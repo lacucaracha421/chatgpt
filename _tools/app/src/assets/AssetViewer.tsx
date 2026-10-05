@@ -1,11 +1,12 @@
 import { useAssetMasks, usePrivacy } from "../privacy/PrivacyContext";
 import {
   ArrowDownTrayIcon,
+  ArrowLeftIcon,
+  ArrowTopRightOnSquareIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   FolderArrowDownIcon,
   InformationCircleIcon,
-  LinkIcon,
   RectangleStackIcon,
   HeartIcon,
   TrashIcon,
@@ -13,6 +14,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
@@ -24,6 +26,7 @@ import type { AlbumEntry, AssetSummary, ClassificationEntry } from "../library/t
 import { breadcrumbPath } from "../shared/breadcrumb";
 import { displayDate, displayTime } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
+import { IconButton } from "../shared/ui/IconButton";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
@@ -341,7 +344,7 @@ export function AssetViewer({
         data-zoomed={zoom.scale > 1 ? "true" : undefined}>
         <div ref={chromeRef} className="asset-viewer__chrome" onFocusCapture={revealChrome} onBlurCapture={revealChrome}>
           <div className="asset-viewer__topbar" {...chromeHover}>
-            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={motion.close}><ChevronLeftIcon aria-hidden="true" /></Button>
+            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={motion.close}><ArrowLeftIcon aria-hidden="true" /></Button>
             <span className="asset-viewer__position"><b>{index + 1}</b> / {total.toLocaleString("ko-KR")}</span>
             <span className="asset-viewer__title">
               <strong>{artistLabel}</strong>
@@ -353,8 +356,8 @@ export function AssetViewer({
               {characterOpen && <div className="asset-viewer__character-popover" onPointerDown={(event) => event.stopPropagation()}>{renderCharacterPicker(asset, closeCharacterPicker)}</div>}
             </span>}
             {albums && onAddToAlbum && <Menu label="앨범" triggerClassName="asset-viewer__vbtn asset-viewer__vbtn--text" disabled={albums.length === 0} trigger={<><RectangleStackIcon aria-hidden="true" /><span>앨범</span></>} items={albumItems} />}
-            {asset.sourceUrl && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!).catch(() => undefined)}><LinkIcon aria-hidden="true" /></Button>}
-            {onToggleFavorite && <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "좋아요 취소" : "좋아요"} aria-pressed={asset.favorite} data-toggle-key={asset.id} ref={favoriteButtonRef} onClick={(event) => { popToggle(event.currentTarget, !asset.favorite); onToggleFavorite(asset); }}><HeartIcon aria-hidden="true" fill={asset.favorite ? "currentColor" : "none"} /></Button>}
+            {asset.sourceUrl && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!).catch(() => undefined)}><ArrowTopRightOnSquareIcon aria-hidden="true" /></Button>}
+            {onToggleFavorite && <IconButton className="asset-viewer__vbtn asset-viewer__favorite" tone="heart" pop label={asset.favorite ? "좋아요 취소" : "좋아요"} icon={HeartIcon} activeIcon={HeartSolidIcon} active={asset.favorite} data-toggle-key={asset.id} ref={favoriteButtonRef} onClick={() => onToggleFavorite(asset)} />}
             {folders && onMoveToFolder && <Menu label="이동" triggerClassName="asset-viewer__vbtn" trigger={<FolderArrowDownIcon aria-hidden="true" />} items={folderItems} />}
             {onExport && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="내보내기" aria-description="PC 폴더로 내보내기" onClick={() => onExport(asset)}><ArrowDownTrayIcon aria-hidden="true" /></Button>}
             {onTrash && <Button className="asset-viewer__vbtn" size="icon" variant="danger" aria-label="휴지통으로 이동" onClick={() => onTrash(asset)}><TrashIcon aria-hidden="true" /></Button>}

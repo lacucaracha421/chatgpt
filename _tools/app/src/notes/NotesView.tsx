@@ -1,14 +1,15 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { displayDateTime } from "../shared/displayDate";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { ArrowPathIcon, ArrowUturnLeftIcon, ChevronDownIcon, ChevronLeftIcon, DocumentTextIcon, LockClosedIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ArrowPathIcon, ArrowUturnLeftIcon, ChevronDownIcon, DocumentTextIcon, EllipsisHorizontalIcon, LockClosedIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useLibrary } from "../library/LibraryContext";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
+import { IconButton } from "../shared/ui/IconButton";
+import { PinIcon, PinSolidIcon } from "../shared/ui/PinIcon";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { SegmentedControl, type SegmentedOption } from "../shared/ui/SegmentedControl";
 import { useSectionDrop } from "../shared/ui/useSectionDrop";
-import { PlusIcon, BookmarkIcon, TrashIcon, EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
 import { SecretEditor, SecretGate } from "./SecretNote";
 import { checklistMarkdown, labelKey, NOTE_COLORS, NOTE_LIMITS, noteColorValue, noteLimitProblem, normalizeLabel, type ChecklistItem, type NoteKind } from "./model";
 import { isSecret, NOTES_REFRESH_INTERVAL, noteKind, notesStore, PIN_REQUIRED_TEXT, type Note, type NotesStore } from "./store";
@@ -257,10 +258,10 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   </div>;
   const listView=<div className="notes-list-view">{board}</div>;
   const editor=!note?null:<article className={`notes-editor${noteColorValue(note.color)?" has-tint":""}`} style={tint(note.color)}>
-      <div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ChevronLeftIcon aria-hidden="true"/>메모</Button><time dateTime={note.updatedAt}>{displayDateTime(note.updatedAt, new Date(), { withTime: true })}</time></div><div>
+      <div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ArrowLeftIcon aria-hidden="true"/>메모</Button><time dateTime={note.updatedAt}>{displayDateTime(note.updatedAt, new Date(), { withTime: true })}</time></div><div>
         <Button variant="quiet" className="notes-undo-button" disabled={!noteUndo.canUndo} onClick={()=>{noteUndo.undo();}}><ArrowUturnLeftIcon aria-hidden="true"/>되돌리기</Button>
         {!trash&&isSecret(note)&&!note.redacted&&<Button size="icon" variant="ghost" aria-label="지금 잠그기" onClick={lockSecrets}><LockClosedIcon/></Button>}
-        {!trash&&<Button size="icon" variant="ghost" aria-label={note.pinned?"고정 해제":"메모 고정"} aria-pressed={note.pinned} onClick={()=>edit({pinned:!note.pinned})}><BookmarkIcon/></Button>}
+        {!trash&&<IconButton label={note.pinned?"고정 해제":"고정"} icon={PinIcon} activeIcon={PinSolidIcon} active={!!note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>}
         {!trash&&<Menu label="메모 색상" items={colorItems} trigger={<span className={`notes-color-dot${colorValue?"":" is-empty"}`} style={colorValue?{background:colorValue}:undefined} aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>}
         <span className="notes-editor-actions__gap" aria-hidden="true"/>
         {moreItems.length>0&&<Menu label="메모 더보기" items={moreItems} trigger={<EllipsisHorizontalIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>}
@@ -283,13 +284,13 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       <footer className="notes-editor-footer"><span>{footer}</span>
         <Button size="icon" variant="ghost" className={`notes-sync${syncDelayed?" is-syncing":""}${state.error?" is-error":""}`} aria-label="동기화" aria-busy={state.syncing} disabled={state.syncing||state.saving} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button></footer>
     </article>;
-  const secretCreation=creatingSecret?<article className="notes-editor notes-editor--gate"><div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ChevronLeftIcon aria-hidden="true"/>메모</Button></div></div><SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create("secret"));requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={close}/></article>:null;
+  const secretCreation=creatingSecret?<article className="notes-editor notes-editor--gate"><div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ArrowLeftIcon aria-hidden="true"/>메모</Button></div></div><SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create("secret"));requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={close}/></article>:null;
   const main=!state.ready?<div className="notes-empty notes-loading" aria-busy="true"><DocumentTextIcon className="notes-empty__icon" aria-hidden="true"/></div>
     :state.keyringLocked?<KeyringLocked store={store} busy={keyringBusy}/>
     :!state.unlocked?<KeySetup store={store}/>
     :ledgerOpen&&note&&!creatingSecret?<LedgerView key={note.id} store={store} ledgerId={note.id} actions={<>
-        <Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ChevronLeftIcon aria-hidden="true"/>메모</Button>
-        <Button size="icon" variant="ghost" aria-label={note.pinned?"고정 해제":"메모 고정"} aria-pressed={note.pinned} onClick={()=>edit({pinned:!note.pinned})}><BookmarkIcon/></Button>
+        <Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ArrowLeftIcon aria-hidden="true"/>메모</Button>
+        <IconButton label={note.pinned?"고정 해제":"고정"} icon={PinIcon} activeIcon={PinSolidIcon} active={!!note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>
         <Menu label="메모 더보기" items={moreItems} trigger={<EllipsisHorizontalIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>
         <Button size="icon" variant="ghost" aria-label="메모를 휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button></>}>
         {note.conflict&&<div className="notes-conflict ledger-banner" role="status"><p>다른 기기 수정과 충돌했습니다.</p><Button size="sm" disabled={state.syncing||state.saving} onClick={()=>void store.resolve(note,true)}>내 내용 보관 후 서버 버전 불러오기</Button></div>}

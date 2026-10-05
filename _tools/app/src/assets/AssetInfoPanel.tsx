@@ -1,7 +1,7 @@
 import { useAssetMasks } from "../privacy/PrivacyContext";
 import { AssetImage } from "../privacy/AssetImage";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
-import { ArrowTopRightOnSquareIcon, CheckIcon, ChevronRightIcon, ClipboardDocumentIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
+import { ArrowTopRightOnSquareIcon, CheckIcon, ChevronRightIcon, ClipboardDocumentIcon, PencilIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { artistHandle } from "../artists/format";
@@ -160,7 +160,7 @@ export function AssetInfoPanel({
       </button>
       <div className="asset-info-panel__facts">
         <div className="asset-info-panel__artist-copy">
-          <div className="asset-info-panel__artist-line"><strong className="artist-name">{artist?.label ?? asset.creatorName ?? handle ?? "작가 미상"}</strong><Button data-edit-source size="icon" variant="ghost" aria-label="출처 정보 편집" onClick={beginEditing}><PencilSquareIcon aria-hidden="true" /></Button></div>
+          <div className="asset-info-panel__artist-line"><strong className="artist-name">{artist?.label ?? asset.creatorName ?? handle ?? "작가 미상"}</strong><Button data-edit-source size="icon" variant="ghost" aria-label="출처 정보 편집" onClick={beginEditing}><PencilIcon aria-hidden="true" /></Button></div>
           <span>{artist ? [handle, `모은 그림 ${artist.assetCount.toLocaleString("ko-KR")}장`].filter(Boolean).join(" · ") : handle ?? (asset.creatorName || asset.creatorUrl ? "" : "계정 정보 없음")}</span>
           {(artist?.id || asset.creatorHandle || asset.creatorUrl) && (onOpenArtist || asset.creatorUrl) && <Button size="sm" variant="quiet" className="asset-info-panel__artist-link" onClick={openArtist}>작가 페이지 <ChevronRightIcon aria-hidden="true" /></Button>}
         </div>

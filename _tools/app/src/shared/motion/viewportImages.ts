@@ -20,8 +20,11 @@ export function viewportImages(host: HTMLElement) {
   });
 }
 
-/** Promote only this viewport. Never restore lazy: a timed-out image must keep loading. */
-export function waitForViewportImages(host: HTMLElement, ready: () => void, capMs = IMAGE_READY_CAP_MS) {
+/**
+ * Promote only this viewport. Never restore lazy: a timed-out image must keep loading.
+ * `onLate` receives the viewport images still loading when the cap fires, just before `ready`.
+ */
+export function waitForViewportImages(host: HTMLElement, ready: () => void, capMs = IMAGE_READY_CAP_MS, onLate?: (late: HTMLImageElement[]) => void) {
   let stopped = false;
   const pending = new Map<HTMLImageElement, {src: string; done: boolean}>();
   const listeners: (() => void)[] = [];
@@ -57,9 +60,46 @@ export function waitForViewportImages(host: HTMLElement, ready: () => void, capM
   };
   const observer = new MutationObserver(check);
   observer.observe(host, {subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'srcset']});
-  const timer = window.setTimeout(finish, capMs);
+  const timer = window.setTimeout(() => {
+    if (stopped) return;
+    const late = onLate ? viewportImages(host).filter(image => pending.get(image)?.done !== true) : [];
+    if (late.length) onLate!(late);
+    finish();
+  }, capMs);
   check();
   return stop;
+}
+
+/** Marks an image held back by {@link revealTogether}; `img[data-reveal-hold]` is transparent in CSS. */
+export const REVEAL_HOLD_ATTRIBUTE = 'data-reveal-hold';
+
+/**
+ * Late images of one screen appear together instead of each popping in on its own load: each stays
+ * transparent until every one has loaded or failed (or `capMs` passes), then all show in the same
+ * frame. Returns a release function for an owner that goes away first.
+ */
+export function revealTogether(images: readonly HTMLImageElement[], capMs: number) {
+  let released = false, frame = 0, remaining = images.length;
+  const release = () => {
+    if (released) return;
+    released = true;
+    window.clearTimeout(timer);
+    window.cancelAnimationFrame(frame);
+    images.forEach(image => image.removeAttribute(REVEAL_HOLD_ATTRIBUTE));
+  };
+  const settled = () => { if (--remaining === 0 && !released) frame = window.requestAnimationFrame(release); };
+  const timer = window.setTimeout(release, capMs);
+  for (const image of images) {
+    image.setAttribute(REVEAL_HOLD_ATTRIBUTE, '');
+    if (typeof image.decode === 'function') void image.decode().then(settled, settled);
+    else if (image.complete) settled();
+    else {
+      image.addEventListener('load', settled, {once: true});
+      image.addEventListener('error', settled, {once: true});
+    }
+  }
+  if (!images.length) release();
+  return release;
 }
 
 /**

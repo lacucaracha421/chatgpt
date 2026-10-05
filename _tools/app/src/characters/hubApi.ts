@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AssetSummary } from "../library/types";
 export type CharacterSeries = { classificationId: string; heroAssetId: string | null; autoClassify: boolean };
-export type SeriesFolder = { classificationId: string; thumbnailAssetId: string | null };
+/** `thumbnailRevision`: the preview Asset's current thumbnail revision, for a cacheable card URL. */
+export type SeriesFolder = { classificationId: string; thumbnailAssetId: string | null; thumbnailRevision?: string | null };
 export type CharacterGroup = { id: string; seriesId: string; name: string; revision: number; targetIds: string[] };
 // referenceTargetId selects eligible reference/thumbnail images; an empty ID denotes an unsaved character.
 // Pair it with the same targetId to restrict candidates to that character folder.

@@ -10,7 +10,7 @@ import type {
   AssetSummary, EncryptedVaultImportReport, EncryptedVaultItem,
   EncryptedVaultItemKind, EncryptedVaultStatus, LibraryGateway,
 } from "../library/types";
-import { ArrowUpTrayIcon, ArrowUturnLeftIcon, DocumentPlusIcon, FilmIcon, FolderArrowDownIcon, LockClosedIcon, PencilSquareIcon, PhotoIcon, Squares2X2Icon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import { ArrowUpTrayIcon, ArrowUturnLeftIcon, DocumentPlusIcon, FilmIcon, FolderArrowDownIcon, LockClosedIcon, PencilIcon, PhotoIcon, Squares2X2Icon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
 import type { ComponentType, SVGProps } from "react";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
@@ -337,7 +337,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
             <ToolbarAction label={showExporting ? "내보내는 중…" : `내보내기${selectedLabel}`} title="PC로 내보내기" count={exporting ? 0 : selectedIds.length} Icon={ArrowUpTrayIcon} disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)} />
             <ToolbarAction label="휴지통으로" Icon={TrashIcon} disabled={busy || readOnly || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)} />
           </>}
-          <ToolbarAction label="제목 변경" Icon={PencilSquareIcon} disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)} />
+          <ToolbarAction label="제목 변경" Icon={PencilIcon} disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)} />
           <span className="external-vault-browser__divider" aria-hidden="true" />
           <ToolbarAction label="파일 추가" Icon={DocumentPlusIcon} disabled={importing || readOnly || !gateway.importFilesIntoEncryptedVault} onClick={() => void addFiles()} />
           <ToolbarAction label={showImporting ? "가져오는 중…" : "가져오기"} title="폴더 가져오기" Icon={FolderArrowDownIcon} disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()} />

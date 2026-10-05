@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowPathIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
-import { SidebarOpenIcon } from "../shared/ui/ArchiveIcons";
+import { SidebarOpenIcon } from "../shared/ui/SidebarIcons";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";

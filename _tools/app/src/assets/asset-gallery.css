@@ -31,6 +31,8 @@
 
 .asset-gallery__folder-snapshot { position: absolute; z-index: 0; overflow: hidden; pointer-events: none; }
 .asset-gallery__folder-snapshot * { animation: none !important; transition: none !important; }
+/* First-screen tiles still loading when a folder move's cap fires appear together (revealTogether). */
+.asset-gallery img[data-reveal-hold] { opacity: 0 !important; }
 .asset-gallery__scroll[data-folder-move] > .asset-gallery__virtual-space { z-index: 1; background: var(--color-bg); }
 .asset-gallery__scroll[data-folder-move] > .asset-gallery__intro { position: relative; z-index: 2; background: var(--color-bg); }
 .asset-gallery__scroll[data-folder-move] .asset-gallery__justified-unit,
@@ -212,8 +214,7 @@
   pointer-events: none;
 }
 
-.asset-gallery__favorite svg { width: 18px; height: 18px; }
-.asset-gallery__favorite[aria-pressed="false"] svg { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.asset-gallery__favorite svg, .asset-gallery__favorite.ui-button svg { width: 18px; height: 18px; }
 
 .asset-gallery__quick-preview-trigger {
   position: absolute;

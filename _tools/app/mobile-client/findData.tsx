@@ -1,5 +1,6 @@
 import {useEffect,useState,useSyncExternalStore} from 'react';
-import {BookOpenIcon,FolderIcon,HomeIcon,PhotoIcon,PencilSquareIcon,RectangleStackIcon,Cog6ToothIcon,UserIcon} from '@heroicons/react/24/outline';
+import {FolderIcon,RectangleStackIcon} from '@heroicons/react/24/outline';
+import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {FIND_SCOPES} from '../src/shared/findModel';
 import {FIND_WORK_TYPE_LABEL,type NavigationEntry} from '../src/shared/findEntries';
 import type {Note,NotesStore} from '../src/notes/store';
@@ -18,12 +19,12 @@ export type TabletFindEntry=NavigationEntry&{destination:FindDestination;work?:{
 export function tabletFindEntries({works,artists,notes,folders,albums,navigate}:{works:{item:CollectionSummary;revision:string}[];artists:LibraryArtist[];notes:Pick<Note,'id'|'title'|'type'|'deleted'>[];folders:Entry[];albums:AlbumTree|null;navigate(destination:FindDestination):void}):TabletFindEntry[] {
   const entry=(id:string,group:NavigationEntry['group'],label:string,destination:FindDestination,extra:Partial<TabletFindEntry>={}):TabletFindEntry=>({id,group,label,icon:null,...extra,destination,run:()=>navigate(destination)});
   return [
-    ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<BookOpenIcon/>,work})),
-    ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{keywords:searchValues(artist),icon:<UserIcon/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
-    ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month').map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<PencilSquareIcon/>})),
+    ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<AREA_ICONS.collections/>,work})),
+    ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{keywords:searchValues(artist),icon:<AREA_ICONS.artists/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
+    ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month').map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<AREA_ICONS.notes/>})),
     ...folders.map(folder=>entry(`place-folder-${folder.id}`,'place',folder.name,{kind:'place',view:entryView(folder)},{context:ancestorsOf(folders,folder.id).map(parent=>parent.name).join(' › ')||'폴더',icon:<FolderIcon/>})),
     ...(albums?.adopted?albums.albums.map(album=>entry(`place-album-${album.id}`,'place',album.name,{kind:'place',view:albumView(albums,album)},{context:'앨범',icon:<RectangleStackIcon/>})):[]),
-    ...([['home','홈',HomeIcon],['assets','에셋',PhotoIcon],['collections','컬렉션',RectangleStackIcon],['catalog','카탈로그',BookOpenIcon],['notes','메모',PencilSquareIcon],['settings','설정',Cog6ToothIcon]] as const).map(([screen,label,Icon])=>entry(`screen-${screen}`,'go',label,{kind:'screen',screen},{icon:<Icon/>})),
+    ...([['home','홈',AREA_ICONS.home],['assets','에셋',AREA_ICONS.assets],['collections','컬렉션',AREA_ICONS.collections],['catalog','카탈로그',AREA_ICONS.manga],['notes','메모',AREA_ICONS.notes],['settings','설정',AREA_ICONS.settings]] as const).map(([screen,label,Icon])=>entry(`screen-${screen}`,'go',label,{kind:'screen',screen},{icon:<Icon/>})),
   ];
 }
 

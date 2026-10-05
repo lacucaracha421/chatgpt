@@ -1,6 +1,6 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
-import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { assetUrl, assetThumbnailUrl } from "../assets/mediaUrl";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -281,7 +281,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); goBack(); }
     }}>
       <ViewToolbar title={`${character.group.seriesName} › ${character.targetName}`}
-        leadingAction={<Button size="icon" variant="ghost" aria-label="태거 검토 목록으로 돌아가기" onClick={goBack}><ChevronLeftIcon aria-hidden="true" /></Button>}
+        leadingAction={<Button size="icon" variant="ghost" aria-label="태거 검토 목록으로 돌아가기" onClick={goBack}><ArrowLeftIcon aria-hidden="true" /></Button>}
         titleAccessory={<span className="tagger-review__title-count numeric">{character.items.length.toLocaleString()}건</span>}
         chrome={{ navigation: index }} />
       <div className="tagger-review__detail">
@@ -374,7 +374,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
   return <div className="crv-view tagger-review" onKeyDown={(event) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onBack(); }
   }}>
-    <ViewToolbar title="태거 검토" leadingAction={<Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ChevronLeftIcon aria-hidden="true" /></Button>} chrome={{ navigation: index }} />
+    <ViewToolbar title="태거 검토" leadingAction={<Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>} chrome={{ navigation: index }} />
     <div className="crv-scroll"><div className="crv-page">
       {groups.length === 0 ? <div className="crv-notice" role="status"><p>확인할 태거 후보가 없습니다.</p></div> : <>
         <div className="crv-summary">

@@ -43,6 +43,16 @@ import { characterHubApi, type CharacterGroup, type CharacterHubApi } from "../c
 import { applySelectionGesture, emptySelection, focusAsset, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 import { FolderFilterControl, FolderShelf } from "./FolderShelf";
 import { descriptionSearchError, searchDescription } from "./descriptionSearch";
+import { prefetchedRead, publishAssetFolderFilters } from "./folderPrefetch";
+import type { AutoTagFilter } from "../autotags/types";
+
+/** The first-page query of a view; a hover prefetch builds the switch's exact request through it. */
+export function assetQueryBase(view: AssetView, { directOnly, mediaFilter, aspectFilter, sort, randomPivot, autoTags }: {
+  directOnly: boolean; mediaFilter: AssetMediaFilter; aspectFilter: AssetAspectFilter; sort: AssetSort; randomPivot: string | null; autoTags: AutoTagFilter | null;
+}): Omit<AssetQuery, "after"> {
+  const filterable = view.kind === "classification" || view.kind === "unsorted" || view.kind === "album" || view.kind === "creator";
+  return { classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey: view.kind === "creator" ? view.creatorKey : null, directOnly: view.kind === "classification" && Boolean(view.classificationId) && !view.characterId && !view.characterGroupId ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivot : null, collectedRange: null, ...(autoTags ? { autoTags } : {}), limit: ASSET_PAGE_SIZE };
+}
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
 type Props = { navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; characterTargets?: CharacterTarget[]; characterGroups?: CharacterGroup[]; onCharactersChanged?: () => void; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders">; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void; /** 내용 검색 검색 해제: back to the view the search was opened from. */ onExitDescriptionSearch?: () => void };
@@ -185,7 +195,6 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     // folderChildren is keyed by folderChildrenKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderChildren.length, folderChildrenKey, folderShelfApi, gateway, previewCache, plainFolderId, refreshVersion]);
-  const creatorKey = view.kind === "creator" ? view.creatorKey : null;
   const styleSuggestionsOnly = view.kind === "creator" && isUnknownArtist(view.creatorKey) && view.styleSuggestionsOnly === true;
   const styleSuggestionAssets = useStyleSuggestionAssetIds(styleSuggestionsOnly);
   const autoTagFilter = useAutoTagFilter();
@@ -194,7 +203,9 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const descriptionForce = view.kind === "description_search" && view.force === true;
   const autoTagFiltered = hasAutoTagFilter(autoTagFilter) && descriptionQuery === null;
   const querySort: AssetSort = descriptionQuery === null ? sort : "newest";
-  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey, directOnly: view.kind === "classification" && Boolean(view.classificationId) && !view.characterId && !view.characterGroupId ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort: querySort, randomPivot: querySort === "random" ? randomPivotRef.current : null, collectedRange: null, ...(autoTagFiltered ? { autoTags: autoTagFilter } : {}), limit: ASSET_PAGE_SIZE }), [aspectFilter, autoTagFilter, autoTagFiltered, creatorKey, directOnly, querySort, filterable, mediaFilter, randomVersion, view]);
+  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => assetQueryBase(view, { directOnly, mediaFilter, aspectFilter, sort: querySort, randomPivot: randomPivotRef.current, autoTags: autoTagFiltered ? autoTagFilter : null }), [aspectFilter, autoTagFilter, autoTagFiltered, directOnly, querySort, mediaFilter, randomVersion, view]);
+  // A hover prefetch of another plain folder builds the query this browser would read for it.
+  useEffect(() => publishAssetFolderFilters(() => ({ mediaFilter, aspectFilter, randomPivot: randomPivotRef.current })), [mediaFilter, aspectFilter]);
   // The summary read uses the all-assets query; the description only keys the page.
   const queryKey = descriptionQuery === null ? JSON.stringify(queryBase) : JSON.stringify({ ...queryBase, descriptionQuery, ...(descriptionForce ? { descriptionForce } : {}) });
   useEffect(() => setNewAssetsAvailable(false), [queryKey]);
@@ -234,7 +245,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     const retained = pageRef.current;
     const load = async () => {
       if (descriptionQuery !== null) return loadDescriptionPage(gateway, descriptionQuery, descriptionForce, request);
-      if (!retained?.items.length || !gateway.refreshAssets) return gateway.listAssets(request);
+      if (!retained?.items.length || !gateway.refreshAssets) return prefetchedRead(gateway, "listAssets", request, () => gateway.listAssets(request));
       const first = retained.headCursor === null ? await gateway.listAssets(request) : null;
       const refreshed = new Map<string, AssetSummary>();
       for (let offset = 0; offset < retained.items.length; offset += 500) {

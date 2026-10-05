@@ -1,5 +1,4 @@
 import { EyeSlashIcon, LockClosedIcon, WalletIcon } from "@heroicons/react/24/outline";
-import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
 import { byOrder, checklistMarkdown, noteColorValue } from "./model";
 import { isSecret, type Note } from "./store";
 import { LEDGER } from "./ledger/model";
@@ -7,6 +6,7 @@ import { ledgerCard } from "./ledger/card";
 import { memoItems, memoMode, memoPreview, parseMemo } from "./memo/memoModel";
 import { noteDateLabel } from "./format";
 import type { CSSProperties } from "react";
+import { PinSolidIcon } from "../shared/ui/PinIcon";
 
 const CHECKLIST_ROWS = 8;
 const BODY_LINES = 12;
@@ -77,7 +77,7 @@ export function NoteCard({ note, notes, selected = false, onOpen, style }: NoteC
       {note.conflictCopy && <span className="notes-copy-mark">사본</span>}
       {note.conflict && <span className="notes-conflict-mark" aria-description="충돌 확인 필요">!</span>}
     </span>{" "}
-    {note.pinned && <BookmarkIcon className="notes-card__pin" aria-label="고정됨" />}
+    {note.pinned && <PinSolidIcon className="notes-card__pin" aria-label="고정됨" />}
     <CardBody note={note} notes={notes} />{" "}
     <span className="notes-card__foot">
       <span className="notes-card__labels">{labels.map((label) => <span key={label} className="notes-card__label">{label}</span>)}</span>

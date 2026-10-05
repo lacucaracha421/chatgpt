@@ -1,6 +1,5 @@
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon} from '@heroicons/react/24/outline';
-import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
 import {TopBar} from './TopBar';
 import {Badge, Button, EmptyState, SegmentedControl, SectionLabel, Skeleton} from './ui';
@@ -14,7 +13,7 @@ import {Scrubber} from './Scrubber';
 import {ddayLabel} from '../src/shared/displayDate';
 import {cancelSegmentSwap, swapSegment} from '../src/shared/motion/viewSwap';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
-import {popToggle} from '../src/shared/motion/togglePop';
+import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
 import {decodeImage} from './media';
 import './releaseCalendar.css';
@@ -98,9 +97,7 @@ function ReleaseCard({entry, watched, pending, privacy, referenceYear, acknowled
     <div className="release-calendar-cover">
       <HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} />
       {entry.unread.length > 0 && <Badge className="release-calendar-new-badge" variant="accent">NEW</Badge>}
-      <Button type="button" size="icon" variant="quiet" className="release-calendar-watch" aria-pressed={watched} aria-busy={pending} disabled={pending} aria-label={watched ? `${entry.title} 관심 목록에서 빼기${pending ? ' · 동기화 대기' : ''}` : `${entry.title} 관심 목록에 추가${pending ? ' · 동기화 대기' : ''}`} onClick={event => { popToggle(event.currentTarget, !watched); onToggle(); }}>
-        {watched ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
-      </Button>
+      <BookmarkToggle form="corner" className="release-calendar-watch" bookmarked={watched} aria-busy={pending} disabled={pending} label={watched ? `${entry.title} 관심 목록에서 빼기${pending ? ' · 동기화 대기' : ''}` : `${entry.title} 관심 목록에 추가${pending ? ' · 동기화 대기' : ''}`} onClick={onToggle} />
     </div>
     <strong className="release-calendar-title">{entry.title}</strong>
     {entry.kind === 'game' && entry.platforms.length > 0 && <PlatformBadges platforms={entry.platforms} port={entry.port} />}

@@ -556,7 +556,7 @@ it("keeps character assignment collapsed and filters the list on demand", async 
 it("opens the character editor from 편집 and keeps rare actions in 캐릭터 더보기", async () => {
   await mount("hina"); const user = userEvent.setup();
   const trigger = await screen.findByRole("button", { name: "캐릭터 편집" });
-  expect(trigger.querySelector("path")?.getAttribute("d")).toContain("M4 20h4L20 8");
+  expect(trigger.querySelector("path")?.getAttribute("d")).toContain("m16.862 4.487");
   await user.click(trigger);
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
   const references = within(panel).getByRole("region", { name: "레퍼런스 목록" });

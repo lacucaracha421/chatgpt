@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useCatalogMasked } from "../privacy/catalogMask";
-import { popToggle } from "../shared/motion/togglePop";
-import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
+import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { StableImage } from "../shared/ui/StableImage";
@@ -34,10 +33,10 @@ export function MangaCard({ title, displayTitle = title, artist, pageCount, cove
       <strong className="manga-card__title" aria-description={displayTitle !== title ? title : undefined}>{displayTitle}</strong>
       <span className="manga-card__artist">{artist?.trim() || "작가 미상"}</span>
     </button>
-    {onBookmark && <button type="button" className="manga-card__bookmark"
-      aria-label={`${title} ${bookmarked ? "북마크 해제" : "북마크"}`} aria-pressed={bookmarked}
+    {onBookmark && <BookmarkToggle form="corner" className="manga-card__bookmark" bookmarked={!!bookmarked}
+      label={`${title} ${bookmarked ? "북마크 해제" : "북마크"}`}
       aria-description={savedEdition ? "북마크된 판본 있음" : undefined} data-saved-edition={savedEdition || undefined}
-      disabled={bookmarkPending} onClick={(event) => { popToggle(event.currentTarget, !bookmarked); onBookmark(); }}><BookmarkIcon aria-hidden="true" /></button>}
+      disabled={bookmarkPending} onClick={onBookmark} />}
   </article>;
 }
 

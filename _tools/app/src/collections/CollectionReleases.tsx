@@ -1,6 +1,6 @@
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { BusyLabel } from "../shared/ui/BusyLabel";
-import { ArrowPathIcon, BookOpenIcon, ChevronLeftIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ArrowPathIcon, BookOpenIcon } from "@heroicons/react/24/outline";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { displayCount, displayDate, displayDateTime } from "../shared/displayDate";
@@ -177,7 +177,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
 
   return <section className="collection-releases" aria-label="신간">
     <ViewToolbar title="신간" titleContent={<span className="collection-releases__heading">신간</span>} ariaLabel="컬렉션 도구" chrome={chrome}
-      leadingAction={onBack ? <Button variant="ghost" size="icon" aria-label="컬렉션으로 돌아가기" onClick={onBack}><ChevronLeftIcon aria-hidden="true" /></Button> : undefined}
+      leadingAction={onBack ? <Button variant="ghost" size="icon" aria-label="컬렉션으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button> : undefined}
       titleAccessory={<><span className="collection-toolbar__count">{displayCount(rows.length + others.length)}</span><div className="collection-releases__actions">
         <SegmentedControl label="신간 지역" options={[{ value: "kakao", label: "한국 정발", count: korean.length }, { value: "mangadex", label: "일본", count: japan.length }]} value={provider} onChange={onProviderChange} />
         {checkedAt && <span className="collection-releases__checked">{displayDateTime(checkedAt)} 확인</span>}

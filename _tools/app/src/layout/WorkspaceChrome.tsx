@@ -1,5 +1,4 @@
-import { ChevronRightIcon } from "@heroicons/react/24/outline";
-import { AdjustmentsHorizontalIcon } from "../shared/ui/ArchiveIcons";
+import { ChevronRightIcon, Squares2X2Icon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PropsWithChildren, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
@@ -131,7 +130,7 @@ export function ChromeSettingsDock() {
     <AnchoredPanel open={open} onOpenChange={(next) => setOpenScope(next ? chrome.scope : null)}
       title="보기 설정"
       trigger={<button type="button" className="workspace-settings-toggle" disabled={!enabled} aria-label="보기 설정" aria-description={enabled ? chrome.meta?.summary : "이 화면에는 보기 설정이 없습니다"}>
-        <AdjustmentsHorizontalIcon aria-hidden="true" />
+        <Squares2X2Icon aria-hidden="true" />
         <span><strong>보기 설정</strong></span>
         <ChevronRightIcon aria-hidden="true" className="workspace-settings-toggle__arrow" />
       </button>}

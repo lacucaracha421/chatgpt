@@ -2,7 +2,7 @@ import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useState} from 'react';
 import {BellSlashIcon, MinusIcon, PlusIcon} from '@heroicons/react/24/outline';
 import {BellIcon as BellSolid} from '@heroicons/react/24/solid';
-import {Button, Dialog, DialogDescription} from './ui';
+import {Button, Dialog, DialogDescription, IconButton} from './ui';
 import {MAX_OWNED_COUNT, type OwnedVolumesValue} from './collectionEditOutbox';
 import {editions, editionVolumes, type CollectionDetail} from './collectionModel';
 import type {PersonalEdits} from './CollectionPersonal';
@@ -65,14 +65,13 @@ export function ReleaseWatchAction({item, edits, onReason}: {item: CollectionDet
   const watch = edits.visible(item.id, 'releaseWatch', item.releaseWatch.enabled);
   const blocked = !item.releaseWatch.available && !watch.value;
   const reason = !editable ? RELEASE_WATCH_READ_ONLY : blocked ? RELEASE_WATCH_BLOCKED : '';
-  const Icon = watch.value ? BellSolid : BellSlashIcon;
   const reasonId = `release-watch-reason-${item.id}`;
-  return <button type="button" className={`ui-button ui-button--ghost ui-button--icon collection-bar-action${watch.pending ? ' is-pending' : ''}`}
-    aria-pressed={watch.value} aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined}
-    aria-label={`신간 알림${watch.pending ? ', 전송 대기' : ''}`}
+  return <IconButton className={`collection-bar-action${watch.pending ? ' is-pending' : ''}`} icon={BellSlashIcon} activeIcon={BellSolid}
+    active={watch.value} aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined}
+    label={`신간 알림${watch.pending ? ', 전송 대기' : ''}`}
     onClick={() => reason ? onReason(reason) : edits.edit(item.id, 'releaseWatch', !watch.value, item.releaseWatch!.enabled)}>
-    <Icon aria-hidden="true"/><span className="collection-bar-pending" aria-hidden="true"/>{reason && <span id={reasonId} className="sr-only">{reason}</span>}
-  </button>;
+    <span className="collection-bar-pending" aria-hidden="true"/>{reason && <span id={reasonId} className="sr-only">{reason}</span>}
+  </IconButton>;
 }
 
 /** The owned-count editor: large −/+ steps, a number field for a jump, and 0 / 전체 shortcuts. */

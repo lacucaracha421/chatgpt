@@ -10,6 +10,8 @@ export const CHARACTER_SUGGESTIONS_CHANGED_EVENT = "lakomics-character-suggestio
 export type Suggestion = {
   tag: string; imageCount: number; bothCount: number; pixaiCount: number; canaryCount: number;
   sampleAssetIds: string[]; seriesId: string | null; seriesName: string | null; insideCount: number;
+  /** Current thumbnail revisions of the samples by id (absent: no thumbnail), for cacheable URLs. */
+  sampleThumbnailRevisions?: Record<string, string>;
 };
 export type SuggestionImage = { assetId: string; assetHash: string; pixaiScore: number; canaryScore: number; insideSeries: boolean; solo: boolean };
 export type SuggestionDetail = { images: SuggestionImage[]; previewToken: string; referenceIds: string[] };

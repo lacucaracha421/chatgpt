@@ -1,12 +1,12 @@
 //! Unregistered tagger characters. Evidence never becomes a character decision here.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    characters::{Error, Result, Target, TargetDraft},
+    characters::{thumbnail_revisions, Error, Result, Target, TargetDraft},
     Library,
 };
 
@@ -21,6 +21,9 @@ pub struct Suggestion {
     pub pixai_count: usize,
     pub canary_count: usize,
     pub sample_asset_ids: Vec<String>,
+    /// Current thumbnail revisions of the samples, by Asset id (absent without a thumbnail),
+    /// for cacheable thumbnail URLs.
+    pub sample_thumbnail_revisions: BTreeMap<String, String>,
     pub series_id: Option<String>,
     pub series_name: Option<String>,
     pub inside_count: usize,
@@ -103,6 +106,7 @@ fn list_in(c: &Connection, minimum: usize) -> Result<Vec<Suggestion>> {
                 pixai_count: r.get::<_, i64>(3)? as usize,
                 canary_count: r.get::<_, i64>(4)? as usize,
                 sample_asset_ids: Vec::new(),
+                sample_thumbnail_revisions: BTreeMap::new(),
                 series_id: r.get(6)?,
                 series_name: r.get(7)?,
                 inside_count: r.get::<_, i64>(8)? as usize,
@@ -110,12 +114,28 @@ fn list_in(c: &Connection, minimum: usize) -> Result<Vec<Suggestion>> {
             r.get::<_, String>(5)?,
         ))
     })?;
-    rows.map(|row| {
-        let (mut suggestion, samples) = row?;
-        suggestion.sample_asset_ids = serde_json::from_str(&samples)?;
-        Ok(suggestion)
-    })
-    .collect()
+    let mut suggestions = rows
+        .map(|row| {
+            let (mut suggestion, samples) = row?;
+            suggestion.sample_asset_ids = serde_json::from_str(&samples)?;
+            Ok(suggestion)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // One read for every sample of every suggestion.
+    let revisions = thumbnail_revisions(
+        c,
+        suggestions
+            .iter()
+            .flat_map(|suggestion| suggestion.sample_asset_ids.iter().map(String::as_str)),
+    )?;
+    for suggestion in &mut suggestions {
+        suggestion.sample_thumbnail_revisions = suggestion
+            .sample_asset_ids
+            .iter()
+            .filter_map(|id| Some((id.clone(), revisions.get(id)?.clone())))
+            .collect();
+    }
+    Ok(suggestions)
 }
 
 fn ensure_available(c: &Connection, tag: &str) -> Result<()> {

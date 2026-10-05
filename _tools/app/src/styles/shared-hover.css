@@ -3,7 +3,8 @@
 .asset-gallery__asset:hover .asset-gallery__hover-control,
 .asset-gallery__asset:focus-within .asset-gallery__hover-control,
 .asset-gallery__hover-control[data-visible="true"] { opacity: 1; }
-button.asset-gallery__favorite { width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; background: transparent; cursor: pointer; pointer-events: auto; }
+button.asset-gallery__favorite { width: var(--control-height-compact); height: var(--control-height-compact); min-height: 0; padding: 0; border: 0; background: transparent; color: var(--color-heart); cursor: pointer; pointer-events: auto; }
+button.asset-gallery__favorite:hover:not(:disabled), button.asset-gallery__favorite:active:not(:disabled) { background: transparent; color: var(--color-heart); }
 .asset-gallery__favorite:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
 .classification-sidebar__badge { opacity: 0; transition: opacity 90ms var(--ease-standard); }
 .classification-sidebar__quick-view:hover .classification-sidebar__badge,

@@ -10,7 +10,7 @@ import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
-type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; thumbnailSrc?: string; playbackSrc?: string; compactBadge?: boolean; durationVisible?: boolean };
+type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; /** `null`: the Asset has no thumbnail, so no still image is requested. */ thumbnailSrc?: string | null; playbackSrc?: string; compactBadge?: boolean; durationVisible?: boolean };
 
 export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode:requestedPrivacy = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true }: Props) {
   const privacyMode=useAssetMask(asset,requestedPrivacy);
@@ -129,10 +129,10 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   }
   const alt = asset.title || asset.originalName;
   const previewFrame = previewRatio === null ? hoverFrame : Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1));
-  const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? (thumbnailSrc ?? assetThumbnailUrl(asset)) : scrubFrameUrl(asset.id, previewFrame, asset.thumbnailRevision);
+  const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? (thumbnailSrc === null ? null : thumbnailSrc ?? assetThumbnailUrl(asset)) : scrubFrameUrl(asset.id, previewFrame, asset.thumbnailRevision);
   return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 160); }} onPointerLeave={leave}>
     {/* 재생 프리뷰가 위에 깔리므로, 정지 타일에서는 scrub 미리보기 프레임을 img로 보여준다. */}
-    <img src={stillUrl} alt={alt} decoding="async" draggable={false} />
+    {stillUrl && <img src={stillUrl} alt={alt} decoding="async" draggable={false} />}
     {active && playbackRequested && <video
       ref={videoRef}
       src={playbackSrc ?? playbackUrl(asset.id)}

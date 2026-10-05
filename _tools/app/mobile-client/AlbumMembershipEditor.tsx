@@ -1,7 +1,7 @@
 import {LoadingLine} from './TopBar';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {FolderIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {RectangleStackIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {errorText,native} from './transport';
 
@@ -84,7 +84,7 @@ export function AlbumMembershipEditor({assetId,open,onClose}:{assetId:string;ope
     {state?.adopted&&<div className="album-membership-list">{flattenMembershipAlbums(state.albums).map(({album,depth})=><div key={album.id} className={`album-membership-entry${album.blocked?' is-blocked':''}`}>
       <label className="album-membership-row" style={{paddingLeft:12+depth*20}}>
         <input type="checkbox" aria-label={album.name} checked={album.desiredState} disabled={album.blocked||saving.has(album.id)} onChange={()=>void toggle(album)}/>
-        <FolderIcon/><span className="album-membership-name">{album.name}</span>
+        <RectangleStackIcon/><span className="album-membership-name">{album.name}</span>
         {album.blocked?<small role="status">동기화 충돌</small>:album.pending?<small role="status">저장 대기</small>:null}
       </label>
       {album.blocked&&<div className="album-membership-conflict-actions">

@@ -7,7 +7,7 @@ import {TopBar} from './TopBar';
 import {useSectionShade} from './SectionShade';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MutableRefObject} from 'react';
 import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
-import {PinIcon} from './PinIcon';
+import {PinIcon,PinSolidIcon} from '../src/shared/ui/PinIcon';
 import {Button,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
@@ -264,7 +264,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
     {state.ready&&state.unlocked&&note&&!ledgerOpen&&<>
       <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={close}/><span className="notes-save-state" role="status">{editorStatus}</span><span className="notes-top__space"/>
         {!note.deleted&&isSecret(note)&&!note.redacted&&<IconButton label="지금 잠그기" icon={LockClosedIcon} onClick={lockSecrets}/>}
-        {!note.deleted&&<><IconButton label={note.pinned?'고정 해제':'고정'} icon={PinIcon} active={note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>
+        {!note.deleted&&<><IconButton label={note.pinned?'고정 해제':'고정'} icon={PinIcon} activeIcon={PinSolidIcon} active={note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>
           <Button type="button" size="icon" variant="ghost" aria-label="메모 색상" onClick={()=>setSheet('color')}><span className={`notes-color-dot${colorValue?'':' is-empty'}`} style={colorValue?{background:colorValue}:undefined} aria-hidden="true"/></Button>
           <IconButton label="메모 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('more')}/>
           <IconButton label="메모 휴지통으로" icon={TrashIcon} onClick={trashNote}/></>}

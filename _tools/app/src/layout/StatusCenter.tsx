@@ -1,7 +1,7 @@
 import { useAutoTagInboxStatus } from "../autotags/useAutoTagInboxStatus";
 import { Button } from "../shared/ui/Button";
 import * as RadixDialog from "@radix-ui/react-dialog";
-import { ChevronRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ChartBarIcon, ChevronRightIcon, InboxIcon, Square2StackIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState, type ReactNode } from "react";
 import type { AssetBrowserStatus } from "../assets/AssetBrowser";
 import type { CloudSyncStatus } from "../app/useCloudProblems";
@@ -18,7 +18,6 @@ import { WorkTray } from "../ingestion/WorkTray";
 import { usePublicationJobs } from "../library/publicationJobs";
 import type { AssetView, AuthoritySyncHealth } from "../library/types";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
-import { ActivityIcon, InboxIcon, PhotoIcon } from "../shared/ui/ArchiveIcons";
 import type { SimilarityIndexState } from "../similarity/useSimilarityIndex";
 import { PublicationStatus } from "./PublicationStatus";
 import { StatusBar } from "./StatusBar";
@@ -130,14 +129,14 @@ export function StatusCenter({
 
   const go = (view: AssetView) => { setOpen(false); onNavigate(view); };
   const queues = [
-    { id: "review", label: "유사 이미지 검토", count: reviewCount, icon: <PhotoIcon />, view: { kind: "similarity_review" } as const },
+    { id: "review", label: "유사 이미지 검토", count: reviewCount, icon: <Square2StackIcon />, view: { kind: "similarity_review" } as const },
     { id: "unsorted", label: "미분류", count: unsortedCount ?? 0, icon: <InboxIcon />, view: { kind: "unsorted" } as const },
   ].filter((queue) => queue.count > 0);
 
   return <RadixDialog.Root modal={false} open={open} onOpenChange={setOpen}>
     <RadixDialog.Trigger asChild>
       <button type="button" className="status-center__trigger" data-state-tone={state} aria-label={label} aria-description={description}>
-        {state === "active" ? <span className="status-center__spinner" aria-hidden="true" /> : <ActivityIcon aria-hidden="true" />}
+        {state === "active" ? <span className="status-center__spinner" aria-hidden="true" /> : <ChartBarIcon aria-hidden="true" />}
         <span className="status-center__trigger-text">{text}</span>
       </button>
     </RadixDialog.Trigger>

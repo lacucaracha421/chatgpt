@@ -5,7 +5,7 @@
 .manga-index .classification-sidebar__quick-view-label { flex: 1; }
 .manga-index__count { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .manga-index [aria-current="page"] .manga-index__count { color: var(--color-on-accent); }
-.manga-index__pin { position: absolute; right: var(--space-3); top: 50%; transform: translateY(-50%); width: var(--space-6); height: var(--space-6); padding: var(--space-1); display: grid; place-items: center; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); opacity: 0; cursor: pointer; }
+.manga-index__row .manga-index__pin { position: absolute; right: var(--space-3); top: 50%; transform: translateY(-50%); width: var(--space-6); height: var(--space-6); min-height: 0; padding: var(--space-1); display: grid; place-items: center; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); opacity: 0; cursor: pointer; }
 .manga-index__row:hover .manga-index__pin, .manga-index__row:focus-within .manga-index__pin, .manga-index__row--pinned .manga-index__pin { opacity: 1; }
 .manga-index__pin:hover { background: var(--color-surface-hover); }
 .manga-index__pin svg { width: 100%; height: 100%; }

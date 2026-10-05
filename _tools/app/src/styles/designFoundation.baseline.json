@@ -501,9 +501,9 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/Catalog.css": {
-      "offScaleSpacing": 23,
+      "offScaleSpacing": 22,
       "offRoleFontSize": 20,
-      "pillRadius": 1,
+      "pillRadius": 0,
       "legacyToken": 0
     },
     "_tools/app/mobile-client/CatalogReader.css": {

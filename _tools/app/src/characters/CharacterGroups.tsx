@@ -1,13 +1,12 @@
 import { AssetImage } from "../privacy/AssetImage";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PhotoIcon } from "@heroicons/react/24/outline";
-import { PencilIcon, PeopleIcon } from "../shared/ui/ArchiveIcons";
+import { PencilIcon, PhotoIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { Dialog } from "../shared/ui/Dialog";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
 import { commandErrorMessage } from "../library/errorMessage";
-import { thumbnailUrl } from "../assets/mediaUrl";
+import { groupMemberImage, groupPreviewMembers } from "./shelfImages";
 import type { CharacterTarget } from "./api";
 import { FolderShelf } from "../assets/FolderShelf";
 
@@ -129,11 +128,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
 }
 
 function CharacterGroupCard({ group, members, memberCounts, privacyMode, onOpen, onEdit }: { group: Group; members: CharacterTarget[]; memberCounts: Record<string, number | undefined>; privacyMode: boolean; onOpen: () => void; onEdit: () => void }) {
-  const orderedMembers = members.filter(member => group.targetIds.includes(member.id));
-  const groupMembers = orderedMembers.some(member => member.folderOrder != null)
-    ? orderedMembers
-    : group.targetIds.flatMap(id => orderedMembers.filter(member => member.id === id));
-  const previews = groupMembers.slice(0, 4);
+  const { groupMembers, previews } = groupPreviewMembers(group, members);
   const count = groupMembers.reduce<number | undefined>((sum, member) => {
     const next = memberCounts[member.id];
     return next === undefined ? sum : (sum ?? 0) + next;
@@ -142,11 +137,11 @@ function CharacterGroupCard({ group, members, memberCounts, privacyMode, onOpen,
     <button className="series-character__open" aria-label={`${group.name} 그룹 열기`} aria-description={`${group.targetIds.length.toLocaleString()}명${groupMembers.length ? ` · ${groupMembers.map(member => member.displayName).join(" · ")}` : ""}`} onClick={onOpen}>
       <span className="character-group-card__mosaic" data-count={Math.max(1, previews.length)}>
         {previews.length ? previews.map(target => {
-          const assetId = target.thumbnailAssetId ?? target.references.find(reference => reference.status === "ready")?.assetId;
-          return privacyMode ? <span key={target.id} className="character-group-card__slot privacy-mask" aria-label="비공개 모드"/> : assetId ? <AssetImage key={target.id} draggable={false} loading="lazy" src={thumbnailUrl(assetId)} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
-        }) : <span className="character-group-card__slot"><PeopleIcon aria-hidden="true" /></span>}
+          const image = groupMemberImage(target);
+          return privacyMode ? <span key={target.id} className="character-group-card__slot privacy-mask" aria-label="비공개 모드"/> : image ? <AssetImage key={target.id} draggable={false} loading="lazy" src={image} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
+        }) : <span className="character-group-card__slot"><UserGroupIcon aria-hidden="true" /></span>}
       </span>
-      <strong><PeopleIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
+      <strong><UserGroupIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
       <small className="folder-shelf__meta" aria-hidden={count === undefined || undefined}>{count === undefined ? null : `${count.toLocaleString("ko-KR")}장`}</small>
     </button>
     <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${group.name} 그룹 편집`} aria-description="그룹 편집" onClick={onEdit}><PencilIcon aria-hidden="true" /></Button>

@@ -135,15 +135,14 @@
 .manga-card__pages { position: absolute; right: var(--space-1); bottom: var(--space-1); pointer-events: none; }
 .manga-card__title { display: -webkit-box; height: 2.7em; margin-top: var(--space-2); overflow: hidden; font-size: var(--type-body); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .manga-card__artist { display: block; margin-top: var(--space-1); overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); line-height: 1.5; white-space: nowrap; text-overflow: ellipsis; }
-/* The bookmark is a square corner mark on the cover, separate from its opening button. */
-.manga-card__bookmark { position: absolute; top: 0; right: 0; display: grid; place-items: center; width: var(--control-height); height: var(--control-height); padding: 0; color: var(--color-text); background: transparent; border: 0; border-radius: var(--radius-mark); cursor: pointer; opacity: 0; }
-.manga-card__bookmark svg { width: var(--icon-sm); height: var(--icon-sm); }
-.manga-card:hover .manga-card__bookmark, .manga-card:focus-within .manga-card__bookmark, .manga-card__bookmark[aria-pressed="true"], .manga-card__bookmark[data-saved-edition], .manga-card__bookmark:disabled { opacity: 1; }
-.manga-card__bookmark[aria-pressed="true"] { color: var(--color-accent); }
-.manga-card__bookmark[aria-pressed="true"] svg, .manga-card__bookmark[data-saved-edition] svg { fill: currentColor; }
-.manga-card__bookmark[data-saved-edition] { color: var(--color-muted); }
-.manga-card__bookmark:disabled { cursor: wait; }
-.manga-card__bookmark:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
+/* The bookmark is the shared cover-corner BookmarkToggle, separate from the opening button.
+   It shows on hover, while on, while saving and when another edition is bookmarked. */
+.manga-card__bookmark.ui-bookmark-corner { opacity: 0; }
+.manga-card:hover .manga-card__bookmark.ui-bookmark-corner, .manga-card:focus-within .manga-card__bookmark.ui-bookmark-corner,
+.manga-card__bookmark.ui-bookmark-corner[aria-pressed="true"], .manga-card__bookmark.ui-bookmark-corner[data-saved-edition], .manga-card__bookmark.ui-bookmark-corner:disabled { opacity: 1; }
+.manga-card__bookmark.ui-bookmark-corner[data-saved-edition]:not([aria-pressed="true"]) { color: var(--color-muted); }
+.manga-card__bookmark.ui-bookmark-corner[data-saved-edition] svg { fill: currentColor; }
+.manga-card__bookmark.ui-bookmark-corner:disabled { cursor: wait; }
 .manga-card--skeleton .manga-card__title { width: 80%; }
 .manga-card--skeleton .manga-card__artist { width: 40%; height: 1.5em; }
 .manga-toolbar__refresh { display: flex; align-items: center; gap: var(--space-2); }

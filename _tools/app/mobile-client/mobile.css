@@ -1,6 +1,6 @@
 @import '../src/styles/tokens.css';
 @import '../src/styles/controls.css';
-:root { color-scheme: dark; --selection-check-size:28px; --touch:44px; --mobile-gutter:24px; --mobile-header:64px; --mobile-nav:64px; --mobile-row-gap:10px; --gallery-date-heading-height:44px; --type-title:22px; --type-body:17px; --type-meta:13px; --type-number:28px; --control-height:44px; --control-height-compact:36px; --touch-target:44px; --row-height:48px; --row-height-2:64px; --badge-height:24px; --badge-icon:16px; --checkbox-size:20px; --checkbox-inset:4px; --switch-width:40px; --switch-height:22px; }
+:root { color-scheme: dark; --bookmark-corner-icon:22px; --selection-check-size:28px; --touch:44px; --mobile-gutter:24px; --mobile-header:64px; --mobile-nav:64px; --mobile-row-gap:10px; --gallery-date-heading-height:44px; --type-title:22px; --type-body:17px; --type-meta:13px; --type-number:28px; --control-height:44px; --control-height-compact:36px; --touch-target:44px; --row-height:48px; --row-height-2:64px; --badge-height:24px; --badge-icon:16px; --checkbox-size:20px; --checkbox-inset:4px; --switch-width:40px; --switch-height:22px; }
 * { box-sizing:border-box; }
 html, body, #root { margin:0; width:100%; height:100%; overflow:hidden; }
 body { background:var(--color-bg); color:var(--color-text); font:var(--type-body)/1.5 var(--font-ui); -webkit-tap-highlight-color:transparent; }

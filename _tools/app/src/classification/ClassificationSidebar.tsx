@@ -1,6 +1,5 @@
-import { StarIcon } from "@heroicons/react/20/solid";
-import { ChevronRightIcon } from "@heroicons/react/24/outline";
-import { BookOpenIcon, EllipsisHorizontalIcon, FolderIcon, PhotoIcon, InboxIcon, PersonIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { PinSolidIcon } from "../shared/ui/PinIcon";
+import { BookOpenIcon, ChevronRightIcon, Cog6ToothIcon, EllipsisHorizontalIcon, FolderIcon, InboxIcon, PlusIcon, RectangleStackIcon, Square2StackIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -15,6 +14,7 @@ import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { buildTree, type TreeNode } from "./buildTree";
+import { useFolderPrefetchIntent } from "../assets/folderPrefetch";
 import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog";
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 import type { CharacterTarget } from "../characters/api";
@@ -483,17 +483,17 @@ export function ClassificationSidebar({
       {!embedded && <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
         <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="전체" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
-        <QuickViewButton icon={<PersonIcon aria-hidden="true" />} label="작가" selected={view.kind === "artists" || view.kind === "creator"} onClick={() => onViewChange({ kind: "artists" })} />
+        <QuickViewButton icon={<UserIcon aria-hidden="true" />} label="작가" selected={view.kind === "artists" || view.kind === "creator"} onClick={() => onViewChange({ kind: "artists" })} />
         {!embedded && <><QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
         <QuickViewButton icon={<RectangleStackIcon aria-hidden="true" />} label="컬렉션" selected={view.kind === "collections" || view.kind === "collection"} onClick={() => onViewChange({ kind: "collections", typeFilter: collectionType, showcase: false })} /></>}
       </nav>}
       {classificationMode && <>
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
-      {pinnedIds.some((id) => entries.some((entry) => entry.id === id)) && <nav className="classification-sidebar__pins" aria-label="즐겨찾기 폴더">
-        <span className="workspace-section-label">즐겨찾기</span>
+      {pinnedIds.some((id) => entries.some((entry) => entry.id === id)) && <nav className="classification-sidebar__pins" aria-label="고정 폴더">
+        <span className="workspace-section-label">고정</span>
         <div className="classification-sidebar__pin-chips">
-          {pinnedIds.map((id) => { const entry = entries.find((item) => item.id === id); return entry ? <ContextMenu key={id} items={[{ id: "unpin", label: "즐겨찾기 해제", onSelect: () => onPinnedIdsChange(pinnedIds.filter((value) => value !== id)) }]}>
-            <button type="button" className="classification-sidebar__pin" title={folderPath(id).map((item) => item.name).join(" › ")} aria-current={view.kind === "classification" && view.classificationId === id && !view.characterId && !view.characterGroupId ? "page" : undefined} aria-description={folderPath(id).map((item) => item.name).join(" / ")} onClick={() => openPinned(id)}><StarIcon aria-hidden="true" /><span>{entry.name}</span></button>
+          {pinnedIds.map((id) => { const entry = entries.find((item) => item.id === id); return entry ? <ContextMenu key={id} items={[{ id: "unpin", label: "고정 해제", onSelect: () => onPinnedIdsChange(pinnedIds.filter((value) => value !== id)) }]}>
+            <button type="button" className="classification-sidebar__pin" title={folderPath(id).map((item) => item.name).join(" › ")} aria-current={view.kind === "classification" && view.classificationId === id && !view.characterId && !view.characterGroupId ? "page" : undefined} aria-description={folderPath(id).map((item) => item.name).join(" / ")} onClick={() => openPinned(id)}><PinSolidIcon aria-hidden="true" /><span>{entry.name}</span></button>
           </ContextMenu> : null; })}
         </div>
       </nav>}
@@ -604,7 +604,7 @@ export function ClassificationSidebar({
       </ContextMenu>
       </>}
       {!embedded && <div className="classification-sidebar__footer">
-        <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
+        <QuickViewButton icon={<Square2StackIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
         <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" count={trashCount} selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
         <QuickViewButton icon={<Cog6ToothIcon aria-hidden="true" />} label="설정" selected={view.kind === "settings"} onClick={() => onViewChange({ kind: "settings" })} />
       </div>}
@@ -700,6 +700,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
+  const folderIntent = useFolderPrefetchIntent();
   const hasChildren = node.children.length > 0;
   const expanded = expandedIds.includes(node.entry.id);
   // Mount on first disclosure, then retain rows so a close can reverse mid-flight.
@@ -712,7 +713,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
   const originalsRoot = isOriginalsRoot(node.entry);
   const actions: MenuItem[] = [
-    ...(onTogglePin && node.entry.treeKind === "classification" ? [{ id: "pin", label: pinnedIds.includes(node.entry.id) ? "즐겨찾기 해제" : "즐겨찾기에 추가", onSelect: () => onTogglePin(node.entry) }] : []),
+    ...(onTogglePin && node.entry.treeKind === "classification" ? [{ id: "pin", label: pinnedIds.includes(node.entry.id) ? "고정 해제" : "고정", onSelect: () => onTogglePin(node.entry) }] : []),
     { id: "create-child", label: node.entry.treeKind === "album" ? "하위 앨범 만들기" : "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     ...(!originalsRoot ? [{ id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) }] : []),
     { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
@@ -738,6 +739,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           aria-selected={selected}
           aria-expanded={hasChildren ? expanded : undefined}
           tabIndex={node.entry.id === activeRowId ? 0 : -1}
+          {...(node.entry.treeKind === "classification" && !node.entry.characterId && !node.entry.characterGroupId ? folderIntent(treeEntryView(node.entry)) : {})}
           onClick={() => onViewChange(treeEntryView(node.entry))}
           onFocus={() => onRowFocus(node.entry.id)}
           onKeyDown={(event) => {

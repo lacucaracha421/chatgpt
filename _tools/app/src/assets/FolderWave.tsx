@@ -1,7 +1,7 @@
 import { Component, type ReactNode, type RefObject } from 'react';
 import { contentCross, EASE_STANDARD, reducedMotion } from '../shared/motion/curves';
 import { READY_CAP_MS } from '../shared/motion/AreaSwitch';
-import { waitForViewportImages } from '../shared/motion/viewportImages';
+import { IMAGE_READY_CAP_MS, revealTogether, waitForViewportImages } from '../shared/motion/viewportImages';
 
 /** AssetBrowser supplies a serialized query; sort/filter changes are not navigation. */
 export function folderMoveScope(scopeKey?: string) {
@@ -54,6 +54,8 @@ export class FolderMove extends Component<Props> {
   private scrollTop = 0;
   private query: MediaQueryList | undefined;
   private stopImages: (() => void) | undefined;
+  /** Releases first-screen tiles still loading at the cap; they appear together, not one by one. */
+  private releaseLate: (() => void) | undefined;
 
   getSnapshotBeforeUpdate(previous: Props) {
     if (!previous.visible || !this.props.visible || previous.scope === undefined || previous.scope === this.props.scope || previous.privacyKey !== this.props.privacyKey) return null;
@@ -83,7 +85,7 @@ export class FolderMove extends Component<Props> {
   }
 
   componentDidUpdate(previous: Props, _state: unknown, snapshot: HTMLDivElement | null) {
-    if (previous.queryKey !== this.props.queryKey || previous.scope !== this.props.scope || !this.props.visible || previous.privacyKey !== this.props.privacyKey) this.finish();
+    if (previous.queryKey !== this.props.queryKey || previous.scope !== this.props.scope || !this.props.visible || previous.privacyKey !== this.props.privacyKey) { this.finish(); this.releaseLate?.(); }
     if (!snapshot) return;
     const host = this.props.host.current!;
     this.layer = snapshot;
@@ -119,6 +121,10 @@ export class FolderMove extends Component<Props> {
           window.clearTimeout(this.timer);
           this.timer = window.setTimeout(this.finish, duration);
         });
+      }, IMAGE_READY_CAP_MS, late => {
+        // Hold late tiles past the entrance until the whole batch is ready (within the fail-safe).
+        this.releaseLate?.();
+        this.releaseLate = revealTogether(late, READY_CAP_MS - IMAGE_READY_CAP_MS);
       });
     });
   }
@@ -147,6 +153,6 @@ export class FolderMove extends Component<Props> {
     }
     this.query?.removeEventListener?.('change', this.finish);
   };
-  componentWillUnmount() { this.finish(); }
+  componentWillUnmount() { this.finish(); this.releaseLate?.(); }
   render() { return this.props.children; }
 }

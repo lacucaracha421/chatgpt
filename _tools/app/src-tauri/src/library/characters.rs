@@ -1,5 +1,5 @@
 //! Character identity is separate from the asset's single direct folder.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -163,9 +163,53 @@ pub struct Target {
     pub learned_references: Vec<Reference>,
     pub ready: bool,
     pub fingerprint: String,
+    /// Current thumbnail revisions of the thumbnail and reference Assets, by Asset id (an
+    /// Asset without a thumbnail is absent), so shelf cards can use cacheable thumbnail URLs.
+    /// Filled only by [`Library::list_character_targets`] (the shelf's source, in one read for
+    /// all targets); empty elsewhere. Not part of the fingerprint.
+    pub thumbnail_revisions: BTreeMap<String, String>,
+}
+
+/// The listed Assets' current [`super::models::thumbnail_revision`]s in one statement, read
+/// like the media protocol's thumbnail route; Assets without a served thumbnail are omitted.
+pub(super) fn thumbnail_revisions<'a>(
+    connection: &Connection,
+    asset_ids: impl IntoIterator<Item = &'a str>,
+) -> Result<BTreeMap<String, String>> {
+    let ids = asset_ids.into_iter().collect::<BTreeSet<_>>();
+    if ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut statement = connection.prepare_cached(
+        "SELECT id,thumbnail_relative_path FROM assets
+         WHERE id IN (SELECT value FROM json_each(?1)) AND status IN ('normal','review')
+         AND thumbnail_relative_path IS NOT NULL",
+    )?;
+    let rows = statement.query_map([serde_json::to_string(&ids)?], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut revisions = BTreeMap::new();
+    for row in rows {
+        let (id, path) = row?;
+        revisions.insert(id, super::models::thumbnail_revision(&path));
+    }
+    Ok(revisions)
 }
 
 impl Target {
+    /// Assets a card or editor may show: the chosen thumbnail and every linked reference.
+    fn shown_asset_ids(&self) -> impl Iterator<Item = &str> {
+        self.thumbnail_asset_id
+            .iter()
+            .chain(
+                self.references
+                    .iter()
+                    .chain(&self.learned_references)
+                    .filter_map(|reference| reference.asset_id.as_ref()),
+            )
+            .map(String::as_str)
+    }
+
     /// The two tables are legacy storage only; every valid reference has equal weight.
     pub(super) fn usable_references(&self) -> impl Iterator<Item = &Reference> {
         self.references
@@ -232,9 +276,21 @@ impl Library {
             .prepare("SELECT t.id FROM character_targets t JOIN character_folder_order o ON o.target_id=t.id ORDER BY o.position, t.id")?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        ids.iter()
+        let mut targets = ids
+            .iter()
             .map(|id| self.read_character_target(&connection, id))
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        let revisions = thumbnail_revisions(
+            &connection,
+            targets.iter().flat_map(Target::shown_asset_ids),
+        )?;
+        for target in &mut targets {
+            target.thumbnail_revisions = target
+                .shown_asset_ids()
+                .filter_map(|id| Some((id.to_owned(), revisions.get(id)?.clone())))
+                .collect();
+        }
+        Ok(targets)
     }
 
     pub fn get_character_target(&self, id: &str) -> Result<Target> {
@@ -1403,7 +1459,7 @@ impl Library {
             (SELECT position FROM character_folder_order WHERE target_id=character_targets.id AND legacy_sidebar=0)
             FROM character_targets WHERE id=?1", [id], |r| Ok(Target {
                 id:r.get(0)?,folder_order:r.get(9)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
-                enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new()
+                enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new(),thumbnail_revisions:BTreeMap::new()
             })).optional()?.ok_or(Error::NotFound)?;
         let regions = super::character_reference_regions::read_regions(connection, id)?;
         let mut statement = connection.prepare("SELECT slot,asset_id,asset_hash FROM character_references WHERE target_id=?1 ORDER BY slot")?;

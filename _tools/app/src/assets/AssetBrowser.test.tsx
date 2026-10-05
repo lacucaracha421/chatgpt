@@ -8,6 +8,8 @@ import { WindowControls } from "../layout/WindowControls";
 import type { AssetPage, AssetSort, AssetSummary, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import type { CharacterHubApi } from "../characters/hubApi";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "./AssetBrowser";
+import { planFolderPrefetch } from "../app/folderPrefetchPlan";
+import { resetFolderPrefetch } from "./folderPrefetch";
 
 const classifications: ClassificationEntry[] = [];
 
@@ -1701,5 +1703,32 @@ describe("search and filter swap", () => {
       await screen.findByRole("option", { name: "asset-5.png" });
       expect(animate.mock.calls.some(([frames]) => JSON.stringify(frames).includes("translateY(8px)"))).toBe(false);
     } finally { delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.unstubAllGlobals(); }
+  });
+});
+
+describe("hover prefetch of a plain folder", () => {
+  afterEach(() => resetFolderPrefetch());
+  it("switches to the prefetched folder without reading its first page again", async () => {
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const folders: ClassificationEntry[] = [
+      { id: "a", kind: "tag", name: "A", parentId: null, iconKey: null, colorKey: null },
+      { id: "b", kind: "tag", name: "B", parentId: null, iconKey: null, colorKey: null },
+    ];
+    const from: AssetView = { kind: "classification", classificationId: "a" }, to: AssetView = { kind: "classification", classificationId: "b" };
+    const view = renderBrowser(gateway, { view: from, classifications: folders });
+    await screen.findByRole("option", { name: "asset-0.png" });
+    const pageReads = () => vi.mocked(gateway.listAssets).mock.calls.filter(([query]) => query.classificationId === "b" && query.limit > 1).length;
+    vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: [asset(3)], nextCursor: null });
+    const reads = planFolderPrefetch(to, { current: from, gateway, series: [], classifications: folders, sort: "newest" });
+    expect(reads).toHaveLength(1);
+    await Promise.all(reads!);
+    expect(pageReads()).toBe(1);
+    vi.mocked(gateway.listAssets).mockResolvedValue({ items: [asset(7)], nextCursor: null });
+    view.rerender(browserElement(gateway, { view: to, classifications: folders }));
+    // The prefetched page is what the switch shows; nothing read the page again.
+    expect(await screen.findByRole("option", { name: "asset-3.png" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "asset-7.png" })).not.toBeInTheDocument();
+    expect(pageReads()).toBe(1);
+    expect(planFolderPrefetch(to, { current: to, gateway, series: [], classifications: folders, sort: "newest" })).toBeNull();
   });
 });

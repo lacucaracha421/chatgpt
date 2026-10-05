@@ -4,21 +4,21 @@ import type { ArtistSummary } from "../artists/types";
 import { useOptionalLibrary } from "../library/LibraryContext";
 import type { AssetView, CollectionSummary } from "../library/types";
 import { notesStore, type Note } from "../notes/store";
-import { BookOpenIcon, NoteIcon, PersonIcon } from "../shared/ui/ArchiveIcons";
+import { AREA_ICONS } from "../shared/ui/areaIcons";
 import type { NavigationEntry } from "./navigationEntries";
 
 import {FIND_WORK_TYPE_LABEL} from "../shared/findEntries";
 /** Only project titles; never copy note bodies, fields, labels or checklist content into the index. */
 export function noteTitleEntries(notes: Pick<Note, "id" | "title" | "type" | "deleted">[], onNavigate: (view: AssetView) => void): NavigationEntry[] {
   return notes.filter(note => !note.deleted && note.type !== "ledger-month").map(note => ({
-    id: `note-${note.id}`, group: "note", label: note.title.trim() || "제목 없는 메모", icon: <NoteIcon />,
+    id: `note-${note.id}`, group: "note", label: note.title.trim() || "제목 없는 메모", icon: <AREA_ICONS.notes />,
     run: () => onNavigate({ kind: "notes", noteId: note.id }),
   }));
 }
 export function workEntries(works: CollectionSummary[], onNavigate: (view: AssetView) => void): NavigationEntry[] {
   return works.map(work => ({
     id: `work-${work.id}`, group: "work", label: work.name, keywords: work.originalTitle ? [work.originalTitle] : [],
-    context: FIND_WORK_TYPE_LABEL[work.type], icon: <BookOpenIcon />, thumbnail: work.coverAssetId ? thumbnailUrl(work.coverAssetId) : undefined,
+    context: FIND_WORK_TYPE_LABEL[work.type], icon: <AREA_ICONS.collections />, thumbnail: work.coverAssetId ? thumbnailUrl(work.coverAssetId) : undefined,
     run: () => onNavigate({ kind: "collection", collectionId: work.id }),
   }));
 }
@@ -26,7 +26,7 @@ export function artistEntries(artists: ArtistSummary[], onNavigate: (view: Asset
   return artists.filter(artist => !artist.hidden).map(artist => ({
     id: `artist-${artist.id}`, group: "artist", label: artist.label,
     keywords: [artist.displayName ?? "", artist.sourceName ?? "", ...artist.keys],
-    context: `에셋 ${artist.assetCount.toLocaleString("ko-KR")}장`, icon: <PersonIcon />, avatar: true,
+    context: `에셋 ${artist.assetCount.toLocaleString("ko-KR")}장`, icon: <AREA_ICONS.artists />, avatar: true,
     thumbnail: artist.coverAssetIds[0] ? thumbnailUrl(artist.coverAssetIds[0]) : undefined,
     run: () => onNavigate({ kind: "creator", creatorKey: artist.id }),
   }));

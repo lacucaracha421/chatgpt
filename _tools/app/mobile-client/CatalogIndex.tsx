@@ -1,7 +1,7 @@
 import {useEffect,useRef} from 'react';
 import type {MangaFrequentIndex,MangaIndexIdentity} from '../src/library/types';
 import {mangaIndexKey} from '../src/manga/mangaIndexModel';
-import {MangaPinIcon} from '../src/manga/MangaPinIcon';
+import {PinSolidIcon} from '../src/shared/ui/PinIcon';
 import type {useMangaIndex} from './useMangaIndex';
 import {SectionLabel} from './ui';
 
@@ -16,7 +16,7 @@ function IndexChip({row,count,pinned,pending,active,onPick,onPin}:{row:MangaInde
     onContextMenu={event=>event.preventDefault()}
     onKeyDown={event=>{if(event.key==='F10'&&event.shiftKey){event.preventDefault();onPin();}}}
     onClick={()=>{if(held.current){held.current=false;return;}onPick();}}>
-    {pinned&&<MangaPinIcon solid/>}<span>{row.label}</span><small className="numeric">{count}</small>{pending&&<span className="catalog-index-pending" aria-label="고정 저장 대기">·</span>}
+    {pinned&&<PinSolidIcon/>}<span>{row.label}</span><small className="numeric">{count}</small>{pending&&<span className="catalog-index-pending" aria-label="고정 저장 대기">·</span>}
   </button>;
 }
 export function CatalogIndex({index,filter,onFilter}:{index:ReturnType<typeof useMangaIndex>;filter:MangaIndexIdentity|null;onFilter(row:MangaIndexIdentity|null):void}){

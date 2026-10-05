@@ -1,4 +1,3 @@
-import { archivePaths } from "../shared/ui/ArchiveIcons";
 import type { SVGProps } from "react";
 import type { ClassificationKind } from "../library/types";
 
@@ -92,15 +91,14 @@ type ClassificationIconProps = SVGProps<SVGSVGElement> & {
 export function ClassificationIcon({ kind, iconKey, testId = true, ...props }: ClassificationIconProps) {
   const fallbackKey = kind === "work" ? "book" : "folder";
   const resolvedKey = iconKey && iconPaths.has(iconKey) ? iconKey : fallbackKey;
-  const geometric = archivePaths[resolvedKey as keyof typeof archivePaths];
-  const resolvedPaths = geometric ? [geometric] : iconPaths.get(resolvedKey) ?? iconPaths.get("folder") ?? [];
+  const resolvedPaths = iconPaths.get(resolvedKey) ?? iconPaths.get("folder") ?? [];
 
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
-      strokeWidth={1.25}
+      strokeWidth={1.5}
       stroke="currentColor"
       {...props}
       data-icon-key={resolvedKey}
@@ -108,7 +106,7 @@ export function ClassificationIcon({ kind, iconKey, testId = true, ...props }: C
       aria-hidden="true"
     >
       {resolvedPaths.map((d, index) => (
-        <path key={index} strokeLinecap="square" strokeLinejoin="miter" d={d} />
+        <path key={index} strokeLinecap="round" strokeLinejoin="round" d={d} />
       ))}
     </svg>
   );

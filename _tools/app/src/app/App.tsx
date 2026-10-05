@@ -14,6 +14,8 @@ import { applyInitialCountOrder, reorderFolders } from "../classification/folder
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
 import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "../assets/AssetBrowser";
+import { FolderPrefetchContext, invalidateFolderPrefetch, type FolderPrefetchPlan } from "../assets/folderPrefetch";
+import { planFolderPrefetch } from "./folderPrefetchPlan";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import { createDefaultCollectionLibraryState, type CollectionLibraryState, type CollectionLibraryStateByType } from "../collections/collectionLibrary";
@@ -315,6 +317,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (result.reviewPending > 0) void refreshReviewCount();
   }, [refreshMembershipCounts, refreshReviewCount]);
   useWorkspaceAuthorityEvents({ refreshAlbums, refreshClassifications, refreshTrashCount, setAssetRefresh, setVideoPreparationTrigger });
+  // Hover prefetch of a folder switch's first page (read-only). Every library change below drops what it read.
+  const folderPrefetchPlan = useRef<FolderPrefetchPlan>(() => null);
+  folderPrefetchPlan.current = (target) => planFolderPrefetch(target, { current: view, gateway, series: characterHub.series, classifications: entries, sort: preferences.assetSort });
+  useEffect(() => invalidateFolderPrefetch(), [gateway, libraryRoot, assetRefresh, entries, albums, characterHub.revision, characterHub.series, characterHub.targets, characterHub.groups, characterHub.folderExclusions]);
   // A mobile similarity decision applied on this PC trashed an image and resolved a pair.
   const handleSimilarityInbound = useCallback(() => {
     void refreshReviewCount().catch(() => undefined);
@@ -653,6 +659,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   return (
     <PrivacyProvider gateway={gateway} libraryKey={libraryRoot} ratingRevision={assetRefresh} nsfwFilter={preferences.nsfwFilter} setNsfwFilter={(nsfwFilter) => updatePreferences({nsfwFilter})} privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
       <FaultGameProvider>
+      <FolderPrefetchContext.Provider value={folderPrefetchPlan}>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
         <WorkspaceChromeProvider scope={JSON.stringify(shownView.current)} pending={area !== shownArea}>
         <AppShell
@@ -849,6 +856,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
+      </FolderPrefetchContext.Provider>
       {mangaViewer && <Suspense fallback={null}><MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} artist={mangaViewer.artist} onClose={() => setMangaViewer(null)} /></Suspense>}
       </FaultGameProvider>
     </PrivacyProvider>

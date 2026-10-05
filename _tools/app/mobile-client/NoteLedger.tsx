@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
 import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline';
-import { PinIcon } from './PinIcon';
+import { PinIcon, PinSolidIcon } from '../src/shared/ui/PinIcon';
 import { Button, IconButton } from './ui';
 import { keyBetween } from '../src/notes/model';
 import type { Note, NotesStore } from '../src/notes/store';
@@ -78,7 +78,7 @@ export function NoteLedger({ store, ledger, notes, saveState, onLeave, onMore, b
     <Button size="sm" variant="quiet" onClick={() => openSheet({ kind: 'entry', draft: {} })}>기록</Button>
   </>;
   return <div className="ledger-view">
-    <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={onLeave} /><h1>{ledger.title.trim() || '가계부'}</h1><span className="notes-top__space" /><span role="status" className="notes-save-state">{saveState}</span><IconButton label={ledger.pinned ? "고정 해제" : "고정"} icon={PinIcon} active={ledger.pinned} onClick={() => editLedger(l => ({ pinned: !l.pinned }))} /><IconButton label="메모 더보기" icon={EllipsisHorizontalIcon} onClick={onMore} /></header>
+    <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={onLeave} /><h1>{ledger.title.trim() || '가계부'}</h1><span className="notes-top__space" /><span role="status" className="notes-save-state">{saveState}</span><IconButton label={ledger.pinned ? "고정 해제" : "고정"} icon={PinIcon} activeIcon={PinSolidIcon} active={ledger.pinned} onClick={() => editLedger(l => ({ pinned: !l.pinned }))} /><IconButton label="메모 더보기" icon={EllipsisHorizontalIcon} onClick={onMore} /></header>
     <div className="ledger-page">
       <div className="ledger-monthrow"><IconButton label="이전 달" icon={ChevronLeftIcon} onClick={() => setMonth(addMonths(month, -1))} /><h2>{monthLabel(month)}</h2><IconButton label="다음 달" icon={ChevronRightIcon} onClick={() => setMonth(addMonths(month, 1))} />{month !== current && <Button size="sm" variant="quiet" onClick={() => setMonth(current)}>이번 달로</Button>}<span className="ledger-spacer" /><Button size="sm" variant="quiet" onClick={() => openSheet({ kind: 'income' })}>예산 정하기</Button></div>
       {problem && !sheet && <p className="ledger-problem" role="alert">{problem}</p>}

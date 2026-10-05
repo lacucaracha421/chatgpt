@@ -1,4 +1,4 @@
-import { EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { CharacterFolderOrganizer } from "./CharacterFolderOrganizer";
 import { folderExclusionItem } from "./folderExclusion";
 import { FolderRegistrationContext } from "./FolderRegistrationContext";
@@ -7,8 +7,23 @@ import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from ".
 import { Menu } from "../shared/ui/Menu";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { useCharacterHub } from "./useCharacterHub";
-import { characterHubApi } from "./hubApi";
+import { characterHubApi, type CharacterSeries } from "./hubApi";
 import { SeriesBrowser, type CharacterGalleryDrag } from "./SeriesBrowser";
+
+function inOriginals(id: string, classifications: ClassificationEntry[]) {
+  let current = classifications.find(item => item.id === id);
+  const seen = new Set<string>();
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    if (!current.parentId) return current.id === "lakomics-originals" || current.name === "오리지널";
+    current = classifications.find(item => item.id === current?.parentId);
+  }
+  return false;
+}
+/** Whether this folder opens as a series (SeriesBrowser) rather than a plain folder. */
+export function opensAsSeries(id: string, series: CharacterSeries[], classifications: ClassificationEntry[]) {
+  return series.some(entry => entry.classificationId === id) && !inOriginals(id, classifications);
+}
 
 export function CharacterFolderContent({ children, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onAssetsChanged }: {
   requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void;
@@ -25,16 +40,7 @@ export function CharacterFolderContent({ children, requestedAsset, onRequestedAs
   const id = view.kind === "classification" ? view.classificationId : null;
   const folder = classifications.find(item => item.id === id);
   const series = hub.series.find(s => s.classificationId === id);
-  const originalScope = Boolean(id && (() => {
-    let current = classifications.find(item => item.id === id);
-    const seen = new Set<string>();
-    while (current && !seen.has(current.id)) {
-      seen.add(current.id);
-      if (!current.parentId) return current.id === "lakomics-originals" || current.name === "오리지널";
-      current = classifications.find(item => item.id === current?.parentId);
-    }
-    return false;
-  })());
+  const originalScope = Boolean(id && inOriginals(id, classifications));
   const folderExclusions = hub.folderExclusions ?? [];
   const seriesAncestor = (() => {
     let current = folder;

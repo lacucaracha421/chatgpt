@@ -1,4 +1,4 @@
-import { MagnifyingGlassIcon } from "../shared/ui/ArchiveIcons";
+import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 import { Dialog } from "../shared/ui/Dialog";
 

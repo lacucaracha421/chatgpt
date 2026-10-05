@@ -1,10 +1,10 @@
-import { ArrowTopRightOnSquareIcon, ChevronDownIcon, ChevronLeftIcon, EllipsisHorizontalIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ArrowTopRightOnSquareIcon, ChevronDownIcon, EllipsisHorizontalIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { displayDate } from "../../shared/displayDate";
-import { popToggle } from "../../shared/motion/togglePop";
 import { Button } from "../../shared/ui/Button";
+import { IconButton } from "../../shared/ui/IconButton";
 import { libraryGateway } from "../../library/client";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import { avError } from "../avClient";
@@ -100,7 +100,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   const stale = page.person.id !== personId;
   return <article className="av-performer-page" aria-label="AV 배우 상세">
     <div className="av-performer-page__topline">
-      <Button size="icon" variant="ghost" aria-label="작품으로 돌아가기" onClick={onBack}><ChevronLeftIcon aria-hidden="true" /></Button>
+      <Button size="icon" variant="ghost" aria-label="작품으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>
       <b>{page.person.displayName}</b><span>AV › 배우</span>
       <Menu label="배우 관리" align="end" triggerClassName="av-performer-page__manage" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
         { id: "portrait", label: "사진 바꾸기", onSelect: () => setPickerOpen(true), disabled: stale },
@@ -119,7 +119,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
             {source.url && safeProfileUrl(source.url) && <Button size="sm" variant="ghost" onClick={() => void openUrl(source.url!).catch(() => setSourceError("원본 링크를 열지 못했습니다."))} aria-label="대표 이미지 출처 열기"><ArrowTopRightOnSquareIcon aria-hidden="true" />원본</Button>}
           </div>
           <div className="av-performer-page__actions">
-            <Button size="icon" aria-label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} aria-pressed={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={(event) => { popToggle(event.currentTarget, !favorite); void toggleFavorite(); }}>{favorite ? <StarSolidIcon aria-hidden="true" /> : <StarIcon aria-hidden="true" />}</Button>
+            <IconButton pop label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} icon={StarIcon} activeIcon={StarSolidIcon} active={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={() => void toggleFavorite()} />
             <Button onClick={() => setPickerOpen(true)}>사진 바꾸기</Button>
           </div>
           {sourceError && <p className="av-profile__quiet" role="status">{sourceError}</p>}

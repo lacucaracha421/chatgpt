@@ -21,7 +21,8 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { ArtistCollage } from "./ArtistCollage";
 import { artistHandle } from "./format";
-import { ArrowPathIcon, CheckIcon, ChevronRightIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, PinIcon, XMarkIcon } from "./artistIcons";
+import { ArrowPathIcon, CheckIcon, ChevronRightIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, PinIcon, PinSolidIcon, XMarkIcon } from "./artistIcons";
+import { IconButton } from "../shared/ui/IconButton";
 import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead, useArtistsChanged } from "./artistStore";
 import { UNKNOWN_SOURCE, type ArtistBucket, type ArtistExcludedFolder, type ArtistMergeSuggestion, type ArtistSettings, type ArtistSort, type ArtistSummary } from "./types";
 import "./artists.css";
@@ -261,7 +262,7 @@ function ArtistCard({ artist, rule, privacyMode, onNavigate }: { artist: ArtistS
       </button>
       {/* Hover tools sit on the image corner so the caption and grid never shift. */}
       <span className="artist-card__tools">
-        <button type="button" className="artist-card__tool" aria-label={artist.pinned ? `${artist.label} 고정 해제` : `${artist.label} 고정`} aria-pressed={artist.pinned} onClick={handlePin}><PinIcon aria-hidden="true" /></button>
+        <IconButton className="artist-card__tool" label={artist.pinned ? `${artist.label} 고정 해제` : `${artist.label} 고정`} icon={PinIcon} activeIcon={PinSolidIcon} active={artist.pinned} onClick={handlePin} />
         <Menu label={`${artist.label} 더보기`} triggerClassName="artist-card__tool" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={artistMenuItems(artist, onNavigate, gateway)} />
       </span>
       <div className="artist-card__caption">
@@ -335,7 +336,7 @@ function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; priva
         </div>
         <div className="artist-today__actions">
           <Button variant="secondary" onClick={() => onNavigate({ kind: "creator", creatorKey: hero.artist.id })}>작가 페이지 열기<ChevronRightIcon aria-hidden="true" /></Button>
-          <Button variant={hero.artist.pinned ? "secondary" : "ghost"} aria-pressed={hero.artist.pinned} onClick={() => { if (gateway) void gateway.setFlags(hero.artist.id, { pinned: !hero.artist.pinned }).then(invalidateArtists, () => undefined); }}><PinIcon aria-hidden="true" />{hero.artist.pinned ? "고정 해제" : "고정"}</Button>
+          <Button variant="ghost" aria-pressed={hero.artist.pinned} onClick={() => { if (gateway) void gateway.setFlags(hero.artist.id, { pinned: !hero.artist.pinned }).then(invalidateArtists, () => undefined); }}>{hero.artist.pinned ? <PinSolidIcon aria-hidden="true" /> : <PinIcon aria-hidden="true" />}{hero.artist.pinned ? "고정 해제" : "고정"}</Button>
         </div>
         <div className="artist-today__others">
           <span className="workspace-section-label">오늘의 다른 작가</span>

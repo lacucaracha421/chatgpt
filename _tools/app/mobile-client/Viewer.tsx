@@ -3,7 +3,8 @@ import {assetMasked} from '../src/shared/privacy/contentMask';
 import {mediaMasked} from './assetMask';
 import {useNsfwFilter} from './privacyMode';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, RectangleStackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
+import {HeartIcon as HeartSolidIcon} from '@heroicons/react/24/solid';
 import type {ComponentType, CSSProperties, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -22,7 +23,6 @@ import {useViewerMotion} from '../src/shared/viewer/useViewerMotion';
 import {ViewerFilmstrip} from './ViewerFilmstrip';
 import {filmstripControlsOffset} from '../src/shared/viewer/CenteredFilmstrip';
 import {useLikesAlbum} from './useLikesAlbum';
-import {popToggle} from '../src/shared/motion/togglePop';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 import {contentCross, EASE_STANDARD, motionDefaults, motionTime, prefersReducedMotion} from '../src/shared/motion/curves';
 
@@ -334,10 +334,10 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         {!vault&&<span className="viewer-spacer"/>}
         <div className="viewer-actions">
           {!vault&&<>
-            <ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
+            <ViewerAction label="앨범" icon={RectangleStackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
             <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
             {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 제외`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
-            {likes.available&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--like" aria-label="좋아요" aria-pressed={likes.liked.has(asset.id)} data-toggle-key={asset.id} disabled={likes.pending.has(asset.id)} onClick={event => {revealChrome();popToggle(event.currentTarget, !likes.liked.has(asset.id));void likes.toggle(asset.id);}}><HeartIcon aria-hidden="true" fill={likes.liked.has(asset.id) ? 'currentColor' : 'none'}/></Button>}
+            {likes.available&&<IconButton className="viewer-action viewer-action--like" tone="heart" pop label="좋아요" icon={HeartIcon} activeIcon={HeartSolidIcon} active={likes.liked.has(asset.id)} data-toggle-key={asset.id} disabled={likes.pending.has(asset.id)} onClick={() => {revealChrome();void likes.toggle(asset.id);}}/>}
             <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); revealChrome();}}/>
             {onTrash&&!asset.pending&&<ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
           </>}

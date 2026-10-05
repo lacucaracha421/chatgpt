@@ -9,17 +9,17 @@ import { cloneElement, useEffect, useLayoutEffect, useRef, useState, type Compon
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
 import { motionDefaults, motionTime, reducedMotion } from "../shared/motion/curves";
-import { ChevronRightIcon, FolderIcon, UserIcon } from "@heroicons/react/24/outline";
-import { EllipsisHorizontalIcon, PencilIcon, PeopleIcon } from "../shared/ui/ArchiveIcons";
+import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, PencilIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import { AssetGallery, tileThumbnailUrl } from "../assets/AssetGallery";
+import { AssetGallery, galleryFirstScreen, tileHasThumbnail, tileThumbnailUrl } from "../assets/AssetGallery";
 import { AssetViewer } from "../assets/AssetViewer";
 import { AssetInspector } from "../assets/AssetInspector";
 import { GalleryViewMenu } from "../assets/GalleryViewMenu";
 import { libraryContextItems } from "../assets/libraryContextItems";
 import { thumbnailUrl } from "../assets/mediaUrl";
+import { characterCardImage, folderCardImage, seriesShelfCardImages, shelfCardsInView } from "./shelfImages";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, selectAllLoaded } from "../assets/selection";
 import { Button } from "../shared/ui/Button";
 import { Menu } from "../shared/ui/Menu";
@@ -44,6 +44,7 @@ import { ShadowReview } from "./ShadowReview";
 import { shadowReviewApi, type ShadowReviewApi } from "./shadowReviewApi";
 import { S36ScoringWarning, S36SeriesControl, readinessLabel, useS36CharacterExclusion, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
 import { characterApi, draftReferenceRegions, moveAssetsToCharacters, type CharacterApi, type CharacterTarget } from "./api";
+import { prefetchRead, prefetchedRead, useFolderPrefetchIntent } from "../assets/folderPrefetch";
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesGalleryFilter, type SeriesFolder } from "./hubApi";
 import "./CharacterManagement.css";
 import "./SeriesBrowser.css";
@@ -73,6 +74,20 @@ const CharacterPanelIcon = (props: ComponentProps<"svg">) => <svg viewBox="0 0 2
   <path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5M10 7h4v4h-4zM7 17l2-3h6l2 3" />
 </svg>;
 const emptyPage = (): CharacterBrowsePage => ({ items: [], nextCursor: null, totalCount: 0 });
+/**
+ * Hover prefetch of a series overview: the reads its switch gates on (the first page in `load` and the
+ * excluded-count, folder and candidate reads below), with the same arguments, so the switch takes them.
+ */
+export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, shadowApi: Pick<ShadowReviewApi, "page"> = shadowReviewApi): Promise<unknown>[] {
+  const query = { seriesId, targetId: null, groupId: null, seriesFilter: "unclassified" as const, all: false, after: null, limit: 100 };
+  const candidates = { offset: 0, limit: 1, seriesId };
+  return [
+    prefetchRead(hubApi, "browse", query, () => hubApi.browse(query)),
+    prefetchRead(hubApi, "excludedAssets", [seriesId, null, 1], () => hubApi.excludedAssets(seriesId, null, 1)),
+    prefetchRead(hubApi, "seriesFolders", seriesId, () => hubApi.seriesFolders(seriesId)),
+    prefetchRead(shadowApi, "page", candidates, () => shadowApi.page(candidates)),
+  ];
+}
 /** Status that used to sit under each character card; tiles now show only a warning mark when something is wrong. */
 function characterStatus(target: CharacterTarget, readiness: S36Readiness | undefined, s36Driven: boolean): { detail: string[]; warning: boolean } {
   const references = activeCharacterReferences(target).length;
@@ -87,6 +102,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
   const previewCache = folderPreviewCache(gateway, library?.root);
+  const folderIntent = useFolderPrefetchIntent();
   const suggestions = useCharacterSuggestions(refreshVersion);
   const [hiddenSuggestions, setHiddenSuggestions] = useState<string[]>([]);
   const seriesSuggestions = suggestions.rows.filter(row => row.seriesId === series.classificationId);
@@ -210,14 +226,15 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     const token = after ? generation.current : ++generation.current;
     pending.current = true; setLoading(true); setError(null);
     try {
-      const next = !picking && !targetId && !currentGroup && excludedOnly
-        ? await hubApi.excludedAssets(series.classificationId, after, 100)
-        : await hubApi.browse({ seriesId: series.classificationId,
+      const query = { seriesId: series.classificationId,
         targetId: picking ? picking.kind !== "hero" && !pickFromSeries ? editor?.target?.id ?? null : null : targetId ?? null,
         groupId: picking ? null : currentGroup?.id ?? null,
         ...(picking && picking.kind !== "hero" ? { referenceTargetId: editor?.target?.id ?? "" } : {}),
         ...(!picking && !targetId && !currentGroup && !excludedOnly ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter } : {}),
-        all: !picking && !targetId && !currentGroup ? seriesGalleryView === "all" : all, after, limit: 100 });
+        all: !picking && !targetId && !currentGroup ? seriesGalleryView === "all" : all, after, limit: 100 };
+      const next = !picking && !targetId && !currentGroup && excludedOnly
+        ? await hubApi.excludedAssets(series.classificationId, after, 100)
+        : await prefetchedRead(hubApi, "browse", query, () => hubApi.browse(query));
       if (token === generation.current && !after && pageScope !== null && scope !== pageScope && !picking) {
         setPreparedPage({ scope, page: next, token });
       } else if (token === generation.current) setPage(old => {
@@ -245,7 +262,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (targetId || currentGroup || picking) return;
     let active = true;
     setExcludedLoading(true);
-    void hubApi.excludedAssets(series.classificationId, null, 1)
+    void prefetchedRead(hubApi, "excludedAssets", [series.classificationId, null, 1], () => hubApi.excludedAssets(series.classificationId, null, 1))
       .then(result => { if (active) setLegacyExcludedCount(result.totalCount); })
       .catch(() => { if (active) setLegacyExcludedCount(0); })
       .finally(() => { if (active) setExcludedLoading(false); });
@@ -261,7 +278,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (targetId || currentGroup || picking) return;
     let active = true;
     setFolderLoading(true);
-    void hubApi.seriesFolders(series.classificationId).then(result => {
+    void prefetchedRead(hubApi, "seriesFolders", series.classificationId, () => hubApi.seriesFolders(series.classificationId)).then(result => {
       if (!active) return;
       const next = result.map(item => {
         const thumbnailAssetId = item.thumbnailAssetId;
@@ -280,7 +297,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (targetId || currentGroup || picking) return;
     let active = true;
     setCandidateLoading(true);
-    void shadowApi.page({ offset: 0, limit: 1, seriesId: series.classificationId })
+    const candidates = { offset: 0, limit: 1, seriesId: series.classificationId };
+    void prefetchedRead(shadowApi, "page", candidates, () => shadowApi.page(candidates))
       .then(result => { if (active) setCandidateCount(result.summary.automatic.pending + result.summary.recommended.pending); })
       .catch(() => { if (active) setCandidateCount(0); })
       .finally(() => { if (active) setCandidateLoading(false); });
@@ -492,14 +510,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   useEffect(() => {
     if (!preparedPage || preparedPage.scope !== scope || preparedPage.token !== generation.current || shelfLoading) return;
     let active = true;
-    const shelfIds = !current && !excludedOnly ? [
-      ...members.flatMap(target => { const id = target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId; return id ? [id] : []; }),
-      ...folders.flatMap(folder => folder.thumbnailAssetId ? [folder.thumbnailAssetId] : []),
-      ...(!suggestionsHidden ? seriesSuggestions.flatMap(row => row.sampleAssetIds) : []),
-    ] : [];
-    void preloadImages(privacyMode ? [] : [...new Set([
-      ...shelfIds.map(id => thumbnailUrl(id)), ...preparedPage.page.items.map(item => tileThumbnailUrl(item)),
-    ])]).then(() => {
+    void preloadImages(privacyMode ? [] : firstScreenImages(preparedPage.page.items)).then(() => {
       if (!active || preparedPage.token !== generation.current) return;
       const commit = () => {
         setPage(preparedPage.page); setPageScope(scope); setPreparedPage(null);
@@ -512,7 +523,20 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       else commit();
     });
     return () => { active = false; };
-  }, [preparedPage, scope, shelfLoading, privacyMode, pageScope, seriesGalleryView, folders, targets, suggestions.rows, suggestionsHidden]);
+  }, [preparedPage, scope, shelfLoading, privacyMode, pageScope, seriesGalleryView, folders, targets, suggestions.rows, suggestionsHidden, galleryLayout]);
+  /**
+   * What a switch waits for: the first screen only, gallery tiles first (those with a thumbnail),
+   * then the strip cards in view. The rest loads lazily after the commit.
+   */
+  function firstScreenImages(items: AssetSummary[]) {
+    const tiles = galleryFirstScreen(host.current, items, { layout: galleryLayout }).filter(item => tileHasThumbnail(item)).map(item => tileThumbnailUrl(item));
+    const strip = !current && !excludedOnly ? seriesShelfCardImages({
+      members, groups: groups.filter(group => group.seriesId === series.classificationId), activeGroupId: currentGroup?.id,
+      suggestions: suggestionsHidden ? [] : seriesSuggestions,
+      folders: staleFolders ? [] : folders.filter(folder => classifications.some(entry => entry.id === folder.classificationId)),
+    }).slice(0, shelfCardsInView(host.current)).flat() : [];
+    return [...new Set([...tiles, ...strip])];
+  }
   const content = <section ref={host} className="series-browser" aria-label={focusedName ?? name} aria-busy={loading || shelfLoading}>
     <ViewToolbar title={focusedName ? [name, current && currentCharacterGroup?.name, focusedName].filter(Boolean).join(" / ") : name} ariaLabel="시리즈 도구"
       titleContent={focusedName ? <span className="series-breadcrumb"><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId })}>{name}</button><ChevronRightIcon aria-hidden="true" />{current && currentCharacterGroup && <><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterGroupId: currentCharacterGroup.id })}>{currentCharacterGroup.name}</button><ChevronRightIcon aria-hidden="true" /></>}<span>{focusedName}</span>{!current && <small className="series-header-count">{page.totalCount.toLocaleString()}장</small>}</span> : name}
@@ -520,7 +544,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {!picking && (!currentGroup || editor) && editorPanel}
         {!picking && current && <Menu label="캐릭터 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={characterMenuItems} />}
         {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={seriesMenuItems} />}
-        {currentGroup && !picking && <Menu label="그룹 더보기" disabled={busy} trigger={<PeopleIcon aria-hidden="true" />} items={[
+        {currentGroup && !picking && <Menu label="그룹 더보기" disabled={busy} trigger={<UserGroupIcon aria-hidden="true" />} items={[
           { id: "edit-group", label: "그룹 편집", icon: <PencilIcon aria-hidden="true" />, onSelect: () => setGroupEditRequest(v => v + 1) },
           ...faultItem,
         ]} />}
@@ -563,8 +587,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               const exclusion = folderExclusionItem(folder.id, classifications, folderExclusions, excluded => void action(() => hubApi.setFolderExcluded(folder.id, excluded)));
               const excluded = folderExclusions.includes(folder.id) || exclusion.disabled;
               return <article className={`series-character folder-shelf__card${excluded ? " series-character--excluded" : ""}`} key={folder.id} inert={staleFolders}>
-                <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
-                  {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <StableImage draggable={false} loading="lazy" src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
+                <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} {...folderIntent({ kind: "classification", classificationId: folder.id })} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
+                  {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <StableImage draggable={false} loading="lazy" src={folderCardImage(item)!} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
                   {excluded && <span className="series-character__tag" aria-hidden="true">제외</span>}
                   <strong><FolderIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{folder.name}</span></strong>
                   {(folder.totalAssetCount ?? folder.assetCount) !== undefined && <small className="folder-shelf__meta">{(folder.totalAssetCount ?? folder.assetCount)!.toLocaleString("ko-KR")}장</small>}
@@ -583,7 +607,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 { id: "move-down", label: "아래로 이동", disabled: busy || index === orderedMembers.length - 1, onSelect: () => move(1) },
               ]}><article className="series-character folder-shelf__card">
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
-                {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : (target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <StableImage draggable={false} loading="lazy" src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
+                {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : characterCardImage(target) ? <StableImage draggable={false} loading="lazy" src={characterCardImage(target)!} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
                 <strong><UserIcon className="folder-shelf__icon" aria-hidden="true" />{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
                 <small className="folder-shelf__meta" aria-hidden={memberCounts[target.id] === undefined || undefined}>{memberCounts[target.id] === undefined ? null : `${memberCounts[target.id]!.toLocaleString("ko-KR")}장`}</small>
               </button>

@@ -1,10 +1,11 @@
 import {useWorkSurfaceReady} from "./useWorkSurfaceReady";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
 import { WorkBackdrop } from "./WorkBackdrop";
-import { ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon, InformationCircleIcon, PencilIcon, StarIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon, InformationCircleIcon, PencilIcon, SparklesIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { SparklesIcon as SparklesSolidIcon } from "@heroicons/react/24/solid";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AreaVisible } from "../../shared/motion/AreaSwitch";
-import { popToggle } from "../../shared/motion/togglePop";
+import { IconButton } from "../../shared/ui/IconButton";
 import type { CollectionSummary, WorkArtworkSummary, CollectionWorkRecord, CollectionRecordEdit, TmdbConnection } from "../../library/types";
 import type { AvCoverSet, AvDetails, AvRelated } from "../avTypes";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
@@ -65,10 +66,10 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); if (!waiting) actions.onStep(event.key === "ArrowLeft" ? -1 : 1); }
     }}>
     <header className="asset-viewer__topbar">
-      <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label={visible.manga ? "컬렉션으로 돌아가기" : "목록으로"} onClick={actions.onClose}><ChevronLeftIcon /></Button>
+      <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label={visible.manga ? "컬렉션으로 돌아가기" : "목록으로"} onClick={actions.onClose}><ArrowLeftIcon /></Button>
       <span className="asset-viewer__title"><strong role="heading" aria-level={1}>{title}</strong><small>{visible.manga ? editionName(visible.manga.editionIndex) : workMeta(visible.collection, visible.case.platform, visible.av)}</small></span>
       <span className="asset-viewer__spacer" />
-      <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label="쇼케이스" aria-pressed={visible.collection.showcase} data-toggle-key={visible.collection.id} disabled={waiting} onClick={event => { popToggle(event.currentTarget, !visible.collection.showcase); actions.onShowcase(visible.collection); }}><StarIcon /></Button>
+      <IconButton className="asset-viewer__vbtn asset-viewer__favorite" pop label="쇼케이스" icon={SparklesIcon} activeIcon={SparklesSolidIcon} active={visible.collection.showcase} data-toggle-key={visible.collection.id} disabled={waiting} onClick={() => actions.onShowcase(visible.collection)} />
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="편집" disabled={waiting} onClick={() => actions.onEdit(visible.collection)}><PencilIcon /></Button>
       <Menu label="작품 관리" disabled={waiting} trigger={<EllipsisHorizontalIcon />} items={actions.onManage(visible)} />
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon /></Button>

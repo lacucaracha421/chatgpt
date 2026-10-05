@@ -834,3 +834,38 @@ select.ui-text-input {
 @media (prefers-reduced-motion: reduce) {
   .ui-section-drop, .ui-section-drop.is-open, .ui-section-drop-title > svg { transition: none; }
 }
+
+/* Shared icon toggle (IconButton): pressed is the on colour and the solid glyph, never a face. */
+.ui-icon-button.ui-button[aria-pressed="true"] { color: var(--color-accent); background: transparent; }
+.ui-icon-button.ui-button[aria-pressed="true"]:hover:not(:disabled) { color: var(--color-accent); }
+.ui-icon-button--heart.ui-button[aria-pressed="true"],
+.ui-icon-button--heart.ui-button[aria-pressed="true"]:hover:not(:disabled) { color: var(--color-heart); }
+
+/* Cover-corner bookmark (BookmarkToggle form="corner"): an icon only on the cover's top-right
+   corner, white outline with a soft shadow, accent fill when on, no button face. */
+.ui-bookmark-corner.ui-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  min-height: var(--touch-target);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  box-shadow: none;
+}
+.ui-bookmark-corner.ui-button:hover:not(:disabled) { background: transparent; color: #fff; filter: none; }
+.ui-bookmark-corner.ui-button:active:not(:disabled) { background: transparent; opacity: 0.6; filter: none; }
+.ui-bookmark-corner.ui-button[aria-pressed="true"],
+.ui-bookmark-corner.ui-button[aria-pressed="true"]:hover:not(:disabled) { background: transparent; color: var(--color-accent); }
+.ui-bookmark-corner.ui-button:disabled { opacity: 0.4; }
+.ui-bookmark-corner.ui-button > svg {
+  width: var(--bookmark-corner-icon, 18px);
+  height: var(--bookmark-corner-icon, 18px);
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 70%));
+}
+.ui-bookmark-corner.ui-button:focus-visible { outline: var(--focus-width, 2px) solid var(--color-focus); outline-offset: -2px; }

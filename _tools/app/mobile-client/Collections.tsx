@@ -27,8 +27,8 @@ import type {BindProvider} from './collectionBindingsModel';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
-import {BellIcon, CalendarIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
-import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
+import {BellIcon, CalendarDaysIcon, SparklesIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
+import {SparklesIcon as SparklesSolidIcon, StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {Overlay} from './Overlay';
@@ -555,8 +555,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
   // Shortcuts and view controls share the section bar's right group on both surfaces.
   const shortcuts=<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}><StarIcon aria-hidden="true"/><span className="collection-shortcuts__label">쇼케이스</span></Button>
-    {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
+    <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}>{showcaseAll?<SparklesSolidIcon aria-hidden="true"/>:<SparklesIcon aria-hidden="true"/>}<span className="collection-shortcuts__label">쇼케이스</span></Button>
+    {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
     {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
   </div>;
   const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true"/><Button variant="quiet" size="sm" aria-label="정렬" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="내 별점" aria-pressed={filters.rating!=='all'} onClick={()=>setSheet('rating')}><StarIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="보기" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/></Button></>},{active:live&&!selected&&!overlayOpen&&!performer});

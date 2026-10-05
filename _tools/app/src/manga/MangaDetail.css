@@ -5,8 +5,6 @@
 .manga-detail__identity h2 { display: -webkit-box; overflow: hidden; margin: 0; color: var(--color-text); font-size: var(--type-title); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .manga-detail__identity p { margin: 0; color: var(--color-muted); font-size: var(--type-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .manga-detail__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: auto; padding-top: var(--space-2); }
-.manga-detail__bookmark[aria-pressed="true"] { color: var(--color-accent); }
-.manga-detail__bookmark[aria-pressed="true"] svg { fill: currentColor; }
 .manga-detail__tags { display: grid; gap: var(--space-2); margin: 0; font-size: var(--type-meta); }
 .manga-detail__tags > div { display: grid; grid-template-columns: 4rem minmax(0, 1fr); align-items: baseline; gap: var(--space-2); }
 .manga-detail__tags dt { color: var(--color-faint); }

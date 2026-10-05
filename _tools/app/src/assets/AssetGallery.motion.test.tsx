@@ -213,3 +213,29 @@ it('keeps old decoded tiles while new media decodes and cancels a superseded fol
     view.unmount(); expect(vi.getTimerCount()).toBe(0);
   } finally { delete (HTMLImageElement.prototype as Partial<HTMLImageElement>).decode; }
 });
+
+it('holds first-screen tiles still loading at the cap and reveals them together, not one by one', async () => {
+  const decodes = new Map<HTMLImageElement, (() => void)[]>();
+  Object.defineProperty(HTMLImageElement.prototype, 'decode', {configurable: true, value: vi.fn(function(this: HTMLImageElement) {
+    return new Promise<void>(resolve => decodes.set(this, [...(decodes.get(this) ?? []), resolve]));
+  })});
+  try {
+    const tree = (folder: string, offset: number) => <AssetGallery layout="masonry" groupDates={false} items={[0, 1, 2].map(i => asset(i + offset))} scopeKey={scope(folder)}/>;
+    const view = render(tree('old', 0)); animate.mockClear();
+    view.rerender(tree('new', 10));
+    const tiles = () => [...view.container.querySelectorAll<HTMLImageElement>('[data-gallery-cell] img')].filter(image => image.alt.startsWith('motion-1'));
+    const held = () => tiles().filter(image => image.hasAttribute('data-reveal-hold')).length;
+    await tick(16 + 250 + 17);
+    expect(animate).toHaveBeenCalledTimes(2); // the move itself does not wait past the cap
+    expect(tiles()).toHaveLength(3);
+    expect(held()).toBe(3);
+    const settle = (image: HTMLImageElement) => decodes.get(image)?.forEach(resolve => resolve());
+    await act(async () => { settle(tiles()[0]); settle(tiles()[1]); });
+    await tick(16);
+    expect(held()).toBe(3);
+    await act(async () => settle(tiles()[2]));
+    await tick(16);
+    expect(held()).toBe(0);
+    view.unmount(); expect(vi.getTimerCount()).toBe(0);
+  } finally { delete (HTMLImageElement.prototype as Partial<HTMLImageElement>).decode; }
+});

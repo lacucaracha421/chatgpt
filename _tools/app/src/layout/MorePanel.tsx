@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { NAVIGATION_GROUP_LABELS, type NavigationEntry } from "./navigationEntries";
 

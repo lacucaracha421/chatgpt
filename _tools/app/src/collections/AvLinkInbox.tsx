@@ -1,4 +1,4 @@
-import { ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, ClockIcon, ExclamationCircleIcon, MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, ClockIcon, ExclamationTriangleIcon, MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -169,7 +169,7 @@ export function AvLinkInbox({ items, collections, api = avLinkClient, error, onR
 function statusIcon(item: AvLinkInboxItem) {
   if (activeStatus(item)) return <ClockIcon />;
   if (item.status === "found") return <MagnifyingGlassIcon />;
-  return <ExclamationCircleIcon />;
+  return <ExclamationTriangleIcon />;
 }
 
 function statusLabel(item: AvLinkInboxItem) {

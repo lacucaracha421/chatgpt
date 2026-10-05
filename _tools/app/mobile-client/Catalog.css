@@ -50,7 +50,8 @@
 .catalog-cover-pages{right:6px}
 .catalog-card strong{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;font-weight:500;line-height:1.35;margin-top:8px;overflow-wrap:anywhere}
 .catalog-card>span{display:block;font-size:12px;color:var(--color-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.catalog-saved{position:absolute;top:6px;right:6px;width:15px;height:15px;padding:6px;box-sizing:content-box;border-radius:999px;background:#07090cb8;color:#fff}
+/* Display-only mark (the card is the open button): the cover-corner bookmark look, never a pill. */
+.catalog-saved{position:absolute;top:var(--space-2);right:var(--space-2);width:var(--bookmark-corner-icon);height:var(--bookmark-corner-icon);color:var(--color-accent);filter:drop-shadow(0 1px 2px rgb(0 0 0 / 70%))}
 .catalog-saved--pending{opacity:.58}
 .catalog-card:focus-visible,.catalog-edition:focus-visible,.catalog-tag:focus-visible{outline:2px solid var(--color-focus);outline-offset:4px}
 .catalog-more-status{text-align:center;padding:18px 0 0}
@@ -71,8 +72,7 @@
 .catalog-primary-actions .ui-button{min-height:48px;white-space:nowrap}
 .catalog-read-action{flex:1;font-weight:600}
 .catalog-primary-actions svg{width:18px}
-.catalog-bookmark-action[aria-pressed=true]{color:var(--color-accent)}
-.catalog-bookmark-pending{opacity:.55}
+.catalog-bookmark-pending>svg{opacity:.55}
 .catalog-bookmark-state{display:block;min-height:18px;margin-top:8px;font-size:12px;line-height:18px;color:var(--color-muted)}
 .catalog-bookmark-error{color:var(--color-danger, #d98a8a)}
 .catalog-reader-error{font-size:12px;color:var(--color-muted);margin:8px 0 0}
@@ -121,10 +121,8 @@
 .catalog-scroll>.catalog-banner{position:absolute;left:var(--mobile-gutter);right:var(--mobile-gutter);bottom:16px;z-index:5;margin:0;border:1px solid var(--color-border);box-shadow:0 6px 18px #0008}
 @media(prefers-reduced-motion:no-preference){.catalog-scroll>.catalog-banner{animation:catalog-banner-enter 160ms var(--ease-standard)}}
 @keyframes catalog-banner-enter{from{opacity:0;transform:translateY(6px)}}
-/* The bookmark action keeps one width for 북마크 and 북마크됨, so the 읽기 button beside it never
-   resizes when the state flips. */
-.catalog-primary-actions .catalog-bookmark-action{flex:none;min-width:8.5em;justify-content:flex-start}
-.catalog-bookmark-label{display:inline-block;min-width:4.2em;text-align:left}
+/* The bookmark is a fixed-size icon toggle, so the 읽기 button beside it never resizes when the state flips. */
+.catalog-primary-actions .catalog-bookmark-action{flex:none}
 /* An edition's page count and bookmark mark share one fixed line: a pending or saved bookmark
    only lights the mark, so the card never grows a second line and nothing below moves. */
 .catalog-edition-meta{display:flex;align-items:center;gap:6px;height:18px;white-space:nowrap;overflow:hidden}

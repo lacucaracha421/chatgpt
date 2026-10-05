@@ -8,7 +8,7 @@ import type {LibraryCrumb} from './LibraryHeader';
 import {FilterChips,type FilterGroup} from './FilterChips';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
-import {ArrowLeftIcon,ChevronUpIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon,ChevronUpIcon,FolderIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon,UserGroupIcon,UserIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {BarProgress,SearchButton} from './TopBar';
 import {useSectionShade} from './SectionShade';
@@ -24,7 +24,6 @@ import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
 import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import {FolderShelf} from './FolderCards';
-import {FolderIcon,PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
 import {useLevelMotion} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
 import {preloadImages} from '../src/shared/motion/viewportImages';
@@ -108,7 +107,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false,ratings}:{node:
     <span className={`character-card-image${node.kind==='group'?' character-mosaic':''}`} data-count={previews.length}>
       {node.kind==='group'&&previews.length?previews.map(id=><span key={id}><Preview id={id} rating={ratings?.[id]} paused={previewPaused}/></span>):node.thumbnailAssetId?<Preview id={node.thumbnailAssetId} rating={ratings?.[node.thumbnailAssetId]} paused={previewPaused}/>:node.kind==='folder'?<FolderIcon/>:<PhotoIcon/>}
     </span>
-    <span className="character-card-caption"><strong>{node.kind==='group'||node.kind==='series'?<PeopleIcon/>:node.kind==='folder'?<FolderIcon/>:<PersonIcon/>}<span className="folder-shelf__name">{node.name}</span></strong>{count!==undefined&&<small className="folder-shelf__meta">{count.toLocaleString('ko-KR')}장</small>}</span>
+    <span className="character-card-caption"><strong>{node.kind==='group'||node.kind==='series'?<UserGroupIcon/>:node.kind==='folder'?<FolderIcon/>:<UserIcon/>}<span className="folder-shelf__name">{node.name}</span></strong>{count!==undefined&&<small className="folder-shelf__meta">{count.toLocaleString('ko-KR')}장</small>}</span>
     {node.excluded&&<small className="character-card__status">자동 분류 제외</small>}
   </button>;
 }

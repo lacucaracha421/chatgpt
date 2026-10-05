@@ -1,4 +1,4 @@
-import {AdjustmentsVerticalIcon} from '@heroicons/react/24/outline';
+import {Squares2X2Icon} from '@heroicons/react/24/outline';
 import {Button} from './ui';
 import {TopBar} from './TopBar';
 import {CharacterGlyph,type CharacterFolderKind} from './FolderCards';
@@ -12,5 +12,5 @@ export function LibraryHeader({title,count,crumbs,onBack,onOptions,changed=0,kin
   return <TopBar className="library-header" loading={loading} back={{label:'뒤로',onClick:onBack}}
     crumbs={<nav className="library-breadcrumb" aria-label="현재 위치">{crumbs.map((crumb,i)=><span key={crumb.id}>{i>0&&<span aria-hidden="true">›</span>}<button onClick={crumb.onSelect}>{crumb.name}</button></span>)}</nav>}
     title={kind?<><CharacterGlyph kind={kind}/>{title}</>:title} count={count}
-    actions={<Button type="button" size="icon" variant="ghost" className={`top-bar__options${changed?' is-changed':''}`} aria-label="보기 옵션" aria-description={changed?`기본과 다른 설정 ${changed}개`:undefined} onClick={onOptions}><AdjustmentsVerticalIcon aria-hidden="true"/>{changed>0&&<span className="top-bar__options-count numeric" aria-hidden="true">{changed}</span>}</Button>}/>;
+    actions={<Button type="button" size="icon" variant="ghost" className={`top-bar__options${changed?' is-changed':''}`} aria-label="보기 옵션" aria-description={changed?`기본과 다른 설정 ${changed}개`:undefined} onClick={onOptions}><Squares2X2Icon aria-hidden="true"/>{changed>0&&<span className="top-bar__options-count numeric" aria-hidden="true">{changed}</span>}</Button>}/>;
 }

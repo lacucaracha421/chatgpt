@@ -1,4 +1,5 @@
-import { ChevronDownIcon, ChevronLeftIcon, MagnifyingGlassIcon, EllipsisHorizontalIcon, PlusIcon, StarIcon, CalendarIcon, BellIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ChevronDownIcon, MagnifyingGlassIcon, EllipsisHorizontalIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon } from "@heroicons/react/24/outline";
+import { SparklesIcon as SparklesSolidIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -303,11 +304,11 @@ export function CollectionBrowser({
   const libraryView = !inbox && !showcase;
   const shortcuts = <div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
     <Button variant="quiet" size="sm" aria-pressed={showcase} aria-label="쇼케이스" onClick={() => setShowcase(!showcase)}>
-      <StarIcon aria-hidden="true" /><span className="collection-shortcuts__label">쇼케이스</span>
+      {showcase ? <SparklesSolidIcon aria-hidden="true" /> : <SparklesIcon aria-hidden="true" />}<span className="collection-shortcuts__label">쇼케이스</span>
     </Button>
     {(typeFilter === "game" || typeFilter === "movie") && <Button variant="quiet" size="sm"
       aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"} onClick={openCalendar}>
-      <CalendarIcon aria-hidden="true" /><span className="collection-shortcuts__label">발매 캘린더</span>{wishlistUnread > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}
+      <CalendarDaysIcon aria-hidden="true" /><span className="collection-shortcuts__label">발매 캘린더</span>{wishlistUnread > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}
     </Button>}
     {typeFilter === "manga" && <Button variant="quiet" size="sm"
       aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"} onClick={() => openInbox("kakao")}>
@@ -381,7 +382,7 @@ export function CollectionBrowser({
         titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
         titleAccessory={<>{!inbox && <span className="collection-toolbar__count">{visible.length.toLocaleString()}</span>}{toolbarControls}</>}
         ariaLabel="컬렉션 도구"
-        leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
+        leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ArrowLeftIcon aria-hidden="true" /></Button>}
         chrome={chrome}
       />}
       {spineBatch.message && <Toast tone={spineBatch.error ? "error" : "status"} onDismiss={spineBatch.dismiss}>{spineBatch.message}</Toast>}

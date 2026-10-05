@@ -6,7 +6,7 @@ import { useLibrary } from "../library/LibraryContext";
 import type { AlbumEntry, AssetSummary, AssetView } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
-import { PhotoIcon, PlusIcon } from "../shared/ui/ArchiveIcons";
+import { PhotoIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import "./albumOverview.css";
 

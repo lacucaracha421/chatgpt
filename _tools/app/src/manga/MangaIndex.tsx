@@ -11,7 +11,8 @@ import { SectionLabel } from "../shared/ui/SectionLabel";
 import { mangaIndexKey } from "./mangaIndexModel";
 import type { MangaSource } from "./MangaToolbar";
 import "./MangaIndex.css";
-import { MangaPinIcon as PinIcon } from "./MangaPinIcon";
+import { IconButton } from "../shared/ui/IconButton";
+import { PinIcon, PinSolidIcon } from "../shared/ui/PinIcon";
 
 type Props = {
   source: MangaSource;
@@ -89,9 +90,7 @@ export function MangaIndex({ source, filter, onFilter, folder, onFolder, localCo
       <button type="button" className="classification-sidebar__quick-view" aria-label={`${entry.label} ${count}`} aria-current={active ? "page" : undefined} onClick={() => onFilter(active ? null : entry)}>
         <span className="classification-sidebar__quick-view-surface"><span className="classification-sidebar__quick-view-label">{entry.label}</span><span className="manga-index__count">{count}</span></span>
       </button>
-      <button type="button" className="manga-index__pin" aria-label={`${entry.label} ${pinned ? "고정 해제" : "고정"}`} aria-pressed={pinned} disabled={pinBusy !== null} onClick={() => void togglePin(entry)}>
-        <PinIcon solid={pinned} />
-      </button>
+      <IconButton className="manga-index__pin" label={`${entry.label} ${pinned ? "고정 해제" : "고정"}`} icon={PinIcon} activeIcon={PinSolidIcon} active={pinned} disabled={pinBusy !== null} onClick={() => void togglePin(entry)} />
     </div>;
   }
   function frequentSection(kind: "tag" | "artist", entries: MangaIndexEntry[], limit: number, title: string) {

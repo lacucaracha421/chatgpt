@@ -1,4 +1,4 @@
-import { QuestionMarkCircleIcon } from "@heroicons/react/24/outline";
+import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import { Description } from "@radix-ui/react-dialog";
 import { useState } from "react";
 import { Button } from "../ui/Button";
@@ -43,7 +43,7 @@ export function MarkdownHelpButton() {
   return (
     <>
       <Button type="button" size="icon" variant="ghost" aria-label={MARKDOWN_HELP_TITLE} onClick={() => setOpen(true)}>
-        <QuestionMarkCircleIcon aria-hidden="true" width={20} height={20} />
+        <InformationCircleIcon aria-hidden="true" width={20} height={20} />
       </Button>
       <Dialog open={open} title={MARKDOWN_HELP_TITLE} variant="medium" onClose={() => setOpen(false)}>
         <Description className="markdown-help__intro">{MARKDOWN_HELP_INTRO}</Description>

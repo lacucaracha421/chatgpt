@@ -18,6 +18,8 @@ pub struct FolderExclusionRequest {
 pub struct SeriesFolder {
     pub classification_id: String,
     pub thumbnail_asset_id: Option<String>,
+    /// The thumbnail Asset's current thumbnail revision, for a cacheable thumbnail URL.
+    pub thumbnail_revision: Option<String>,
 }
 
 pub(super) fn asset_excluded(connection: &Connection, asset_id: &str) -> Result<bool> {
@@ -93,9 +95,24 @@ impl Library {
              ) SELECT f.id,(SELECT a.id FROM scope s JOIN asset_classifications ac ON ac.classification_id=s.id
                 JOIN assets a ON a.id=ac.asset_id WHERE s.root=f.id AND a.status='normal' AND a.thumbnail_relative_path IS NOT NULL
                 ORDER BY a.collected_at DESC,a.id DESC LIMIT 1) FROM folders f JOIN classification_entries c ON c.id=f.id ORDER BY c.name COLLATE NOCASE,f.id",
-        )?.query_map([series_id], |row| Ok(SeriesFolder { classification_id: row.get(0)?, thumbnail_asset_id: row.get(1)? }))?
+        )?.query_map([series_id], |row| Ok(SeriesFolder { classification_id: row.get(0)?, thumbnail_asset_id: row.get(1)?, thumbnail_revision: None }))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(result)
+        let revisions = super::characters::thumbnail_revisions(
+            &connection,
+            result
+                .iter()
+                .filter_map(|folder| folder.thumbnail_asset_id.as_deref()),
+        )?;
+        Ok(result
+            .into_iter()
+            .map(|folder| SeriesFolder {
+                thumbnail_revision: folder
+                    .thumbnail_asset_id
+                    .as_ref()
+                    .and_then(|id| revisions.get(id).cloned()),
+                ..folder
+            })
+            .collect())
     }
 }
 
@@ -277,6 +294,39 @@ mod tests {
         assert_eq!(
             f.library.character_folder_exclusions().unwrap(),
             vec![machines]
+        );
+    }
+
+    #[test]
+    fn character_folder_cards_carry_the_preview_thumbnail_revision() {
+        let f = Fixture::new();
+        let machines = folder(&f, &f.series, "Machines");
+        move_asset(&f, "asset-5", &machines);
+        let empty = folder(&f, &f.series, "Empty");
+        let cards = f.library.character_series_folders(&f.series).unwrap();
+        let card = |id: &str| {
+            cards
+                .iter()
+                .find(|card| card.classification_id == id)
+                .unwrap()
+        };
+        assert_eq!(
+            card(&machines).thumbnail_asset_id.as_deref(),
+            Some("asset-5")
+        );
+        assert_eq!(
+            card(&machines).thumbnail_revision,
+            Some(crate::library::models::thumbnail_revision(
+                "thumbnails/asset-5.webp"
+            ))
+        );
+        assert_eq!(card(&empty).thumbnail_revision, None);
+        let json = serde_json::to_value(card(&machines)).unwrap();
+        assert_eq!(
+            json["thumbnailRevision"],
+            serde_json::json!(crate::library::models::thumbnail_revision(
+                "thumbnails/asset-5.webp"
+            ))
         );
     }
 

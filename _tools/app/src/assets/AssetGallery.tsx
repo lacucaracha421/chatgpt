@@ -1,11 +1,12 @@
 import { useAssetMasks, usePrivacy } from "../privacy/PrivacyContext";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
-import { popToggle } from "../shared/motion/togglePop";
+import { IconButton } from "../shared/ui/IconButton";
 import { AreaVisible } from "../shared/motion/AreaSwitch";
 import { FolderMove, folderMoveScope } from "./FolderWave";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MagnifyingGlassPlusIcon } from "@heroicons/react/24/outline";
 import { HeartIcon } from "@heroicons/react/24/solid";
+import { HeartIcon as HeartOutlineIcon } from "@heroicons/react/24/outline";
 import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AssetSummary } from "../library/types";
 import { artistHandle } from "../artists/format";
@@ -343,8 +344,14 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
     const changed = previous && previous.scopeKey === scopeKey && previous.key !== geometryKey;
     if (changed) {
       animationsRef.current.forEach(animation => animation.cancel());
-      scroller.scrollTop = anchorScrollTop(previous.tiles, positionedTiles, previous.scrollTop - previous.introHeight) + introHeight;
-      setScrollTop(Math.max(0, scroller.scrollTop - introHeight));
+      // Anchor a tile only when the viewport top was inside the grid. At the top or inside the intro
+      // (a folder shelf), keep the intro-relative position: anchoring there snapped to row 0 and
+      // scrolled the shelf away when page 2 or a width change re-laid the grid (user, 2026-10-05).
+      const gridTop = previous.scrollTop - previous.introHeight;
+      if (gridTop > 0) {
+        scroller.scrollTop = anchorScrollTop(previous.tiles, positionedTiles, gridTop) + introHeight;
+        setScrollTop(Math.max(0, scroller.scrollTop - introHeight));
+      }
       if (previous.infoOpen !== infoOpen) animationsRef.current = animateVisibleTiles(scroller, pendingRectsRef.current ?? new Map(), window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
     }
     pendingRectsRef.current = null;
@@ -487,11 +494,11 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
   const metadataLabel = (captionLabel ?? (creatorKey ? artistHandle({ keys: [creatorKey] }) : asset.creatorName?.trim())) ?? "";
   return <div role="option" data-asset-id={asset.id} data-focused={focusVisible ? "true" : undefined} className="asset-gallery__asset ui-selectable-media" style={{ width: asset.width, height }} aria-label={alt} aria-description={[metadataLabel, collectedDate(asset.collectedAt).full].filter(Boolean).join(" · ")} aria-selected={selected} tabIndex={focused ? 0 : -1} onFocus={event => { if (event.target === event.currentTarget) onFocusAsset?.(asset, true); }} onClick={(event) => { const gesture = { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }; if (onFocusAsset && !gesture.toggle && !gesture.range) onFocusAsset(asset); else onSelectionGesture?.(asset, gesture); }} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.(asset.id, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
     <div className="asset-gallery__image" style={{ height }}>
-    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <StableImage src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
+    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileHasThumbnail(asset, mediaSource) ? tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource) : null} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <StableImage src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
     {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
     </div>
     {selected && <span className="ui-selection-check" aria-hidden="true" />}
-    {(asset.favorite || onToggleFavorite) && (onToggleFavorite ? <button type="button" className="asset-gallery__favorite asset-gallery__hover-control" data-visible={favoritesView || selected || hasSelection || undefined} aria-label={`${alt} 좋아요`} aria-pressed={asset.favorite} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); popToggle(event.currentTarget, !asset.favorite); onToggleFavorite(asset); }}><HeartIcon /></button> : <span className="asset-gallery__favorite asset-gallery__hover-control" data-visible={favoritesView || selected || hasSelection || undefined} aria-hidden="true"><HeartIcon /></span>)}
+    {(asset.favorite || onToggleFavorite) && (onToggleFavorite ? <IconButton className="asset-gallery__favorite asset-gallery__hover-control" tone="heart" pop data-visible={favoritesView || selected || hasSelection || undefined} label={`${alt} 좋아요`} icon={HeartOutlineIcon} activeIcon={HeartIcon} active={asset.favorite} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onToggleFavorite(asset); }} /> : <span className="asset-gallery__favorite asset-gallery__hover-control" data-visible={favoritesView || selected || hasSelection || undefined} aria-hidden="true"><HeartIcon /></span>)}
   </div>;
 });
 
@@ -499,6 +506,46 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
 export function tileThumbnailUrl(asset: AssetSummary, cacheKey?: string | number, mediaSource: "library" | "vault" = "library") {
   if (mediaSource === "vault") return vaultThumbnailUrl(asset.id, cacheKey);
   return asset.thumbnailRevision ? assetThumbnailUrl(asset) : thumbnailUrl(asset.id, cacheKey);
+}
+
+/**
+ * Whether a tile has a thumbnail to request. A library Asset's `thumbnailRevision` is null exactly
+ * when the backend has none (a video without a poster), so its URL could only fail; an unknown
+ * revision (undefined) and vault media are requested as before.
+ */
+export function tileHasThumbnail(asset: AssetSummary, mediaSource: "library" | "vault" = "library") {
+  return mediaSource !== "library" || asset.thumbnailRevision !== null;
+}
+
+const FIRST_SCREEN_FALLBACK = 30;
+
+/**
+ * The items a page shows on its first screen once it replaces the page of the gallery mounted in
+ * `host`: laid out by the gallery's own builders with its current width, count setting, viewport
+ * and intro (shelf) height, in display order. Without a measured gallery, the first 30 items.
+ */
+export function galleryFirstScreen(host: HTMLElement | null, items: AssetSummary[], { layout, groupDates = true, fullDateHeadings = false }: { layout: GalleryLayout; groupDates?: boolean; fullDateHeadings?: boolean }): AssetSummary[] {
+  const scroller = host?.querySelector<HTMLElement>(".asset-gallery__scroll");
+  const perRow = Number(scroller?.closest<HTMLElement>(".asset-gallery")?.dataset.perRow);
+  if (!scroller || !scroller.clientWidth || !scroller.clientHeight || !(perRow > 0)) return items.slice(0, FIRST_SCREEN_FALLBACK);
+  const style = getComputedStyle(scroller);
+  const gap = cssLength(style.getPropertyValue("--gallery-gap"));
+  const width = Math.round(Math.max(0, scroller.clientWidth - cssLength(style.paddingLeft) - cssLength(style.paddingRight)) / METRICS_QUANTIZE) * METRICS_QUANTIZE;
+  const intro = scroller.querySelector(".asset-gallery__intro")?.getBoundingClientRect().height ?? 0;
+  const height = Math.max(1, scroller.clientHeight - intro);
+  const rowHeight = galleryRowHeight(items, width, gap, perRow);
+  const shown = new Set<string>();
+  if (layout === "masonry") {
+    for (const tile of buildMasonryLayout(items, width, rowHeight, gap, false, groupDates, fullDateHeadings, perRow).tiles) if (tile.top < height) shown.add(tile.asset.id);
+  } else {
+    let top = 0;
+    for (const row of buildJustifiedGalleryRows(items, width, rowHeight, gap, groupDates, fullDateHeadings)) {
+      if (top >= height) break;
+      for (const item of row.items) shown.add(item.id);
+      top += row.height + (row.dateHeadings?.length ? DATE_HEADING_HEIGHT : 0) + gap;
+    }
+  }
+  return items.filter(item => shown.has(item.id));
 }
 
 const METRICS_QUANTIZE = 16;

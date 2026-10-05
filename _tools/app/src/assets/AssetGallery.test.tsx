@@ -850,3 +850,26 @@ it.each([false,true])('NSFW filters each tile without media requests; privacy=%s
   expect(container.querySelector('video[src]')).toBeNull();
   expect(container.querySelectorAll('.privacy-mask')).toHaveLength(privacy?6:5);
 });
+
+it.each(["justified", "masonry"] as const)("keeps a folder shelf in view when %s grid geometry changes at the top", layout => {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains("asset-gallery__intro") ? { ...original.call(this), height: 380 } : original.call(this);
+  });
+  const leaf = JSON.stringify({ classificationId: "leaf" }), folder = JSON.stringify({ classificationId: "manga" });
+  const page1 = Array.from({ length: 100 }, (_, index) => asset(index));
+  // A 100-item page is under the 120-item aspect sample, so page 2 changes the row height.
+  const page2 = [...page1, ...Array.from({ length: 100 }, (_, index) => ({ ...asset(100 + index), width: 400 }))];
+  const intro = <section>폴더 11</section>;
+  const { container, rerender } = render(<AssetGallery layout={layout} items={page1.map(item => ({ ...item, id: `leaf-${item.id}` }))} scopeKey={leaf} groupDates={false} />);
+  const scroller = container.querySelector<HTMLElement>(".asset-gallery__scroll")!;
+  scroller.scrollTop = 900; fireEvent.scroll(scroller);
+  rerender(<AssetGallery layout={layout} intro={intro} items={page1} scopeKey={folder} groupDates={false} hasNextPage />);
+  expect(scroller.scrollTop).toBe(0);
+  rerender(<AssetGallery layout={layout} intro={intro} items={page2} scopeKey={folder} groupDates={false} />);
+  expect(scroller.scrollTop).toBe(0);
+  // Inside the shelf the position is kept; a grid position is still anchored by the existing tests.
+  scroller.scrollTop = 200; fireEvent.scroll(scroller);
+  rerender(<AssetGallery layout={layout} intro={intro} items={page1} scopeKey={folder} groupDates={false} />);
+  expect(scroller.scrollTop).toBe(200);
+});

@@ -1,5 +1,4 @@
 import { ArrowPathIcon, BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { BookmarkIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type SVGProps } from "react";
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -7,9 +6,9 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { ReleaseCalendar, ReleaseTitle, ReleaseWishlistEvent, ReleaseWishlistItem } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { displayDateTime, displayDDay } from "../shared/displayDate";
-import { popToggle } from "../shared/motion/togglePop";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
+import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -214,11 +213,9 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
                     <div className={`release-calendar__cover release-calendar__cover--${tile.kind}`}>
                       {url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true">{tile.kind === "game" ? "GAME" : tile.kind === "anime" ? "ANIME" : "MOVIE"}</span>}
                       {tile.unread.length > 0 && <Badge className="release-calendar__new-badge" variant="accent">NEW</Badge>}
-                      <button type="button" className="release-calendar__watch" aria-pressed={tile.watched} disabled={pending === tile.id}
-                        aria-label={tile.watched ? `${tile.title} 관심 목록에서 빼기` : `${tile.title} 관심 목록에 추가`}
-                        onClick={(event) => { popToggle(event.currentTarget, !tile.watched); void toggle(tile); }}>
-                        {tile.watched ? <BookmarkIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
-                      </button>
+                      <BookmarkToggle form="corner" className="release-calendar__watch" bookmarked={tile.watched} disabled={pending === tile.id}
+                        label={tile.watched ? `${tile.title} 관심 목록에서 빼기` : `${tile.title} 관심 목록에 추가`}
+                        onClick={() => void toggle(tile)} />
                     </div>
                     <strong className="release-calendar__title">{tile.title}</strong>
                     {tile.kind === "game" && tile.platforms.length > 0 && <PlatformBadges platforms={tile.platforms} port={tile.port} />}

@@ -114,8 +114,7 @@
 .asset-viewer__vbtn--text svg,
 .asset-viewer__topbar .ui-menu__trigger.asset-viewer__vbtn--text svg { width: 20px; height: 20px; }
 
-.asset-viewer__vbtn--on,
-.asset-viewer__favorite[aria-pressed="true"] { color: var(--color-accent); }
+.asset-viewer__vbtn--on { color: var(--color-accent); }
 
 .asset-viewer__vbtn.ui-button--danger { color: var(--color-danger); }
 

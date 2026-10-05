@@ -1,4 +1,7 @@
-import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, SidebarCloseIcon } from "../shared/ui/ArchiveIcons";
+import { FolderIcon, MagnifyingGlassIcon, PlusIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
+import { AREA_ICONS } from "../shared/ui/areaIcons";
+import type { IconGlyph } from "../shared/ui/IconButton";
+import { SidebarCloseIcon } from "../shared/ui/SidebarIcons";
 import { Button } from "../shared/ui/Button";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { EASE_STANDARD, reducedMotion } from "../shared/motion/curves";
@@ -20,6 +23,7 @@ import { modalDialogOpen } from "./modalDialog";
 import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome, type ChromeMeta } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
+import { createIndexSlide } from "./indexSlide";
 
 export function workspaceArea(view: AssetView): "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault" | "manage" {
   if (view.kind === "home") return "home";
@@ -42,13 +46,13 @@ export function hasWorkspaceIndex(view: AssetView, collections: CollectionSummar
   return view.kind !== "collections" && !workViewer && !emptyIndex;
 }
 type RailArea = "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault";
-const RAIL_AREAS: { key: RailArea; label: string; Icon: typeof NoteIcon }[] = [
-  { key: "home", label: "홈", Icon: HomeIcon },
-  { key: "assets", label: "에셋", Icon: RectangleStackIcon },
-  { key: "collections", label: "컬렉션", Icon: BookOpenIcon },
-  { key: "manga", label: "망가", Icon: PhotoIcon },
-  { key: "notes", label: "메모", Icon: NoteIcon },
-  { key: "exchange", label: "전송", Icon: ExchangeIcon },
+const RAIL_AREAS: { key: RailArea; label: string; Icon: IconGlyph }[] = [
+  { key: "home", label: "홈", Icon: AREA_ICONS.home },
+  { key: "assets", label: "에셋", Icon: AREA_ICONS.assets },
+  { key: "collections", label: "컬렉션", Icon: AREA_ICONS.collections },
+  { key: "manga", label: "망가", Icon: AREA_ICONS.manga },
+  { key: "notes", label: "메모", Icon: AREA_ICONS.notes },
+  { key: "exchange", label: "전송", Icon: AREA_ICONS.exchange },
 ];
 
 type Props = {
@@ -117,6 +121,20 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     const timer = window.setTimeout(finish, duration);
     return () => { window.clearTimeout(timer); animation.onfinish = null; animation.cancel(); finish(); };
   }, [indexClosed, settling]);
+  // A user show/hide slides the content with the sidebar edge, then lays it out once (indexSlide.ts).
+  const navigationRoot = useRef<HTMLDivElement>(null);
+  const indexSlot = useRef<HTMLDivElement>(null);
+  const [indexSlide] = useState(createIndexSlide);
+  const shownToggle = useRef({ area, hidden: indexHiddenByUser });
+  const indexToggling = chrome?.indexToggling === true;
+  useLayoutEffect(() => {
+    const previous = shownToggle.current;
+    shownToggle.current = { area, hidden: indexHiddenByUser };
+    // Area switches keep their own transition: a slide still running ends at once.
+    if (!canToggleIndex || hideIndex || previous.area !== area) { indexSlide.stop(); return; }
+    if (previous.hidden !== indexHiddenByUser && indexToggling) indexSlide.start(navigationRoot.current, indexSlot.current);
+  }, [area, canToggleIndex, hideIndex, indexHiddenByUser, indexToggling, indexSlide]);
+  useEffect(() => () => indexSlide.stop(), [indexSlide]);
   const indexContent = useRef<ReactNode>(null);
   const assetTotalCount = useAssetTotalCount(area === "assets");
   const artistOverview = useArtistOverview();
@@ -133,7 +151,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
   const moreEntries = entries.filter((entry) => entry.id !== "notes" && entry.id !== "exchange" && entry.id !== "private_vault");
   const exchangeCount = entries.find((entry) => entry.id === "exchange")?.count ?? 0;
   // 비밀 joins the rail only while its USB is attached.
-  const railAreas = privateVaultAvailable ? [...RAIL_AREAS, { key: "private_vault" as const, label: "비밀", Icon: BookmarkIcon }] : RAIL_AREAS;
+  const railAreas = privateVaultAvailable ? [...RAIL_AREAS, { key: "private_vault" as const, label: "비밀", Icon: AREA_ICONS.private_vault }] : RAIL_AREAS;
   const searchInfo = chrome?.meta?.search ?? null;
   const paletteSearch = searchInfo && chrome ? { info: searchInfo, apply: chrome.applySearch, open: chrome.openSearch } : null;
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -147,10 +165,10 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     if (id) rememberRecent(find.recentKey, id);
   }, [view, find.recentKey]);
   const paletteEntries = [...find.entries,
-    { id: "home", group: "go" as const, label: "홈", icon: <HomeIcon />, run: () => onNavigate({ kind: "home" }) },
-    { id: "assets", group: "go" as const, label: "에셋", icon: <RectangleStackIcon />, run: () => onNavigate({ kind: "classification", classificationId: null }) },
-    { id: "collections", group: "go" as const, label: "컬렉션", icon: <BookOpenIcon />, run: () => onNavigate({ kind: "collections", typeFilter: collectionType, showcase: false }) },
-    { id: "manga", group: "go" as const, label: "망가", icon: <PhotoIcon />, run: () => onNavigate({ kind: "manga" }) },
+    { id: "home", group: "go" as const, label: "홈", icon: <AREA_ICONS.home />, run: () => onNavigate({ kind: "home" }) },
+    { id: "assets", group: "go" as const, label: "에셋", icon: <AREA_ICONS.assets />, run: () => onNavigate({ kind: "classification", classificationId: null }) },
+    { id: "collections", group: "go" as const, label: "컬렉션", icon: <AREA_ICONS.collections />, run: () => onNavigate({ kind: "collections", typeFilter: collectionType, showcase: false }) },
+    { id: "manga", group: "go" as const, label: "망가", icon: <AREA_ICONS.manga />, run: () => onNavigate({ kind: "manga" }) },
     ...entries];
   const findTags = useAutoTagPaletteSearch(paletteOpen, view, onNavigate);
   const libraryGateway = useOptionalLibrary()?.gateway;
@@ -209,7 +227,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
         }}
       />
     </aside>;
-  return <div className="workspace-navigation">
+  return <div ref={navigationRoot} className="workspace-navigation">
     <nav className="workspace-rail" aria-label="주요 영역">
       <span className="workspace-mark"><img src={lakomicsMark} alt="Lakomics" width="32" height="32" /></span>
       {railAreas.map(({ key, label, Icon }) => {
@@ -228,7 +246,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
         <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
-    <div className="workspace-index-slot" data-toggling={canToggleIndex && !hideIndex && chrome.indexToggling ? "" : undefined} data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
+    <div ref={indexSlot} className="workspace-index-slot" data-toggling={canToggleIndex && !hideIndex && chrome.indexToggling ? "" : undefined} data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
       <div ref={indexClip} className="workspace-index-clip" hidden={indexClosed} style={{opacity: !indexClosed && settling && (previousClosed.current || indexEntrance.current) ? 0 : undefined}}>{indexContent.current}</div>
     </div>
     <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} descriptionSearch={descriptionSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
@@ -244,8 +262,8 @@ function AssetIndexTop({ view, onNavigate, totalCount, artistCount, albumCount }
 }) {
   return <nav className="classification-sidebar__pins asset-index__top" aria-label="에셋 보기">
     <AssetIndexTopRow icon={<FolderIcon aria-hidden="true" />} label="전체" count={totalCount} selected={view.kind === "classification" && view.classificationId === null} onClick={() => onNavigate({ kind: "classification", classificationId: null })} />
-    <AssetIndexTopRow icon={<PersonIcon aria-hidden="true" />} label="작가" count={artistCount} selected={view.kind === "artists" || view.kind === "creator"} onClick={() => onNavigate({ kind: "artists" })} />
-    <AssetIndexTopRow icon={<PhotoIcon aria-hidden="true" />} label="앨범" count={albumCount} selected={view.kind === "albums" || view.kind === "album"} onClick={() => onNavigate({ kind: "albums" })} />
+    <AssetIndexTopRow icon={<AREA_ICONS.artists aria-hidden="true" />} label="작가" count={artistCount} selected={view.kind === "artists" || view.kind === "creator"} onClick={() => onNavigate({ kind: "artists" })} />
+    <AssetIndexTopRow icon={<RectangleStackIcon aria-hidden="true" />} label="앨범" count={albumCount} selected={view.kind === "albums" || view.kind === "album"} onClick={() => onNavigate({ kind: "albums" })} />
   </nav>;
 }
 

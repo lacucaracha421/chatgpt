@@ -1,4 +1,4 @@
-import { ChevronLeftIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -403,7 +403,7 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
   if (!collection) return (
     <section className="collection-overlay" aria-label="컬렉션 표지 보기">
       <ViewToolbar title="컬렉션" ariaLabel="컬렉션 표지 도구"
-        leadingAction={<Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={onExit}><ChevronLeftIcon aria-hidden="true" /></Button>} />
+        leadingAction={<Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={onExit}><ArrowLeftIcon aria-hidden="true" /></Button>} />
       <EmptyState title="컬렉션을 찾을 수 없습니다.">
         <Button onClick={onExit}>돌아가기</Button>
       </EmptyState>
@@ -438,7 +438,7 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
         ariaLabel="컬렉션 표지 도구"
         leadingAction={<>
           <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={onExit}>
-            <ChevronLeftIcon aria-hidden="true" />
+            <ArrowLeftIcon aria-hidden="true" />
           </Button>
         </>}
       />

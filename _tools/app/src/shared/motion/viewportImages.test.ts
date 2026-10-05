@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { IMAGE_READY_CAP_MS, viewportImageDecoded, waitForViewportImages } from './viewportImages';
+import { IMAGE_READY_CAP_MS, REVEAL_HOLD_ATTRIBUTE, revealTogether, viewportImageDecoded, waitForViewportImages } from './viewportImages';
 
 const rect = (top = 0, height = 100) => ({top, bottom: top + height, left: 0, right: 100, width: 100, height, x: 0, y: top, toJSON() {}});
 let host: HTMLDivElement;
@@ -91,4 +91,55 @@ it('treats a decode rejection as settled so one broken image cannot block the en
   waitForViewportImages(host, ready); await Promise.resolve();
   expect(viewportImageDecoded(image)).toBe(false);
   expect(ready).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+});
+
+it('hands the images still loading at the cap to onLate, then reports ready', async () => {
+  const done = thumbnail(), late = thumbnail(100), offscreen = thumbnail(600), order: string[] = [];
+  done.decode = () => Promise.resolve();
+  late.decode = () => new Promise<void>(() => {});
+  offscreen.decode = () => new Promise<void>(() => {});
+  waitForViewportImages(host, () => order.push('ready'), IMAGE_READY_CAP_MS, images => order.push(`late:${images.length}:${images[0] === late}`));
+  await vi.advanceTimersByTimeAsync(IMAGE_READY_CAP_MS);
+  expect(order).toEqual(['late:1:true', 'ready']);
+});
+
+it('does not call onLate when every viewport image decoded in time', async () => {
+  const image = thumbnail(), onLate = vi.fn(), ready = vi.fn();
+  image.decode = () => Promise.resolve();
+  waitForViewportImages(host, ready, IMAGE_READY_CAP_MS, onLate);
+  await vi.advanceTimersByTimeAsync(IMAGE_READY_CAP_MS);
+  expect(ready).toHaveBeenCalledOnce(); expect(onLate).not.toHaveBeenCalled();
+});
+
+it('reveals late images together in one frame once the last one settles', async () => {
+  const images = [thumbnail(), thumbnail(100), thumbnail(200)];
+  const decodes = images.map(image => {
+    let settle!: (failed?: boolean) => void;
+    image.decode = () => new Promise<void>((resolve, reject) => { settle = failed => failed ? reject(new Error('404')) : resolve(); });
+    return () => settle;
+  });
+  revealTogether(images, 750);
+  const held = () => images.filter(image => image.hasAttribute(REVEAL_HOLD_ATTRIBUTE)).length;
+  expect(held()).toBe(3);
+  decodes[0]()(); decodes[2]()(true); await vi.advanceTimersByTimeAsync(32);
+  expect(held()).toBe(3);
+  decodes[1]()(); await Promise.resolve(); await Promise.resolve();
+  expect(held()).toBe(3); // the reveal waits for the next frame, then flips all at once
+  await vi.advanceTimersByTimeAsync(16);
+  expect(held()).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('reveals stalled late images together at the fail-safe cap, or when released', async () => {
+  const images = [thumbnail(), thumbnail(100)];
+  images.forEach(image => { image.decode = () => new Promise<void>(() => {}); });
+  revealTogether(images, 750);
+  await vi.advanceTimersByTimeAsync(749);
+  expect(images.every(image => image.hasAttribute(REVEAL_HOLD_ATTRIBUTE))).toBe(true);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(images.some(image => image.hasAttribute(REVEAL_HOLD_ATTRIBUTE))).toBe(false);
+  const other = thumbnail(); other.decode = () => new Promise<void>(() => {});
+  const release = revealTogether([other], 750);
+  release();
+  expect(other.hasAttribute(REVEAL_HOLD_ATTRIBUTE)).toBe(false); expect(vi.getTimerCount()).toBe(0);
 });

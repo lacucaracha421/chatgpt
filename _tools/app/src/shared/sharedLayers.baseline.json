@@ -12,7 +12,6 @@
     "mobile-client/NoteSecret.tsx#SecretGate",
     "mobile-client/NoteSecret.tsx#copySecret",
     "mobile-client/Notes.tsx#SECRET_IDLE_MS",
-    "mobile-client/PinIcon.tsx#PinIcon",
     "mobile-client/ViewerInfo.tsx#sourceLabel",
     "mobile-client/collectionReleasesModel.ts#koreanReleases",
     "mobile-client/collectionReleasesModel.ts#releaseCaption",

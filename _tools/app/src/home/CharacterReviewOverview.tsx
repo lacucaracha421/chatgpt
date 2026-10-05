@@ -1,7 +1,7 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { CharacterSuggestionsOverview } from "../characters/suggestions/CharacterSuggestions";
-import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -113,7 +113,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
 
   return <div className="crv-view">
     <ViewToolbar title="캐릭터 검토"
-      leadingAction={<Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ChevronLeftIcon aria-hidden="true" /></Button>}
+      leadingAction={<Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>}
       chrome={{ navigation: index }} />
     <div className="crv-scroll">
       <div className="crv-page">

@@ -16,6 +16,7 @@ import type {Asset, Ticket} from './types';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import {ddayLabel, displayDate} from '../src/shared/displayDate';
 import {Badge, Skeleton} from './ui';
+import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {HomeSection, HomeToday, type HomeReleaseCard} from '../src/home/HomeAttention';
 import {HomeReleaseGrid} from '../src/home/HomeReleaseGrid';
 import {HomePlayingShelf} from '../src/home/HomePlayingShelf';
@@ -128,7 +129,7 @@ const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;
 
 function UpcomingDetailSheet({entry, interested, privacy, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; onToggle(): void; onClose(): void}) {
   const days = entry.date ? daysAfter(entry.date, localToday()) : null;
-  return <BottomSheet title={entry.title} onClose={onClose}><div className="home-detail-sheet"><div className="home-detail-cover"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></div><Badge>{upcomingKind[entry.kind]}</Badge>{entry.originalTitle && <p className="home-detail-original">{entry.originalTitle}</p>}<p className="home-detail-meta">{entry.date ? displayDate(entry.date) : '발매일 미정'}{days !== null && ` · ${ddayLabel(days) ?? '발매됨'}`}</p>{entry.platforms?.length ? <p className="home-detail-meta">{entry.platforms.join(' · ')}</p> : null}{entry.description && <p className="home-detail-description">{entry.description}</p>}<button className="home-interest-action" onClick={onToggle}>{interested ? '관심 목록에서 빼기' : '관심 목록에 추가'}</button></div></BottomSheet>;
+  return <BottomSheet title={entry.title} onClose={onClose}><div className="home-detail-sheet"><div className="home-detail-cover"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></div><Badge>{upcomingKind[entry.kind]}</Badge>{entry.originalTitle && <p className="home-detail-original">{entry.originalTitle}</p>}<p className="home-detail-meta">{entry.date ? displayDate(entry.date) : '발매일 미정'}{days !== null && ` · ${ddayLabel(days) ?? '발매됨'}`}</p>{entry.platforms?.length ? <p className="home-detail-meta">{entry.platforms.join(' · ')}</p> : null}{entry.description && <p className="home-detail-description">{entry.description}</p>}<BookmarkToggle className="home-detail-bookmark" bookmarked={interested} label={interested ? '관심 목록에서 빼기' : '관심 목록에 추가'} onClick={onToggle} /></div></BottomSheet>;
 }
 
 export function Home(props: HomeProps) {

@@ -112,7 +112,7 @@ export function CharacterSuggestionTile({ suggestion, state, privacyMode, onChan
   return <>
     <AnchoredPanel open={open} onOpenChange={setOpen} title={suggestionName(suggestion.tag)} description={suggestion.tag}
       trigger={<button type="button" className="character-suggestion-tile" aria-label={`${suggestionName(suggestion.tag)} 제안 ${suggestion.imageCount}장`}>
-        <span className="character-suggestion-tile__mosaic character-suggestion-tile__mosaic--suggestion">{!privacyMode && suggestion.sampleAssetIds.map(id => <AssetImage key={id} draggable={false} loading="lazy" src={thumbnailUrl(id)} alt="" />)}</span>
+        <span className="character-suggestion-tile__mosaic character-suggestion-tile__mosaic--suggestion">{!privacyMode && suggestion.sampleAssetIds.map(id => <AssetImage key={id} draggable={false} loading="lazy" src={thumbnailUrl(id, suggestion.sampleThumbnailRevisions?.[id])} alt="" />)}</span>
         <span className="character-suggestion-tile__flag">제안</span><b>{suggestionName(suggestion.tag)}</b><small>{suggestion.imageCount}장 · {suggestion.bothCount ? "● 일치" : "○ 한 태거만"}</small>
       </button>}
       footer={<SuggestionActions disabled={state.busy} onRegister={() => edit("register")} onMerge={() => edit("merge")} onIgnore={() => { setOpen(false); void state.ignore(suggestion.tag, true); }} onPostpone={() => state.postpone(suggestion.tag)} />}>
@@ -127,7 +127,7 @@ function SuggestionCounts({ suggestion: row }: { suggestion: Suggestion }) {
   return <div className="character-suggestion-count"><b><span className="numeric">{row.imageCount}</span>장</b><small className={row.bothCount ? "" : "character-suggestion-warning"}>{row.bothCount ? `● 일치 ${row.bothCount} · 한쪽 ${row.imageCount - row.bothCount}` : `○ ${only} ${row.imageCount}`}</small></div>;
 }
 function Samples({ suggestion, privacyMode }: { suggestion: Suggestion; privacyMode: boolean }) {
-  return <div className="character-suggestion-samples" aria-label="표본 이미지">{suggestion.sampleAssetIds.map(id => <span key={id}>{!privacyMode && <AssetImage loading="lazy" draggable={false} src={thumbnailUrl(id)} alt="" />}</span>)}{suggestion.imageCount > 4 && <small>+{suggestion.imageCount - 4}</small>}</div>;
+  return <div className="character-suggestion-samples" aria-label="표본 이미지">{suggestion.sampleAssetIds.map(id => <span key={id}>{!privacyMode && <AssetImage loading="lazy" draggable={false} src={thumbnailUrl(id, suggestion.sampleThumbnailRevisions?.[id])} alt="" />}</span>)}{suggestion.imageCount > 4 && <small>+{suggestion.imageCount - 4}</small>}</div>;
 }
 function Location({ suggestion }: { suggestion: Suggestion }) {
   return <div className="character-suggestion-location">{suggestion.seriesId ? <><span>{suggestion.seriesName} 폴더 {suggestion.insideCount}장</span><small>{suggestion.imageCount === suggestion.insideCount ? "모두 시리즈 폴더 안" : `다른 곳 ${suggestion.imageCount - suggestion.insideCount}장`}</small></> : <span>시리즈 폴더 없음</span>}</div>;

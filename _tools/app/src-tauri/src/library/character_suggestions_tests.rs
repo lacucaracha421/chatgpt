@@ -403,3 +403,22 @@ fn suggestion_registration_enqueues_series_with_current_target_and_skips_manual_
         }
     }
 }
+
+#[test]
+fn suggestion_samples_carry_their_thumbnail_revisions() {
+    let f = fixture();
+    let rows = f.library.character_suggestions(None).unwrap();
+    let row = &rows[0];
+    assert_eq!(row.sample_asset_ids.len(), 4);
+    assert_eq!(row.sample_thumbnail_revisions.len(), 4);
+    for id in &row.sample_asset_ids {
+        assert_eq!(
+            row.sample_thumbnail_revisions.get(id),
+            Some(&crate::library::models::thumbnail_revision(&format!(
+                "thumbnails/{id}.webp"
+            )))
+        );
+    }
+    let json = serde_json::to_value(row).unwrap();
+    assert!(json["sampleThumbnailRevisions"].is_object());
+}

@@ -6,6 +6,40 @@ use crate::library::{
 use std::{fs, path::Path};
 
 #[test]
+fn listed_character_targets_carry_thumbnail_revisions_outside_the_fingerprint() {
+    let f = Fixture::new();
+    let target = f.ready("Pilot");
+    let revision =
+        |id: &str| super::super::models::thumbnail_revision(&format!("thumbnails/{id}.webp"));
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE character_targets SET thumbnail_asset_id='asset-5' WHERE id=?1",
+            [&target.id],
+        )
+        .unwrap();
+    // A trashed reference has no served thumbnail, so no cacheable URL is claimed for it.
+    f.library.trash_assets(&["asset-4".into()]).unwrap();
+    let listed = f.library.list_character_targets().unwrap();
+    let listed = listed.iter().find(|item| item.id == target.id).unwrap();
+    for id in ["asset-0", "asset-1", "asset-2", "asset-3", "asset-5"] {
+        assert_eq!(
+            listed.thumbnail_revisions.get(id),
+            Some(&revision(id)),
+            "{id}"
+        );
+    }
+    assert!(!listed.thumbnail_revisions.contains_key("asset-4"));
+    assert_eq!(
+        serde_json::to_value(listed).unwrap()["thumbnailRevisions"]["asset-5"],
+        serde_json::json!(revision("asset-5"))
+    );
+    let read = f.library.get_character_target(&target.id).unwrap();
+    assert_eq!(read.fingerprint, listed.fingerprint);
+}
+
+#[test]
 fn unified_references_survive_trash_restore_and_settings_save() {
     let f = Fixture::new();
     let target = f.ready("Unified");

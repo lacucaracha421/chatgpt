@@ -1,6 +1,6 @@
 import {LoadingLine} from './TopBar';
 import {useEffect,useRef,useState} from 'react';
-import {FolderIcon} from '@heroicons/react/24/outline';
+import {RectangleStackIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {errorText,native} from './transport';
 import {flattenMembershipAlbums,type AlbumMembershipState} from './AlbumMembershipEditor';
@@ -59,7 +59,7 @@ export function AlbumBatchSheet({assetIds,open,onClose,onComplete}:{assetIds:str
     {state&&!state.adopted&&<p className="hint">앨범 동기화가 준비된 뒤 편집할 수 있습니다.</p>}
     {state?.adopted&&!confirmation&&<div className="album-batch-list" aria-busy={busy}>
       {flattenMembershipAlbums(state.albums).map(({album,depth})=><button type="button" className="album-batch-entry" key={album.id} style={{paddingLeft:12+depth*20}} disabled={busy} onClick={()=>void addToAlbum(album.id,album.name)}>
-        <FolderIcon aria-hidden="true"/><span>{album.name}</span>
+        <RectangleStackIcon aria-hidden="true"/><span>{album.name}</span>
       </button>)}
     </div>}
   </BottomSheet>;

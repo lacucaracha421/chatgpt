@@ -10,7 +10,7 @@ import type {CharacterIndex} from './characterModel';
 import {entryView,type Entry} from './libraryModel';
 import {SectionLabel} from './ui';
 import {ShelfScroller} from '../src/shared/ui/ShelfScroller';
-import {FolderIcon,PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
+import {FolderIcon,UserGroupIcon,UserIcon} from '@heroicons/react/24/outline';
 export type CharacterFolderKind='series'|'group'|'character';
 /** The character kind of a Library entry, or undefined for an ordinary asset folder. */
 export const characterKindOf=(entry:Entry):CharacterFolderKind|undefined=>entry.characterNode?characterFolderKind(entry.characterKind??'series'):undefined;
@@ -21,7 +21,7 @@ export const characterFolderKind=(kind:string|undefined):CharacterFolderKind|und
  * a series or group shows people, a single character a person.
  */
 export function CharacterGlyph({kind}:{kind:CharacterFolderKind}) {
-  const Icon=kind==='character'?PersonIcon:PeopleIcon;
+  const Icon=kind==='character'?UserIcon:UserGroupIcon;
   return <Icon className="character-glyph" aria-hidden="true"/>;
 }
 const KIND_NAMES:Record<CharacterFolderKind,string>={series:'캐릭터 시리즈',group:'캐릭터 그룹',character:'캐릭터'};

@@ -2,7 +2,8 @@ import { matchesKoreanSearch } from "../shared/koreanSearch";
 import { nativeWorkload, updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/types";
 import { useExchangeSnapshot } from "../exchange/exchangeStore";
-import { ActivityIcon, BookmarkIcon, Cog6ToothIcon, ExchangeIcon, FolderIcon, InboxIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { ChartBarIcon, FolderIcon, InboxIcon, PlusIcon, RectangleStackIcon, Square2StackIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
+import { AREA_ICONS } from "../shared/ui/areaIcons";
 
 import { type NavigationEntry } from "../shared/findEntries";
 export { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "../shared/findEntries";
@@ -37,28 +38,28 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
   const go = (next: AssetView) => () => onNavigate(next);
   const queued = (count: number | null) => (count ?? 0) > 0;
   const entries: NavigationEntry[] = [
-    { id: "review", group: queued(reviewCount) ? "queue" : "go", label: "유사 검토", keywords: ["유사 이미지 검토", "중복"], icon: <PhotoIcon />, count: queued(reviewCount) ? reviewCount : undefined, selected: view.kind === "similarity_review", run: go({ kind: "similarity_review" }) },
+    { id: "review", group: queued(reviewCount) ? "queue" : "go", label: "유사 검토", keywords: ["유사 이미지 검토", "중복"], icon: <Square2StackIcon />, count: queued(reviewCount) ? reviewCount : undefined, selected: view.kind === "similarity_review", run: go({ kind: "similarity_review" }) },
     { id: "unsorted", group: queued(unsortedCount) ? "queue" : "go", label: "미분류", icon: <InboxIcon />, count: queued(unsortedCount) ? unsortedCount ?? undefined : undefined, selected: view.kind === "unsorted", run: go({ kind: "unsorted" }) },
-    { id: "notes", group: "go", label: "메모", icon: <NoteIcon />, selected: view.kind === "notes", run: go({ kind: "notes" }) },
+    { id: "notes", group: "go", label: "메모", icon: <AREA_ICONS.notes />, selected: view.kind === "notes", run: go({ kind: "notes" }) },
     // Utility outside the Library: listed as a queue only while received files are unseen.
-    { id: "exchange", group: queued(received) ? "queue" : "go", label: "전송", keywords: ["보내기/받기", "파일 보내기", "파일 받기", "받은 파일", "태블릿"], icon: <ExchangeIcon />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
-    ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: "비밀", keywords: ["비밀 보관함"], icon: <BookmarkIcon />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
-    { id: "artists", group: "go", label: "작가", keywords: ["다시보기", "작가 미상", "artist"], icon: <PersonIcon />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },
-    { id: "statistics", group: "go", label: "통계", icon: <ActivityIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },
+    { id: "exchange", group: queued(received) ? "queue" : "go", label: "전송", keywords: ["보내기/받기", "파일 보내기", "파일 받기", "받은 파일", "태블릿"], icon: <AREA_ICONS.exchange />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
+    ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: "비밀", keywords: ["비밀 보관함"], icon: <AREA_ICONS.private_vault />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
+    { id: "artists", group: "go", label: "작가", keywords: ["다시보기", "작가 미상", "artist"], icon: <AREA_ICONS.artists />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },
+    { id: "statistics", group: "go", label: "통계", icon: <ChartBarIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },
     { id: "trash", group: "go", label: "휴지통", icon: <TrashIcon />, count: trashCount > 0 ? trashCount : undefined, selected: view.kind === "trash", run: go({ kind: "trash" }) },
-    { id: "settings", group: "go", label: "설정", icon: <Cog6ToothIcon />, selected: view.kind === "settings", run: go({ kind: "settings" }) },
+    { id: "settings", group: "go", label: "설정", icon: <AREA_ICONS.settings />, selected: view.kind === "settings", run: go({ kind: "settings" }) },
   ];
   const queues = entries.filter((entry) => entry.group === "queue");
   const destinations = entries.filter((entry) => entry.group === "go");
   const actions: NavigationEntry[] = [
     ...(onImportFiles ? [{ id: "import", group: "action" as const, label: "파일 가져오기", icon: <PlusIcon />, run: onImportFiles }] : []),
     ...(nativeWorkload() && workload.ready ? [{
-      id: "lightweight", group: "action" as const, label: workload.lightweight ? "절약 모드 끄기" : "절약 모드 켜기", keywords: ["절약 모드"], icon: <ActivityIcon />,
+      id: "lightweight", group: "action" as const, label: workload.lightweight ? "절약 모드 끄기" : "절약 모드 켜기", keywords: ["절약 모드"], icon: <ChartBarIcon />,
       run: () => { void updateWorkloadSettings({ lightweight: !workload.lightweight }); },
     }] : []),
   ];
   const settings: NavigationEntry[] = SETTINGS_SECTIONS.map(([section, label]) => ({
-    id: `settings-${section}`, group: "settings", label: `설정 · ${label}`, icon: <Cog6ToothIcon />, run: go({ kind: "settings", section }),
+    id: `settings-${section}`, group: "settings", label: `설정 · ${label}`, icon: <AREA_ICONS.settings />, run: go({ kind: "settings", section }),
   }));
   return [...queues, ...destinations, ...actions, ...settings];
 }
@@ -125,7 +126,7 @@ export function placeEntries(sources: PlaceSources | undefined, query: string, v
     if (!seriesId || !series) continue;
     const group = sources.characterGroups?.find((candidate) => candidate.seriesId === seriesId && candidate.targetIds.includes(character.id));
     add(character.displayName, {
-      id: `place-character-${character.id}`, group: "place", label: character.displayName, icon: <PersonIcon />,
+      id: `place-character-${character.id}`, group: "place", label: character.displayName, icon: <UserIcon />,
       context: [...ancestorNames(folders, series.parentId), series.name, ...(group ? [group.name] : [])].join(" › "),
       selected: view.kind === "classification" && view.characterId === character.id,
       run: () => onNavigate({ kind: "classification", classificationId: seriesId, characterId: character.id }),

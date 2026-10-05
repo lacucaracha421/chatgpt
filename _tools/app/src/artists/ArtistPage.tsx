@@ -8,10 +8,11 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetSummary, AssetView } from "../library/types";
 import { displayDate } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
+import { IconButton } from "../shared/ui/IconButton";
 import { Toggle } from "../shared/ui/Toggle";
 import { ArtistThumb, ThumbStrip } from "./ArtistHub";
 import { artistHandle } from "./format";
-import { CheckIcon, MagnifyingGlassIcon, MergeIcon, PencilIcon, PinIcon, PlayIcon, SparklesIcon, XMarkIcon } from "./artistIcons";
+import { CheckIcon, MagnifyingGlassIcon, MergeIcon, PencilIcon, PinIcon, PinSolidIcon, PlayIcon, SparklesIcon, XMarkIcon } from "./artistIcons";
 import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead, useArtistRevision, useArtistsChanged } from "./artistStore";
 import { UNKNOWN_NONE, UNKNOWN_SOURCE, isUnknownArtist, type ArtistDetail, type ArtistStyleGroup, type ArtistStylePage, type ArtistStyleStatus } from "./types";
 import "./artists.css";
@@ -75,7 +76,7 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
   };
   // The toolbar keeps only the artist's name; identity details and actions live in the page head (user, 2026-09-29).
   const actions = summary ? <div className="artist-head__actions">
-    <Button size="icon" variant={summary.pinned ? "secondary" : "ghost"} aria-label={summary.pinned ? "고정 해제" : "고정"} aria-pressed={summary.pinned} onClick={() => void togglePin()}><PinIcon aria-hidden="true" /></Button>
+    <IconButton label={summary.pinned ? "고정 해제" : "고정"} icon={PinIcon} activeIcon={PinSolidIcon} active={summary.pinned} onClick={() => void togglePin()} />
     <Button size="icon" variant={editOpen ? "secondary" : "ghost"} aria-label="작가 편집" aria-expanded={editOpen} onClick={() => setEditOpen((open) => !open)}><PencilIcon aria-hidden="true" /></Button>
     <Button size="sm" variant="primary" onClick={onPlay}><PlayIcon aria-hidden="true" />연속 보기</Button>
   </div> : null;

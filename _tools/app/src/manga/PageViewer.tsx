@@ -1,13 +1,12 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { BookmarkIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
-import { BookmarkIcon as BookmarkSolidIcon } from "@heroicons/react/24/solid";
+import { ArrowLeftIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
 import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { useCatalogMasked } from "../privacy/catalogMask";
 import { loadUiPreferences, saveUiPreferences } from "../preferences/uiPreferences";
 import type { MangaViewerGap, MangaViewerMargin } from "../preferences/uiPreferences";
-import { popToggle } from "../shared/motion/togglePop";
 import { Button } from "../shared/ui/Button";
+import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -271,7 +270,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
         </div>
         <div ref={chrome.ref} className="asset-viewer__chrome" onFocusCapture={chrome.reveal} onBlurCapture={chrome.reveal}>
           <div className="asset-viewer__topbar" {...chrome.hover}>
-            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={onClose}><ChevronLeftIcon aria-hidden="true" /></Button>
+            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={onClose}><ArrowLeftIcon aria-hidden="true" /></Button>
             <span className="asset-viewer__position"><b>{position}</b> / {pageCount}</span>
             <span className="asset-viewer__title">
               <strong>{title}</strong>
@@ -281,7 +280,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
             {actions}
             <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${spread ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="두 쪽 보기" aria-description="두 쪽 보기 (V)" aria-pressed={spread} onClick={() => updatePrefs({ mode: spread ? "single" : "double" })}><BookOpenIcon aria-hidden="true" /><span>두 쪽</span></Button>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="페이지 목록" aria-description="페이지 목록 (T)" aria-pressed={overviewOpen} onClick={() => setOverviewOpen((value) => !value)} ref={overviewToggleRef}><Squares2X2Icon aria-hidden="true" /></Button>
-            {bookmark && <Button className={`asset-viewer__vbtn${bookmark.bookmarked ? " asset-viewer__vbtn--on" : ""}`} size="icon" variant="ghost" aria-label="북마크" aria-pressed={bookmark.bookmarked} disabled={bookmark.disabled} onClick={(event) => { popToggle(event.currentTarget, !bookmark.bookmarked); bookmark.onToggle(); }}>{bookmark.bookmarked ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkIcon aria-hidden="true" />}</Button>}
+            {bookmark && <BookmarkToggle className="asset-viewer__vbtn" label="북마크" bookmarked={bookmark.bookmarked} disabled={bookmark.disabled} onClick={bookmark.onToggle} />}
             <Menu label="읽기 설정" align="end" trigger={<Cog6ToothIcon aria-hidden="true" />} items={settingsItems} />
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="망가 뷰어 닫기" aria-description="망가 뷰어 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
           </div>
@@ -306,7 +305,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
       </div>
       {overviewOpen && <div className="manga-viewer__overview" role="dialog" aria-label="페이지 목록">
         <div className="manga-viewer__overview-header">
-          <Button variant="ghost" onClick={closeOverview}><ChevronLeftIcon aria-hidden="true" />뷰어로 돌아가기</Button>
+          <Button variant="ghost" onClick={closeOverview}><ArrowLeftIcon aria-hidden="true" />뷰어로 돌아가기</Button>
           <span>{position} / {pageCount}</span>
         </div>
         <div

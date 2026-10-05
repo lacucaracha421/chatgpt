@@ -1,6 +1,6 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import {useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
-import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {ArrowTopRightOnSquareIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, EmptyState, Field, IconButton, SectionLabel, TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {useLibraryArtists} from './useLibraryArtists';
@@ -252,7 +252,7 @@ function ArtistDetail({scopeChips,summary, initialPage, assignments, privateMode
   const local = filter==='all'?fallback:fallback.filter(asset=>filter==='video'?asset.kind==='video':asset.kind!=='video');
   const shown = page?.items ?? (sort==='oldest'?[...local].reverse():local);
   const stale = !!page && page.scope!==scope;
-  return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(artist)} actions={<>{profile && <IconButton label="작가 프로필 열기" icon={ArrowUpRightIcon} onClick={() => { void native('openExternal', {url: profile}).catch(() => {}); }} />}<ArtistEditMenu artist={artist} onEdit={onEdit} /></>} />{notice}
+  return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(artist)} actions={<>{profile && <IconButton label="작가 프로필 열기" icon={ArrowTopRightOnSquareIcon} onClick={() => { void native('openExternal', {url: profile}).catch(() => {}); }} />}<ArtistEditMenu artist={artist} onEdit={onEdit} /></>} />{notice}
     <div className="artist-detail-scroll"><Gallery sparse={privateMode?undefined:sparse} items={shown} privacy={privateMode} stale={stale} busy={busy||loadingMore} onRefresh={()=>setRetry(value=>value+1)} density={DEFAULT_DENSITY} identity={`artist:${page?.scope??scope}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setPage(current=>current?readyScopedAsset(current,ready):current)} onNearEnd={loadMore} paused={privateMode||paused} intro={<>{scopeChips}<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={changeSort} onFilter={changeFilter} assets={shown} /></>} onOpen={index => { if (!privateMode&&!stale) onOpenViewer(shown, index); }} />{!shown.length&&!busy && <div className="artist-detail-empty">조건에 맞는 자산이 없습니다.</div>}{error&&<div className="inline-error" role="alert">{error}<button onClick={()=>setRetry(value=>value+1)}>다시 시도</button></div>}</div>
   </div>;
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ImgHTML
 
 import { beginNativePhase } from "../nativePerf";
 import { contentCross, EASE_STANDARD } from "../motion/curves";
-import { viewportImageDecoded } from "../motion/viewportImages";
+import { REVEAL_HOLD_ATTRIBUTE, viewportImageDecoded } from "../motion/viewportImages";
 
 type StableImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt"> & {
   src: string;
@@ -94,8 +94,9 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
       if (!element.isConnected || element.getAttribute("src") !== loadedSrc) return;
       if (loadedSrc === wanted.current && !appeared.current) {
         appeared.current = true;
-        // The area owns prepared images; only late first loads get their own fade.
-        const preparing = element.closest('[data-folder-move="pending"], [data-motion-view][style*="opacity: 0"]');
+        // The area owns prepared images; only late first loads get their own fade. A late tile held
+        // for a shared reveal (revealTogether) appears with its batch, not on a fade of its own.
+        const preparing = element.closest('[data-folder-move="pending"], [data-motion-view][style*="opacity: 0"]') || element.hasAttribute(REVEAL_HOLD_ATTRIBUTE);
         if (held && !preparing && typeof element.animate === "function") {
           fade.current = element.animate([{opacity: 0}, {opacity: props.style?.opacity ?? 1}], {duration: contentCross.image, easing: EASE_STANDARD});
         }

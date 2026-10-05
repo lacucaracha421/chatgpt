@@ -1,12 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState, type ComponentProps } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { ClassificationSidebar } from "./ClassificationSidebar";
 import { fixtureTarget } from "../characters/characterFixtures";
 import { buildTree } from "./buildTree";
+import { FOLDER_PREFETCH_DWELL_MS, FolderPrefetchContext, resetFolderPrefetch, type FolderPrefetchPlan } from "../assets/folderPrefetch";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -113,6 +114,7 @@ function gateway(): LibraryGateway {
 function renderSidebar(
   libraryGateway = gateway(),
   props: Partial<ComponentProps<typeof ClassificationSidebar>> = {},
+  wrapper?: (props: { children: ReactNode }) => ReactNode,
 ) {
   const onViewChange = vi.fn();
   const onExpandedIdsChange = vi.fn();
@@ -164,7 +166,7 @@ function renderSidebar(
     );
   }
 
-  render(<Fixture />);
+  render(<Fixture />, { wrapper });
   return { libraryGateway, onChanged, onExpandedIdsChange, onSidebarWidthChange, onViewChange, onClearAssetSelection };
 }
 
@@ -185,6 +187,23 @@ describe("buildTree", () => {
 });
 
 describe("ClassificationSidebar", () => {
+  it("prefetches a folder row only after a mouse pointer rests on it", () => {
+    const plan = vi.fn<FolderPrefetchPlan>(() => null);
+    renderSidebar(gateway(), {}, ({ children }) => <FolderPrefetchContext.Provider value={{ current: plan }}>{children}</FolderPrefetchContext.Provider>);
+    const row = screen.getByRole("treeitem", { name: "Blue Archive" });
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(row, { pointerType: "touch" });
+      vi.advanceTimersByTime(1000);
+      expect(plan).not.toHaveBeenCalled();
+      fireEvent.pointerEnter(row, { pointerType: "mouse" });
+      vi.advanceTimersByTime(FOLDER_PREFETCH_DWELL_MS - 1);
+      expect(plan).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(plan).toHaveBeenCalledExactlyOnceWith({ kind: "classification", classificationId: "work" });
+    } finally { resetFolderPrefetch(); vi.useRealTimers(); }
+  });
+
   it("keeps series folders as ordinary rows without virtual character rows", () => {
     renderSidebar(gateway(), {
       characters: [
@@ -229,8 +248,8 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const { onExpandedIdsChange, onViewChange } = renderSidebar();
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }));
-    await user.click(screen.getByRole("menuitem", { name: "즐겨찾기에 추가" }));
-    const pins = screen.getByRole("navigation", { name: "즐겨찾기 폴더" });
+    await user.click(screen.getByRole("menuitem", { name: "고정" }));
+    const pins = screen.getByRole("navigation", { name: "고정 폴더" });
     // Tree view commands live in the heading's ⋯ menu; only ＋ stays on the heading.
     expect(screen.queryByRole("button", { name: "모든 폴더 접기" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "폴더 보기 옵션" }));
@@ -243,8 +262,8 @@ describe("ClassificationSidebar", () => {
     await user.click(await screen.findByRole("menuitem", { name: "현재 위치만 펼치기" }));
     expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "work", "tag"]);
     fireEvent.contextMenu(within(pins).getByRole("button", { name: "Arona" }));
-    await user.click(screen.getByRole("menuitem", { name: "즐겨찾기 해제" }));
-    expect(screen.queryByRole("navigation", { name: "즐겨찾기 폴더" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "고정 해제" }));
+    expect(screen.queryByRole("navigation", { name: "고정 폴더" })).not.toBeInTheDocument();
   });
 
   it("shows the visible branch ancestry while scrolling and clears it at the top", () => {
@@ -268,7 +287,7 @@ describe("ClassificationSidebar", () => {
 
     expect(screen.getByRole("tree", { name: "앨범" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "폴더 탐색" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "즐겨찾기 폴더" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "고정 폴더" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "새 앨범" }));
     await user.type(screen.getByRole("textbox", { name: "폴더 이름" }), "표지");
     await user.keyboard("{Enter}");
@@ -468,7 +487,7 @@ describe("ClassificationSidebar", () => {
 
   it("lists pinned folders before the folder tree in the all-assets mode", async () => {
     renderSidebar(gateway(), { pinnedIds: ["tag", "work"] });
-    const pins = screen.getByRole("navigation", { name: "즐겨찾기 폴더" });
+    const pins = screen.getByRole("navigation", { name: "고정 폴더" });
     const folders = screen.getByRole("region", { name: "폴더 탐색" });
     expect(pins.compareDocumentPosition(folders) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(pins).getAllByRole("button").map((chip) => chip.textContent)).toEqual(["Arona", "Blue Archive"]);
@@ -622,7 +641,7 @@ describe("ClassificationSidebar", () => {
 
     expect(screen.queryByRole("button", { name: /추가 작업/ })).not.toBeInTheDocument();
     fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["즐겨찾기에 추가", "하위 폴더 만들기", "이름 변경", "아이콘 및 색상", "폴더 이동", "삭제 — 하위 폴더 있음"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["고정", "하위 폴더 만들기", "이름 변경", "아이콘 및 색상", "폴더 이동", "삭제 — 하위 폴더 있음"]);
     await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
     const rename = screen.getByRole("textbox", { name: "폴더 이름" });
     await user.clear(rename);

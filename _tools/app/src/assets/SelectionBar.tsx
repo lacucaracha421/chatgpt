@@ -1,4 +1,4 @@
-import { FolderIcon, MinusCircleIcon, PhotoIcon, HeartIcon, TrashIcon, UserIcon, UserPlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { MinusCircleIcon, PhotoIcon, HeartIcon, RectangleStackIcon, TrashIcon, UserIcon, UserPlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import type { AssetView } from "../library/types";
@@ -39,7 +39,7 @@ export function SelectionBar({
     <div className={`asset-selection-bar${compact ? " asset-selection-bar--compact" : ""}`} role="toolbar" aria-label="선택 작업">
       <strong>{selectedCount}개 선택</strong>
       <span className="view-toolbar__divider" aria-hidden="true" />
-      {onAddToAlbum && <Button size="sm" variant="primary" disabled={batchPending} onClick={onAddToAlbum}><FolderIcon aria-hidden="true" />앨범에 추가</Button>}
+      {onAddToAlbum && <Button size="sm" variant="primary" disabled={batchPending} onClick={onAddToAlbum}><RectangleStackIcon aria-hidden="true" />앨범에 추가</Button>}
       {onCharacterToggle && <div className="asset-selection-bar__character">
         <Button size="sm" variant={characterOpen ? "secondary" : "ghost"} aria-label={`${characterLabel} 지정`} aria-expanded={characterOpen} disabled={batchPending} onClick={onCharacterToggle}><UserIcon aria-hidden="true" />{!compact && <><span className="asset-selection-bar__label">{characterLabel}</span>{characterShortcut && <kbd>{characterShortcut}</kbd>}</>}</Button>
         {characterOpen && characterPicker}

@@ -7,7 +7,7 @@ import {ArtistImage,EmptyArtists} from './Artists';
 import {ARTIST_LIST_ENTRANCE,PreparedCovers,usePreparedCovers} from './artistCovers';
 import {EmptyState,SegmentedControl} from './ui';
 import {usePrivacyMode} from './privacyMode';
-import {PinIcon} from './PinIcon';
+import {PinSolidIcon} from '../src/shared/ui/PinIcon';
 import {useArtistEntry} from './ArtistGridEntry';
 import {artistName,assetsFromIds,sortArtists,type ArtistSort,type LibraryArtist} from './artistsModel';
 
@@ -31,7 +31,7 @@ function ArtistGridCard({artist,privateMode,paused,onOpen}:{artist:LibraryArtist
       <ArtistImage asset={assets[0]} privateMode={privateMode} paused={paused}/>
       <ArtistImage asset={assets[1]} privateMode={privateMode} paused={paused}/>
       <ArtistImage asset={assets[2]} privateMode={privateMode} paused={paused}/>
-      {artist.pinned && <span className="artist-grid-pin" aria-label="고정된 작가"><PinIcon aria-hidden="true"/></span>}
+      {artist.pinned && <span className="artist-grid-pin" aria-label="고정된 작가"><PinSolidIcon aria-hidden="true"/></span>}
     </span>
     <span className="artist-grid-caption"><strong className="artist-grid-name">{name}</strong><span className="artist-grid-count numeric muted">{artist.assetCount.toLocaleString('ko-KR')}</span></span>
   </button>;

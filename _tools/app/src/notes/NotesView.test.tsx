@@ -21,7 +21,7 @@ it("creates, edits, pins, trashes and restores through the actual notes editor",
   fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"내일 2장 읽기"}});
   await waitFor(()=>expect(store.snapshot().saving).toBe(false));
   expect(document.querySelector("time")?.textContent).toBe(displayDateTime("2026-09-07T00:00:00Z", new Date(), { withTime: true }));
-  await userEvent.click(screen.getByRole("button",{name:"메모 고정"}));
+  await userEvent.click(screen.getByRole("button",{name:"고정"}));
   await waitFor(()=>expect(store.snapshot().notes[0].pinned).toBe(true));
   await userEvent.click(screen.getByRole("button",{name:"메모를 휴지통으로"}));
   await userEvent.click(screen.getByRole("button",{name:/보기/}));

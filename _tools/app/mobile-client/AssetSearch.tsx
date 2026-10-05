@@ -1,6 +1,6 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import {useMemo,useRef,useState} from 'react';
-import {FolderIcon,PhotoIcon,UserIcon,TagIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {FolderIcon,RectangleStackIcon,UserIcon,TagIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {assetSearchLimitHint,assetSearchChoiceHint,assetSearchKey,groupAssetSuggestions,rememberAssetSearch,type AssetSearchName,type AssetSearchIdentity} from '../src/assets/assetSearch';
 import {TopBarSearch} from './TopBar';
 import {Button,IconButton,SectionLabel,TextInput} from './ui';
@@ -13,7 +13,7 @@ import './assetSearch.css';
 
 function Suggestion({item,privateMode,paused,hint,pending=false,onChoose}:{pending?:boolean;hint:string;item:AssetSuggestion;privateMode:boolean;paused:boolean;onChoose(item:AssetSuggestion):void}) {
   const showSearching=useDelayedBusy(pending);
-  const Icon=item.kind==='tag'?TagIcon:item.kind==='folder'?FolderIcon:item.kind==='album'?PhotoIcon:UserIcon;
+  const Icon=item.kind==='tag'?TagIcon:item.kind==='folder'?FolderIcon:item.kind==='album'?RectangleStackIcon:UserIcon;
   return <button type="button" className="asset-search-result" disabled={!!hint||pending} data-pending={pending||undefined} aria-description={hint||(showSearching?'검색 중입니다.':undefined)} onClick={()=>onChoose(item)}>
     {!privateMode&&(item.cover?<span className="asset-search-cover"><Cover asset={item.cover} paused={paused}/></span>:<Icon aria-hidden="true"/>)}
     <span className="asset-search-name">{item.name}</span>{!privateMode&&item.count!==undefined&&<span className="numeric muted">{item.count.toLocaleString('ko-KR')}장</span>}

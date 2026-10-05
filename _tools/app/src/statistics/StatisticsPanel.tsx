@@ -4,7 +4,7 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
 import { Menu } from "../shared/ui/Menu";
-import { EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ActivityStatistic, DerivativeStorage, LibraryStatistics, StatisticCount } from "./types";
 import "./statistics.css";
