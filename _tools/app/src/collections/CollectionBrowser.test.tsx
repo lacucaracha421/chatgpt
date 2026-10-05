@@ -434,13 +434,15 @@ describe("CollectionBrowser", () => {
     expect(screen.getByRole("region", { name: "z" })).toHaveTextContent("1권 새로 나옴");
   });
 
-  it("opens a Showcase work in exhibition order, excluding the regular grid", async () => {
+  it("lays the Showcase on a shelf in showcase order, excluding the regular grid", async () => {
     const onOpenWork = vi.fn();
     const first = { ...sample, showcase: true, showcaseOrder: 1 };
     const second = { ...sample, id: "second", name: "두 번째", showcase: true, showcaseOrder: 2 };
     renderBrowser({ collections: [first, second, { ...sample, id: "regular", name: "일반 게임" }], typeFilter: "game", showcase: true, onOpenWork });
     const user = userEvent.setup();
-    const shelf = screen.getByLabelText("3행 3열 전시");
+    const shelf = screen.getByRole("group", { name: "게임 쇼케이스" });
+    expect(shelf).toHaveClass("collection-list--shelf");
+    expect(within(shelf).queryByRole("button", { name: /일반 게임/ })).toBeNull();
     await user.dblClick(within(shelf).getByRole("button", { name: /Astral Chain/ }));
     expect(onOpenWork).toHaveBeenCalledWith("c1", ["c1", "second"]);
   });

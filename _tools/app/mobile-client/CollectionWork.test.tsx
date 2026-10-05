@@ -4,6 +4,9 @@ import {act, cleanup, fireEvent, render, screen} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import type {CollectionDetail} from './collectionModel';
+import {playCaseSound} from '../src/collections/case/caseSounds';
+
+vi.mock('../src/collections/case/caseSounds', async original => ({...await original<typeof import('../src/collections/case/caseSounds')>(), playCaseSound: vi.fn(), preloadCaseSounds: vi.fn()}));
 
 const artwork = vi.hoisted(() => ({urls: {} as Record<string, string>, sources: [] as string[]}));
 vi.mock('./collectionArtwork', () => ({usePortraitUrl: () => ({url: null, failed: false}), useArtworkSet: (item: {id: string}, requests: Record<string, {id?: string | null}>) => {
@@ -314,4 +317,48 @@ it.each(['game', 'movie', 'av'] as const)('retains every painted %s surface unti
   for (const image of oldImages) expect(image).not.toBeVisible();
   expect(root).not.toHaveAttribute('inert');
   expect(screen.getByRole('group', {name: '케이스'})).toHaveAttribute('aria-expanded', 'false');
+});
+
+it('plays the shared case sounds only for the tapped open and close, cancelled by a quick reopen or a new work', async () => {
+  vi.useFakeTimers();
+  try {
+    const play = vi.mocked(playCaseSound); play.mockClear();
+    artwork.urls = {};
+    const item: CollectionDetail = {...manga, id: 'one', name: '작품 하나', type: 'game', platforms: 'Nintendo Switch'};
+    const options = {item, revision: 'r1', active: true, privacy: false, position: 1, total: 2, score: () => null, onStep: vi.fn(), info: () => null};
+    const {container, rerender} = render(<CaseWork {...options}/>);
+    const kase = screen.getByRole('group', {name: '케이스'});
+    act(() => vi.advanceTimersByTime(2000));
+    expect(play).not.toHaveBeenCalled();
+    fireEvent.keyDown(kase, {key: 'Enter'});
+    expect(play.mock.calls).toEqual([['sw', 'open']]);
+    fireEvent.click(container.querySelector('.work-stage')!);
+    act(() => vi.advanceTimersByTime(529));
+    expect(play).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(1));
+    expect(play.mock.calls).toEqual([['sw', 'open'], ['sw', 'close']]);
+    fireEvent.keyDown(kase, {key: 'Enter'}); fireEvent.keyDown(kase, {key: 'Enter'}); fireEvent.keyDown(kase, {key: 'Enter'});
+    act(() => vi.advanceTimersByTime(2000));
+    expect(play.mock.calls.slice(2)).toEqual([['sw', 'open'], ['sw', 'open']]);
+    // Closing and moving on at once: the next work paints silently and the old close sound is dropped.
+    fireEvent.keyDown(kase, {key: 'Enter'}); play.mockClear();
+    rerender(<CaseWork {...options} item={{...item, id: 'two', name: '작품 둘', platforms: 'PS5'}} position={2}/>);
+    await act(async () => container.querySelectorAll('[data-work-pending] img').forEach(image => fireEvent.load(image)));
+    expect(screen.getByRole('heading', {name: '작품 둘'})).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(2000));
+    expect(play).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
+
+it('opens a manga volume with a book sound, but not in privacy mode', () => {
+  const play = vi.mocked(playCaseSound); play.mockClear();
+  artwork.urls = {c1: '/one', c2: '/two'};
+  const onEnlarge = vi.fn();
+  const view = render(<MangaWork {...props} onEnlarge={onEnlarge}/>);
+  fireEvent.doubleClick(view.container.querySelector('[data-volume-id="v2"]')!);
+  expect(play.mock.calls).toEqual([['book', 'open']]);
+  expect(onEnlarge).toHaveBeenCalledExactlyOnceWith('v2');
+  view.rerender(<MangaWork {...props} privacy onEnlarge={onEnlarge}/>);
+  fireEvent.doubleClick(view.container.querySelector('[data-volume-id="v1"]')!);
+  expect(play).toHaveBeenCalledTimes(1);
 });

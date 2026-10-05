@@ -6,6 +6,11 @@ import type { CollectionSummary } from "../../library/types";
 import { displayDate } from "../../shared/displayDate";
 import { defaultRecord } from "./WorkRecord";
 import { PrivacyProvider } from "../../privacy/PrivacyContext";
+import { playCaseSound } from "../case/caseSounds";
+
+vi.mock("../case/caseSounds", async original => ({ ...await original<typeof import("../case/caseSounds")>(), playCaseSound: vi.fn(), preloadCaseSounds: vi.fn() }));
+const pop = vi.hoisted(() => ({ popToggle: vi.fn() }));
+vi.mock("../../shared/motion/togglePop", () => pop);
 
 afterEach(cleanup);
 const fixtureWork: CollectionSummary = {
@@ -515,4 +520,68 @@ it('retains the existing PC case turn state when reusing a painted surface, whil
   expect(screen.getByRole('group', {name: '케이스'})).toBe(original);
   expect(original).toHaveAttribute('data-angle', angle);
   expect(incoming).toBeVisible();
+});
+
+describe("case sounds", () => {
+  const play = vi.mocked(playCaseSound);
+  afterEach(() => { vi.useRealTimers(); play.mockClear(); });
+  it("plays one sound for each user open and close of the case, never on mount", () => {
+    vi.useFakeTimers(); play.mockClear();
+    const { container } = view();
+    const kase = screen.getByRole("group", { name: "케이스" });
+    act(() => vi.advanceTimersByTime(2000));
+    expect(play).not.toHaveBeenCalled();
+    fireEvent.keyDown(kase, { key: "Enter" });
+    expect(play.mock.calls).toEqual([["sw2", "open"]]);
+    // An empty-stage click closes it; the close sound waits for the lid.
+    fireEvent.click(container.querySelector(".work-stage")!);
+    expect(kase).toHaveAttribute("aria-expanded", "false");
+    expect(play).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(530));
+    expect(play.mock.calls).toEqual([["sw2", "open"], ["sw2", "close"]]);
+    // Reopening before the lid lands cancels that close sound.
+    fireEvent.keyDown(kase, { key: "Enter" }); fireEvent.keyDown(kase, { key: "Enter" }); fireEvent.keyDown(kase, { key: "Enter" });
+    act(() => vi.advanceTimersByTime(2000));
+    expect(play.mock.calls.slice(2)).toEqual([["sw2", "open"], ["sw2", "open"]]);
+  });
+  it("stays silent when switching works, and the shown work's waiting close sound is dropped with it", async () => {
+    vi.useFakeTimers(); play.mockClear();
+    const actions = callbacks(); const first = value(); const { container, rerender } = view(first, actions);
+    const kase = screen.getByRole("group", { name: "케이스" });
+    fireEvent.keyDown(kase, { key: "Enter" }); fireEvent.keyDown(kase, { key: "Enter" });
+    expect(play.mock.calls).toEqual([["sw2", "open"]]);
+    const second = { ...first, collection: { ...fixtureWork, id: "game-2", name: "게임 둘", platforms: "PS5" }, case: { ...first.case, title: "게임 둘", front: "/next", platform: "ps5" as const }, position: 3 };
+    rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={second} pending={false} actions={actions} /></PrivacyProvider>);
+    await act(async () => fireEvent.load(container.querySelector('img[src="/next"]')!));
+    expect(screen.getByRole("heading", { name: "게임 둘" })).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(2000));
+    expect(play.mock.calls).toEqual([["sw2", "open"]]);
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
+    expect(play.mock.calls).toEqual([["sw2", "open"], ["ps5", "open"]]);
+  });
+  it("opens a manga volume with a book sound and never closes one", () => {
+    play.mockClear();
+    const first = value();
+    const volumes = [{ id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "cover", localReleaseDate: null, isbn13: null, releaseStatus: null }, { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: null, localReleaseDate: null, isbn13: null, releaseStatus: null }];
+    const manga = { volumes, activeVolumeId: "v1", editionIndex: 0, focuses: [], ownedNumbers: null, scope: "", revision: "", ownership: null, management: null };
+    const actions = { ...callbacks(), onEnlargeManga: vi.fn() };
+    const { container } = view({ ...first, collection: { ...fixtureWork, type: "manga" }, manga }, actions);
+    const [withCover, withoutCover] = container.querySelectorAll<HTMLElement>(".manga-spine");
+    fireEvent.doubleClick(withCover!);
+    expect(play.mock.calls).toEqual([["book", "open"]]);
+    expect(actions.onEnlargeManga).toHaveBeenCalledTimes(1);
+    // The viewer does not open a coverless volume, so neither does the sound.
+    fireEvent.doubleClick(withoutCover!);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+});
+it("pops the showcase star only from the user's toggle, with the state it turns to", () => {
+  pop.popToggle.mockReset();
+  const { actions } = view();
+  expect(pop.popToggle).not.toHaveBeenCalled();
+  const star = screen.getByRole("button", { name: "쇼케이스" });
+  expect(star).toHaveAttribute("data-toggle-key", fixtureWork.id);
+  fireEvent.click(star);
+  expect(pop.popToggle).toHaveBeenCalledExactlyOnceWith(star, !fixtureWork.showcase);
+  expect(actions.onShowcase).toHaveBeenCalledOnce();
 });

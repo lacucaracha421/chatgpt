@@ -267,3 +267,14 @@ it("uses the shared fetched timestamp and backup date", async () => {
     expect(await screen.findByText("9.28")).toBeInTheDocument();
   } finally { vi.useRealTimers(); }
 });
+
+it("keeps the case sound switch under 화면, on by default and stored for the device", async () => {
+  renderSettings(createGateway(), { initialSection: "display" });
+  const toggle = await screen.findByRole("switch", { name: "케이스 소리" });
+  expect(toggle).toBeChecked();
+  await userEvent.click(toggle);
+  expect(toggle).not.toBeChecked();
+  expect(localStorage.getItem("lakomics.caseSounds")).toBe("0");
+  await userEvent.click(toggle);
+  expect(localStorage.getItem("lakomics.caseSounds")).toBe("1");
+});

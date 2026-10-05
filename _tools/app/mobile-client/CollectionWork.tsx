@@ -4,6 +4,7 @@ import {WorkBackdrop} from '../src/collections/work/WorkBackdrop';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode} from 'react';
 import {ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CaseInside, CollectionCase} from '../src/collections/case/CollectionCase';
+import {playCaseSound} from '../src/collections/case/caseSounds';
 import type {StageBox} from '../src/collections/case/fitCaseStage';
 import {FlatJacket, HeroBand, WorkStrip, heroArtwork, workMeta} from '../src/collections/work/WorkStage';
 import {MangaBookcase, MangaStage, type MangaWorkData} from '../src/collections/work/MangaBookcase';
@@ -139,7 +140,7 @@ export function CaseWork(props: CaseWorkProps) {
   return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work" style={{position: 'relative'}} aria-label={label} aria-busy={waiting || !entered} inert={waiting || undefined}>
     {slots.map((slot, index) => slot && <div key={index} data-work-pending={index !== painted && slot === incoming ? '' : undefined} aria-hidden={index !== painted} inert={index !== painted || waiting || undefined}
       style={index === painted ? undefined : {position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none'}}>
-      <CaseWorkSurface {...props} shown={index === painted ? visible : slot} reset={reset} onReset={() => setReset(value => value + 1)} onReady={() => {
+      <CaseWorkSurface {...props} shown={index === painted ? visible : slot} current={index === painted} reset={reset} onReset={() => setReset(value => value + 1)} onReady={() => {
         if (index === painted) setEntered(true);
         if (index !== painted && slot === requested.current) setPainted(index as 0 | 1);
       }}/>
@@ -147,9 +148,11 @@ export function CaseWork(props: CaseWorkProps) {
   </article></WorkZoomProvider>;
 }
 
-function CaseWorkSurface({shown, active, privacy, score, record = workRecordFacts, portraitSources, onStep, info, reset, onReset, onReady}: CaseWorkProps & {shown: Shown; reset: number; onReset(): void; onReady(): void}) {
+function CaseWorkSurface({shown, current, active, privacy, score, record = workRecordFacts, portraitSources, onStep, info, reset, onReset, onReady}: CaseWorkProps & {shown: Shown; /** The painted slot; only its case plays sounds. */current: boolean; reset: number; onReset(): void; onReady(): void}) {
   const [stage, stageBox] = useStageBox(true);
   const [mode, setMode] = useState('case'), [picked, setPicked] = useState('case');
+  // Counts the user's moves that visibly open or close the case; each one plays its case sound (as on the PC).
+  const [caseTurn, setCaseTurn] = useState(0);
   const flatReady = useRef(false);
   const shownId = shown?.item.id;
   useEffect(() => { setMode('case'); setPicked('case'); flatReady.current = false; }, [shownId]);
@@ -162,7 +165,10 @@ function CaseWorkSurface({shown, active, privacy, score, record = workRecordFact
   useEffect(() => { if (art.ready && art.urls.art && picked !== 'case' && picked !== 'open' && picked !== 'flat') setMode(picked); }, [art.ready, art.urls.art, picked]);
   function pick(next: string) {
     setPicked(next);
-    if (next === 'case' || next === 'open' || privacy || (next === 'flat' && flatReady.current)) setMode(next);
+    if (!(next === 'case' || next === 'open' || privacy || (next === 'flat' && flatReady.current))) return;
+    // Views that hide the case (flat sheet, artwork) close it silently.
+    if (next === 'open' ? mode !== 'open' : next === 'case' && mode === 'open') setCaseTurn(turn => turn + 1);
+    setMode(next);
   }
   const data = {...workCaseData(work, shown.urls, privacy), title: work.av?.titleJa?.trim() || work.name, discLabel: [work.av?.productCode, work.av?.maker, work.av?.label].filter(Boolean).join(' · ')};
   const isObject = mode === 'case' || mode === 'open';
@@ -175,7 +181,7 @@ function CaseWorkSurface({shown, active, privacy, score, record = workRecordFact
         {work.type === 'av' && !privacy && <WorkBackdrop key={data.front} src={data.front} onReady={() => ready('backdrop')}/>}
         <WorkZoomObject>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
-          <CollectionCase key={work.id} data={data} large stageBox={stageBox} open={mode === 'open'} onOpenChange={open => pick(open ? 'open' : 'case')} frontReset={reset}
+          <CollectionCase key={work.id} data={data} large stageBox={stageBox} open={mode === 'open'} sound={current ? {turn: caseTurn, work: work.id} : undefined} onOpenChange={open => pick(open ? 'open' : 'case')} frontReset={reset}
             backContent={{hero: shown.urls.hero, overview: work.overview,
               screenshots: work.artworks.filter(art => art.kind === 'screenshot').slice(0, 3).map(art => shown.urls[`thumb:${art.id}`] ?? (art.id === heroArtwork(work) ? shown.urls.hero : null)).filter((url): url is string => Boolean(url)),
               facts: backFacts(work, work.av ?? null),
@@ -277,7 +283,11 @@ function MangaWorkSurface({shown, privacy, reset, onReset, onPick, onEnlarge, on
           : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook key={shown.book} src={shown.book} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => ready('object')}/></WorkZoomObject></WorkZoomStage>}
         <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ArrowPathIcon aria-hidden="true"/></Button>
       </div>
-      <MangaBookcase key={`${item.id}:${manga.activeVolumeId}`} touchTargets manga={manga} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={onEnlarge} onReady={() => ready('strip')}/>
+      <MangaBookcase key={`${item.id}:${manga.activeVolumeId}`} touchTargets manga={manga} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={id => {
+        // The cover viewer stays shut in privacy mode, and so does the book sound.
+        if (!privacy) playCaseSound('book', 'open');
+        onEnlarge(id);
+      }} onReady={() => ready('strip')}/>
     </div>
     <div className="tablet-work__info">{shown.info}</div>
   </>;

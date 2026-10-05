@@ -106,3 +106,13 @@ it('persists the independent tablet NSFW switch without changing privacy',()=>{
  expect(localStorage.getItem('lakomics.mobile.nsfwFilter')).toBe('1');
  expect(localStorage.getItem('lakomics.mobile.privacyMode')).not.toBe('1');
 });
+
+it('turns the shared case sounds off and on from 화면, on by default',()=>{
+ localStorage.clear();
+ render(<Settings status={{configured:false,endpoint:''}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
+ const toggle=screen.getByRole('switch',{name:'케이스 소리'}) as HTMLInputElement;
+ expect(toggle.checked).toBe(true);
+ fireEvent.click(toggle);
+ expect(toggle.checked).toBe(false);
+ expect(localStorage.getItem('lakomics.caseSounds')).toBe('0');
+});

@@ -24,12 +24,12 @@ import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
-import { SectionDropMount, useSectionDrop } from "../shared/ui/useSectionDrop";
+import { useSectionDrop } from "../shared/ui/useSectionDrop";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { useCollectionCoverPerf } from "./collectionPerf";
 import { CollectionCard } from "./CollectionCard";
-import { CollectionExhibition, exhibitionPage } from "./physical/CollectionExhibition";
+import { exhibitionPage } from "./physical/CollectionExhibition";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
@@ -136,7 +136,7 @@ export function CollectionBrowser({
   const stageRef = useRef<HTMLDivElement>(null);
   const typeSwap = useRef({}).current;
   useEffect(() => () => cancelSegmentSwap(typeSwap), [typeSwap]);
-  const [pageMemory, setPageMemory] = useState<{ scope: string; page: number } | null>(null);
+  const [pageMemory] = useState<{ scope: string; page: number } | null>(null);
   const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar]);
   useCollectionCoverPerf(stageRef, scope, collections);
   useLayoutEffect(() => {
@@ -167,10 +167,6 @@ export function CollectionBrowser({
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
   const sectionLabel = TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
-  function changeExhibitionPage(page: number) {
-    setPageMemory({ scope, page });
-    navigationMemory?.set(scope, { scrollTop: 0, focusId: null, page });
-  }
 
   function setTypeFilter(next: CollectionType) {
     if (next === typeFilter && !releaseProvider && !releaseCalendar && !showcase) return;
@@ -264,7 +260,9 @@ export function CollectionBrowser({
   const board = releases.data?.board;
   const viewLayout = viewSettings.layout;
   const renderCollection = useCallback((collection: CollectionSummary) => {
-    const shelf = viewLayout === "shelf" && !showcase;
+    // 쇼케이스 is laid out on the same shelf as the library (user, 2026-10-05): the paged exhibition wall
+    // squeezed its cards until the names ran into the covers.
+    const shelf = showcase || viewLayout === "shelf";
     const work = collection.type !== "manga" || shelf;
     const open = () => latest.current.openCollection(collection);
     return <ContextMenu
@@ -275,11 +273,10 @@ export function CollectionBrowser({
                 collection={collection}
                 coverUrl={collectionCoverUrl(collection)}
                 selected={pickedId === collection.id}
-                lightCase={!showcase}
+                lightCase
                 shelf={shelf}
                 releaseCaption={releaseCaption(collection, board?.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
                 scope={libraryRoot}
-                exhibition={showcase}
                 onClick={() => { if (work) setPickedId(collection.id); else latest.current.openCollection(collection); }}
                 onDoubleClick={() => { if (work) open(); }}
                 onKeyDown={event => { if (work && event.key === "Enter") { event.preventDefault(); open(); } }}
@@ -409,8 +406,10 @@ export function CollectionBrowser({
             query={libraryState.query} coverUrl={collectionCoverUrl} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} onProviderChange={openInbox} />}
           {releaseCalendar && <ReleaseCalendarView query={libraryState.query} onWishlistChange={loadWishlistUnread}
             onOpenSettings={() => onViewChange({ kind: "settings", section: "connection" })} />}
-          {!inbox && showcase && visible.length > 0 && <><SectionDropMount host=".collection-browser" target=".collection-exhibition">{sectionDrop.inline}</SectionDropMount>
-            <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={collection => renderCollection(collection)} scrollRef={stageRef} /></>}
+          {!inbox && showcase && visible.length > 0 && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" {...shelfPutDown}>
+            {sectionDrop.inline}
+            <CollectionList items={visible} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={{ ...viewSettings, layout: "shelf", grouping: "sort" }} render={renderCollection} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />
+          </div>}
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__showcase-scroll">{sectionDrop.inline}<div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div></div>}
           {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" {...shelfPutDown}>
             {sectionDrop.inline}

@@ -1,10 +1,11 @@
 import { useWorkImageReady } from "../work/useWorkImageReady";
-import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useWorkTurnBlocked } from "../work/WorkZoom";
 import "./CollectionCase.css";
 import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
 import { CaseBack, type CaseBackContent } from "./CaseBack";
+import { CASE_SOUND_ATTACK_MS, playCaseSound, preloadCaseSounds } from "./caseSounds";
 export { CaseInside } from "./CaseInside";
 
 export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film" | "book";
@@ -62,12 +63,50 @@ function TrayMedia({ data, front }: { data: CaseData; front: string | null }) {
 }
 /** The case's open/close move (`.kase` transition in CollectionCase.css). */
 const UNFOLD_MS = 560;
+/** A work screen's case sounds: `turn` counts the user's actions that opened or closed this case; `work` names the shown work. */
+export type CaseSoundCue = { turn: number; work: string };
 
-export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox }: {
+/**
+ * Plays the open sound as the case starts opening and the close sound as the lid lands, only for a new `turn`:
+ * mounting, switching works and a navigation that resets `open` stay silent. Reopening, another work, a missing
+ * cue (an inactive surface) or unmounting cancels a close sound that is still waiting for its lid.
+ */
+function useCaseSound(cue: CaseSoundCue | undefined, open: boolean, platform: CasePlatform, lid: RefObject<HTMLElement | null>) {
+  const heard = useRef(cue?.turn);
+  const enabled = Boolean(cue);
+  useEffect(() => { if (enabled) preloadCaseSounds(platform); }, [enabled, platform]);
+  const turn = cue?.turn, work = cue?.work;
+  useEffect(() => {
+    if (turn === undefined) return;
+    // The first turn a surface shows (on mount, or when an inactive slot becomes the shown one) is no action.
+    const fresh = heard.current !== undefined && heard.current !== turn;
+    heard.current = turn;
+    if (!fresh) return;
+    if (open) { playCaseSound(platform, "open"); return; }
+    const node = lid.current;
+    if (!node || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { playCaseSound(platform, "close"); return; }
+    let done = false;
+    const land = () => { if (done) return; done = true; cancel(); playCaseSound(platform, "close"); };
+    const ended = (event: TransitionEvent) => { if (event.target === node && event.propertyName === "transform") land(); };
+    // The clip's click comes ~30 ms in, so the timer starts it that much before the 560 ms lid lands.
+    const timer = setTimeout(land, UNFOLD_MS - CASE_SOUND_ATTACK_MS);
+    function cancel() { done = true; clearTimeout(timer); node!.removeEventListener("transitionend", ended); }
+    node.addEventListener("transitionend", ended);
+    return cancel;
+    // `open` and the platform are read as committed with this turn; later changes alone never play.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turn, work]);
+}
+
+export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox, sound }: {
   data: CaseData; open: boolean; onOpenChange(open: boolean): void; frontReset?: number;
   inside?: ReactNode; note?: ReactNode; backContent?: CaseBackContent; onReady?(): void; large?: boolean; stageBox?: StageBox;
+  /** Only the work screen's case sounds; shelves and previews stay silent. */
+  sound?: CaseSoundCue;
 }) {
   const blocked = useWorkTurnBlocked();
+  const lid = useRef<HTMLSpanElement>(null);
+  useCaseSound(sound, open, data.platform, lid);
   const [angle, setAngle] = useState(open ? -10 : 28);
   const [ratio, setRatio] = useState(.71);
   const [loadedFront, setLoadedFront] = useState<string | null>(null);
@@ -138,7 +177,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       <TrayWalls tray="base" /><span className="k-ridge" aria-hidden="true" />
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
         <CaseSpine data={data} onSettled={url => images.failed("spine", url)} />
-      </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner"><span className="tray-ledge" aria-hidden="true" />{data.privacy ? <span className="case-mask" aria-label="비공개 모드" /> : inside}</span><TrayWalls tray="lid" /></span></span>
+      </span></span><span className="k-spine-in" /><span ref={lid} className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner"><span className="tray-ledge" aria-hidden="true" />{data.privacy ? <span className="case-mask" aria-label="비공개 모드" /> : inside}</span><TrayWalls tray="lid" /></span></span>
     </div>
     </div>
   </div>;

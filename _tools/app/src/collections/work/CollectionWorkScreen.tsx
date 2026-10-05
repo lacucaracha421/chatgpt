@@ -4,6 +4,7 @@ import { WorkBackdrop } from "./WorkBackdrop";
 import { ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon, InformationCircleIcon, PencilIcon, StarIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AreaVisible } from "../../shared/motion/AreaSwitch";
+import { popToggle } from "../../shared/motion/togglePop";
 import type { CollectionSummary, WorkArtworkSummary, CollectionWorkRecord, CollectionRecordEdit, TmdbConnection } from "../../library/types";
 import type { AvCoverSet, AvDetails, AvRelated } from "../avTypes";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
@@ -11,6 +12,7 @@ import { Button } from "../../shared/ui/Button";
 import { Menu, type MenuItem } from "../../shared/ui/Menu";
 import { StableImage } from "../../shared/ui/StableImage";
 import { CaseInside, CollectionCase, type CaseData } from "../case/CollectionCase";
+import { playCaseSound } from "../case/caseSounds";
 import { AvPortrait } from "../av/AvPortrait";
 import { WorkInfo, insideFacts, insideRecord } from "./WorkInfo";
 import { backFacts } from "./workFacts";
@@ -66,7 +68,7 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label={visible.manga ? "컬렉션으로 돌아가기" : "목록으로"} onClick={actions.onClose}><ChevronLeftIcon /></Button>
       <span className="asset-viewer__title"><strong role="heading" aria-level={1}>{title}</strong><small>{visible.manga ? editionName(visible.manga.editionIndex) : workMeta(visible.collection, visible.case.platform, visible.av)}</small></span>
       <span className="asset-viewer__spacer" />
-      <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label="쇼케이스" aria-pressed={visible.collection.showcase} disabled={waiting} onClick={() => actions.onShowcase(visible.collection)}><StarIcon /></Button>
+      <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label="쇼케이스" aria-pressed={visible.collection.showcase} data-toggle-key={visible.collection.id} disabled={waiting} onClick={event => { popToggle(event.currentTarget, !visible.collection.showcase); actions.onShowcase(visible.collection); }}><StarIcon /></Button>
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="편집" disabled={waiting} onClick={() => actions.onEdit(visible.collection)}><PencilIcon /></Button>
       <Menu label="작품 관리" disabled={waiting} trigger={<EllipsisHorizontalIcon />} items={actions.onManage(visible)} />
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon /></Button>
@@ -74,14 +76,14 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="닫기" onClick={actions.onClose}><XMarkIcon /></Button>
     </header>
     {slots.map((slot, index) => slot && <div key={index} className={`work-surface${info ? " work-surface--info" : ""}`} style={index === active ? undefined : { visibility: "hidden", pointerEvents: "none" }} inert={index !== active || waiting} aria-hidden={index !== active}>
-      <WorkSurface data={index === active ? visible : slot} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => {
+      <WorkSurface data={index === active ? visible : slot} active={index === active} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => {
         if (index === active) setEntered(true);
         else if (slot === requested.current) { setEntered(true); setActive(index as 0 | 1); root.current?.focus({ preventScroll: true }); }
       }} />
     </div>)}
   </article></WorkZoomProvider>;
 }
-function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: CollectionWorkData; privacy: boolean; info: boolean; reset: number; actions: WorkActions; onReady(): void }) {
+function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: { data: CollectionWorkData; active: boolean; privacy: boolean; info: boolean; reset: number; actions: WorkActions; onReady(): void }) {
   const stage = useRef<HTMLDivElement>(null);
   const [stageBox, setStageBox] = useState<StageBox>();
   useLayoutEffect(() => {
@@ -105,24 +107,33 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
     JSON.stringify([data.collection.id, data.manga?.activeVolumeId, data.case.front, data.case.spine, data.case.back, data.case.platform, coverSrc, privacy]));
   const [mode, setMode] = useState("case");
   const [picked, setPicked] = useState("case");
+  // Counts the user's moves that visibly open or close the case; each one plays its case sound.
+  const [caseTurn, setCaseTurn] = useState(0);
   const flatReady = useRef(false);
   useEffect(() => { setMode("case"); setPicked("case"); flatReady.current = false; }, [data.collection.id]);
   const desired = useRef(picked); desired.current = picked;
   const artwork = data.artworks.find(item => item.id === picked);
-  function pick(next: string) {
+  function pick(next: string, user = true) {
     setPicked(next);
-    if (next === "case" || next === "open" || privacy || (next === "flat" && flatReady.current)) setMode(next);
+    if (!(next === "case" || next === "open" || privacy || (next === "flat" && flatReady.current))) return;
+    // Views that hide the case (flat sheet, artwork) close it silently.
+    if (user && (next === "open" ? mode !== "open" : next === "case" && mode === "open")) setCaseTurn(turn => turn + 1);
+    setMode(next);
   }
   const isObject = mode === "case" || mode === "open";
   const record = data.record ?? defaultRecord(data.collection);
   return <>
     {coverSrc && <div className={`work-cover-band${data.collection.type === "av" ? " work-cover-band--av" : ""}${info ? " work-cover-band--info" : ""}`}><WorkBackdrop key={coverSrc} src={coverSrc} onReady={() => ready("backdrop")} /></div>}
     {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} onReady={() => ready("hero")} />}
-    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase key={`${data.collection.id}:${data.manga.activeVolumeId}`} onReady={() => ready("strip")} manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga} /></> : <>
+    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase key={`${data.collection.id}:${data.manga.activeVolumeId}`} onReady={() => ready("strip")} manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga && (volumeId => {
+      // The volume viewer opens only on a volume with a cover; the book sound goes with it.
+      if (data.manga?.volumes.some(volume => volume.id === volumeId && volume.coverArtworkId)) playCaseSound("book", "open");
+      actions.onEnlargeManga?.();
+    })} /></> : <>
     <WorkZoomStage stageRef={stage} className={`work-stage${data.collection.type !== "av" && !data.artworks.length ? " work-stage--no-strip" : ""}`} enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode !== "case" || picked !== "case") pick("case"); }}>
       <WorkZoomObject>
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
-        <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset}
+        <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} sound={active ? { turn: caseTurn, work: data.collection.id } : undefined} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset}
           backContent={{ hero: heroSrc, overview: data.collection.overview,
             screenshots: data.artworks.filter(art => art.kind === "screenshot").slice(0, 3).map(art => workArtworkThumbnailUrl(art.id)),
             facts: backFacts(data.collection, data.av),
@@ -137,7 +148,7 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
       {artwork && <div className="work-art" style={mode === "case" || mode === "open" || mode === "flat" ? { visibility: "hidden", pointerEvents: "none" } : undefined} aria-hidden={mode === "case" || mode === "open" || mode === "flat"}>{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <StableImage src={workArtworkUrl(artwork.id)} alt={`${data.case.title} 아트워크`} draggable={false} onLoad={async event => {
         const image = event.currentTarget; try { await image.decode?.(); } catch { /* Settled artwork remains navigable. */ }
         if (desired.current === artwork.id) setMode(artwork.id);
-      }} onError={() => { if (desired.current === artwork.id) setMode(artwork.id); }} onPreloadError={() => { pick("case"); }} />}</div>}
+      }} onError={() => { if (desired.current === artwork.id) setMode(artwork.id); }} onPreloadError={() => { pick("case", false); }} />}</div>}
       {/* Wide edge targets and the strip belong to the immersive media viewer. */}
       <button className="asset-viewer__edge asset-viewer__edge--left" aria-label="이전 작품" disabled={data.position <= 1} onClick={() => actions.onStep(-1)}><ChevronLeftIcon /></button>
       <button className="asset-viewer__edge asset-viewer__edge--right" aria-label="다음 작품" disabled={data.position >= data.total} onClick={() => actions.onStep(1)}><ChevronRightIcon /></button>

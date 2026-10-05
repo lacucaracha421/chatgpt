@@ -43,6 +43,7 @@ import { useReleaseCalendarRefresh } from "./ReleaseCalendarRefreshSettings";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
+import { useCaseSounds } from "../preferences/caseSoundPreference";
 import { SettingsGroup, SettingsRow } from "../shared/ui/SettingsRow";
 
 type SettingsViewProps = {
@@ -84,6 +85,7 @@ const SHORTCUTS = [
 
 export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, onPrivateVaultChanged, initialSection, sectionRequest, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
   const {nsfwFilter,setNsfwFilter} = usePrivacy();
+  const [caseSounds, setCaseSounds] = useCaseSounds();
   const workspace = useWorkspaceChrome();
   const { collections: collectionPublication, characters: characterPublication } = usePublicationJobs();
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
@@ -526,6 +528,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {appZoomError && <p className="settings-view__row-message" role="alert">{appZoomError}</p>}
             <SimpleRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => onPrivacyModeChange(event.target.checked)} />} />
             <SimpleRow name="NSFW 필터" status="전연령 이미지만 보여요" control={<Switch aria-label="NSFW 필터" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />} />
+            <SimpleRow name="케이스 소리" status="컬렉션에서 케이스와 책을 열고 닫을 때" control={<Switch aria-label="케이스 소리" checked={caseSounds} onChange={event => setCaseSounds(event.target.checked)} />} />
           </SettingsGroup>
           <SettingsGroup title="절약 모드">
             <WorkloadControls />
