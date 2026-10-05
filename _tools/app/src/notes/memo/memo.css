@@ -50,4 +50,4 @@
 .memo-section-add { margin-top: 24px; }
 .memo-editor--touch .memo-section-add { min-height: 44px; }
 .memo-editor--file-over { outline: var(--focus-width) solid var(--color-accent); outline-offset: calc(var(--focus-width) * -1); }
-.memo-file-drop-hint { position: absolute; top: 0; right: 0; z-index: 1; padding: var(--space-1) var(--space-2); background: var(--color-surface-elevated); border: var(--border-width) solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-muted); font-size: var(--text-sm); pointer-events: none; }
+.memo-file-drop-hint { position: absolute; top: 0; right: 0; z-index: 1; padding: var(--space-1) var(--space-2); background: var(--color-surface-elevated); border: var(--border-width) solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-muted); font-size: var(--text-xs); pointer-events: none; }

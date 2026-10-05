@@ -914,7 +914,7 @@ describe("App", () => {
         thumbnailRowHeight: 180,
         creatorCardSize: 200,
         collectionType: "manga",
-        mangaReadingDirection: "ltr",
+        mangaReadingDirection: "rtl",
         mangaPageMode: "single",
         mangaCoverSingle: true,
         mangaViewerMargin: "compact",
