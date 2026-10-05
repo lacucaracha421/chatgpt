@@ -13,6 +13,8 @@ export const LAUNCH_IMAGE_CAP_MS = 1500;
 const LAUNCH_SETTLE_MS = 120;
 /** Matches `--motion-screen` in launchSplash.css. */
 const LAUNCH_FADE_MS = 240;
+/** Maintenance still runs if the readiness owner or cover never reports completion. */
+export const LAUNCH_MAINTENANCE_FALLBACK_MS = LAUNCH_CAP_MS + LAUNCH_IMAGE_CAP_MS + LAUNCH_FADE_MS;
 /** The static cover in both index.html files, painted before any script runs. */
 export const LAUNCH_COVER_ID = "launch-cover";
 
@@ -35,6 +37,25 @@ export function releaseLaunchSplash() {
 /** True while a mounted splash still covers the app. */
 export function launchSplashWaiting() {
   return present && phase === "waiting";
+}
+
+/** Schedule background maintenance after the cover has left and a short idle window. */
+export function afterLaunchSettled(task: () => void) {
+  let timer: number | undefined;
+  let started = false;
+  const run = () => {
+    if (started) return;
+    started = true;
+    task();
+  };
+  const fallback = window.setTimeout(run, LAUNCH_MAINTENANCE_FALLBACK_MS);
+  const check = () => {
+    if (present && phase !== 'done') return;
+    if (timer === undefined) timer = window.setTimeout(run, 300);
+  };
+  const stop = subscribe(check);
+  check();
+  return () => { stop(); window.clearTimeout(timer); window.clearTimeout(fallback); };
 }
 
 export function resetLaunchSplashForTests() {

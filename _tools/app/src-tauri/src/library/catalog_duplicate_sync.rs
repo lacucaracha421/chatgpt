@@ -88,7 +88,7 @@ pub(crate) fn duplicate_tier(a: &ReviewWork, b: &ReviewWork) -> Tier {
 }
 
 /// One undecided candidate of the whole-catalog comparison; `left.work_id < right.work_id`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct Found {
     pub left: ReviewWork,
     pub right: ReviewWork,

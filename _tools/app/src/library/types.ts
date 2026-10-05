@@ -280,7 +280,7 @@ export type AvFavoritePerformer = {
   createdAt: string;
 };
 
-export type CatalogSort = "latest" | "views" | "hotDay" | "hotWeek" | "hotMonth";
+export type CatalogSort = "latest" | "bookmarkAdded" | "views" | "hotDay" | "hotWeek" | "hotMonth";
 export type CatalogScope = "all" | "bookmarked";
 export type CatalogLanguage = "korean" | "japanese";
 
@@ -1382,6 +1382,8 @@ export interface LibraryGateway {
   recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;
   collectionTracking?: CollectionTrackingGateway;
   listCatalogReview(): Promise<CatalogReviewPage>;
+  /** Narrow Home count; optional for injected clients that still expose only review pages. */
+  getCatalogReviewCount?(): Promise<number>;
   generateCatalogReview(): Promise<CatalogReviewPage>;
   decideCatalogReview(query: CatalogReviewDecision): Promise<void>;
   openLibrary(path: string): Promise<LibrarySummary>;

@@ -34,6 +34,7 @@ import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useLaunchReady } from "../shared/launch/LaunchSplash";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
+import { readDuplicateCount } from "./duplicateCount";
 import { shadowPageSource, type CharacterReviewSource } from "./characterReviewSource";
 import "./home.css";
 
@@ -192,12 +193,12 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     if (!active) return;
     let live = true;
     onQueuesRequested?.();
-    void Promise.resolve().then(() => gateway.listCatalogReview()).then((page) => {
-      if (live) { setDuplicateCount((page?.rows ?? []).filter((row) => row.state === "pending" && row.actionable).length); setDuplicateError(false); }
+    void readDuplicateCount(gateway).then((count) => {
+      if (live) { setDuplicateCount(count); setDuplicateError(false); }
     }, () => { if (live) setDuplicateError(true); });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway, queueRead, active]);
+  }, [gateway, queueRead, refreshVersion, active]);
 
   const store = useMemo(() => notes ?? (root ? notesStore(root) : null), [notes, root]);
   const notesState = useSyncExternalStore(store?.subscribe ?? noopSubscribe, store?.snapshot ?? emptyNotes);
@@ -257,7 +258,14 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const openUpcoming = (row: UpcomingRow) => row.collectionId ? onNavigate({ kind: 'collection', collectionId: row.collectionId }) : onNavigate(calendarView(row.kind === 'movie' ? 'movie' : 'game'));
   const problems = connectionRows.filter(row => row.tone === 'off' || row.tone === 'idle');
   if (overview?.server?.configured && !overview.server.live && !problems.some(row => row.key === 'server')) problems.unshift({ key: 'server', label: '서버', value: '연결 안 됨', tone: 'off', view: { kind: 'settings', section: 'connection' } });
-  const todayRows = attentionRows(notesState.notes, todos, problems, today).map(row => ({ ...row, disabled: row.key === 'tagger' ? taggerLoading || overviewLoading || fieldFailed('tagger') : row.key === 'pending' ? overviewLoading || fieldFailed('server') : false }));
+  // Keep a late count's row in place for this visit, including a zero result.
+  const duplicateSlot = useRef(false);
+  const reservedTodos = duplicateSlot.current || duplicateCount === null
+    ? [...todos.filter(todo => todo.key !== 'duplicates'), { key: 'duplicates', label: '중복 판본', count: 1 }]
+    : todos;
+  const todayRows = attentionRows(notesState.notes, reservedTodos, problems, today).map(row => ({ ...row,
+    value: row.key === 'duplicates' ? duplicateCount === null ? ' ' : duplicateCount.toLocaleString() : row.value,
+    disabled: row.key === 'duplicates' ? duplicateCount === null : row.key === 'tagger' ? taggerLoading || overviewLoading || fieldFailed('tagger') : row.key === 'pending' ? overviewLoading || fieldFailed('server') : false }));
 
   const cover = (row: ReleaseRow | UpcomingRow) => {
     if (privacyMode) return null;
@@ -278,11 +286,14 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const shelfLoading = (Boolean(tracking) && !release.data && !release.error) || (!wishlistReady && !wishlistError);
   const shelfFailed = Boolean(release.error) || wishlistError;
   const retryShelf = () => { release.reload(); setShelfRetry(value => value + 1); };
-  const attentionPending = (Boolean(gateway.getHomeOverview) && !overview && !overviewError) || duplicateCount === null && !duplicateError
+  const attentionPending = (Boolean(gateway.getHomeOverview) && !overview && !overviewError)
     || Boolean(shadowQueueApi) && !restricted && characterQueue === null && !characterError || Boolean(store && !notesState.ready);
   // Resolve the initial block arrangement together; subsequent reads leave it mounted.
   const layoutShown = useRef(false);
-  if (collectionsReady && (media.data || media.failed) && !shelfLoading && !attentionPending) layoutShown.current = true;
+  if (collectionsReady && (media.data || media.failed) && !shelfLoading && !attentionPending) {
+    if (!layoutShown.current && duplicateCount === null) duplicateSlot.current = true;
+    layoutShown.current = true;
+  }
   const firstLoad = !layoutShown.current;
   // On app start the launch splash covers this first load, then leaves with Home's first images.
   const launchHost = useRef<HTMLDivElement>(null);
@@ -322,6 +333,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
       {!firstLoad && todayRows.length > 0 && <HomeToday rows={todayRows} animate={false} onOpen={row => {
         if (row.noteId) onNavigate({ kind: 'notes', noteId: row.noteId });
         else if (row.key.startsWith('connection:')) { const problem = problems.find(p => `connection:${p.key}` === row.key); if (problem) onNavigate(problem.view); }
+        else if (row.key === 'duplicates') setDialog({ kind: 'duplicates' });
         else todos.find(todo => todo.key === row.key)?.open();
       }} />}
       {reviewUnknown.some(row => row.failed) && <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p>}

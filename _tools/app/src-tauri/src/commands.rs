@@ -2358,15 +2358,33 @@ pub async fn get_catalog_group_editions(
         .map_err(CommandError::from)
 }
 
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum CatalogReviewResponse {
+    Count(usize),
+    Page(crate::library::catalog_review::ReviewPage),
+}
+
 #[tauri::command]
 pub async fn list_catalog_review(
     state: State<'_, AppState>,
-) -> Result<crate::library::catalog_review::ReviewPage, CommandError> {
+    count_only: Option<bool>,
+) -> Result<CatalogReviewResponse, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.list_catalog_review())
-        .await
-        .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || {
+        if count_only.unwrap_or(false) {
+            library
+                .catalog_review_count()
+                .map(CatalogReviewResponse::Count)
+        } else {
+            library
+                .list_catalog_review()
+                .map(CatalogReviewResponse::Page)
+        }
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -3614,6 +3632,26 @@ fn current_required(state: State<'_, AppState>) -> Result<Library, CommandError>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn catalog_review_count_response_preserves_the_existing_page_wire_shape() {
+        assert_eq!(
+            serde_json::to_value(super::CatalogReviewResponse::Count(7)).unwrap(),
+            serde_json::json!(7)
+        );
+        let page = super::CatalogReviewResponse::Page(crate::library::catalog_review::ReviewPage {
+            rows: vec![],
+            inspected_works: 0,
+            comparisons: 0,
+            skipped_buckets: 0,
+        });
+        assert_eq!(
+            serde_json::to_value(page).unwrap(),
+            serde_json::json!({
+                "rows": [], "inspectedWorks": 0, "comparisons": 0, "skippedBuckets": 0,
+            })
+        );
+    }
+
     use std::{io, path::PathBuf};
 
     use crate::library::{

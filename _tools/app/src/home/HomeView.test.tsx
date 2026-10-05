@@ -18,13 +18,14 @@ const gateway = vi.hoisted(() => ({
   getHomeMedia: vi.fn(),
   getOnlineCatalogStatus: vi.fn(),
   listCatalogReview: vi.fn(),
+  getCatalogReviewCount: undefined as undefined | ReturnType<typeof vi.fn>,
   cloudBackfillProgress: vi.fn(),
   authoritySyncHealth: vi.fn(),
   getRevisitSlate: vi.fn(),
   listContinueItems: vi.fn(),
   listAvFavorites: vi.fn(),
 }));
-vi.mock("../library/LibraryContext", () => ({ useLibrary: () => ({ gateway, library: { root: "fixture" } }) }));
+vi.mock("../library/LibraryContext", () => ({ useLibrary: () => ({ gateway, library: { root: "fixture" } }), useOptionalLibrary: () => null }));
 const artistFixture = vi.hoisted(() => ({ gateway: null as unknown, rows: null as unknown }));
 vi.mock("../artists/artistStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../artists/artistStore")>();
@@ -94,6 +95,7 @@ beforeEach(() => {
   gateway.getHomeMedia.mockResolvedValue({ playing: [], dailyAsset: null });
   gateway.getOnlineCatalogStatus.mockResolvedValue({ installed: true, workCount: 1, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: iso(14, 19), lastSuccessAt: iso(14, 19), lastAdded: 0, lastError: null, streams: [] });
   gateway.listCatalogReview.mockResolvedValue({ rows: [], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
+  gateway.getCatalogReviewCount = undefined;
   gateway.cloudBackfillProgress.mockResolvedValue({ controlState: "idle", totalAssets: 1, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 1, failed: 0, activeWorkers: 0, lastError: null });
   gateway.authoritySyncHealth.mockResolvedValue(healthy);
   gateway.listContinueItems.mockResolvedValue([]);
@@ -106,6 +108,25 @@ afterEach(() => {
 });
 
 describe('Home attention', () => {
+  it('releases Home and the splash while duplicates are pending, then fills the reserved row', async () => {
+    resetLaunchSplashForTests();
+    let finish!: (value: number) => void;
+    gateway.getCatalogReviewCount = vi.fn().mockReturnValueOnce(new Promise<number>(resolve => { finish = resolve; }));
+    render(<LaunchSplash />);
+    const { view } = renderHome();
+    await waitFor(() => expect(view.container.querySelector('.home-pc-layout')).toHaveAttribute('aria-busy', 'false'));
+    const row = screen.getByRole('button', { name: /중복 판본/ });
+    expect(row).toBeDisabled();
+    const parent = row.parentElement;
+    await waitFor(() => expect(document.querySelector('.launch-splash')).toBeNull());
+    expect(gateway.getCatalogReviewCount).toHaveBeenCalledOnce();
+    expect(gateway.listCatalogReview).not.toHaveBeenCalled();
+    await act(async () => finish(3));
+    expect(screen.getByRole('button', { name: /중복 판본/ })).toBe(row);
+    expect(row.parentElement).toBe(parent);
+    expect(row).toHaveTextContent('3');
+    expect(row).not.toBeDisabled();
+  });
   it('counts the actionable pending dialog queue and refreshes after a duplicate decision', async () => {
     const rows = Array.from({ length: 95 }, (_, id) => ({ leftAnchor: `${id}:left`, rightAnchor: `${id}:right`, state: 'pending', actionable: true }));
     gateway.listCatalogReview.mockResolvedValue({ rows: [...rows, { state: 'confirm', actionable: true }, { state: 'pending', actionable: false }], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });

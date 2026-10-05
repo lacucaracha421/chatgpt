@@ -17,6 +17,8 @@ const TAGS: usize = 64;
 /// The bounded canary ledger of human decisions. Automatic merges
 /// (`catalog_duplicate_sync`) have their own bound and do not use this one up.
 pub(super) const HUMAN_DECISIONS: i64 = 500;
+#[cfg(test)]
+thread_local! { static QUEUE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 /// Decision rows not owned by an automatic merge.
 pub(super) fn human_decisions(c: &Connection) -> Result<i64, LibraryError> {
@@ -78,10 +80,11 @@ pub struct ReviewDecision {
 
 /// Shared by Library clones: opening Home and its dialog compares an unchanged catalog
 /// once. No schema change or catalog write is needed to discover pending candidates.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub(super) struct QueueCache {
     input: Option<String>,
     found: Vec<super::catalog_duplicate_sync::Found>,
+    count: Option<usize>,
 }
 
 impl QueueCache {
@@ -91,10 +94,43 @@ impl QueueCache {
     ) -> Result<&[super::catalog_duplicate_sync::Found], LibraryError> {
         let input = queue_input(c)?;
         if self.input.as_deref() != Some(input.as_str()) {
+            #[cfg(test)]
+            QUEUE_SCANS.with(|scans| scans.set(scans.get() + 1));
             self.found = super::catalog_duplicate_sync::scan(c)?;
             self.input = Some(input);
+            self.count = None;
         }
         Ok(&self.found)
+    }
+
+    fn load(&mut self, path: &std::path::Path) {
+        if self.input.is_none() {
+            if let Some(saved) = std::fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Self>(&bytes).ok())
+            {
+                *self = saved;
+            }
+        }
+    }
+
+    fn persist(&self, path: &std::path::Path) {
+        // Disposable derived data: a failed/interrupted write only causes another scan.
+        // UUID staging avoids partial readers and collisions between app processes.
+        let Some(parent) = path.parent() else { return };
+        let Ok(bytes) = serde_json::to_vec(self) else {
+            return;
+        };
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+        let temporary = parent.join(format!("review-{}.tmp", uuid::Uuid::new_v4()));
+        if std::fs::write(&temporary, bytes).is_ok() {
+            // Windows rename cannot replace an existing file. The cache is optional.
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::rename(&temporary, path);
+        }
+        let _ = std::fs::remove_file(temporary);
     }
 }
 
@@ -138,6 +174,7 @@ fn whole_catalog_page(c: &Connection, cache: &mut QueueCache) -> Result<ReviewPa
     for pair in &cache.found {
         queue.push(pending_row(c, pair)?);
     }
+    cache.count = Some(queue.iter().filter(|row| row.actionable).count());
     queue.extend(rows(c, None, false)?);
     Ok(ReviewPage {
         rows: queue,
@@ -587,14 +624,46 @@ fn decide_row(c: &Connection, q: &ReviewDecision, row: ReviewRow) -> Result<(), 
     Ok(())
 }
 impl Library {
+    fn catalog_review_cache_path(&self) -> std::path::PathBuf {
+        self.root.join(".cache/catalog-review/queue-v1.json")
+    }
+
+    pub fn catalog_review_count(&self) -> Result<usize, LibraryError> {
+        let mut cache = self
+            .catalog_review_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let path = self.catalog_review_cache_path();
+        cache.load(&path);
+        let mut reader = self.catalog_read_connection()?;
+        let tx = reader.transaction()?;
+        cache.candidates(&tx)?;
+        if let Some(count) = cache.count {
+            return Ok(count);
+        }
+        // No decision history, evidence refresh or review tokens are needed by Home.
+        let count = if human_decisions(&tx)? >= HUMAN_DECISIONS {
+            0
+        } else {
+            cache.found.len()
+        };
+        cache.count = Some(count);
+        cache.persist(&path);
+        Ok(count)
+    }
+
     pub fn list_catalog_review(&self) -> Result<ReviewPage, LibraryError> {
         let mut cache = self
             .catalog_review_cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let path = self.catalog_review_cache_path();
+        cache.load(&path);
         let mut reader = self.catalog_read_connection()?;
         let tx = reader.transaction()?;
-        whole_catalog_page(&tx, &mut cache)
+        let page = whole_catalog_page(&tx, &mut cache)?;
+        cache.persist(&path);
+        Ok(page)
     }
     pub fn generate_catalog_review(&self) -> Result<ReviewPage, LibraryError> {
         self.list_catalog_review()

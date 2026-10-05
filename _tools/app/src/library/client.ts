@@ -289,6 +289,12 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   getCatalogGroupEditions: (query) => invoke<CatalogGroupEditionsPage>("get_catalog_group_editions", { query }),
   setCatalogGroupRepresentative: (query) => invoke<void>("set_catalog_group_representative", { query }),
   listCatalogReview: () => invoke<CatalogReviewPage>("list_catalog_review"),
+  getCatalogReviewCount: async () => {
+    const result = await invoke<number | CatalogReviewPage>("list_catalog_review", { countOnly: true });
+    // Existing preview bridges (and an older native binary during dev) return a page.
+    return typeof result === "number" ? result
+      : (result?.rows ?? []).filter(row => row.state === "pending" && row.actionable).length;
+  },
   generateCatalogReview: () => invoke<CatalogReviewPage>("generate_catalog_review"),
   decideCatalogReview: (query) => invoke<void>("decide_catalog_review", { query }),
   searchOnlineCatalog: (query: CatalogSearchQuery) =>

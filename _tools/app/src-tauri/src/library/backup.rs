@@ -135,10 +135,22 @@ impl Library {
 
         let path = backup_path(&self.root, BackupKind::Daily, now, None);
         let temporary = path.with_extension("sqlite.tmp");
-        let connection = self.connection()?;
+        // Restore uses backup_lock too, so the file cannot be replaced under this
+        // reader. SQLite online backup includes committed WAL data consistently;
+        // the application's global writer/read mutex is never held for the copy.
+        let connection = Connection::open_with_flags(
+            self.root.join("library.sqlite"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        // Pin the WAL snapshot before copying, even if writers keep committing.
+        let _: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         // Publish only a complete, verified snapshot. The UUID target does not exist yet,
         // so this same-directory rename also works on Windows without replacing a file.
-        create_verified_snapshot_released(connection, &temporary)?;
+        write_snapshot(&connection, &temporary)?;
+        drop(connection);
+        verify_or_remove(&temporary)?;
         fs::rename(&temporary, &path).map_err(|source| backup_error(&path, source))?;
         rotate_daily_backups(&self.root, &path)?;
         // Creation already verified this snapshot; returning metadata needs no second check.
@@ -599,7 +611,7 @@ fn write_snapshot(source: &Connection, destination: &Path) -> Result<(), Library
     let result = (|| {
         run_after_reservation_hook(destination)?;
         source
-            .backup(MAIN_DB, destination, None)
+            .backup(MAIN_DB, destination, Some(snapshot_copy_progress))
             .map_err(|source| LibraryError::Backup {
                 path: destination.to_path_buf(),
                 source: std::io::Error::other(source),
@@ -609,6 +621,20 @@ fn write_snapshot(source: &Connection, destination: &Path) -> Result<(), Library
         remove_snapshot(destination)?;
     }
     result
+}
+
+fn snapshot_copy_progress(_progress: rusqlite::backup::Progress) {
+    #[cfg(test)]
+    DURING_COPY_HOOK.with(|stored| {
+        if let Some(hook) = stored.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    static DURING_COPY_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn verify_or_remove(destination: &Path) -> Result<(), LibraryError> {
@@ -1818,6 +1844,77 @@ mod tests {
             free_during_verify.get(),
             Some(true),
             "the minutes-long quick_check must not block every other library command"
+        );
+    }
+
+    #[test]
+    fn daily_backup_copy_allows_reads_and_writes_and_restores_its_consistent_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE backup_consistency(id INTEGER PRIMARY KEY, payload BLOB);
+             INSERT INTO backup_consistency VALUES(1, zeroblob(2000000));",
+            )
+            .unwrap();
+        let copying = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let worker_library = library.clone();
+        let worker_copying = Arc::clone(&copying);
+        let worker_release = Arc::clone(&release);
+        let backup = std::thread::spawn(move || {
+            super::DURING_COPY_HOOK.with(|stored| {
+                *stored.borrow_mut() = Some(Box::new(move || {
+                    worker_copying.wait();
+                    worker_release.wait();
+                }))
+            });
+            worker_library
+                .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+                .unwrap()
+                .unwrap()
+        });
+        copying.wait();
+        let read_library = library.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let read = std::thread::spawn(move || {
+            let c = read_library.connection().unwrap();
+            let count: i64 = c
+                .query_row("SELECT COUNT(*) FROM backup_consistency", [], |r| r.get(0))
+                .unwrap();
+            c.execute(
+                "INSERT INTO backup_consistency VALUES(2, zeroblob(2000000))",
+                [],
+            )
+            .unwrap();
+            done_tx.send(count).unwrap();
+        });
+        // Always release the copy before asserting, so regressions do not strand threads.
+        let result = done_rx.recv_timeout(Duration::from_secs(5));
+        release.wait();
+        let backup = backup.join().unwrap();
+        read.join().unwrap();
+        assert_eq!(
+            result.unwrap(),
+            1,
+            "a read and write must finish while copying is paused"
+        );
+        library.restore_backup(&backup.id).unwrap();
+        let c = library.connection().unwrap();
+        assert_eq!(
+            c.query_row("SELECT COUNT(*) FROM backup_consistency", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            c.query_row("SELECT length(payload) FROM backup_consistency", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap(),
+            2000000
         );
     }
 }

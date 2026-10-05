@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LAUNCH_CAP_MS, LAUNCH_COVER_ID, LAUNCH_IMAGE_CAP_MS, LaunchSplash, resetLaunchSplashForTests, useLaunchReady } from "./LaunchSplash";
+import { afterLaunchSettled, LAUNCH_CAP_MS, LAUNCH_COVER_ID, LAUNCH_IMAGE_CAP_MS, LaunchSplash, resetLaunchSplashForTests, useLaunchReady } from "./LaunchSplash";
 
 const splash = () => document.querySelector<HTMLElement>(".launch-splash");
 const start = () => 0;
@@ -36,6 +36,30 @@ afterEach(() => {
 });
 
 describe("LaunchSplash", () => {
+  it('defers maintenance through readiness, image settling and the cover fade', () => {
+    const view = render(<><Screen ready={false} /><LaunchSplash elapsed={start} /></>);
+    const task = vi.fn();
+    const cancel = afterLaunchSettled(task);
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(task).not.toHaveBeenCalled();
+    view.rerender(<><Screen ready /><LaunchSplash elapsed={start} /></>);
+    act(() => { vi.advanceTimersByTime(120); });
+    expect(splash()?.dataset.state).toBe('leaving');
+    act(() => { vi.advanceTimersByTime(240); });
+    expect(splash()).toBeNull();
+    expect(task).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(task).toHaveBeenCalledOnce();
+    cancel();
+  });
+
+  it('cancels maintenance when its workspace leaves before the idle window', () => {
+    const task = vi.fn();
+    const cancel = afterLaunchSettled(task);
+    cancel();
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(task).not.toHaveBeenCalled();
+  });
   it("takes over the static index.html cover at mount and stays while the first screen is loading", () => {
     const cover = staticCover();
     render(<><Screen ready={false} /><LaunchSplash elapsed={start} /></>);

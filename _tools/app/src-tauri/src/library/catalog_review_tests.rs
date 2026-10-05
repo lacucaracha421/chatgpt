@@ -37,6 +37,15 @@ fn catalog_review_whole_queue_public_commands_share_cache_and_save_without_canar
     .unwrap();
     drop(c);
     let library = Library::open(dir.path()).unwrap();
+    QUEUE_SCANS.with(|scans| scans.set(0));
+    assert_eq!(library.catalog_review_count().unwrap(), 1);
+    assert_eq!(library.catalog_review_count().unwrap(), 1);
+    QUEUE_SCANS.with(|scans| assert_eq!(scans.get(), 1));
+    // A fresh process starts with an empty in-memory cache. Keep the fixture's
+    // single-open lease while exercising that same disk-load path.
+    *library.catalog_review_cache.lock().unwrap() = QueueCache::default();
+    assert_eq!(library.catalog_review_count().unwrap(), 1);
+    QUEUE_SCANS.with(|scans| assert_eq!(scans.get(), 1, "second start must not scan"));
     let first = library.list_catalog_review().unwrap();
     let row = first.rows.iter().find(|r| r.state == "pending").unwrap();
     assert!(row.actionable);
@@ -52,6 +61,8 @@ fn catalog_review_whole_queue_public_commands_share_cache_and_save_without_canar
         .unwrap();
     let page = library.list_catalog_review().unwrap();
     assert!(page.rows.iter().all(|r| r.state != "pending"));
+    assert_eq!(library.catalog_review_count().unwrap(), 0);
+    QUEUE_SCANS.with(|scans| assert_eq!(scans.get(), 2, "decision invalidates discovery"));
     assert_eq!(page.rows[0].state, "falsePositive");
     let reader = library.catalog_read_connection().unwrap();
     assert_eq!(
@@ -68,6 +79,34 @@ fn catalog_review_whole_queue_public_commands_share_cache_and_save_without_canar
             .unwrap(),
         0
     );
+}
+
+#[test]
+fn catalog_review_persisted_cache_invalidates_on_catalog_change_and_recovers_from_corruption() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("catalogs")).unwrap();
+    let c = fixture(&dir.path().join("library.sqlite"));
+    c.execute_batch("ALTER TABLE catalog.Works ADD COLUMN Views INTEGER DEFAULT 0;
+        ALTER TABLE catalog.Works ADD COLUMN Posted INTEGER DEFAULT 0;").unwrap();
+    catalog_groups::ensure_membership(&c).unwrap();
+    c.execute("VACUUM catalog INTO ?1", [dir.path().join("catalogs/kdata.db").to_str().unwrap()]).unwrap();
+    drop(c);
+    let library = Library::open(dir.path()).unwrap();
+    QUEUE_SCANS.with(|scans| scans.set(0));
+    assert_eq!(library.catalog_review_count().unwrap(), 1);
+    let path = library.catalog_review_cache_path();
+    let catalog = Connection::open(dir.path().join("catalogs/kdata.db")).unwrap();
+    catalog.execute_batch("UPDATE Works SET Title='No longer matching',TitleJpn=NULL WHERE Id=2;
+        UPDATE CrawlState SET Value='new-content';").unwrap();
+    drop(catalog);
+    library.prepare_online_catalog_counts().unwrap();
+    *library.catalog_review_cache.lock().unwrap() = QueueCache::default();
+    assert_eq!(library.catalog_review_count().unwrap(), 0);
+    QUEUE_SCANS.with(|scans| assert_eq!(scans.get(), 2));
+    std::fs::write(path, b"interrupted cache").unwrap();
+    *library.catalog_review_cache.lock().unwrap() = QueueCache::default();
+    assert_eq!(library.catalog_review_count().unwrap(), 0);
+    QUEUE_SCANS.with(|scans| assert_eq!(scans.get(), 3));
 }
 
 #[test]
@@ -276,6 +315,28 @@ fn catalog_review_copied_database_queue_measurement() {
         })
         .count();
     eprintln!("copied DB: legacy_pending={legacy_pending}, whole_pending={}, uncertain={uncertain}; baseline_scan_ms={scan_ms}, cold_queue_ms={first_ms}, warm_queue_ms={warm_ms}", count(&first));
+}
+
+#[test]
+#[ignore = "requires HOME_PERF_SNAPSHOT pointing to a disposable complete library snapshot"]
+fn catalog_review_home_count_snapshot_measurement() {
+    use std::time::Instant;
+    let root = std::path::PathBuf::from(std::env::var_os("HOME_PERF_SNAPSHOT").expect("copied fixture root"));
+    let library = Library::open(&root).unwrap();
+    library.prepare_online_catalog_counts().unwrap();
+    let persisted_before = library.catalog_review_cache_path().exists();
+    QUEUE_SCANS.with(|scans| scans.set(0));
+    let started = Instant::now();
+    let count = library.catalog_review_count().unwrap();
+    let first_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let first_scans = QUEUE_SCANS.with(|scans| scans.get());
+    // Clear only process memory: a second launch must use the saved fingerprint.
+    *library.catalog_review_cache.lock().unwrap() = QueueCache::default();
+    let started = Instant::now();
+    assert_eq!(library.catalog_review_count().unwrap(), count);
+    let fresh_cache_ms = started.elapsed().as_secs_f64() * 1000.0;
+    QUEUE_SCANS.with(|scans| assert_eq!(scans.get(), first_scans));
+    eprintln!("Home count snapshot: count={count} persisted_before={persisted_before} first_ms={first_ms:.2} first_scans={first_scans} fresh_process_cache_ms={fresh_cache_ms:.2} fresh_process_scans=0");
 }
 
 #[test]

@@ -33,11 +33,24 @@ it("forwards volume progress to an optional listener", async () => {
 it("routes catalog review to explicit native commands", async () => {
   await libraryGateway.listCatalogReview();
   expect(invoke).toHaveBeenLastCalledWith("list_catalog_review");
+  invoke.mockResolvedValueOnce(7);
+  expect(await libraryGateway.getCatalogReviewCount!()).toBe(7);
+  expect(invoke).toHaveBeenLastCalledWith("list_catalog_review", { countOnly: true });
   await libraryGateway.generateCatalogReview();
   expect(invoke).toHaveBeenLastCalledWith("generate_catalog_review");
   const query = { leftAnchor: "1", rightAnchor: "2", reviewToken: "displayed-evidence", decision: "split" as const };
   await libraryGateway.decideCatalogReview(query);
   expect(invoke).toHaveBeenLastCalledWith("decide_catalog_review", { query });
+});
+
+it("accepts the existing preview review-page response for a count request", async () => {
+  invoke.mockResolvedValueOnce({ rows: [
+    { state: "pending", actionable: true },
+    { state: "pending", actionable: false },
+    { state: "confirm", actionable: true },
+  ] });
+  expect(await libraryGateway.getCatalogReviewCount!()).toBe(1);
+  expect(invoke).toHaveBeenLastCalledWith("list_catalog_review", { countOnly: true });
 });
 
 describe("libraryGateway similarity contract", () => {

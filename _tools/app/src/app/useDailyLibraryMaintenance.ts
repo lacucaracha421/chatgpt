@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { LibraryGateway } from "../library/types";
+import { afterLaunchSettled } from "../shared/launch/LaunchSplash";
 
 export function useDailyLibraryMaintenance(gateway: LibraryGateway, restricted: boolean, appendMessage: (next: string) => void, refreshTrashCount: () => Promise<void>) {
   useEffect(() => {
     if (restricted) return;
     let active = true;
-    void (async () => {
+    const run = async () => {
       try {
         await gateway.ensureDailyBackup();
       } catch (error) {
@@ -23,7 +24,8 @@ export function useDailyLibraryMaintenance(gateway: LibraryGateway, restricted: 
       } finally {
         if (active) void refreshTrashCount().catch(() => undefined);
       }
-    })();
-    return () => { active = false; };
+    };
+    const cancel = afterLaunchSettled(() => { void run(); });
+    return () => { active = false; cancel(); };
   }, [appendMessage, gateway, refreshTrashCount, restricted]);
 }
