@@ -291,6 +291,7 @@ pub fn run() {
             commands::artists::preview_artist_source_fill,
             commands::artists::apply_artist_source_fill,
             commands::artists::get_artist_caption_labels,
+            commands::artists::get_asset_artist,
             commands::artists::set_artist_display_name,
             commands::artists::set_artist_flags,
             commands::artists::merge_artists,

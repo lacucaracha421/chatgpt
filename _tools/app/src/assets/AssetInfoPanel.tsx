@@ -5,8 +5,8 @@ import { ArrowTopRightOnSquareIcon, CheckIcon, ChevronRightIcon, ClipboardDocume
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { artistHandle } from "../artists/format";
-import { invalidateArtists } from "../artists/artistStore";
-import type { ArtistStyleSuggestion, ArtistSummary } from "../artists/types";
+import { invalidateArtists, useAssetArtist } from "../artists/artistStore";
+import type { ArtistStyleSuggestion } from "../artists/types";
 import { AutoTagHighlights, AutoTagList, useAssetAutoTags } from "../autotags/AutoTagSections";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -58,7 +58,6 @@ export function AssetInfoPanel({
   const [copyError, setCopyError] = useState<string | null>(null);
   const [sourceGroup, setSourceGroup] = useState<AssetSummary[]>([]);
   const [folderPaths, setFolderPaths] = useState<string[]>([]);
-  const [artist, setArtist] = useState<ArtistSummary | null>(null);
   const [styleSuggestion, setStyleSuggestion] = useState<ArtistStyleSuggestion | null>(null);
   const [styleSuggestionHidden, setStyleSuggestionHidden] = useState(false);
   const [styleSuggestionPending, setStyleSuggestionPending] = useState(false);
@@ -66,6 +65,7 @@ export function AssetInfoPanel({
   useAutoDismiss(copyError, setCopyError);
   const assetIds = assets.map((item) => item.id).join(",");
   const asset = assets.length === 1 ? assets[0] : null;
+  const artist = useAssetArtist(asset);
   const masked = useAssetMasks();
   const privacyMode = masked(asset, requestedPrivacy);
   const autoTags = useAssetAutoTags(gateway.autoTags, asset?.id ?? null, onAutoTagFilterApplied);
@@ -99,19 +99,6 @@ export function AssetInfoPanel({
     }, () => { if (active) setFolderPaths([]); });
     return () => { active = false; };
   }, [asset?.id, classifications, gateway]);
-
-  useEffect(() => {
-    let active = true;
-    const artists = gateway.artists;
-    const query = asset?.creatorHandle || asset?.creatorName || asset?.creatorUrl;
-    if (!asset || !artists || typeof artists.list !== "function" || !query) { setArtist(null); return; }
-    void artists.list({ search: query, limit: 20 }).then((page) => {
-      if (!active) return;
-      const keys = [asset.creatorHandle?.replace(/^@+/, ""), asset.creatorUrl].filter(Boolean);
-      setArtist(page.artists.find((item) => item.keys.some((key) => keys.includes(key)) || item.label === asset.creatorName) ?? null);
-    }, () => { if (active) setArtist(null); });
-    return () => { active = false; };
-  }, [asset?.id, asset?.creatorHandle, asset?.creatorName, asset?.creatorUrl, gateway.artists]);
 
   useEffect(() => {
     let active = true;
@@ -174,7 +161,7 @@ export function AssetInfoPanel({
       <div className="asset-info-panel__facts">
         <div className="asset-info-panel__artist-copy">
           <div className="asset-info-panel__artist-line"><strong className="artist-name">{artist?.label ?? asset.creatorName ?? handle ?? "작가 미상"}</strong><Button data-edit-source size="icon" variant="ghost" aria-label="출처 정보 편집" onClick={beginEditing}><PencilSquareIcon aria-hidden="true" /></Button></div>
-          <span>{handle ?? "계정 정보 없음"}{artist ? ` · 모은 그림 ${artist.assetCount.toLocaleString("ko-KR")}장` : ""}</span>
+          <span>{artist ? [handle, `모은 그림 ${artist.assetCount.toLocaleString("ko-KR")}장`].filter(Boolean).join(" · ") : handle ?? (asset.creatorName || asset.creatorUrl ? "" : "계정 정보 없음")}</span>
           {(artist?.id || asset.creatorHandle || asset.creatorUrl) && (onOpenArtist || asset.creatorUrl) && <Button size="sm" variant="quiet" className="asset-info-panel__artist-link" onClick={openArtist}>작가 페이지 <ChevronRightIcon aria-hidden="true" /></Button>}
         </div>
         <dl className="asset-info-panel__facts-list" data-info-section="source" aria-label="출처와 파일">

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useOptionalLibrary } from "../library/LibraryContext";
 import type { AssetSummary } from "../library/types";
-import type { ArtistCaptionLabels, ArtistGateway, ArtistOverview } from "./types";
+import type { ArtistCaptionLabels, ArtistGateway, ArtistOverview, ArtistSummary } from "./types";
 
 /**
  * One revision counter for every artist read: a write bumps it and each open view (index,
@@ -77,6 +77,13 @@ export function useArtistRead<T>(read: ((gateway: ArtistGateway) => Promise<T>) 
 
 export function useArtistOverview(): ArtistOverview | null {
   return useArtistRead((gateway) => gateway.overview(), "overview").data;
+}
+
+/** The asset scope resolves assignments before creator keys, including hidden artists. */
+export function useAssetArtist(asset: AssetSummary | null | undefined): ArtistSummary | null {
+  useArtistsChanged(Boolean(asset));
+  return useArtistRead(asset ? (gateway) => gateway.assetArtist?.(asset.id) ?? Promise.resolve(null) : null,
+    `asset:${asset?.id ?? ""}:${asset?.creatorHandle ?? ""}:${asset?.creatorUrl ?? ""}:${asset?.creatorName ?? ""}`).data;
 }
 
 /** Gallery caption: a renamed or merged artist's name, or the artist an image was assigned to. */

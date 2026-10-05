@@ -585,6 +585,9 @@ impl Library {
             if !materialized { enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?; }
         }
         if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
+        if matches!(registration, Registration::Normal) {
+            super::artists::fill_ingested_artist(&transaction, &asset.id, &asset.collected_at)?;
+        }
         transaction.commit()?;
         self.publication_inputs.signal(&[10, 11]);
         drop(connection);
@@ -661,6 +664,7 @@ impl Library {
         }
         if !materialized { enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?; }
         if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
+        super::artists::fill_ingested_artist(&transaction, &asset.id, &asset.collected_at)?;
         transaction.commit()?;
         self.publication_inputs.signal(&[10, 11]);
         drop(connection);
@@ -1656,6 +1660,61 @@ mod tests {
     }
 
     #[test]
+    fn ingestion_fills_artist_from_post_url_for_all_capture_sources() {
+        for import_source in [
+            ImportSource::Direct,
+            ImportSource::BrowserExtension,
+            ImportSource::MetadataImport,
+        ] {
+            let fixture = IngestionFixture::new();
+            let outcome = fixture.library.ingest_media(IngestMediaRequest {
+                source_path: fixture.source.clone(),
+                classification_id: None,
+                source_url: Some("https://x.com/HoundShou/status/123/photo/1".into()),
+                collected_at: None,
+                replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
+            }).unwrap();
+            let IngestOutcome::Added { asset } = outcome else {
+                panic!("expected added asset");
+            };
+            let artist = fixture.library.asset_artist(&asset.id).unwrap().unwrap();
+            assert_eq!(artist.label, "HoundShou");
+            assert_eq!(artist.keys, vec!["HoundShou"]);
+            assert!(asset.creator_handle.is_none());
+            assert_eq!(fixture.library.artist_source_fill_preview().unwrap().fillable, 0);
+        }
+    }
+
+    #[test]
+    fn ingestion_source_fill_observes_the_arriving_assets_excluded_folder() {
+        let fixture = IngestionFixture::new();
+        let folder = fixture.library.create_classification(CreateClassification {
+            kind: ClassificationKind::Root, name: "Excluded".into(), parent_id: None,
+        }).unwrap();
+        fixture.library.set_artist_excluded_folders(&[folder.id.clone()]).unwrap();
+        let outcome = fixture.library.ingest_media(IngestMediaRequest {
+            source_path: fixture.source.clone(), classification_id: Some(folder.id),
+            source_url: Some("https://x.com/HoundShou/status/123".into()),
+            collected_at: None, replace_duplicate_metadata: false, source_published_at: None,
+            creator_name: None, creator_handle: None, creator_url: None,
+            import_source: ImportSource::BrowserExtension,
+            import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
+        }).unwrap();
+        let IngestOutcome::Added { asset } = outcome else { panic!("expected added asset"); };
+        assert!(fixture.library.asset_artist(&asset.id).unwrap().is_none());
+        let count: i64 = fixture.library.connection().unwrap().query_row(
+            "SELECT COUNT(*) FROM asset_artist_assignments", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
     fn video_ingest_registers_original_and_pending_job_atomically() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("clip.webm");
@@ -1674,7 +1733,7 @@ mod tests {
             .ingest_media(IngestMediaRequest {
                 source_path: source.clone(),
                 classification_id: Some(classification.id.clone()),
-                source_url: Some("https://example.test/post".into()),
+                source_url: Some("https://x.com/HoundShou/status/123/video/1".into()),
                 collected_at: None,
                 replace_duplicate_metadata: false,
                 source_published_at: None,
@@ -1689,6 +1748,7 @@ mod tests {
         let IngestOutcome::Added { asset } = outcome else {
             panic!("video ingest must add an asset");
         };
+        assert_eq!(library.asset_artist(&asset.id).unwrap().unwrap().label, "HoundShou");
         assert_eq!(
             asset.media,
             MediaSummary::Video {

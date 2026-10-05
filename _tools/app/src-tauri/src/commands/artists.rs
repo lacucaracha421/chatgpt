@@ -10,6 +10,14 @@ use crate::library::artists::{
 };
 use crate::library::Library;
 
+#[tauri::command]
+pub async fn get_asset_artist(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::artists::ArtistSummary>, CommandError> {
+    run(state, move |library| library.asset_artist(&asset_id)).await
+}
+
 async fn run<T: Send + 'static>(
     state: State<'_, AppState>,
     work: impl FnOnce(Library) -> Result<T, crate::library::error::LibraryError> + Send + 'static,

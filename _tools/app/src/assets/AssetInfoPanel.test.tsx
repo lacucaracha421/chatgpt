@@ -9,6 +9,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it.each([null, "Source creator"])("shows assigned artist before creator metadata (%s)", async (creatorName) => {
+  const selected = {...asset("assigned", "2026-10-05T05:27:00Z", "2026-10-05T05:27:00Z"), creatorName, creatorHandle: "Reposter", creatorUrl: null};
+  const gateway = { artists: { assetArtist: vi.fn().mockResolvedValue({id: "artist:assigned", label: "Assigned artist", keys: ["HoundShou"], assetCount: 2}) } } as unknown as LibraryGateway;
+  const open = vi.fn();
+  render(<LibraryProvider gateway={gateway}><AssetInfoPanel assets={[selected]} onOpenArtist={open}/></LibraryProvider>);
+  expect(await screen.findByText("Assigned artist")).toBeInTheDocument();
+  expect(screen.getByText(/@HoundShou/)).toBeInTheDocument();
+  expect(screen.queryByText("작가 미상")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: /작가 페이지/}));
+  expect(open).toHaveBeenCalledWith("artist:assigned");
+});
+
 it("orders information sections and formats timestamps in the app date style", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 9, 1, 12));

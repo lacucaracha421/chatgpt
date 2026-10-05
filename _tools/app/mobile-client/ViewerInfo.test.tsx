@@ -2,7 +2,8 @@ import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/reac
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import {displayDateTime} from '../src/shared/displayDate';
-const mocks = vi.hoisted(() => ({native: vi.fn()}));
+const mocks = vi.hoisted(() => ({native: vi.fn(), artistIndex: {allArtists: [] as import('./artistsModel').LibraryArtist[], assignments: [] as import('./artistsModel').ArtistAssignment[]}}));
+vi.mock('./useLibraryArtists', () => ({useLibraryArtists: () => mocks.artistIndex}));
 vi.mock('./transport', () => ({
   native: mocks.native,
   errorText: (reason: unknown) => reason instanceof Error ? reason.message.slice(0, 180) : '연결을 확인한 뒤 다시 시도해 주세요.',
@@ -20,6 +21,7 @@ const clipboard = {writeText: vi.fn()};
 const NOW = new Date('2026-09-29T12:00:00+09:00');
 
 beforeEach(() => {
+  mocks.artistIndex = {allArtists: [], assignments: []};
   mocks.native.mockReset();
   clipboard.writeText.mockReset();
   mocks.native.mockResolvedValue({});
@@ -28,6 +30,17 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'clipboard', {configurable: true, value: clipboard});
 });
 afterEach(cleanup);
+
+it('shows a published assignment before missing or conflicting creator metadata and copies it', async () => {
+  mocks.artistIndex = {allArtists: [{id: 'artist:a', label: 'Assigned artist', keys: ['HoundShou'], hidden: true, pinned: false, main: false, assetCount: 1, recentCount: 1, coverAssetIds: []}], assignments: [{assetId: 'a', artistId: 'artist:a'}]};
+  const {rerender} = render(<ViewerInfo asset={asset({creator_name: undefined, creator_handle: undefined})}/>);
+  expect(screen.getByRole('heading', {name: 'Assigned artist'})).toBeTruthy();
+  expect(screen.getByText('@HoundShou')).toBeTruthy();
+  rerender(<ViewerInfo asset={asset({creator_name: 'Reposter', creator_handle: 'Reposter'})}/>);
+  expect(screen.getByRole('heading', {name: 'Assigned artist'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', {name: '작가 복사'}));
+  await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith('Assigned artist\n@HoundShou'));
+});
 
 describe('ViewerInfo field projection', () => {
   it('renders only fields the Asset actually carries', () => {

@@ -9,6 +9,42 @@ use super::Library;
 
 const NOW: &str = "2026-09-26T12:00:00Z";
 
+#[test]
+fn single_asset_source_fill_preserves_manual_creator_and_folder_exclusions_and_rolls_back() {
+    let (_temp, library) = fixture();
+    let connection = library.connection().unwrap();
+    insert(&connection, Asset::new("known").by("Known artist", "HoundShou"));
+    insert(&connection, Asset::new("old").source("https://x.com/Other/status/1"));
+    insert(&connection, Asset::new("new").source("https://x.com/houndshou/status/2/photo/1"));
+    insert(&connection, Asset::new("manual").by("Reposter", "Reposter").source("https://x.com/Other/status/3"));
+    insert(&connection, Asset::new("keyed").by("Creator", "Creator").source("https://x.com/Other/status/4"));
+    insert(&connection, Asset::new("excluded").source("https://x.com/Other/status/5"));
+    insert(&connection, Asset::new("no-handle").source("https://x.com/i/web/status/6"));
+    let manual = artists::assign_assets(&connection, &["manual".into()], None, Some("Manual"), NOW).unwrap();
+    connection.execute_batch("INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES ('root','root','Excluded',NULL,'t'),('child','tag','Child','root','t');
+        INSERT INTO artist_excluded_classifications VALUES('root','t');
+        INSERT INTO asset_classifications VALUES('excluded','child');").unwrap();
+    let before = creator_fields(&connection);
+    let transaction = connection.unchecked_transaction().unwrap();
+    artists::fill_ingested_artist(&transaction, "new", NOW).unwrap();
+    let artist = artists::asset_artist(&transaction, "new").unwrap().unwrap();
+    assert_eq!(artist.label, "Known artist");
+    assert_eq!(artist.keys, vec!["HoundShou"]);
+    transaction.rollback().unwrap();
+    assert!(artists::asset_artist(&connection, "new").unwrap().is_none());
+    for id in ["new", "manual", "keyed", "excluded", "no-handle"] {
+        artists::fill_ingested_artist(&connection, id, NOW).unwrap();
+    }
+    assert_eq!(artists::asset_artist(&connection, "manual").unwrap().unwrap().id, manual);
+    assert!(artists::asset_artist(&connection, "manual").unwrap().unwrap().keys.is_empty());
+    assert_eq!(artists::asset_artist(&connection, "keyed").unwrap().unwrap().label, "Creator");
+    let count: i64 = connection.query_row("SELECT COUNT(*) FROM asset_artist_assignments WHERE source='source_url'", [], |row| row.get(0)).unwrap();
+    assert_eq!(count, 1, "only the arriving eligible asset is filled");
+    assert_eq!(creator_fields(&connection), before);
+    artists::fill_ingested_artist(&connection, "new", NOW).unwrap();
+    assert_eq!(artists::source_fill_preview(&connection, NOW).unwrap().fillable, 1, "historical asset is left for the user's action");
+}
+
 fn fixture() -> (tempfile::TempDir, Library) {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();

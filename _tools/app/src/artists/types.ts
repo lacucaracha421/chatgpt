@@ -89,6 +89,7 @@ export type SourceFillPreview = {
 export type ArtistCaptionLabels = { byKey: Record<string, string>; byAsset: Record<string, string> };
 
 export interface ArtistGateway {
+  assetArtist?(assetId: string): Promise<ArtistSummary | null>;
   overview(): Promise<ArtistOverview>;
   /** Offset/limit count artist groups; each group contains all its candidates. */
   styleSuggestions(offset: number, limit: number): Promise<ArtistStylePage>;

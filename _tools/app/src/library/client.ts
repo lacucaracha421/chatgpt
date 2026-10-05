@@ -226,6 +226,7 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     sourceFillPreview: () => invoke("preview_artist_source_fill"),
     applySourceFill: () => invoke("apply_artist_source_fill"),
     captionLabels: () => invoke("get_artist_caption_labels"),
+    assetArtist: (assetId) => invoke("get_asset_artist", { assetId }),
     setDisplayName: (artistId, displayName) => invoke("set_artist_display_name", { artistId, displayName }),
     setFlags: (artistId, flags) => invoke("set_artist_flags", { artistId, pinned: flags.pinned ?? null, hidden: flags.hidden ?? null, reposter: flags.reposter ?? null }),
     merge: (targetId, sourceIds, displayName) => invoke("merge_artists", { targetId, sourceIds, displayName }),

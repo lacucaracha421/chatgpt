@@ -394,6 +394,15 @@ fn load_settings(connection: &Connection) -> Result<ArtistSettings, LibraryError
 
 impl Snapshot {
     fn load(connection: &Connection) -> Result<Self, LibraryError> {
+        Self::load_selected(connection, None, None, None)
+    }
+
+    fn load_selected(
+        connection: &Connection,
+        asset_id: Option<&str>,
+        handle: Option<&str>,
+        scope: Option<&str>,
+    ) -> Result<Self, LibraryError> {
         let settings = load_settings(connection)?;
         let artists = connection
             .prepare("SELECT id, display_name, pinned, hidden, reposter FROM artists")?
@@ -435,9 +444,12 @@ impl Snapshot {
                 "SELECT id, creator_name, COALESCE(creator_handle, creator_url), creator_url, source_url, collected_at
                  FROM assets
                  JOIN asset_artist_scope AS artist_scope ON artist_scope.asset_id = assets.id
-                 WHERE status = 'normal' ORDER BY collected_at DESC, id DESC",
+                 WHERE status = 'normal'
+                   AND (?1 IS NULL OR assets.id = ?1 OR lower(COALESCE(creator_handle, creator_url)) = lower(?2))
+                   AND (?3 IS NULL OR artist_scope.scope_ref = ?3)
+                 ORDER BY collected_at DESC, id DESC",
             )?
-            .query_map([], |row| {
+            .query_map(params![asset_id, handle, scope], |row| {
                 Ok(AssetRow {
                     id: row.get(0)?,
                     creator_name: row.get::<_, Option<String>>(1)?.map(|name| name.trim().to_owned()).filter(|name| !name.is_empty()),
@@ -503,6 +515,16 @@ impl Snapshot {
             }
             let group = groups.entry(scope).or_default();
             group.assets.push(asset);
+            if self.assignments.contains_key(&asset.id)
+                && asset
+                    .key
+                    .as_deref()
+                    .is_none_or(|key| self.scope_of_key(key) != self.scope_of(asset))
+            {
+                // An assigned image's original creator remains provenance, not the
+                // assigned artist's name or account (also used by tablet publication).
+                continue;
+            }
             if let Some(name) = &asset.creator_name {
                 *group.names.entry(name.clone()).or_default() += 1;
             }
@@ -1364,7 +1386,7 @@ struct FillPlan {
     targets: HashMap<String, String>,
 }
 
-fn source_fill_plan(snapshot: &Snapshot, now: &DateTime<Utc>) -> FillPlan {
+fn source_fill_plan(snapshot: &Snapshot, now: &DateTime<Utc>, asset_id: Option<&str>) -> FillPlan {
     // Existing keys by lower-case handle, with how many assets use each spelling.
     let mut known: HashMap<String, BTreeMap<String, usize>> = HashMap::new();
     for asset in &snapshot.assets {
@@ -1389,6 +1411,9 @@ fn source_fill_plan(snapshot: &Snapshot, now: &DateTime<Utc>) -> FillPlan {
     let mut total = 0;
     let mut without_handle = 0;
     for asset in &snapshot.assets {
+        if asset_id.is_some_and(|id| asset.id != id) {
+            continue;
+        }
         if snapshot.scope_of(asset) != UNKNOWN_SOURCE {
             continue;
         }
@@ -1401,15 +1426,8 @@ fn source_fill_plan(snapshot: &Snapshot, now: &DateTime<Utc>) -> FillPlan {
             continue;
         }
         match super::legacy_migration::creator_from_source_url(Some(url)).0 {
-            Some(_) => {
+            Some(handle) => {
                 entry.1 += 1;
-                let handle = url::Url::parse(url)
-                    .ok()
-                    .and_then(|url| {
-                        url.path_segments()
-                            .and_then(|mut segments| segments.next().map(str::to_owned))
-                    })
-                    .unwrap_or_default();
                 by_handle
                     .entry(handle.to_lowercase())
                     .or_default()
@@ -1517,7 +1535,7 @@ fn source_fill_plan(snapshot: &Snapshot, now: &DateTime<Utc>) -> FillPlan {
 }
 
 fn source_fill_from(snapshot: &Snapshot, now: &DateTime<Utc>) -> SourceFillPreview {
-    source_fill_plan(snapshot, now).preview
+    source_fill_plan(snapshot, now, None).preview
 }
 
 pub(crate) fn source_fill_preview(
@@ -1534,29 +1552,64 @@ pub(crate) fn apply_source_fill(
 ) -> Result<SourceFillResult, LibraryError> {
     let now = parse_utc_timestamp(now_utc)?;
     let transaction = connection.unchecked_transaction()?;
-    let plan = source_fill_plan(&Snapshot::load(&transaction)?, &now);
+    let plan = source_fill_plan(&Snapshot::load(&transaction)?, &now, None);
+    let result = write_source_fill(&transaction, &plan, now_utc)?;
+    collect_empty_artists(&transaction)?;
+    transaction.commit()?;
+    Ok(result)
+}
+
+/// Called after folder membership is installed, inside the ingest transaction. Only the
+/// arriving asset is a candidate; existing keys still decide spelling and merge targets.
+pub(crate) fn fill_ingested_artist(
+    connection: &Connection,
+    asset_id: &str,
+    now_utc: &str,
+) -> Result<(), LibraryError> {
+    let source: Option<String> = connection
+        .query_row(
+            "SELECT source_url FROM assets JOIN asset_artist_scope scope ON scope.asset_id = assets.id
+         WHERE assets.id = ?1 AND status = 'normal' AND scope.scope_ref = 'unknown:source'",
+            [asset_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(handle) = super::legacy_migration::creator_from_source_url(source.as_deref()).0 else {
+        return Ok(());
+    };
+    let now = parse_utc_timestamp(now_utc)?;
+    let snapshot = Snapshot::load_selected(connection, Some(asset_id), Some(&handle), None)?;
+    let plan = source_fill_plan(&snapshot, &now, Some(asset_id));
+    write_source_fill(connection, &plan, now_utc)?;
+    Ok(())
+}
+
+fn write_source_fill(
+    connection: &Connection,
+    plan: &FillPlan,
+    now_utc: &str,
+) -> Result<SourceFillResult, LibraryError> {
     let mut assigned = 0;
     let mut created = 0;
     for (handle, asset_ids) in &plan.assets {
         let artist_id = match plan.targets.get(handle) {
-            Some(scope) => materialize(&transaction, scope, now_utc)?,
+            Some(scope) => materialize(connection, scope, now_utc)?,
             None => {
                 created += 1;
                 // The handle becomes a member key, so later saves from it join this artist.
-                let id = new_artist(&transaction, None, now_utc)?;
-                transaction.execute("INSERT INTO artist_members (creator_key, artist_id, added_at) VALUES (?1, ?2, ?3)", params![handle, id, now_utc])?;
+                let id = new_artist(connection, None, now_utc)?;
+                connection.execute("INSERT INTO artist_members (creator_key, artist_id, added_at) VALUES (?1, ?2, ?3)", params![handle, id, now_utc])?;
                 id
             }
         };
         for asset_id in asset_ids {
-            assigned += transaction.execute(
+            assigned += connection.execute(
                 "INSERT OR IGNORE INTO asset_artist_assignments (asset_id, artist_id, source, source_handle, created_at) VALUES (?1, ?2, 'source_url', ?3, ?4)",
                 params![asset_id, artist_id, handle, now_utc],
             )? as u32;
         }
     }
-    collect_empty_artists(&transaction)?;
-    transaction.commit()?;
     Ok(SourceFillResult {
         assigned,
         created_artists: created,
@@ -1566,6 +1619,28 @@ pub(crate) fn apply_source_fill(
 // ---------------------------------------------------------------------------------------
 // Captions
 // ---------------------------------------------------------------------------------------
+
+pub(crate) fn asset_artist(
+    connection: &Connection,
+    asset_id: &str,
+) -> Result<Option<ArtistSummary>, LibraryError> {
+    let scope: Option<String> = connection
+        .query_row(
+            "SELECT scope_ref FROM asset_artist_scope JOIN assets ON assets.id = asset_id
+             WHERE asset_id = ?1 AND status = 'normal'",
+            [asset_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(scope) = scope.filter(|scope| !is_unknown(scope)) else {
+        return Ok(None);
+    };
+    let snapshot = Snapshot::load_selected(connection, None, None, Some(&scope))?;
+    Ok(snapshot
+        .groups()
+        .get(&scope)
+        .map(|group| snapshot.summary(&scope, group, &Utc::now())))
+}
 
 pub(crate) fn caption_labels(connection: &Connection) -> Result<ArtistCaptionLabels, LibraryError> {
     let snapshot = Snapshot::load(connection)?;
@@ -2202,6 +2277,10 @@ impl super::Library {
 
     pub fn artist_caption_labels(&self) -> Result<ArtistCaptionLabels, LibraryError> {
         caption_labels(&*self.connection()?)
+    }
+
+    pub fn asset_artist(&self, asset_id: &str) -> Result<Option<ArtistSummary>, LibraryError> {
+        asset_artist(&*self.connection()?, asset_id)
     }
 
     pub fn set_artist_display_name(

@@ -7,6 +7,9 @@ import {durationLabel} from './model';
 import {displayDateTime} from '../src/shared/displayDate';
 import {formatBytes} from '../src/shared/formatBytes';
 import {errorText, native} from './transport';
+import {useLibraryArtists} from './useLibraryArtists';
+import {artistName} from './artistsModel';
+import {artistHandle as assignedHandle} from '../src/artists/format';
 
 /**
  * Every row renders a field the mobile Asset actually carries; a value the device does
@@ -124,6 +127,12 @@ async function writeClipboard(text: string): Promise<void> {
  */
 export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?: string; onClose?(): void}) {
   const privacy = useTabletAssetMask(asset);
+  const artistIndex = useLibraryArtists(true, 0);
+  const assignment = artistIndex.assignments.find(row => row.assetId === asset.id);
+  const artist = assignment
+    ? artistIndex.allArtists.find(row => row.id === assignment.artistId)
+    : artistIndex.allArtists.find(row => row.keys.includes(asset.creator_handle?.replace(/^@+/, '') ?? ''));
+  const creatorAsset = artist ? {...asset, creator_name: artistName(artist), creator_handle: assignedHandle(artist) ?? undefined} : asset;
   const [status, setStatus] = useState<{kind: 'copied' | 'failed'; label: string} | null>(null);
   const [copied, setCopied] = useState('');
   const [busy, setBusy] = useState(false);
@@ -133,7 +142,8 @@ export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?:
   const lifetime = useRef({assetId: asset.id, generation: 0});
   lifetime.current.assetId = asset.id;
   useEffect(() => () => {lifetime.current.generation++;}, []);
-  const {rows, heading} = useMemo(() => infoFields(asset), [asset]);
+  const {rows} = useMemo(() => infoFields(asset), [asset]);
+  const heading = infoFields(creatorAsset).heading;
   const source = openableSource(asset.source_url) ? asset.source_url : undefined;
 
   useEffect(() => {setStatus(null); setCopied(''); setBusy(false);}, [asset.id]);
@@ -169,9 +179,9 @@ export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?:
     }
   };
 
-  const creator = creatorText(asset);
-  const artistHandle = asset.creator_name?.trim() && asset.creator_handle?.trim() && asset.creator_name.trim() !== asset.creator_handle.trim()
-    ? handleLabel(asset.creator_handle)
+  const creator = creatorText(creatorAsset);
+  const artistHandle = creatorAsset.creator_name?.trim() && creatorAsset.creator_handle?.trim() && creatorAsset.creator_name.trim().replace(/^@+/, '') !== creatorAsset.creator_handle.trim().replace(/^@+/, '')
+    ? handleLabel(creatorAsset.creator_handle)
     : '';
   const copiedLabel = (label: string) => copied === label;
 
