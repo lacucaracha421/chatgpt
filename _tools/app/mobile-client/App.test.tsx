@@ -195,6 +195,29 @@ it('renders Home from a saved native connection while the async status read is p
   expect(await screen.findByRole('button',{name:'라이브러리 연결'})).toBeTruthy();
   expect(screen.queryByRole('button',{name:'전체 보기'})).toBeNull();
 });
+it('restarts a Home load cut off by the startup status check, so the bar does not stay (user 2026-10-06)', async()=>{
+  let resolveStatus!: (value: unknown) => void;
+  window.LakomicsNative={localStatus:()=>JSON.stringify({configured:true,endpoint:'https://example.invalid'}),request:vi.fn(),cancel:vi.fn()};
+  mocks.native.mockImplementation((op:string)=>op==='status' ? new Promise(resolve=>{resolveStatus=resolve;}) : Promise.resolve({configured:true,endpoint:'https://example.invalid'}));
+  const original=mocks.api.getMockImplementation()!;
+  const generations:AbortSignal[]=[];
+  let hold=true;
+  mocks.api.mockImplementation((path:string,signal:AbortSignal)=>{
+    if(path==='/v1/library/list-generation'){generations.push(signal);if(hold)return new Promise(()=>{});}
+    return original(path,signal);
+  });
+  render(<App/>);
+  await screen.findByRole('button',{name:'전체 보기'});
+  // A list change reloads Home; its generation read is still waiting when the native status read lands.
+  await act(async()=>{window.dispatchEvent(new Event('lakomics-list-generation'));});
+  await waitFor(()=>expect(generations.some(signal=>!signal.aborted)).toBe(true));
+  const before=generations.length;
+  hold=false;
+  await act(async()=>{resolveStatus({configured:true,endpoint:'https://example.invalid'});});
+  await waitFor(()=>expect(generations.length).toBeGreaterThan(before));
+  await new Promise(resolve=>setTimeout(resolve,700));
+  expect(screen.queryAllByLabelText('목록 불러오는 중')).toHaveLength(0);
+});
 it('keeps the connect screen while a device without a saved connection is checking',()=>{
   window.LakomicsNative={localStatus:()=>JSON.stringify({configured:false,endpoint:''}),request:vi.fn(),cancel:vi.fn()};
   mocks.native.mockImplementation((op:string)=>op==='status' ? new Promise(()=>{}) : Promise.resolve({configured:false,endpoint:''}));

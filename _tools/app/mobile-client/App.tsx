@@ -236,6 +236,8 @@ export function App() {
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
   const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
+  // A page load cut off by the status/load effect's cleanup is started again; otherwise its bar stays until a tab switch.
+  const loadInFlight = useRef(false), loadInterrupted = useRef(false);
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
   const latest = useRef({findOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
@@ -299,7 +301,7 @@ export function App() {
     }
     if (visible.view.tab === 'library' && view.tab === 'home') lastLibrary.current = {view:visible.view,cursor:visible.cursor,previous:visible.previous,scroll:scroll.current,filters:visible.filters};
     cancelMore();
-    const request = gate.current.begin(); lastIntent.current = {view,cursor,previous,filters:nextFilters}; setBusy(true); setError(''); setFilterNotice('');
+    const request = gate.current.begin(); loadInFlight.current = true; lastIntent.current = {view,cursor,previous,filters:nextFilters}; setBusy(true); setError(''); setFilterNotice('');
     // Declared outside the `try` so the failure path can tell a refused filter request from
     // an ordinary transport failure. A character scope has its own reader and its own
     // placeholder page, so it is not part of this route's filter contract.
@@ -403,7 +405,7 @@ export function App() {
       if (filtered && !hasActiveFilters(latest.current.page.filters)) setFilterNotice(errorText(reason));
       setError(errorText(reason));
     } }
-    finally { if (gate.current.current(request.id)) setBusy(false); }
+    finally { if (gate.current.current(request.id)) { setBusy(false); loadInFlight.current = false; } }
   }, [cancelMore,clearSelection,closeAlbumBatch,recoverSearch]);
   const sparse = useAssetToc(page,setPage,()=>{const current=latest.current.page;void load(current.view,null,[],0,true,current.filters);},setMoreError,async(reason,signal)=>{
     const current=latest.current.page,recovered=await recoverSearch(current.view,reason,signal);
@@ -571,8 +573,10 @@ export function App() {
     void api<{items:Classification[]}>('/v1/library/classifications', controller.signal).then(result => {if(!controller.signal.aborted){setClassifications(result.items);setIndexReady(true);}}).catch(reason => {if (!controller.signal.aborted) setIndexError(errorText(reason));});
     // A root card can be tapped before this passive startup effect runs.
     // Do not overwrite that newer navigation with the initial root read.
+    const interrupted = loadInterrupted.current; loadInterrupted.current = false;
     if(lastIntent.current.view.root && !startedWithLocalConnection.current) void load(LIBRARY);
-    return () => {controller.abort(); gate.current.cancel(); secondaryGate.current.cancel(); moreGate.current.cancel(); prefetched.current?.controller.abort();};
+    else if(interrupted) {const intent = lastIntent.current; void load(intent.view, intent.cursor, intent.previous, 0, false, intent.filters);}
+    return () => {loadInterrupted.current = loadInFlight.current; controller.abort(); gate.current.cancel(); secondaryGate.current.cancel(); moreGate.current.cancel(); prefetched.current?.controller.abort();};
   }, [status, load]);
   useEffect(() => { if (page.version && page.view.tab === 'home' && !page.cursor) void refreshSecondary(); return () => secondaryGate.current.cancel(); }, [page.version, page.view.tab, page.cursor, refreshSecondary]);
   const refresh = useCallback(() => {
@@ -710,7 +714,7 @@ export function App() {
    */
   const applyFilters = (next: AssetFiltersValue) => {
     const state = latest.current;
-    if (sameFilters(next, state.page.filters)) {gate.current.cancel();cancelMore();setBusy(false);setError('');setFilterNotice('');setFilters(next);setFiltersOpen(null);lastIntent.current={view:state.page.view,cursor:state.page.cursor,previous:state.page.previous,filters:next};return;}
+    if (sameFilters(next, state.page.filters)) {gate.current.cancel();cancelMore();setBusy(false);loadInFlight.current=false;setError('');setFilterNotice('');setFilters(next);setFiltersOpen(null);lastIntent.current={view:state.page.view,cursor:state.page.cursor,previous:state.page.previous,filters:next};return;}
     setFiltersOpen(null); setFilters(next);
     // Home and Revisit are not filterable, so a filter change can only originate from a
     // filterable Library scope and is committed against that same scope.
@@ -739,7 +743,7 @@ export function App() {
     const state = latest.current, current = state.page, intent = lastIntent.current;
     // A retained tab is also a navigation intent: a delayed replacement must not win later.
     if (viewKey(intent.view,intent.filters) !== viewKey(current.view,current.filters) || intent.cursor !== current.cursor) {
-      gate.current.cancel(); cancelMore(); setBusy(false); setError(''); setFilterNotice(''); setFilters(current.filters);
+      gate.current.cancel(); cancelMore(); setBusy(false); loadInFlight.current=false; setError(''); setFilterNotice(''); setFilters(current.filters);
       lastIntent.current = {view:current.view,cursor:current.cursor,previous:current.previous,filters:current.filters};
     }
     // Older servers have no change signal, so returning still needs a fresh read.
@@ -767,7 +771,7 @@ export function App() {
     else {
       const cached = viewCache.current.get(HOME_PAGE_KEY);
       if (cached && Date.now() - homePageAt.current < 60_000) {
-        gate.current.cancel(); cancelMore(); setBusy(false); setError(''); setFilterNotice(''); setFilters(cached.filters);
+        gate.current.cancel(); cancelMore(); setBusy(false); loadInFlight.current=false; setError(''); setFilterNotice(''); setFilters(cached.filters);
         lastIntent.current = {view:cached.view,cursor:cached.cursor,previous:cached.previous,filters:cached.filters};
         setPage({...cached, restoreScroll:cached.restoreScroll});
       } else select(HOME);
@@ -780,7 +784,7 @@ export function App() {
   };
   const openCurrent = (index: number) => {
     // Opening the still-visible gallery cancels its uncommitted replacement.
-    gate.current.cancel(); cancelMore(); setBusy(false); setError('');
+    gate.current.cancel(); cancelMore(); setBusy(false); loadInFlight.current=false; setError('');
     lastIntent.current = {view:page.view,cursor:page.cursor,previous:page.previous,filters:page.filters};
     const id=visibleItems[index]?.id,range=page.assetRanges?.ranges.find(range=>range.items.some(item=>item.id===id));
     if(range) {
