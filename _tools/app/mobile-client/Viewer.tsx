@@ -68,16 +68,22 @@ function viewerDateLabel(value?: string): string {
 function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
   return <Button type="button" size="icon" variant={danger ? 'danger' : 'ghost'} className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/></Button>;
 }
-export function Viewer(props: Parameters<typeof ViewerContent>[0]) {
+export function Viewer(props: Omit<Parameters<typeof ViewerContent>[0], 'openedOn'>) {
   const [privacy] = usePrivacyMode();
   const [filter]=useNsfwFilter();
   const masked=assetMasked(false,filter,props.items[props.index]);
   const hidden = !props.vault && (privacy || !!props.privacy);
+  // Only the asset the viewer was opened on may autoplay; any move inside the viewer (also through
+  // a masked item, which remounts the content) ends that.
+  const openedOn = useRef<string | undefined>(props.items[props.index]?.id);
+  if (openedOn.current !== props.items[props.index]?.id) openedOn.current = undefined;
   useEffect(() => { if (hidden) props.onClose(); }, [hidden, props.onClose]);
-  return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : masked ? <MaskedViewer {...props}/> : <ViewerContent key={String(filter)} {...props}/>;
+  return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : masked ? <MaskedViewer {...props}/> : <ViewerContent key={String(filter)} {...props} openedOn={openedOn.current}/>;
 }
 
-function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault,openedOn}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+  /** The asset id the viewer was opened on while it is still shown; only that video autoplays. */
+  openedOn?: string;
   /** Move the Asset on screen to the Library Trash (no confirmation: it is reversible). */
   onTrash?(asset:Asset):void;
   /** The host's "휴지통으로 이동함 · 실행 취소" snackbar, rendered inside the modal viewer. */
@@ -167,6 +173,10 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   useEffect(() => setVideoPlaying(false), [asset.id]);
   const video = useRef<HTMLVideoElement>(null);
   const videoResume = useRef({id:'',time:0,playing:false});
+  // Video taps: paused → play at once; playing → a second tap within DOUBLE_TAP_MS pauses, a lone tap toggles the chrome once the window passes.
+  const lastTap = useRef<{id:string;time:number;x:number;y:number}|null>(null);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => { lastTap.current = null; return () => clearTimeout(tapTimer.current); }, [asset.id]);
   const stallTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Library video: no metadata within PROGRESS_MS of loadstart (or an element error) renews the
   // stream once, silently, before the delay/error message is shown.
@@ -259,6 +269,17 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     const timer = setTimeout(() => setChrome(false), vault ? 4000 : asset.kind === 'video' ? 2000 : 2500); return () => clearTimeout(timer);
   }, [chrome, chromeActivity, filmstripActive, info, albumOpen, classificationOpen, exclusion, asset.id, asset.kind, videoPlaying, vault]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
+  const videoTap = (x: number, y: number) => {
+    const element = video.current, previous = lastTap.current, now = Date.now();
+    clearTimeout(tapTimer.current);
+    if (previous && previous.id === asset.id && now - previous.time < DOUBLE_TAP_MS && Math.hypot(x - previous.x, y - previous.y) < DOUBLE_TAP_SLOP) {
+      lastTap.current = null; setStripGrown(false); element?.pause(); revealChrome(); return;
+    }
+    lastTap.current = {id:asset.id, time:now, x, y};
+    if (!videoPlaying) { setStripGrown(false); void element?.play()?.catch(() => {}); return; }
+    const grown = stripGrown;
+    tapTimer.current = setTimeout(() => { setStripGrown(false); if (grown) revealChrome(); else setChrome(value => !value); }, DOUBLE_TAP_MS);
+  };
   const renewVideo = (element: HTMLVideoElement | null, intendPlay: boolean) => {
     clearTimeout(progressTimer.current);
     if(element)videoResume.current={id:asset.id,time:element.currentTime,playing:intendPlay};
@@ -374,6 +395,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         const dx = event.clientX - g.startX, dy = event.clientY - g.startY;
         if (g.points.size === 0 && !g.pinched && transform.scale === 1 && g.startY > event.currentTarget.getBoundingClientRect().bottom - 160 && dy < -40 && Math.abs(dy) > Math.abs(dx)) { setStripGrown(true); revealChrome(); }
         else if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
+        else if (g.points.size === 0 && !g.moved && !g.pinched && asset.kind === 'video') videoTap(event.clientX, event.clientY);
         else if (g.points.size === 0 && !g.moved && !g.pinched) { setStripGrown(false); if (stripGrown) revealChrome(); else setChrome(value => !value); }
       }} onPointerCancel={() => gesture.current.points.clear()}>
         {asset.kind === 'video' ? <VideoPlayerSurface
@@ -382,7 +404,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           source={vault?'vault':'library'}
           sourceUrl={original ?? null}
           poster={asset.preview}
-          autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing}
+          autoPlay={videoResume.current.id===asset.id?videoResume.current.playing:openedOn===asset.id}
           loop
           preload="auto"
           controlsVisible={chrome || !videoPlaying}
@@ -437,6 +459,8 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
 
 /** How long a library video may go from loadstart to loadedmetadata before it is renewed. */
 const PROGRESS_MS = 8000;
+/** A second video tap within this window and distance is a double tap (pause). */
+const DOUBLE_TAP_MS = 300, DOUBLE_TAP_SLOP = 40;
 // About 96 MB once decoded as RGBA; larger neighbours are not prefetched.
 const MAX_PREFETCH_PIXELS = 24_000_000;
 

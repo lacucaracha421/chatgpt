@@ -302,14 +302,74 @@ describe('progressive viewer',()=>{
     rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
     await waitFor(()=>expect(screen.queryByText('classification-editor-open')).toBeNull());
   });
-  it('toggles the shared chrome on a video tap without toggling playback',async()=>{
-    const change=vi.fn(); const {container}=render(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={change} onClose={()=>{}}/>);
-    const player=container.ownerDocument.querySelector('video')!;
-    await waitFor(()=>expect(player.getAttribute('src')).toContain('original-v'));
-    fireEvent.pointerDown(player,{pointerId:1,clientX:200,clientY:100}); fireEvent.pointerUp(player,{pointerId:1,clientX:200,clientY:100});
-    expect(container.ownerDocument.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(false);
-    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
-    expect(change).not.toHaveBeenCalled();
+  describe('video taps',()=>{
+    const videoItems:Asset[]=[items[0],{id:'v',kind:'video'}];
+    const viewer=()=>document.querySelector<HTMLElement>('.viewer')!;
+    const tap=(x=300)=>{const v=document.querySelector('video')!;fireEvent.pointerDown(v,{pointerId:1,button:0,clientX:x,clientY:300});fireEvent.pointerUp(v,{pointerId:1,clientX:x,clientY:300});};
+    beforeEach(()=>{vi.useFakeTimers();});
+    afterEach(()=>{vi.useRealTimers();});
+    it('does not autoplay a video reached inside the viewer and keeps the strip up',()=>{
+      const view=render(<Viewer items={videoItems} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      view.rerender(<Viewer items={videoItems} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+      expect(document.querySelector('video')!.autoplay).toBe(false);
+      expect(viewer().dataset.filmstripVisible).toBe('true');
+      expect(screen.getByRole('navigation',{name:'주변 자산'})).toBeTruthy();
+      // Returning to a video the viewer was opened on no longer autoplays it either.
+      cleanup();
+      const back=render(<Viewer items={videoItems} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+      expect(document.querySelector('video')!.autoplay).toBe(true);
+      back.rerender(<Viewer items={videoItems} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      back.rerender(<Viewer items={videoItems} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+      expect(document.querySelector('video')!.autoplay).toBe(false);
+    });
+    it('follows the same autoplay rule for vault videos',()=>{
+      const vault={original:(asset:Asset)=>`https://app.lakomics.local/vault/s/${asset.id}`,label:(asset:Asset)=>asset.id};
+      const view=render(<Viewer items={videoItems} index={0} onIndex={()=>{}} onClose={()=>{}} vault={vault}/>);
+      view.rerender(<Viewer items={videoItems} index={1} onIndex={()=>{}} onClose={()=>{}} vault={vault}/>);
+      expect(document.querySelector('video')!.autoplay).toBe(false);
+      cleanup();
+      render(<Viewer items={videoItems} index={1} onIndex={()=>{}} onClose={()=>{}} vault={vault}/>);
+      expect(document.querySelector('video')!.autoplay).toBe(true);
+    });
+    it('plays a paused video on one tap and hides the strip',()=>{
+      const view=render(<Viewer items={videoItems} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      view.rerender(<Viewer items={videoItems} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+      tap();
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
+      fireEvent.play(document.querySelector('video')!);
+      expect(viewer().dataset.filmstripVisible).toBe('false');
+    });
+    it('pauses a playing video on a double tap and brings the strip and chrome back without toggling them',()=>{
+      render(<Viewer items={videoItems} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+      const video=document.querySelector('video')!;
+      fireEvent.play(video);
+      act(()=>{vi.advanceTimersByTime(2000);});
+      expect(viewer().classList.contains('chrome-visible')).toBe(false);
+      tap();act(()=>{vi.advanceTimersByTime(150);});tap(310);
+      expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
+      expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+      expect(viewer().classList.contains('chrome-visible')).toBe(true);
+      act(()=>{vi.advanceTimersByTime(400);});
+      expect(viewer().classList.contains('chrome-visible')).toBe(true);
+      fireEvent.pause(video);
+      expect(viewer().dataset.filmstripVisible).toBe('true');
+      expect(viewer().classList.contains('chrome-visible')).toBe(true);
+    });
+    it('toggles the chrome on a single tap while playing only after the double-tap window',()=>{
+      const change=vi.fn();
+      render(<Viewer items={videoItems} index={1} onIndex={change} onClose={()=>{}}/>);
+      fireEvent.play(document.querySelector('video')!);
+      expect(viewer().classList.contains('chrome-visible')).toBe(true);
+      tap();
+      expect(viewer().classList.contains('chrome-visible')).toBe(true);
+      act(()=>{vi.advanceTimersByTime(300);});
+      expect(viewer().classList.contains('chrome-visible')).toBe(false);
+      tap();act(()=>{vi.advanceTimersByTime(300);});
+      expect(viewer().classList.contains('chrome-visible')).toBe(true);
+      expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+      expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled();
+      expect(change).not.toHaveBeenCalled();
+    });
   });
   it('opens the information panel in its own dialog with a labelled close control',()=>{
     render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
