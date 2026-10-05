@@ -2,6 +2,25 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-10-05 — Tablet catch-up, UI unification phase 1 and PC speed
+
+Reconciled against committed `main` at `75f70dba`. Uncommitted worktree changes at writing (Home 다시보기/지금 하는 중, multi-person references, tagger review) are excluded and stay `IN_PROGRESS` in the backlog. Records below are source-complete; native/device acceptance is not inferred unless stated. Android 0.9.16–0.9.24 were built today; 0.9.21–0.9.24 were installed on the tablet.
+
+- **Tablet catch-up (priority 0):** shared shelf rules and work-entry readiness, approved Home layout, full-screen layers/folds/swipe card motion, delayed busy labels and count parity, View Transitions tab switch on PC (`07af036e`, Android 0.9.16); follow-ups: Home 지금 하는 중 opens the work directly and returns Home (`5d4f006c`), artist detail opens with its real first page (`edcc613c`), character shelf and 미분류/전체 switch match the PC (`7ee09ee8`). The user's device check is pending.
+- **WIN-FEEDBACK-20261004 — Home fill layout (spec as approved 2026-10-04):** two columns (left ≈1.75fr media: 지금 하는 중 on a plank, 2주 안에 발매; right ≈1fr: 오늘 할 것, 1년 전 오늘; quiet day: 오늘의 한 장, a daily highly rated portrait/near-square asset shown whole on a blurred copy). PC `2748f0db`, tablet `07af036e`; mockup `docs/prototypes/pc-home-fill-20261004/` (untracked, real covers).
+- **UI unification phase 1:** one Heroicons family (solid only for an on state), shared IconButton and BookmarkToggle on PC and tablet (`2eef344c`). Phases 2–3 are open in `USER-FEEDBACK-20261005`.
+- **Motion:** one shared view swap for category switches (`b43a6922`); shared-element Collection work entry, search swaps, tablet character/artist motion (`3da5087f`); the whole case flies between shelf and work screen (`18814fe5`); toggle pop for likes/bookmarks/showcase (`11d4ede0`).
+- **Launch splash:** the Lakomics mark covers the first Home load on PC and Android 12+ (8 s fail-safe, loading line after 3 s) (`3dd73981`).
+- **Assets:** sectioned 보기 menu; series, group and character folders gain 종류/정렬/비율 (`7df25047`); image-first info panel and series/character folders using the shared asset pieces (focus/select, dock, viewer, selection bar, in-place updates) (`ad8ddaeb`); no stale character grid and steady 미분류/전체 switch (`e643ec64`); video hover preview survives the heart and no first-frame flash on scrub (`28f87a52`, `e870308c`).
+- **Tablet viewer videos:** only the video the viewer opened on autoplays; others wait for a tap (`e0364f31`).
+- **Notes:** 섹션 추가 button, count at the bottom, no caret pinning on PC (`789aa8c3`); dropping files on a PC note inserts their paths (`19ef652e`, option (b) decided by the user 2026-10-05).
+- **Manga:** sidebar starts closed with a clearer toggle and sliding width (`6abacd47`); shared reader control bar on PC, right-to-left default with a one-time migration, wheel paging (`121d60be`); double-click a catalog work to read from page 1 (`f9fe6c60`; single-click delay follow-up open).
+- **Catalog:** 북마크 sorts by 최근 추가순 on PC and tablet (`75f70dba`); server deployed by the user 2026-10-05 (backup `~/lakomics-deploy-bookmark-20261005` on the server). Home 중복 판본 counts the whole-catalog queue (`68406c27`).
+- **Collections:** recorded case sounds with a Settings switch and the PC showcase on the library shelf (`4d261d66`), late clips trimmed (`cff73ddd`); switching type inside 쇼케이스 stays there, tablet showcase type tabs (`3b3b2e8b`); game spines name the developer (`a2307324`); connect a hand-made game to IGDB (`53846561`).
+- **AV:** StashDB is the default performer photo, picker photos no longer overlap (`adbdcb8c`); spine lines sit on the printed seams (`9aca7944`).
+- **Other fixes:** promoting an incoming duplicate declares its folder (`288c5e87`); the artist is filled from the x.com post URL on save (`62e21814`); the PC tablet row describes file transfer, not sync (`dfac2a9d`); NL search release bundle and one-syllable queries (`9de785a2`, `d9a4d766`).
+- **Performance:** PC folder switches and first Home load (`c0e41223`, `2eef344c`, `288ae552`, `01e48a31`, `8431e063`, probe `a093aa3b`); figures and remaining measurements are in backlog `PERF-ALL-001`.
+
 ## Closure checkpoint — 2026-10-04 — NSFW running round
 
 - **RUNNING-ROUND-20261003 — NSFW filtering and rollout:** closed by the user on 2026-10-04 (PC/server/tablet NSFW filtering, catalog masking under privacy mode or the filter, AUDIT-20261003 fixes, server deployment of 2026-10-03). Former record:
