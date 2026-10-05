@@ -17,7 +17,6 @@
     "mobile-client/collectionReleasesModel.ts#releaseCaption",
     "mobile-client/exchangeModel.ts#timelineEntries",
     "mobile-client/homeDashboard.ts#releaseRows",
-    "mobile-client/noteCaret.ts#caretOffset",
     "mobile-client/noteCaret.ts#caretOffsetAtPoint"
   ],
   "controlClasses": [

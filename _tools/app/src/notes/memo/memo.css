@@ -47,5 +47,5 @@
 .memo-add { min-width: 32px; font-size: var(--type-body, 15px); line-height: 1; text-align: left; }
 .memo-add:hover, .memo-add:focus-visible { color: var(--color-text); }
 
-.memo-section-add { margin-top: 24px; color: var(--color-muted); }
+.memo-section-add { margin-top: 24px; }
 .memo-editor--touch .memo-section-add { min-height: 44px; }

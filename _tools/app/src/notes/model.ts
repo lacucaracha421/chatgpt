@@ -210,6 +210,26 @@ export function caretOffset(area: HTMLTextAreaElement): { top: number; height: n
   return result;
 }
 
+/**
+ * Scrolls `pane` by the least amount that keeps the field's caret line `margin` px inside it.
+ * The view never moves while that line is already visible (PC typing and the tablet keyboard).
+ */
+export function revealCaretIn(pane: HTMLElement, field: HTMLElement, margin: number) {
+  const box = pane.getBoundingClientRect();
+  const rect = field.getBoundingClientRect();
+  // A field that is fully visible holds a visible caret; skip measuring its text.
+  if (rect.top >= box.top + margin && rect.bottom <= box.bottom - margin) return;
+  let top = rect.top;
+  let bottom = rect.bottom;
+  if (field instanceof HTMLTextAreaElement) {
+    const caret = caretOffset(field);
+    top = rect.top + caret.top - field.scrollTop;
+    bottom = top + caret.height;
+  }
+  if (bottom > box.bottom - margin) pane.scrollTop += bottom - (box.bottom - margin);
+  else if (top < box.top + margin) pane.scrollTop -= box.top + margin - top;
+}
+
 /** Finds a source offset at a rendered-text point, using the same wrapped-text mirror as tablet Notes. */
 export function caretOffsetAtPoint(area: HTMLTextAreaElement, x: number, y: number): number | null {
   const style = getComputedStyle(area);

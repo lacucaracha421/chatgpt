@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { ArrowsRightLeftIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline';
+import { ArrowsRightLeftIcon, ClipboardDocumentIcon, PlusIcon } from '@heroicons/react/24/outline';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from '../../shared/ui/Button';
 import { Dialog } from '../../shared/ui/Dialog';
 import { Menu, type MenuItem } from '../../shared/ui/Menu';
 import { addMemoSection, appendToSection, deleteMemoSection, editItem, editSectionBody, joinItem, memoBody, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, renameMemoSection, sectionCopy, sectionText, splitItem, toggleItem, type MemoDocument, type MemoItem } from './memoModel';
+import { revealCaretIn } from '../model';
 import { useMemoSectionDrag } from './useMemoSectionDrag';
 import './memo.css';
 
@@ -23,16 +24,37 @@ export type MemoEditorProps = {
 };
 const defaultCopy = (text: string) => navigator.clipboard.writeText(text);
 export const MEMO_HOLD_MS = 550;
+/** Room kept below and above the caret line when PC typing has to scroll it back into view. */
+export const MEMO_CARET_MARGIN = 16;
 
-function sizeArea(area: HTMLTextAreaElement) {
+export function sizeArea(area: HTMLTextAreaElement) {
+  // Collapsing the field to measure it shrinks the scrolling pane for a moment, and the
+  // browser clamps the pane's offset; keep every scrolled ancestor where it was so the view
+  // does not jump (and then re-follow the caret to the bottom edge) on each keystroke.
+  const scrolled: Array<[Element, number]> = [];
+  for (let node = area.parentElement; node; node = node.parentElement) if (node.scrollTop) scrolled.push([node, node.scrollTop]);
   // scrollHeight works in WebKitGTK, WebView2 and Android WebView, including wrapped lines.
   area.style.height = '0px';
   const style = getComputedStyle(area);
   const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
   area.style.height = `${Math.max(area.scrollHeight + border, parseFloat(style.lineHeight) || 24)}px`;
+  for (const [node, top] of scrolled) if (node.scrollTop !== top) node.scrollTop = top;
 }
-function MemoArea({ id, text, plainBody = false, readOnly, onEdit, onKey, onPaste, register }: {
-  id: string; text: string; plainBody?: boolean; readOnly: boolean; onEdit: (text: string) => boolean | void;
+/** The nearest ancestor that scrolls vertically. */
+function scrollPane(node: HTMLElement): HTMLElement | null {
+  for (let element = node.parentElement; element; element = element.parentElement) {
+    const overflow = getComputedStyle(element).overflowY;
+    if ((overflow === 'auto' || overflow === 'scroll') && element.scrollHeight > element.clientHeight) return element;
+  }
+  return null;
+}
+/** PC typing: the view stays put while the caret line is visible and moves only as far as needed. */
+export function followCaret(area: HTMLTextAreaElement) {
+  const pane = scrollPane(area);
+  if (pane) revealCaretIn(pane, area, MEMO_CARET_MARGIN);
+}
+function MemoArea({ id, text, plainBody = false, readOnly, follow, onEdit, onKey, onPaste, register }: {
+  id: string; text: string; plainBody?: boolean; readOnly: boolean; follow: boolean; onEdit: (text: string) => boolean | void;
   onKey?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste?: (start: number, end: number, text: string) => void;
   register: (node: HTMLTextAreaElement | null) => void;
@@ -66,7 +88,7 @@ function MemoArea({ id, text, plainBody = false, readOnly, onEdit, onKey, onPast
     if (onEdit(area.value) === false) { area.value = display; commit.current = display; sizeArea(area); }
   }
   return <textarea ref={ref} className={plainBody ? 'memo-body-text' : 'memo-item-text'} data-memo-item={id} aria-label="메모 본문" defaultValue={text} rows={1} spellCheck={false} readOnly={readOnly}
-    onChange={event => { sizeArea(event.currentTarget); if (!composing.current && !(event.nativeEvent as InputEvent).isComposing) save(event.currentTarget); }}
+    onChange={event => { const area = event.currentTarget; sizeArea(area); if (follow) followCaret(area); if (!composing.current && !(event.nativeEvent as InputEvent).isComposing) save(area); }}
     onCompositionStart={() => { composing.current = true; }}
     onCompositionEnd={event => { composing.current = false; save(event.currentTarget); }}
     onBlur={event => { if (!composing.current) save(event.currentTarget); }}
@@ -210,7 +232,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         else focus(item.id);
         apply(toggleItem(doc, item.id));
       }}/>}
-      <MemoArea id={item.id} text={item.text} readOnly={readOnly} register={node => { if (node) areas.current.set(item.id, node); else areas.current.delete(item.id); }}
+      <MemoArea id={item.id} text={item.text} readOnly={readOnly} follow={!touch} register={node => { if (node) areas.current.set(item.id, node); else areas.current.delete(item.id); }}
         onEdit={text => apply(editItem(documentRef.current.doc, item.id, text, mode), false)} onKey={event => key(event, item)}
         onPaste={(start, end, text) => {
           const next = pasteItems(doc, item.id, start, end, text, mode);
@@ -264,7 +286,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
             clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
           }}><ClipboardDocumentIcon aria-hidden="true" /></Button><Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger="⋯" open={sectionMenu === section.id} onOpenChange={open => setSectionMenu(open ? section.id : null)}/>{status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}</>}
         </div>}
-        {mode === 'todo' ? open.map(row) : <MemoArea id={section.id} text={sectionText(section)} plainBody readOnly={readOnly}
+        {mode === 'todo' ? open.map(row) : <MemoArea id={section.id} text={sectionText(section)} plainBody readOnly={readOnly} follow={!touch}
           register={node => { if (node) areas.current.set(section.id, node); else areas.current.delete(section.id); }}
           onEdit={text => apply(editSectionBody(documentRef.current.doc, section.id, text), false)}/>}
 
@@ -275,7 +297,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         {mode === 'todo' && doneOpen.has(section.id) && done.map(row)}
       </section>;
     })}
-    {!readOnly && <Button type="button" variant="ghost" className="memo-section-add" onClick={() => {
+    {!readOnly && <Button type="button" className="memo-section-add" onClick={() => {
       const next = addMemoSection(documentRef.current.doc, mode);
       const addedSections = memoSections(next).filter(section => section.heading);
       if (addedSections.length <= named.length) {
@@ -287,7 +309,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
       if (!apply(next)) return;
       if (activeFilter) setFilter(added.id);
       setRename(added.id);
-    }}>섹션 추가</Button>}
+    }}><PlusIcon aria-hidden="true"/>섹션 추가</Button>}
     {status?.id === 'add' && <p className="memo-status" role="status">{status.text}</p>}
     {sectionDrag.indicator !== undefined && <div className="memo-section-drop" aria-hidden="true" style={{ top: sectionDrag.indicator }}/>}
     {deleteTarget && <Dialog open title="섹션 삭제" onClose={() => setDeleteTarget(null)}><p>이 섹션과 항목을 삭제할까요?</p><div className="ui-dialog__actions"><Button variant="ghost" onClick={() => setDeleteTarget(null)}>취소</Button><Button variant="danger" onClick={() => { focus(''); apply(deleteMemoSection(doc, deleteTarget)); setDeleteTarget(null); }}>삭제</Button></div></Dialog>}

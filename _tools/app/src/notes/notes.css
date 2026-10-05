@@ -95,7 +95,7 @@
 .notes-editor-actions__gap { width: 14px; }
 .notes-color-dot { display: block; width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 25%, transparent); }
 .notes-color-dot.is-empty { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-muted); }
-.notes-editor-footer { align-items: center; padding-top: 8px; }
+.notes-editor-footer { align-items: center; padding-top: 8px; margin-top: auto; }
 .notes-sync svg { width: 16px; height: 16px; }
 .notes-sync.is-syncing svg { animation: notes-sync-spin 1s linear infinite; }
 .notes-sync.is-error { color: var(--color-danger); }

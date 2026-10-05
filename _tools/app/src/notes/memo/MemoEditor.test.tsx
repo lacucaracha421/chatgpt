@@ -309,7 +309,7 @@ it.each([false, true])('copies a memo section with an accessible icon button (to
 it.each([false, true])('adds sections in plain and todo modes, then focuses their body (todo=%s)', async todo => {
   const changes = surface(todo ? '- [ ] top' : 'top');
   const add = screen.getByRole('button', { name: '섹션 추가' });
-  expect(add).toHaveClass('ui-button--ghost');
+  expect(add).toHaveClass('ui-button--secondary');
   await userEvent.click(add);
   const name = screen.getByRole('textbox', { name: '섹션 이름' });
   expect(name).toHaveFocus(); expect(name).toHaveValue('새 섹션');
