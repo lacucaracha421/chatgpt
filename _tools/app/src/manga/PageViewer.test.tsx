@@ -1,13 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
+import { DEFAULT_UI_PREFERENCES, saveUiPreferences, UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { PageViewer } from "./PageViewer";
 import { BackNavigationProvider, useBackRequest } from "../shared/navigation/BackNavigation";
 
 beforeEach(() => {
+  saveUiPreferences({ ...DEFAULT_UI_PREFERENCES, mangaReadingDirection: "ltr" });
   vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
   vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(100);
   vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { callback(0); return 1; });
@@ -25,7 +26,7 @@ afterEach(() => {
 });
 
 function seedReaderPrefs(value: object) {
-  localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(value));
+  saveUiPreferences({ ...DEFAULT_UI_PREFERENCES, ...value });
 }
 
 function viewerProps(overrides: object = {}) {
@@ -52,6 +53,201 @@ function position(): string {
 }
 
 describe("PageViewer", () => {
+  it.each(["rtl", "ltr"] as const)("turns only once per wheel gesture and waits for a pause in %s", direction => {
+    vi.useFakeTimers();
+    try {
+      seedReaderPrefs({ mangaReadingDirection: direction });
+      const props = viewerProps({ initialPage: 2 });
+      render(<PageViewer {...props} />);
+      const reader = document.querySelector(".manga-reader")!;
+      fireEvent.wheel(reader, { deltaY: 20 });
+      fireEvent.wheel(reader, { deltaY: 20 });
+      expect(position()).toBe("2 / 6");
+      fireEvent.wheel(reader, { deltaY: 20 });
+      expect(position()).toBe("3 / 6");
+      fireEvent.wheel(reader, { deltaY: 120 });
+      act(() => { vi.advanceTimersByTime(199); });
+      fireEvent.wheel(reader, { deltaY: 120 });
+      act(() => { vi.advanceTimersByTime(199); });
+      fireEvent.wheel(reader, { deltaY: 120 });
+      expect(props.onPageChange).toHaveBeenCalledExactlyOnceWith(3);
+      act(() => { vi.advanceTimersByTime(201); });
+      fireEvent.wheel(reader, { deltaY: 120 });
+      expect(position()).toBe("4 / 6");
+      act(() => { vi.advanceTimersByTime(201); });
+      fireEvent.wheel(reader, { deltaY: -120 });
+      expect(position()).toBe("3 / 6");
+      expect(props.onPageChange).toHaveBeenCalledTimes(3);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["rtl", "ltr"] as const)("maps horizontal wheels like the edges in %s without closing", direction => {
+    vi.useFakeTimers();
+    try {
+      seedReaderPrefs({ mangaReadingDirection: direction });
+      const props = viewerProps({ initialPage: 3 });
+      render(<PageViewer {...props} />);
+      const reader = document.querySelector(".manga-reader")!;
+      fireEvent.wheel(reader, { deltaX: -100, deltaY: 5 });
+      expect(position()).toBe(direction === "rtl" ? "4 / 6" : "2 / 6");
+      fireEvent.wheel(reader, { deltaX: -100, deltaY: 5 });
+      expect(props.onPageChange).toHaveBeenCalledTimes(1);
+      act(() => { vi.advanceTimersByTime(201); });
+      fireEvent.wheel(reader, { deltaX: 100, deltaY: -5 });
+      expect(position()).toBe("3 / 6");
+      expect(props.onClose).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["rtl", "ltr"] as const)("normalizes line and page wheel units and advances whole spreads in %s", direction => {
+    vi.useFakeTimers();
+    try {
+      seedReaderPrefs({ mangaReadingDirection: direction, mangaPageMode: "double" });
+      render(<PageViewer {...viewerProps()} />);
+      const reader = document.querySelector(".manga-reader")!;
+      fireEvent.wheel(reader, { deltaY: 1, deltaMode: 1 });
+      expect(position()).toBe("1 / 6");
+      fireEvent.wheel(reader, { deltaY: 2, deltaMode: 1 });
+      expect(position()).toBe("2-3 / 6");
+      act(() => { vi.advanceTimersByTime(201); });
+      fireEvent.wheel(reader, { deltaY: 1, deltaMode: 2 });
+      expect(position()).toBe("4-5 / 6");
+      act(() => { vi.advanceTimersByTime(201); });
+      fireEvent.wheel(reader, { deltaY: -1, deltaMode: 2 });
+      expect(position()).toBe("2-3 / 6");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("ignores wheels while the overview is open, including horizontal Back gestures", () => {
+    const props = viewerProps({ initialPage: 2 });
+    render(<PageViewer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "페이지 목록" }));
+    fireEvent.wheel(screen.getByRole("dialog", { name: "페이지 목록" }), { deltaY: 120 });
+    fireEvent.wheel(screen.getByRole("dialog", { name: "페이지 목록" }), { deltaX: -120 });
+    expect(position()).toBe("2 / 6");
+    expect(screen.getByRole("dialog", { name: "페이지 목록" })).toBeVisible();
+    expect(props.onPageChange).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("leaves slider and Ctrl-wheel behavior alone", () => {
+    const props = viewerProps({ initialPage: 2 });
+    render(<PageViewer {...props} />);
+    const slider = screen.getByRole("slider");
+    expect(fireEvent.wheel(slider, { deltaY: 120 })).toBe(true);
+    expect(fireEvent.wheel(slider, { deltaX: -120 })).toBe(true);
+    fireEvent.wheel(document.querySelector(".manga-reader")!, { deltaY: 120, ctrlKey: true });
+    expect(props.onPageChange).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not turn pages while a reader menu or nested dialog is open", async () => {
+    const props = viewerProps({ initialPage: 2 });
+    render(<PageViewer {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: "읽기 설정" }));
+    fireEvent.wheel(document.querySelector(".manga-reader")!, { deltaY: 120 });
+    expect(props.onPageChange).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    vi.useFakeTimers();
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.append(dialog);
+    try {
+      act(() => { vi.advanceTimersByTime(201); });
+      fireEvent.wheel(document.querySelector(".manga-reader")!, { deltaY: 120 });
+      expect(props.onPageChange).not.toHaveBeenCalled();
+    } finally { dialog.remove(); vi.useRealTimers(); }
+  });
+
+  it("opens with Japanese direction by default and preserves a later toggle across reopening", async () => {
+    localStorage.clear();
+    const user = userEvent.setup();
+    const { unmount } = render(<PageViewer {...viewerProps()} />);
+    expect(screen.getByRole("slider")).toHaveAttribute("dir", "rtl");
+    await user.keyboard("{ArrowLeft}");
+    expect(position()).toBe("2 / 6");
+    await user.click(screen.getByRole("button", { name: "읽기 설정" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "오른쪽에서 왼쪽으로 읽기" }));
+    unmount();
+    render(<PageViewer {...viewerProps()} />);
+    expect(screen.getByRole("slider")).toHaveAttribute("dir", "ltr");
+  });
+
+  it.each(["rtl", "ltr"] as const)("mirrors the bottom bar and turns pages and spreads in %s", (direction) => {
+    seedReaderPrefs({ mangaReadingDirection: direction });
+    const props = viewerProps();
+    render(<PageViewer {...props} />);
+    const bar = document.querySelector(".reader-control-bar")!;
+    const buttons = Array.from(bar.querySelectorAll("button"));
+    const next = buttons[direction === "rtl" ? 0 : 1];
+    const previous = buttons[direction === "rtl" ? 1 : 0];
+    expect(next).toHaveAccessibleName("다음 페이지");
+    expect(previous).toBeDisabled();
+    expect(screen.getByRole("slider")).toHaveAttribute("dir", direction);
+    expect(bar).toHaveTextContent("1 / 6");
+    fireEvent.click(next);
+    expect(position()).toBe("2 / 6");
+    fireEvent.click(previous);
+    expect(position()).toBe("1 / 6");
+    fireEvent.click(screen.getByRole("button", { name: "두 쪽 보기" }));
+    fireEvent.click(next);
+    expect(position()).toBe("2-3 / 6");
+    fireEvent.click(next);
+    expect(position()).toBe("4-5 / 6");
+    fireEvent.click(next);
+    expect(position()).toBe("6 / 6");
+    expect(next).toBeDisabled();
+    fireEvent.click(previous);
+    expect(position()).toBe("4-5 / 6");
+  });
+
+  it("previews a drag without turning pages, holds chrome, commits on release and cancels safely", () => {
+    vi.useFakeTimers();
+    try {
+      const props = viewerProps();
+      render(<PageViewer {...props} />);
+      const slider = screen.getByRole("slider");
+      const reader = document.querySelector(".manga-reader")!;
+      const bottom = document.querySelector(".manga-reader__bottom")!;
+      fireEvent.pointerDown(slider, { pointerId: 1 });
+      fireEvent.change(slider, { target: { value: "5" } });
+      expect(bottom).toHaveTextContent("5 / 6");
+      expect(slider).toHaveAttribute("aria-valuetext", "5 / 6페이지");
+      expect(position()).toBe("1 / 6");
+      expect(props.onPageChange).not.toHaveBeenCalled();
+      fireEvent.pointerLeave(bottom);
+      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2); });
+      expect(reader).toHaveAttribute("data-chrome-visible", "true");
+      fireEvent.pointerUp(slider, { pointerId: 1 });
+      expect(position()).toBe("5 / 6");
+      expect(props.onPageChange).toHaveBeenCalledExactlyOnceWith(5);
+      fireEvent.pointerDown(slider, { pointerId: 2 });
+      fireEvent.change(slider, { target: { value: "2" } });
+      fireEvent.pointerCancel(slider, { pointerId: 2 });
+      expect(slider).toHaveValue("5");
+      expect(props.onPageChange).toHaveBeenCalledTimes(1);
+      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS); });
+      expect(reader).toHaveAttribute("data-chrome-visible", "false");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps chrome during keyboard slider focus and leaves its native arrow keys unhandled", () => {
+    vi.useFakeTimers();
+    try {
+      const props = viewerProps();
+      render(<PageViewer {...props} />);
+      const slider = screen.getByRole("slider");
+      fireEvent.keyDown(document.querySelector(".manga-reader")!, { key: "Tab" });
+      act(() => slider.focus());
+      expect(fireEvent.keyDown(slider, { key: "ArrowLeft" })).toBe(true);
+      expect(props.onPageChange).not.toHaveBeenCalled();
+      fireEvent.change(slider, { target: { value: "3" } });
+      expect(props.onPageChange).toHaveBeenLastCalledWith(3);
+      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2); });
+      expect(document.querySelector(".manga-reader")).toHaveAttribute("data-chrome-visible", "true");
+    } finally { vi.useRealTimers(); }
+  });
+
   it("keeps the painted page mounted while the next page is still loading", async () => {
     vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
     const user = userEvent.setup();

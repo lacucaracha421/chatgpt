@@ -1,5 +1,5 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
 import { ArrowLeftIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
 import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { useCatalogMasked } from "../privacy/catalogMask";
@@ -11,6 +11,7 @@ import { Dialog } from "../shared/ui/Dialog";
 import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { DEFAULT_PAGE_RATIO, ReaderPage, ReaderPageBox } from "./ReaderPage";
+import { ReaderControlBar } from "./ReaderControlBar";
 import { ReaderSpread } from "./ReaderSpread";
 import { arrowAdvance, displayOrder, edgeAdvance, nextSpreadStart, prevSpreadStart, spreadForPage } from "./readerSpreadModel";
 import "./reader.css";
@@ -36,6 +37,10 @@ type PageViewerProps = {
   actions?: ReactNode;
   onRetryPage?: () => Promise<void>;
 };
+
+const WHEEL_PAGE_THRESHOLD_PX = 48;
+const WHEEL_GESTURE_PAUSE_MS = 200;
+const WHEEL_LINE_PX = 16;
 
 const VIEWER_MARGIN_PX: Record<MangaViewerMargin, number> = { compact: 0, normal: 16, wide: 48 };
 const VIEWER_GAP_PX: Record<MangaViewerGap, number> = { none: 0, narrow: 8, wide: 24 };
@@ -90,6 +95,10 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
   const overviewOpenedOnceRef = useRef(false);
   const overviewGridRef = useRef<HTMLDivElement>(null);
   const chrome = useIdleChrome();
+  const wheelGesture = useRef({ delta: 0, axis: "y", turned: false, timer: null as number | null });
+  useEffect(() => () => {
+    if (wheelGesture.current.timer !== null) window.clearTimeout(wheelGesture.current.timer);
+  }, []);
 
   const { direction, mode, coverSingle, margin, gap } = readerPrefs;
   const spread = mode === "double";
@@ -116,6 +125,48 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
   };
   const goNext = () => move(spread ? nextSpreadStart(page, pageCount, coverSingle) : Math.min(pageCount, page + 1));
   const goPrev = () => move(spread ? prevSpreadStart(page, pageCount, coverSingle) : Math.max(1, page - 1));
+  const turnWithWheel = (event: WheelEvent<HTMLDivElement>) => {
+    // The enclosing Dialog uses horizontal wheels for Back; the reader owns these gestures.
+    // No preventDefault: the page stage cannot scroll, and the slider keeps its native behavior.
+    event.stopPropagation();
+    const gesture = wheelGesture.current;
+    if (gesture.timer !== null) window.clearTimeout(gesture.timer);
+    gesture.timer = window.setTimeout(() => {
+      gesture.delta = 0;
+      gesture.turned = false;
+      gesture.timer = null;
+    }, WHEEL_GESTURE_PAUSE_MS);
+    const ownDialog = event.currentTarget.closest('[role="dialog"]');
+    const blocked = overviewOpen || chrome.scrubbing.current || event.ctrlKey || event.metaKey
+      || (event.target instanceof Element && !!event.target.closest('input[type="range"]'))
+      || !!document.querySelector('[role="menu"]')
+      || Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]'))
+        .some(dialog => dialog !== ownDialog && dialog.getAttribute("data-state") !== "closed");
+    if (blocked) {
+      gesture.delta = 0;
+      // Do not let the remainder of this gesture turn a page after the overlay closes.
+      gesture.turned = true;
+      return;
+    }
+    if (gesture.turned) return;
+    const horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+    const axis = horizontal ? "x" : "y";
+    const rawDelta = horizontal ? event.deltaX : event.deltaY;
+    const factor = event.deltaMode === 1 ? WHEEL_LINE_PX
+      : event.deltaMode === 2 ? (event.currentTarget.clientHeight || window.innerHeight) : 1;
+    const delta = rawDelta * factor;
+    if (!Number.isFinite(delta) || delta === 0) return;
+    if (axis !== gesture.axis || Math.sign(delta) !== Math.sign(gesture.delta)) gesture.delta = 0;
+    gesture.axis = axis;
+    gesture.delta += delta;
+    if (Math.abs(gesture.delta) < WHEEL_PAGE_THRESHOLD_PX) return;
+    gesture.turned = true;
+    chrome.reveal();
+    const advance = horizontal ? edgeAdvance(delta < 0 ? "left" : "right", direction)
+      : delta > 0 ? "next" : "prev";
+    if (advance === "next") goNext();
+    else goPrev();
+  };
   const goTo = (target: number) => move(spread ? (spreadForPage(target, pageCount, coverSingle)[0] ?? target) : target);
   const jumpTo = (target: number) => {
     goTo(target);
@@ -252,6 +303,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
     <div
       className={`asset-viewer manga-reader${chrome.visible ? "" : " asset-viewer--chrome-hidden"}`}
       data-chrome-visible={chrome.visible}
+      onWheel={turnWithWheel}
       onPointerMove={() => { chrome.keyboardFocus.current = false; chrome.reveal(); }}
       onPointerDown={() => { chrome.keyboardFocus.current = false; }}
     >
@@ -286,21 +338,14 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
           </div>
           {edge("left")}
           {edge("right")}
-          {/* The scrubber runs in the reading direction: right-to-left books start at the right (user, 2026-10-03). */}
-          {pageCount > 1 && <div className="asset-viewer__filmstrip manga-reader__bottom" dir="ltr" {...chrome.hover}>
-            <input
-              type="range"
-              dir={direction === "rtl" ? "rtl" : "ltr"}
-              className="manga-reader__scrubber"
-              aria-label="페이지 위치"
-              aria-valuetext={`${logicalSpread[0]}페이지`}
-              min={1}
-              max={pageCount}
-              step={1}
-              value={logicalSpread[0]}
-              onChange={(event) => goTo(Number(event.currentTarget.value))}
+          <div className="asset-viewer__filmstrip manga-reader__bottom" dir="ltr" {...chrome.hover}>
+            <ReaderControlBar
+              page={logicalSpread[0]} pageLabel={position} total={pageCount} direction={direction}
+              sliderLabel="페이지 위치" onPageChange={goTo} onNext={goNext} onPrevious={goPrev}
+              nextDisabled={(logicalSpread[logicalSpread.length - 1] ?? page) >= pageCount} previousDisabled={logicalSpread[0] <= 1}
+              onScrubbingChange={(active) => { chrome.scrubbing.current = active; chrome.reveal(); }}
             />
-          </div>}
+          </div>
         </div>
       </div>
       {overviewOpen && <div className="manga-viewer__overview" role="dialog" aria-label="페이지 목록">
@@ -363,12 +408,13 @@ function useIdleChrome() {
   const timerRef = useRef<number | null>(null);
   const pointerOverRef = useRef(false);
   const keyboardFocus = useRef(false);
+  const scrubbing = useRef(false);
   const reveal = useCallback(() => {
     setVisible(true);
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
-      if (pointerOverRef.current) return;
+      if (pointerOverRef.current || scrubbing.current) return;
       if (keyboardFocus.current && ref.current?.contains(document.activeElement)) return;
       setVisible(false);
     }, VIEWER_CHROME_IDLE_MS);
@@ -384,5 +430,5 @@ function useIdleChrome() {
     onPointerEnter: () => { pointerOverRef.current = true; setVisible(true); },
     onPointerLeave: () => { pointerOverRef.current = false; reveal(); },
   };
-  return { visible, reveal, hover, ref, keyboardFocus };
+  return { visible, reveal, hover, ref, keyboardFocus, scrubbing };
 }

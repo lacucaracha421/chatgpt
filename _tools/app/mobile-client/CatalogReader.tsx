@@ -1,12 +1,13 @@
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {ArrowLeftIcon,ArrowPathIcon,ChevronLeftIcon,ChevronRightIcon,MagnifyingGlassMinusIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon,ArrowPathIcon,MagnifyingGlassMinusIcon} from '@heroicons/react/24/outline';
 import {Dialog,DialogDescription,IconButton,Button} from './ui';
 import {decodeImage} from './media';
 import {catalogImageTicket} from './catalogMedia';
 import {fitTransform} from './model';
 import type {CatalogReaderManifest,CatalogReaderPage} from './catalogModel';
 import './CatalogReader.css';
+import {ReaderControlBar} from '../src/manga/ReaderControlBar';
 import {useTabletCatalogMasked} from './catalogMask';
 
 type Transform={scale:number;x:number;y:number};
@@ -40,8 +41,7 @@ export function CatalogReader(props: Parameters<typeof CatalogReaderContent>[0])
 function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{manifest:CatalogReaderManifest;title:string;onClose():void;onRefresh():void;refreshing:boolean}){
   const [current,setCurrent]=useState(0),[chrome,setChrome]=useState(false),[transform,setTransform]=useState<Transform>({scale:1,x:0,y:0});
   const [target,setTarget]=useState(0);
-  const [scrubPage,setScrubPage]=useState<number|null>(null),[controlsFocused,setControlsFocused]=useState(false);
-  const scrubbing=useRef(false);
+  const [scrubbing,setScrubbing]=useState(false),[controlsFocused,setControlsFocused]=useState(false);
   const [attempt,setAttempt]=useState(0),[failedPages,setFailedPages]=useState<number[]>([]);
   const [ready,setReady]=useState<Record<number,number>>({});
   const pageReady=useCallback((index:number,ratio:number)=>setReady(old=>old[index]===ratio?old:{...old,[index]:ratio}),[]);
@@ -76,7 +76,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{man
   useEffect(()=>{if(!stageElement)return;const update=()=>{if(stageElement.clientWidth&&stageElement.clientHeight)setBounds({width:stageElement.clientWidth,height:stageElement.clientHeight});};update();if(!window.ResizeObserver)return;const observer=new ResizeObserver(update);observer.observe(stageElement);return()=>observer.disconnect();},[stageElement]);
   useEffect(()=>{if(current>=manifest.pages.length)setCurrent(Math.max(0,manifest.pages.length-1));},[current,manifest.pages.length]);
   useEffect(()=>{setTransform({scale:1,x:0,y:0});gesture.current.points.clear();},[current,landscape,manifest.providerWorkId]);
-  useEffect(()=>{if(!chrome||scrubPage!==null||controlsFocused)return;const timer=setTimeout(()=>setChrome(false),3500);return()=>clearTimeout(timer);},[chrome,scrubPage,controlsFocused]);
+  useEffect(()=>{if(!chrome||scrubbing||controlsFocused)return;const timer=setTimeout(()=>setChrome(false),3500);return()=>clearTimeout(timer);},[chrome,scrubbing,controlsFocused]);
   const pool=manifest.pages.filter(page=>shown.some(p=>p.index===page.index)||(page.index>=Math.max(0,targetStart-2)&&page.index<=targetStart+targetPages.length+1));
   return <Dialog open title="만화 읽기" variant="fullscreen" onClose={onClose} onKeyDown={event=>{
     if(event.target instanceof HTMLInputElement||transform.scale>1)return;if(event.key==='ArrowLeft'){event.preventDefault();change(next);}if(event.key==='ArrowRight'){event.preventDefault();change(previous);}
@@ -115,16 +115,10 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{man
       <header className="catalog-reader-bar"><IconButton label="읽기 닫기" icon={ArrowLeftIcon} onClick={onClose}/><div><strong>{title}</strong><span>{pageLabel} / {manifest.pages.length}</span></div><IconButton label="페이지 주소 갱신" icon={ArrowPathIcon} disabled={refreshing} onClick={onRefresh}/></header>
       {transform.scale>1&&<div className="catalog-reader-zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={()=>setTransform({scale:1,x:0,y:0})}/></div>}
       <footer className="catalog-reader-footer" onPointerDownCapture={()=>setControlsFocused(false)} onKeyDownCapture={()=>{setControlsFocused(true);setChrome(true);}} onFocusCapture={event=>{setControlsFocused(event.target.matches(':focus-visible'));setChrome(true);}} onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setControlsFocused(false);}}>
-        <IconButton label="다음 페이지" icon={ChevronLeftIcon} disabled={next>=manifest.pages.length} onClick={()=>change(next)}/>
-        <label className="catalog-reader-jump"><span className="numeric">{scrubPage??pageLabel} / {manifest.pages.length}</span>
-          <input type="range" dir="rtl" aria-label="페이지 이동" min={1} max={manifest.pages.length} step={1} value={scrubPage??target+1} aria-valuetext={`${scrubPage??target+1} / ${manifest.pages.length}페이지`} disabled={manifest.pages.length<=1}
-            onPointerDown={event=>{scrubbing.current=true;setScrubPage(target+1);setChrome(true);event.currentTarget.setPointerCapture?.(event.pointerId);}}
-            onChange={event=>{const page=Number(event.currentTarget.value);if(scrubbing.current)setScrubPage(page);else change(page-1);}}
-            onPointerUp={event=>{if(scrubbing.current)change(Number(event.currentTarget.value)-1);scrubbing.current=false;setScrubPage(null);}}
-            onPointerCancel={()=>{scrubbing.current=false;setScrubPage(null);}}
-            onLostPointerCapture={()=>{scrubbing.current=false;setScrubPage(null);}}/>
-        </label>
-        <IconButton label="이전 페이지" icon={ChevronRightIcon} disabled={target===0} onClick={()=>change(previous)}/>
+        <ReaderControlBar page={target+1} pageLabel={pageLabel} total={manifest.pages.length} direction="rtl"
+          onPageChange={page=>change(page-1)} onNext={()=>change(next)} onPrevious={()=>change(previous)}
+          nextDisabled={next>=manifest.pages.length} previousDisabled={target===0}
+          onScrubbingChange={active=>{setScrubbing(active);if(active)setChrome(true);}}/>
       </footer>
     </div>
   </Dialog>;

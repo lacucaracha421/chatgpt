@@ -21,6 +21,17 @@ function storage(): Storage {
 }
 
 describe("UI preferences", () => {
+  it("defaults to RTL and migrates legacy LTR only once, preserving later explicit choices", () => {
+    const target = storage();
+    expect(loadUiPreferences(target).mangaReadingDirection).toBe("rtl");
+    target.clear();
+    target.setItem(UI_PREFERENCES_KEY, JSON.stringify({ mangaReadingDirection: "ltr", appZoom: 125, futureField: "keep" }));
+    expect(loadUiPreferences(target)).toMatchObject({ mangaReadingDirection: "rtl", appZoom: 125 });
+    expect(JSON.parse(target.getItem(UI_PREFERENCES_KEY)!)).toMatchObject({ mangaReadingDirection: "rtl", futureField: "keep" });
+    saveUiPreferences({ ...loadUiPreferences(target), mangaReadingDirection: "ltr" }, target);
+    expect(loadUiPreferences(target).mangaReadingDirection).toBe("ltr");
+    expect(loadUiPreferences(target).mangaReadingDirection).toBe("ltr");
+  });
   it("persists app zoom and rejects unsupported stored values", () => {
     const target = storage();
     saveUiPreferences({ ...DEFAULT_UI_PREFERENCES, appZoom: 125 }, target);
@@ -102,7 +113,7 @@ describe("UI preferences", () => {
       thumbnailRowHeight: 180,
       creatorCardSize: 200,
       collectionType: "manga",
-      mangaReadingDirection: "ltr",
+      mangaReadingDirection: "rtl",
       mangaPageMode: "single",
       mangaCoverSingle: true,
       mangaViewerMargin: "compact",
@@ -137,7 +148,7 @@ describe("UI preferences", () => {
       thumbnailRowHeight: 180,
       creatorCardSize: 200,
       collectionType: "manga",
-      mangaReadingDirection: "ltr",
+      mangaReadingDirection: "rtl",
       mangaPageMode: "single",
       mangaCoverSingle: true,
       mangaViewerMargin: "compact",
@@ -215,7 +226,7 @@ describe("UI preferences", () => {
       mangaViewerGap: null,
     }));
     expect(loadUiPreferences(localStorage)).toMatchObject({
-      mangaReadingDirection: "ltr",
+      mangaReadingDirection: "rtl",
       mangaPageMode: "single",
       mangaCoverSingle: true,
       mangaViewerMargin: "compact",

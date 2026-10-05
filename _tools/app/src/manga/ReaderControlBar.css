@@ -1,0 +1,35 @@
+.reader-control-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.reader-control-bar__jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.reader-control-bar__jump span {
+  font-size: var(--type-meta);
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-control-bar__jump input {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  margin: 0;
+  accent-color: var(--color-accent);
+  touch-action: none;
+  cursor: pointer;
+}
+
+.reader-control-bar__jump input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

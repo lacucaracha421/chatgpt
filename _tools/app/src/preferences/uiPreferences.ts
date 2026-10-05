@@ -2,6 +2,7 @@ import type { AssetSort, CollectionType } from "../library/types";
 import { clampSidebarWidth } from "../layout/sidebarWidth";
 
 export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
+const MANGA_RTL_MIGRATION_KEY = "lakomics.mangaRtlMigration.v1";
 export const APP_ZOOM_LEVELS = [80, 90, 100, 110, 125, 150] as const;
 
 export function normalizeAppZoom(value: unknown): number {
@@ -51,7 +52,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   thumbnailRowHeight: 180,
   creatorCardSize: 200,
   collectionType: "manga",
-  mangaReadingDirection: "ltr",
+  mangaReadingDirection: "rtl",
   mangaPageMode: "single",
   mangaCoverSingle: true,
   mangaViewerMargin: "compact",
@@ -59,7 +60,20 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
 };
 
 export function loadUiPreferences(storage: Storage = localStorage): UiPreferences {
-  const stored = storage.getItem(UI_PREFERENCES_KEY);
+  let stored = storage.getItem(UI_PREFERENCES_KEY);
+  if (storage.getItem(MANGA_RTL_MIGRATION_KEY) !== "true") {
+    // Preserve all stored fields; only the old reading direction changes once.
+    if (stored) {
+      try {
+        const legacy: unknown = JSON.parse(stored);
+        if (isRecord(legacy) && legacy.mangaReadingDirection === "ltr") {
+          stored = JSON.stringify({ ...legacy, mangaReadingDirection: "rtl" });
+          storage.setItem(UI_PREFERENCES_KEY, stored);
+        }
+      } catch { /* Malformed preferences still fall back to defaults below. */ }
+    }
+    storage.setItem(MANGA_RTL_MIGRATION_KEY, "true");
+  }
   if (!stored) return DEFAULT_UI_PREFERENCES;
 
   let value: unknown;
@@ -137,6 +151,8 @@ export function saveUiPreferences(
   storage: Storage = localStorage,
 ): void {
   storage.setItem(UI_PREFERENCES_KEY, JSON.stringify(value));
+  // A choice saved by the current UI must survive subsequent loads.
+  storage.setItem(MANGA_RTL_MIGRATION_KEY, "true");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

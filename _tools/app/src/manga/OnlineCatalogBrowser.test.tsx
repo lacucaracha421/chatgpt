@@ -833,7 +833,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(await findReaderPosition("1 / 3")).toBeVisible();
     expect(within(screen.getByRole("dialog")).getByText(/카탈로그$/)).toBeVisible();
-    await userEvent.keyboard("{ArrowRight}");
+    await userEvent.keyboard("{ArrowLeft}");
     await findReaderPosition("2 / 3");
     expect(gateway.saveRemoteReadingProgress).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
@@ -902,7 +902,7 @@ describe("OnlineCatalogBrowser", () => {
     await findReaderPosition("1 / 3");
     vi.useFakeTimers();
 
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowLeft" });
     fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
 
     expect(gateway.saveRemoteReadingProgress).not.toHaveBeenCalled();

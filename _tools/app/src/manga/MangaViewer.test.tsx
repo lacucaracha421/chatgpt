@@ -73,21 +73,21 @@ describe("MangaViewer", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("moves to the next page with the right arrow", async () => {
+  it("moves to the next page with the left arrow", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     await waitFor(() => expect(position()).toBe("1 / 60"));
-    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowLeft}");
     expect(position()).toBe("2 / 60");
   });
 
-  it("moves to the previous page with the left arrow", async () => {
+  it("moves to the previous page with the right arrow", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     await waitFor(() => expect(position()).toBe("1 / 60"));
-    await user.keyboard("{ArrowRight}");
-    await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowLeft}");
+    await user.keyboard("{ArrowLeft}");
+    await user.keyboard("{ArrowRight}");
     expect(position()).toBe("2 / 60");
   });
 
@@ -95,10 +95,10 @@ describe("MangaViewer", () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={2} onClose={vi.fn()} />);
     await waitFor(() => expect(position()).toBe("1 / 2"));
-    await user.keyboard("{ArrowLeft}");
+    await user.keyboard("{ArrowRight}");
     expect(position()).toBe("1 / 2");
-    await user.keyboard("{ArrowRight}");
-    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowLeft}");
+    await user.keyboard("{ArrowLeft}");
     expect(position()).toBe("2 / 2");
   });
 
@@ -118,7 +118,7 @@ describe("MangaViewer", () => {
     await waitFor(() => expect(position()).toBe("1 / 60"));
     await user.click(screen.getByRole("button", { name: "두 쪽 보기" }));
     expect(position()).toBe("1 / 60");
-    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowLeft}");
     expect(position()).toBe("2-3 / 60");
     expect(screen.getAllByRole("img", { name: /페이지/ })).toHaveLength(2);
   });
@@ -128,7 +128,7 @@ describe("MangaViewer", () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     await waitFor(() => expect(position()).toBe("1 / 60"));
     await user.keyboard("v");
-    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowLeft}");
     expect(position()).toBe("2-3 / 60");
     await user.keyboard("v");
     expect(position()).toBe("2 / 60");
@@ -139,9 +139,9 @@ describe("MangaViewer", () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={6} onClose={vi.fn()} />);
     await waitFor(() => expect(position()).toBe("1 / 6"));
     await user.click(screen.getByRole("button", { name: "두 쪽 보기" }));
-    await user.keyboard("{ArrowRight}");
-    await user.keyboard("{ArrowRight}");
-    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowLeft}");
+    await user.keyboard("{ArrowLeft}");
+    await user.keyboard("{ArrowLeft}");
     expect(position()).toBe("6 / 6");
     expect(screen.getAllByRole("img", { name: /페이지/ })).toHaveLength(1);
   });
@@ -162,7 +162,7 @@ describe("MangaViewer", () => {
     expect(position()).toBe("1 / 60");
     await act(async () => undefined);
     expect(progressApi.get).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".reader-control-bar button")!);
     expect(position()).toBe("2 / 60");
     fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
     unmount();
@@ -172,7 +172,7 @@ describe("MangaViewer", () => {
 
   it("starts a different series at page one when the viewer stays mounted", () => {
     const { rerender } = render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".reader-control-bar button")!);
     expect(position()).toBe("2 / 60");
 
     rerender(<MangaViewer seriesId="s2" galleryId={null} title="Other" pageCount={20} onClose={vi.fn()} />);
