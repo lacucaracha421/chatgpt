@@ -83,3 +83,8 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.artist-style-math]
 opt-level = 3
+
+# Release rebuilds reuse unchanged code (user 2026-10-06): the single app crate otherwise
+# recompiles and re-optimizes from scratch on every release build.
+[profile.release]
+incremental = true
