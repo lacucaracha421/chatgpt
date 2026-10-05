@@ -1023,7 +1023,12 @@ impl Library {
         targets: Vec<CharacterMoveTarget>,
         asset_ids: Vec<String>,
     ) -> Result<u64> {
-        self.move_assets_to_characters_with_decision(targets, asset_ids, DecisionKind::Accepted)
+        self.move_assets_to_characters_with_decision(
+            targets,
+            asset_ids,
+            DecisionKind::Accepted,
+            false,
+        )
     }
 
     pub fn move_assets_to_character_without_learning(
@@ -1039,6 +1044,33 @@ impl Library {
             }],
             asset_ids,
             DecisionKind::AcceptedWrongRegion,
+            false,
+        )
+    }
+
+    /// 태거 검토의 맞음 / 맞음 · 영역 틀림 (`learning: false`). Unlike every other move,
+    /// a reviewed image may leave the 오리지널 folder: the user judged this exact image
+    /// as the character (decision 2026-10-05). Same transaction, assignment and outbox
+    /// path as any other character move.
+    pub fn move_tagger_review_assets_to_character(
+        &self,
+        target_id: String,
+        expected_fingerprint: String,
+        asset_ids: Vec<String>,
+        learning: bool,
+    ) -> Result<u64> {
+        self.move_assets_to_characters_with_decision(
+            vec![CharacterMoveTarget {
+                target_id,
+                expected_fingerprint,
+            }],
+            asset_ids,
+            if learning {
+                DecisionKind::Accepted
+            } else {
+                DecisionKind::AcceptedWrongRegion
+            },
+            true,
         )
     }
 
@@ -1047,6 +1079,7 @@ impl Library {
         targets: Vec<CharacterMoveTarget>,
         asset_ids: Vec<String>,
         decision: DecisionKind,
+        allow_originals_source: bool,
     ) -> Result<u64> {
         let asset_ids = asset_ids.into_iter().collect::<BTreeSet<_>>();
         let target_ids = targets
@@ -1104,11 +1137,13 @@ impl Library {
                 )));
             }
             if let Some(classification_id) = classifications.first() {
-                if super::classification::classification_in_role_scope(
-                    &transaction,
-                    classification_id,
-                    "originals",
-                )? {
+                if !allow_originals_source
+                    && super::classification::classification_in_role_scope(
+                        &transaction,
+                        classification_id,
+                        "originals",
+                    )?
+                {
                     return Err(Error::InvalidMessage(format!(
                         "{}: 오리지널 보관 영역의 자산은 이동할 수 없습니다.",
                         destination_target.display_name

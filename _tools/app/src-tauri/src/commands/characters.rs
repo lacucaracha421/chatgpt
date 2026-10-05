@@ -670,17 +670,27 @@ pub async fn replace_character_references(
 }
 
 /// `learning: false` is 맞음 · 영역 틀림: membership only, never learning evidence.
+/// `tagger_review: true` marks a 태거 검토 decision, the only move allowed to take an
+/// image out of the 오리지널 folder.
 #[tauri::command]
 pub async fn move_assets_to_character(
     target_id: String,
     expected_fingerprint: String,
     asset_ids: Vec<String>,
     learning: Option<bool>,
+    tagger_review: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<u64, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        if learning.unwrap_or(true) {
+        if tagger_review.unwrap_or(false) {
+            library.move_tagger_review_assets_to_character(
+                target_id,
+                expected_fingerprint,
+                asset_ids,
+                learning.unwrap_or(true),
+            )
+        } else if learning.unwrap_or(true) {
             library.move_assets_to_character(target_id, expected_fingerprint, asset_ids)
         } else {
             library.move_assets_to_character_without_learning(

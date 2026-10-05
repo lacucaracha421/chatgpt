@@ -145,8 +145,9 @@ export function predictionRequest(prediction: Prediction, assetIds: string[], de
   return { targetId: prediction.targetId, expectedFingerprint: prediction.targetFingerprint, assetIds, decision, scanId: prediction.scanId, baselineFingerprint: prediction.runtimeFingerprint };
 }
 
-export function moveAssetsToCharacter(targetId: string, expectedFingerprint: string, assetIds: string[], learning = true): Promise<number> {
-  return invoke("move_assets_to_character", { targetId, expectedFingerprint, assetIds, learning });
+/** 태거 검토 맞음 only: the one move allowed to take an image out of the 오리지널 folder. */
+export function moveTaggerReviewAssetsToCharacter(targetId: string, expectedFingerprint: string, assetIds: string[], learning = true): Promise<number> {
+  return invoke("move_assets_to_character", { targetId, expectedFingerprint, assetIds, learning, taggerReview: true });
 }
 
 export function moveAssetsToCharacters(targets: CharacterMoveTarget[], assetIds: string[]): Promise<number> {

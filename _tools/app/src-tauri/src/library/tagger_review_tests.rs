@@ -1094,7 +1094,7 @@ fn wrong_region_acceptance_records_membership_without_learning_evidence() {
 }
 
 #[test]
-fn tagger_review_lists_originals_folder_candidates_without_moving_them() {
+fn tagger_review_lists_originals_folder_candidates_and_only_review_moves_them() {
     let f = Fixture::new();
     let t = f.target("Original candidate");
     let originals: String = f
@@ -1126,7 +1126,7 @@ fn tagger_review_lists_originals_folder_candidates_without_moving_them() {
         .unwrap()
         .iter()
         .any(|item| item.asset.id == "asset-6" && item.target_id == t.id));
-    // The originals area stays storage only: 맞음 cannot move the image out of it.
+    // A non-review move still treats the originals area as storage only.
     let t = f.library.get_character_target(&t.id).unwrap();
     let error = f
         .library
@@ -1137,4 +1137,116 @@ fn tagger_review_lists_originals_folder_candidates_without_moving_them() {
         f.library.get_asset_classifications("asset-6").unwrap()[0].id,
         originals
     );
+    // 태거 검토 맞음 moves it into the character's series like any other image,
+    // through the same assignment path that queues the change for sync.
+    let queued = || -> i64 {
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM cloud_sync_queue
+                 WHERE entity_type='asset' AND entity_id='asset-6' AND status='pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let queued_before = queued();
+    let moved = f
+        .library
+        .move_tagger_review_assets_to_character(
+            t.id.clone(),
+            t.fingerprint.clone(),
+            vec!["asset-6".into()],
+            true,
+        )
+        .unwrap();
+    assert_eq!(moved, 1);
+    assert_eq!(queued(), queued_before + 1);
+    assert_eq!(
+        f.library.get_asset_classifications("asset-6").unwrap()[0].id,
+        f.series
+    );
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-6").unwrap(),
+        vec![t.id.clone()]
+    );
+    let (decision, origin, snapshot) = latest_snapshot(&f, &t, "asset-6");
+    assert_eq!((decision.as_str(), origin.as_str()), ("accepted", "manual"));
+    assert!(snapshot.get("learningDisabled").is_none());
+    assert!(f
+        .library
+        .tagger_review_items()
+        .unwrap()
+        .iter()
+        .all(|item| item.asset.id != "asset-6"));
+}
+
+#[test]
+fn tagger_review_wrong_region_moves_originals_image_without_learning() {
+    let f = Fixture::new();
+    let t = f.target("Original wrong region");
+    let originals: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT classification_id FROM classification_roles WHERE role='originals'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    f.library
+        .set_asset_classification(crate::library::models::SetAssetClassification {
+            asset_ids: vec!["asset-6".into()],
+            classification_id: Some(originals.clone()),
+        })
+        .unwrap();
+    let hash: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT content_hash FROM assets WHERE id='asset-6'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    // The non-review membership-only move keeps refusing the originals area.
+    let error = f
+        .library
+        .move_assets_to_character_without_learning(
+            t.id.clone(),
+            t.fingerprint.clone(),
+            vec!["asset-6".into()],
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("오리지널 보관 영역"), "{error}");
+
+    f.library
+        .move_tagger_review_assets_to_character(
+            t.id.clone(),
+            t.fingerprint.clone(),
+            vec!["asset-6".into()],
+            false,
+        )
+        .unwrap();
+    assert_eq!(
+        f.library.get_asset_classifications("asset-6").unwrap()[0].id,
+        f.series
+    );
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-6").unwrap(),
+        vec![t.id.clone()]
+    );
+    let (decision, origin, snapshot) = latest_snapshot(&f, &t, "asset-6");
+    assert_eq!((decision.as_str(), origin.as_str()), ("accepted", "manual"));
+    assert_eq!(snapshot["learningDisabled"], true);
+    assert!(!s36_decision_hashes(&f, &t).contains(&hash));
+    assert!(!f
+        .library
+        .reference_candidates(&t.id, 5)
+        .unwrap()
+        .suggested_asset_ids
+        .contains(&"asset-6".to_string()));
 }

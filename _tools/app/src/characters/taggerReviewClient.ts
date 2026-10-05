@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { characterApi, moveAssetsToCharacter, type CharacterApi, type CharacterTarget, type ReviewRow, type TaggerReviewEvidence } from "./api";
+import { characterApi, moveTaggerReviewAssetsToCharacter, type CharacterApi, type CharacterTarget, type ReviewRow, type TaggerReviewEvidence } from "./api";
 import { libraryGateway } from "../library/client";
 import type { ClassificationEntry } from "../library/types";
 
@@ -57,7 +57,7 @@ export type TaggerDecisionApi = Pick<CharacterApi, "decide" | "decideBatch"> & {
 export const taggerDecisionApi: TaggerDecisionApi = {
   decide: (request) => characterApi.decide(request),
   decideBatch: (requests) => characterApi.decideBatch(requests),
-  move: moveAssetsToCharacter,
+  move: moveTaggerReviewAssetsToCharacter,
   classifications: (assetId) => libraryGateway.getAssetClassifications(assetId),
 };
 

@@ -354,10 +354,43 @@ fn character_move_preserves_originals_and_excluded_source_folders() {
         error.to_string(),
         "보호 대상: 오리지널 보관 영역의 자산은 이동할 수 없습니다."
     );
+    // Only a 태거 검토 decision may take an image out of the originals area;
+    // the gallery/series 캐릭터 picker and the plain membership-only move keep refusing.
+    let error = f
+        .library
+        .move_assets_to_characters(
+            vec![CharacterMoveTarget {
+                target_id: target.id.clone(),
+                expected_fingerprint: target.fingerprint.clone(),
+            }],
+            vec!["asset-6".into()],
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "보호 대상: 오리지널 보관 영역의 자산은 이동할 수 없습니다."
+    );
+    let error = f
+        .library
+        .move_assets_to_character_without_learning(
+            target.id.clone(),
+            target.fingerprint.clone(),
+            vec!["asset-6".into()],
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "보호 대상: 오리지널 보관 영역의 자산은 이동할 수 없습니다."
+    );
     assert_eq!(
         f.library.get_asset_classifications("asset-6").unwrap()[0].id,
         originals
     );
+    assert!(f
+        .library
+        .character_relations_for_asset("asset-6")
+        .unwrap()
+        .is_empty());
 
     let excluded_folder = folder(&f.library, "Excluded source", Some(f.series.clone()));
     f.library
