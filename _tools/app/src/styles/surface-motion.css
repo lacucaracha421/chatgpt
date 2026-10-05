@@ -37,3 +37,8 @@
   [data-motion][data-motion] { --surface-time: var(--motion-micro); --surface-opacity-time: var(--motion-micro); --surface-exit-time: var(--motion-micro); translate: none !important; scale: none !important; transition: opacity var(--motion-micro) var(--ease-out) !important; }
   [data-motion][data-motion][data-state="closed"] { animation: ui-surface-exit var(--motion-micro) linear !important; }
 }
+/* The favorite/bookmark/showcase pop (shared/motion/togglePop.ts): a burst of dots in the toggle's
+   on colour; a host whose icon colour differs from its own sets --toggle-pop-color. */
+.toggle-pop-host { position: relative; }
+.toggle-pop-burst { position: absolute; inset: 0; z-index: 1; overflow: visible; color: var(--toggle-pop-color, currentColor); pointer-events: none; }
+.toggle-pop-dot { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }

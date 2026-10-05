@@ -468,3 +468,11 @@ it('NSFW viewer and filmstrip use each rating and never preload the masked neigh
   expect(document.querySelector('img[src*="/asset/e"]')).toBeNull();
   rerender(draw('g',true));expect(document.querySelector('img[src]')).toBeNull();
 });
+
+it("paints the info dock above the absolutely positioned zoom backdrop", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync("src/assets/asset-viewer.css", "utf8");
+  // The backdrop covers the whole frame; a non-positioned dock would be painted under it (empty black panel).
+  expect(css).toMatch(/\.asset-viewer__backdrop \{[^}]*position: absolute;/);
+  expect(css).toMatch(/\.asset-viewer__dock \{[^}]*position: relative;[^}]*z-index: 1;/);
+});

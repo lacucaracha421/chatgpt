@@ -8,6 +8,7 @@ import {platformOptions, recordStates, statusLabel} from '../src/collections/wor
 import type {CollectionDetail, CollectionSummary} from './collectionModel';
 import {OwnedSheet, ReleaseWatchAction, trackedEditions, TrackingRows} from './CollectionTracking';
 import {useMotionSurface} from '../src/shared/ui/useMotionSurface';
+import {popToggle} from '../src/shared/motion/togglePop';
 
 /** `owned-N` edits the owned-volume count of edition N; `status` / `platform` the PC work record. */
 export type PersonalSheet = 'rating' | 'memo' | 'conflict' | 'status' | 'platform' | `owned-${number}` | null;
@@ -105,7 +106,7 @@ export function PersonalActions({item, edits}: {item: CollectionDetail; edits: P
   return <>
     <div className="collection-bar-actions" role="group" aria-label="작품 동작">
       {edits.supported
-        ? <button type="button" className={`ui-button ui-button--ghost ui-button--icon collection-bar-action${showcase.pending ? ' is-pending' : ''}`} aria-pressed={showcase.value} aria-label={`쇼케이스${showcase.pending ? ', 전송 대기' : ''}`} onClick={() => edits.edit(item.id, 'showcase', !showcase.value, item.showcase)}>
+        ? <button type="button" className={`ui-button ui-button--ghost ui-button--icon collection-bar-action${showcase.pending ? ' is-pending' : ''}`} aria-pressed={showcase.value} aria-label={`쇼케이스${showcase.pending ? ', 전송 대기' : ''}`} onClick={event => { popToggle(event.currentTarget, !showcase.value); edits.edit(item.id, 'showcase', !showcase.value, item.showcase); }}>
             <ShowcaseIcon aria-hidden="true"/><span className="collection-bar-pending" aria-hidden="true"/>
           </button>
         : (showcase.value || showcase.pending) && <span className={`collection-bar-action is-static${showcase.pending ? ' is-pending' : ''}`} role="img" aria-label={`쇼케이스에 추가됨${showcase.pending ? ', 전송 대기' : ''}`}><ShowcaseIcon aria-hidden="true"/><span className="collection-bar-pending" aria-hidden="true"/></span>}

@@ -130,6 +130,7 @@ Reference: [accepted calm Asset grid](docs/prototypes/assets-calm-20261002/READM
 
 - Motion은 90/140/200 ms 역할을 따른다: 작은 feedback, open/close, screen transition 순서이며 `--ease-standard`와 no bounce를 쓴다. The accepted motion set below (2026-10-02) adds longer screen-level moves.
 - No bounce or overshoot and no looping decoration. A critically damped spring (no overshoot) is allowed where the accepted set names it; entrance motion is limited to a list's first load.
+- **Exception (user, 2026-10-05): the "toggle pop".** Turning ON an affection toggle — 좋아요 heart, bookmark / 관심, 쇼케이스, AV favorite — squashes the icon, overshoots and settles (~420 ms on `--spring-gentle`) with six dots bursting ~15 px in the on colour; turning OFF only dips (~180 ms, no burst). It plays only when the control actually shows the new state after a user action, never on load or refresh, and not under reduced motion. Shared helper: `src/shared/motion/togglePop.ts`. No other control may overshoot.
 - **Accepted motion set (user, 2026-10-02; choices "ABAD+ABAB" in `docs/prototypes/motion-2026-10-02.html`, PC and tablet):**
   - Curves: `--ease-standard` for small feedback and open/close; `--ease-sheet` = `cubic-bezier(.32,.72,0,1)` for screen and sheet moves; `--ease-spring` = a critically damped spring sampled as CSS `linear()` (fallback `cubic-bezier(.22,1,.36,1)`).
   - Area/tab switch (A): the old view stays until the new one is ready (no blank), then the new view replaces it at once without cross-dissolve or rise (user 2026-10-04: overlap looked like an afterimage).

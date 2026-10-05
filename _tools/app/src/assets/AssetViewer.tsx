@@ -17,6 +17,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
 import { artistHandle } from "../artists/format";
+import { useAssetArtist } from "../artists/artistStore";
+import type { ArtistSummary } from "../artists/types";
 import { useOptionalLibrary } from "../library/LibraryContext";
 import type { AlbumEntry, AssetSummary, ClassificationEntry } from "../library/types";
 import { breadcrumbPath } from "../shared/breadcrumb";
@@ -27,6 +29,7 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { StableImage } from "../shared/ui/StableImage";
+import { popToggle } from "../shared/motion/togglePop";
 import { VIDEO_SEEK_STEP_SECONDS, VideoPlayer, type VideoPlayerHandle } from "../video/VideoPlayer";
 import { assetThumbnailUrl, assetUrl, vaultAssetUrl, vaultThumbnailUrl } from "./mediaUrl";
 
@@ -86,6 +89,7 @@ export function AssetViewer({
   const library = useOptionalLibrary();
   const index = items.findIndex((item) => item.id === activeId);
   const asset = items[index];
+  const artist = useAssetArtist(mediaSource === "library" ? asset : null);
   const masked = useAssetMasks();
   const {nsfwFilter}=usePrivacy();
   const privacyMode = masked(asset, requestedPrivacy);
@@ -121,6 +125,7 @@ export function AssetViewer({
   const [zoom, setZoom] = useState({ scale: 1, x: 0, y: 0 });
   const videoPlayerRef = useRef<VideoPlayerHandle>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
+  const favoriteButtonRef = useRef<HTMLButtonElement>(null);
   const chromeTimerRef = useRef<number | null>(null);
   const pointerOverChromeRef = useRef(false);
   const keyboardFocusRef = useRef(false);
@@ -214,7 +219,7 @@ export function AssetViewer({
   const move = (target: AssetSummary | undefined) => { if (target) onActiveIdChange(target.id); };
   const seekable = asset.media.kind === "video" && !privacyMode;
   const filmstripVisible = showFilmstrip && !videoPlaying && (chromeVisible || seekable);
-  const artistLabel = getArtistLabel(asset);
+  const artistLabel = getArtistLabel(asset, artist);
   const dateLabel = [displayDate(asset.collectedAt), displayTime(asset.collectedAt)].filter(Boolean).join(" ");
   const metaLabel = [folderPath, dateLabel].filter(Boolean).join(" · ");
   const handleDialogClose = () => {
@@ -298,7 +303,7 @@ export function AssetViewer({
       if (event.key === "ArrowLeft") { event.preventDefault(); move(previous); }
       if (event.key === "ArrowRight") { event.preventDefault(); move(next); }
       if ((event.ctrlKey || event.metaKey) && event.key === "0") { event.preventDefault(); setZoom({ scale: 1, x: 0, y: 0 }); return; }
-      if (event.key.toLowerCase() === "f") { event.preventDefault(); onToggleFavorite?.(asset); }
+      if (event.key.toLowerCase() === "f") { event.preventDefault(); if (onToggleFavorite) { if (favoriteButtonRef.current) popToggle(favoriteButtonRef.current, !asset.favorite); onToggleFavorite(asset); } }
       if (event.key.toLowerCase() === "i" && renderInfo) { event.preventDefault(); setInfoOpen((open) => !open); }
       if (event.key === "Delete") { event.preventDefault(); onTrash?.(asset); }
     }}
@@ -349,7 +354,7 @@ export function AssetViewer({
             </span>}
             {albums && onAddToAlbum && <Menu label="앨범" triggerClassName="asset-viewer__vbtn asset-viewer__vbtn--text" disabled={albums.length === 0} trigger={<><RectangleStackIcon aria-hidden="true" /><span>앨범</span></>} items={albumItems} />}
             {asset.sourceUrl && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!).catch(() => undefined)}><LinkIcon aria-hidden="true" /></Button>}
-            {onToggleFavorite && <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "좋아요 취소" : "좋아요"} aria-pressed={asset.favorite} onClick={() => onToggleFavorite(asset)}><HeartIcon aria-hidden="true" fill={asset.favorite ? "currentColor" : "none"} /></Button>}
+            {onToggleFavorite && <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "좋아요 취소" : "좋아요"} aria-pressed={asset.favorite} data-toggle-key={asset.id} ref={favoriteButtonRef} onClick={(event) => { popToggle(event.currentTarget, !asset.favorite); onToggleFavorite(asset); }}><HeartIcon aria-hidden="true" fill={asset.favorite ? "currentColor" : "none"} /></Button>}
             {folders && onMoveToFolder && <Menu label="이동" triggerClassName="asset-viewer__vbtn" trigger={<FolderArrowDownIcon aria-hidden="true" />} items={folderItems} />}
             {onExport && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="내보내기" aria-description="PC 폴더로 내보내기" onClick={() => onExport(asset)}><ArrowDownTrayIcon aria-hidden="true" /></Button>}
             {onTrash && <Button className="asset-viewer__vbtn" size="icon" variant="danger" aria-label="휴지통으로 이동" onClick={() => onTrash(asset)}><TrashIcon aria-hidden="true" /></Button>}
@@ -379,7 +384,8 @@ export function AssetViewer({
   </Dialog>;
 }
 
-function getArtistLabel(asset: AssetSummary): string {
+export function getArtistLabel(asset: AssetSummary, artist?: Pick<ArtistSummary, "label"> | null): string {
+  if (artist) return artist.label;
   const key = asset.creatorHandle?.replace(/^@+/, "") || asset.creatorUrl;
   return key ? artistHandle({ keys: [key] }) || asset.creatorName || asset.title || asset.originalName : asset.creatorName || asset.title || asset.originalName;
 }

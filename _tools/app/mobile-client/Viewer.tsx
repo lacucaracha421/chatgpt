@@ -22,6 +22,7 @@ import {useViewerMotion} from '../src/shared/viewer/useViewerMotion';
 import {ViewerFilmstrip} from './ViewerFilmstrip';
 import {filmstripControlsOffset} from '../src/shared/viewer/CenteredFilmstrip';
 import {useLikesAlbum} from './useLikesAlbum';
+import {popToggle} from '../src/shared/motion/togglePop';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 import {contentCross, EASE_STANDARD, motionDefaults, motionTime, prefersReducedMotion} from '../src/shared/motion/curves';
 
@@ -336,7 +337,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
             <ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
             <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
             {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 제외`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
-            {likes.available&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--like" aria-label="좋아요" aria-pressed={likes.liked.has(asset.id)} disabled={likes.pending.has(asset.id)} onClick={() => {revealChrome();void likes.toggle(asset.id);}}><HeartIcon aria-hidden="true" fill={likes.liked.has(asset.id) ? 'currentColor' : 'none'}/></Button>}
+            {likes.available&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--like" aria-label="좋아요" aria-pressed={likes.liked.has(asset.id)} data-toggle-key={asset.id} disabled={likes.pending.has(asset.id)} onClick={event => {revealChrome();popToggle(event.currentTarget, !likes.liked.has(asset.id));void likes.toggle(asset.id);}}><HeartIcon aria-hidden="true" fill={likes.liked.has(asset.id) ? 'currentColor' : 'none'}/></Button>}
             <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); revealChrome();}}/>
             {onTrash&&!asset.pending&&<ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
           </>}

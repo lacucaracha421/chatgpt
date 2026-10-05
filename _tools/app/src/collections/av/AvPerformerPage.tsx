@@ -3,6 +3,7 @@ import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { displayDate } from "../../shared/displayDate";
+import { popToggle } from "../../shared/motion/togglePop";
 import { Button } from "../../shared/ui/Button";
 import { libraryGateway } from "../../library/client";
 import { usePrivacy } from "../../privacy/PrivacyContext";
@@ -118,7 +119,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
             {source.url && safeProfileUrl(source.url) && <Button size="sm" variant="ghost" onClick={() => void openUrl(source.url!).catch(() => setSourceError("원본 링크를 열지 못했습니다."))} aria-label="대표 이미지 출처 열기"><ArrowTopRightOnSquareIcon aria-hidden="true" />원본</Button>}
           </div>
           <div className="av-performer-page__actions">
-            <Button size="icon" aria-label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} aria-pressed={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={() => void toggleFavorite()}>{favorite ? <StarSolidIcon aria-hidden="true" /> : <StarIcon aria-hidden="true" />}</Button>
+            <Button size="icon" aria-label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} aria-pressed={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={(event) => { popToggle(event.currentTarget, !favorite); void toggleFavorite(); }}>{favorite ? <StarSolidIcon aria-hidden="true" /> : <StarIcon aria-hidden="true" />}</Button>
             <Button onClick={() => setPickerOpen(true)}>사진 바꾸기</Button>
           </div>
           {sourceError && <p className="av-profile__quiet" role="status">{sourceError}</p>}

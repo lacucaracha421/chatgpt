@@ -125,6 +125,7 @@
 .viewer-actions .viewer-action[aria-pressed="true"] { background: var(--color-selected); }
 .viewer-actions .viewer-action--like[aria-pressed="true"] { background: transparent; }
 .viewer-actions .viewer-action--like[aria-pressed="true"] svg { color: var(--color-heart); }
+.viewer-actions .viewer-action--like { --toggle-pop-color: var(--color-heart); }
 .viewer-actions .viewer-action.is-danger { color: var(--color-danger); }
 .viewer-actions .viewer-action.is-danger svg { color: currentColor; }
 .viewer-actions__divider { display: none; }

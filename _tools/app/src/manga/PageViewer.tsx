@@ -6,6 +6,7 @@ import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { useCatalogMasked } from "../privacy/catalogMask";
 import { loadUiPreferences, saveUiPreferences } from "../preferences/uiPreferences";
 import type { MangaViewerGap, MangaViewerMargin } from "../preferences/uiPreferences";
+import { popToggle } from "../shared/motion/togglePop";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu } from "../shared/ui/Menu";
@@ -280,7 +281,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
             {actions}
             <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${spread ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="두 쪽 보기" aria-description="두 쪽 보기 (V)" aria-pressed={spread} onClick={() => updatePrefs({ mode: spread ? "single" : "double" })}><BookOpenIcon aria-hidden="true" /><span>두 쪽</span></Button>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="페이지 목록" aria-description="페이지 목록 (T)" aria-pressed={overviewOpen} onClick={() => setOverviewOpen((value) => !value)} ref={overviewToggleRef}><Squares2X2Icon aria-hidden="true" /></Button>
-            {bookmark && <Button className={`asset-viewer__vbtn${bookmark.bookmarked ? " asset-viewer__vbtn--on" : ""}`} size="icon" variant="ghost" aria-label="북마크" aria-pressed={bookmark.bookmarked} disabled={bookmark.disabled} onClick={bookmark.onToggle}>{bookmark.bookmarked ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkIcon aria-hidden="true" />}</Button>}
+            {bookmark && <Button className={`asset-viewer__vbtn${bookmark.bookmarked ? " asset-viewer__vbtn--on" : ""}`} size="icon" variant="ghost" aria-label="북마크" aria-pressed={bookmark.bookmarked} disabled={bookmark.disabled} onClick={(event) => { popToggle(event.currentTarget, !bookmark.bookmarked); bookmark.onToggle(); }}>{bookmark.bookmarked ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkIcon aria-hidden="true" />}</Button>}
             <Menu label="읽기 설정" align="end" trigger={<Cog6ToothIcon aria-hidden="true" />} items={settingsItems} />
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="망가 뷰어 닫기" aria-description="망가 뷰어 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
           </div>

@@ -1,5 +1,6 @@
 import { useAssetMasks, usePrivacy } from "../privacy/PrivacyContext";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
+import { popToggle } from "../shared/motion/togglePop";
 import { AreaVisible } from "../shared/motion/AreaSwitch";
 import { FolderMove, folderMoveScope } from "./FolderWave";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -490,7 +491,7 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
     {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
     </div>
     {selected && <span className="ui-selection-check" aria-hidden="true" />}
-    {(asset.favorite || onToggleFavorite) && (onToggleFavorite ? <button type="button" className="asset-gallery__favorite asset-gallery__hover-control" data-visible={favoritesView || selected || hasSelection || undefined} aria-label={`${alt} 좋아요`} aria-pressed={asset.favorite} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onToggleFavorite(asset); }}><HeartIcon /></button> : <span className="asset-gallery__favorite asset-gallery__hover-control" data-visible={favoritesView || selected || hasSelection || undefined} aria-hidden="true"><HeartIcon /></span>)}
+    {(asset.favorite || onToggleFavorite) && (onToggleFavorite ? <button type="button" className="asset-gallery__favorite asset-gallery__hover-control" data-visible={favoritesView || selected || hasSelection || undefined} aria-label={`${alt} 좋아요`} aria-pressed={asset.favorite} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); popToggle(event.currentTarget, !asset.favorite); onToggleFavorite(asset); }}><HeartIcon /></button> : <span className="asset-gallery__favorite asset-gallery__hover-control" data-visible={favoritesView || selected || hasSelection || undefined} aria-hidden="true"><HeartIcon /></span>)}
   </div>;
 });
 

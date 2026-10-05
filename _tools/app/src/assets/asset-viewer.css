@@ -36,8 +36,19 @@
   gap: var(--space-3);
   height: 56px;
   padding: 0 var(--space-4);
-  background: linear-gradient(rgba(0, 0, 0, 0.6), transparent);
 }
+/* The scrim reaches below the bar and stays dark through the text, so the title and buttons read on
+   white artwork too; it never takes clicks. */
+.asset-viewer__topbar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 -40px;
+  background: linear-gradient(rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0.45) 55%, transparent);
+  pointer-events: none;
+}
+.asset-viewer__topbar { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
+.asset-viewer__topbar svg { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.55)); }
 
 .asset-viewer__spacer { flex: 1; min-width: var(--space-2); }
 
@@ -166,7 +177,10 @@
 /* The video controls live in the media surface that zooms back into the tile; they leave with the chrome. */
 .asset-viewer[data-viewer-closing] .asset-viewer__chrome, .asset-viewer[data-viewer-closing] .video-player__controls { visibility: hidden; }
 
+/* Positioned so it paints above the zoom backdrop, which is absolutely positioned over the frame. */
 .asset-viewer__dock {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-width: 0;
   min-height: 0;

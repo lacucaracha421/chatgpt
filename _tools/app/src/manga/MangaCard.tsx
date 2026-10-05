@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useCatalogMasked } from "../privacy/catalogMask";
+import { popToggle } from "../shared/motion/togglePop";
 import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
 import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -36,7 +37,7 @@ export function MangaCard({ title, displayTitle = title, artist, pageCount, cove
     {onBookmark && <button type="button" className="manga-card__bookmark"
       aria-label={`${title} ${bookmarked ? "북마크 해제" : "북마크"}`} aria-pressed={bookmarked}
       aria-description={savedEdition ? "북마크된 판본 있음" : undefined} data-saved-edition={savedEdition || undefined}
-      disabled={bookmarkPending} onClick={onBookmark}><BookmarkIcon aria-hidden="true" /></button>}
+      disabled={bookmarkPending} onClick={(event) => { popToggle(event.currentTarget, !bookmarked); onBookmark(); }}><BookmarkIcon aria-hidden="true" /></button>}
   </article>;
 }
 

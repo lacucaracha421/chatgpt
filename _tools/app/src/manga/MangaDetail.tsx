@@ -4,6 +4,7 @@ import { formatBytes } from "../assets/assetMetadata";
 import { useLayoutEffect, useRef } from "react";
 import type { CatalogWork, CatalogWorkDetail } from "../library/types";
 import { displayDate } from "../shared/displayDate";
+import { popToggle } from "../shared/motion/togglePop";
 import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
 import { Button } from "../shared/ui/Button";
 import { SectionLabel } from "../shared/ui/SectionLabel";
@@ -68,7 +69,8 @@ export function MangaDetail({ detail, privacyMode, bookmarkPending, reading, onB
         <div className="manga-detail__actions">
           <Button variant="primary" disabled={reading} aria-busy={reading} onClick={onRead}><BusyLabel busy={!!(reading)} idle={"읽기"}>불러오는 중…</BusyLabel></Button>
           <Button size="icon" variant="ghost" className="manga-detail__bookmark" aria-label={detail.bookmarked ? "북마크 해제" : "북마크"}
-            aria-pressed={detail.bookmarked} aria-busy={bookmarkPending} disabled={bookmarkPending} onClick={() => onBookmark(!detail.bookmarked)}>
+            aria-pressed={detail.bookmarked} aria-busy={bookmarkPending} disabled={bookmarkPending} data-toggle-key={catalogIdentityKey(detail)}
+            onClick={(event) => { popToggle(event.currentTarget, !detail.bookmarked); onBookmark(!detail.bookmarked); }}>
             <BookmarkIcon aria-hidden="true" />
           </Button>
         </div>
