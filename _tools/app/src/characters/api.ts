@@ -16,6 +16,9 @@ export type ReferenceInspection = {
   selectedIndex: number | null; suggestedIndex: number | null;
   /** The common person the worker inferred on its own; older workers omit it. */
   automaticIndex: number | null; state: string;
+  /** Other characters this image already belongs to. Such an image is used only through a
+   * person the user chose, so a detected or inferred person arrives as `needs_region`. */
+  otherCharacters?: string[];
 };
 
 /**
@@ -85,7 +88,9 @@ export type ReviewPage = { rows: ReviewRow[]; nextCursor: string | null };
 export type ReviewFilter = "all" | "recommended" | "unmatched" | "multiple" | "confirmed" | "pending" | "error" | "rejected";
 export type ReviewQuery = { seriesId: string; targetId: string | null; filter: ReviewFilter; after: string | null; limit: number };
 export type DecisionKind = "accepted" | "rejected" | "cleared";
-export type DecisionRequest = { targetId: string; expectedFingerprint: string; assetIds: string[]; decision: DecisionKind; baselineFingerprint: string | null; scanId: string | null };
+/** `accepted_wrong_region` is stored as `accepted` (membership) but never used as learning evidence. */
+export type DecisionRequestKind = DecisionKind | "accepted_wrong_region";
+export type DecisionRequest = { targetId: string; expectedFingerprint: string; assetIds: string[]; decision: DecisionRequestKind; baselineFingerprint: string | null; scanId: string | null };
 export type Decision = { origin?: "manual" | "automatic"; sequence: number; assetId: string | null; sourceAssetId: string; decision: DecisionKind; createdAt: string; referenceSnapshot: string; targetFingerprint: string; baselineFingerprint: string | null };
 export type CharacterMoveTarget = { targetId: string; expectedFingerprint: string };
 export type CharacterAssignSuggestion = { targetId: string; matched: number; total: number };
@@ -140,8 +145,8 @@ export function predictionRequest(prediction: Prediction, assetIds: string[], de
   return { targetId: prediction.targetId, expectedFingerprint: prediction.targetFingerprint, assetIds, decision, scanId: prediction.scanId, baselineFingerprint: prediction.runtimeFingerprint };
 }
 
-export function moveAssetsToCharacter(targetId: string, expectedFingerprint: string, assetIds: string[]): Promise<number> {
-  return invoke("move_assets_to_character", { targetId, expectedFingerprint, assetIds });
+export function moveAssetsToCharacter(targetId: string, expectedFingerprint: string, assetIds: string[], learning = true): Promise<number> {
+  return invoke("move_assets_to_character", { targetId, expectedFingerprint, assetIds, learning });
 }
 
 export function moveAssetsToCharacters(targets: CharacterMoveTarget[], assetIds: string[]): Promise<number> {

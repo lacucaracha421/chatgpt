@@ -52,7 +52,7 @@ export function createCharacterFixture(): CharacterApi {
       });
       return { rows: query.after ? [] : matching, nextCursor: null };
     },
-    decide: async request => { for (const assetId of request.assetIds) { decisions.set(`${request.targetId}:${assetId}`, request.decision); history.unshift({ sequence: history.length + 1, assetId, sourceAssetId: assetId, decision: request.decision, createdAt: new Date().toISOString(), referenceSnapshot: "[]", targetFingerprint: request.expectedFingerprint, baselineFingerprint: request.baselineFingerprint }); } return request.assetIds.length; },
+    decide: async request => { const decision = request.decision === "accepted_wrong_region" ? "accepted" : request.decision; for (const assetId of request.assetIds) { decisions.set(`${request.targetId}:${assetId}`, decision); history.unshift({ sequence: history.length + 1, assetId, sourceAssetId: assetId, decision, createdAt: new Date().toISOString(), referenceSnapshot: "[]", targetFingerprint: request.expectedFingerprint, baselineFingerprint: request.baselineFingerprint }); } return request.assetIds.length; },
     decideBatch: async requests => { let total = 0; for (const request of requests) total += await api.decide(request); return total; },
     history: async (_id, before) => history.filter(d => before === null || d.sequence < before),
     runtime: async () => true,

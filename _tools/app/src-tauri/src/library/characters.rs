@@ -229,17 +229,27 @@ impl Target {
 #[serde(rename_all = "snake_case")]
 pub enum DecisionKind {
     Accepted,
+    /// 맞음 · 영역 틀림: the image belongs to the character (stored as `accepted`), but the
+    /// person box shown for it was another person. The row is membership only: no learning
+    /// path (S36 witnesses, training labels, reference suggestions) reads it as evidence.
+    AcceptedWrongRegion,
     Rejected,
     Cleared,
 }
 impl DecisionKind {
     fn stored(self) -> &'static str {
         match self {
-            Self::Accepted => "accepted",
+            Self::Accepted | Self::AcceptedWrongRegion => "accepted",
             Self::Rejected => "rejected",
             Self::Cleared => "cleared",
         }
     }
+}
+
+/// SQL predicate on a `character_decisions` row aliased `alias`: a membership-only
+/// acceptance (`DecisionKind::AcceptedWrongRegion`), which must never become learning evidence.
+pub(super) fn learning_disabled_sql(alias: &str) -> String {
+    format!("COALESCE(json_extract({alias}.reference_snapshot,'$.learningDisabled'),0)=1")
 }
 
 #[derive(Debug, Deserialize)]
@@ -521,11 +531,16 @@ impl Library {
         let transaction = connection.transaction()?;
         let manual_on_create =
             request.target.id.is_none() && request.reference_ids.len() < REFERENCE_COUNT;
-        let saved = self.save_character_target_selection_in(
+        super::character_reference_regions::validate_region_ids(
+            &request.reference_ids,
+            &request.reference_regions,
+        )?;
+        let saved = self.save_character_target_with_regions_in(
             &transaction,
             request.target,
             strict,
             manual_on_create,
+            Some(&request.reference_regions),
         )?;
         let regions_changed = super::character_reference_regions::apply_regions(
             &transaction,
@@ -557,6 +572,23 @@ impl Library {
         draft: TargetDraft,
         strict: bool,
         manual_on_create: bool,
+    ) -> Result<Target> {
+        self.save_character_target_with_regions_in(
+            transaction,
+            draft,
+            strict,
+            manual_on_create,
+            None,
+        )
+    }
+
+    fn save_character_target_with_regions_in(
+        &self,
+        transaction: &Connection,
+        draft: TargetDraft,
+        strict: bool,
+        manual_on_create: bool,
+        regions: Option<&super::character_reference_regions::RegionBindings>,
     ) -> Result<Target> {
         let name = draft.display_name.trim();
         if name.is_empty() {
@@ -598,7 +630,7 @@ impl Library {
                 .transpose()?
                 .is_some_and(|t| t.thumbnail_asset_id.as_ref() == Some(image));
             if strict && !unchanged {
-                super::character_hub::validate_character_selection(
+                super::character_hub::validate_character_selection_with_region(
                     transaction,
                     draft
                         .series_classification_id
@@ -606,6 +638,7 @@ impl Library {
                         .ok_or(Error::Stale)?,
                     draft.id.as_deref(),
                     image,
+                    regions.and_then(|regions| regions.get(image)),
                 )?;
             }
         }
@@ -714,12 +747,12 @@ impl Library {
                     "먼저 이 캐릭터로 승인한 이미지만 학습에 추가할 수 있습니다.",
                 ));
             }
-            let shared: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_relations WHERE asset_id=?1 AND target_id<>?2)", params![asset_id,id], |row| row.get(0))?;
-            if shared {
-                return Err(Error::Invalid(
-                    "여러 캐릭터에 연결된 이미지는 학습에 추가할 수 없습니다.",
-                ));
-            }
+            super::character_hub::validate_character_selection(
+                transaction,
+                series,
+                Some(id),
+                asset_id,
+            )?;
             let (hash, path) = scoped_image(transaction, series, asset_id)?;
             self.open_library_media(&path)?;
             let current: Option<String> = transaction.query_row("SELECT asset_hash FROM character_learned_references WHERE target_id=?1 AND asset_id=?2", params![id,asset_id], |row| row.get(0)).optional()?;
@@ -990,6 +1023,31 @@ impl Library {
         targets: Vec<CharacterMoveTarget>,
         asset_ids: Vec<String>,
     ) -> Result<u64> {
+        self.move_assets_to_characters_with_decision(targets, asset_ids, DecisionKind::Accepted)
+    }
+
+    pub fn move_assets_to_character_without_learning(
+        &self,
+        target_id: String,
+        expected_fingerprint: String,
+        asset_ids: Vec<String>,
+    ) -> Result<u64> {
+        self.move_assets_to_characters_with_decision(
+            vec![CharacterMoveTarget {
+                target_id,
+                expected_fingerprint,
+            }],
+            asset_ids,
+            DecisionKind::AcceptedWrongRegion,
+        )
+    }
+
+    fn move_assets_to_characters_with_decision(
+        &self,
+        targets: Vec<CharacterMoveTarget>,
+        asset_ids: Vec<String>,
+        decision: DecisionKind,
+    ) -> Result<u64> {
         let asset_ids = asset_ids.into_iter().collect::<BTreeSet<_>>();
         let target_ids = targets
             .iter()
@@ -1103,7 +1161,7 @@ impl Library {
                     target_id: target.id.clone(),
                     expected_fingerprint: request.expected_fingerprint.clone(),
                     asset_ids: asset_ids.clone(),
-                    decision: DecisionKind::Accepted,
+                    decision,
                     baseline_fingerprint: None,
                     scan_id: None,
                 },
@@ -1228,6 +1286,11 @@ impl Library {
         {
             return Err(Error::Invalid("분석 식별자가 비어 있습니다."));
         }
+        if request.decision == DecisionKind::AcceptedWrongRegion && request.scan_id.is_some() {
+            return Err(Error::Invalid(
+                "영역이 틀린 이미지는 직접 확인으로 저장해 주세요.",
+            ));
+        }
         let target = self.read_character_target(&transaction, &request.target_id)?;
         if target.fingerprint != request.expected_fingerprint {
             return Err(Error::Stale);
@@ -1284,27 +1347,41 @@ impl Library {
                 )?
                 .0
             };
-            let previous: Option<(String, String)> = transaction
+            let previous: Option<(String, String, String)> = transaction
                 .query_row(
-                    "SELECT decision,origin FROM character_decisions
+                    "SELECT decision,origin,reference_snapshot FROM character_decisions
                 WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
                     params![target.id, asset_id],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()?;
             // Repeating a person's own decision changes nothing. Confirming an automatic
             // acceptance is new evidence: it becomes a manual decision.
-            if previous.as_ref().is_some_and(|(decision, origin)| {
-                decision == request.decision.stored() && origin != "automatic"
-            }) {
+            let learning_disabled = request.decision == DecisionKind::AcceptedWrongRegion;
+            if previous
+                .as_ref()
+                .is_some_and(|(decision, origin, snapshot)| {
+                    let prior_disabled = serde_json::from_str::<serde_json::Value>(snapshot)
+                        .is_ok_and(|value| value["learningDisabled"] == true);
+                    decision == request.decision.stored()
+                        && origin != "automatic"
+                        && prior_disabled == learning_disabled
+                })
+            {
                 super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
                 continue;
             }
-            let snapshot = evidence
-                .get(asset_id)
-                .map(serde_json::to_string)
-                .transpose()?
-                .unwrap_or_else(|| references.clone());
+            let snapshot = if learning_disabled {
+                serde_json::json!({"reason": "wrong_region", "learningDisabled": true,
+                    "references": target.references})
+                .to_string()
+            } else {
+                evidence
+                    .get(asset_id)
+                    .map(serde_json::to_string)
+                    .transpose()?
+                    .unwrap_or_else(|| references.clone())
+            };
             transaction.execute("INSERT INTO character_decisions
                 (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
                 VALUES(?1,?2,?2,?3,?4,?5,?6,?7,?8)", params![target.id,asset_id,hash,request.decision.stored(),target.fingerprint,request.baseline_fingerprint,snapshot,now])?;

@@ -102,7 +102,8 @@ pub(super) fn snapshot(c: &Connection, pending: &Pending) -> Result<(Value, u64)
     let regions = c.prepare("SELECT target_id,asset_hash,baseline_fingerprint,bounds_json FROM character_reference_regions WHERE target_id IN (SELECT value FROM json_each(?1))")?
         .query_map([&ids], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?
         .collect::<std::result::Result<Vec<_>,_>>()?.into_iter().map(|(t,h,b,bounds)| Ok(json!({"target_id":t,"asset_hash":h,"baseline_fingerprint":b,"bounds":serde_json::from_str::<Value>(&bounds)?}))).collect::<Result<Vec<_>>>()?;
-    let decisions = c.prepare("SELECT d.sequence,d.target_id,d.asset_hash,d.decision,d.created_at FROM character_decisions d JOIN assets a ON a.id=d.source_asset_id AND a.content_hash=d.asset_hash AND a.status='normal' AND a.media_kind='image' WHERE d.origin='manual' AND d.target_id IN (SELECT value FROM json_each(?1)) ORDER BY d.sequence")?
+    // A membership-only acceptance (wrong person box) never fixes a witness crop.
+    let decisions = c.prepare(&format!("SELECT d.sequence,d.target_id,d.asset_hash,d.decision,d.created_at FROM character_decisions d JOIN assets a ON a.id=d.source_asset_id AND a.content_hash=d.asset_hash AND a.status='normal' AND a.media_kind='image' WHERE d.origin='manual' AND NOT {} AND d.target_id IN (SELECT value FROM json_each(?1)) ORDER BY d.sequence", super::characters::learning_disabled_sql("d")))?
         .query_map([&ids], |r| Ok(json!({"sequence":r.get::<_,i64>(0)?,"target_id":r.get::<_,String>(1)?,"asset_hash":r.get::<_,String>(2)?,"decision":r.get::<_,String>(3)?,"created_at":r.get::<_,String>(4)?,"origin":"manual"})))?
         .collect::<std::result::Result<Vec<_>,_>>()?;
     let mut images: BTreeMap<String, Value> = BTreeMap::new();

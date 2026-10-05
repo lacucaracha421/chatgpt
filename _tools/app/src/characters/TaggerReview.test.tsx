@@ -219,3 +219,21 @@ it("does not reopen a preview closed during a pending decision or submit twice",
   await waitFor(() => expect(screen.queryByAltText("a1.png — 라라 후보")).not.toBeInTheDocument());
   expect(screen.queryByRole("region", { name: "이미지 미리보기" })).not.toBeInTheDocument();
 });
+
+it("records 맞음 · 영역 틀림 as membership without learning, inside and outside the folder", async () => {
+  const crop = { box: [0.1, 0.1, 0.5, 0.6] as [number, number, number, number], distance: 0.12 };
+  const { api } = fixture([{ ...item("a1"), crop }, { ...item("a2"), crop }, item("a3")], { a2: ["other"] });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "백합 › 라라 태거 검토 3건" }));
+  const grid = await screen.findByRole("grid", { name: "라라 태거 후보" });
+  await waitFor(() => expect(api.classifications).toHaveBeenCalledTimes(3));
+  // Only a tile with a drawn box can say the box was wrong.
+  expect(within(grid).queryByRole("button", { name: "a3.png 맞음 · 영역 틀림" })).not.toBeInTheDocument();
+  await user.click(within(grid).getByRole("button", { name: "a1.png 맞음 · 영역 틀림" }));
+  expect(api.decide).toHaveBeenCalledWith({
+    targetId: "char", expectedFingerprint: "fp-char", assetIds: ["a1"], decision: "accepted_wrong_region", baselineFingerprint: null, scanId: null,
+  });
+  await user.click(within(grid).getByRole("button", { name: "a2.png 맞음 · 영역 틀림" }));
+  expect(api.move).toHaveBeenCalledWith("char", "fp-char", ["a2"], false);
+  expect(within(grid).queryByRole("button", { name: "a1.png 맞음" })).not.toBeInTheDocument();
+});

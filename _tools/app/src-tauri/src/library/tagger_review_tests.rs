@@ -958,3 +958,183 @@ fn tagger_batched_fingerprints_match_manual_decisions_for_unavailable_references
             .all(|i| i.target_fingerprint == expected));
     }
 }
+
+fn latest_snapshot(f: &Fixture, t: &Target, asset: &str) -> (String, String, serde_json::Value) {
+    let (decision, origin, snapshot): (String, String, String) = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT decision,origin,reference_snapshot FROM character_decisions
+             WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
+            params![t.id, asset],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    (decision, origin, serde_json::from_str(&snapshot).unwrap())
+}
+
+/// Hashes of the manual decisions the S36 replay receives for `t`.
+fn s36_decision_hashes(f: &Fixture, t: &Target) -> Vec<String> {
+    let pending = crate::library::character_shadow::Pending {
+        asset_id: "asset-6".into(),
+        content_hash: "unused".into(),
+        relative_path: "assets/asset-6.png".into(),
+        outcomes: [(t.id.clone(), "none".to_string())].into(),
+        native_at: "2026-10-05T00:00:00Z".into(),
+    };
+    let (snapshot, _) =
+        crate::library::character_shadow::snapshot(&f.library.connection().unwrap(), &pending)
+            .unwrap();
+    snapshot["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["asset_hash"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn wrong_region_acceptance_records_membership_without_learning_evidence() {
+    let f = Fixture::new();
+    let t = f.ready("Momoka");
+    signals(&f, &t, 0.9, 0.9);
+    let p = f.library.preview_tagger_review().unwrap();
+    assert_eq!(p.recommend.count, 2);
+    f.library.apply_tagger_review(&p.preview_token).unwrap();
+    let hash = |asset: &str| -> String {
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT content_hash FROM assets WHERE id=?1",
+                [asset],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+
+    // Inside the series: membership is recorded as an ordinary acceptance.
+    manual(&f, &t, "asset-5", DecisionKind::AcceptedWrongRegion);
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-5").unwrap(),
+        vec![t.id.clone()]
+    );
+    let (decision, origin, snapshot) = latest_snapshot(&f, &t, "asset-5");
+    assert_eq!((decision.as_str(), origin.as_str()), ("accepted", "manual"));
+    assert_eq!(snapshot["learningDisabled"], true);
+    assert!(f
+        .library
+        .tagger_review_items()
+        .unwrap()
+        .iter()
+        .all(|item| item.asset.id != "asset-5"));
+    // No learning path reads it: no S36 witness, no reference suggestion.
+    assert!(!s36_decision_hashes(&f, &t).contains(&hash("asset-5")));
+    let suggestions = f.library.reference_candidates(&t.id, 5).unwrap();
+    assert!(!suggestions
+        .suggested_asset_ids
+        .contains(&"asset-5".to_string()));
+    // Repeating the same judgment changes nothing.
+    let current = f.library.get_character_target(&t.id).unwrap();
+    let repeated = f
+        .library
+        .record_character_decisions(DecisionRequest {
+            target_id: t.id.clone(),
+            expected_fingerprint: current.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: DecisionKind::AcceptedWrongRegion,
+            scan_id: None,
+            baseline_fingerprint: None,
+        })
+        .unwrap();
+    assert_eq!(repeated, 0);
+    // A scan-bound decision always has a box of its own; the membership-only kind is direct.
+    assert!(f
+        .library
+        .record_character_decisions(DecisionRequest {
+            target_id: t.id.clone(),
+            expected_fingerprint: current.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: DecisionKind::AcceptedWrongRegion,
+            scan_id: Some("scan".into()),
+            baseline_fingerprint: Some("baseline".into()),
+        })
+        .is_err());
+
+    // Outside the series: the same move as 맞음, still membership only.
+    f.library
+        .move_assets_to_character_without_learning(
+            t.id.clone(),
+            current.fingerprint.clone(),
+            vec!["asset-6".into()],
+        )
+        .unwrap();
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-6").unwrap(),
+        vec![t.id.clone()]
+    );
+    assert_eq!(
+        latest_snapshot(&f, &t, "asset-6").2["learningDisabled"],
+        true
+    );
+    assert!(!s36_decision_hashes(&f, &t).contains(&hash("asset-6")));
+
+    // A later plain 맞음 turns the pair back into ordinary learning evidence.
+    manual(&f, &t, "asset-5", DecisionKind::Accepted);
+    assert!(latest_snapshot(&f, &t, "asset-5")
+        .2
+        .get("learningDisabled")
+        .is_none());
+    assert!(s36_decision_hashes(&f, &t).contains(&hash("asset-5")));
+    let suggestions = f.library.reference_candidates(&t.id, 5).unwrap();
+    assert!(suggestions
+        .suggested_asset_ids
+        .contains(&"asset-5".to_string()));
+}
+
+#[test]
+fn tagger_review_lists_originals_folder_candidates_without_moving_them() {
+    let f = Fixture::new();
+    let t = f.target("Original candidate");
+    let originals: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT classification_id FROM classification_roles WHERE role='originals'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    f.library
+        .set_asset_classification(crate::library::models::SetAssetClassification {
+            asset_ids: vec!["asset-6".into()],
+            classification_id: Some(originals.clone()),
+        })
+        .unwrap();
+    signals(&f, &t, 0.9, 0.9);
+    let p = f.library.preview_tagger_review().unwrap();
+    assert!(p
+        .recommend
+        .sample_asset_ids
+        .contains(&"asset-6".to_string()));
+    f.library.apply_tagger_review(&p.preview_token).unwrap();
+    assert!(f
+        .library
+        .tagger_review_items()
+        .unwrap()
+        .iter()
+        .any(|item| item.asset.id == "asset-6" && item.target_id == t.id));
+    // The originals area stays storage only: 맞음 cannot move the image out of it.
+    let t = f.library.get_character_target(&t.id).unwrap();
+    let error = f
+        .library
+        .move_assets_to_character(t.id.clone(), t.fingerprint.clone(), vec!["asset-6".into()])
+        .unwrap_err();
+    assert!(error.to_string().contains("오리지널 보관 영역"), "{error}");
+    assert_eq!(
+        f.library.get_asset_classifications("asset-6").unwrap()[0].id,
+        originals
+    );
+}

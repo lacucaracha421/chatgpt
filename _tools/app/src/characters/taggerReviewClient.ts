@@ -49,7 +49,8 @@ export type TaggerReviewSource = (
 ) => Promise<TaggerReviewItem[] | null>;
 
 export type TaggerDecisionApi = Pick<CharacterApi, "decide" | "decideBatch"> & {
-  move(targetId: string, expectedFingerprint: string, assetIds: string[]): Promise<number>;
+  /** `learning: false` moves with a membership-only decision (맞음 · 영역 틀림). */
+  move(targetId: string, expectedFingerprint: string, assetIds: string[], learning?: boolean): Promise<number>;
   classifications(assetId: string): Promise<string[]>;
 };
 

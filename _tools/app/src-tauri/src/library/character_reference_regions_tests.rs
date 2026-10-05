@@ -21,6 +21,7 @@ fn row_in_state(asset_id: &str, hash: &str, state: &str) -> ReferenceInspection 
         suggested_index: None,
         state: state.into(),
         automatic_index: None,
+        other_characters: Vec::new(),
     };
     match state {
         // An explicit binding resolves to the crop the user named.
@@ -499,4 +500,238 @@ fn stored_manual_regions_survive_settings_saves_that_do_not_override_them() {
         1,
         "inspection overrides are never persisted"
     );
+}
+
+/// Two characters of one series. 모모카 owns `asset-5` through a manual acceptance; 미도리
+/// has no references yet. `asset-5` is 100x80 so a person box can be smaller than the frame.
+fn shared_image_fixture() -> (
+    crate::library::characters::tests::Fixture,
+    Target,
+    Target,
+    String,
+) {
+    use crate::library::characters::{tests::Fixture, DecisionKind, DecisionRequest};
+    let f = Fixture::new();
+    let connection = f.library.connection().unwrap();
+    connection
+        .execute(
+            "UPDATE assets SET width=100,height=80 WHERE id='asset-5'",
+            [],
+        )
+        .unwrap();
+    let hash: String = connection
+        .query_row(
+            "SELECT content_hash FROM assets WHERE id='asset-5'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    drop(connection);
+    let momoka = f.ready("모모카");
+    f.library
+        .record_character_decisions(DecisionRequest {
+            target_id: momoka.id.clone(),
+            expected_fingerprint: momoka.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: DecisionKind::Accepted,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    let momoka = f.library.get_character_target(&momoka.id).unwrap();
+    let midori = f.target("미도리");
+    (f, momoka, midori, hash)
+}
+
+fn shared_settings(
+    target: &Target,
+    reference_ids: &[&str],
+    regions: RegionBindings,
+) -> crate::library::characters::CharacterSettingsDraft {
+    crate::library::characters::CharacterSettingsDraft {
+        target: crate::library::characters::TargetDraft {
+            id: Some(target.id.clone()),
+            expected_revision: Some(target.revision),
+            series_classification_id: target.series_classification_id.clone(),
+            linked_classification_id: target.linked_classification_id.clone(),
+            display_name: target.display_name.clone(),
+            description: String::new(),
+            thumbnail_asset_id: None,
+            enabled: target.enabled,
+        },
+        reference_ids: reference_ids.iter().map(|id| id.to_string()).collect(),
+        reference_regions: regions,
+    }
+}
+
+const SHARED_HINT: &str =
+    "다른 캐릭터(모모카)에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.";
+
+#[test]
+fn another_characters_image_is_refused_as_a_whole_image_reference_with_the_named_hint() {
+    let (f, momoka, midori, hash) = shared_image_fixture();
+    let error = f
+        .library
+        .save_character_settings(
+            shared_settings(&midori, &["asset-5"], RegionBindings::new()),
+            true,
+        )
+        .unwrap_err();
+    assert_eq!(error.to_string(), SHARED_HINT);
+    // A box covering the whole frame is the whole image, whatever it is called.
+    let whole = RegionBindings::from([("asset-5".to_string(), binding(&hash, [0, 0, 100, 80]))]);
+    let error = f
+        .library
+        .save_character_settings(shared_settings(&midori, &["asset-5"], whole), true)
+        .unwrap_err();
+    assert_eq!(error.to_string(), SHARED_HINT);
+    // Nothing of the refused saves remains, and the owner is untouched.
+    assert!(read_regions(&f.library.connection().unwrap(), &midori.id)
+        .unwrap()
+        .is_empty());
+    assert!(f
+        .library
+        .get_character_target(&midori.id)
+        .unwrap()
+        .references
+        .is_empty());
+    assert_eq!(
+        f.library
+            .get_character_target(&momoka.id)
+            .unwrap()
+            .fingerprint,
+        momoka.fingerprint
+    );
+    // Learning from a multi-character image needs the same person region.
+    let midori = f.library.get_character_target(&midori.id).unwrap();
+    f.library
+        .record_character_decisions(crate::library::characters::DecisionRequest {
+            target_id: midori.id.clone(),
+            expected_fingerprint: midori.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: crate::library::characters::DecisionKind::Accepted,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    let midori = f.library.get_character_target(&midori.id).unwrap();
+    let error = f
+        .library
+        .add_character_learned_references(&midori.id, midori.revision, &["asset-5".into()])
+        .unwrap_err();
+    assert_eq!(error.to_string(), SHARED_HINT);
+}
+
+#[test]
+fn region_scoped_reference_on_another_characters_image_supplies_only_the_region() {
+    let (f, momoka, midori, hash) = shared_image_fixture();
+    let momoka_regions_before = read_regions(&f.library.connection().unwrap(), &momoka.id).unwrap();
+    let person = binding(&hash, [10, 10, 50, 70]);
+    let saved = f
+        .library
+        .save_character_settings(
+            shared_settings(
+                &midori,
+                &["asset-5"],
+                RegionBindings::from([("asset-5".to_string(), person.clone())]),
+            ),
+            true,
+        )
+        .unwrap();
+    // B36 and training read references with their region; the crop is the evidence.
+    let usable = saved.usable_references().collect::<Vec<_>>();
+    assert_eq!(usable.len(), 1);
+    assert_eq!(usable[0].asset_id.as_deref(), Some("asset-5"));
+    assert_eq!(usable[0].region.as_ref(), Some(&person));
+    // S36 resolves the same reference through the same region, keyed by this target only.
+    let pending = crate::library::character_shadow::Pending {
+        asset_id: "asset-6".into(),
+        content_hash: "unused".into(),
+        relative_path: "assets/asset-6.png".into(),
+        outcomes: [
+            (midori.id.clone(), "none".to_string()),
+            (momoka.id.clone(), "none".to_string()),
+        ]
+        .into(),
+        native_at: "2026-10-05T00:00:00Z".into(),
+    };
+    let (snapshot, _) =
+        crate::library::character_shadow::snapshot(&f.library.connection().unwrap(), &pending)
+            .unwrap();
+    let regions = snapshot["regions"].as_array().unwrap();
+    assert_eq!(regions.len(), 1, "{regions:?}");
+    assert_eq!(regions[0]["target_id"], json!(midori.id));
+    assert_eq!(regions[0]["asset_hash"], json!(hash));
+    assert_eq!(regions[0]["bounds"], json!([10, 10, 50, 70]));
+    // The owner keeps its own membership, references and (absent) regions.
+    let momoka_after = f.library.get_character_target(&momoka.id).unwrap();
+    assert_eq!(momoka_after.fingerprint, momoka.fingerprint);
+    assert_eq!(momoka_after.revision, momoka.revision);
+    assert_eq!(
+        read_regions(&f.library.connection().unwrap(), &momoka.id).unwrap(),
+        momoka_regions_before
+    );
+    assert!(f
+        .library
+        .character_relations_for_asset("asset-5")
+        .unwrap()
+        .contains(&momoka.id));
+    // A later save without a new override keeps the stored person and still passes.
+    let kept = f
+        .library
+        .save_character_settings(
+            shared_settings(&saved, &["asset-5"], RegionBindings::new()),
+            true,
+        )
+        .unwrap();
+    assert_eq!(kept.references[0].region.as_ref(), Some(&person));
+    // Removing the reference prunes only this target's region.
+    let cleared = f
+        .library
+        .save_character_settings(shared_settings(&kept, &[], RegionBindings::new()), true)
+        .unwrap();
+    assert!(cleared.usable_references().next().is_none());
+    assert!(read_regions(&f.library.connection().unwrap(), &midori.id)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        f.library
+            .get_character_target(&momoka.id)
+            .unwrap()
+            .fingerprint,
+        momoka.fingerprint
+    );
+}
+
+#[test]
+fn inspection_asks_for_a_person_on_images_shared_with_another_character() {
+    let mut detected = row_in_state("asset-0", "hash-0", "single");
+    require_choice_for_shared(&mut detected, vec!["모모카".into()]);
+    assert_eq!(detected.state, "needs_region");
+    assert_eq!(
+        (detected.selected_index, detected.suggested_index),
+        (None, Some(0))
+    );
+    assert_eq!(detected.other_characters, vec!["모모카".to_string()]);
+    let mut inferred = row_in_state("asset-0", "hash-0", "automatic");
+    require_choice_for_shared(&mut inferred, vec!["모모카".into()]);
+    assert_eq!(inferred.state, "needs_region");
+    assert_eq!(
+        (inferred.automatic_index, inferred.suggested_index),
+        (None, Some(1))
+    );
+    // An explicit person, or an image nobody else owns, is left as the worker reported it.
+    let mut chosen = row_in_state("asset-0", "hash-0", "selected");
+    require_choice_for_shared(&mut chosen, vec!["모모카".into()]);
+    assert_eq!(
+        (chosen.state.as_str(), chosen.selected_index),
+        ("selected", Some(1))
+    );
+    let mut own = row_in_state("asset-0", "hash-0", "single");
+    require_choice_for_shared(&mut own, Vec::new());
+    assert_eq!(own.state, "single");
+    assert!(serde_json::to_value(&own)
+        .unwrap()
+        .get("otherCharacters")
+        .is_none());
 }

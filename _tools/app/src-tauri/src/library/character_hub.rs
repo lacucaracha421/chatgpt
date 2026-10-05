@@ -338,9 +338,6 @@ impl Library {
               AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
               AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id)
               AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
-              AND NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id<>?2)
-              AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id<>?2)
-              AND NOT EXISTS(SELECT 1 FROM character_learned_references r WHERE r.asset_id=a.id AND r.target_id<>?2)
               AND (?3 OR (NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id)
               AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)
               AND NOT EXISTS(SELECT 1 FROM character_learned_references r WHERE r.asset_id=a.id)))";
@@ -1441,9 +1438,23 @@ mod tests {
         assert_eq!(counts.targets[&a.id], target_page.total_count);
         assert_eq!(counts.groups[&group_id], group_page.total_count);
 
+        // Another character's image stays pickable: it may become B's reference only through
+        // a person region, so the whole image is refused with that hint.
         let picker = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:None, reference_target_id:Some(b.id.clone()), after:None, limit:100, all:true, series_filter:None }).unwrap();
-        assert!(picker.items.iter().all(|asset| asset.id != "asset-5"));
-        assert!(validate_character_selection(&f.library.connection().unwrap(), &f.series, Some(&b.id), "asset-5").is_err());
+        assert!(picker.items.iter().any(|asset| asset.id == "asset-5"));
+        let refused = validate_character_selection(
+            &f.library.connection().unwrap(),
+            &f.series,
+            Some(&b.id),
+            "asset-5",
+        )
+        .unwrap_err();
+        assert!(
+            refused
+                .to_string()
+                .starts_with("다른 캐릭터(A)에 등록된 이미지입니다."),
+            "{refused}"
+        );
     }
 
     #[test]
@@ -1463,7 +1474,7 @@ mod tests {
     }
 
     #[test]
-    fn reference_picker_excludes_other_characters_before_pagination() {
+    fn reference_picker_offers_other_characters_images_only_through_regions() {
         let f = Fixture::new();
         let a = f.ready("Towa");
         let b = f.ready("New character");
@@ -1499,13 +1510,14 @@ mod tests {
             all: true,
             series_filter: None,
         };
+        // The whole-series picker lists other characters' images too; saving one still
+        // needs a person region (checked below).
         let new = f
             .library
             .browse_character_assets(query(&b.id, None))
             .unwrap();
-        assert_eq!(new.total_count, 1);
-        assert_eq!(new.items[0].id, "asset-6");
-        assert!(new.next_cursor.is_none());
+        assert_eq!(new.total_count, 7);
+        assert!(new.next_cursor.is_some());
         let own = f
             .library
             .browse_character_assets(query(&a.id, None))
@@ -1540,10 +1552,13 @@ mod tests {
             .unwrap();
         assert_eq!(unclassified.total_count, 1);
         let unsaved = f.library.browse_character_assets(query("", None)).unwrap();
-        assert_eq!(unsaved.total_count, 1);
+        assert_eq!(unsaved.total_count, 7);
         let connection = f.library.connection().unwrap();
-        assert!(
-            validate_character_selection(&connection, &f.series, Some(&b.id), "asset-5").is_err()
+        let refused = validate_character_selection(&connection, &f.series, Some(&b.id), "asset-5")
+            .unwrap_err();
+        assert_eq!(
+            refused.to_string(),
+            "다른 캐릭터(Towa)에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다."
         );
         assert!(validate_character_selection(&connection, &f.series, None, "asset-0").is_err());
         assert!(
@@ -1868,17 +1883,64 @@ pub(super) fn validate_character_selection(
     target: Option<&str>,
     asset: &str,
 ) -> Result<()> {
+    validate_character_selection_with_region(connection, series, target, asset, None)
+}
+
+/// Display names of the other characters an image already belongs to: their accepted
+/// decisions, base references, or learned references. `target` is the character being edited.
+pub(super) fn other_character_names(
+    connection: &Connection,
+    target: Option<&str>,
+    asset: &str,
+) -> Result<Vec<String>> {
+    Ok(connection
+        .prepare_cached(
+            "SELECT DISTINCT t.display_name FROM character_targets t
+             WHERE (?2 IS NULL OR t.id<>?2) AND (
+                 EXISTS(SELECT 1 FROM character_relations r WHERE r.target_id=t.id AND r.asset_id=?1)
+                 OR EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=t.id AND r.asset_id=?1)
+                 OR EXISTS(SELECT 1 FROM character_learned_references r WHERE r.target_id=t.id AND r.asset_id=?1))
+             ORDER BY t.display_name",
+        )?
+        .query_map(params![asset, target], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// An image another character already owns may become this character's reference only
+/// through one person region: the region crop, never the whole image, is the evidence every
+/// consumer (B36, S36, training) receives. `region` is the caller's draft choice; without one,
+/// only this target's own stored binding counts. Another target's region is never borrowed.
+pub(super) fn validate_character_selection_with_region(
+    connection: &Connection,
+    series: &str,
+    target: Option<&str>,
+    asset: &str,
+    region: Option<&super::character_reference_regions::RegionBinding>,
+) -> Result<()> {
     super::characters::scoped_image(connection, series, asset)?;
     if series_asset_excluded(connection, series, asset)? {
         return Err(Error::Invalid(
             "캐릭터 분류에서 제외된 이미지는 선택할 수 없습니다.",
         ));
     }
-    let excluded: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2)) OR EXISTS(SELECT 1 FROM character_references WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2)) OR EXISTS(SELECT 1 FROM character_learned_references WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2))", params![asset,target], |r| r.get(0))?;
-    if excluded {
-        return Err(Error::Invalid(
-            "다른 캐릭터에 등록된 이미지입니다. 선택을 다시 확인해 주세요.",
-        ));
+    let names = other_character_names(connection, target, asset)?;
+    if names.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    let stored = match (region, target) {
+        (None, Some(id)) => {
+            super::character_reference_regions::read_regions(connection, id)?.remove(asset)
+        }
+        _ => None,
+    };
+    if let Some(region) = region.or(stored.as_ref()) {
+        if super::character_reference_regions::is_person_region(connection, series, asset, region)?
+        {
+            return Ok(());
+        }
+    }
+    Err(Error::InvalidMessage(format!(
+        "다른 캐릭터({})에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.",
+        names.join(", ")
+    )))
 }

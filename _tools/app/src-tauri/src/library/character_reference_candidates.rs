@@ -167,7 +167,7 @@ impl Library {
             .series_classification_id
             .as_deref()
             .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare(&format!(
             "WITH RECURSIVE scope(id) AS (
                 SELECT id FROM classification_entries WHERE id=?2
                 UNION ALL SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
@@ -181,7 +181,7 @@ impl Library {
                   AND json_type(json_extract(p.result_json,'$.evidence.queryBoxes'))='array'
                 ORDER BY e.generation DESC,e.id DESC LIMIT 1)
              FROM character_relations r
-             JOIN character_decisions d ON d.sequence=r.sequence AND d.origin='manual'
+             JOIN character_decisions d ON d.sequence=r.sequence AND d.origin='manual' AND NOT {disabled}
              JOIN assets a ON a.id=r.asset_id AND a.status='normal' AND a.media_kind='image'
              WHERE r.target_id=?1
                AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
@@ -193,8 +193,9 @@ impl Library {
                AND NOT EXISTS(SELECT 1 FROM character_learned_references learned_hash WHERE learned_hash.target_id=?1 AND learned_hash.asset_hash=a.content_hash)
                AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
                AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions excluded WHERE excluded.series_id=?2 AND excluded.asset_id=a.id)
-             ORDER BY d.sequence DESC,r.asset_id LIMIT 400"
-        )?;
+             ORDER BY d.sequence DESC,r.asset_id LIMIT 400",
+            disabled = super::characters::learning_disabled_sql("d")
+        ))?;
         let eligible = statement
             .query_map(params![target_id, series], |row| {
                 let bytes: Option<Vec<u8>> = row.get(2)?;
@@ -286,6 +287,15 @@ impl Library {
             .series_classification_id
             .as_deref()
             .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
+        // Draft bindings are stored before the reference writes, so their shared-image checks
+        // see this target's chosen person. Replacing the anchors prunes regions of images that
+        // are not references yet; they are stored again before the learned additions.
+        super::character_reference_regions::apply_regions(
+            &transaction,
+            &target,
+            &request.asset_ids,
+            &regions,
+        )?;
         let mut selected_hashes = target
             .references
             .iter()
@@ -298,17 +308,21 @@ impl Library {
             )
             .collect::<BTreeSet<_>>();
         for asset_id in &request.asset_ids {
-            super::character_hub::validate_character_selection(
+            super::character_hub::validate_character_selection_with_region(
                 &transaction,
                 series,
                 Some(&target.id),
                 asset_id,
+                regions.get(asset_id),
             )?;
             let manual_relation: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM character_relations r
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM character_relations r
                  JOIN character_decisions d ON d.sequence=r.sequence
                  WHERE r.target_id=?1 AND r.asset_id=?2
-                   AND d.origin='manual' AND d.decision='accepted')",
+                   AND d.origin='manual' AND d.decision='accepted' AND NOT {})",
+                    super::characters::learning_disabled_sql("d")
+                ),
                 params![target.id, asset_id],
                 |row| row.get(0),
             )?;
@@ -365,6 +379,12 @@ impl Library {
                 if additions.is_empty() {
                     after_anchors
                 } else {
+                    super::character_reference_regions::apply_regions(
+                        &transaction,
+                        &after_anchors,
+                        &request.asset_ids,
+                        &regions,
+                    )?;
                     self.add_character_learned_references_in(
                         &transaction,
                         &target.id,

@@ -68,8 +68,14 @@ impl Library {
         let current=self.read_character_target(&c,target_id)?;
         if current.revision!=page.target_revision || reference_set_hash(&current)?!=page.reference_set_hash {return Err(Error::Stale);}
         for id in &ids {
-            super::character_hub::validate_character_selection(&c,series,Some(target_id),id)?;
-            let manual:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM character_relations r JOIN character_decisions d ON d.sequence=r.sequence WHERE r.target_id=?1 AND r.asset_id=?2 AND d.origin='manual' AND d.decision='accepted')",params![target_id,id],|r|r.get(0))?;
+            super::character_hub::validate_character_selection_with_region(
+                &c,
+                series,
+                Some(target_id),
+                id,
+                regions.get(id),
+            )?;
+            let manual:bool=c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM character_relations r JOIN character_decisions d ON d.sequence=r.sequence WHERE r.target_id=?1 AND r.asset_id=?2 AND d.origin='manual' AND d.decision='accepted' AND NOT {})",super::characters::learning_disabled_sql("d")),params![target_id,id],|r|r.get(0))?;
             if !manual || super::characters::scoped_image(&c,series,id)?.0!=regions[id].content_hash {return Err(Error::Stale);}
         }
         page.items=super::query::asset_summaries_by_ids(&c,&ids)?;

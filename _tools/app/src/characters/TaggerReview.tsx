@@ -8,7 +8,7 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { ClassificationEntry } from "../library/types";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { Button } from "../shared/ui/Button";
-import type { CharacterTarget, DecisionKind, DecisionRequest } from "./api";
+import type { CharacterTarget, DecisionKind, DecisionRequest, DecisionRequestKind } from "./api";
 import {
   classificationIsInSeries,
   taggerCounts,
@@ -32,6 +32,9 @@ type Props = {
 
 type Membership = "loading" | "inside" | "outside" | "error";
 type BulkDecision = Extract<DecisionKind, "accepted" | "rejected">;
+/** `accepted_wrong_region` (맞음 · 영역 틀림): the image belongs to the character, but the drawn
+ * box is another person, so the decision is membership only and never learning evidence. */
+type ItemDecision = BulkDecision | Extract<DecisionRequestKind, "accepted_wrong_region">;
 type Group = {
   seriesId: string;
   seriesName: string;
@@ -41,7 +44,7 @@ type Group = {
 
 const TILE_SIZE_KEY = "lakomics.taggerReview.tileSize";
 const ALL = "\u0000all";
-const manualRequest = (item: TaggerReviewItem, assetIds: string[], decision: BulkDecision): DecisionRequest => ({
+const manualRequest = (item: TaggerReviewItem, assetIds: string[], decision: ItemDecision): DecisionRequest => ({
   targetId: item.targetId,
   expectedFingerprint: item.targetFingerprint,
   assetIds,
@@ -173,14 +176,19 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
     }
   }
 
-  async function decideOne(item: TaggerReviewItem, decision: BulkDecision) {
+  async function decideOne(item: TaggerReviewItem, decision: ItemDecision) {
     if (decisionPending.current) return;
     const state = membership.get(item.asset.id);
-    if (decision === "accepted" && state !== "inside" && state !== "outside") return;
+    const accepting = decision !== "rejected";
+    if (decision === "accepted_wrong_region" && !item.crop) return;
+    if (accepting && state !== "inside" && state !== "outside") return;
     decisionPending.current = true;
     setBusy(true); setError(null);
     try {
-      if (decision === "accepted" && state === "outside") await api.move(item.targetId, item.targetFingerprint, [item.asset.id]);
+      if (accepting && state === "outside") {
+        if (decision === "accepted") await api.move(item.targetId, item.targetFingerprint, [item.asset.id]);
+        else await api.move(item.targetId, item.targetFingerprint, [item.asset.id], false);
+      }
       else await api.decide(manualRequest(item, [item.asset.id], decision));
       if (previewKey === taggerItemKey(item) && character) {
         const index = character.items.indexOf(item);
@@ -289,12 +297,12 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
           onKeyDown={(event) => {
             if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
             const key = event.key.toLowerCase();
-            if (!["arrowleft", "arrowright", "a", "x", "escape"].includes(key)) return;
+            if (!["arrowleft", "arrowright", "a", "w", "x", "escape"].includes(key)) return;
             event.preventDefault(); event.stopPropagation();
             if (key === "escape") closePreview();
             else if (key === "arrowleft") movePreview(-1);
             else if (key === "arrowright") movePreview(1);
-            else void decideOne(previewItem, key === "a" ? "accepted" : "rejected");
+            else void decideOne(previewItem, key === "a" ? "accepted" : key === "w" ? "accepted_wrong_region" : "rejected");
           }}>
           <div className="tagger-review__preview-toolbar">
             <Button size="sm" disabled={busy || character.items[0] === previewItem} aria-label="이전 이미지" onClick={() => movePreview(-1)}>←</Button>
@@ -308,6 +316,8 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
           {["loading", "error"].includes(membership.get(previewItem.asset.id) ?? "loading") && <p role="status" className="tagger-review__notice">폴더 위치를 확인할 수 있을 때 확정할 수 있습니다.</p>}
           <div className="tagger-review__preview-toolbar">
             <Button disabled={busy || !["inside", "outside"].includes(membership.get(previewItem.asset.id) ?? "")} onClick={() => void decideOne(previewItem, "accepted")}>확정 (A)</Button>
+            {previewItem.crop && <Button disabled={busy || !["inside", "outside"].includes(membership.get(previewItem.asset.id) ?? "")}
+              onClick={() => void decideOne(previewItem, "accepted_wrong_region")}>확정 · 영역 틀림 (W)</Button>}
             <Button disabled={busy} onClick={() => void decideOne(previewItem, "rejected")}>거부 (X)</Button>
           </div>
           {error && <p className="tagger-review__notice is-error" role="alert">{error}</p>}
@@ -362,6 +372,8 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
               <div className="tagger-review__actions">
                 <Button size="sm" variant="primary" disabled={acceptDisabled} aria-label={`${item.asset.originalName} 맞음`} onClick={() => void decideOne(item, "accepted")}>맞음</Button>
                 <Button size="sm" disabled={busy} aria-label={`${item.asset.originalName} 아님`} onClick={() => void decideOne(item, "rejected")}>아님</Button>
+                {item.crop && <Button size="sm" variant="ghost" className="tagger-review__wrong-region" disabled={acceptDisabled}
+                  aria-label={`${item.asset.originalName} 맞음 · 영역 틀림`} onClick={() => void decideOne(item, "accepted_wrong_region")}>맞음 · 영역 틀림</Button>}
               </div>
             </article>;
           })}

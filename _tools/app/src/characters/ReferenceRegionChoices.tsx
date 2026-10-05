@@ -19,8 +19,12 @@ export const automaticReferenceCount = (inspections: ReferenceInspection[]) =>
 /** How many references need no choice at all, from the current inspection result. */
 export const usableReferenceCount = (inspections: ReferenceInspection[]) => inspections.filter(usableRegion).length;
 
+/** An image shared with another character cannot be saved until its person is chosen. */
+const sharedNeedsChoice = (region: ReferenceInspection) => Boolean(region.otherCharacters?.length) && needsReferenceRegionChoice(region);
+
 export const needsReferenceConfirmation = (inspections: ReferenceInspection[]) =>
-  usableReferenceCount(inspections) < AUTOMATIC_CHARACTER_REFERENCE_COUNT && inspections.some(needsReferenceRegionChoice);
+  (usableReferenceCount(inspections) < AUTOMATIC_CHARACTER_REFERENCE_COUNT && inspections.some(needsReferenceRegionChoice))
+  || inspections.some(sharedNeedsChoice);
 
 export type ReferenceRegionInspection = { inspections: ReferenceInspection[] | null; error: string | null; retry?: () => void };
 type InspectionRequest = {
@@ -53,6 +57,7 @@ export function referenceRegionStatus(region: ReferenceInspection, draftRegions:
   if (region.state === "selected") return changedRegions[region.assetId] ? "직접 지정 · 저장 전" : "직접 지정 · 저장됨";
   if (region.state === "automatic") return "자동 확인";
   if (region.state === "single") return "한 명 감지 · 자동 사용";
+  if (region.otherCharacters?.length) return `다른 캐릭터(${region.otherCharacters.join(", ")}) 이미지 · 인물 지정 필요`;
   return "인물 확인 필요 · 미사용";
 }
 
@@ -149,12 +154,14 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     setMode("focus"); setChosen(focusRequest.assetId);
   }, [focusRequest?.key]);
 
-  // The shortfall workflow ends only when the threshold is genuinely met. A pick
+  // The shortfall workflow ends only when the threshold is genuinely met and no image shared
+  // with another character still waits for its person. A pick
   // briefly leaves nothing unresolved until the reinspection lands, so an empty
   // list alone must not close it.
+  const sharedPending = inspections.some(sharedNeedsChoice);
   useEffect(() => {
-    if (mode === "required" && enough) setMode(null);
-  }, [mode, enough]);
+    if (mode === "required" && enough && !sharedPending) setMode(null);
+  }, [mode, enough, sharedPending]);
 
   if (!assetIds.length) return null;
 

@@ -402,3 +402,19 @@ it("does not settle state from a response that arrives after unmount", async () 
   await new Promise(next => setTimeout(next, 20));
   expect(errors).not.toHaveBeenCalled();
 });
+
+it("asks for a person on an image shared with another character even with six usable references", async () => {
+  // The native inspection reports a detected person in a shared image as needs_region with a suggestion.
+  const shared = (regions: ReferenceRegions) => regions.g ? { ...inspection("g", "selected", multi), selectedIndex: 1, otherCharacters: ["모모카"] }
+    : { ...inspection("g", "needs_region", multi), suggestedIndex: 1, otherCharacters: ["모모카"] };
+  const api = vi.fn(async (_ids: string[], regions: ReferenceRegions) => [...six.map(id => inspection(id, "single")), shared(regions)]);
+  const user = userEvent.setup();
+  render(<Harness assetIds={[...six, "g"]} respond={api} />);
+  await user.click(await screen.findByRole("button", { name: "필요한 인물만 확인" }));
+  expect(screen.getByText("다른 캐릭터(모모카) 이미지 · 인물 지정 필요")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "추천 영역 사용" }));
+  await waitFor(() => expect(draft()).toEqual({ g: box("g", [200, 40, 380, 520]) }));
+  // Once the chosen person is honoured nothing is required any more.
+  await waitFor(() => expect(boxButtons()).toHaveLength(0));
+  expect(screen.queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+});

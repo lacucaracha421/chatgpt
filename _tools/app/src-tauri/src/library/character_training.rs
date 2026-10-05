@@ -14,6 +14,8 @@
 //! * `origin='manual'` with `accepted`/`rejected`, still matching current asset
 //!   content, is a label.
 //! * `cleared` is neither positive nor negative; it withdraws the pair.
+//! * A membership-only acceptance (`learningDisabled`, 맞음 · 영역 틀림: the shown
+//!   person box was someone else) owns its pair but is not a label either.
 //! * `origin='automatic'` is never truth, even as the latest row. A later
 //!   automatic row therefore *removes* a pair rather than relabelling it, which
 //!   is why the snapshot identity must not use the library-wide decision
@@ -151,9 +153,11 @@ impl Library {
             if remaining == 0 {
                 break;
             }
-            let mut statement = connection.prepare(
+            // A membership-only acceptance (wrong person box) is the latest word on its
+            // pair, so the pair carries no label at all rather than an older one.
+            let mut statement = connection.prepare(&format!(
                 "WITH latest AS (
-                     SELECT source_asset_id,asset_id,asset_hash,decision,origin,sequence,
+                     SELECT source_asset_id,asset_id,asset_hash,decision,origin,sequence,reference_snapshot,
                             ROW_NUMBER() OVER (
                                 PARTITION BY source_asset_id ORDER BY sequence DESC
                             ) AS rank
@@ -163,9 +167,11 @@ impl Library {
                  FROM latest l
                  JOIN assets a ON a.id=l.source_asset_id
                  WHERE l.rank=1 AND l.origin='manual' AND l.decision IN ('accepted','rejected')
+                   AND NOT {}
                    AND l.asset_id IS NOT NULL AND l.asset_hash=a.content_hash
                  ORDER BY l.sequence DESC,l.source_asset_id LIMIT ?2",
-            )?;
+                super::characters::learning_disabled_sql("l")
+            ))?;
             let candidates = statement
                 .query_map(params![target.id, MAX_LABELLED_SOURCES as i64], |row| {
                     Ok((
@@ -223,11 +229,12 @@ impl Library {
                 {
                     continue;
                 }
-                let latest: Option<(String,String,String,i64)> = connection.query_row(
-                    "SELECT decision,origin,asset_hash,sequence FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
-                    params![target.id,asset_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
-                if let Some((decision, origin, hash, sequence)) = latest {
+                let latest: Option<(String,String,String,i64,bool)> = connection.query_row(
+                    &format!("SELECT decision,origin,asset_hash,sequence,{} FROM character_decisions d WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1", super::characters::learning_disabled_sql("d")),
+                    params![target.id,asset_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
+                if let Some((decision, origin, hash, sequence, learning_disabled)) = latest {
                     if origin == "manual"
+                        && !learning_disabled
                         && hash == row.content_hash
                         && matches!(decision.as_str(), "accepted" | "rejected")
                     {
@@ -712,6 +719,44 @@ mod tests {
             .character_training_snapshot(&connection, &context(&f, &target))
             .unwrap();
         assert!(labels(&automatic, "asset-6").is_null());
+    }
+
+    #[test]
+    fn wrong_region_acceptance_is_membership_but_never_a_label() {
+        let f = Fixture::new();
+        stamp_pdq(&f);
+        let target = f.ready("A");
+        decide(&f, &target, &["asset-6"], DecisionKind::Accepted);
+        let connection = f.library.connection().unwrap();
+        let accepted = f
+            .library
+            .character_training_snapshot(&connection, &context(&f, &target))
+            .unwrap();
+        assert_eq!(labels(&accepted, "asset-6")[&target.id], json!(true));
+        drop(connection);
+
+        // The latest word on the pair is membership only: no label, not even the older one.
+        decide(&f, &target, &["asset-6"], DecisionKind::AcceptedWrongRegion);
+        assert_eq!(
+            f.library.character_relations_for_asset("asset-6").unwrap(),
+            vec![target.id.clone()]
+        );
+        let connection = f.library.connection().unwrap();
+        let wrong = f
+            .library
+            .character_training_snapshot(&connection, &context(&f, &target))
+            .unwrap();
+        assert!(labels(&wrong, "asset-6").is_null());
+        assert_ne!(wrong.id, accepted.id);
+        drop(connection);
+
+        decide(&f, &target, &["asset-6"], DecisionKind::Accepted);
+        let connection = f.library.connection().unwrap();
+        let again = f
+            .library
+            .character_training_snapshot(&connection, &context(&f, &target))
+            .unwrap();
+        assert_eq!(labels(&again, "asset-6")[&target.id], json!(true));
     }
 
     #[test]

@@ -32,6 +32,22 @@ pub struct ReferenceInspection {
     /// identity selection omit this key and mean `None`.
     #[serde(default)]
     pub automatic_index: Option<usize>,
+    /// Other characters this image already belongs to. Filled natively, never by the worker.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub other_characters: Vec<String>,
+}
+
+/// An image shared with another character supplies a reference only through a person the
+/// user chose. A detected or inferred person stays a suggestion, so the inspection asks for
+/// a choice exactly where a save would otherwise be refused.
+fn require_choice_for_shared(row: &mut ReferenceInspection, others: Vec<String>) {
+    if !others.is_empty() && matches!(row.state.as_str(), "single" | "automatic") {
+        row.suggested_index = row.automatic_index.or(row.selected_index);
+        row.selected_index = None;
+        row.automatic_index = None;
+        row.state = "needs_region".into();
+    }
+    row.other_characters = others;
 }
 
 /// Every region state the worker may report. `single`, `selected`, and `automatic` supply a
@@ -96,6 +112,26 @@ fn resolve_binding(connection: &Connection, series: &str, id: &str, region: &Reg
         return Err(Error::Invalid("인물 영역이 이미지 범위를 벗어났습니다."));
     }
     Ok(hash)
+}
+
+/// True when the binding still describes one person of the image's current content. A stale
+/// or out-of-frame binding, or one covering the whole frame, scopes nothing to a person.
+pub(super) fn is_person_region(
+    connection: &Connection,
+    series: &str,
+    id: &str,
+    region: &RegionBinding,
+) -> Result<bool> {
+    match resolve_binding(connection, series, id, region) {
+        Ok(_) => {}
+        Err(Error::Stale | Error::Invalid(_)) => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    let (width, height): (u32, u32) =
+        connection.query_row("SELECT width,height FROM assets WHERE id=?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
+    Ok(region.bounds != [0, 0, width, height] && region.bounds != [0, 0, height, width])
 }
 
 pub(super) fn apply_regions(connection: &Connection, target: &Target, allowed: &[String], regions: &RegionBindings) -> Result<bool> {
@@ -199,13 +235,19 @@ impl Library {
             worker.receive()
         })?;
         if value["type"]!="references_inspected" {return Err(Error::Worker(value["error"].as_str().unwrap_or("인물 영역을 확인하지 못했습니다.").into()));}
-        let rows:Vec<ReferenceInspection>=serde_json::from_value(value["items"].clone())?;
+        let mut rows: Vec<ReferenceInspection> = serde_json::from_value(value["items"].clone())?;
         let expected = inputs.iter().map(|(id,hash,_)| (id.clone(),hash.clone())).collect::<Vec<_>>();
         validate_inspection_rows(&expected, &rows)?;
-        for ((id,hash,path),source) in inputs.iter().zip(&sources) {
+        for (((id, hash, path), source), row) in inputs.iter().zip(&sources).zip(&mut rows) {
             source.verify(self)?;
-            let c=self.connection()?;
-            if super::characters::scoped_image(&c,series,id)?!=(hash.clone(),path.clone()) {return Err(Error::Stale);}
+            let c = self.connection()?;
+            if super::characters::scoped_image(&c, series, id)? != (hash.clone(), path.clone()) {
+                return Err(Error::Stale);
+            }
+            require_choice_for_shared(
+                row,
+                super::character_hub::other_character_names(&c, target_id, id)?,
+            );
         }
         Ok(rows)
     }

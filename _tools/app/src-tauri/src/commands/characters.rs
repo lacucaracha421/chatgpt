@@ -669,16 +669,26 @@ pub async fn replace_character_references(
     .map_err(|_| super::background_task_error())?
 }
 
+/// `learning: false` is 맞음 · 영역 틀림: membership only, never learning evidence.
 #[tauri::command]
 pub async fn move_assets_to_character(
     target_id: String,
     expected_fingerprint: String,
     asset_ids: Vec<String>,
+    learning: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<u64, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.move_assets_to_character(target_id, expected_fingerprint, asset_ids)
+        if learning.unwrap_or(true) {
+            library.move_assets_to_character(target_id, expected_fingerprint, asset_ids)
+        } else {
+            library.move_assets_to_character_without_learning(
+                target_id,
+                expected_fingerprint,
+                asset_ids,
+            )
+        }
     })
     .await
     .map_err(|_| super::background_task_error())?
