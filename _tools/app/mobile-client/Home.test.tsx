@@ -11,6 +11,7 @@ import {resetReleaseStore} from './releaseStore';
 import {resetHomeSourceCache} from './homeCache';
 import {commitUpcomingWishlist} from './upcomingWishlistOutbox';
 import {PRIVACY_MODE_KEY, PRIVACY_MODE_EVENT} from './privacyMode';
+import {LaunchSplash, resetLaunchSplashForTests} from '../src/shared/launch/LaunchSplash';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn(), mediaTicket: vi.fn()}));
 vi.mock('./transport', async () => { const actual = await vi.importActual<typeof import('./transport')>('./transport'); return {...actual, api: mocks.api, native: mocks.native}; });
@@ -362,4 +363,24 @@ it('includes an owned upcoming game from the replica without a wishlist', async 
   expect(within(card).getByText('9.28 · 게임')).toBeTruthy();
   expect(within(card).getByText('D-3')).toBeTruthy();
   fireEvent.click(card); expect(p.onWork).toHaveBeenCalledWith('owned-game');
+});
+
+it('covers the first Home load on app start with the launch splash, leaves when Home is ready, and never returns', async () => {
+  resetLaunchSplashForTests();
+  const read = mocks.api.getMockImplementation()!;
+  let finish!: (value: unknown) => void;
+  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(resolve => {finish = resolve;}) : read(path, ...args));
+  const splash = render(<LaunchSplash elapsed={() => 0}/>);
+  const first = render(<Home {...props()}/>);
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  expect(screen.getByRole('status', {name: 'Lakomics 여는 중'}).hasAttribute('data-state')).toBe(false);
+  expect(screen.getByLabelText('홈').querySelector('[aria-busy=true]')).toBeTruthy();
+  await act(async () => {finish(revisitReply);});
+  await waitFor(() => expect(document.querySelector('.launch-splash')).toBeNull());
+  first.unmount(); resetHomeSourceCache();
+  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(() => undefined) : read(path, ...args));
+  render(<Home {...props()}/>);
+  expect(screen.getByLabelText('홈').querySelector('[aria-busy=true]')).toBeTruthy();
+  expect(document.querySelector('.launch-splash')).toBeNull();
+  splash.unmount();
 });

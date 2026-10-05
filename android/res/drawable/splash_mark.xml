@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Lakomics mark (src/brand/lakomics-mark.svg) at 88x96dp, centred in the 288dp system splash
+     icon canvas: the same size as the web launch splash mark (_tools/app/src/shared/launch). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="288dp" android:height="288dp" android:viewportWidth="288" android:viewportHeight="288">
+ <group android:scaleX="0.5" android:scaleY="0.5" android:translateX="80" android:translateY="80">
+  <path android:fillColor="#DDD8CA" android:fillType="evenOdd" android:pathData="M40 56H80V200H40ZM48 64V192H72V64ZM108 32H148V224H108ZM116 40V216H140V40ZM176 56H216V200H176ZM184 64V192H208V64Z"/>
+ </group>
+</vector>

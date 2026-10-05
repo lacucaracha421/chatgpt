@@ -255,6 +255,7 @@ Menus, popovers and dialogs are square (radius 0) with the NieR corner brackets:
 ### States
 
 - **Loading:** skeleton blocks in the shape of the content, `color-mix` of surface toward the page background, breathing slowly (opacity .55 → 1, 2.4 s); they fade in only after 300 ms so fast loads show nothing; with reduced motion they are static. No "…불러오는 중" text and no spinners in content areas.
+- **Launch (user, 2026-10-05):** on app start, PC and tablet show one shared splash (`src/shared/launch/LaunchSplash.tsx`) instead of Home's first-load skeleton: the Lakomics mark (88×96, `--color-accent`) centred on `--color-bg`, painted by `index.html` before any script runs. It stays until the first screen is ready — Home's first-load data and its on-screen images (images at most 1.5 s), or the setup / connection screen — with an 8 s cap from page start, then fades once (`--motion-screen`; reduced motion snaps). A start slower than 3 s shows the thin loading line under the mark; no text, no spinner. Never shown again in the same run. On Android 12+ the system splash shows the same mark at the same size.
 - **Empty:** a faint 32px icon and one line ("이미지 없음"); one button only when there is a real next step.
 - **Error:** one line and "다시 시도"; codes and explanations go behind the ⓘ help button.
 

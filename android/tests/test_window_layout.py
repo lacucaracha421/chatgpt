@@ -59,6 +59,18 @@ class WindowLayoutTest(unittest.TestCase):
         self.assertIn('Color.rgb(22,23,24)', self.source)
         self.assertIn(f'content="{color}"', (ROOT / '_tools/app/mobile-client/index.html').read_text())
 
+    def test_system_splash_hands_off_to_the_web_launch_splash(self):
+        tokens = (ROOT / '_tools/app/src/styles/tokens.css').read_text()
+        color = re.search(r'--color-bg:\s*(#[0-9a-f]{6})', tokens).group(1)
+        theme = ET.parse(ROOT / 'android/res/values-v31/styles.xml').getroot().find('style')
+        self.assertEqual((theme.get('name'), theme.get('parent')), ('LakomicsTheme', 'LakomicsBaseTheme'))
+        items = {i.get('name'): i.text for i in theme.findall('item')}
+        self.assertEqual(items['android:windowSplashScreenBackground'], color)
+        self.assertEqual(items['android:windowSplashScreenAnimatedIcon'], '@drawable/splash_mark')
+        # The same mark path as the web splash (index.html and LaunchSplash.tsx).
+        mark = ET.parse(ROOT / 'android/res/drawable/splash_mark.xml').getroot().find('group/path').get(ATTR + 'pathData')
+        self.assertIn(f'd="{mark}"', (ROOT / '_tools/app/mobile-client/index.html').read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

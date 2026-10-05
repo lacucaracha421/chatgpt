@@ -31,6 +31,7 @@ import {useHomeVisit} from '../src/home/useHomeVisit';
 import {koreanReleases} from './collectionReleasesModel';
 import {useLocalDayClock} from '../src/shared/useLocalDayClock';
 import {StableImage} from '../src/shared/ui/StableImage';
+import {useLaunchReady} from '../src/shared/launch/LaunchSplash';
 import '../src/home/home.css';
 import './home.css';
 
@@ -216,6 +217,8 @@ export function Home(props: HomeProps) {
   const layoutShown = useRef(false);
   if ((d.releasesReady && upcoming.ready || d.offline || d.serverProblem) && (!attentionPending || d.offline || d.serverProblem) && !dayPending) layoutShown.current = true;
   const firstLoad = !layoutShown.current;
+  // On app start the launch splash covers this first load, then leaves with Home's first images.
+  useLaunchReady(!firstLoad, homeScroll);
   useLayoutEffect(() => {
     if (firstLoad || reducedMotion()) return;
     const host = homeScroll.current?.querySelector<HTMLElement>('.home-tablet-layout');

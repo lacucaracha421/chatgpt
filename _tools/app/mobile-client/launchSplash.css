@@ -1,0 +1,2 @@
+/* The tablet entry links the shared launch splash styles through this file (Vite root is mobile-client). */
+@import "../src/shared/launch/launchSplash.css";

@@ -2,6 +2,7 @@ import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "../shared/ui/Button";
 import { useLibrary } from "./LibraryContext";
+import { useLaunchReady } from "../shared/launch/LaunchSplash";
 
 export type FolderPicker = () => Promise<string | string[] | null>;
 
@@ -12,6 +13,8 @@ export function LibrarySetup({ selectFolder = selectLibraryFolder }: { selectFol
   const { error, initializing, openLibrary } = useLibrary();
 
   const showOpening = useDelayedBusy(initializing);
+  // Without a library to open, this is the first screen: end the launch splash.
+  useLaunchReady(!initializing);
 
   async function select() {
     const path = await selectFolder();

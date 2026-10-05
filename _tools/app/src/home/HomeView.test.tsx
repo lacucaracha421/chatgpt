@@ -9,6 +9,7 @@ import { NotesStore, type Note } from "../notes/store";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { HomeView, type HomeViewProps } from "./HomeView";
 import { AreaPainted, AreaRequested, AreaVisible } from "../shared/motion/AreaSwitch";
+import { LaunchSplash, resetLaunchSplashForTests } from "../shared/launch/LaunchSplash";
 
 const gateway = vi.hoisted(() => ({
   collectionTracking: { listInbox: vi.fn(), releaseBoard: vi.fn() },
@@ -341,4 +342,25 @@ it('keeps the saved visit until collections have successfully loaded and their a
   const card=await screen.findByRole('button',{name:/늦게 읽은 게임/});
   expect(within(card).getByText('NEW')).toBeTruthy();
   await waitFor(()=>expect(readHomeVisit('fixture').lastVisit).toBe(NOW.toISOString()));
+});
+
+it("covers Home's first load on app start with the launch splash, leaves when Home is ready, and never returns", async () => {
+  resetLaunchSplashForTests();
+  let finish!: (value: unknown) => void;
+  gateway.getHomeMedia.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const splash = render(<LaunchSplash elapsed={() => 0} />);
+  const first = renderHome();
+  await act(async () => {});
+  expect(screen.getByRole("status", { name: "Lakomics 여는 중" })).not.toHaveAttribute("data-state");
+  expect(first.view.container.querySelector(".home-pc-layout")?.getAttribute("aria-busy")).toBe("true");
+  await act(async () => finish({ playing: [], dailyAsset: null }));
+  await waitFor(() => expect(document.querySelector(".launch-splash")).toBeNull());
+  // A later first load (e.g. after switching library) shows the usual skeleton, not the splash.
+  first.view.unmount();
+  gateway.getHomeMedia.mockReturnValueOnce(new Promise(() => undefined));
+  const later = renderHome();
+  await act(async () => {});
+  expect(later.view.container.querySelector(".home-pc-layout")?.getAttribute("aria-busy")).toBe("true");
+  expect(document.querySelector(".launch-splash")).toBeNull();
+  splash.unmount();
 });

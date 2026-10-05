@@ -4,10 +4,12 @@ import {createRoot} from 'react-dom/client';
 import './mobile.css';
 import {App} from './App';
 import {setDevelopmentTransport} from './transport';
+import {LaunchSplash} from '../src/shared/launch/LaunchSplash';
 async function start() {
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('demo')) {
     const {demoTransport} = await import('./preview'); setDevelopmentTransport(demoTransport);
   }
-  createRoot(document.getElementById('root')!).render(<App/>);
+  // The launch splash from index.html stays until Home (or the connection screen) is ready.
+  createRoot(document.getElementById('root')!).render(<><App/><LaunchSplash/></>);
 }
 void start();

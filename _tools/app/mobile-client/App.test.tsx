@@ -203,6 +203,19 @@ it('keeps the connect screen while a device without a saved connection is checki
   expect(screen.queryByText('연결 확인 중')).toBeNull();
   expect(screen.queryByRole('button',{name:'전체 보기'})).toBeNull();
 });
+it('keeps the launch splash while a device without a saved connection is checking, then ends it on the connect screen',async()=>{
+  const {LaunchSplash,resetLaunchSplashForTests}=await import('../src/shared/launch/LaunchSplash');
+  resetLaunchSplashForTests();
+  let resolveStatus!: (value: unknown) => void;
+  window.LakomicsNative={localStatus:()=>JSON.stringify({configured:false,endpoint:''}),request:vi.fn(),cancel:vi.fn()};
+  mocks.native.mockImplementation((op:string)=>op==='status' ? new Promise(resolve=>{resolveStatus=resolve;}) : Promise.resolve({configured:false,endpoint:''}));
+  render(<><App/><LaunchSplash elapsed={()=>0}/></>);
+  await act(async()=>{});
+  expect(screen.getByRole('status',{name:'Lakomics 여는 중'}).hasAttribute('data-state')).toBe(false);
+  await act(async()=>{resolveStatus({configured:false,endpoint:''});});
+  await waitFor(()=>expect(document.querySelector('.launch-splash')).toBeNull());
+  expect(screen.getByRole('button',{name:'라이브러리 연결'})).toBeTruthy();
+});
 it('points the durable outboxes at the configured connection as soon as the status arrives',async()=>{
   setOutboxConnection(null);
   render(<App/>);

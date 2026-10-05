@@ -31,6 +31,7 @@ import { HomePlaying } from "./HomePlaying";
 import { HomeReleaseGrid } from "./HomeReleaseGrid";
 import { useHomeMedia } from "./useHomeMedia";
 import { BusyLabel } from "../shared/ui/BusyLabel";
+import { useLaunchReady } from "../shared/launch/LaunchSplash";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
 import { shadowPageSource, type CharacterReviewSource } from "./characterReviewSource";
@@ -283,6 +284,9 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const layoutShown = useRef(false);
   if (collectionsReady && (media.data || media.failed) && !shelfLoading && !attentionPending) layoutShown.current = true;
   const firstLoad = !layoutShown.current;
+  // On app start the launch splash covers this first load, then leaves with Home's first images.
+  const launchHost = useRef<HTMLDivElement>(null);
+  useLaunchReady(!firstLoad, launchHost);
 
   if (reviewOverview && source) return <>
     <CharacterReviewOverview source={source} targets={characters} seriesName={seriesName} version={reviewRead} restricted={restricted} privacyMode={privacyMode}
@@ -300,7 +304,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     ...upcoming.filter(row => !visit.arrivals.some(arrival => arrival.date === row.date && (arrival.volume ?? null) === (row.volume ?? null) && (arrival.key === row.key || arrival.collection?.id === row.collectionId && !!row.collectionId)))
       .map(row => ({ key: row.key, name: row.name, date: row.date, detail: releaseKind(row.kind, row.volume), cover: releaseCover(row), onOpen: () => openUpcoming(row) })),
   ];
-  return <div className="home-view">
+  return <div className="home-view" ref={launchHost}>
     <ViewToolbar title="홈" titleContent={<span className="home-title-date"><span className="numeric">{`${at.getMonth() + 1}.${at.getDate()}`}</span> {weekdayLabel(at)}</span>} />
     <div className="home-scroll"><div className="home-content home-pc-layout" aria-busy={firstLoad}>
       <div className="home-media-column">

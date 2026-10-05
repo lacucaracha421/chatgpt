@@ -1,6 +1,7 @@
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {ClassificationBatchSheet} from './ClassificationBatchSheet';
 import {AreaSwitch, MotionScope, viewReady} from '../src/shared/motion/AreaSwitch';
+import {useLaunchReady} from '../src/shared/launch/LaunchSplash';
 import {useAreaPrewarm} from './useAreaPrewarm';
 import {AssetInfoSheet} from './AssetInfoSheet';
 import {FindContext,FindButton} from './FindContext';
@@ -159,6 +160,8 @@ export function App() {
   const [similarityClosed,setSimilarityClosed]=useState(0);
   const similarityBack=useRef<(()=>boolean)|null>(null);
   const [checking, setChecking] = useState(true), [settings, setSettings] = useState(false);
+  // Without a connection, the connection screen is the first screen: end the launch splash.
+  useLaunchReady(!status.configured && !checking);
   const [viewSettings, setViewSettings] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   // A character scope may supply local view options through this host; filters stay in its top bar.

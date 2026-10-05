@@ -4,9 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lakomics</title>
+    <link rel="stylesheet" href="/src/shared/launch/launchSplash.css" />
   </head>
 
   <body>
+    <!-- Launch splash from the first paint; LaunchSplash (src/shared/launch) takes it over. -->
+    <div class="launch-splash" id="launch-cover" data-tauri-drag-region aria-hidden="true"><svg class="launch-splash__mark" viewBox="40 32 176 192" fill="currentColor" aria-hidden="true" focusable="false"><path fill-rule="evenodd" d="M40 56H80V200H40ZM48 64V192H72V64ZM108 32H148V224H108ZM116 40V216H140V40ZM176 56H216V200H176ZM184 64V192H208V64Z"/></svg><span class="launch-splash__hint"></span></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

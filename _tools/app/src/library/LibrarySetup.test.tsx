@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "./LibraryContext";
 import { LibrarySetup } from "./LibrarySetup";
+import { LaunchSplash, resetLaunchSplashForTests } from "../shared/launch/LaunchSplash";
 import type { LibraryGateway } from "./types";
 
 function gateway(): LibraryGateway {
@@ -116,4 +117,12 @@ it("opens the folder selected during setup", async () => {
   await waitFor(() =>
     expect(libraryGateway.openLibrary).toHaveBeenCalledWith("C:\\Lakomics"),
   );
+});
+
+it("ends the launch splash when setup is the first screen", async () => {
+  resetLaunchSplashForTests();
+  localStorage.clear();
+  render(<><LibraryProvider gateway={gateway()}><LibrarySetup selectFolder={vi.fn()} /></LibraryProvider><LaunchSplash elapsed={() => 0} /></>);
+  expect(screen.getByRole("button", { name: "라이브러리 선택" })).toBeInTheDocument();
+  await waitFor(() => expect(document.querySelector(".launch-splash")).toBeNull());
 });

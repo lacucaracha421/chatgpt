@@ -1,0 +1,67 @@
+/*
+ * Launch splash (PC and tablet): the Lakomics mark on the page background, from the first paint
+ * until the first screen is ready. Both index.html files link this file so the static cover paints
+ * before any script runs; the fallbacks mirror --color-bg / --color-accent for that first paint.
+ * Above dialogs, menus and toasts; below the PC window resize handles (--z-window-resize 1400).
+ */
+.launch-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 1350;
+  display: grid;
+  place-items: center;
+  background: var(--color-bg, #161718);
+  color: var(--color-accent, #ddd8ca);
+  transition: opacity var(--motion-screen, 240ms) var(--ease-standard, cubic-bezier(0.2, 0, 0, 1));
+}
+
+.launch-splash[data-state="leaving"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 0.5 x the 256-unit mark: whole-pixel 4px outlines at any devicePixelRatio. */
+.launch-splash__mark {
+  display: block;
+  width: 88px;
+  height: 96px;
+}
+
+/* Only a slow start shows this: the tablet's loading line, 32px under the mark. */
+.launch-splash__hint {
+  position: absolute;
+  top: calc(50% + 48px + 32px);
+  left: calc(50% - 44px);
+  width: 88px;
+  height: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  opacity: 0;
+  animation: launch-splash-hint-in 180ms var(--ease-standard, cubic-bezier(0.2, 0, 0, 1)) var(--launch-hint-delay, 3s) forwards;
+  pointer-events: none;
+}
+
+.launch-splash__hint::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, currentColor 50%, transparent);
+  opacity: 0.85;
+  transform: translateX(-100%);
+  animation: launch-splash-sweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes launch-splash-hint-in {
+  to { opacity: 1; }
+}
+
+@keyframes launch-splash-sweep {
+  to { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launch-splash { transition: none; }
+  .launch-splash__hint { background: color-mix(in srgb, currentColor 60%, transparent); animation-duration: 1ms; }
+  .launch-splash__hint::after { display: none; }
+}

@@ -1,0 +1,8 @@
+<resources>
+ <!-- Android 12+ system splash: the bare Lakomics mark on the page background, the same size and
+      place as the web launch splash (src/shared/launch) that follows it, instead of the launcher icon. -->
+ <style name="LakomicsTheme" parent="LakomicsBaseTheme">
+  <item name="android:windowSplashScreenBackground">#161718</item>
+  <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
+ </style>
+</resources>
