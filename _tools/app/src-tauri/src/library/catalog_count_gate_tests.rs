@@ -756,3 +756,47 @@ fn catalog_count_final_production_sparse_page_gate() {
     fs::write(&output, serde_json::to_vec_pretty(&cases).unwrap()).unwrap();
     eprintln!("FINAL_PRODUCTION_PAGE_EVIDENCE {}", output.display());
 }
+
+#[test]
+#[ignore = "bookmark-added page timing on a read-only library copy; explicit source opt-in"]
+fn catalog_bookmark_added_page_gate() {
+    let source = std::path::PathBuf::from(
+        std::env::var("LAKOMICS_CATALOG_COUNT_GATE_SOURCE")
+            .expect("explicit source library root required"),
+    );
+    assert!(source.is_absolute());
+    // Visibility predicates name main.*, so the library copy itself is main.
+    let c = Connection::open_with_flags(
+        source.join("library.sqlite"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut uri = url::Url::from_file_path(source.join("catalogs/kdata.db")).unwrap();
+    uri.set_query(Some("mode=ro"));
+    c.execute("ATTACH DATABASE ? AS catalog", [uri.as_str()])
+        .unwrap();
+    let tx = c.unchecked_transaction().unwrap();
+    for language in [
+        None,
+        Some(CatalogLanguage::Korean),
+        Some(CatalogLanguage::Japanese),
+    ] {
+        for sort in [CatalogSort::Latest, CatalogSort::BookmarkAdded] {
+            let q = query("", language, false, CatalogScope::Bookmarked, sort);
+            let plan = GroupQueryPlan::new(&tx, &q, chrono::Utc::now().timestamp()).unwrap();
+            grouped::take_measurements();
+            let (rows, timing) = measured(|| grouped::select_page(&tx, &plan).unwrap());
+            let page = grouped::take_measurements()
+                .into_iter()
+                .find(|m| m.phase == "page")
+                .unwrap();
+            let groups: Vec<_> = rows.iter().map(|r| r.group_id.clone()).collect();
+            eprintln!(
+                "BOOKMARK_ADDED_PAGE {}",
+                json!({"language":format!("{language:?}"),"sort":format!("{sort:?}"),"route":format!("{:?}",plan.route),
+                    "median_ms":timing["median_ms"],"samples_ms":timing["samples_ms"],
+                    "plan":explain(&tx,&page.sql,&page.values),"groups":groups})
+            );
+        }
+    }
+}

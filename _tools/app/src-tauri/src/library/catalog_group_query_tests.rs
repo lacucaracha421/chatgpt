@@ -429,3 +429,51 @@ fn bookmark_added_order_uses_matching_group_time_and_sorts_nulls_last() {
     q.page = 1;
     assert_eq!(select_groups(&connection, &q).unwrap().0[0].representative_id, 2);
 }
+
+#[test]
+fn bookmark_added_page_is_seeded_from_bookmarks_with_rank_scan_order() {
+    let (_root, library) = fixture();
+    let c = library.connection().unwrap();
+    seed(&c);
+    c.execute_batch("WITH RECURSIVE n(id) AS (VALUES(4) UNION ALL SELECT id+1 FROM n WHERE id<60)
+      INSERT INTO catalog.Works(Id,Token,Title,FileCount,Category,Expunged,Posted,Views)
+      SELECT id,'w-'||id,'distinct title '||id,20,1,0,id%7,id FROM n;
+      INSERT INTO catalog.Tags SELECT Id,'language','korean' FROM catalog.Works WHERE Id>=4 AND Id%3=0;
+      INSERT INTO online_catalog_bookmarks SELECT 'kHentai',CAST(Id AS TEXT),
+        CASE WHEN Id%11=0 THEN 'invalid' ELSE '2026-10-0'||(1+Id%5)||'T00:00:00Z' END
+        FROM catalog.Works WHERE Id%2=0 OR Id=3;
+      INSERT INTO online_catalog_bookmarks VALUES('kHentai','05','2026-10-09T00:00:00Z');
+      INSERT INTO catalog.CrawlState VALUES('lakomics.catalog.contentRevision','bookmark-added-fixture');").unwrap();
+    super::super::catalog_groups::ensure_membership(&c).unwrap();
+    for language in [None, Some(CatalogLanguage::Korean)] {
+        let mut q = query("");
+        q.scope = CatalogScope::Bookmarked;
+        q.sort = CatalogSort::BookmarkAdded;
+        q.language = language;
+        q.page_size = 7;
+        let total = select_groups(&c, &q).unwrap().1;
+        assert!(total > 7, "fixture spans several pages");
+        for page in 0..=(total as u32 / 7) {
+            q.page = page;
+            let mut plan = GroupQueryPlan::new(&c, &q, 10000).unwrap();
+            assert!(plan.seed_page);
+            take_measurements();
+            let seeded = select_page(&c, &plan).unwrap();
+            let sql = take_measurements()
+                .into_iter()
+                .find(|m| m.phase == "page")
+                .unwrap()
+                .sql;
+            assert!(sql.contains("candidate AS MATERIALIZED"), "{sql}");
+            // The former full rank scan is the ordering oracle.
+            plan.seed_page = false;
+            let scanned = select_page(&c, &plan).unwrap();
+            let ids = |rows: &[GroupSelection]| {
+                rows.iter()
+                    .map(|r| (r.group_id.clone(), r.representative_id))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(ids(&seeded), ids(&scanned), "{language:?} page {page}");
+        }
+    }
+}

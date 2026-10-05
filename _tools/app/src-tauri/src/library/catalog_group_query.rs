@@ -189,7 +189,12 @@ impl GroupQueryPlan {
             bookmark_candidates,
             seed_page: false,
         };
-        if plan.route == CountRoute::Bookmark
+        if plan.route == CountRoute::Bookmark && query.sort == CatalogSort::BookmarkAdded {
+            // No catalog index orders by bookmark time, so a rank traversal cannot
+            // stop early and would scan every eligible work (~2.4s on 132k works).
+            // The bounded bookmark seed already holds every candidate.
+            plan.seed_page = true;
+        } else if plan.route == CountRoute::Bookmark
             && plan
                 .bookmark_candidates
                 .is_some_and(|n| n <= BOOKMARK_PAGE_CANDIDATE_LIMIT)
@@ -403,8 +408,9 @@ pub(super) fn select_page(
             .unwrap(),
     );
     let (sql, page_values) = if plan.seed_page {
-        // Only the measured, guaranteed-short bookmark shape uses this page
-        // plan. Other COUNT seeds preserve their independent page access paths.
+        // Only the measured bookmark shapes (guaranteed-short pages, and the
+        // bookmark-time order) use this page plan. Other COUNT seeds preserve
+        // their independent page access paths.
         plan.seed_page_statement()
             .expect("bookmark page has a seed")
     } else {

@@ -19,7 +19,7 @@ sys.path.insert(0, str(SERVER_DIR))
 
 
 
-from mobile_catalog_query import (QueryError, compile_query, count_groups, detail, editions,  # noqa: E402
+from mobile_catalog_query import (QueryError, compile_query, count_groups, cte, detail, editions,  # noqa: E402
                                   freeze_query, mobile_query_text, parse_query, search_groups,
                                   tag_value_variants)
 
@@ -463,6 +463,30 @@ class BookmarkOrderTests(unittest.TestCase):
                 self.assertEqual((recent, count), (['g6', 'g3', 'g1'], 3))
                 q = frozen(db, scope='bookmarked', sort='bookmarkAdded')
                 self.assertEqual([r['groupId'] for r in search_groups(db, q, offset=2, limit=1)], ['g1'])
+
+    def test_bookmark_scope_is_driven_by_canonical_bookmark_ids(self):
+        for projection in (False, True):
+            for authority in (False, True):
+                with self.subTest(projection=projection, authority=authority), fixture(projection) as db:
+                    db.execute("DELETE FROM online_catalog_bookmarks")
+                    # "06" must never alias work 6, with or without the authority shadow.
+                    rows = [('kHentai', '3', '2026-10-04T00:00:00Z'), ('kHentai', '06', '2026-10-05T00:00:00Z'),
+                            ('kHentai', '7', '2026-10-03T00:00:00Z')]
+                    db.executemany("INSERT INTO online_catalog_bookmarks VALUES(?,?,?)", rows)
+                    if projection:
+                        build_projection(db)
+                    if authority:
+                        db.execute("CREATE TEMP TABLE online_catalog_bookmarks(provider TEXT NOT NULL,work_id TEXT NOT NULL,"
+                                   "created_at TEXT NOT NULL,PRIMARY KEY(provider,work_id)) WITHOUT ROWID")
+                        db.executemany("INSERT INTO online_catalog_bookmarks VALUES(?,?,?)", rows)
+                    # Works 6 and 7 share g6; the alias's newer time must not lift it.
+                    for sort in ('latest', 'bookmarkAdded'):
+                        self.assertEqual(groups(db, scope='bookmarked', sort=sort), (['g3', 'g6'], 2))
+                    if projection:
+                        prefix, params = cte(frozen(db, scope='bookmarked', sort='bookmarkAdded'))
+                        plan = [r[3] for r in db.execute("EXPLAIN QUERY PLAN " + prefix + " SELECT * FROM matching", params)]
+                        self.assertTrue(any("LIST SUBQUERY" in line for line in plan), plan)
+                        self.assertFalse(any(line.startswith(("SCAN state", "SCAN work")) for line in plan), plan)
 
 
 if __name__ == "__main__":

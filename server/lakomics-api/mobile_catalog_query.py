@@ -357,15 +357,17 @@ def cte(query):
     sql, values = compile_query(mobile_query_text(query["text"], query.get("searchMode")))
     params.extend(values)
     if query["scope"] == "bookmarked":
-        if query.get("preparedState") and not query.get("authorityBookmarks"):
-            sql += " AND work._bookmarked=1"
-        else:
-            sql += " AND EXISTS(SELECT 1 FROM online_catalog_bookmarks b WHERE b.provider='kHentai' AND b.work_id=CAST(work.Id AS TEXT))"
+        # Drive the scan from the small bookmark set (catalog rowid lookups)
+        # instead of probing every eligible work. Only canonical integer text
+        # ids match, exactly like b.work_id=CAST(work.Id AS TEXT): "05" never
+        # aliases work 5.
+        sql += (" AND work.Id IN (SELECT CAST(b.work_id AS INTEGER) FROM online_catalog_bookmarks b"
+                " WHERE b.provider='kHentai' AND b.work_id=CAST(CAST(b.work_id AS INTEGER) AS TEXT))")
     if "hotCutoff" in query:
         sql += " AND work.Posted>=?"
         params.append(query["hotCutoff"])
     if query.get("preparedState"):
-        eligible_source = "SELECT work.*,state.group_id AS _group_id,state.bookmarked AS _bookmarked FROM catalog.Works work JOIN mobile_catalog_work_state state ON state.work_id=work.Id WHERE " + where
+        eligible_source = "SELECT work.*,state.group_id AS _group_id FROM catalog.Works work JOIN mobile_catalog_work_state state ON state.work_id=work.Id WHERE " + where
     else:
         eligible_source = "SELECT work.* FROM catalog.Works work WHERE " + where
     return f"WITH eligible AS NOT MATERIALIZED ({eligible_source}), matching AS MATERIALIZED (SELECT work.* FROM eligible work WHERE {sql})", params
