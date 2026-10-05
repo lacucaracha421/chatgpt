@@ -18,6 +18,8 @@ if (params.get("privacy") === "1") {
   localStorage.setItem(key, JSON.stringify({ ...current, privacyMode: true }));
 }
 if (params.get("panel") === "info") {
+  // A click only focuses (2026-09-29); the 정보 dock follows its saved open state, so open it here.
+  localStorage.setItem("lakomics.assets.infoPanel.open.v1", "true");
   const openInfo = () => {
     const firstAsset = document.querySelector<HTMLElement>(".asset-gallery__asset[data-asset-id]");
     if (!firstAsset) return false;

@@ -21,7 +21,7 @@ export function AssetInfoSheet({asset,onClose}:{asset:Asset;onClose():void}) {
       }} onPointerCancel={()=>{start.current=null;}}>
         <strong>정보</strong><IconButton label="정보 닫기" icon={XMarkIcon} onClick={onClose}/>
       </header>
-      <ViewerInfo asset={asset}/>
+      <ViewerInfo asset={asset} image/>
     </div>
   </Dialog>;
 }

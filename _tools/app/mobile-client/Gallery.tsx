@@ -132,7 +132,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   /** Ancestor ids then the place itself; a shorter prefix is a move back. */folderPath?:readonly string[]; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
   /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
-  /** Tablet Library selection; absent for Revisit, character and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
+  /** Tablet Library and character selection; absent for Revisit and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
   /** A double tap on empty gallery space (not a tile) leaves selection mode. */onClearSelection?():void;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {

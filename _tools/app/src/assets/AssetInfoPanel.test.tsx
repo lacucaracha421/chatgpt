@@ -21,6 +21,24 @@ it.each([null, "Source creator"])("shows assigned artist before creator metadata
   expect(open).toHaveBeenCalledWith("artist:assigned");
 });
 
+it("leads with the image at its own shape; a video shows its still and length; the viewer leaves it out", () => {
+  const gateway = {} as unknown as LibraryGateway;
+  const tall = { ...asset("tall", "2026-10-05T05:27:00Z", "2026-10-05T05:27:00Z"), width: 800, height: 1200 };
+  const { container, rerender } = render(<LibraryProvider gateway={gateway}><AssetInfoPanel assets={[tall]} /></LibraryProvider>);
+  const preview = screen.getByRole("button", { name: "tall.png 감상 화면으로 열기" });
+  expect(preview).toHaveStyle({ aspectRatio: "800 / 1200" });
+  expect(preview.querySelector("img")?.getAttribute("src")).toContain("/thumbnail/tall");
+  expect(container.firstElementChild?.firstElementChild).toBe(preview);
+  const clip = { ...asset("clip", "2026-10-05T05:27:00Z", "2026-10-05T05:27:00Z"), thumbnailRevision: null, media: { kind: "video" as const, durationMs: 42_000 } } as AssetSummary;
+  rerender(<LibraryProvider gateway={gateway}><AssetInfoPanel assets={[clip]} /></LibraryProvider>);
+  const still = screen.getByRole("button", { name: "clip.png 감상 화면으로 열기" });
+  expect(still.querySelector("img")).toBeNull();
+  expect(still).toHaveTextContent("▶ 0:42");
+  rerender(<LibraryProvider gateway={gateway}><AssetInfoPanel preview={false} assets={[tall]} /></LibraryProvider>);
+  expect(screen.queryByRole("button", { name: /감상 화면으로 열기/ })).toBeNull();
+  expect(screen.getByLabelText("출처와 파일")).toBeInTheDocument();
+});
+
 it("orders information sections and formats timestamps in the app date style", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 9, 1, 12));
@@ -56,7 +74,7 @@ it("orders information sections and formats timestamps in the app date style", a
 
   await waitFor(() => expect(screen.getByRole("region", { name: "같은 게시물" })).toBeVisible());
   expect([...container.querySelectorAll<HTMLElement>("[data-info-section]")].map((node) => node.dataset.infoSection)).toEqual([
-    "artist", "source", "file", "same-post", "tags", "collection",
+    "preview", "artist", "source", "file", "same-post", "tags", "collection",
   ]);
   expect(screen.getByText("9.29 07:20")).toBeVisible();
   expect(screen.getByText("9.29 08:10")).toBeVisible();

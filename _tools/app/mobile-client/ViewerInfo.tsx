@@ -1,7 +1,7 @@
 import {useTabletAssetMask} from './assetMask';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon} from '@heroicons/react/24/outline';
-import {IconButton} from './ui';
+import {Badge, IconButton, SectionLabel} from './ui';
 import type {Asset} from './types';
 import {durationLabel} from './model';
 import {displayDateTime} from '../src/shared/displayDate';
@@ -125,7 +125,8 @@ async function writeClipboard(text: string): Promise<void> {
  * Open/closed state and mutual exclusion with the Album and Classification editors stay in
  * `Viewer`, so those three overlays keep one owner.
  */
-export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?: string; onClose?(): void}) {
+/** `image`: lead with the large image (the gallery sheet); the viewer already shows the asset itself. */
+export function ViewerInfo({asset, mediaError = '', image = false}: {asset: Asset; mediaError?: string; image?: boolean; onClose?(): void}) {
   const privacy = useTabletAssetMask(asset);
   const artistIndex = useLibraryArtists(true, 0);
   const assignment = artistIndex.assignments.find(row => row.assetId === asset.id);
@@ -185,12 +186,18 @@ export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?:
     : '';
   const copiedLabel = (label: string) => copied === label;
 
+  const duration = asset.kind === 'video' ? durationLabel(asset) : '';
+  const ratio = asset.width && asset.height ? `${asset.width} / ${asset.height}` : undefined;
+
+  // Same order as the PC 정보 panel: the image alone on top (only where it is not already the
+  // screen, i.e. the gallery sheet), then the artist, then the labelled record rows.
   return <section className="viewer-info" aria-label="미디어 정보">
-    <header className="viewer-info-heading" data-info-section="artist">
-      <div className="viewer-info-preview" aria-hidden="true">
+    <div className="viewer-info-body">
+      {image && <div className="viewer-info-image" data-info-section="preview" style={ratio ? {aspectRatio: ratio} : undefined}>
         {privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : asset.preview ? <img src={asset.preview} alt="" draggable={false}/> : null}
-      </div>
-      <div className="viewer-info-artist">
+        {duration && <Badge variant="scrim">▶ {duration}</Badge>}
+      </div>}
+      <header className="viewer-info-heading" data-info-section="artist">
         <div className="viewer-info-artist-line">
           <h2>{heading}</h2>
           {creator && (
@@ -198,15 +205,13 @@ export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?:
           )}
         </div>
         {artistHandle && <span className="viewer-info-artist-handle">{artistHandle}</span>}
-      </div>
-    </header>
-    <div className="viewer-info-body">
+      </header>
       {SECTIONS.map(section => {
         const sectionRows = rows.filter(row => row.section === section.key);
         if (!sectionRows.length) return null;
         return <section key={section.key} className="viewer-info-section" data-info-section={section.key}>
           <div className="viewer-info-section-heading">
-            {sectionHasVisibleTitle(sectionRows, section.key) && <h3>{section.title}</h3>}
+            {sectionHasVisibleTitle(sectionRows, section.key) && <SectionLabel as="h3" title={section.title}/>}
             {section.key === 'file' && (
               <IconButton label="파일 정보 복사" icon={copiedLabel('파일 정보') ? CheckIcon : ClipboardDocumentIcon} onClick={() => void copy(summaryText(asset), '파일 정보')} disabled={busy}/>
             )}

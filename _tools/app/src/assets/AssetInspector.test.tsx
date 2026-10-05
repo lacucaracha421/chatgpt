@@ -88,7 +88,7 @@ it("opens the viewer from the preview and groups the metadata into sections", as
     </LibraryProvider>,
   );
 
-  // Artist, source and file facts sit together beside the preview.
+  // The image leads; the source and file record follows below it.
   const facts = screen.getByLabelText("출처와 파일");
   expect(within(facts).getByText("가져옴")).toBeVisible();
   expect(within(facts).getByText("파일")).toBeVisible();

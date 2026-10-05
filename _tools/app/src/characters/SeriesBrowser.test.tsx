@@ -32,6 +32,9 @@ async function openReferencePicker(user: ReturnType<typeof userEvent.setup>) {
   await user.click(within(panel).getByRole("button", { name: "레퍼런스 추가" }));
 }
 
+/** Ctrl+click selects; a plain click only focuses (DESIGN §6, the plain-folder behaviour). */
+async function selectTile(name: string) { fireEvent.click(await screen.findByRole("option", { name }), { ctrlKey: true }); }
+
 beforeEach(() => { Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable:true,get:()=>850 },clientHeight:{configurable:true,get:()=>650} }); });
 afterEach(() => { cleanup(); vi.mocked(tauriCore.invoke).mockReset(); vi.restoreAllMocks(); });
 
@@ -124,7 +127,7 @@ it("keeps missing-original status across picker pages and refreshes it on retry"
   expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "true");
 });
 
-async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { sort?: AssetSort; onSortChange?: (sort: AssetSort) => void; targetOverrides?: Partial<CharacterTarget>; seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string; candidates?: number; shadowItems?: string[]; fault?: boolean; inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]> }) {
+async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { sort?: AssetSort; onSortChange?: (sort: AssetSort) => void; targetOverrides?: Partial<CharacterTarget>; seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string; candidates?: number; shadowItems?: string[]; fault?: boolean; gateway?: Partial<LibraryGateway>; inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]> }) {
   const api=createCharacterFixture(), sourceTargets=await api.targets();
   const targets = sourceTargets.map(target => target.id === (targetId ?? "hina") ? {
     ...target,
@@ -143,7 +146,7 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
     start:vi.fn(),cancel:vi.fn(),status:vi.fn().mockResolvedValue({running:false,preparing:false,total:0,scored:0,skipped:0,cancelled:false,error:null})} as unknown as ShadowReviewApi;
   const navigate=vi.fn(),changed=vi.fn();
   const onGalleryLayoutChange=vi.fn(),onMetadataVisibleChange=vi.fn(),onPrivacyModeChange=vi.fn(),onThumbnailRowHeightChange=vi.fn();
-  const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn()} as unknown as LibraryGateway;
+  const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn(),...legacy?.gateway} as unknown as LibraryGateway;
   const browser=<SeriesBrowser folderExclusions={legacy?.exclusions ?? []} targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} sort={legacy?.sort} onSortChange={legacy?.onSortChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} />;
   const content = withChrome ? <WorkspaceChromeProvider scope="series"><div className="workspace-navigation"><aside className="workspace-index"><ChromeSettingsDock /></aside>{browser}</div></WorkspaceChromeProvider> : browser;
   const rendered = render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
@@ -262,7 +265,7 @@ it("keeps normal series browsing free of review and exclusion work", async () =>
   expect(within(filters).getByRole("radio", { name: "미분류 13" })).toBeInTheDocument();
   expect(within(filters).getByRole("radio", { name: "전체" })).toBeInTheDocument();
   expect(within(filters).queryByRole("radio", { name: "자동 분류 제외" })).not.toBeInTheDocument();
-  await userEvent.setup().click(await screen.findByRole("option", { name: "이미지 5.webp" }));
+  await selectTile("이미지 5.webp");
   const selectionBar = screen.getByRole("toolbar", { name: "선택 작업" });
   expect(within(selectionBar).getByText("1개 선택")).toBeVisible();
   expect(within(selectionBar).getByRole("button", { name: "캐릭터 지정" })).toBeVisible();
@@ -504,7 +507,11 @@ it("keeps character selection in place without a persistent refresh button",asyn
   expect(within(toolbar).queryByRole("button",{name:"레퍼런스 추가"})).not.toBeInTheDocument();
   expect(within(toolbar).getByRole("button",{name:"캐릭터 편집"})).toBeVisible();
   expect(within(toolbar).queryByRole("button",{name:"새로고침"})).not.toBeInTheDocument();
+  // A plain click focuses, as in plain folders (DESIGN §6); Ctrl+click selects.
   await user.click(await screen.findByRole("option",{name:"이미지 5.webp"}));
+  expect(screen.getByRole("option",{name:"이미지 5.webp"})).toHaveAttribute("aria-selected","false");
+  expect(screen.queryByRole("toolbar",{name:"선택 작업"})).not.toBeInTheDocument();
+  await selectTile("이미지 5.webp");
   expect(screen.getByRole("option",{name:"이미지 5.webp"})).toHaveAttribute("aria-selected","true");
   const selectionBar=screen.getByRole("toolbar",{name:"선택 작업"});
   expect(within(selectionBar).getByRole("button",{name:"이 캐릭터에서 제외"})).toBeVisible();
@@ -529,7 +536,7 @@ it("creates an underfilled character as manual management",async()=>{
   const first=await mount(); const user=userEvent.setup();
   const manual={...(await first.api.targets())[0],id:"manual",displayName:"단역",manualOnly:true,ready:false,references:[]};
   vi.mocked(first.hubApi.createManualCharacter).mockResolvedValue(manual);
-  await user.click(await screen.findByRole("option",{name:"이미지 5.webp"}));
+  await selectTile("이미지 5.webp");
   const selectionBar=screen.getByRole("toolbar",{name:"선택 작업"});
   await user.click(within(selectionBar).getByRole("button",{name:"캐릭터 지정"}));
   const search=await screen.findByRole("searchbox",{name:"캐릭터 찾기"});
@@ -544,7 +551,7 @@ it("keeps character selection in the header without review status",async()=>{
   const decide=vi.spyOn(api,"decide");
   expect(screen.queryByRole("button",{name:/검토/})).not.toBeInTheDocument();
   expect(screen.queryByText("0장 선택")).not.toBeInTheDocument();
-  await user.click(await screen.findByRole("option",{name:"이미지 5.webp"}));
+  await selectTile("이미지 5.webp");
   const selectionBar=screen.getByRole("toolbar",{name:"선택 작업"});
   expect(within(selectionBar).getByText("1개 선택")).toBeInTheDocument();
   expect(document.querySelector(".series-gallery .series-selection")).toBeNull();
@@ -557,7 +564,7 @@ it("assigns multiple checked characters in one batch and clears only on success"
   const { api } = await mount();
   const user = userEvent.setup();
   const batch = vi.spyOn(api, "decideBatch").mockRejectedValueOnce(new Error("저장 실패"));
-  await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
+  await selectTile("이미지 5.webp");
   const selectionBar = screen.getByRole("toolbar", { name: "선택 작업" });
   await user.click(within(selectionBar).getByRole("button", { name: "캐릭터 지정" }));
   const picker = await screen.findByRole("listbox", { name: "캐릭터에 넣기" });
@@ -1048,4 +1055,64 @@ it("reaches each reference's crop check in one tap from the character panel and 
   await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
     referenceRegions: { "image-2": { contentHash: "hash-image-2", baselineFingerprint: "baseline", bounds: [100, 0, 200, 200] } },
   }), true));
+});
+
+it("hearts a series tile in place without reloading the series screen", async () => {
+  const setAssetFavorite = vi.fn().mockResolvedValue(undefined);
+  const characterSidebarCounts = vi.fn().mockResolvedValue({ targets: {} });
+  const listSuggestions = vi.spyOn(suggestionApi, "list");
+  const { browse, changed } = await mount(undefined, false, [], undefined, false, { gateway: { setAssetFavorite, characterSidebarCounts } });
+  const tile = await screen.findByRole("option", { name: "이미지 5.webp" });
+  await waitFor(() => expect(characterSidebarCounts).toHaveBeenCalled());
+  const reads = { browse: browse.mock.calls.length, counts: characterSidebarCounts.mock.calls.length, suggestions: listSuggestions.mock.calls.length };
+  await userEvent.click(within(tile).getByRole("button", { name: "이미지 5.webp 좋아요" }));
+  await waitFor(() => expect(within(screen.getByRole("option", { name: "이미지 5.webp" })).getByRole("button", { name: "이미지 5.webp 좋아요" })).toHaveAttribute("aria-pressed", "true"));
+  expect(setAssetFavorite).toHaveBeenCalledWith("image-5", true);
+  expect(browse.mock.calls.length).toBe(reads.browse);
+  expect(characterSidebarCounts.mock.calls.length).toBe(reads.counts);
+  expect(listSuggestions.mock.calls.length).toBe(reads.suggestions);
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("trashes from the series in place and puts the tile back on 실행 취소", async () => {
+  const trashAssets = vi.fn().mockResolvedValue(undefined), restoreAssets = vi.fn().mockResolvedValue(undefined);
+  const { browse, changed } = await mount(undefined, false, [], undefined, false, { gateway: { trashAssets, restoreAssets } });
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  const reads = browse.mock.calls.length;
+  await selectTile("이미지 6.webp");
+  await userEvent.click(within(screen.getByRole("toolbar", { name: "선택 작업" })).getByRole("button", { name: "휴지통으로 이동" }));
+  await waitFor(() => expect(screen.queryByRole("option", { name: "이미지 6.webp" })).toBeNull());
+  expect(trashAssets).toHaveBeenCalledWith(["image-6"]);
+  await userEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+  await waitFor(() => expect(screen.getByRole("option", { name: "이미지 6.webp" })).toBeInTheDocument());
+  expect(restoreAssets).toHaveBeenCalledWith(["image-6"]);
+  expect([...document.querySelectorAll("[data-asset-id]")].map(node => node.getAttribute("data-asset-id")).slice(0, 3)).toEqual(["image-5", "image-6", "image-7"]);
+  expect(browse.mock.calls.length).toBe(reads);
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("offers 이 캐릭터에서 제외 in the viewer opened from a character, but not on its references", async () => {
+  const { api } = await mount("hina");
+  const decide = vi.spyOn(api, "decide");
+  await userEvent.dblClick(await screen.findByRole("option", { name: "이미지 5.webp" }));
+  const exclude = await screen.findByRole("button", { name: "이 캐릭터에서 제외" });
+  expect(screen.getByRole("button", { name: "캐릭터" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "정보" })).toBeInTheDocument();
+  await userEvent.click(exclude);
+  await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina", assetIds: ["image-5"], decision: "rejected" })));
+  cleanup();
+  await mount("hina", false, [], undefined, false, { targetOverrides: { references: [{ slot: 0, assetId: "image-5", assetHash: "hash-image-5", status: "ready" }] } });
+  await userEvent.dblClick(await screen.findByRole("option", { name: "이미지 5.webp" }));
+  await screen.findByRole("button", { name: "정보" });
+  expect(screen.queryByRole("button", { name: "이 캐릭터에서 제외" })).toBeNull();
+});
+
+it("hides date headings under the series shelf and shows them in a character", async () => {
+  await mount();
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  expect(document.querySelector("[data-gallery-date]")).toBeNull();
+  cleanup();
+  await mount("hina");
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  await waitFor(() => expect(document.querySelector("[data-gallery-date]")).not.toBeNull());
 });

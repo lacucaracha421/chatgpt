@@ -1,4 +1,3 @@
-import { AssetImage } from "../privacy/AssetImage";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { libraryContextItems } from "./libraryContextItems";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,7 +31,8 @@ import { AssetInfoPanel } from "./AssetInfoPanel";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
 import { visibleTileRect, type TileRect } from "../shared/viewer/useViewerMotion";
-import { AssetViewer } from "./AssetViewer";
+import { AssetViewer, movableViewerFolders } from "./AssetViewer";
+import { CharacterAssignToast, markAssignedTiles, type CharacterAssignNoticeState } from "./characterAssignNotice";
 import { SelectionBar } from "./SelectionBar";
 import { thumbnailUrl } from "./mediaUrl";
 import { folderPreviewCache, rememberFolderPreview } from "./folderPreviewCache";
@@ -133,7 +133,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const [characterOpen, setCharacterOpen] = useState(false);
   const [characterCounts, setCharacterCounts] = useState<Record<string, number>>({});
-  const [characterNotice, setCharacterNotice] = useState<{ id: number; count: number; target: CharacterTarget } | null>(null);
+  const [characterNotice, setCharacterNotice] = useState<CharacterAssignNoticeState | null>(null);
   const [dateBuckets, setDateBuckets] = useState<AssetDateBucket[]>([]);
   const dismissMessage = useCallback((value: null) => { setMessage(value); setUndoAssetIds(null); }, []);
   useAutoDismiss(message, dismissMessage);
@@ -523,7 +523,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   })();
   // "기존 자산 열기"로 요청된 자산이 현재 페이지에 없으면 뷰어는 그 한 장만 보여 준다.
   const viewerItems = requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items;
-  const viewerFolders = useMemo(() => classifications.filter(isMovableViewerFolder), [classifications]);
+  const viewerFolders = useMemo(() => movableViewerFolders(classifications), [classifications]);
   const addViewerAssetToAlbum = (asset: AssetSummary, albumId: string) => void (async () => {
     try {
       await gateway.patchAssetAlbums({ assetIds: [asset.id], addAlbumIds: [albumId], removeAlbumIds: [] });
@@ -674,14 +674,11 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} scopeHelp={folderFilterControl ? <FolderFilterHelp inLabel /> : undefined} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
-    {characterNotice && <Toast secondaryActionLabel="열기" onSecondaryAction={() => {
+    {characterNotice && <CharacterAssignToast notice={characterNotice} privacyMode={privacyMode} busy={batchPending} onDismiss={() => setCharacterNotice(null)} onOpen={() => {
       const target = characterNotice.target;
       if (target.seriesClassificationId) onViewChange?.({ kind: "classification", classificationId: target.seriesClassificationId, characterId: target.id });
       setCharacterNotice(null);
-    }} actionDisabled={batchPending} onDismiss={() => setCharacterNotice(null)}><span className="character-assign-notice">
-      {privacyMode ? <span className="character-assign-notice__thumbnail character-assign-notice__thumbnail--private" aria-hidden="true" /> : <CharacterNoticeThumbnail target={characterNotice.target} />}
-      <span><strong>{characterNotice.count.toLocaleString("ko-KR")}장</strong> → {characterNotice.target.displayName}</span>
-    </span></Toast>}
+    }} />}
     {currentFirstError && descriptionQuery === null && <Toast tone="error">{currentFirstError}</Toast>}
     <div className="asset-browser__workspace" data-info-open={inspectorOpen}>
       <div className="asset-browser__gallery">
@@ -712,7 +709,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       folders={viewerFolders}
       onMoveToFolder={moveViewerAssetToFolder}
       renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={characterTargets} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={(targets) => assignCharactersToAssets([asset.id], targets)} onClose={close} />}
-      renderInfo={(asset) => <AssetInfoPanel assets={[asset]} classifications={classifications} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />}
+      renderInfo={(asset) => <AssetInfoPanel preview={false} assets={[asset]} classifications={classifications} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />}
       onNearEnd={activePage && tailCursor !== null ? loadNextPage : undefined}
     />
   </section>;
@@ -729,30 +726,6 @@ async function loadDescriptionPage(gateway: LibraryGateway, query: string, force
   }
   const items = assetIds.flatMap(id => found.get(id) ?? []);
   return { items, previousCursor: null, nextCursor: null, totalCount: items.length };
-}
-
-function isMovableViewerFolder(entry: ClassificationEntry): boolean {
-  return !(entry.parentId === null && (entry.id === "lakomics-originals" || entry.name === "오리지널"));
-}
-
-function CharacterNoticeThumbnail({ target }: { target: CharacterTarget }) {
-  const assetId = target.thumbnailAssetId ?? target.references.find(reference => reference.status === "ready")?.assetId;
-  return assetId
-    ? <AssetImage className="character-assign-notice__thumbnail" src={thumbnailUrl(assetId)} alt="" />
-    : <span className="character-assign-notice__thumbnail" aria-hidden="true" />;
-}
-
-function markAssignedTiles(assetIds: string[], characterName: string) {
-  const selected = new Set(assetIds);
-  document.querySelectorAll<HTMLElement>(".asset-gallery__asset[data-asset-id]").forEach(tile => {
-    if (!tile.dataset.assetId || !selected.has(tile.dataset.assetId)) return;
-    tile.querySelector(".asset-gallery__character-assigned")?.remove();
-    const marker = document.createElement("span");
-    marker.className = "asset-gallery__character-assigned";
-    marker.textContent = `✓ ${characterName}`;
-    tile.append(marker);
-    window.setTimeout(() => marker.remove(), 2_000);
-  });
 }
 
 function reconcileAsset(current: AssetSummary | null, currentViewKey: string | null, viewKey: string, items: AssetSummary[]) {

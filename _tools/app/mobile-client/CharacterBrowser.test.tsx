@@ -9,7 +9,7 @@ import type {SparseGallerySource} from './assetToc';
 const mocks=vi.hoisted(()=>({api:vi.fn(),loadThumbnail:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,errorText:(e:Error)=>e.message}));
 vi.mock('./media',()=>({loadThumbnail:mocks.loadThumbnail}));
-vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,intro,stale,sparse,privacy,likesRevision,onRefresh}:{intro?:import('react').ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll:number;stale?:boolean;privacy?:boolean;likesRevision?:unknown;onRefresh?():void;sparse?:SparseGallerySource})=><div aria-label="character gallery" data-likes-revision={String(likesRevision)} data-privacy={String(privacy)} data-scroll={restoreScroll} data-toc={sparse?.toc.totalCount} data-stale={stale?'true':undefined}>{intro}<button onClick={onRefresh}>refresh gallery</button>{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{a.id}</button>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
+vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,intro,stale,sparse,privacy,likesRevision,onRefresh,selectedIds,onSelectAsset}:{intro?:import('react').ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll:number;stale?:boolean;privacy?:boolean;likesRevision?:unknown;onRefresh?():void;sparse?:SparseGallerySource;selectedIds?:ReadonlySet<string>;onSelectAsset?(id:string):void})=><div aria-label="character gallery" data-likes-revision={String(likesRevision)} data-privacy={String(privacy)} data-scroll={restoreScroll} data-toc={sparse?.toc.totalCount} data-stale={stale?'true':undefined}>{intro}<button onClick={onRefresh}>refresh gallery</button>{items.map((a,i)=><span key={a.id}><button aria-selected={selectedIds?.has(a.id)?true:undefined} onClick={()=>onOpen(i)}>{a.id}</button>{onSelectAsset&&<button onClick={()=>onSelectAsset(a.id)}>select {a.id}</button>}</span>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
 const revision='a'.repeat(64);
 const node=(kind:'series'|'group'|'character',id:string,name:string,parentId:string|null)=>({id:`${kind}:${id}`,kind,sourceId:id,seriesId:'s',parentId,name,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false});
 const index:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,publishedAt:'2026',nodes:[node('series','s','Series',null),node('group','g','Group','series:s'),node('character','c','Character','group:g')],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'series:s',filter:'unclassified',totalCount:0,sourceCount:0},{nodeId:'series:s',filter:'needs_review',totalCount:0,sourceCount:0},{nodeId:'group:g',filter:'all',totalCount:2,sourceCount:2},{nodeId:'character:c',filter:'all',totalCount:2,sourceCount:3}]};
@@ -540,4 +540,22 @@ it('drops an old explicit cover when the filter turns on and a new safe cover is
   await waitFor(()=>expect(container.querySelector(`img[src$="/${newId}"]`)).toBeTruthy());
   expect(container.contains(oldImage)).toBe(false);
  }finally {localStorage.removeItem('lakomics.mobile.nsfwFilter');}
+});
+
+it('selects like the plain gallery, reports its loaded items and pages for a viewer opened from it',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/characters'))return structuredClone(index);
+    return path.includes('cursor=next')?page(['second']):{...page(['first']),has_more:true,next_cursor:'next'};
+  });
+  const onSelect=vi.fn(),onToggle=vi.fn(),onClear=vi.fn(),onItems=vi.fn();
+  const moreRef:{current:(()=>void)|null}={current:null};
+  render(<CharacterBrowser {...props} initialNode="character:c" selection={{ids:new Set(['first']),onSelect,onToggle,onClear}} onItems={onItems} moreRef={moreRef}/>);
+  await screen.findByText('first');
+  expect(screen.getByText('first').getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(screen.getByText('select first'));
+  expect(onSelect).toHaveBeenCalledWith('first');
+  await waitFor(()=>expect(onItems.mock.calls.at(-1)?.[0].map((asset:Asset)=>asset.id)).toEqual(['first']));
+  act(()=>{moreRef.current?.();});
+  await screen.findByText('second');
+  await waitFor(()=>expect(onItems.mock.calls.at(-1)?.[0].map((asset:Asset)=>asset.id)).toEqual(['first','second']));
 });

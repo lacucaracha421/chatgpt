@@ -197,9 +197,21 @@ export function App() {
   const homeOriginRef=useRef(homeOrigin); homeOriginRef.current=homeOrigin;
   const homeRestore=useRef<number|null>(null);
   const [secondaryError, setSecondaryError] = useState('');
-  const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'; character?:ViewerCharacterContext|null} | null>(null);
+  const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'|'character'; character?:ViewerCharacterContext|null} | null>(null);
   const [assetInfo,setAssetInfo]=useState<Asset|null>(null);
   const [selectedIds,setSelectedIds]=useState<Set<string>>(new Set());
+  // A character gallery's loaded items and its next-page loader, for its selection bar and the viewer opened from it.
+  const characterItems=useRef<Asset[]>([]);
+  const characterMore=useRef<(()=>void)|null>(null);
+  const characterItemsChanged=useCallback((items:Asset[])=>{
+    characterItems.current=items;
+    setViewer(viewer=>{
+      if(viewer?.source!=='character')return viewer;
+      const fresh=items.filter(item=>!viewer.items.some(old=>old.id===item.id));
+      return fresh.length?{...viewer,items:[...viewer.items,...fresh]}:viewer;
+    });
+  },[]);
+  const characterNearEnd=useCallback(()=>characterMore.current?.(),[]);
   const [classificationBatchIds,setClassificationBatchIds]=useState<string[]|null>(null);
   const classificationBatchBusy=useRef(false);
   const [classificationNotice,setClassificationNotice]=useState('');
@@ -800,9 +812,12 @@ export function App() {
   // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
   const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia},{active:filterable&&!settings&&!viewer});
   const selectionGallery = filterable;
+  // Character galleries select like the plain gallery (user, 2026-10-05).
+  const characterSelection = area==='assets' && !!page.view.characters;
   const selectedAsset = selectedIds.size === 1
-    ? visibleItems.find(asset => selectedIds.has(asset.id)) ?? sparse?.ranges.flatMap(range => range.items).find(asset => selectedIds.has(asset.id))
+    ? characterSelection ? characterItems.current.find(asset => selectedIds.has(asset.id)) : visibleItems.find(asset => selectedIds.has(asset.id)) ?? sparse?.ranges.flatMap(range => range.items).find(asset => selectedIds.has(asset.id))
     : undefined;
+  useEffect(()=>{clearSelection();},[focusedCharacter,clearSelection]);
   const currentEntry=entries.find(item=>item.id===page.view.classification);
   const childEntries=entries.filter(item=>item.parent_id===currentEntry?.id);
   const currentAlbum=albumTree?.albums.find(album=>album.id===page.view.album?.id);
@@ -912,6 +927,7 @@ export function App() {
   const faultLayer=useMotionSurface('layer'),similarityLayer=useMotionSurface('layer'),trashLayer=useMotionSurface('layer'),exchangeLayer=useMotionSurface('layer');
   const classificationToast=useMotionSurface('toast'),exchangeToast=useMotionSurface('toast');
   const artistsCovered=useLayerCovered(artistsOpen);
+  const selectionBar=<SelectionBar selectedCount={selectedIds.size} batchPending={albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} characterLabel="분류" characterShortcut={null} characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={selectedAsset?<Button variant="ghost" onClick={()=>setAssetInfo(selectedAsset)}>정보</Button>:undefined} onClearSelection={clearSelection}/>;
   const assetAreaNode=(
       <main className="library-main" ref={mainRef} style={{display:artistsCovered?'none':undefined}}>
         {assetToolbar}{assetToolbar&&kindShade.shade}{revisitToolbar}
@@ -920,10 +936,12 @@ export function App() {
         <LibraryRoot endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? null : <>
         <Gallery stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={visibleItems} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
-        {selectionGallery&&<SelectionBar selectedCount={selectedIds.size} batchPending={albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} characterLabel="분류" characterShortcut={null} characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={selectedAsset?<Button variant="ghost" onClick={()=>setAssetInfo(selectedAsset)}>정보</Button>:undefined} onClearSelection={clearSelection}/>}
+        {selectionGallery&&selectionBar}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
-        {charactersVisited && <CharacterBrowser search={page.view.search} onSearch={openAssetSearch} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters}/>}
+        {charactersVisited && <CharacterBrowser search={page.view.search} onSearch={openAssetSearch} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character,source:'character'})} backRef={characterBack} onExit={exitCharacters}
+          selection={characterSelection?{ids:selectedIds,onSelect:selectAsset,onToggle:toggleSelectedAsset,onClear:clearSelection}:undefined} onItems={characterItemsChanged} moreRef={characterMore}/>}
+        {characterSelection&&selectionBar}
         <div className="floating-notices">
           {searchNotice&&<p className="hint" role="status">{searchNotice}</p>}
           {indexError&&rootShown&&<p className="error-message">{indexError}</p>}
@@ -986,7 +1004,7 @@ export function App() {
     {fault && !privacyMode && !nsfwFilter && <div className="tablet-layer is-fault" ref={faultLayer}><FaultGame items={fault} onClose={() => setFault(null)}/></div>}
     {similarity && <div className="tablet-layer" ref={similarityLayer}><SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/></div>}
     {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)}/>}
-    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
+    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <div className="tablet-layer" ref={trashLayer}><LibraryTrash key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <div className="tablet-layer" ref={exchangeLayer}><Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/></div>}

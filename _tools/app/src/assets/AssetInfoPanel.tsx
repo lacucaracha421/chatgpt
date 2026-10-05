@@ -14,9 +14,11 @@ import type { AssetSummary, ClassificationEntry, CollectionSummary } from "../li
 import { breadcrumbPath } from "../shared/breadcrumb";
 import { displayDateTime } from "../shared/displayDate";
 import { formatBytes } from "../shared/formatBytes";
+import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { StableImage } from "../shared/ui/StableImage";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
@@ -32,6 +34,8 @@ type Props = {
   onAutoTagFilterApplied?: () => void;
   onOpenArtist?: (artistId: string) => void;
   privacyMode?: boolean;
+  /** The large image on top; off where the asset itself is already on screen (the viewer). */
+  preview?: boolean;
 };
 
 type MetadataDraft = { creatorName: string; creatorHandle: string; creatorUrl: string };
@@ -46,6 +50,7 @@ export function AssetInfoPanel({
   onAutoTagFilterApplied,
   onOpenArtist,
   privacyMode: requestedPrivacy = false,
+  preview = true,
 }: Props) {
   const { gateway } = useLibrary();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -152,26 +157,31 @@ export function AssetInfoPanel({
     if (key && onOpenArtist) onOpenArtist(key); else if (asset.creatorUrl) void openUrl(asset.creatorUrl);
   };
 
+  const duration = asset.media.kind === "video" ? formatDuration(asset.media.durationMs) : "";
+  // A library Asset without a thumbnail revision has no still (a video without a poster).
+  const hasStill = asset.thumbnailRevision !== null;
   return <div ref={rootRef} className="asset-info-panel" onKeyDown={handleEscape}>
-    {/* Image left; artist, source and file facts gathered on its right. */}
-    <section className="asset-info-panel__head" data-info-section="artist">
-      <button type="button" className="asset-inspector__preview" aria-label={`${asset.title || asset.originalName} 감상 화면으로 열기`} onClick={() => onOpenAsset?.(asset)}>
-        {privacyMode ? <span className="asset-inspector__preview-placeholder"><Skeleton className="privacy-mask" label="비공개 모드" /></span> : <img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" draggable={false} />}
-      </button>
-      <div className="asset-info-panel__facts">
-        <div className="asset-info-panel__artist-copy">
-          <div className="asset-info-panel__artist-line"><strong className="artist-name">{artist?.label ?? asset.creatorName ?? handle ?? "작가 미상"}</strong><Button data-edit-source size="icon" variant="ghost" aria-label="출처 정보 편집" onClick={beginEditing}><PencilIcon aria-hidden="true" /></Button></div>
-          <span>{artist ? [handle, `모은 그림 ${artist.assetCount.toLocaleString("ko-KR")}장`].filter(Boolean).join(" · ") : handle ?? (asset.creatorName || asset.creatorUrl ? "" : "계정 정보 없음")}</span>
-          {(artist?.id || asset.creatorHandle || asset.creatorUrl) && (onOpenArtist || asset.creatorUrl) && <Button size="sm" variant="quiet" className="asset-info-panel__artist-link" onClick={openArtist}>작가 페이지 <ChevronRightIcon aria-hidden="true" /></Button>}
-        </div>
-        <dl className="asset-info-panel__facts-list" data-info-section="source" aria-label="출처와 파일">
-          <div><dt>{asset.sourceUrl ? <button type="button" className="asset-inspector__link" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!)}>게시물<ArrowTopRightOnSquareIcon aria-hidden="true" /></button> : "게시물"}</dt><dd className="asset-inspector__source">{asset.sourceUrl ? <><span className="asset-inspector__source-url" aria-description={asset.sourceUrl}>{sourceLabel(asset.sourceUrl)}</span><Button size="icon" variant="ghost" aria-label="출처 복사" onClick={() => void copySource()}>{copied ? <CheckIcon aria-hidden="true" /> : <ClipboardDocumentIcon aria-hidden="true" />}</Button></> : "—"}</dd></div>
-          <div><dt>게시</dt><dd>{displayDateTime(asset.sourcePublishedAt, new Date(), { withTime: true }) || "—"}</dd></div>
-          <div data-info-section="file"><dt>파일</dt><dd><span>{asset.width}×{asset.height}</span> · <span>{formatBytes(asset.byteSize)}</span>{asset.media.kind === "video" && <> · <span>{formatDuration(asset.media.durationMs)}</span></>}</dd></div>
-          <div><dt>가져옴</dt><dd><span>{displayDateTime(asset.collectedAt, new Date(), { withTime: true }) || "—"}</span> · <span>{importSourceLabel(asset.importSource)}</span></dd></div>
-          <div><dt>폴더</dt><dd title={folderPaths.join(" · ")}>{folderPaths.join(" · ") || "—"}</dd></div>
-        </dl>
-      </div>
+    {/* The image leads, whole and alone; then who made it and the record; then the tags. */}
+    {preview && <button type="button" className="asset-info-panel__preview" data-info-section="preview" style={asset.width > 0 && asset.height > 0 ? { aspectRatio: `${asset.width} / ${asset.height}` } : undefined} aria-label={`${asset.title || asset.originalName} 감상 화면으로 열기`} onClick={() => onOpenAsset?.(asset)}>
+      {privacyMode
+        ? <Skeleton className="privacy-mask" label="비공개 모드" />
+        : hasStill ? <StableImage src={assetThumbnailUrl(asset)} alt="" decoding="async" draggable={false} /> : <span className="asset-info-panel__no-still" aria-hidden="true" />}
+      {duration && <Badge variant="scrim" className="asset-info-panel__duration">▶ {duration}</Badge>}
+    </button>}
+    <section className="asset-info-panel__artist" data-info-section="artist">
+      <div className="asset-info-panel__artist-line"><strong className="artist-name">{artist?.label ?? asset.creatorName ?? handle ?? "작가 미상"}</strong><Button data-edit-source size="icon" variant="ghost" aria-label="출처 정보 편집" onClick={beginEditing}><PencilIcon aria-hidden="true" /></Button></div>
+      <span className="asset-info-panel__artist-meta">{artist ? [handle, `모은 그림 ${artist.assetCount.toLocaleString("ko-KR")}장`].filter(Boolean).join(" · ") : handle ?? (asset.creatorName || asset.creatorUrl ? "" : "계정 정보 없음")}</span>
+      {(artist?.id || asset.creatorHandle || asset.creatorUrl) && (onOpenArtist || asset.creatorUrl) && <Button size="sm" variant="quiet" className="asset-info-panel__artist-link" onClick={openArtist}>작가 페이지 <ChevronRightIcon aria-hidden="true" /></Button>}
+    </section>
+    <section className="asset-info-panel__record" data-info-section="source" aria-label="출처와 파일">
+      <SectionLabel as="h3" title="기록" />
+      <dl className="asset-info-panel__facts-list">
+        <div><dt>{asset.sourceUrl ? <button type="button" className="asset-inspector__link" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!)}>게시물<ArrowTopRightOnSquareIcon aria-hidden="true" /></button> : "게시물"}</dt><dd className="asset-inspector__source">{asset.sourceUrl ? <><span className="asset-inspector__source-url" aria-description={asset.sourceUrl}>{sourceLabel(asset.sourceUrl)}</span><Button size="icon" variant="ghost" aria-label="출처 복사" onClick={() => void copySource()}>{copied ? <CheckIcon aria-hidden="true" /> : <ClipboardDocumentIcon aria-hidden="true" />}</Button></> : "—"}</dd></div>
+        <div><dt>게시</dt><dd>{displayDateTime(asset.sourcePublishedAt, new Date(), { withTime: true }) || "—"}</dd></div>
+        <div data-info-section="file"><dt>파일</dt><dd><span>{asset.width}×{asset.height}</span> · <span>{formatBytes(asset.byteSize)}</span>{duration && <> · <span>{duration}</span></>}</dd></div>
+        <div><dt>가져옴</dt><dd><span>{displayDateTime(asset.collectedAt, new Date(), { withTime: true }) || "—"}</span> · <span>{importSourceLabel(asset.importSource)}</span></dd></div>
+        <div><dt>폴더</dt><dd className="asset-info-panel__folders">{folderPaths.join(" · ") || "—"}</dd></div>
+      </dl>
     </section>
     {editing && draft && <div className="asset-inspector__metadata-editor">
       <TextField autoFocus label="제작자 이름" value={draft.creatorName} onChange={(event) => setDraft({ ...draft, creatorName: event.target.value })} />

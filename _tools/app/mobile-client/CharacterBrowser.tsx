@@ -112,7 +112,10 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false,ratings}:{node:
   </button>;
 }
 
-export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{search?:readonly AssetSearchName[];onSearch?():void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,selection,onItems,moreRef}:{search?:readonly AssetSearchName[];onSearch?():void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void;
+  /** Selection mode, as in the tablet's plain gallery (long press, then taps toggle). */selection?:{ids:ReadonlySet<string>;onSelect(id:string):void;onToggle(id:string):void;onClear():void};
+  /** The loaded items, for the host's selection bar and a viewer opened from here. */onItems?(items:Asset[]):void;
+  /** Loads the next page; the host's viewer calls it near its end. */moreRef?:MutableRefObject<(()=>void)|null>}) {
   const [privacy]=usePrivacyMode();
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
@@ -354,6 +357,8 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   // The committed page and its filters are one value, so an append cannot extend a page that
   // was fetched under a different scope than the one now displayed.
   const nearEnd=useCallback(()=>{if(!busy&&!moreError)void append();},[busy,moreError,append]);
+  useEffect(()=>{if(!moreRef)return;moreRef.current=nearEnd;return()=>{if(moreRef.current===nearEnd)moreRef.current=null;};},[moreRef,nearEnd]);
+  useEffect(()=>{if(page)onItems?.(page.items);},[page?.items,onItems]);
   // While the next folder loads, the previous one stays on screen, quieted, instead of blanking;
   // once it commits the new level slides in from the side it was entered from.
   const lastPage=useRef<CharacterPage|undefined>(undefined);
@@ -438,7 +443,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
-    <Gallery privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
+    <Gallery privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null} selectedIds={selection?.ids} onSelectAsset={selection?.onSelect} onToggleSelection={selection?.onToggle} onClearSelection={selection?.onClear}/>
     {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     <LoadingLine label={(more)&&'다음 캐릭터 자산 불러오는 중'} className="is-bottom"/>
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>{if(sparse){cache.current.clear();setRetry(n=>n+1);}else void append();}}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}

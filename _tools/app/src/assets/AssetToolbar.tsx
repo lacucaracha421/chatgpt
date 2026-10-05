@@ -22,9 +22,10 @@ type AssetToolbarProps = {
   metadataVisible: boolean;
   privacyMode: boolean;
   thumbnailRowHeight: number;
-  onSortChange: (sort: AssetSort) => void;
-  onMediaFilterChange: (filter: AssetMediaFilter) => void;
-  onAspectFilterChange: (filter: AssetAspectFilter) => void;
+  /** Absent where the place keeps its own fixed order (a series picker or its excluded list). */
+  onSortChange?: (sort: AssetSort) => void;
+  onMediaFilterChange?: (filter: AssetMediaFilter) => void;
+  onAspectFilterChange?: (filter: AssetAspectFilter) => void;
   onMetadataVisibleChange: (value: boolean) => void;
   onPrivacyModeChange: (value: boolean) => void;
   onThumbnailRowHeightChange: (value: number) => void;
@@ -39,13 +40,19 @@ type AssetToolbarProps = {
   titleAccessory?: ReactNode;
   /** Header content before the title, e.g. the 내용 검색 badge. */
   titleLeading?: ReactNode;
+  /** Rendered in place of the plain title (a series breadcrumb); `title` still names the place. */
+  titleContent?: ReactNode;
+  /** Place-specific status beside the privacy status (a series' automation recovery). */
+  status?: ReactNode;
+  actions?: ReactNode;
+  ariaLabel?: string;
 };
 
 // 상단바는 선택 상태와 무관하게 제목·보기 설정·창 제어 슬롯을 고정한다.
 // 선택 작업은 SelectionBar(갤러리 위 고정 바)에서 수행한다.
 export function AssetToolbar({
   scopeControl, scopeHelp, galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, metadataVisible, privacyMode, thumbnailRowHeight,
-  onSortChange, onMediaFilterChange, onAspectFilterChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, inspectorOpen = false, inspectorAvailable = false, onInspectorOpenChange, title, titleAccessory, titleLeading,
+  onSortChange, onMediaFilterChange, onAspectFilterChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, inspectorOpen = false, inspectorAvailable = false, onInspectorOpenChange, title, titleAccessory, titleLeading, titleContent, status, actions, ariaLabel = "자산 도구",
 }: AssetToolbarProps) {
   const {nsfwFilter} = usePrivacy();
   void metadataVisible;
@@ -56,7 +63,7 @@ export function AssetToolbar({
   const view = rawView.kind === "home" || rawView.kind === "notes" || rawView.kind === "exchange" || rawView.kind === "private_vault" || rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "statistics" || rawView.kind === "manga" || rawView.kind === "artists"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
-  const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
+  const filterable = (rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator") && Boolean(onMediaFilterChange || onAspectFilterChange);
   // 내용 검색 results keep their relevance order: no sort choice.
   const ranked = rawView.kind === "description_search";
   const location = title ?? (view.kind === "description_search" ? view.query : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : view.kind === "albums" ? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체");
@@ -68,9 +75,9 @@ export function AssetToolbar({
       inspectorOpen={inspectorOpen} inspectorAvailable={inspectorAvailable} onInspectorOpenChange={onInspectorOpenChange} />;
 
   return <>
-    <ViewToolbar title={location} ariaLabel="자산 도구" leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}</>} trailingAction={<div className="asset-toolbar__controls">{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
+    <ViewToolbar title={location} titleContent={titleContent} actions={actions} ariaLabel={ariaLabel} leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}</>} trailingAction={<div className="asset-toolbar__controls">{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
       summary: [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all") ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all")}` : "", privacyMode ? "비공개" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · "),
-      status: privacyMode || nsfwFilter ? <span>{[privacyMode ? "비공개 모드" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · ")}</span> : undefined,
+      status: privacyMode || nsfwFilter || status ? <>{status}{(privacyMode || nsfwFilter) && <span>{[privacyMode ? "비공개 모드" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · ")}</span>}</> : undefined,
     }} />
   </>;
 }

@@ -53,7 +53,7 @@ it('masks collection artwork in seasons, release shelves and original cover surf
 });
 it('keeps list and viewer info readable while masking its supplied preview',()=>{
  localStorage.setItem('lakomics.mobile.privacyMode','1');
- const {container}=render(<ViewerInfo asset={{id:'info',kind:'image',preview:'blob:preview',width:600,height:800}}/>);
+ const {container}=render(<ViewerInfo image asset={{id:'info',kind:'image',preview:'blob:preview',width:600,height:800}}/>);
  expect(screen.getByText('600 × 800')).toBeTruthy();expect(container.querySelector('.privacy-mask')).toBeTruthy();expect(container.querySelector('img[src]')).toBeNull();
 });
 

@@ -53,29 +53,35 @@
 .asset-view-menu__aspect[aria-checked="true"] { border-color: var(--color-border-strong, var(--color-border)); background: var(--color-surface-elevated); color: var(--color-text); }
 .asset-view-menu__aspect:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: calc(var(--focus-width) * -1); }
 
-.asset-info-panel { display: grid; gap: var(--space-3); min-width: 0; }
-.asset-info-panel__head { display: grid; grid-template-columns: 128px minmax(0, 1fr); align-items: start; gap: var(--space-3); }
-.asset-info-panel__head .asset-inspector__preview { width: 128px; height: 172px; margin: 0; }
-.asset-info-panel__head .asset-inspector__preview img,
-.asset-info-panel__head .asset-inspector__preview-placeholder { width: 100%; height: 100%; object-fit: cover; }
-.asset-info-panel__facts { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-.asset-info-panel__artist-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
-.asset-info-panel__artist-line { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
-.asset-info-panel__artist-line .artist-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 정보 panel (user, 2026-10-05): the image alone and whole on top, then the artist and the record, then the tags.
+   NieR within DESIGN.md: section labels (square + hairline), hairline rows, square corners, tabular values. */
+.asset-info-panel { display: grid; gap: var(--space-4); min-width: 0; }
+.asset-info-panel__preview { position: relative; display: block; width: 100%; max-height: min(56vh, 480px); aspect-ratio: 4 / 3; margin: 0; padding: 0; overflow: hidden; background: var(--color-bg); border: 0; border-radius: 0; cursor: zoom-in; }
+.asset-info-panel__preview > img,
+.asset-info-panel__preview > .ui-skeleton,
+.asset-info-panel__no-still { display: block; width: 100%; height: 100%; object-fit: contain; }
+.asset-info-panel__preview:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: calc(var(--focus-width) * -1); }
+.asset-info-panel__duration { position: absolute; right: var(--space-2); bottom: var(--space-2); }
+.asset-info-panel__artist { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; }
+.asset-info-panel__artist-line { display: flex; align-self: stretch; align-items: center; gap: var(--space-2); min-width: 0; }
+.asset-info-panel__artist-line .artist-name { min-width: 0; overflow: hidden; font-size: var(--type-title); font-weight: 600; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .asset-info-panel__artist-line .ui-button { flex: none; margin-left: auto; }
-.asset-info-panel__artist-copy > span { overflow: hidden; color: var(--color-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.asset-info-panel__facts .ui-button.asset-info-panel__artist-link { align-self: start; margin-top: 2px; padding-inline: 0; }
-.asset-info-panel__artist-link > svg { width: 14px; height: 14px; }
-.asset-info-panel__facts-list { display: grid; gap: 2px; margin: 0; font-size: var(--text-xs); }
-.asset-info-panel__facts-list > div { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: var(--space-2); min-height: 22px; }
+.asset-info-panel__artist-meta { max-width: 100%; overflow: hidden; color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.asset-info-panel__artist-meta:empty { display: none; }
+.asset-info-panel__artist .ui-button.asset-info-panel__artist-link { padding-inline: 0; }
+.asset-info-panel__artist-link > svg { width: var(--icon-sm); height: var(--icon-sm); }
+.asset-info-panel__record > .ui-section-label { margin-bottom: var(--space-1); }
+.asset-info-panel__facts-list { display: grid; margin: 0; font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.asset-info-panel__facts-list > div { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: var(--space-2); min-height: 32px; border-bottom: var(--border-width) solid var(--color-border); }
 .asset-info-panel__facts-list dt { color: var(--color-faint); }
 .asset-info-panel__facts-list dd { margin: 0; min-width: 0; overflow: hidden; color: var(--color-text); text-overflow: ellipsis; white-space: nowrap; }
-.asset-info-panel__facts-list .asset-inspector__link { display: inline-flex; white-space: nowrap; align-items: center; gap: 2px; color: var(--color-faint); }
+.asset-info-panel__facts-list dd.asset-info-panel__folders { padding-block: var(--space-2); overflow-wrap: anywhere; white-space: normal; }
+.asset-info-panel__facts-list .asset-inspector__link { display: inline-flex; white-space: nowrap; align-items: center; gap: var(--space-1); color: var(--color-faint); }
 .asset-info-panel__facts-list .asset-inspector__link:hover { color: var(--color-text); }
-.asset-info-panel__facts-list .asset-inspector__link svg { width: 11px; height: 11px; }
+.asset-info-panel__facts-list .asset-inspector__link svg { width: 12px; height: 12px; }
 .asset-info-panel__facts-list .asset-inspector__source { display: flex; align-items: center; gap: var(--space-1); }
 .asset-info-panel__facts-list .asset-inspector__source-url { overflow: hidden; text-overflow: ellipsis; }
-.asset-info-panel__facts-list .ui-button { flex: none; width: 22px; height: 22px; min-height: 22px; }
+.asset-info-panel__facts-list .ui-button { flex: none; width: 24px; height: 24px; min-height: 24px; margin-left: auto; }
 .asset-inspector__metadata div,
 .asset-inspector__collection-info div { grid-template-columns: 72px minmax(0, 1fr); }
 

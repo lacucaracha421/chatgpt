@@ -133,11 +133,15 @@ describe('ViewerInfo section headings', () => {
 });
 
 describe('ViewerInfo panel', () => {
-  it('matches the PC order with a preview header and no internal close button', () => {
-    const {container} = render(<ViewerInfo asset={asset({preview: 'https://example.com/thumb.webp'})} onClose={() => {}}/>);
+  it('matches the PC order: the image alone on top in the gallery sheet, no image in the viewer', () => {
+    const {container, rerender} = render(<ViewerInfo image asset={asset({preview: 'https://example.com/thumb.webp'})} onClose={() => {}}/>);
+    expect(container.querySelector('.viewer-info-image img')?.getAttribute('src')).toBe('https://example.com/thumb.webp');
+    expect((container.querySelector('.viewer-info-image') as HTMLElement).style.aspectRatio).toBe('1200 / 800');
+    expect([...container.querySelectorAll('[data-info-section]')].map(node => node.getAttribute('data-info-section'))).toEqual(['preview', 'artist', 'source', 'file']);
+    rerender(<ViewerInfo asset={asset({preview: 'https://example.com/thumb.webp'})} onClose={() => {}}/>);
+    expect(container.querySelector('.viewer-info-image')).toBeNull();
     expect(screen.getByRole('heading', {level: 2}).textContent).toBe('서유진');
     expect(screen.getByText('@bluealex1203')).toBeTruthy();
-    expect(container.querySelector('.viewer-info-preview img')?.getAttribute('src')).toBe('https://example.com/thumb.webp');
     expect(screen.queryByText('IMAGE')).toBeNull();
     expect(screen.queryByRole('button', {name: /닫기/})).toBeNull();
     expect(screen.getByRole('heading', {name: '출처'})).toBeTruthy();

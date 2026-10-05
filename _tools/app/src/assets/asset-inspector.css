@@ -1,7 +1,7 @@
 .asset-inspector {
   min-width: 0;
   overflow: auto;
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   background: var(--color-surface-elevated);
   border-left: var(--border-width) solid var(--color-border);
 }
@@ -13,36 +13,6 @@
   gap: var(--space-2);
   width: 100%;
   min-width: 0;
-}
-
-.asset-inspector__preview {
-  display: block;
-  width: 100%;
-  margin-bottom: var(--space-3);
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: zoom-in;
-  overflow: hidden;
-}
-
-.asset-inspector__preview img {
-  display: block;
-  width: 100%;
-  height: 200px;
-  object-fit: contain;
-  background: var(--color-surface-raised);
-}
-
-.asset-inspector__preview-placeholder {
-  display: block;
-  height: 200px;
-  background: var(--color-surface-raised);
-}
-
-.asset-inspector__preview-placeholder .ui-skeleton {
-  height: 100%;
 }
 
 .asset-inspector__section + .asset-inspector__section {

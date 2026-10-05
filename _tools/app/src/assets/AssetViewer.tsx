@@ -64,8 +64,15 @@ type AssetViewerProps = {
   onMoveToFolder?: (asset: AssetSummary, folderId: string) => void;
   renderCharacterPicker?: (asset: AssetSummary, close: () => void) => ReactNode;
   renderInfo?: (asset: AssetSummary) => ReactNode;
+  /** Context actions of the place the viewer was opened from (a character's 이 캐릭터에서 제외). */
+  renderExtraActions?: (asset: AssetSummary) => ReactNode;
   onNearEnd?: () => void;
 };
+
+/** Folders an asset may be moved to from the viewer: everything except the 오리지널 root. */
+export function movableViewerFolders(classifications: ClassificationEntry[]): ClassificationEntry[] {
+  return classifications.filter(entry => !(entry.parentId === null && (entry.id === "lakomics-originals" || entry.name === "오리지널")));
+}
 
 export function AssetViewer({
   items,
@@ -87,6 +94,7 @@ export function AssetViewer({
   onMoveToFolder,
   renderCharacterPicker,
   renderInfo,
+  renderExtraActions,
   onNearEnd,
 }: AssetViewerProps) {
   const library = useOptionalLibrary();
@@ -355,6 +363,7 @@ export function AssetViewer({
               <Button className="asset-viewer__vbtn asset-viewer__vbtn--text" variant="ghost" aria-label="캐릭터" aria-expanded={characterOpen} aria-haspopup="dialog" onClick={() => setCharacterOpen((open) => !open)}><UserIcon aria-hidden="true" /><span>캐릭터</span></Button>
               {characterOpen && <div className="asset-viewer__character-popover" onPointerDown={(event) => event.stopPropagation()}>{renderCharacterPicker(asset, closeCharacterPicker)}</div>}
             </span>}
+            {renderExtraActions?.(asset)}
             {albums && onAddToAlbum && <Menu label="앨범" triggerClassName="asset-viewer__vbtn asset-viewer__vbtn--text" disabled={albums.length === 0} trigger={<><RectangleStackIcon aria-hidden="true" /><span>앨범</span></>} items={albumItems} />}
             {asset.sourceUrl && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!).catch(() => undefined)}><ArrowTopRightOnSquareIcon aria-hidden="true" /></Button>}
             {onToggleFavorite && <IconButton className="asset-viewer__vbtn asset-viewer__favorite" tone="heart" pop label={asset.favorite ? "좋아요 취소" : "좋아요"} icon={HeartIcon} activeIcon={HeartSolidIcon} active={asset.favorite} data-toggle-key={asset.id} ref={favoriteButtonRef} onClick={() => onToggleFavorite(asset)} />}
