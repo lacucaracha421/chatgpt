@@ -524,6 +524,46 @@ describe("AssetGallery", () => {
     expect(second.querySelector("img")).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/"));
   });
 
+  it.each(["justified", "masonry"] as const)("preserves visible hover playback across %s gallery refreshes and scroll measurement", (layout) => {
+    vi.useFakeTimers();
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+    const { container, rerender } = render(<AssetGallery layout={layout} items={[videoAsset(0), videoAsset(1)]} />);
+    const tile = screen.getByRole("option", { name: "video-0.webm" }).querySelector(".video-tile")!;
+    fireEvent.pointerEnter(tile);
+    act(() => vi.advanceTimersByTime(160));
+    const media = tile.querySelector("video") as HTMLVideoElement;
+    const removeAttribute = vi.spyOn(media, "removeAttribute");
+    const setAttribute = vi.spyOn(media, "setAttribute");
+    fireEvent.playing(media);
+
+    for (let second = 1; second <= 20; second++) {
+      media.currentTime = second % 10;
+      fireEvent.timeUpdate(media);
+      rerender(<AssetGallery layout={layout} items={[videoAsset(0), videoAsset(1)]} intro={<div>Updated shelf {second}</div>} thumbnailCacheKey={second} />);
+      const scroller = container.querySelector(".asset-gallery__scroll")!;
+      fireEvent.scroll(scroller);
+      act(() => vi.advanceTimersByTime(720));
+      fireEvent.waiting(media);
+      fireEvent.stalled(media);
+      expect(screen.getByRole("option", { name: "video-0.webm" }).querySelector(".video-tile")).toBe(tile);
+      expect(tile.querySelector("video")).toBe(media);
+      expect(media).toHaveAttribute("data-shown");
+      expect(media.currentTime).toBe(second % 10);
+    }
+
+    expect(play).toHaveBeenCalledOnce();
+    expect(pause).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+    expect(removeAttribute.mock.calls.some(([name]) => name === "src" || name === "data-shown")).toBe(false);
+    expect(setAttribute.mock.calls.some(([name]) => name === "src")).toBe(false);
+    fireEvent.pointerLeave(tile);
+    expect(tile.querySelector("video")).toBeNull();
+    expect(pause).toHaveBeenCalledOnce();
+    expect(load).toHaveBeenCalledOnce();
+  });
+
   it("keeps active video preview clicks routed to normal tile selection", async () => {
     vi.useFakeTimers();
     const onSelectionGesture = vi.fn();

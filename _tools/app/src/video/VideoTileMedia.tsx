@@ -15,6 +15,8 @@ type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onRe
 export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode:requestedPrivacy = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true }: Props) {
   const privacyMode=useAssetMask(asset,requestedPrivacy);
   const videoRef = useRef<HTMLVideoElement>(null);
+  /** Detaches the gallery-cell leave listener armed while the pointer is on the cell's own controls. */
+  const cellWatch = useRef<(() => void) | null>(null);
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
   const frameTimer = useRef<number | null>(null);
@@ -63,8 +65,27 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       setHoverFrame(null);
     };
   }, [active, asset.media.scrubFrameCount, privacyMode, videoShown]);
-  useEffect(() => () => clearTimers(), []);
-  const leave = () => { clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); setVideoShown(false); onReleaseActive(); };
+  useEffect(() => () => { clearTimers(); cellWatch.current?.(); }, []);
+  const leave = () => { cellWatch.current?.(); clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); setVideoShown(false); onReleaseActive(); };
+  const leaveRef = useRef(leave);
+  leaveRef.current = leave;
+  // The gallery cell's heart and other hover controls sit outside this tile: moving onto them must
+  // not stop (and later restart) the preview, so the hover ends when the pointer leaves the cell.
+  const leaveTile = (event: React.PointerEvent<HTMLDivElement>) => {
+    const cell = event.currentTarget.closest<HTMLElement>("[data-asset-id]");
+    // The native pointerout target: React reports a target outside its own tree as the window.
+    const next = event.nativeEvent.relatedTarget;
+    if (!cell || cell === event.currentTarget || !(next instanceof Node) || !cell.contains(next)) { leave(); return; }
+    cellWatch.current?.();
+    const onCellLeave = () => leaveRef.current();
+    cell.addEventListener("pointerleave", onCellLeave, { once: true });
+    cellWatch.current = () => { cell.removeEventListener("pointerleave", onCellLeave); cellWatch.current = null; };
+  };
+  const enterTile = () => {
+    if (cellWatch.current) { cellWatch.current(); return; }
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => { setPlaybackRequested(true); onRequestActive(); }, 160);
+  };
   const seekToRatio = (ratio: number, live: boolean) => {
     const clamped = Math.max(0, Math.min(1, ratio));
     setPreviewRatio(clamped);
@@ -132,7 +153,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const alt = asset.title || asset.originalName;
   const previewFrame = previewRatio === null ? hoverFrame : Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1));
   const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? (thumbnailSrc === null ? null : thumbnailSrc ?? assetThumbnailUrl(asset)) : scrubFrameUrl(asset.id, previewFrame, asset.thumbnailRevision);
-  return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(() => { setPlaybackRequested(true); onRequestActive(); }, 160); }} onPointerLeave={leave}>
+  return <div className="video-tile" onPointerEnter={enterTile} onPointerLeave={leaveTile}>
     {/* 재생 프리뷰가 위에 깔리므로, 영상 첫 프레임이 뜨기 전까지는 scrub 미리보기 프레임을 img로 보여준다. */}
     {stillUrl && <img src={stillUrl} alt={alt} decoding="async" draggable={false} />}
     {active && playbackRequested && <video

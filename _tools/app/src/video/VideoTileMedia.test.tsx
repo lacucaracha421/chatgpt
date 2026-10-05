@@ -46,6 +46,48 @@ it("plays the video live on hover, keeping prepared frames until its first frame
   expect(container.querySelector("video")).toBeNull();
 });
 
+it("keeps visible hover playback through progress, equal props, stalls and child pointer transitions", () => {
+  const request = vi.fn();
+  const release = vi.fn();
+  const { container, rerender } = render(<VideoTileMedia asset={video()} active onRequestActive={request} onReleaseActive={release} onRetry={vi.fn()} />);
+  const tile = container.querySelector(".video-tile")!;
+  fireEvent.pointerEnter(tile);
+  act(() => vi.advanceTimersByTime(160));
+  const media = container.querySelector("video") as HTMLVideoElement;
+  const removeAttribute = vi.spyOn(media, "removeAttribute");
+  const setAttribute = vi.spyOn(media, "setAttribute");
+  fireEvent.playing(media);
+
+  for (let second = 1; second <= 20; second++) {
+    media.currentTime = second % 10;
+    fireEvent.timeUpdate(media);
+    fireEvent.durationChange(media);
+    rerender(<VideoTileMedia asset={video()} active onRequestActive={() => request()} onReleaseActive={() => release()} onRetry={vi.fn()} />);
+    fireEvent.waiting(media);
+    fireEvent.stalled(media);
+    fireEvent.seeking(media);
+    fireEvent.seeked(media);
+    expect(media).toHaveAttribute("data-shown");
+    fireEvent.playing(media);
+    act(() => vi.advanceTimersByTime(720));
+    expect(container.querySelector("video")).toBe(media);
+    expect(media).toHaveAttribute("data-shown");
+    expect(media.currentTime).toBe(second % 10);
+  }
+
+  const still = tile.querySelector("img")!;
+  const slider = tile.querySelector(".video-tile__scrub")!;
+  fireEvent.pointerOut(still, { relatedTarget: slider });
+  fireEvent.pointerOver(slider, { relatedTarget: still });
+  expect(release).not.toHaveBeenCalled();
+  expect(media).toHaveAttribute("data-shown");
+  expect(media.pause).not.toHaveBeenCalled();
+  expect(media.load).not.toHaveBeenCalled();
+  expect(media.play).toHaveBeenCalledOnce();
+  expect(removeAttribute.mock.calls.some(([name]) => name === "src" || name === "data-shown")).toBe(false);
+  expect(setAttribute.mock.calls.some(([name]) => name === "src")).toBe(false);
+});
+
 it("updates the still image immediately when its thumbnail source revision changes", () => {
   const props = { active: false, onRequestActive: vi.fn(), onReleaseActive: vi.fn(), onRetry: vi.fn() };
   const { rerender } = render(<VideoTileMedia asset={video()} {...props} thumbnailSrc="http://lakomics.localhost/thumbnail/video-1?v=1" />);
@@ -165,4 +207,37 @@ it("does not call startup video scheduling Saving Mode before readiness", () => 
   render(<VideoTileMedia asset={video("pending")} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
   expect(screen.getByText("준비 중")).toBeInTheDocument();
   expect(screen.queryByText("절약 모드로 대기 중")).not.toBeInTheDocument();
+});
+
+it("keeps the hover preview playing while the pointer is on the gallery cell's own controls", () => {
+  const release = vi.fn();
+  const cell = document.createElement("div");
+  cell.setAttribute("data-asset-id", "video-1");
+  const heart = document.createElement("button");
+  cell.appendChild(heart);
+  document.body.appendChild(cell);
+  const { container, rerender } = render(<VideoTileMedia asset={video()} active={false} onRequestActive={vi.fn()} onReleaseActive={release} onRetry={vi.fn()} />, { container: cell.appendChild(document.createElement("div")) });
+  const tile = container.querySelector(".video-tile")!;
+  fireEvent.pointerEnter(tile);
+  act(() => vi.advanceTimersByTime(160));
+  rerender(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={release} onRetry={vi.fn()} />);
+  const media = container.querySelector("video") as HTMLVideoElement;
+  fireEvent.playing(media);
+
+  // Onto the heart and back: the same playback continues, nothing restarts.
+  // React derives enter/leave from pointerout/pointerover and their relatedTarget.
+  fireEvent.pointerOut(tile, { relatedTarget: heart });
+  expect(release).not.toHaveBeenCalled();
+  fireEvent.pointerOver(tile, { relatedTarget: heart });
+  act(() => vi.advanceTimersByTime(400));
+  expect(container.querySelector("video")).toBe(media);
+  expect(media).toHaveAttribute("data-shown");
+  expect(media.load).not.toHaveBeenCalled();
+
+  // Leaving the whole cell from the heart ends the preview.
+  fireEvent.pointerOut(tile, { relatedTarget: heart });
+  fireEvent.pointerLeave(cell, { relatedTarget: document.body });
+  expect(release).toHaveBeenCalledOnce();
+  expect(container.querySelector("video")).toBeNull();
+  cell.remove();
 });
