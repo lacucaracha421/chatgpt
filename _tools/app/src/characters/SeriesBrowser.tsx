@@ -5,14 +5,16 @@ import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { CharacterSuggestionTile, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { cloneElement, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
+import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
+import { preloadImages } from "../shared/motion/viewportImages";
 import { motionDefaults, motionTime, reducedMotion } from "../shared/motion/curves";
 import { ChevronRightIcon, FolderIcon, UserIcon } from "@heroicons/react/24/outline";
 import { EllipsisHorizontalIcon, PencilIcon, PeopleIcon } from "../shared/ui/ArchiveIcons";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import { AssetGallery } from "../assets/AssetGallery";
+import { AssetGallery, tileThumbnailUrl } from "../assets/AssetGallery";
 import { AssetViewer } from "../assets/AssetViewer";
 import { AssetInspector } from "../assets/AssetInspector";
 import { GalleryViewMenu } from "../assets/GalleryViewMenu";
@@ -128,6 +130,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // The scope the shown page belongs to. On a scope switch the previous images stay until the new
   // first page lands, instead of blanking the gallery (no-flash rule, DESIGN.md).
   const [pageScope, setPageScope] = useState<string | null>(null);
+  const [preparedPage, setPreparedPage] = useState<{ scope: string; page: CharacterBrowsePage; token: number } | null>(null);
+  const painted = useRef<ReactElement<{ inert?: boolean; 'aria-busy'?: boolean; children?: ReactNode }> | null>(null);
+  const host = useRef<HTMLElement>(null);
+  const swapOwner = useRef({});
   const pickerPages = useRef(new Map<string, CharacterBrowsePage>());
   const returnGallery = useRef<{ scope: string; page: CharacterBrowsePage } | null>(null);
   useLayoutEffect(() => {
@@ -212,7 +218,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         ...(picking && picking.kind !== "hero" ? { referenceTargetId: editor?.target?.id ?? "" } : {}),
         ...(!picking && !targetId && !currentGroup && !excludedOnly ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter } : {}),
         all: !picking && !targetId && !currentGroup ? seriesGalleryView === "all" : all, after, limit: 100 });
-      if (token === generation.current) setPage(old => {
+      if (token === generation.current && !after && pageScope !== null && scope !== pageScope && !picking) {
+        setPreparedPage({ scope, page: next, token });
+      } else if (token === generation.current) setPage(old => {
         const value = after ? { ...next,
           items: [...old.items, ...next.items.filter(a => !old.items.some(b => b.id === a.id))],
           unavailableReferenceIds: [...new Set([...(old.unavailableReferenceIds ?? []), ...(next.unavailableReferenceIds ?? [])])],
@@ -220,7 +228,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         if (pickerScope) pickerPages.current.set(pickerScope, value);
         return value;
       });
-      if (token === generation.current && !after) setPageScope(scope);
+      if (token === generation.current && !after && (pageScope === null || scope === pageScope || picking)) setPageScope(scope);
     } catch (e) { if (token === generation.current) setError(commandErrorMessage(e, "이미지를 불러오지 못했습니다.")); }
     finally { if (token === generation.current) { pending.current = false; setLoading(false); } }
   }
@@ -231,7 +239,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (loadedScope.current !== scope) {
       loadedScope.current = scope; setSelection(emptySelection()); setViewer(null);
     }
-    void load(); return () => { ++generation.current; };
+    void load(); return () => { ++generation.current; cancelSegmentSwap(swapOwner.current); };
   }, [scope, galleryRefreshVersion, reload, hubApi]);
   useEffect(() => {
     if (targetId || currentGroup || picking) return;
@@ -480,8 +488,32 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     })}>이 캐릭터에서 제외</Button>
     : undefined;
   // The first page alone is not ready: the shelf and its count/header reads also change layout.
-  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && (folderLoading || suggestions.loading || candidateLoading || excludedLoading || (!s36Settings && !s36Error))));
-  return <section className="series-browser" aria-label={focusedName ?? name} aria-busy={loading || shelfLoading}>
+  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.loading || candidateLoading || excludedLoading || (!s36Settings && !s36Error))));
+  useEffect(() => {
+    if (!preparedPage || preparedPage.scope !== scope || preparedPage.token !== generation.current || shelfLoading) return;
+    let active = true;
+    const shelfIds = !current && !excludedOnly ? [
+      ...members.flatMap(target => { const id = target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId; return id ? [id] : []; }),
+      ...folders.flatMap(folder => folder.thumbnailAssetId ? [folder.thumbnailAssetId] : []),
+      ...(!suggestionsHidden ? seriesSuggestions.flatMap(row => row.sampleAssetIds) : []),
+    ] : [];
+    void preloadImages(privacyMode ? [] : [...new Set([
+      ...shelfIds.map(id => thumbnailUrl(id)), ...preparedPage.page.items.map(item => tileThumbnailUrl(item)),
+    ])]).then(() => {
+      if (!active || preparedPage.token !== generation.current) return;
+      const commit = () => {
+        setPage(preparedPage.page); setPageScope(scope); setPreparedPage(null);
+      };
+      const segment = pageScope?.replace(/:series-(unclassified|all|excluded):/, ':series:') === scope.replace(/:series-(unclassified|all|excluded):/, ':series:');
+      if (segment) swapSegment(swapOwner.current, {
+        forward: seriesGalleryView === 'all', target: host.current?.querySelector<HTMLElement>('.asset-gallery__scroll'),
+        still: host.current?.querySelector<HTMLElement>('.folder-filter'), commit,
+      });
+      else commit();
+    });
+    return () => { active = false; };
+  }, [preparedPage, scope, shelfLoading, privacyMode, pageScope, seriesGalleryView, folders, targets, suggestions.rows, suggestionsHidden]);
+  const content = <section ref={host} className="series-browser" aria-label={focusedName ?? name} aria-busy={loading || shelfLoading}>
     <ViewToolbar title={focusedName ? [name, current && currentCharacterGroup?.name, focusedName].filter(Boolean).join(" / ") : name} ariaLabel="시리즈 도구"
       titleContent={focusedName ? <span className="series-breadcrumb"><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId })}>{name}</button><ChevronRightIcon aria-hidden="true" />{current && currentCharacterGroup && <><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterGroupId: currentCharacterGroup.id })}>{currentCharacterGroup.name}</button><ChevronRightIcon aria-hidden="true" /></>}<span>{focusedName}</span>{!current && <small className="series-header-count">{page.totalCount.toLocaleString()}장</small>}</span> : name}
       titleAccessory={<div className="series-header-actions">
@@ -519,7 +551,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       </div>}
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && current && <div className="series-character-folder-head"><div className="folder-shelf__label character-group-heading"><span>이미지</span><span className="character-group-heading__count">{page.totalCount.toLocaleString("ko-KR")}</span></div></div>}
-        {!picking && !current && !excludedOnly && <SeriesShelf scope={`${library?.root ?? ""}:${series.classificationId}:${currentGroup?.id ?? ""}`} path={[library?.root ?? "", series.classificationId, ...(currentGroup ? [currentGroup.id] : [])]} privacyKey={String(privacyMode)} ready={!shelfLoading && (Boolean(currentGroup) || (!staleFolders && !folderLoading) || Boolean(folderError))}>
+        {!picking && !excludedOnly && <SeriesShelf hidden={Boolean(current)} scope={`${library?.root ?? ""}:${series.classificationId}:${currentGroup?.id ?? ""}`} path={[library?.root ?? "", series.classificationId, ...(currentGroup ? [currentGroup.id] : [])]} privacyKey={String(privacyMode)} ready={!shelfLoading && (Boolean(currentGroup) || (!staleFolders && (!folderLoading || Boolean(cachedFolders))) || Boolean(folderError))}>
           <CharacterGroups key={`${library?.root ?? ""}:${series.classificationId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
             onGroupsChanged={onChanged} suggestionCount={currentGroup ? 0 : seriesSuggestions.length}
@@ -576,7 +608,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => { pickerPages.current.clear(); setReload(v => v + 1); }}>다시 시도</Button></p>}
         {!!undo.length && <div className="character-actions"><span>휴지통으로 이동했습니다.</span><Button size="sm" onClick={() => void action(async () => { await gateway.restoreAssets(undo); setUndo([]); })}>실행 취소</Button></div>}
         {!loading && !error && !page.items.length && <p className="series-gallery__empty">{picking ? "선택할 수 있는 이미지가 없습니다." : current ? "이 캐릭터의 이미지가 없습니다." : currentGroup ? "이 그룹에 연결된 이미지가 없습니다." : seriesGalleryView === "all" ? "이 시리즈에 이미지가 없습니다." : excludedOnly ? "자동 분류에서 제외한 이미지가 없습니다." : "미분류 이미지가 없습니다."}</p>}
-      </>} layout={galleryLayout} groupDates items={page.items} scopeKey={pageScope ?? undefined} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
+      </>} layout={galleryLayout} groupDates items={page.items} scopeKey={pageScope ?? undefined} navigationScopeKey={pageScope?.replace(/:series-(unclassified|all|excluded):/, ':series:')} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
         captionLabel={picking && picking.kind !== "hero" ? asset => page.unavailableReferenceIds?.includes(asset.id) ? "원본 없음 · 선택 불가" : null : undefined}
         selectedAssetIds={picking ? new Set(picking.ids) : selection.ids} focusAssetId={picking ? null : selection.focusId}
         hasNextPage={Boolean(page.nextCursor) && !loading && !error && pageScope === scope} onLoadNextPage={() => void load(page.nextCursor)}
@@ -615,6 +647,14 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     </Dialog>}
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />
   </section>;
+  // Retain the whole painted screen, not only its gallery data: new chrome must never
+  // label the previous character's images. The gallery stays mounted across publication.
+  if (pageScope !== null && pageScope !== scope && painted.current && !picking) return error
+    ? cloneElement(painted.current, { inert: false, 'aria-busy': false }, ...(Array.isArray(painted.current.props.children) ? painted.current.props.children : [painted.current.props.children]),
+      <p role="alert">{error}<Button size="sm" onClick={() => setReload(value => value + 1)}>다시 시도</Button></p>)
+    : cloneElement(painted.current, { inert: true, 'aria-busy': true });
+  painted.current = content;
+  return content;
 }
 
 export function SeriesInlineInspector({ open, ...props }: ComponentProps<typeof AssetInspector>) {

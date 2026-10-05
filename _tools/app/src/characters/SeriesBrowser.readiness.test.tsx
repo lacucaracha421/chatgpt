@@ -76,7 +76,7 @@ it("waits for suggestions that can add the first shelf cards", async () => {
   await waitFor(() => expect(viewReady(container)).toBe(true));
 });
 
-it("keeps the outgoing page scroll position until the next filter page arrives", async () => {
+it("keeps the outgoing scroll position through publication of the next filter page", async () => {
   const { container, folders, counts, browse } = await mount();
   await act(async () => { folders.resolve([]); counts.resolve({ targets: {} }); });
   await waitFor(() => expect(viewReady(container)).toBe(true));
@@ -87,9 +87,11 @@ it("keeps the outgoing page scroll position until the next filter page arrives",
   browse.mockReturnValue(page.promise);
   await userEvent.click(screen.getByRole("radio", { name: "전체" }));
   expect(scroller.scrollTop).toBe(300);
-  expect(container.querySelector(".series-gallery")).toHaveAttribute("inert");
-  await act(async () => { page.resolve({ items: fixtureAssets, nextCursor: null, totalCount: fixtureAssets.length }); });
-  expect(scroller.scrollTop).toBe(0);
+  expect(container.querySelector(".series-gallery")?.closest("[inert]")).not.toBeNull();
+  const items = Array.from({ length: 120 }, (_, index) => ({ ...fixtureAssets[index % fixtureAssets.length], id: `all-${index}` }));
+  await act(async () => { page.resolve({ items, nextCursor: null, totalCount: items.length }); });
+  await screen.findByRole("radio", { name: "전체 120" });
+  expect(scroller.scrollTop).toBe(300);
 });
 
 it.each([false, true])("switches the real series shelf only after folders, suggestions and character/group/collage images are ready (view transitions: %s)", async viewTransitions => {

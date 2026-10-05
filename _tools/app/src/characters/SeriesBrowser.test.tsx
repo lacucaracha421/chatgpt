@@ -1,4 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cloneElement } from "react";
+import * as viewportImages from "../shared/motion/viewportImages";
+import * as viewSwap from "../shared/motion/viewSwap";
 import * as tauriCore from "@tauri-apps/api/core";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -143,9 +146,64 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn()} as unknown as LibraryGateway;
   const browser=<SeriesBrowser folderExclusions={legacy?.exclusions ?? []} targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} />;
   const content = withChrome ? <WorkspaceChromeProvider scope="series"><div className="workspace-navigation"><aside className="workspace-index"><ChromeSettingsDock /></aside>{browser}</div></WorkspaceChromeProvider> : browser;
-  render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
-  return {api,browse,shadowApi,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange};
+  const rendered = render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
+  const navigateToCharacter = (id?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId: id })}</LibraryProvider>);
+  return {api,browse,shadowApi,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter};
 }
+
+it("keeps the character screen until the returning folder page and shelf thumbnails are ready", async () => {
+  const mounted = await mount();
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  const shelfImage = screen.getByRole("button", { name: "히나 열기" }).querySelector("img");
+  mounted.browse.mockResolvedValue({ items: [fixtureAssets[0]], nextCursor: null, totalCount: 24 });
+  mounted.navigateToCharacter("hina");
+  await waitFor(() => expect(document.querySelector('.character-group-heading__count')).toHaveTextContent('24'));
+  let resolveFolder!: (page: { items: typeof fixtureAssets; nextCursor: null; totalCount: number }) => void;
+  mounted.browse.mockImplementationOnce(() => new Promise(resolve => { resolveFolder = resolve; }));
+  let decoded!: () => void;
+  const preload = vi.spyOn(viewportImages, "preloadImages").mockImplementationOnce(() => new Promise<void>(resolve => { decoded = resolve; }));
+  mounted.navigateToCharacter();
+  expect(screen.queryByRole("radiogroup", { name: "시리즈 이미지 필터" })).toBeNull();
+  expect(document.querySelector('.character-group-heading__count')).toHaveTextContent('24');
+  await act(async () => resolveFolder({ items: [fixtureAssets[5]], nextCursor: null, totalCount: 21 }));
+  await waitFor(() => expect(preload).toHaveBeenCalled());
+  expect(screen.queryByRole("radiogroup", { name: "시리즈 이미지 필터" })).toBeNull();
+  expect(document.querySelector('[data-asset-id]')).toHaveAttribute('data-asset-id', fixtureAssets[0].id);
+  await act(async () => decoded());
+  expect(await screen.findByRole("radio", { name: "미분류 21" })).toBeInTheDocument();
+  expect(document.querySelector('[data-asset-id]')).toHaveAttribute('data-asset-id', fixtureAssets[5].id);
+  expect(screen.getByRole("button", { name: "히나 열기" }).querySelector("img")).toBe(shelfImage);
+});
+
+it("publishes a ready segment and its count only inside the shared swap callback", async () => {
+  const mounted = await mount();
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  const scroller = document.querySelector<HTMLElement>('.asset-gallery__scroll')!;
+  scroller.scrollTop = 80; fireEvent.scroll(scroller);
+  let commit!: () => void;
+  const swap = vi.spyOn(viewSwap, "swapSegment").mockImplementation((_owner, options) => { commit = options.commit; return null; });
+  vi.spyOn(viewportImages, "preloadImages").mockResolvedValue(undefined);
+  mounted.browse.mockResolvedValue({ items: Array.from({ length: 113 }, (_, index) => ({ ...fixtureAssets[index % fixtureAssets.length], id: `all-${index}` })), nextCursor: null, totalCount: 113 });
+  await userEvent.click(screen.getByRole("radio", { name: "전체" }));
+  await waitFor(() => expect(swap).toHaveBeenCalled());
+  expect(scroller.scrollTop).toBe(80);
+  expect(screen.getByRole("radio", { name: "미분류 13" })).toHaveAttribute('aria-checked', 'true');
+  expect(swap).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ target: scroller, still: document.querySelector('.folder-filter'), forward: true }));
+  act(() => commit());
+  expect(screen.getByRole("radio", { name: "전체 113" })).toHaveAttribute('aria-checked', 'true');
+  expect(scroller.scrollTop).toBe(80);
+  expect(document.querySelector('.asset-gallery__folder-snapshot')).toBeNull();
+  mounted.browse.mockResolvedValue({ items: [fixtureAssets[5]], nextCursor: null, totalCount: 1 });
+  await userEvent.click(screen.getByRole("radio", { name: "미분류" }));
+  await waitFor(() => expect(swap).toHaveBeenCalledTimes(2));
+  expect(scroller.scrollTop).toBe(80);
+  expect(screen.getByRole("radio", { name: "전체 113" })).toHaveAttribute('aria-checked', 'true');
+  expect(swap).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ forward: false }));
+  act(() => commit());
+  expect(screen.getByRole("radio", { name: "미분류 1" })).toHaveAttribute('aria-checked', 'true');
+  expect(scroller.scrollTop).toBe(0);
+  expect(document.querySelector('.asset-gallery__folder-snapshot')).toBeNull();
+});
 
 it("provides working display settings inside character folders", async () => {
   const callbacks=await mount("hina",false,[],undefined,true); const user=userEvent.setup();

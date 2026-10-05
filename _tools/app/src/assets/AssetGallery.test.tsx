@@ -90,6 +90,19 @@ describe("AssetGallery", () => {
     expect(container.querySelector(".asset-gallery__scroll")).toBe(scroll);
   });
 
+  it("preserves one navigation offset across segments and clamps a shorter list", () => {
+    const items = Array.from({ length: 120 }, (_, index) => asset(index));
+    const { container, rerender } = render(<AssetGallery layout="masonry" scopeKey="unclassified" navigationScopeKey="folder" items={items} />);
+    const scroll = container.querySelector<HTMLElement>(".asset-gallery__scroll")!;
+    scroll.scrollTop = 800; fireEvent.scroll(scroll);
+    rerender(<AssetGallery layout="masonry" scopeKey="all" navigationScopeKey="folder" items={[...items]} />);
+    expect(scroll.scrollTop).toBe(800);
+    expect(scroll.dataset.folderMove).toBeUndefined();
+    rerender(<AssetGallery layout="masonry" scopeKey="unclassified" navigationScopeKey="folder" items={items.slice(0, 1)} />);
+    expect(scroll.scrollTop).toBe(0);
+    expect(scroll.dataset.folderMove).toBeUndefined();
+  });
+
   it("selects a focused masonry asset with Space", async () => {
     const select = vi.fn();
     render(<AssetGallery layout="masonry" items={[asset(0)]} onSelectionGesture={select} />);

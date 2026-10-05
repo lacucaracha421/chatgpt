@@ -42,6 +42,8 @@ type AssetGalleryProps = {
   groupDates?: boolean;
   fullDateHeadings?: boolean;
   scopeKey?: string;
+  /** Navigation identity shared by segments that preserve the same shelf/scroll position. */
+  navigationScopeKey?: string;
   folderPath?: readonly string[];
   infoOpen?: boolean;
   favoritesView?: boolean;
@@ -81,7 +83,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, folderPath, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, folderPath, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const masked = useAssetMasks();
   void _metadataVisible;
   const sourceAssets = useMemo(() => new Map(items.map(asset => [asset.id, asset])), [items]);
@@ -128,11 +130,11 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const rows = useMemo<JustifiedGalleryRow[]>(() => buildJustifiedGalleryRows(layout === "justified" ? items : [], width, targetRowHeight, gap, groupDates, fullDateHeadings), [layout, gap, groupDates, fullDateHeadings, items, targetRowHeight, width]);
   const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => (rows[index]?.height ?? targetRowHeight) + (rows[index]?.dateHeadings?.length ? DATE_HEADING_HEIGHT : 0), getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, scrollMargin: introHeight, overscan: VIRTUAL_OVERSCAN_ROWS });
   useLayoutEffect(() => { rowVirtualizer.measure(); }, [rowVirtualizer, targetRowHeight, width, layout]);
-  const lastScopeKeyRef = useRef<string | null>(scopeKey ?? null);
+  const lastScopeKeyRef = useRef<string | null>(navigationScopeKey ?? null);
   const scrollMemoryRef = useRef(new Map<string, number>());
   const pendingRestoreRef = useRef<{ scopeKey: string | null; offset: number } | null>(null);
   useLayoutEffect(() => {
-    const currentScopeKey = scopeKey ?? null;
+    const currentScopeKey = navigationScopeKey ?? null;
     if (lastScopeKeyRef.current === currentScopeKey) return;
     const previousScopeKey = lastScopeKeyRef.current;
     const element = scrollRef.current;
@@ -146,7 +148,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
     rowVirtualizer.measure();
     rowVirtualizer.scrollToOffset(0);
     if (remembered > 0) element.scrollTop = remembered;
-  }, [scopeKey, rowVirtualizer]);
+  }, [navigationScopeKey, rowVirtualizer]);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const layoutUnits = layout === "masonry" ? masonry.tiles.length : rows.length;
   const measuredTotal = layout === "masonry" ? masonry.height : rowVirtualizer.getTotalSize();
@@ -196,7 +198,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   }
   useLayoutEffect(() => {
     const pending = pendingRestoreRef.current;
-    if (!pending || pending.scopeKey !== scopeKey || layoutUnits === 0) return;
+    if (!pending || pending.scopeKey !== navigationScopeKey || layoutUnits === 0) return;
     const element = scrollRef.current;
     if (!element) return;
     if (element.scrollTop < pending.offset - 1) {
@@ -206,7 +208,18 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       if (element.scrollTop < pending.offset - 1) return;
     }
     pendingRestoreRef.current = null;
-  }, [layoutUnits, scopeKey, reservedTotal, introHeight]);
+  }, [layoutUnits, navigationScopeKey, reservedTotal, introHeight]);
+  const segmentScopeRef = useRef(scopeKey);
+  useLayoutEffect(() => {
+    if (segmentScopeRef.current === scopeKey) return;
+    segmentScopeRef.current = scopeKey;
+    const element = scrollRef.current;
+    if (!element || !navigationScopeKey || navigationScopeKey === scopeKey) return;
+    // A segment keeps its intro in place. Clamp only after the new range is laid out,
+    // inside the swap commit, and update virtualization before the new snapshot.
+    element.scrollTop = Math.min(element.scrollTop, Math.max(0, reservedTotal + introHeight - element.clientHeight));
+    setScrollTop(Math.max(0, element.scrollTop - introHeight));
+  }, [items, reservedTotal, introHeight, navigationScopeKey, scopeKey]);
   const cancelQuickPreview = useGalleryEvent(() => {
     quickPreviewRequestRef.current += 1;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
@@ -366,7 +379,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const mountedTiles = positionedTiles.filter(tile => retainedIds.has(tile.asset.id) || inRangeIds.has(tile.asset.id));
   useLayoutEffect(() => { paintedRef.current = { scopeKey, scrollTop, ids: new Set(mountedTiles.map(tile => tile.asset.id)) }; });
   const areaVisible = useContext(AreaVisible);
-  const folderScope = folderMoveScope(scopeKey);
+  const folderScope = folderMoveScope(navigationScopeKey);
   const visitScope = useRef(folderScope);
   if (!areaVisible || visitScope.current === undefined) visitScope.current = folderScope;
   useFirstAppearance(scrollRef, items.length, visitScope.current === folderScope, `asset-gallery:${mediaSource}`);

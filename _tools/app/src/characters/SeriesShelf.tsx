@@ -14,7 +14,7 @@ const movesBack = (from: readonly string[] | undefined, to: readonly string[] | 
   Boolean(from && to && to.length < from.length && to.every((part, index) => from[index] === part));
 
 /** Keep both real trees mounted: the prepared image elements become the shown ones. */
-export function SeriesShelf({ scope, path, privacyKey, ready, children }: { scope: string; path?: readonly string[]; privacyKey: string; ready: boolean; children: ReactNode }) {
+export function SeriesShelf({ scope, path, privacyKey, ready, hidden = false, children }: { scope: string; path?: readonly string[]; privacyKey: string; ready: boolean; hidden?: boolean; children: ReactNode }) {
   const [shown, setShown] = useState(scope);
   const [exiting, setExiting] = useState<{ scope: string; children: ReactNode } | null>(null);
   const retained = useRef({ scope, path, privacyKey, children });
@@ -94,7 +94,7 @@ export function SeriesShelf({ scope, path, privacyKey, ready, children }: { scop
     animations.current.forEach(animation => { if (animation) { animation.onfinish = null; animation.cancel(); } });
   }, []);
 
-  return <div ref={host} className="series-browser__overview series-shelf">
+  return <div ref={host} className="series-browser__overview series-shelf" style={hidden ? { display: 'none' } : undefined}>
     {switching && <div key={shown} inert>{retained.current.children}</div>}
     {!switching && exiting && <div key={exiting.scope} data-shelf-exit aria-hidden="true" inert
       style={{ pointerEvents: "none" }}>{exiting.children}</div>}
