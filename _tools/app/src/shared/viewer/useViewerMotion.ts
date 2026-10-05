@@ -1,4 +1,4 @@
-import { useLayoutEffect,useCallback, useRef} from 'react';
+import { createContext, useContext, useLayoutEffect,useCallback, useRef} from 'react';
 
 export type TileRect = {left: number; top: number; width: number; height: number};
 export function viewerTile(id: string | null) {
@@ -11,6 +11,8 @@ export function visibleTileRect(id: string | null): TileRect | undefined {
   if (clip && clip.width > 0 && clip.height > 0 && (r.bottom <= clip.top || r.top >= clip.bottom || r.right <= clip.left || r.left >= clip.right)) return;
   return {left: r.left, top: r.top, width: r.width, height: r.height};
 }
+/** Replaces the viewer's own close: an image opened from Home closes by switching back to Home. */
+export const ViewerExit = createContext<(() => void) | null>(null);
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const sheet = 'cubic-bezier(.32,.72,0,1)';
 const standard = 'cubic-bezier(.2,0,0,1)';
@@ -23,6 +25,8 @@ export function useViewerMotion(id: string | null, onClose: () => void, origin?:
   const sources = useRef(new Map<string, string>());
   if (source && sourceId) sources.current.set(source, sourceId);
   const closing = useRef(false);
+  const exitHandler = useContext(ViewerExit);
+  const exit = useRef(exitHandler); exit.current = exitHandler;
   const cleanup = useRef<(() => void) | undefined>(undefined);
   const bind = useCallback((node: HTMLElement | null) => {
     cleanup.current?.(); cleanup.current = undefined; root.current = node;
@@ -86,6 +90,7 @@ export function useViewerMotion(id: string | null, onClose: () => void, origin?:
   },[masked]);
   const close = useCallback(() => {
     if (closing.current) return;
+    if (exit.current) { exit.current(); return; }
     const node = root.current, media = node?.querySelector<HTMLElement>('[data-viewer-media]');
     if (!node || !media || reduced() || typeof media.animate !== 'function') { current.current.onClose(); return; }
     closing.current = true;

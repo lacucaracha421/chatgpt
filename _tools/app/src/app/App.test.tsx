@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DropSubscriber, NativeFileDropEvent } from "../ingestion/useFileDrop";
 import type {
@@ -408,6 +409,54 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
     expect(await screen.findByRole("region", { name: /^오늘 할 것/ })).toBeInTheDocument();
+  });
+
+  it("opens a Home 1년 전 오늘 image straight in the viewer and closing it returns to Home", async () => {
+    // Browser fixture: no native character review queue can keep the daily fallback busy.
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    localStorage.setItem("lakomics.libraryPath", summary.root);
+    const libraryGateway = gateway();
+    libraryGateway.getHomeMedia = vi.fn().mockResolvedValue({ playing: [], dailyAsset: asset });
+    const progress = await libraryGateway.cloudBackfillProgress();
+    vi.mocked(libraryGateway.cloudBackfillProgress).mockResolvedValue({ ...progress, replicationEnabled: true });
+    vi.mocked(libraryGateway.getRevisitSlate).mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [{ kind: "date", assetIds: [asset.id] }] } as Awaited<ReturnType<LibraryGateway["getRevisitSlate"]>>);
+    vi.mocked(libraryGateway.listAssets).mockImplementation(async query => ({ items: query.unclassifiedOnly ? [] : [asset], nextCursor: null }));
+    let resolveAsset!: (value: AssetSummary) => void;
+    vi.mocked(libraryGateway.getAsset).mockReturnValue(new Promise(resolve => { resolveAsset = resolve; }));
+    let resolveCollections!: () => void;
+    vi.mocked(libraryGateway.listCollections).mockReturnValue(new Promise(resolve => { resolveCollections = () => resolve([]); }));
+    const frames: string[] = [];
+    const record = () => {
+      const stage = document.querySelector<HTMLElement>("[data-motion-shown]");
+      if (!stage) return;
+      const area = stage.dataset.motionShown!;
+      const host = stage.querySelector(`[data-motion-view="${area}"]`);
+      // A viewer outside every area paints over whatever area is shown.
+      const overlay = document.querySelector('.asset-viewer') && !document.querySelector('[data-motion-view] .asset-viewer') ? '+viewer over it' : '';
+      const frame = `${area}:${host?.querySelector('.asset-viewer') ? 'viewer' : host?.querySelector('.asset-browser') ? 'gallery' : 'home'}${overlay}`;
+      if (frames[frames.length - 1] !== frame) frames.push(frame);
+    };
+    render(<Profiler id="home-navigation" onRender={record}><App gateway={libraryGateway} subscribeDrops={noDrops} /></Profiler>);
+    await waitFor(() => expect(libraryGateway.listCatalogReview).toHaveBeenCalled());
+    await act(async () => resolveCollections());
+    const button = await screen.findByRole("button", { name: "1년 전 오늘 이미지 열기" }, { timeout: 5000 });
+    frames.length = 0;
+    record();
+    fireEvent.click(button);
+    expect(document.querySelector('[data-motion-shown]')?.getAttribute('data-motion-shown')).toBe('home');
+    await act(async () => resolveAsset(asset));
+    await screen.findByRole("dialog", { name: asset.originalName });
+    await waitFor(() => expect(document.querySelector('[data-motion-shown]')?.getAttribute('data-motion-shown')).toBe('assets'));
+    record();
+    // One switch from Home to the viewer: the gallery behind it never paints first.
+    expect(frames).toEqual(['home:home', 'assets:viewer']);
+    await waitFor(() => expect(screen.getByRole("dialog", { name: asset.originalName })).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.mouseUp(window, { button: 3 });
+    await waitFor(() => expect(document.querySelector('[data-motion-shown]')?.getAttribute('data-motion-shown')).toBe('home'));
+    expect(screen.queryByRole('dialog', { name: asset.originalName })).toBeNull();
+    record();
+    // Closing goes straight back too: the viewer stays up until Home is shown.
+    expect(frames).toEqual(['home:home', 'assets:viewer', 'home:home']);
   });
 
   it("opens Home from the rail and leaves it for the screen a row owns", async () => {

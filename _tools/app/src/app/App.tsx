@@ -10,6 +10,7 @@ import {
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
 import { useCharacterHub } from "../characters/useCharacterHub";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
+import { HomeAssetDestination } from "../home/HomeAssetDestination";
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
 import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
@@ -217,6 +218,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const nativeDragAssetsRef = useRef(new Map<string, string[]>());
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
+  /** The requested asset was opened from Home: its viewer is the destination, and closing it returns Home. */
+  const [homeAsset, setHomeAsset] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
   const [videoReviewAssetIds, setVideoReviewAssetIds] = useState<string[]>([]);
   const [trashCount, setTrashCount] = useState(0);
@@ -429,9 +432,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
   /** Set when Home opened another tab: back (mouse, Escape) from that tab's first screen returns to Home. */
   const homeReturnRef = useRef(false);
+  const assetOpenRequest = useRef(0);
   function navigateView(next: AssetView, options: { fromHome?: boolean } = {}) {
     // A vault recovery key shown once in Settings is lost if Settings closes (asks first).
     if (view.kind === "settings" && !confirmLeaveVaultRecovery()) return;
+    assetOpenRequest.current += 1;
     // Re-opening a settings section must switch to it even when the view object is unchanged.
     if (next.kind === "settings") setSettingsSectionRequest((current) => current + 1);
     if (next.kind === "collection" && view.kind === "collections") collectionReturnViewRef.current = view;
@@ -449,6 +454,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   function navigateBack(fallback?: AssetView) {
+    assetOpenRequest.current += 1;
     const previous = viewHistoryRef.current.pop() ?? fallback;
     if (!previous || backNavigationTab(previous) !== backNavigationTab(view)) {
       if (!homeReturnRef.current || view.kind === "home") return false;
@@ -539,13 +545,23 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   async function openExisting(assetId: string, options: { fromHome?: boolean } = {}) {
+    const request = ++assetOpenRequest.current;
     try {
       const asset = await gateway.getAsset(assetId);
+      // The user went somewhere else while the asset loaded.
+      if (request !== assetOpenRequest.current) return;
       navigateView({ kind: "classification", classificationId: null }, options);
+      setHomeAsset(Boolean(options.fromHome));
       setRequestedAsset(asset);
     } catch (error) {
       setMessage(commandErrorMessage(error, "기존 자산을 열지 못했습니다."));
     }
+  }
+
+  function leaveHomeAsset() {
+    navigateView({ kind: "home" });
+    setRequestedAsset(null);
+    setHomeAsset(false);
   }
 
   function cancelPointerDrag(event: React.PointerEvent<HTMLElement>) {
@@ -719,7 +735,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 <WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={setShownArea} onSettlingChange={setAreaSettling} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
+                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={setShownArea} onSettlingChange={setAreaSettling} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && (area !== "assets" || !homeAsset || !requestedAsset || Boolean(host.querySelector(".asset-viewer"))) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "private_vault" ? (
                   privateVaultVisible && privateVaultStatus
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
@@ -802,6 +818,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 ) : view.kind === "artists" ? (
                   <ArtistHub view={view} onNavigate={navigateView} privacyMode={preferences.privacyMode} />
                 ) : (
+                  <HomeAssetDestination active={homeAsset} onExit={homeAsset && requestedAsset ? leaveHomeAsset : undefined}>
                   <CharacterFolderContent albums={albums} sort={preferences.assetSort} onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} galleryLayout={preferences.galleryLayout} onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })} privacyMode={preferences.privacyMode} onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })} metadataVisible={preferences.metadataVisible} onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })} thumbnailRowHeight={preferences.thumbnailRowHeight} onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }} onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }} onMembershipChanged={refreshMembershipCounts}>
                   <AssetBrowser
                     navigationMemory={assetNavigationMemory.current}
@@ -844,6 +861,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     }}
                   />
                   </CharacterFolderContent>
+                  </HomeAssetDestination>
                 )}
                 </Suspense></WorkspaceAreaSwitch></MotionScope>
                 {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}

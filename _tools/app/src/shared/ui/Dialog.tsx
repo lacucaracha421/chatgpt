@@ -1,6 +1,6 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { useMotionSurface } from "./useMotionSurface";
-import { useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren, type WheelEventHandler } from "react";
+import { createContext, useContext, useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren, type WheelEventHandler } from "react";
 import { useBackHandler, useBackNavigationContext, useBackRequest } from "../navigation/BackNavigation";
 
 type DialogProps = PropsWithChildren<{
@@ -17,7 +17,11 @@ type DialogProps = PropsWithChildren<{
 const SWIPE_BACK_PX = 80;
 const SWIPE_BACK_COOLDOWN_MS = 800;
 
+/** Where dialogs mount; null (the default) is the document body. A Home destination mounts its viewer inside its area. */
+export const DialogPortalContainer = createContext<HTMLElement | null>(null);
+
 export function Dialog({ children, open, title, variant = "default", onKeyDown, onKeyUp, layer = false, onClose }: DialogProps) {
+  const portalContainer = useContext(DialogPortalContainer);
   const backNavigation = useBackNavigationContext();
   const requestBack = useBackRequest();
   const surfaceRef = useMotionSurface(layer ? "layer" : "dialog", variant !== "fullscreen" || layer, title);
@@ -75,7 +79,7 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
 
   return (
     <RadixDialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <RadixDialog.Portal>
+      <RadixDialog.Portal container={portalContainer ?? undefined}>
         <RadixDialog.Overlay ref={scrimRef} className="ui-dialog__overlay" />
         <RadixDialog.Content
           ref={surfaceRef}
