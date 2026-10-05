@@ -119,6 +119,8 @@ export function App() {
   const notesBack=useRef<(()=>boolean)|null>(null);
   const characterBack = useRef<(()=>boolean)|null>(null);
   const collectionBack = useRef<(()=>boolean)|null>(null);
+  const homeWorkBack = useRef<(()=>boolean)|null>(null);
+  const [homeWork,setHomeWork]=useState<{id:string;key:number}|null>(null);
   const catalogBack = useRef<(()=>boolean)|null>(null);
   const [librarySegment,setLibrarySegment]=useState<LibrarySegment>('folders');
   const [vaultOpen,setVaultOpen]=useState(false);
@@ -643,7 +645,7 @@ export function App() {
       else if (closeVisibleShade()) { /* The section shade consumed back. */ }
       else if (state.calendarOpen) {if (!calendarBack.current?.()) setCalendarOpen(false);}
       else if (state.artistsOpen) {if (!artistsBack.current?.()) closeArtists();}
-      else if (state.area === 'collections') {if (!collectionBack.current?.()) returnHome();}
+      else if (state.area === 'collections') {if (!(homeOriginRef.current?.area==='collections'?homeWorkBack:collectionBack).current?.()) returnHome();}
       else if (state.area === 'notes') {if (!notesBack.current?.()) returnHome();}
       else if (state.area === 'catalog') {if (!catalogBack.current?.()) returnHome();}
       else if (state.page.view.characters && characterBack.current?.()) {  }
@@ -898,7 +900,8 @@ export function App() {
     }
   };
   const findEntries=tabletFindEntries({works:findWorks.works,artists:searchArtists.artists,notes:findNotes.notes,folders:entries,albums:albumTree,navigate:findNavigate});
-  const motionTab=area==='assets'?page.view.tab:area;
+  const homeWorkOpen=area==='collections'&&homeOrigin?.area==='collections'&&!!homeWork;
+  const motionTab=homeWorkOpen?'home-work':area==='assets'?page.view.tab:area;
   // Full-screen layers are pushed in from the right over the page and pop back the same way; the
   // page beneath stays put. Artists replaces the page only once it has covered it.
   const searchLayer=useMotionSurface('layer'),calendarLayer=useMotionSurface('layer'),artistsLayer=useMotionSurface('layer'),settingsLayer=useMotionSurface('layer');
@@ -938,18 +941,20 @@ export function App() {
           onPending={openPending}
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
-          onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/>
+          onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});setArea('collections');setHomeWork(current=>({id,key:(current?.key??0)+1}));}}/>
   </main></>;
   const motionViews={
     library: assetAreaNode,
     home: homeAreaNode,
-    collections: (collectionsVisited||areaPrewarm.mounted) && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} prefetch={areaPrewarm.prefetch&&!collectionsVisited} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>,
+    'home-work': homeWork && <Collections key={`home-work:${status.endpoint}:${homeWork.key}`} active={homeWorkOpen} paused={settings || !!viewer} backRef={homeWorkBack} directWork={homeWork.id} onReturnHome={returnHome}/>,
+    collections: (collectionsVisited||areaPrewarm.mounted) && <Collections key={`collections:${status.endpoint}`} active={area==='collections'&&!homeWorkOpen} prefetch={areaPrewarm.prefetch&&!collectionsVisited} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest}/>,
     notes: notesVisited && <Notes findStore={findStore} key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>,
     catalog: (catalogVisited||areaPrewarm.mounted) && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} prefetch={areaPrewarm.prefetch&&!catalogVisited} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>,
   };
   const tabReady=(host:HTMLElement,key:string)=>{
     const has=(selector:string)=>Array.from(host.querySelectorAll(selector)).some(element=>!element.closest('[style*="display: none"]'));
     if(!viewReady(host))return false;
+    if(key==='home-work'&&has('.mobile-collections'))return has('.tablet-work, .inline-error');
     if(key==='collections'&&has('.mobile-collections'))return has('.collection-tile, .collection-card, .collection-grid > *, .manga-bookcase, .empty-state, .inline-error, .error-message, .tablet-work');
     if(key==='catalog'&&has('.mobile-catalog'))return has('.catalog-card, .empty-state:not([role="status"]), .inline-error, .catalog-detail-intro');
     if(key==='notes'&&has('.mobile-notes'))return has('.notes-unlock, .notes-list-view, .memo-editor, .notes-recovery');
@@ -960,7 +965,7 @@ export function App() {
     {/* Every configured area except Home draws its own title bar. */}
     {!status.configured&&appHeader}
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area} data-layer-covered={artistsCovered||undefined}>
-      <AreaSwitch activeKey={motionTab} views={motionViews} retained={['library',...(page.view.tab==='home'?['home']:[]),'collections','notes','catalog']} ready={tabReady} crossFade={false}/>
+      <AreaSwitch activeKey={motionTab} views={motionViews} retained={['library',...(page.view.tab==='home'?['home']:[]),'collections','notes','catalog']} ready={tabReady} waitForReady={homeWorkOpen} crossFade={false}/>
       {assetSearchOpen&&<div className="asset-search-layer" ref={searchLayer}><AssetSearch items={searchItems} chips={searchChips.map(chipName)} endpoint={status.endpoint} paused={settings||!!viewer} onClose={()=>setAssetSearchOpen(false)} onChoose={chooseSearchScope}/></div>}
       {calendarOpen && <div className="release-calendar-layer" ref={calendarLayer}><ReleaseCalendar onClose={closeCalendar} initialKind={calendarKind} backRef={calendarBack}/></div>}
       {artistsOpen && <div className="artists-layer" ref={artistsLayer}><Artists endpoint={status.endpoint} backRef={artistsBack} initialArtist={artistSelection ?? undefined} onClose={closeArtists} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/></div>}
