@@ -6,6 +6,10 @@
 .workspace-index-slot[data-state="closed"] { width: 0; pointer-events: none; }
 .workspace-index-clip { height: 100%; width: var(--workspace-index-width); }
 .workspace-index-slot[data-state="closed"] .workspace-index-clip { display: none; }
+/* A user show/hide (망가) slides the sidebar width; the clip stays painted until the slot has closed. */
+.workspace-index-slot[data-toggling] { overflow: hidden; transition: width 220ms var(--ease-standard, cubic-bezier(.2,0,0,1)); }
+.workspace-index-slot[data-toggling][data-state="closed"] .workspace-index-clip { display: block; visibility: hidden; transition: visibility 0s linear 220ms; }
+@media (prefers-reduced-motion: reduce) { .workspace-index-slot[data-toggling] { transition: none; } .workspace-index-slot[data-toggling][data-state="closed"] .workspace-index-clip { transition: none; } }
 .workspace-index-slot .workspace-index { height: 100%; }
 .workspace-index-slot .workspace-index__resize { right: 0; }
 .workspace-navigation svg { flex: none; width: 18px; height: 18px; }

@@ -1,5 +1,4 @@
-import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
-import { ViewColumnsIcon } from "@heroicons/react/24/outline";
+import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, SidebarCloseIcon } from "../shared/ui/ArchiveIcons";
 import { Button } from "../shared/ui/Button";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { EASE_STANDARD, reducedMotion } from "../shared/motion/curves";
@@ -182,7 +181,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
         <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
         <div className="workspace-index__head-actions">
-          {canToggleIndex && <Button type="button" size="icon" variant="ghost" aria-label="사이드바 숨기기" onClick={() => chrome.setIndexHidden(area, true)}><ViewColumnsIcon aria-hidden="true" /></Button>}
+          {canToggleIndex && <Button type="button" size="icon" variant="ghost" aria-label="사이드바 숨기기" onClick={() => chrome.setIndexHidden(area, true)}><SidebarCloseIcon aria-hidden="true" /></Button>}
           <ChromeTarget name="search" />
           <ChromeTarget name="actions" />
           {area === "assets" && !chrome?.meta?.actions && onImportFiles && <button type="button" className="ui-button ui-button--icon ui-button--ghost" aria-label="파일 가져오기" aria-description="선택한 파일을 라이브러리로 가져오기" onClick={onImportFiles}><PlusIcon aria-hidden="true" /></button>}
@@ -229,7 +228,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
         <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
-    <div className="workspace-index-slot" data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
+    <div className="workspace-index-slot" data-toggling={canToggleIndex && !hideIndex && chrome.indexToggling ? "" : undefined} data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
       <div ref={indexClip} className="workspace-index-clip" hidden={indexClosed} style={{opacity: !indexClosed && settling && (previousClosed.current || indexEntrance.current) ? 0 : undefined}}>{indexContent.current}</div>
     </div>
     <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} descriptionSearch={descriptionSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />

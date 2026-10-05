@@ -24,8 +24,10 @@ type ChromeContextValue = {
   openSearch: (draft: string) => void;
   openFind: () => void;
   setFindAction: (action: (() => void) | null) => void;
-  indexHidden: Record<string, true>;
+  indexHidden: Record<string, boolean>;
   setIndexHidden: (area: string, hidden: boolean) => void;
+  /** True for a moment after a user toggle, so only that toggle animates the sidebar width. */
+  indexToggling?: boolean;
 };
 
 // Keep the context identity independent of Fast Refresh component updates,

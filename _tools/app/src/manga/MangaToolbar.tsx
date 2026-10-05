@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { ArrowPathIcon, ChevronDownIcon, ViewColumnsIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
+import { SidebarOpenIcon } from "../shared/ui/ArchiveIcons";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
@@ -37,7 +38,7 @@ export function MangaToolbar({ source, onSourceChange, countLabel, filterToken, 
   const sectionDrop = useSectionDrop({ label: "망가 출처", className: "manga-section-bar", value: source, onChange: onSourceChange, trailing: controls, options: sourceOptions });
   return <>
     <ViewToolbar sectionDrop={sectionDrop} title="망가" ariaLabel={ariaLabel}
-      leadingAction={workspace?.indexHidden.manga && <Button type="button" size="icon" variant="ghost" aria-label="사이드바 보이기" onClick={() => workspace.setIndexHidden("manga", false)}><ViewColumnsIcon aria-hidden="true" /></Button>}
+      leadingAction={workspace?.indexHidden.manga && <Button type="button" size="icon" variant="ghost" aria-label="사이드바 보이기" onClick={() => workspace.setIndexHidden("manga", false)}><SidebarOpenIcon aria-hidden="true" /></Button>}
       titleAccessory={<>
       {filterToken}
       {countLabel && <span className="manga-toolbar__count">{countLabel}</span>}

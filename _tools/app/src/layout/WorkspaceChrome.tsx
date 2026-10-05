@@ -1,6 +1,6 @@
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
 import { AdjustmentsHorizontalIcon } from "../shared/ui/ArchiveIcons";
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type PropsWithChildren, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PropsWithChildren, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import type { ChromeSearchSpec } from "./ChromeSearch";
@@ -21,23 +21,36 @@ export type ViewChromeSpec = {
   status?: ReactNode;
 };
 const INDEX_HIDDEN_KEY = "lakomics.workspace.indexHidden.v1";
-function readIndexHidden(): Record<string, true> {
+/** 망가 opens with its sidebar closed until the user shows it (user, 2026-10-05); a stored choice wins. */
+const INDEX_HIDDEN_DEFAULT: Record<string, boolean> = { manga: true };
+/** Long enough for the sidebar width transition (220 ms) to finish before the slot stops animating. */
+const INDEX_TOGGLE_MS = 300;
+function readIndexHidden(): Record<string, boolean> {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(INDEX_HIDDEN_KEY) ?? "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value).filter(([, hidden]) => hidden === true));
+    return Object.fromEntries(Object.entries(value).filter(([, hidden]) => typeof hidden === "boolean"));
   } catch {
     return {};
   }
 }
 export function WorkspaceChromeProvider({ scope, pending = false, children }: PropsWithChildren<{ scope: string; pending?: boolean }>) {
-  const [indexHidden, updateIndexHidden] = useState(readIndexHidden);
+  const [storedIndexHidden, updateIndexHidden] = useState(readIndexHidden);
+  // Areas without a stored choice use their default; consumers read `indexHidden[area] === true`.
+  const indexHidden = useMemo(() => ({ ...INDEX_HIDDEN_DEFAULT, ...storedIndexHidden }), [storedIndexHidden]);
+  // Only a user toggle animates the sidebar width; area switches keep their own view transition.
+  const [indexToggling, setIndexToggling] = useState(false);
+  const toggleTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(toggleTimer.current), []);
   const setIndexHidden = useCallback((area: string, hidden: boolean) => {
-    const next = { ...indexHidden };
-    if (hidden) next[area] = true; else delete next[area];
+    // The choice is stored explicitly, so a shown 망가 sidebar stays shown despite its closed default.
+    const next = { ...storedIndexHidden, [area]: hidden };
     updateIndexHidden(next);
+    setIndexToggling(true);
+    window.clearTimeout(toggleTimer.current);
+    toggleTimer.current = window.setTimeout(() => setIndexToggling(false), INDEX_TOGGLE_MS);
     try { localStorage.setItem(INDEX_HIDDEN_KEY, JSON.stringify(next)); } catch { /* Keep the toggle usable when storage is unavailable. */ }
-  }, [indexHidden]);
+  }, [storedIndexHidden]);
   const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null, header: null, details: null });
   const [registrations, setRegistrations] = useState<ChromeMeta[]>([]);
   const setTarget = useCallback((slot: Slot, element: HTMLElement | null) => {
@@ -63,8 +76,8 @@ export function WorkspaceChromeProvider({ scope, pending = false, children }: Pr
   const findAction = useRef<(() => void) | null>(null);
   const setFindAction = useCallback((action: (() => void) | null) => { findAction.current = action; }, []);
   const openFind = useCallback(() => findAction.current?.(), []);
-  const value = useMemo(() => ({ openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden }),
-    [openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden]);
+  const value = useMemo(() => ({ openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden, indexToggling }),
+    [openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden, indexToggling]);
   return <ChromeContext.Provider value={value}><ChromePresenceContext.Provider value>{children}</ChromePresenceContext.Provider></ChromeContext.Provider>;
 }
 

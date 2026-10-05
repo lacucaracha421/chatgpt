@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -41,12 +41,17 @@ it("offers a collection list when detail was opened without a remembered list", 
 const baseProps = { collectionType: "game" as const, width: 208, onWidthChange: vi.fn(), assetNavigation: null, reviewCount: 0, trashCount: 0 };
 const assetsView = { kind: "classification" as const, classificationId: null };
 
-it("changes index presence without width or transform transitions", () => {
+it("changes index presence without transitions, except a user toggle that slides the width", () => {
   const css = readFileSync('src/styles/chrome.css', 'utf8');
   const indexRules = css.match(/[^{}]*workspace-index-(?:slot|clip)[^{}]*\{[^}]*\}/g)!;
-  expect(indexRules.length).toBeGreaterThan(0);
-  expect(indexRules.join('\n')).not.toMatch(/transform|transition/);
-  expect(indexRules.join('\n')).toContain('display: none');
+  const plain = indexRules.filter(rule => !rule.includes('data-toggling'));
+  expect(plain.length).toBeGreaterThan(0);
+  expect(plain.join('\n')).not.toMatch(/transform|transition/);
+  expect(plain.join('\n')).toContain('display: none');
+  // Only a user show/hide (data-toggling, user 2026-10-05) animates, and only the width.
+  const toggling = indexRules.filter(rule => rule.includes('data-toggling')).join('\n');
+  expect(toggling).toMatch(/transition: width 220ms/);
+  expect(toggling).not.toMatch(/transform/);
 });
 
 it("fades an appearing index only when the content cross-fade starts", () => {
@@ -104,6 +109,7 @@ function IndexToggleWorkspace({ view = { kind: "manga" } }: { view?: AssetView }
 }
 
 it("hides and restores the manga index without replacing the grid or its state", async () => {
+  localStorage.setItem(indexHiddenKey, JSON.stringify({ manga: false }));
   const user = userEvent.setup();
   render(<IndexToggleWorkspace />);
   const grid = screen.getByTestId("manga-grid");
@@ -130,22 +136,40 @@ it("hides and restores the manga index without replacing the grid or its state",
   expect(selection).toHaveValue("선택 유지 3");
 });
 
-it("remembers hidden and shown manga index states across workspace remounts", async () => {
+it("opens 망가 with its index closed, then remembers shown and hidden across workspace remounts", async () => {
   const user = userEvent.setup();
   const first = render(<IndexToggleWorkspace />);
-  await user.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
-  first.unmount();
-  const second = render(<IndexToggleWorkspace />);
   expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "사이드바 보이기" }));
+  expect(JSON.parse(localStorage.getItem(indexHiddenKey)!)).toEqual({ manga: false });
+  first.unmount();
+  const second = render(<IndexToggleWorkspace />);
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
   second.unmount();
   render(<IndexToggleWorkspace />);
-  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "사이드바 보이기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "사이드바 보이기" })).toBeInTheDocument();
+});
+
+it("slides the index width only for a moment after a user toggle", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { container } = render(<IndexToggleWorkspace />);
+    const slot = container.querySelector<HTMLElement>(".workspace-index-slot")!;
+    expect(slot).not.toHaveAttribute("data-toggling");
+    await user.click(screen.getByRole("button", { name: "사이드바 보이기" }));
+    expect(slot).toHaveAttribute("data-toggling");
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(slot).not.toHaveAttribute("data-toggling");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("limits index toggling to manga and preserves preferences for other areas", async () => {
-  localStorage.setItem(indexHiddenKey, JSON.stringify({ assets: true, notes: true }));
+  localStorage.setItem(indexHiddenKey, JSON.stringify({ assets: true, notes: true, manga: false }));
   const user = userEvent.setup();
   const { rerender } = render(<IndexToggleWorkspace />);
   await user.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
@@ -163,22 +187,24 @@ it("limits index toggling to manga and preserves preferences for other areas", a
   }
   rerender(<IndexToggleWorkspace />);
   await user.click(screen.getByRole("button", { name: "사이드바 보이기" }));
-  expect(JSON.parse(localStorage.getItem(indexHiddenKey)!)).toEqual({ assets: true, notes: true });
+  expect(JSON.parse(localStorage.getItem(indexHiddenKey)!)).toEqual({ assets: true, notes: true, manga: false });
 });
 
-it.each(["broken", "null", "[]", '"manga"', '{"manga":"true"}'])("shows the manga index for invalid storage: %s", value => {
+it.each(["broken", "null", "[]", '"manga"', '{"manga":"true"}'])("falls back to the closed 망가 index for invalid storage: %s", value => {
   localStorage.setItem(indexHiddenKey, value);
   render(<IndexToggleWorkspace />);
-  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "사이드바 보이기" })).toBeInTheDocument();
 });
 
 it("keeps the toggle usable when localStorage reads and writes fail", async () => {
   vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
   render(<IndexToggleWorkspace />);
-  await userEvent.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
   await userEvent.click(screen.getByRole("button", { name: "사이드바 보이기" }));
   expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
 });
 
 it("keeps 홈, 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 while its USB is attached, then 찾기 and 더보기", async () => {
@@ -523,6 +549,7 @@ it("opens a view's own search editor from the palette with the typed draft", asy
       </SearchSurface>,
     } }} />;
   }
+  localStorage.setItem(indexHiddenKey, JSON.stringify({ manga: false }));
   render(<BackNavigationProvider><WorkspaceChromeProvider scope="test">
     <WorkspaceNavigation {...baseProps} view={{ kind: "manga" }} onNavigate={vi.fn()} />
     <SurfaceView />
