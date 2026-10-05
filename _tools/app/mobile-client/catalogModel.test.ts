@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {DEFAULT_CATALOG_QUERY,CATALOG_PATH_MAX_BYTES,FILTER_JSON_MAX_BYTES,catalogFilterBytes,catalogPath,catalogPathIssue,catalogDetailPath,catalogReaderPath,catalogTagQuery,supportsDisplayPreferences,utf8Bytes,wireExcludedTags} from './catalogModel';
+import {DEFAULT_CATALOG_QUERY,catalogError,CATALOG_PATH_MAX_BYTES,FILTER_JSON_MAX_BYTES,catalogFilterBytes,catalogPath,catalogPathIssue,catalogDetailPath,catalogReaderPath,catalogTagQuery,supportsDisplayPreferences,utf8Bytes,wireExcludedTags} from './catalogModel';
 const params=(path:string)=>new URL(path,'https://example.invalid').searchParams;
 describe('catalog read identities',()=>{
   it('keeps query and cursor separate and preserves provider-qualified IDs',()=>{
@@ -82,5 +82,14 @@ describe('catalog wire bounds',()=>{
     expect(()=>catalogPathIssue(long)).not.toThrow();
     expect(catalogPathIssue(long)).toBe('pathTooLong');
     expect(catalogFilterBytes(long)).toBe(0);
+  });
+});
+
+describe('catalogError',()=>{
+  it('tells a work gone from the source site and an unavailable work apart from a missing catalog route',()=>{
+    expect(catalogError({status:404,details:{detail:'work not found on k-hentai'}})).toBe('원본 사이트에서 이 작품을 찾을 수 없습니다. 삭제됐을 수 있으니 다른 판본이 있으면 그쪽을 열어 보세요.');
+    expect(catalogError({status:404,details:{detail:'Catalog work is unavailable'}})).toBe('지금 목록에서는 이 작품을 볼 수 없습니다. 새로고침해 주세요.');
+    expect(catalogError({status:404,details:{detail:'Not Found'}})).toBe('서버에 모바일 카탈로그 기능이 필요합니다.');
+    expect(catalogError({status:404})).toBe('서버에 모바일 카탈로그 기능이 필요합니다.');
   });
 });

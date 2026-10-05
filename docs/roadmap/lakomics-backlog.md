@@ -2,17 +2,17 @@
 
 Living source of truth for **active** Lakomics work only. Completed and superseded records live in [lakomics-completed.md](lakomics-completed.md).
 
-Reconciled 2026-10-05 against committed `main` at `75f70dba` (today's commits, plus 2026-10-04 fixes where they close listed bullets); full reconciliation 2026-10-03 at `adb00569`. Concurrent code edits are excluded. Source completion is separate from native/device acceptance and production rollout; uncertain claims are dated below. Removed records are indexed in the [2026-10-03](lakomics-completed.md#closure-checkpoint--2026-10-03-backlog-reconciliation) and [2026-10-05](lakomics-completed.md#closure-checkpoint--2026-10-05--tablet-catch-up-ui-unification-phase-1-and-pc-speed) checkpoints.
+Reconciled 2026-10-05 (night) against committed `main` at `223fac11`; full reconciliation 2026-10-03 at `adb00569`. Concurrent code edits are excluded. All pending native PC / tablet / Windows acceptance was closed by the user on 2026-10-05 after overall use of the current release build and tablet 0.9.26 ([night checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-05-night--ui-unification-phases-23-folder-move-motion-bookmarks-speed-and-acceptance-closure)); production rollout stays separate and uncertain claims are dated below. Removed records are indexed in the [2026-10-03](lakomics-completed.md#closure-checkpoint--2026-10-03-backlog-reconciliation), [2026-10-05](lakomics-completed.md#closure-checkpoint--2026-10-05--tablet-catch-up-ui-unification-phase-1-and-pc-speed) and [2026-10-05 (night)](lakomics-completed.md#closure-checkpoint--2026-10-05-night--ui-unification-phases-23-folder-move-motion-bookmarks-speed-and-acceptance-closure) checkpoints.
 
 ## Current priority
 
-Updated 2026-10-05: tablet catch-up (item 0) largely progressed today; order otherwise as set by the user on 2026-10-03/04. PC remains canonical; tablet follows in the same round.
+Updated 2026-10-05 (night): the tablet catch-up and the 2026-10-05 round are done and all pending device acceptance is closed (user 2026-10-05); order otherwise as set by the user on 2026-10-03/04. PC remains canonical; tablet follows in the same round.
 
-0. **Tablet catch-up before Collections authority (user 2026-10-04):** source done — shared shelf/work-entry pieces, approved Home layout, motion phase 3, delayed busy labels and count parity shipped in Android 0.9.16 (`07af036e`), followed by 0.9.17–0.9.24 (0.9.21–0.9.24 installed on the tablet 2026-10-05). Left: the user's device check, then the in-progress round in `USER-FEEDBACK-20261005`, then resume Collections authority 1B (item 2).
-1. **PERF-ALL-001:** measurements first — PC idle residue, PC Collections first open, tablet cold thumbnails/startup, and `PC-POLISH-20261002` item 5. `PERF-20261002`, `MOBILE-PERF-002` and Home measurements are consolidated here.
-2. **USER-REQ-20260924 / USER-REQ-20260926B:** Collections authority slices 1B (PC write paths + first tablet editing UI) and 1C (separately authorized activation), then tablet Collection creation. 1A (verify-only baseline, `883a36a6`) shipped and deployed 2026-10-04; design: [Collection authority](../research/collection-authority-design-20260924.md).
-3. **TABLET-PARITY-001:** artist slice 1 (rename/hide/pin, 숨긴 작가) shipped 2026-10-04 in tablet 0.9.15; merge/detach stay PC-only unless the user asks; remaining tablet parity items below.
-4. **Remaining work, preserving the previous priority order:** Collections/manga acceptance → Home/artist/AV/calendar acceptance (`USER-REQ-20260927`, `HOME-DASH-001`) → release picker checks (`PC-RELEASE-FEEDBACK-20260929`) → remaining tablet parity → `ARTIST-SUGGEST-001` acceptance → `AUTO-TAG-001` approval → Windows gates (`PC-DECLUTTER-001`, `WIN-SYNC-001`, `VAULT-ENC-001`) → `PC-REVIEW-001` → `CLOUD-POST-001` → `PC-UI-001` / `ARTIST-001` acceptance → `HOME-OPT-001` test debt → `CHAR-AUTO-007`. Other low-priority and held requests retain their order below.
+1. **Next up:** (a) cancel or deprioritise thumbnail requests for views already left (`media_protocol_queue.rs`, `WIN-FEEDBACK-20261004`); (b) tablet startup performance — measure first (`PERF-ALL-001` tablet cold thumbnails/startup, `AUDIT-20261003` Android native items).
+2. **PERF-ALL-001:** remaining measurements — PC release-build switch/first-Home timings, PC idle residue, PC Collections first open and `PC-POLISH-20261002` item 5. `PERF-20261002`, `MOBILE-PERF-002` and Home measurements are consolidated here.
+3. **USER-REQ-20260924 / USER-REQ-20260926B:** Collections authority slices 1B (PC write paths + first tablet editing UI) and 1C (separately authorized activation), then tablet Collection creation. 1A (verify-only baseline, `883a36a6`) shipped and deployed 2026-10-04; design: [Collection authority](../research/collection-authority-design-20260924.md).
+4. **TABLET-PARITY-001:** artist slice 1 (rename/hide/pin, 숨긴 작가) shipped 2026-10-04 in tablet 0.9.15; merge/detach stay PC-only unless the user asks; remaining tablet parity items below.
+5. **Remaining work, preserving the previous priority order:** remaining tablet parity → `AUTO-TAG-001` approval → `PC-REVIEW-001` → `CLOUD-POST-001` → `HOME-OPT-001` test debt → `CHAR-AUTO-007`. Other low-priority and held requests retain their order below.
 
 ## Status legend
 
@@ -82,9 +82,10 @@ Status: `TODO` — implement tablet Collection creation after authority slice 1.
 ## TABLET-PARITY-001 — Remaining tablet parity
 
 Status: `PARTIAL` — rename/hide/edit the Artist tab with PC-equivalent behaviour (priority 4, user 2026-10-03); committed `Artists.tsx` still directs these edits to PC.
-- **Slice 1 (2026-10-04, `02656706`):** tablet rename / hide / pin + 숨긴 작가 list via the artist intent log (server overlay; PC applies on its artists publication pass). The status head now wakes the PC pass and open PC artist screens refresh on `library://artists-changed` (`ebb5f59b`); native timing is (unverified 2026-10-05). Merge/detach stay PC-only.
+- **Slice 1 (2026-10-04, `02656706`):** tablet rename / hide / pin + 숨긴 작가 list via the artist intent log (server overlay; PC applies on its artists publication pass). The status head now wakes the PC pass and open PC artist screens refresh on `library://artists-changed` (`ebb5f59b`). Merge/detach stay PC-only.
 - Add subtree folder listing, shelf thumbnail/count projection and true batch album/folder server operations; individual album commands and multi-selection classification already exist (`c60e57f9`, `f027836c`). Keep cursor/cache identity bound to subtree mode; do not repurpose direct `asset_count`. User 2026-09-29 approved server deployment for this scope.
 - Next IGDB refetch, one-off TMDB 400 and leftover diagnostics are (unverified 2026-10-03). Keep release-calendar ownership on PC. Deep character classification remains PC-only; viewer single-asset editors remain, multi-select character assignment stays dropped (user 2026-09-29).
+- **Manga-spine touch target (from `COLLECTION-VIEW-20261001`):** manga spines are 30 px against the 44 px touch-target rule (unverified 2026-10-03); a source-level size gap, kept when the acceptance list was closed.
 
 ## TRANSFER-001 — LocalSend-style direct transfer first, server as fallback
 
@@ -132,13 +133,13 @@ Status: `PARTIAL` — implemented redesigns, manga cleanup UI, automatic edition
 <a id="pc-release-feedback-20260929--release-build-use-feedback-2026-09-29-evening"></a>
 ## PC-RELEASE-FEEDBACK-20260929 — Deferred calendar-cover latency
 
-Status: `HOLD` — user deferred late PC calendar covers; no fix selected. Picker items 4–5 are in the consolidated acceptance section.
+Status: `HOLD` — user deferred late PC calendar covers; no fix selected. Picker items 4–5 acceptance was closed 2026-10-05 (night checkpoint).
 
 <a id="home-opt-001--home-optimisation-and-debugging-pass-pc-and-tablet"></a>
 ## HOME-OPT-001 — Residual test reliability
 
 Status: `TODO` — make two parallel-run `src/app/App.test.tsx` cases deterministic or measure worker-count effects; also retain intermittent Albums, assetFilterUi, AssetGallery and library-root-switch failures from the user's 2026-10-01 report (unverified 2026-10-03). Passing reruns do not establish the scheduling cause.
-Server `test_server_added_work_can_be_refreshed_and_survive_stale_pc` was intermittent on the VPS stage (2/3 failures, 2026-10-01); `198357b7` addresses a catalog refresh-count race, but equivalence to this failure is (unverified 2026-10-03). Home findings 1–8 are source-fixed; performance and acceptance are consolidated elsewhere.
+Server `test_server_added_work_can_be_refreshed_and_survive_stale_pc` was intermittent on the VPS stage (2/3 failures, 2026-10-01); `198357b7` addresses a catalog refresh-count race, but equivalence to this failure is (unverified 2026-10-03). Home findings 1–8 are source-fixed; performance is in `PERF-ALL-001` and their acceptance was closed 2026-10-05.
 Rust `thumbnail_maintenance::tests::apply_limit_is_resumable_and_skips_completed_files` failed repeatedly inside the Codex sandbox but passes in a normal shell (2026-10-05); find the sandbox-sensitive dependency (filesystem/timing) before trusting either result.
 
 <a id="pc-review-001--fix-findings-of-the-2026-09-25-pc-app-review"></a>
@@ -148,6 +149,10 @@ Status: `PARTIAL` — [review report](../research/pc-app-review-2026-09-25.md); 
 - Asset restore/error-recovery and relation re-baseline edges; repeated content-hash mismatches; dropped lifecycle-intent detail; remaining non-trash sync UI-thread work.
 - `empty_trash`/purge lock scope, TrashBrowser retention reset and authority-path purge guard re-review; IGDB screenshot hero labeling; Aladin/Kakao renumbering retry; long HEVC/ProRes limits; S36 rollback after trashing an automatic acceptance.
 In-flight artwork cleanup race is fixed (`af2fd1a4`); this does not prove every purge/recovery edge accepted.
+
+## VAULT-ENC-001 — Residual audit claims
+
+Status: `TODO` — low priority; kept when the vault's acceptance line was closed 2026-10-05 (ADR-0039). Original scan-error title/thumbnail preservation, full-image cache headers and per-tile-probe audit survivors are (unverified 2026-10-03); recheck the rewritten path only.
 
 <a id="oss-scan-20260926--open-source-projects-worth-using-idea"></a>
 ## OSS-SCAN-20260926 — Optional bounded trials
@@ -164,18 +169,18 @@ Status: `IDEA` — user 2026-09-26, not started. Candidate order: Collection pro
 ## TRANSFER-REVIEW-001 — Residual transfer design edges
 
 Status: `TODO` — low priority. Scope catalog duplicate decisions by library identity as well as server address; resolve similarity-review withdrawal arriving after the PC log read but before feed PUT, leaving the asset in Trash (unverified 2026-10-03).
-Live R2 Content-Length enforcement and transfer recovery checks are in consolidated acceptance; implemented bounds/paging/reclaim are archived.
+Live R2 signed Content-Length refusal is not established by fixtures (storage enforcement unverified); transfer recovery acceptance was closed 2026-10-05; implemented bounds/paging/reclaim are archived.
 
 <a id="server-review-20260924--remaining-judgment-calls-of-the-cloud-api-review"></a>
 ## SERVER-REVIEW-20260924 — Residual server judgment calls
 
 Status: `TODO` — low priority; [review](../research/server-review-2026-09-24.md). Personal-edit/noop, character/similarity decision histories and observation-ledger retention still need review (unverified 2026-10-03); refresh-job pruning is implemented (`5c1b80d7`) and is not the same history.
-Items 5 (legacy long memo conflict) and 9 (auth before body validation) are fixed (`67e0cd97`). Shared-token trash/restore matches the retained design; broader refusal-path acceptance is consolidated below.
+Items 5 (legacy long memo conflict) and 9 (auth before body validation) are fixed (`67e0cd97`). Shared-token trash/restore matches the retained design; the similarity-kept Trash refusal acceptance was closed 2026-10-05.
 
 <a id="mobile-ux-001--portrait-real-use-follow-up"></a>
 ## MOBILE-UX-001 — Deferred portrait investigations
 
-Status: `HOLD` — landscape two-pane Library stays parked (user 2026-09-28: need unclear); begin from actual wide-content/stand/split-screen use if resumed. Dimensions, sidebar, filters, copying and duplicate-review source work are archived; older unconfirmed device checks are consolidated below.
+Status: `HOLD` — landscape two-pane Library stays parked (user 2026-09-28: need unclear); begin from actual wide-content/stand/split-screen use if resumed. Dimensions, sidebar, filters, copying and duplicate-review source work are archived; older unconfirmed device checks were closed 2026-10-05.
 Keep classification-capacity research bounded and on hold: inference stays on PC, with isolated model-memory/latency measurement before any VPS migration (unverified 2026-10-03). Actual model-file viewing and three-column root cards were dropped; physical covers remain sufficient.
 
 # Character classification
@@ -208,12 +213,18 @@ Status: `HOLD` — linear PDQ stays default; reopen only if representative 100k+
 # Works / Collections
 
 <a id="long-001--av-metadatacover-acquisition-and-candidate-selection"></a>
-## LONG-001 — AV lookup rollout and candidate acceptance
+## LONG-001 — AV lookup rollout
 
-Status: `PARTIAL` — collector → server inbox → PC LibreDMM/Wikidata chooser exists (`67e0cd97`, `b9c4f89a`, `b00f3bfe`). Confirm the recorded deployment/PC migration status before selecting rollout work (unverified 2026-10-03); native candidate-flow acceptance is below.
+Status: `PARTIAL` — collector → server inbox → PC LibreDMM/Wikidata chooser exists (`67e0cd97`, `b9c4f89a`, `b00f3bfe`). Confirm the recorded deployment/PC migration status before selecting rollout work (unverified 2026-10-03); native candidate-flow acceptance was closed 2026-10-05.
 User 2026-09-27 chose LibreDMM; DMM/FANZA affiliate API dropped (Korean geo/address barrier), JavLibrary browsing only. Keep explicit front/spine/back selection and manual artwork preservation, acquisition separate from application, no Vault coupling or second lifecycle. [Design](../research/av-link-design-20260927.md), [sources](../research/av-sources-20260926.md), `docs/prototypes/av-link-20260927/`.
 
 # Catalog / optional providers
+
+## CATALOG-KEEP-001 — Keep bookmarked works when the source deletes them
+
+Status: `TODO` — user 2026-10-06, not scheduled. On 2026-10-05 the bookmarked kHentai work 2583385 still listed and opened its detail from the published catalog, but its reader returned 404 because k-hentai no longer serves the gallery (`app.py` "work not found on k-hentai"); the tablet message now says so instead of "서버에 모바일 카탈로그 기능이 필요합니다". The user chose to keep copies of bookmarked works rather than look the work up on another source (that alternative stays with `CATALOG-002B`).
+- **Direction:** store the pages of bookmarked works (server or PC) so the reader falls back to the kept copy when the source is gone; reuse the planned local-manga-on-the-server path (`MANGA-CATALOG-FEEDBACK-20261004`) and the existing catalog reader.
+- **Open questions before building:** where copies live (VPS had ~23 GB free on 2026-10-04 and ~291 bookmarks), when to copy (on bookmark vs a background pass), image format/size limits, removal when a bookmark is cleared, and whether the PC reader needs the same fallback. Measure the bookmarks' total size first.
 
 ## CATALOG-002B — Optional Heliotrope coexistence
 
@@ -223,13 +234,7 @@ Status: `TODO` — low priority. VCK/kHentai stays default; isolate optional pro
 
 ## USER-FEEDBACK-20261005 — Requests of 2026-10-05
 
-Status: `IN_PROGRESS` — user requests and decisions of 2026-10-05; each bullet carries its own status. Requests delivered the same day are in the [2026-10-05 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-05--tablet-catch-up-ui-unification-phase-1-and-pc-speed).
-- **In progress (`IN_PROGRESS`, uncommitted at writing, 2026-10-05):**
-  - Home: 다시보기 opens its destination directly; 지금 하는 중 shelf fixes (scrollbar, gap, cut edge).
-  - Multi-person references: region-scoped references on assets owned by another character; whole-image references there stay blocked with a named hint.
-  - Tagger review: a third decision "맞음 · 영역 틀림", and the review also covers the 오리지널 folder.
-- **UI unification phase 2 — wording (`TODO`):** one wording per meaning on PC and tablet: 휴지통으로, 내 별점, 고정/좋아요, 검색 결과 없음, 빼기 vs 제거, 새로고침. Phase 1 (one icon family, shared IconButton/BookmarkToggle) shipped in `2eef344c`.
-- **UI unification phase 3 — shared pieces (`TODO`):** Badge (count, scrim), SectionLabel, EmptyState, Skeleton, displayDate and DDay, shared by both clients.
+Status: `TODO` — remaining user requests and decisions of 2026-10-05; each bullet carries its own status. Requests delivered the same day are in the [2026-10-05](lakomics-completed.md#closure-checkpoint--2026-10-05--tablet-catch-up-ui-unification-phase-1-and-pc-speed) and [2026-10-05 (night)](lakomics-completed.md#closure-checkpoint--2026-10-05-night--ui-unification-phases-23-folder-move-motion-bookmarks-speed-and-acceptance-closure) checkpoints.
 - **Manga catalog single click (`TODO`, confirm with the user):** since `f9fe6c60` a single click on a work card is held ~500 ms to detect a double click before the detail opens; the user may prefer an immediate open.
 - **Tag translations (`TODO`, later batch):** manga catalog tags are often long-winded paraphrases or untranslated, and some asset tags are untranslated; the user will collect examples first.
 - **AV work screen disc (`HOLD`):** tapping the disc plays a disc-out animation and opens a site; waits until the user picks the site.
@@ -237,28 +242,17 @@ Status: `IN_PROGRESS` — user requests and decisions of 2026-10-05; each bullet
 
 ## WIN-FEEDBACK-20261004 — First Windows release-run findings
 
-Status: `PARTIAL` — reported by the user 2026-10-04 on the first Windows release build (`e8b3d774`, WebView2). Most bullets now have source fixes; close each only after a Windows release-build check.
+Status: `PARTIAL` — reported by the user 2026-10-04 on the first Windows release build (`e8b3d774`, WebView2). The source-fixed bullets were closed by the user on 2026-10-05 (night checkpoint); the bullets below remain.
 - **Wrong Collection overview (found 2026-10-04, read-only):** 가치아쿠타 (`8a143d39…`) carries the MangaDex overview of 극락가 (Gokurakugai, same author Sano Yuto) while its Kakao volume data is correct; check the MangaDex binding and whether other works by the same author were matched to the wrong series.
 - **Windows test debt:** the three `library::collection_source::tests::source_root_*` failures are fixed with native separators (`7c1dd0e5`). Server `tests.test_media_thumbnail_encode` `test_no_kind_leaves_a_partial_file_behind_on_an_unsupported_source` returns exit 7 instead of 4 under the WSL test venv (Pillow/codec environment; untouched code).
 - **Abandoned thumbnail requests (found 2026-10-04, unverified natively):** `src-tauri/src/media_protocol_queue.rs` serves media-protocol thumbnail requests FIFO from a few slots and removing an `<img>` does not cancel its request, so after rapid tab/folder switches requests for views already left can queue ahead of visible ones. Not fixed (queue unchanged); mitigated by cheaper concurrent thumbnail lookups (`c0e41223`) and first-screen-only folder preloads (`2eef344c`). Check the request log during rapid switching and, if confirmed, drop or deprioritise requests whose view is gone.
 - **No popping in (user 2026-10-04):** progressed — menus, dialogs, popovers, toasts, selection bar and tablet sheets ease in and out (`2748f0db`); first-screen tiles and late images appear together (`2eef344c`, `288ae552`); the launch mark covers the first Home load (`3dd73981`). Keep sweeping instant panels and late blocks found in use (≈150–250 ms ease-in, reduced motion respected; never fade from a blank frame where the no-flash rule applies).
 - **Collections cache should survive (on hold — user 2026-10-04: seems fine after more use):** the user wanted the PC Collections screen to keep its cache instead of rebuilding it (compare `mobile-client` collection caching with the PC `collection_cache.rs` / frontend Collections loading and game-case bake cache).
-- **Source fix; native check pending:**
-  - **Starts in Saving Mode:** the launch label "절약 모드 해제 중" now waits for workload readiness (`1d9494b8`); whether the app actually entered the restricted state on Windows is unchecked.
-  - **Tab ghosting / sidebar tab switch motion:** the old view stays until the new one is ready and is replaced in one frame (`1d9494b8`); sidebar, title and content switch together (`1d329325`); View Transitions tab switch (`07af036e`); the 망가 sidebar slides and morphs as one view transition (`6abacd47`, `288ae552`).
-  - **Home tab delay:** Home stays mounted and refreshes in the background (`1d329325`); first Home load no longer waits for 중복 판본 (`8431e063`, see PERF-ALL-001).
-  - **Shelf pop-in:** spine and cover reveal together (`7d118b1e`).
-  - **쇼케이스:** count removed (`1d329325`); the PC showcase is laid out on the library shelf (`4d261d66`); type switches stay in the showcase and the tablet showcase gains type tabs (`3b3b2e8b`). Whether this meets the requested trayed-case display-shelf redesign needs the user's look.
-  - **Delayed busy labels:** one shared helper (600 ms delay, 400 ms minimum) on PC and tablet, including the manga 로컬 scan label (`1d329325`, tablet `07af036e`).
-  - **Tablet follow-up by sharing:** shared shelf/work-entry pieces in Android 0.9.16 (`07af036e`); 0.9.21–0.9.24 installed on the tablet. Tablet manga back synopsis/price still needs the volume fields in the replica (server work), a separate item.
-  - **Asset folder switch bounce:** character-count space reserved (`1d329325`); a folder opened at the top no longer jumps (`2eef344c`); series ↔ plain switches swap in one step (`288ae552`); steady 미분류/전체 switch (`e643ec64`).
-  - **Home fill — approved layout:** PC `2748f0db`, tablet `07af036e` (mockup `docs/prototypes/pc-home-fill-20261004/`, untracked; spec in the 2026-10-05 checkpoint).
-  - **3D collection objects release check (1)–(6):** no hinge gap, no default spine flash, the work viewer waits for its artwork and record, stable shelf width, lifted items paint above neighbours, no cover snap after a lift (`1d329325`); that the last one covers (1) "front cover rises ahead of the case" is (unverified 2026-10-05).
+- **Tablet manga back synopsis/price (`TODO`):** the tablet manga case back still needs the volume fields in the replica (server work), a separate item.
 
 ## MANGA-CATALOG-FEEDBACK-20261004 — Manga catalog requests
 
 Status: `TODO` — requested by the user 2026-10-04 (PC).
-- **Source fix; native check pending:** 로컬 view settings dropped, no counts on the mode toggle, 폴더 스캔 중 on the shared delayed helper (`1d329325`); the 망가 tab counts as ready on its first list and stays mounted like Home (`2748f0db`).
 - **Import local works:** add a way to bring works in from a local folder, supporting both archives and plain image folders (copy/move and destination decided below).
 - **Local manga on the tablet via the server (user 2026-10-04):** the user wants local manga readable on the tablet; NSFW content on the server is already accepted (assets are there). Direction: the PC uploads local works to the server and the tablet gets a 로컬 source in the catalog, read with the existing catalog reader, available while the PC is off. Measured 2026-10-04 (read-only): VPS `/` 52 GB with 23 GB free; local manga root `C:\laku\2군` is 197 MB. Decided (user 2026-10-04): every local work uploads automatically; import MOVES the source into the manga root (not copy). Destination (user 2026-10-04): automatic — read the artist from the name (e.g. `[작가명] 제목`, circle/artist brackets) into that artist folder; ask only when no artist can be read. Show a preview of where each item moves and confirm before moving (moves are hard to undo). Scheduled after the Home fill round.
 - **Selection flash (user 2026-10-04):** selecting a work in the Manga catalog makes its thumbnail flash briefly as the selection effect appears. Check whether the selection style changes the image layer (scale/filter/transform start or end causing a re-raster, as with the shelf lift fixed this round) or swaps the image source.
@@ -268,7 +262,7 @@ Status: `TODO` — requested by the user 2026-10-04 (PC).
 <a id="pc-polish-20261002--remaining-polish-and-acceptance"></a>
 ## PC-POLISH-20261002 — Remaining notification feature
 
-Status: `TODO` — native ledger notifications; current reminders are in-app only. Item 5 is in PERF; all implementation/acceptance slices are archived or consolidated below. PC full-range month TOC remains absent, a limitation without approved new scope; memo conflicts retain copies, not per-item merging.
+Status: `TODO` — native ledger notifications; current reminders are in-app only. Item 5 is in PERF; all implementation slices are archived and their acceptance was closed 2026-10-05. PC full-range month TOC remains absent, a limitation without approved new scope; memo conflicts retain copies, not per-item merging.
 
 ## AUDIT-20261003 — read-only audits of 2026-10-03 (left after the fix rounds)
 
@@ -307,7 +301,7 @@ Thumbnail-size slider is superseded by user-chosen shared row-count control (202
 <a id="stats-001--personal-statistics"></a>
 ## STATS-001 — Metric definitions
 
-Status: `PARTIAL` — clarify any remaining inventory/recorded-era metric definitions (unverified 2026-10-03); never infer activity from file timestamps. Source exists; native acceptance is consolidated below.
+Status: `PARTIAL` — clarify any remaining inventory/recorded-era metric definitions (unverified 2026-10-03); never infer activity from file timestamps. Source exists; native acceptance was closed 2026-10-05.
 
 <a id="idea-002--asset-date-timeline-exploration"></a>
 ## IDEA-002 — Date timeline exploration
@@ -332,13 +326,13 @@ Status: `TODO` — user 2026-10-04 asked for deeper integration with the Linux P
 
 ## GPU-BATCH-001 — Main-PC one-off heavy backfills
 
-Status: `TODO` — user 2026-10-04: use the new main PC (RTX 5070 Ti 16 GB, 12 threads, 23 GB) for heavy one-off work over the whole library (~9,073 images, 459 videos) that would be slow on the laptop; afterwards the laptop only keeps up with new items. Gate everything on the machine-local `performance.profile = "main"`; laptop behaviour unchanged. Library counts below are from the restored DB on 2026-10-04.
+Status: `PARTIAL` — user 2026-10-04: use the new main PC (RTX 5070 Ti 16 GB, 12 threads, 23 GB) for heavy one-off work over the whole library (~9,073 images, 459 videos) that would be slow on the laptop; afterwards the laptop only keeps up with new items. Gate everything on the machine-local `performance.profile = "main"`; laptop behaviour unchanged. Library counts below are from the restored DB on 2026-10-04.
 - **Already done 2026-10-04:** full PixAI v1.0 / canary / Kaloscope re-run on GPU (0.2–0.4 s/image, pack-copy preprocessing, matches the prior DB to float16); exports placed in the auto-tag inbox; nightly tagger switched to the same pack copy.
-- **Suggested order: 1 → 2 → 3.**
-  1. **CCIP feature backfill (B36 + S36):** 6,826 of 9,073 images have B36 features (only `auto_classify` series were scanned). Fill the rest so history refresh and character tools cover the whole library. Run on CPU with more threads, not GPU, so vectors stay bit-identical to the cache and the equivalence receipts keep working (GPU output is not bit-identical).
+- **Done 2026-10-05 — item 1, CCIP feature backfill:** B36 features now cover every normal image (user-approved one-off run, finished 23:23). Whether S36 also needs its own whole-library feature pass (the item was titled "B36 + S36") is (unverified 2026-10-05); check before item 3 relies on it ([night checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-05-night--ui-unification-phases-23-folder-move-motion-bookmarks-speed-and-acceptance-closure)).
+- **Suggested order: 2 → 3.**
   2. **Video similarity fingerprints:** 0 of 459 videos fingerprinted (12 samples/video, FFmpeg 1 decoder thread, serialized). Run several in parallel on the main PC and try NVDEC decode; the fingerprint contract (frame size, samples) must stay identical so laptop-made fingerprints compare.
-  3. **Unknown-character grouping:** pairwise CCIP comparison over the whole library, grouping with Chinese Whispers (chosen in [OSS trial](../research/oss-trial-sqlitevec-ccip-20260926.md)); GPU for the N×N similarity. Needs 1.
-- **Design notes (read-only study 2026-10-04):** 1 = new extraction-only `warm_features` op in `scan_worker.py` driven by the incremental owner (32/page, one Python owner, manual priority, Saving Mode wins, cache entries are the checkpoint); first prove S36 4-thread vectors are byte-identical to 2-thread and to the cache (ORT does not guarantee equality across thread counts). 2 = purpose-specific fingerprint backfill (not the 2–100-ID review scan), CPU only with N=2 bounded gate, resumable 600 s windows, keep `-threads 1` and test `-filter_threads 1`; NVDEC not adopted (no identity proof); fingerprint cache is keyed by the FFmpeg binary hash, so laptop and main PC do not share fingerprints. UI: two main-profile-only actions beside the performance selector, no auto-run.
+  3. **Unknown-character grouping:** pairwise CCIP comparison over the whole library, grouping with Chinese Whispers (chosen in [OSS trial](../research/oss-trial-sqlitevec-ccip-20260926.md)); GPU for the N×N similarity. Item 1's features are now in place.
+- **Design notes (read-only study 2026-10-04):** 2 = purpose-specific fingerprint backfill (not the 2–100-ID review scan), CPU only with N=2 bounded gate, resumable 600 s windows, keep `-threads 1` and test `-filter_threads 1`; NVDEC not adopted (no identity proof); fingerprint cache is keyed by the FFmpeg binary hash, so laptop and main PC do not share fingerprints. UI: a main-profile-only action beside the performance selector, no auto-run.
 - **Optional larger features:** text-to-image library search is now `NL-SEARCH-001` (vectors built 2026-10-04); upscaling for low-resolution manga pages.
 - **Also possible later:** NVENC for Linux video proxies (`libx264` today) and CUDA for live CCIP inference — both need equivalence/feature-identity decisions first.
 
@@ -371,51 +365,3 @@ Status: `PARTIAL` — PC shipped to main 2026-10-05; tablet option A is next. Th
   - laptop query side, needing a smaller text model;
   - video.
 - **Laptop later:** the query worker holds about 4.1 GB RAM because the SigLIP text tower is fp32. New images need the main PC to index them.
-
-## ACCEPTANCE — native PC / tablet / Windows checks pending
-
-Status: `VERIFY` — source exists. Each line is a retained check, not new implementation, installation or claimed acceptance. Recorded prior confirmation applies only to its recorded revision/scope.
-
-<a id="vault-enc-001--lakomics-encrypted-private-vault-adr-0039"></a>
-- **VAULT-ENC-001:** Windows compile/real USB, Credential Manager, unlock/removal, video and same-letter card swaps (`cc917f65`, `17c10b72`); Linux real-USB acceptance recorded 2026-09-24/26. Original scan-error title/thumbnail preservation, full-image cache headers and per-tile-probe audit survivors are (unverified 2026-10-03); recheck the rewritten path only. ADR-0039.
-<a id="win-sync-001--update-the-windows-pc-after-the-2026-09-24-changes"></a>
-- **WIN-SYNC-001:** when Windows PC is available, update from pushed source; verify Collection publication handshake, vault, WebView2 FAULT originals (`4e4163a0`, `17c10b72`). Recorded production library minimum v109 is a historical lower bound, not a verified current schema; preserve authority fencing/salvage and migration backup.
-<a id="home-dash-001--information-dashboard-home-tablet-first"></a>
-<a id="user-req-20260927--pc-redesigns-and-fixes-requested-2026-09-27-evening"></a>
-- **HOME-DASH-001 / USER-REQ-20260927:** PC Home, artist/review, AV/portrait, calendar and Settings (`60d4e3a6`, `532b7cc0`, `21b5aea1`, `48c8d2c8`); calendar stays PC-sourced. [Settings](../prototypes/settings-remake-20260929/), [calendar](../prototypes/release-calendar-20260929/).
-- **TABLET-PARITY-001 / TABLET-FEEDBACK-20260928:** published performer profiles/portraits, Home parity and density after process restart (`d997b208`, `ea8e72e0`, `c60e57f9`); 0.8.85 confirmation covered the Asset port only.
-<a id="artist-suggest-001--닮은-작가-후보-artist-suggestions-from-art-style"></a>
-- **ARTIST-SUGGEST-001:** grouped suggestions, inspector, reposter flag and explicit assignment/dismissal (`e88c21ff`); user 2026-09-28 chose A+C+D, never automatic assignment. [Mockups](../prototypes/artist-style-suggest-20260928/index.html).
-- **USER-FEEDBACK-20260928B:** PC/tablet memo caret/undo/sync-on-finish and reported sync-button re-render (`60d1429d`, `86f1b2d7`); no acceptance inferred from tests.
-- **USER-FEEDBACK-20260928B — manga:** current native reader/sidebar, folder counts and cross-device pins (`4962f9bf`, `bdbfbfd2`, `4542a6b9`, `02319ffd`); [accepted A–D](../prototypes/pc-manga-20260929/). Production cleanup approval remains separate.
-- **PC-RELEASE-FEEDBACK-20260929:** release picker items 4–5, series-scoped choices and visible all-series/unclassified behaviour (`d44edc0c`); user accepted only items 1–3 and 6–13 in the earlier release. [Folder D](../prototypes/pc-folders-20260929/).
-<a id="section-bar-20261001--section-bar-on-pc-and-tablet"></a>
-- **SECTION-BAR-20261001:** PC scroll-away/150 ms hover-drop/300 ms close/title toggle, narrow manga toolbar; tablet shade pull/bounce/thickness (`cc85d8ab`, `513581fa`, `00a2e8b3`); user 2026-10-01 rejected scroll-direction auto-hide and merging the title/section bars. [Design](../prototypes/section-bar-20261001/).
-<a id="collection-shortcuts-20261001--tablet-collections-shortcut-row-and-overlays"></a>
-- **COLLECTION-SHORTCUTS-20261001:** current one-row action placement, overlay dismissal/Back stacking/list restoration (`cc85d8ab`, `97edc2c9`); user accepted one-row revision `297891ea`, superseding the second shortcut row. [Original overlay spec](../prototypes/collection-shortcuts-20261001/README.md).
-<a id="tablet-feedback-20261001--tablet-scrubber-feedback"></a>
-- **TABLET-FEEDBACK-20261001:** scrubber B touch thickening/labels and Collections full-list scale stability (`c4d1819e`, `cc85d8ab`); [mockup](../prototypes/tablet-scrubber-20261001/).
-<a id="asset-toc-20261001--query-toc-and-stable-tablet-scrubber-seeks"></a>
-- **ASSET-TOC-20261001:** artist/character phase-2 dated sorting, seeks and query-generation consistency (`73d22496`); phase 1 was device-accepted 2026-10-01. Revisit/trash/catalog expansion stays dropped (user 2026-10-02).
-- **HOME-OPT-001:** reserved heights, failed/empty/offline/retry states, counts and midnight/privacy races (`8fa77090`, `c9bc474b`, `71855626`, `7f3144f6`).
-<a id="pc-declutter-001--pc-app-declutter-concepts-abc-staged"></a>
-- **PC-DECLUTTER-001:** Windows rail/chrome/status/Settings/Home acceptance (`57a4fa85`, `532b7cc0`, `60d4e3a6`); [concepts A+B+C](../prototypes/pc-declutter-20260924/).
-- **PC-REVIEW-001:** actual Asset restore/re-baseline, skipped exclusions, UI-thread relief, Windows leftovers/credentials and live IGDB (`7326f48d`, `24058df6`); retain residual source uncertainties above.
-- **TRANSFER-REVIEW-001:** live R2 signed Content-Length refusal and transfer cursor/recovery/ZIP bounds (`0c2b7118`, `8443890c`); fixtures do not establish storage enforcement.
-- **SERVER-REVIEW-20260924:** native/production similarity-kept Trash refusal (`8bb55420`, `39d9ed02`); rollout does not prove every edge accepted.
-- **MOBILE-UX-001:** older unrecorded tablet copy/Back/icons/framing/catalog dialog/filter/search/Album/Character/duration checks and fresh PC-off capture/poster-v2/scheduled-refresh evidence (`49e9f224`, `a0782486`, `1a8ede19`, `6c0fd5ce`). Dimensions/repair are source/rollout-recorded; repaired thumbnails were user-confirmed, exhaustive interactions were not.
-<a id="collection-view-20261001--manga-layouts-and-shelf-case-proportions"></a>
-- **COLLECTION-VIEW-20261001:** three manga layouts/default shelf, matte title spine/depth, ledger G, AV rotation and small-case proportions (`cc85d8ab`, `57a23b5e`, `c552ff7d`, `678cc422`); manga-spine 30 px vs 44 px touch-target gap remains (unverified 2026-10-03). [Layouts](../prototypes/pc-collection-cases-20260930/), [ledger/detail](../prototypes/pc-collections-20260929/).
-- **LONG-001:** collector code → inbox → LibreDMM candidates, Korean names and explicit cover selection (`67e0cd97`, `b9c4f89a`, `b00f3bfe`); deployment/migration status remains unverified above.
-- **PC-POLISH-20261002 items 1–2, 6–9:** scrubber, dock/reflow, shortcuts, manga hide/search, zoom/reset/backdrops and tablet pinch/scroll (`b29bd44e`, `62e90091`, `5b8b51c0`, `97edc2c9`).
-- **PC-POLISH-20261002 items 4, 10–12:** Find/More, memo IME/sections/undo, ledger/reminders and attention-first Home (`628b6da3`, `86f1b2d7`, `8fc0bd1f`, `71855626`); native notifications remain TODO above.
-- **PC-POLISH-20261002 item 13 / likes:** first auto-tag publication/live tablet tags/filters and designated likes album convergence (`a8d19545`, `116875b1`, `260bdc6b`); earlier delivery does not accept later fixes.
-<a id="audit-20261002--acceptance-after-source-fixes"></a>
-- **AUDIT-20261002:** Windows case-only manga renames, viewer/IME/refresh, Android privacy/Back/record convergence, controlled upload/Notes/library rollout (`001b7bd8`, `eccb2ac4`, `af2fd1a4`, `6902ac36`); PC release precedes server upload hardening.
-<a id="audit-20261002b--acceptance-after-source-fixes"></a>
-- **AUDIT-20261002B:** document grants/exhausted retries, collector pairing/settings across servers, privacy/secret sections, ledger edits, Home NEW failures, tile keys/local month, cleared creators/unclassified Home (`c523900b`, `57b9b6e7`, `9079611b`, `71855626`). Album-tree grants still refused pending membership support; this is a compatibility limit, not restored browsing.
-<a id="pc-ui-001--pc-ui-consistency-pass"></a>
-- **PC-UI-001:** native visual items 5–7, 9–11 and current GalleryTile preview selection (`3cd97057`, `87e87e93`, `6902ac36`); [design decisions](../research/pc-ui-design-decisions-20260923.md). Preview update itself is (unverified 2026-10-03).
-- **STATS-001:** native inventory/recorded-era figures (`7c72e41a`; retained historical stats records); metric definitions remain above.
-<a id="artist-001--replace-revisit-tab-with-an-artist-hub"></a>
-- **ARTIST-001:** PC source-fill preview/apply, conservative merge, pins/hide/display names and PC-authoritative links (`57a4fa85`, `532b7cc0`, `b5c4eafa`); tablet editing is a separate open implementation item.

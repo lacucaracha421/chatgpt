@@ -763,7 +763,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
             {results.works.map((work) => <OnlineCatalogCard
               key={`${work.provider}:${work.groupId}`}
               work={work}
-              opening={reading || loading || !active || requestedSource === "local" || openingWorkKey === catalogIdentityKey(work)}
+              opening={reading || loading || !active || requestedSource === "local"}
               selected={detailOpen && detailGroup?.provider === work.provider && detailGroup.groupId === work.groupId}
               bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
               onOpen={(selected, opener) => void openDetail(selected, work, opener)}

@@ -166,7 +166,7 @@ impl Library {
                     )
                     .map_err(map_duplicate_name)?;
             } else {
-                fill_blank_provider_fields(&transaction, &collection_id, &preview, &now)?;
+                refresh_provider_fields(&transaction, &collection_id, &preview, &now)?;
             }
             upsert_external_binding(
                 &transaction,
@@ -196,7 +196,12 @@ impl Library {
                 } else {
                     None
                 };
-            super::collection_updates::reconcile_mangadex_volumes(&transaction, &collection_id, &request.manga_id, &preview.covers)?;
+            super::collection_updates::reconcile_mangadex_volumes(
+                &transaction,
+                &collection_id,
+                &request.manga_id,
+                &preview.covers,
+            )?;
             materialize_mangadex_volumes(
                 &transaction,
                 &collection_id,
@@ -237,8 +242,13 @@ impl Library {
             let mut connection = self.connection()?;
             let transaction = connection.transaction()?;
             let now = chrono::Utc::now().to_rfc3339();
-            fill_blank_provider_fields(&transaction, collection_id, &fetched.preview, &now)?;
-            super::collection_updates::reconcile_mangadex_volumes(&transaction, collection_id, &fetched.preview.manga_id, &fetched.preview.covers)?;
+            refresh_provider_fields(&transaction, collection_id, &fetched.preview, &now)?;
+            super::collection_updates::reconcile_mangadex_volumes(
+                &transaction,
+                collection_id,
+                &fetched.preview.manga_id,
+                &fetched.preview.covers,
+            )?;
             upsert_external_binding(
                 &transaction,
                 collection_id,
@@ -273,19 +283,41 @@ fn representative_japanese_cover(
         })
 }
 
-fn fill_blank_provider_fields(
+fn refresh_provider_fields(
     connection: &rusqlite::Connection,
     collection_id: &str,
     preview: &MangaDexWorkPreview,
     now: &str,
 ) -> Result<(), LibraryError> {
+    // Read before replacing the binding snapshot, including on reconnect. Only values
+    // still matching that provider response belong to MangaDex; differing local values
+    // (and values with no usable previous snapshot) must retain their precedence.
+    let stored: Option<(String, Option<String>)> = connection
+        .query_row(
+            "SELECT external_id, provider_data_json FROM collection_external_bindings
+             WHERE collection_id = ?1 AND provider = ?2",
+            params![collection_id, PROVIDER],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let previous = stored.and_then(|(manga_id, snapshot)| {
+        let snapshot: serde_json::Value = serde_json::from_str(&snapshot?).ok()?;
+        // Covers do not affect these fields. Use the same metadata/localization parser
+        // as fetch_work, without requiring the old snapshot's cover data to be valid.
+        let previous = mangadex::parse_work_preview(
+            &snapshot.get("detail")?.to_string(),
+            r#"{"result":"ok","data":[]}"#,
+        )
+        .ok()?;
+        (previous.manga_id == manga_id).then_some(previous)
+    });
     connection.execute(
         "UPDATE collections SET
-            year = CASE WHEN year IS NULL THEN ?1 ELSE year END,
-            author = CASE WHEN author IS NULL OR trim(author) = '' THEN ?2 ELSE author END,
-            genres = CASE WHEN genres IS NULL OR trim(genres) = '' THEN ?3 ELSE genres END,
-            overview = CASE WHEN overview IS NULL OR trim(overview) = '' THEN ?4 ELSE overview END,
-            original_title = CASE WHEN original_title IS NULL OR trim(original_title) = '' THEN ?7 ELSE original_title END,
+            year = CASE WHEN year IS NULL OR year = ?8 THEN ?1 ELSE year END,
+            author = CASE WHEN author IS NULL OR trim(author) = '' OR author = ?9 THEN ?2 ELSE author END,
+            genres = CASE WHEN genres IS NULL OR trim(genres) = '' OR genres = ?10 THEN ?3 ELSE genres END,
+            overview = CASE WHEN overview IS NULL OR trim(overview) = '' OR overview = ?11 THEN ?4 ELSE overview END,
+            original_title = CASE WHEN original_title IS NULL OR trim(original_title) = '' OR original_title = ?12 THEN ?7 ELSE original_title END,
             updated_at = ?5
          WHERE id = ?6",
         params![
@@ -296,6 +328,11 @@ fn fill_blank_provider_fields(
             now,
             collection_id,
             preview.japanese_title,
+            previous.as_ref().and_then(|previous| previous.year),
+            previous.as_ref().and_then(|previous| previous.author.as_deref()),
+            previous.as_ref().and_then(|previous| previous.genres.as_deref()),
+            previous.as_ref().and_then(|previous| previous.overview.as_deref()),
+            previous.as_ref().and_then(|previous| previous.japanese_title.as_deref()),
         ],
     )?;
     Ok(())
@@ -742,6 +779,184 @@ mod tests {
             .refresh_fetched_mangadex(&id, fetched("snapshot-v3"))
             .unwrap();
         assert_eq!(original_title(&library, &id).as_deref(), Some("고친 원제"));
+    }
+
+    fn provider_work(manga_id: &str, revision: &str) -> MangaDexFetchedWork {
+        let mut detail: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/mangadex_detail.json")).unwrap();
+        detail["data"]["id"] = manga_id.into();
+        let attributes = &mut detail["data"]["attributes"];
+        attributes["altTitles"] = serde_json::json!([{ "ja": format!("Title {revision}") }]);
+        attributes["description"] = serde_json::json!({ "en": format!("Overview {revision}") });
+        attributes["year"] = if revision == "old" { 2014 } else { 2022 }.into();
+        attributes["tags"] = serde_json::json!([{
+            "id": "tag", "type": "tag", "attributes": { "name": { "en": format!("Genre {revision}") } }
+        }]);
+        detail["data"]["relationships"][0]["attributes"]["name"] =
+            format!("Author {revision}").into();
+        detail["data"]["relationships"][1]["attributes"]["name"] =
+            format!("Author {revision}").into();
+        let covers = serde_json::json!({ "result": "ok", "data": [] });
+        MangaDexFetchedWork {
+            preview: parse_work_preview(&detail.to_string(), &covers.to_string()).unwrap(),
+            snapshot_json: serde_json::json!({ "detail": detail, "covers": covers }).to_string(),
+        }
+    }
+
+    fn assert_provider_fields(
+        collection: &crate::library::models::CollectionSummary,
+        revision: &str,
+    ) {
+        assert_eq!(collection.overview, Some(format!("Overview {revision}")));
+        assert_eq!(collection.author, Some(format!("Author {revision}")));
+        assert_eq!(collection.genres, Some(format!("Genre {revision}")));
+        assert_eq!(collection.original_title, Some(format!("Title {revision}")));
+        assert_eq!(
+            collection.year,
+            Some(if revision == "old" { 2014 } else { 2022 })
+        );
+    }
+
+    #[test]
+    fn reconnect_mangadex_replaces_previous_provider_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_mangadex(request("Local title"), provider_work(MANGA_ID, "old"), None)
+            .unwrap();
+        let new_id = "22222222-2222-4222-8222-222222222222";
+        mark_published(&library);
+        let updated = library
+            .apply_fetched_mangadex(
+                MangaDexApplyRequest {
+                    target: MangaDexApplyTarget::Existing {
+                        collection_id: created.id.clone(),
+                    },
+                    manga_id: new_id.into(),
+                },
+                provider_work(new_id, "new"),
+                None,
+            )
+            .unwrap();
+        assert_provider_fields(&updated, "new");
+        assert_eq!(updated.name, "Local title");
+        assert_eq!(
+            library
+                .get_mangadex_connection(&created.id)
+                .unwrap()
+                .unwrap()
+                .manga_id,
+            new_id
+        );
+        assert!(collections_dirty(&library));
+        assert_provider_fields(&library.list_collections().unwrap()[0], "new");
+    }
+
+    #[test]
+    fn refresh_mangadex_replaces_previous_provider_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_mangadex(request("Local title"), provider_work(MANGA_ID, "old"), None)
+            .unwrap();
+        mark_published(&library);
+        let updated = library
+            .refresh_fetched_mangadex(&created.id, provider_work(MANGA_ID, "new"))
+            .unwrap();
+        assert_provider_fields(&updated, "new");
+        assert!(collections_dirty(&library));
+    }
+
+    #[test]
+    fn reconnect_and_refresh_mangadex_preserve_manual_fields_and_memo() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_mangadex(request("Local title"), provider_work(MANGA_ID, "old"), None)
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET overview = 'Manual overview', author = 'Manual author',
+             original_title = 'Manual title', genres = 'Manual genres', year = 1999,
+             description = 'Personal memo', my_score = 4.5 WHERE id = ?1",
+                [&created.id],
+            )
+            .unwrap();
+        let new_id = "22222222-2222-4222-8222-222222222222";
+        let reconnected = library
+            .apply_fetched_mangadex(
+                MangaDexApplyRequest {
+                    target: MangaDexApplyTarget::Existing {
+                        collection_id: created.id.clone(),
+                    },
+                    manga_id: new_id.into(),
+                },
+                provider_work(new_id, "new"),
+                None,
+            )
+            .unwrap();
+        let refreshed = library
+            .refresh_fetched_mangadex(&created.id, provider_work(new_id, "latest"))
+            .unwrap();
+        for updated in [reconnected, refreshed] {
+            assert_eq!(updated.overview.as_deref(), Some("Manual overview"));
+            assert_eq!(updated.author.as_deref(), Some("Manual author"));
+            assert_eq!(updated.original_title.as_deref(), Some("Manual title"));
+            assert_eq!(updated.genres.as_deref(), Some("Manual genres"));
+            assert_eq!(updated.year, Some(1999));
+            assert_eq!(updated.description.as_deref(), Some("Personal memo"));
+            assert_eq!(updated.my_score, Some(4.5));
+        }
+    }
+
+    #[test]
+    fn refresh_mangadex_preserves_manual_overview_while_updating_other_provider_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_mangadex(request("Local title"), provider_work(MANGA_ID, "old"), None)
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET overview = 'Manual overview' WHERE id = ?1",
+                [&created.id],
+            )
+            .unwrap();
+        let updated = library
+            .refresh_fetched_mangadex(&created.id, provider_work(MANGA_ID, "new"))
+            .unwrap();
+        assert_eq!(updated.overview.as_deref(), Some("Manual overview"));
+        assert_eq!(updated.author.as_deref(), Some("Author new"));
+        assert_eq!(updated.genres.as_deref(), Some("Genre new"));
+        assert_eq!(updated.original_title.as_deref(), Some("Title new"));
+        assert_eq!(updated.year, Some(2022));
+    }
+
+    #[test]
+    fn refresh_mangadex_clears_removed_provider_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_mangadex(request("Local title"), provider_work(MANGA_ID, "old"), None)
+            .unwrap();
+        let mut removed = provider_work(MANGA_ID, "new");
+        removed.preview.overview = None;
+        removed.preview.author = None;
+        removed.preview.genres = None;
+        removed.preview.japanese_title = None;
+        removed.preview.year = None;
+        let updated = library
+            .refresh_fetched_mangadex(&created.id, removed)
+            .unwrap();
+        assert_eq!(updated.overview, None);
+        assert_eq!(updated.author, None);
+        assert_eq!(updated.genres, None);
+        assert_eq!(updated.original_title, None);
+        assert_eq!(updated.year, None);
     }
 
     fn artwork_file_count(library: &Library) -> usize {

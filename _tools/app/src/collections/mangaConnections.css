@@ -15,9 +15,11 @@
 .manga-connections__fold[aria-expanded="true"] .manga-connections__chevron { transform: rotate(180deg); }
 .manga-connections__rows { border-bottom: 1px solid var(--color-border); }
 .manga-connections__row { display: flex; align-items: center; gap: var(--space-3); min-height: 40px; padding: var(--space-1) var(--space-2); border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
-.manga-connections__name { flex: none; width: 88px; color: var(--color-muted); }
-.manga-connections__state { display: flex; flex: 1; min-width: 0; align-items: baseline; gap: var(--space-2); }
-.manga-connections__state small { overflow: hidden; color: var(--color-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.manga-connections__name { flex: none; width: 72px; color: var(--color-muted); white-space: nowrap; }
+/* State over its detail line, so a narrow info panel never breaks "연결됨" one syllable per line. */
+.manga-connections__state { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 2px; white-space: nowrap; }
+.manga-connections__state small { max-width: 100%; overflow: hidden; color: var(--color-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.manga-connections__row > button { flex: none; white-space: nowrap; }
 
 .manga-connections.is-panel { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm, 4px); background: var(--color-surface); }
 .manga-connections.is-panel h2 { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-md); font-weight: 600; }

@@ -1620,23 +1620,18 @@ describe("load more", () => {
   });
 });
 
-it("double clicks straight into page one without opening detail or reading resume progress", async () => {
+it("double clicks straight into page one without reading resume progress", async () => {
   const gateway = createGateway(true);
   renderBrowser(gateway);
   const card = await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-  const flashes: Element[] = [];
-  const observer = new MutationObserver(() => { const panel = document.querySelector('.ui-overlay-panel'); if (panel) flashes.push(panel); });
-  observer.observe(document.body, { childList: true, subtree: true });
-  try {
-    await userEvent.dblClick(card);
-    expect(await findReaderPosition("1 / 3")).toBeVisible();
-    expect(gateway.getOnlineCatalogWorkDetail).not.toHaveBeenCalled();
-    expect(gateway.getRemoteReadingProgress).not.toHaveBeenCalled();
-    expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
-    expect(flashes).toHaveLength(0);
-    await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(card).toHaveFocus());
-  } finally { observer.disconnect(); }
+  // The first click opens the detail at once (user 2026-10-05); the double click replaces it with the reader.
+  await userEvent.dblClick(card);
+  expect(await findReaderPosition("1 / 3")).toBeVisible();
+  expect(gateway.getRemoteReadingProgress).not.toHaveBeenCalled();
+  expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(card).toHaveFocus());
+  expect(screen.queryByRole("complementary", { name: "망가 상세" })).toBeNull();
 });
 
 it("single clicks still open the detail and never resolve reader pages", async () => {

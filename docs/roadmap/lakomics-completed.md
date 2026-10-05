@@ -2,6 +2,67 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-10-05 (night) — UI unification phases 2–3, folder-move motion, bookmarks speed and acceptance closure
+
+Reconciled against committed `main` at `223fac11` (commits after `75f70dba`). Records are source-complete unless stated; Android 0.9.25 (`ad825712`) and 0.9.26 (`223fac11`) were built and installed on the tablet 2026-10-05.
+
+- **Home (`USER-FEEDBACK-20261005`):** 다시보기 opens the image in one step and closing it returns Home; the 지금 하는 중 shelf uses the shared shelf control (hidden scrollbar, no gap, no cut edge) (`1dd4ac69`).
+- **Multi-person references (`USER-FEEDBACK-20261005`):** an image owned by another character can be a region-scoped reference (only the chosen crop feeds B36/S36/training); a whole-image reference there stays blocked with a hint naming the other character. Tagger review gains a third decision 맞음 · 영역 틀림 (membership without learning the crop) (`40c99d25`).
+- **Tagger review and 오리지널:** 맞음, 맞음 · 영역 틀림 and bulk 맞음 in 태거 검토 can move an image out of the 오리지널 folder through the normal classification path; every other move still refuses 오리지널 (`67e55346`).
+- **Catalog bookmarks 최근 추가순 speed:** the PC page is seeded from the bookmark set (2.4 s → 14 ms on a copy of real data, same order); the server bookmark scope is driven by canonical bookmark ids (87–331 ms → 6–9 ms) (`e92321d3`). Server deployed 2026-10-05 (sha256 prefix `e169f82802e28905`, 147 server tests OK on the VPS stage).
+- **UI unification phases 2–3 (`USER-FEEDBACK-20261005`):** one wording per meaning on PC and tablet (휴지통으로, 내 별점, 고정/고정 해제, 좋아요, 검색 결과 없음, 새로고침, 다시 시도; 빼기 vs 제거 rule in `DESIGN.md`); shared Badge (count/scrim/corner), SectionLabel, EmptyState, Skeleton, displayDate and DDay, guarded by the `sharedPieces` ratchet test (`dcdc988c`).
+- **Folder-move motion (user decision 2026-10-05):** plain folders, series/group/character shelves and tablet galleries swap in one step without animation once the new first screen is ready; the first load of a visit still rises (`dcdc988c`).
+- **Gallery double click:** a tile opens only when both presses landed on it, so double-clicking a character card no longer opens the image that appears under it (`dcdc988c`).
+- **Bookmark default sort:** 최근 추가순 is the default 북마크 sort on PC and tablet; a stored 최신순 choice wins (`dcdc988c`).
+- **GPU-BATCH-001 item 1 — CCIP feature backfill:** user-approved one-off backfill wrote B36 features for every remaining normal image into the legacy cache namespace `123e34f8…` after an equivalence gate proved them bit-identical to the current extraction identity `4197ada2…` (compat receipt `4197ada2` → `123e34f8` written); `library.sqlite` read-only. Finished 2026-10-05 23:23 after one interruption (PC crash at 1833/2389, resumed: 555 written, 0 failed). Items 2–3 stay open in the backlog.
+
+### Acceptance closure (user 2026-10-05)
+
+The user closed all pending native PC / tablet / Windows acceptance on 2026-10-05 ("실기기 확인은 모두 완료해도 될듯? 이제 이상한건 딱히 없네") after using the current PC release build (from `223fac11`) and tablet Android 0.9.26 and finding nothing wrong. This was **closed by the user's overall use on 2026-10-05 without itemised checks**; it does not record per-item test evidence. Source-level uncertainties, measurements and real unbuilt work from these lines stay in the backlog (`VAULT-ENC-001` audit claims, the manga-spine touch-target gap under `TABLET-PARITY-001`, live R2 Content-Length enforcement under `TRANSFER-REVIEW-001`, deployment status under `LONG-001`, native notifications under `PC-POLISH-20261002`). Former backlog `ACCEPTANCE` lines:
+
+<a id="vault-enc-001--lakomics-encrypted-private-vault-adr-0039"></a>
+- **VAULT-ENC-001:** Windows compile/real USB, Credential Manager, unlock/removal, video and same-letter card swaps (`cc917f65`, `17c10b72`); ADR-0039.
+<a id="win-sync-001--update-the-windows-pc-after-the-2026-09-24-changes"></a>
+- **WIN-SYNC-001:** Windows update from pushed source: Collection publication handshake, vault and WebView2 FAULT originals (`4e4163a0`, `17c10b72`).
+<a id="home-dash-001--information-dashboard-home-tablet-first"></a>
+<a id="user-req-20260927--pc-redesigns-and-fixes-requested-2026-09-27-evening"></a>
+- **HOME-DASH-001 / USER-REQ-20260927:** PC Home, artist/review, AV/portrait, calendar and Settings (`60d4e3a6`, `532b7cc0`, `21b5aea1`, `48c8d2c8`).
+- **TABLET-PARITY-001 / TABLET-FEEDBACK-20260928:** published performer profiles/portraits, Home parity and density after process restart (`d997b208`, `ea8e72e0`, `c60e57f9`).
+<a id="artist-suggest-001--닮은-작가-후보-artist-suggestions-from-art-style"></a>
+- **ARTIST-SUGGEST-001:** grouped suggestions, inspector, reposter flag and explicit assignment/dismissal (`e88c21ff`).
+- **USER-FEEDBACK-20260928B:** PC/tablet memo caret/undo/sync-on-finish and sync-button re-render (`60d1429d`, `86f1b2d7`); manga reader/sidebar, folder counts and cross-device pins (`4962f9bf`, `bdbfbfd2`, `4542a6b9`, `02319ffd`).
+- **PC-RELEASE-FEEDBACK-20260929:** release picker items 4–5, series-scoped choices and all-series/unclassified behaviour (`d44edc0c`).
+<a id="section-bar-20261001--section-bar-on-pc-and-tablet"></a>
+- **SECTION-BAR-20261001:** PC scroll-away/hover-drop/close/title toggle, narrow manga toolbar; tablet shade pull/bounce/thickness (`cc85d8ab`, `513581fa`, `00a2e8b3`).
+<a id="collection-shortcuts-20261001--tablet-collections-shortcut-row-and-overlays"></a>
+- **COLLECTION-SHORTCUTS-20261001:** one-row action placement, overlay dismissal/Back stacking/list restoration (`cc85d8ab`, `97edc2c9`, `297891ea`).
+<a id="tablet-feedback-20261001--tablet-scrubber-feedback"></a>
+- **TABLET-FEEDBACK-20261001:** scrubber B touch thickening/labels and Collections full-list scale stability (`c4d1819e`, `cc85d8ab`).
+<a id="asset-toc-20261001--query-toc-and-stable-tablet-scrubber-seeks"></a>
+- **ASSET-TOC-20261001:** phase-2 artist/character dated sorting, seeks and query-generation consistency (`73d22496`).
+- **HOME-OPT-001:** reserved heights, failed/empty/offline/retry states, counts and midnight/privacy races (`8fa77090`, `c9bc474b`, `71855626`, `7f3144f6`).
+<a id="pc-declutter-001--pc-app-declutter-concepts-abc-staged"></a>
+- **PC-DECLUTTER-001:** Windows rail/chrome/status/Settings/Home (`57a4fa85`, `532b7cc0`, `60d4e3a6`).
+- **PC-REVIEW-001:** Asset restore/re-baseline, skipped exclusions, UI-thread relief, Windows leftovers/credentials and live IGDB (`7326f48d`, `24058df6`); residual source claims stay in the backlog.
+- **TRANSFER-REVIEW-001:** transfer cursor/recovery/ZIP bounds (`0c2b7118`, `8443890c`); live R2 storage enforcement stays in the backlog.
+- **SERVER-REVIEW-20260924:** native/production similarity-kept Trash refusal (`8bb55420`, `39d9ed02`).
+- **MOBILE-UX-001:** older tablet copy/Back/icons/framing/catalog dialog/filter/search/Album/Character/duration checks and PC-off capture/poster-v2/scheduled-refresh (`49e9f224`, `a0782486`, `1a8ede19`, `6c0fd5ce`).
+<a id="collection-view-20261001--manga-layouts-and-shelf-case-proportions"></a>
+- **COLLECTION-VIEW-20261001:** three manga layouts/default shelf, matte title spine/depth, ledger G, AV rotation and small-case proportions (`cc85d8ab`, `57a23b5e`, `c552ff7d`, `678cc422`); the spine touch-target gap stays in the backlog.
+- **LONG-001:** collector code → inbox → LibreDMM candidates, Korean names and explicit cover selection (`67e0cd97`, `b9c4f89a`, `b00f3bfe`).
+- **PC-POLISH-20261002 items 1–2, 4, 6–13 / likes:** scrubber, dock/reflow, shortcuts, manga hide/search, zoom/backdrops, tablet pinch/scroll, Find/More, memo, ledger/reminders, attention-first Home, auto-tag publication/tablet tags and likes album (`b29bd44e`, `62e90091`, `5b8b51c0`, `97edc2c9`, `628b6da3`, `86f1b2d7`, `8fc0bd1f`, `71855626`, `a8d19545`, `116875b1`, `260bdc6b`).
+<a id="audit-20261002--acceptance-after-source-fixes"></a>
+- **AUDIT-20261002:** Windows case-only manga renames, viewer/IME/refresh, Android privacy/Back/record convergence, upload/Notes/library rollout (`001b7bd8`, `eccb2ac4`, `af2fd1a4`, `6902ac36`).
+<a id="audit-20261002b--acceptance-after-source-fixes"></a>
+- **AUDIT-20261002B:** document grants/retries, collector pairing, privacy/secret sections, ledger edits, Home NEW failures, tile keys/local month, cleared creators (`c523900b`, `57b9b6e7`, `9079611b`, `71855626`); album-tree grants stay refused pending membership support (a compatibility limit).
+<a id="pc-ui-001--pc-ui-consistency-pass"></a>
+- **PC-UI-001:** native visual items 5–7, 9–11 and GalleryTile preview selection (`3cd97057`, `87e87e93`, `6902ac36`).
+- **STATS-001:** native inventory/recorded-era figures (`7c72e41a`); metric definitions stay in the backlog.
+<a id="artist-001--replace-revisit-tab-with-an-artist-hub"></a>
+- **ARTIST-001:** PC source-fill preview/apply, conservative merge, pins/hide/display names and PC-authoritative links (`57a4fa85`, `532b7cc0`, `b5c4eafa`).
+
+Also closed by the same decision: the tablet catch-up device check (priority 0 of the 2026-10-05 checkpoint); `WIN-FEEDBACK-20261004` source-fixed bullets (Saving Mode launch label, tab ghosting/sidebar motion, Home tab delay, shelf pop-in, 쇼케이스 look, delayed busy labels, tablet follow-up by sharing, asset folder switch bounce, Home fill layout, 3D collection objects (1)–(6)); `MANGA-CATALOG-FEEDBACK-20261004` 로컬 view settings / mode-toggle counts / scan label / 망가 tab readiness (`1d329325`, `2748f0db`); `TABLET-PARITY-001` slice 1 native timing. The tablet manga back synopsis/price (replica volume fields) stays open in the backlog.
+
 ## Closure checkpoint — 2026-10-05 — Tablet catch-up, UI unification phase 1 and PC speed
 
 Reconciled against committed `main` at `75f70dba`. Uncommitted worktree changes at writing (Home 다시보기/지금 하는 중, multi-person references, tagger review) are excluded and stay `IN_PROGRESS` in the backlog. Records below are source-complete; native/device acceptance is not inferred unless stated. Android 0.9.16–0.9.24 were built today; 0.9.21–0.9.24 were installed on the tablet.

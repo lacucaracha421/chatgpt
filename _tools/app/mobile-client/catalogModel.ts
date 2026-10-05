@@ -125,7 +125,13 @@ export function catalogReaderPath(item:Pick<CatalogWork,'provider'|'providerWork
 export function catalogTagQuery(namespace:string,value:string){return `${namespace}:"${value.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"`;}
 export function catalogError(reason:unknown){
   const status=(reason as {status?:number})?.status;
-  if(status===404)return '서버에 모바일 카탈로그 기능이 필요합니다.';
+  if(status===404){
+    // The server's own detail tells a gone source gallery or work apart from a missing route.
+    const detail=(reason as {details?:{detail?:unknown}})?.details?.detail;
+    if(typeof detail==='string'&&/k-hentai/i.test(detail))return '원본 사이트에서 이 작품을 찾을 수 없습니다. 삭제됐을 수 있으니 다른 판본이 있으면 그쪽을 열어 보세요.';
+    if(detail==='Catalog work is unavailable')return '지금 목록에서는 이 작품을 볼 수 없습니다. 새로고침해 주세요.';
+    return '서버에 모바일 카탈로그 기능이 필요합니다.';
+  }
   if(status===409)return '카탈로그가 갱신되었거나 이 목록의 유효기간이 끝났습니다. 새로고침해 주세요.';
   if(status===422)return '검색식을 확인해 주세요.';
   if(status===503)return '검색 시간이 길어지고 있습니다. 조건을 좁히거나 다시 시도해 주세요.';

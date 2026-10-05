@@ -92,19 +92,16 @@ it("masks a local manga card with only the NSFW filter enabled", () => {
   expect(container.querySelector(".privacy-mask")).toBeVisible();
 });
 
-it("cancels a pending pointer click on unmount and keeps keyboard activation immediate", () => {
-  vi.useFakeTimers();
-  try {
-    const onOpen = vi.fn(), onRead = vi.fn();
-    const { unmount } = render(<MangaCard {...props} onOpen={onOpen} onRead={onRead}/>);
-    const button = screen.getByRole("button");
-    fireEvent.click(button, { detail: 0 });
-    expect(onOpen).toHaveBeenCalledOnce();
-    onOpen.mockClear();
-    fireEvent.click(button, { detail: 1 });
-    expect(onOpen).not.toHaveBeenCalled();
-    unmount();
-    vi.runAllTimers();
-    expect(onOpen).not.toHaveBeenCalled();
-  } finally { vi.useRealTimers(); }
+it("opens the detail on a single click at once, and only the reader on a double click", () => {
+  const onOpen = vi.fn(), onRead = vi.fn();
+  render(<MangaCard {...props} onOpen={onOpen} onRead={onRead}/>);
+  const button = screen.getByRole("button");
+  fireEvent.click(button, { detail: 1 });
+  expect(onOpen).toHaveBeenCalledOnce();
+  fireEvent.click(button, { detail: 2 });
+  fireEvent.doubleClick(button);
+  expect(onOpen).toHaveBeenCalledOnce();
+  expect(onRead).toHaveBeenCalledOnce();
+  fireEvent.click(button, { detail: 0 });
+  expect(onOpen).toHaveBeenCalledTimes(2);
 });
