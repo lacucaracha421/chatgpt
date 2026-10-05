@@ -47,7 +47,7 @@
 .auto-tags__match > span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .auto-tags__match-en { overflow: hidden; text-overflow: ellipsis; color: var(--color-muted); font-size: var(--text-xs); }
 .auto-tags__match-count { margin-left: auto; color: var(--color-muted); font: 500 var(--text-sm) var(--font-numeric); font-variant-numeric: tabular-nums; }
-.auto-tags__empty { margin: var(--space-1) 0 0; color: var(--color-muted); font-size: var(--text-xs); }
+.auto-tags__empty { margin: var(--space-1) 0 0; padding: 0; }
 
 /* Header filter badges on the 에셋 screen. */
 .auto-tag-filters { display: flex; align-items: center; gap: var(--space-compact); min-width: 0; overflow: hidden; }

@@ -87,7 +87,7 @@ export const memoLength = (value: string) => [...value].length;
 export function normalizeCollectionEdit(field: CollectionEditField, value: CollectionEditValue): CollectionEditValue {
   if (field === 'myScore') {
     if (value === null) return null;
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 5 || !Number.isInteger(value * 2)) throw new Error('평점은 0.0–5.0 사이 0.5 단위입니다.');
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 5 || !Number.isInteger(value * 2)) throw new Error('별점은 0.0–5.0 사이 0.5 단위입니다.');
     return value;
   }
   if (field === 'showcase' || field === 'releaseWatch') {

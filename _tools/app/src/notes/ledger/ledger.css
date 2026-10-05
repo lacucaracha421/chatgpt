@@ -39,7 +39,7 @@
 .ledger-wish__expanded { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding-bottom: var(--space-3); }
 .ledger-wish__expanded > span { flex: 1; font-size: var(--type-meta); color: var(--color-muted); }
 .ledger-wish__expanded b { color: var(--color-text); white-space: nowrap; }
-.ledger-empty { margin: var(--space-4) 0; font-size: var(--type-meta); color: var(--color-faint); }
+.ledger-empty { margin: var(--space-4) 0; padding: 0; }
 .ledger-problem, .ledger-quick > p { color: var(--color-danger); font-size: var(--type-meta); margin: var(--space-2) 0; }
 .ledger-review, .ledger-conflict { font-size: var(--type-meta); color: var(--color-muted); }
 .ledger-day { margin-top: var(--space-2); }

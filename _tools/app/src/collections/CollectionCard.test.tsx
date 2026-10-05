@@ -50,9 +50,9 @@ const sample: CollectionSummary = {
 it("shows series season premiere range and a single date for one season", () => {
   const props = { coverUrl: null, onClick: vi.fn(), selected: false };
   const { rerender } = render(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2024-05-05"] }} />);
-  expect(screen.getByText("16.1.14~24.5.5")).toBeInTheDocument();
+  expect(screen.getByText("2016.1.14–2024.5.5")).toBeInTheDocument();
   rerender(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2016-01-14"] }} />);
-  expect(screen.getByText("16.1.14")).toBeInTheDocument();
+  expect(screen.getByText("2016.1.14")).toBeInTheDocument();
 });
 
 describe("CollectionCard", () => {

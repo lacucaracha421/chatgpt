@@ -16,7 +16,7 @@ import type {Fact} from '../src/collections/case/CollectionCase';
 import {selectedSpine} from '../src/collections/launchBoxSpines';
 import {StableImage} from '../src/shared/ui/StableImage';
 import type {CollectionVolume as SharedVolume} from '../src/library/types';
-import {Button} from './ui';
+import {Button,Skeleton} from './ui';
 import {useArtworkSet, type ArtworkRequest} from './collectionArtwork';
 import {collectionCover, coverFocuses, type CollectionDetail, type CollectionSummary, type CollectionVolume} from './collectionModel';
 import {workCaseData} from './CollectionShelf';
@@ -29,7 +29,7 @@ const SWIPE_PX = 64;
 
 /** The booklet uses the visible record, including queued tablet edits. */
 function caseRecord(rows: [string, string][], stars: ReactNode): Fact[] {
-  return [...rows.filter(([label]) => label === '상태'), ['별점', stars], ...rows.filter(([label]) => label === '기기')];
+  return [...rows.filter(([label]) => label === '상태'), ['내 별점', stars], ...rows.filter(([label]) => label === '기기')];
 }
 
 /** The kind's selected artwork, else its first. */
@@ -134,7 +134,7 @@ export function CaseWork(props: CaseWorkProps) {
     if (slots[next] === incoming) return;
     setSlots(current => next === 0 ? [incoming, current[1]] : [current[0], incoming]);
   }, [incoming, shown, metadataOnly, painted, slots]);
-  if (!visible) return <div className="tablet-work__skeleton ui-skeleton" aria-label="작품을 불러오는 중" aria-busy="true"/>;
+  if (!visible) return <Skeleton className="tablet-work__skeleton" label="작품을 불러오는 중"/>;
   const waiting = !incoming || visible !== incoming;
   const label = visible.item.type === 'av' ? 'AV 작품 화면' : visible.item.type === 'movie' ? '영화 작품 화면' : '게임 작품 화면';
   return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work" style={{position: 'relative'}} aria-label={label} aria-busy={waiting || !entered} inert={waiting || undefined}>
@@ -253,7 +253,7 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
   }, [incoming, shown, metadataOnly, slots, painted]);
   const [reset, setReset] = useState(0);
   const [entered, setEntered] = useState(false);
-  if (!visible) return <div className="tablet-work__skeleton ui-skeleton" aria-label="작품을 불러오는 중" aria-busy="true"/>;
+  if (!visible) return <Skeleton className="tablet-work__skeleton" label="작품을 불러오는 중"/>;
   const waiting = !incoming || visible !== incoming;
   return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work tablet-work--manga" style={{position: 'relative'}} aria-label="만화 작품 화면" aria-busy={waiting || !entered} inert={waiting || undefined}>
     {slots.map((slot, index) => slot && <div key={index} data-work-pending={index !== painted && slot === incoming ? '' : undefined} aria-hidden={index !== painted} inert={index !== painted || waiting || undefined}

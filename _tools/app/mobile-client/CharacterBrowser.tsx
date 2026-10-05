@@ -12,7 +12,7 @@ import {ArrowLeftIcon,ChevronUpIcon,FolderIcon,InformationCircleIcon,PhotoIcon,S
 import {BottomSheet} from './BottomSheet';
 import {BarProgress,SearchButton} from './TopBar';
 import {useSectionShade} from './SectionShade';
-import {Button,IconButton,SegmentedControl} from './ui';
+import {Button,EmptyState,IconButton,SegmentedControl} from './ui';
 import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
 import {StableImage} from '../src/shared/ui/StableImage';
@@ -381,8 +381,9 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   const entering=active&&!!initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)&&!lastPage.current;
   if(!active){lastPage.current=undefined;lastPlace.current=null;level.current=null;}
   else if(page&&!entering){lastPage.current=page;if(committed)lastPlace.current=committed;}
-  // Moving between places inside the browser is the shared folder move (tiles) and first-batch
-  // entrance (shelf cards); only a search toggle keeps the level swap.
+  // Moving between places inside the browser is the shared folder move (tiles); shelf cards keep only
+  // the visit's first entrance and swap in one step after that (user 2026-10-05). Only a search
+  // toggle keeps the level swap.
   if(active&&committed&&index)level.current='place';
   useLevelMotion(host,search?.length?'asset-search':level.current,0,false);
   // Not gated on `busy`: the frame between a navigation and its request starting must not show
@@ -412,16 +413,16 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     <SegmentedControl<CharacterFilter> label="이미지 범위" options={SERIES_FILTERS.map(filter=>({value:filter,label:filter==='unclassified'?'미분류':'전체',count:scopeCount(filter)}))} value={place.filter} onChange={applyCharacterFilter}/>
     <IconButton label="미분류와 전체 설명" icon={InformationCircleIcon} onClick={()=>setFilterHelpOpen(true)}/>
   </div>;
-  const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearancePlace={shelfPlace??'root'} appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
+  const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
   const overview=<>
-    {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
-    {index&&!index.ready&&<div className="empty-state"><h3>캐릭터 보기가 아직 공유되지 않았습니다</h3><p>PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다.</p></div>}
+    {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>다시 시도</Button></div>}
+    {index&&!index.ready&&<EmptyState title="캐릭터 보기가 아직 공유되지 않았습니다" hint="PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다."/>}
     {landscape&&node?.kind==='series'&&node.heroAssetId&&<div className="character-hero"><Preview id={node.heroAssetId} rating={index?.contentRatings?.[node.heroAssetId]} paused={!active||paused} label={`${node.name} 대표 이미지`}/></div>}
     {shelf}
     {filterControls}
     {node?.description&&<p className="character-description">{node.description}</p>}
     {scope&&scope.sourceCount>scope.totalCount&&<p className="character-description">서버에 보관된 {scope.totalCount}개를 표시합니다. 아직 공유되지 않은 자산 {scope.sourceCount-scope.totalCount}개가 있습니다.</p>}
-    {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<div className="empty-state"><h3>{where.node?(filterPending?'조건에 맞는 자산이 없습니다':node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}</h3></div>}
+    {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<EmptyState title={where.node?(filterPending?'조건에 맞는 자산이 없습니다':node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}/>}
   </>;
   // 종류 is the gallery's first row; scrolled away, the current crumb names it and the bar pulls down.
   const kindShade=useSectionShade<AssetMediaFilter>({label:'종류',options:MEDIA_SECTIONS,value:where.filters.media,onChange:applyMedia},{active:active&&!paused&&!!where.node});
@@ -443,7 +444,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
-    <Gallery privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null} selectedIds={selection?.ids} onSelectAsset={selection?.onSelect} onToggleSelection={selection?.onToggle} onClearSelection={selection?.onClear}/>
+    <Gallery privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node&&kindShade.inline}{overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null} selectedIds={selection?.ids} onSelectAsset={selection?.onSelect} onToggleSelection={selection?.onToggle} onClearSelection={selection?.onClear}/>
     {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     <LoadingLine label={(more)&&'다음 캐릭터 자산 불러오는 중'} className="is-bottom"/>
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>{if(sparse){cache.current.clear();setRetry(n=>n+1);}else void append();}}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}

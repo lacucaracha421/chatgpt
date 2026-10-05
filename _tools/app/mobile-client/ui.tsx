@@ -1,6 +1,7 @@
 import {Button} from '../src/shared/ui/Button';
 export {Button};
-export {Badge} from '../src/shared/ui/Badge';
+export {Badge, CountBadge} from '../src/shared/ui/Badge';
+export {DDay} from '../src/shared/ui/DDay';
 export {Checkbox} from '../src/shared/ui/Checkbox';
 export {Dialog} from '../src/shared/ui/Dialog';
 export {Description as DialogDescription} from '@radix-ui/react-dialog';

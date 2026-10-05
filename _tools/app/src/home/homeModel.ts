@@ -1,6 +1,7 @@
 import type { AuthoritySyncHealth, CloudBackfillProgress, CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
 import { koreanReleases, releaseCaption, shortReleaseDate, type ReleaseCaption } from "../collections/releaseCaption";
 import { releaseEventLine } from "../collections/releaseCalendarFormat";
+import { displayTime } from "../shared/displayDate";
 
 /**
  * PC Home (HOME-DASH-001, layout D): pure shaping of data other screens
@@ -9,8 +10,7 @@ import { releaseEventLine } from "../collections/releaseCalendarFormat";
 
 /** "14:32" in local time. */
 export function clockLabel(at: Date | string | number) {
-  const date = new Date(at);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return displayTime(at);
 }
 
 /** Local midnight today and on this week's Monday, as instants for `get_home_overview`. */

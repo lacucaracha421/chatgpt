@@ -2,7 +2,7 @@ import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon} from '@heroicons/react/24/outline';
 import {useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
 import {TopBar} from './TopBar';
-import {Badge, Button, EmptyState, SegmentedControl, SectionLabel, Skeleton} from './ui';
+import {Badge, Button, DDay, EmptyState, SegmentedControl, SectionLabel, Skeleton} from './ui';
 import {api, ApiError, errorText, native} from './transport';
 import {usePrivacyMode} from './privacyMode';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
@@ -10,7 +10,7 @@ import {PlatformBadges} from '../src/collections/PlatformBadges';
 import type {Ticket} from './types';
 import {filterReleaseEntries, groupReleaseEntries, normalizeReleaseCalendarReply, releaseDateLabel, releaseDaysUntil, releaseEventLine, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarEvent, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {Scrubber} from './Scrubber';
-import {ddayLabel} from '../src/shared/displayDate';
+import {releaseGroupHeading} from '../src/collections/releaseCalendarFormat';
 import {cancelSegmentSwap, swapSegment} from '../src/shared/motion/viewSwap';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
@@ -119,7 +119,7 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
   if (!entries.length) return <EmptyCalendar wishlistOnly={wishlistOnly} />;
   return <div className="release-calendar-groups">
     {groups.map(month => <section key={month.key} className={`release-calendar-month${month.key === 'recent' ? ' is-recent' : ''}`} aria-label={month.label}>
-      <SectionLabel as="h2" className="release-calendar-month-heading" title={month.label} count={month.items} />
+      <SectionLabel as="h2" className="release-calendar-month-heading" title={releaseGroupHeading(month.label, referenceYear)} count={month.items} />
       <div className="release-calendar-days">
         {month.days.map(day => {
           // One heading per release day; the day's covers sit side by side under it (up to a row).
@@ -129,7 +129,7 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
           return <section key={day.key} className="release-calendar-day" style={{'--day-span': span} as CSSProperties} aria-label={day.label}>
             <div className="release-calendar-day-head">
               <span className="release-calendar-date numeric">{releaseDateLabel(first.date, first.precision, referenceYear)}</span>
-              {ddayLabel(days) && <span className="release-calendar-dday numeric">{ddayLabel(days)}</span>}
+              <DDay as="text" days={days} />
             </div>
             <ul className="release-calendar-card-grid">
               {day.items.map(entry => {

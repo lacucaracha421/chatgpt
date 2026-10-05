@@ -13,10 +13,10 @@ import { FilmDetails } from "../FilmDetails";
 import { SeriesSeasons } from "../SeriesSeasons";
 
 export function workRecord(collection: CollectionSummary, record = defaultRecord(collection)): Fact[] {
-  return [["들인 날", displayDate(collection.createdAt)], ["상태", statusLabel(collection.type, record.status)], ["별점", <RecordStars score={record.myScore} />], ...(collection.type === "game" ? [["기기", record.ownedPlatform ?? "미입력"] as Fact] : [])];
+  return [["들인 날", displayDate(collection.createdAt)], ["상태", statusLabel(collection.type, record.status)], ["내 별점", <RecordStars score={record.myScore} />], ...(collection.type === "game" ? [["기기", record.ownedPlatform ?? "미입력"] as Fact] : [])];
 }
 export function insideRecord(collection: CollectionSummary, record: CollectionWorkRecord): Fact[] {
-  return workRecord(collection, record).filter(([label]) => label !== "들인 날").map(([label, value]) => [label, label === "별점" ? <CaseScore score={record.myScore} /> : value]);
+  return workRecord(collection, record).filter(([label]) => label !== "들인 날").map(([label, value]) => [label, label === "내 별점" ? <CaseScore score={record.myScore} /> : value]);
 }
 export function WorkInfo({ collection, av, related, tmdb, record = defaultRecord(collection), onSave, onOpenPerson, onOpenCollection, onCopyCode }: {
   collection: CollectionSummary; av: AvDetails | null; related: AvRelated | null; tmdb?: TmdbConnection | null;

@@ -117,7 +117,7 @@ describe("MangaBrowser", () => {
     expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
     await act(async () => finish());
     expect(await screen.findByText("새 작품")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "태그 필터 해제" }));
+    await userEvent.click(screen.getByRole("button", { name: "태그 필터 빼기" }));
     expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "b" }), expect.any(Function), expect.any(String));
   });
 

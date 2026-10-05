@@ -135,6 +135,6 @@ describe("device name search", () => {
     rerender(tree(true));
     expect(document.querySelector(".command-palette img")).toBeNull();
     await user.clear(screen.getByRole("combobox")); await user.type(screen.getByRole("combobox"), "없는이름");
-    expect(screen.getByText("일치하는 이름이 없습니다.")).toBeVisible();
+    expect(screen.getByText("검색 결과 없음")).toBeVisible();
   });
 });

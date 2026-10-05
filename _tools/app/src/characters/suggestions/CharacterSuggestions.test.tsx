@@ -136,7 +136,7 @@ describe("character suggestions", () => {
     expect(screen.getByRole("checkbox", { name: "태그를 이 캐릭터에 연결" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "시리즈 폴더 밖 이미지도 후보로" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "a0 크게 보기" }));
-    fireEvent.click(screen.getByRole("button", { name: "참조에서 빼기" }));
+    fireEvent.click(screen.getByRole("button", { name: "참조에서 제거" }));
     fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
     expect(screen.getByText("참조 5장 미만: 수동 관리로 시작해요.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "a5 크게 보기" }));
@@ -213,7 +213,7 @@ describe("character suggestions", () => {
     await screen.findByRole("button", { name: "a0 크게 보기" });
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "다시 불러오기" }));
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(client.detail).toHaveBeenCalledTimes(2));
   });
   it("does not render private thumbnails", async () => {

@@ -89,7 +89,7 @@ it('keeps the same input and results during Korean composition and a delayed lis
 });
 it('removes a selected scope through its chip without treating it as a search action',()=>{
  const remove=vi.fn();render(<AssetScopeChips chips={[suggestions[0]]} onRemove={remove}/>);
- fireEvent.click(screen.getByRole('button',{name:'서리 폴더 범위 제거'}));
+ fireEvent.click(screen.getByRole('button',{name:'서리 폴더 범위 빼기'}));
  expect(remove).toHaveBeenCalledWith(suggestions[0]);
  expect(assetSearchKey(suggestions[0])).toBe('folder:folder');
 });
@@ -148,10 +148,10 @@ it('removes chips independently, offers clear-all for multiple chips, and animat
  vi.spyOn(Element.prototype,'getBoundingClientRect').mockReturnValue({width:96} as DOMRect);
  const remove=vi.fn(),clear=vi.fn(),tag={kind:'tag' as const,id:'long_hair',name:'긴 머리'};
  const view=render(<AssetScopeChips chips={[suggestions[0],tag]} onRemove={remove} onClear={clear}/>);
- fireEvent.click(screen.getByRole('button',{name:'긴 머리 범위 제거'}));expect(remove).toHaveBeenCalledWith(tag);
+ fireEvent.click(screen.getByRole('button',{name:'긴 머리 범위 빼기'}));expect(remove).toHaveBeenCalledWith(tag);
  fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));expect(clear).toHaveBeenCalledOnce();
  view.rerender(<AssetScopeChips chips={[suggestions[0]]} onRemove={remove} onClear={clear}/>);
- expect(screen.queryByRole('button',{name:'모두 지우기'})).toBeNull();expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'모두 지우기'})).toBeNull();expect(screen.queryByRole('button',{name:'긴 머리 범위 빼기'})).toBeNull();
  expect(animations.mock.calls[0]?.[0]).toEqual([{width:'0px',opacity:0},{width:'96px',opacity:1}]);
  expect(animations.mock.calls.at(-1)?.[1]).toMatchObject({duration:140});expect(animations.mock.calls.at(-1)?.[0]).toEqual([{width:'96px',opacity:1},{width:'0px',opacity:0}]);
  await advance(140);expect(view.container.querySelectorAll('.asset-scope-chip-slot')).toHaveLength(1);

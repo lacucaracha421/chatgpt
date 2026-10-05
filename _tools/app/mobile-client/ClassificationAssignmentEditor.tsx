@@ -3,7 +3,7 @@ import {visibleInterval} from './useVisibleInterval';
 import {viewerEditEvent} from './listGeneration';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {ChevronDownIcon,ChevronRightIcon,FolderIcon,MagnifyingGlassIcon,XMarkIcon} from '@heroicons/react/24/outline';
-import {Dialog,DialogDescription,IconButton} from './ui';
+import {Dialog,DialogDescription,EmptyState,IconButton} from './ui';
 import {errorText,native} from './transport';
 import {treeBreadcrumb} from './homeModel';
 import {ClassificationIcon,classificationColor} from '../src/classification/classificationAppearance';
@@ -155,7 +155,7 @@ export function ClassificationAssignmentChoices({classifications,selectedId,disa
         {query.trim()
           ? (results.length
             ? <div className="classification-assignment-search-results">{results.map(({classification,breadcrumb})=>row(classification,0,false,breadcrumb))}</div>
-            : <p className="hint">일치하는 분류가 없습니다.</p>)
+            : <EmptyState inline title="검색 결과 없음" />)
           : <>
             <div className={`tree-row${selectedId===null?' is-current':''}`}>
               <span className="tree-leaf"/>

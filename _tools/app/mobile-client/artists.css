@@ -70,6 +70,7 @@
 .artist-grid-count { flex:none; font-size:13px; }
 .artist-grid-search input:focus-visible,.artist-grid-sort:focus-visible,.artist-grid-card:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
 .artist-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:260px; padding:32px; text-align:center; }
+.artist-empty > .artist-empty__skeleton { align-self:stretch; flex:1; }
 .artist-detail-scroll { flex:1; min-height:0; display:flex; flex-direction:column; }
 .artist-hidden-entry { padding:0 var(--space-3); }
 .artist-hidden-row { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); }

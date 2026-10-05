@@ -3,6 +3,7 @@ import { AREA_ICONS } from "../shared/ui/areaIcons";
 import type { IconGlyph } from "../shared/ui/IconButton";
 import { SidebarCloseIcon } from "../shared/ui/SidebarIcons";
 import { Button } from "../shared/ui/Button";
+import { CountBadge } from "../shared/ui/Badge";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { EASE_STANDARD, reducedMotion } from "../shared/motion/curves";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
@@ -220,7 +221,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
         const activity = key === "private_vault" ? vaultImportText : undefined;
         return <button key={key} type="button" className="workspace-rail__item" aria-current={requestedArea === key ? "page" : undefined}
           aria-description={count > 0 ? `받은 파일 ${count}개` : activity} onClick={() => enterArea(key)}>
-          <span className="workspace-rail__icon"><Icon aria-hidden="true" />{count > 0 && <span className="workspace-rail__count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}</span>
+          <span className="workspace-rail__icon"><Icon aria-hidden="true" />{count > 0 && <CountBadge variant="corner" className="workspace-rail__count" aria-hidden="true" value={count} max={99} />}</span>
           <span>{label}</span>{activity && <span className="workspace-rail__activity" aria-hidden="true" />}</button>;
       })}
       <div className="workspace-rail__tail">

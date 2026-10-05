@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { displayDateTime } from "../shared/displayDate";
 
 export type AutoTagInboxLast = {
   fileModified: string;
@@ -23,9 +24,7 @@ export function autoTagInboxResult(settings: AutoTagInbox): string {
   const entries = Object.entries(settings.last ?? {});
   if (!entries.length) return "아직 자동으로 가져오지 않음";
   return entries.map(([name, last]) => {
-    const date = new Date(last.importedAt);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const time = Number.isNaN(date.getTime()) ? last.importedAt : `${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const time = displayDateTime(last.importedAt, new Date(), { withTime: true });
     const label = name === "auto-tags-latest.sqlite" ? "자동 태그" : name === "artist-style-latest.sqlite" ? "그림체" : "내용 검색 색인";
     if (last.error) return `${time} ${label} 가져오기 실패 · ${last.error}`;
     const result = label === "자동 태그" ? "자동 태그 가져옴"

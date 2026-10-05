@@ -3,7 +3,7 @@ import {useMemo,useRef,useState} from 'react';
 import {FolderIcon,RectangleStackIcon,UserIcon,TagIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {assetSearchLimitHint,assetSearchChoiceHint,assetSearchKey,groupAssetSuggestions,rememberAssetSearch,type AssetSearchName,type AssetSearchIdentity} from '../src/assets/assetSearch';
 import {TopBarSearch} from './TopBar';
-import {Button,IconButton,SectionLabel,TextInput} from './ui';
+import {Button,EmptyState,IconButton,SectionLabel,TextInput} from './ui';
 import {Cover} from './CoverGroup';
 import {useNoteEditor} from './noteCaret';
 import {usePrivacyMode} from './privacyMode';
@@ -32,7 +32,7 @@ export function AssetSearch({items,endpoint,paused,loading=false,onClose,onChoos
     <TopBarSearch title="에셋" loading={loading&&'검색 목록 불러오는 중'} onClose={onClose}><TextInput type="search" autoFocus aria-label="에셋 찾기" placeholder="에셋 찾기" defaultValue="" {...binding} onKeyDown={event=>{if(editor.isComposing(event.currentTarget)||event.nativeEvent.isComposing||event.keyCode===229)return;if(event.key==='Enter')event.preventDefault();}}/>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={clear}/>}</TopBarSearch>
     <div className="asset-search-results" aria-label="에셋 검색 제안">
       {query.trim()?groups.filter(group=>group.items.length>0).map(group=><section key={group.kind} aria-label={group.label}><SectionLabel as="h2" title={group.label}/>{assetSearchLimitHint(chips,group.kind)&&<p className="hint">{assetSearchLimitHint(chips,group.kind)}</p>}{group.items.slice(0,expanded.includes(group.kind)?group.items.length:5).map(item=><Suggestion key={assetSearchKey(item)} item={item} privateMode={privateMode} paused={paused} pending={group.kind==='tag'&&tags.pending} hint={assetSearchChoiceHint(chips,item)} onChoose={choose}/>)}{group.items.length>5&&!expanded.includes(group.kind)&&<Button type="button" variant="quiet" aria-label={`${group.label} 더 보기`} onClick={()=>setExpanded(old=>[...old,group.kind])}>더 보기</Button>}</section>):!privateMode&&recentItems.length>0&&<section aria-label="최근 검색"><SectionLabel as="h2" title="최근 검색"/>{recentItems.map(item=><Suggestion key={assetSearchKey(item)} item={item} privateMode={privateMode} paused={paused} hint={assetSearchChoiceHint(chips,item)} onChoose={choose}/>)}</section>}
-      {query.trim()&&!groups.some(group=>group.items.length)&&!error&&!loading&&!tags.pending&&<p className="hint">검색 결과가 없습니다.</p>}
+      {query.trim()&&!groups.some(group=>group.items.length)&&!error&&!loading&&!tags.pending&&<EmptyState inline title="검색 결과 없음" />}
       {error&&<div className="inline-error" role="alert"><span>{error}</span>{onRetry&&<Button type="button" variant="ghost" onClick={onRetry}>다시 시도</Button>}</div>}
     </div>
   </div>;

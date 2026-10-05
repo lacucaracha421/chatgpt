@@ -1,3 +1,4 @@
+import {displayDateTime} from '../src/shared/displayDate';
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -329,30 +330,30 @@ describe('mobile catalog reads',()=>{
     expect(within(row).getByRole('button',{name:'필터 1개 적용'}).textContent).toBe('필터1');
     expect(within(row).queryByText('기본')).toBeNull();
   });
-  it('defaults bookmarks to latest and offers both bookmark orders',async()=>{
+  it('defaults bookmarks to newest-added and offers both bookmark orders',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     choose('카탈로그 정렬','views');await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['views']));
-    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['latest']));
-    expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked')&&path.includes('sort=latest'))).toBe(true);
-    expect((screen.getByRole('button',{name:'카탈로그 정렬 최신순'}) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe('최근 추가순'));
+    expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked')&&path.includes('sort=bookmarkAdded'))).toBe(true);
+    expect((screen.getByRole('button',{name:'카탈로그 정렬 최근 추가순'}) as HTMLButtonElement).disabled).toBe(false);
     const list=document.querySelector('.catalog-scroll') as HTMLElement;
     fireEvent.scroll(list,{target:{scrollTop:300}});
     fireEvent.click(screen.getByRole('button',{name:'카탈로그 · 북마크'}));
     const shade=document.querySelector('.section-shade') as HTMLElement;
-    const sort=within(shade).getByRole('button',{name:'카탈로그 정렬 최신순'}) as HTMLButtonElement;
+    const sort=within(shade).getByRole('button',{name:'카탈로그 정렬 최근 추가순'}) as HTMLButtonElement;
     expect(sort.disabled).toBe(false);
     fireEvent.click(sort);
-    expect(screen.getByRole('radio',{name:'최근 추가순'})).toBeTruthy();
+    expect(screen.getByRole('radio',{name:'최신순'})).toBeTruthy();
     expect(screen.queryByRole('radio',{name:'조회순'})).toBeNull();
-    fireEvent.click(screen.getByRole('radio',{name:'최근 추가순'}));
-    await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('bookmarkAdded'));
+    fireEvent.click(screen.getByRole('radio',{name:'최신순'}));
+    await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('latest'));
     cleanup();
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));
-    await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('bookmarkAdded'));
-    fireEvent.click(screen.getByRole('button',{name:/^카탈로그 정렬/}));
-    fireEvent.click(screen.getByRole('radio',{name:'최신순'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('latest'));
+    fireEvent.click(screen.getByRole('button',{name:/^카탈로그 정렬/}));
+    fireEvent.click(screen.getByRole('radio',{name:'최근 추가순'}));
+    await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('bookmarkAdded'));
   });
   it('uses a ready total without issuing the extra count request',async()=>{
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{publicationRevision:'p1'}:{...page,countToken:null,totalCount:1,countStatus:'ready'});
@@ -363,7 +364,7 @@ describe('mobile catalog reads',()=>{
     let published=false;
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{publicationRevision:'p1'}:published?{...page,items:[],countToken:null,totalCount:0,countStatus:'ready'}:{...page,ready:false,items:[],countToken:null});
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('카탈로그가 아직 공유되지 않았습니다');published=true;
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 새로고침'}));await screen.findByText('검색 결과가 없습니다');expect(screen.queryByText('카탈로그가 아직 공유되지 않았습니다')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'카탈로그 새로고침'}));await screen.findByText('검색 결과 없음');expect(screen.queryByText('카탈로그가 아직 공유되지 않았습니다')).toBeNull();
   });
   it('resumes an aborted count without fetching the retained page again',async()=>{
     let countCalls=0;mocks.api.mockImplementation(async(path:string)=>{
@@ -695,7 +696,7 @@ describe('mobile catalog layout',()=>{
       return {...page,publishedAt};
     });
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    await screen.findByText('23분 전 갱신');expect(await screen.findByRole('button',{name:'새 작품 가져오기'})).toBeTruthy();
+    await screen.findByText(`갱신 ${displayDateTime(publishedAt)}`);expect(await screen.findByRole('button',{name:'새 작품 가져오기'})).toBeTruthy();
   });
   it('offers only Read and starts at the cover even when old progress exists',async()=>{
     localStorage.setItem('lakomics.catalog.reading.kHentai:42','11');

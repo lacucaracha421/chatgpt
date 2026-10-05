@@ -5,7 +5,7 @@ import {ArrowsUpDownIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {ArtistImage,EmptyArtists} from './Artists';
 import {ARTIST_LIST_ENTRANCE,PreparedCovers,usePreparedCovers} from './artistCovers';
-import {EmptyState,SegmentedControl} from './ui';
+import {EmptyState,SegmentedControl,Skeleton} from './ui';
 import {usePrivacyMode} from './privacyMode';
 import {PinSolidIcon} from '../src/shared/ui/PinIcon';
 import {useArtistEntry} from './ArtistGridEntry';
@@ -61,7 +61,7 @@ export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{a
     <div className="artist-grid-toolbar">
       <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
     </div>
-    {state === 'idle' || state === 'loading' || showLoading || state === 'ready' && !covers ? <div className="artist-empty" role="status"><span>{showLoading && "작가 목록을 불러오는 중입니다"}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <PreparedCovers.Provider value={covers ?? new Map()}><div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => void entry.open(artist)}/>)}</div></PreparedCovers.Provider> : <EmptyState title="검색 결과가 없습니다"/>}
+    {state === 'idle' || state === 'loading' || showLoading || state === 'ready' && !covers ? <div className="artist-empty">{showLoading && <Skeleton className="artist-empty__skeleton" label="작가 목록"/>}</div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <PreparedCovers.Provider value={covers ?? new Map()}><div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => void entry.open(artist)}/>)}</div></PreparedCovers.Provider> : <EmptyState title="검색 결과 없음"/>}
     {sortOpen && <BottomSheet title="정렬" onClose={() => setSortOpen(false)}><SegmentedControl fullWidth label="작가 정렬" options={SORT_OPTIONS} value={sort} onChange={chooseSort}/></BottomSheet>}
   </div>{entry.error&&<div className="inline-error" role="alert">{entry.error}</div>}</>;
 }

@@ -203,7 +203,7 @@ describe("Collection work open path", () => {
   it("saves each personal field through the PC command without a stale full-work write", async () => {
     const {Harness,gateway}=fixtures(); render(<Harness/>); const user=userEvent.setup();
     await user.dblClick(screen.getByRole("button",{name:/^가 작품/}));
-    await user.click(await screen.findByRole("button",{name:"별점 5점"}));
+    await user.click(await screen.findByRole("button",{name:"내 별점 5점"}));
     await waitFor(()=>expect(gateway.saveCollectionWorkRecord).toHaveBeenCalledWith("a",{field:"myScore",value:5}));
     const memo=screen.getByRole("textbox",{name:"메모"}); await user.clear(memo); await user.type(memo,"새 기록"); await user.tab();
     await waitFor(()=>expect(gateway.saveCollectionWorkRecord).toHaveBeenCalledWith("a",{field:"memo",value:"새 기록"}));

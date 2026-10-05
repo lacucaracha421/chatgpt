@@ -3,6 +3,7 @@ import {assetMasked} from '../src/shared/privacy/contentMask';
 import {mediaMasked} from './assetMask';
 import {useNsfwFilter} from './privacyMode';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
+import {displayDateTime} from '../src/shared/displayDate';
 import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, RectangleStackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import {HeartIcon as HeartSolidIcon} from '@heroicons/react/24/solid';
 import type {ComponentType, CSSProperties, SVGProps} from 'react';
@@ -51,14 +52,7 @@ function handleLabel(handle: string): string {
 }
 
 function viewerDateLabel(value?: string): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '';
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const hour = String(date.getHours()).padStart(2, '0');
-  const minute = String(date.getMinutes()).padStart(2, '0');
-  return `${month}.${day} ${hour}:${minute}`;
+  return value && Number.isFinite(Date.parse(value)) ? displayDateTime(value, new Date(), {withTime: true}) : '';
 }
 
 /**
@@ -357,10 +351,10 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           {!vault&&<>
             <ViewerAction label="앨범" icon={RectangleStackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
             <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
-            {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 제외`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
+            {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 빼기`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
             {likes.available&&<IconButton className="viewer-action viewer-action--like" tone="heart" pop label="좋아요" icon={HeartIcon} activeIcon={HeartSolidIcon} active={likes.liked.has(asset.id)} data-toggle-key={asset.id} disabled={likes.pending.has(asset.id)} onClick={() => {revealChrome();void likes.toggle(asset.id);}}/>}
             <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); revealChrome();}}/>
-            {onTrash&&!asset.pending&&<ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
+            {onTrash&&!asset.pending&&<ViewerAction label="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
           </>}
         </div>
       </header>

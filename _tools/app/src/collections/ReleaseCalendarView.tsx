@@ -5,7 +5,8 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ReleaseCalendar, ReleaseTitle, ReleaseWishlistEvent, ReleaseWishlistItem } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
-import { displayDateTime, displayDDay } from "../shared/displayDate";
+import { daysUntil, displayDateTime } from "../shared/displayDate";
+import { DDay } from "../shared/ui/DDay";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
@@ -14,7 +15,7 @@ import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { PlatformBadges } from "./PlatformBadges";
-import { groupReleaseDays, groupReleases, isVisibleCalendarRelease, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine } from "./releaseCalendarFormat";
+import { groupReleaseDays, groupReleases, isVisibleCalendarRelease, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine, releaseGroupHeading } from "./releaseCalendarFormat";
 import "./releaseCalendar.css";
 import { createKoreanMatcher } from "../shared/koreanSearch";
 
@@ -33,11 +34,6 @@ type Props = {
 function coverUrl(title: ReleaseTitle): string | null {
   if (!title.cover) return null;
   return title.provider === "igdb" ? igdbImagePreviewUrl(title.cover, "cover") : tmdbImagePreviewUrl(title.cover, "poster");
-}
-
-function groupHeadingLabel(label: string, referenceYear: number): string {
-  const month = /^(\d{4})년 (\d{1,2})월$/.exec(label);
-  return month && Number(month[1]) === referenceYear ? `${month[2]}월` : label;
 }
 
 function EmptyCalendarState({ title, icon: Icon }: { title: string; icon: ComponentType<SVGProps<SVGSVGElement>> }) {
@@ -161,7 +157,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
     if (!api || refreshing) return;
     setRefreshing(true); setError(null);
     try { const fresh = await api.refresh(true); if (active.current) setCalendar(fresh); }
-    catch (err) { setError(commandErrorMessage(err, "발매 캘린더를 새로 고치지 못했습니다.")); }
+    catch (err) { setError(commandErrorMessage(err, "발매 캘린더를 새로고침하지 못했습니다.")); }
     finally { if (active.current) setRefreshing(false); }
   }
 
@@ -180,7 +176,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
       <div className="release-calendar__actions">
         {!refreshing && latest && <span className="release-calendar__updated">갱신 {displayDateTime(latest)}</span>}
         {watchOnly && allUnread.length > 0 && <Button type="button" size="sm" variant="quiet" disabled={Boolean(pending)} onClick={() => void acknowledge("all", allUnread)}>모두 확인</Button>}
-        <Button type="button" size="sm" variant="quiet" disabled={refreshing || !api} onClick={() => void refreshNow()}><ArrowPathIcon aria-hidden="true" />새로 고침</Button>
+        <Button type="button" size="sm" variant="quiet" disabled={refreshing || !api} onClick={() => void refreshNow()}><ArrowPathIcon aria-hidden="true" />새로고침</Button>
       </div>
     </div>
     {problems.length > 0 && <div className="release-calendar__status" role="status">
@@ -194,17 +190,17 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
         ? <EmptyCalendarState title="관심 목록 비어 있음" icon={BookmarkOutlineIcon} />
         : needle ? <EmptyCalendarState title="검색 결과 없음" icon={MagnifyingGlassIcon} /> : <EmptyCalendarState title="6개월 안의 발매 정보 없음" icon={CalendarDaysIcon} />)}
       {groups.map(group => <section key={group.key} className={`release-calendar__month${group.key === "recent" ? " is-recent" : ""}`} aria-label={group.label}>
-        <SectionLabel as="h3" title={groupHeadingLabel(group.label, referenceYear)} count={group.items.length} />
+        <SectionLabel as="h3" title={releaseGroupHeading(group.label, referenceYear)} count={group.items.length} />
         <div className="release-calendar__days">
           {groupReleaseDays(group.items, group.key === "recent").map(day => {
             // One heading per release day; the day's covers sit side by side under it (up to four).
             const first = day[0]!;
-            const dDay = first.released === true || first.precision !== "exact" ? null : displayDDay(first.date);
+            const dDay = first.released === true || first.precision !== "exact" ? null : daysUntil(first.date);
             return <section key={`${first.date ?? "tbd"}:${first.precision}:${first.id}`} className="release-calendar__day" style={{ "--day-span": Math.min(day.length, DAY_SPAN_MAX) } as CSSProperties}
               aria-label={releaseDateLabel(first.date, first.precision, referenceYear)}>
               <div className="release-calendar__date-row">
                 <span className="release-calendar__date">{releaseDateLabel(first.date, first.precision, referenceYear)}</span>
-                {dDay && <span className="release-calendar__dday">{dDay}</span>}
+                <DDay as="text" days={dDay} />
               </div>
               <ul className="release-calendar__grid">
                 {day.map(tile => {

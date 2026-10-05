@@ -204,7 +204,7 @@ export function AssetInfoPanel({
 
 function CollectionInfo({ collection }: { collection: CollectionSummary }) {
   return <section className="asset-inspector__collection-info" data-info-section="collection" aria-label="컬렉션 정보"><SectionLabel as="h3" title="컬렉션" /><strong className="asset-inspector__collection-name">{collection.name}</strong>{collection.description?.trim() && <p className="asset-inspector__collection-description">{collection.description}</p>}<dl>
-    {collection.type === "game" && <>{collection.author && <div><dt>제작사</dt><dd>{collection.author}</dd></div>}{collection.externalScore != null && <div><dt>외부 점수</dt><dd>{collection.externalScore}</dd></div>}{collection.myScore != null && <div><dt>내 점수</dt><dd>{collection.myScore}</dd></div>}</>}
+    {collection.type === "game" && <>{collection.author && <div><dt>제작사</dt><dd>{collection.author}</dd></div>}{collection.externalScore != null && <div><dt>외부 점수</dt><dd>{collection.externalScore}</dd></div>}{collection.myScore != null && <div><dt>내 별점</dt><dd>{collection.myScore}</dd></div>}</>}
     {collection.type === "manga" && <>{collection.author && <div><dt>작가</dt><dd>{collection.author}</dd></div>}{collection.year != null && <div><dt>출간 연도</dt><dd>{collection.year}</dd></div>}</>}
     {collection.type === "movie" && <>{collection.director && <div><dt>감독</dt><dd>{collection.director}</dd></div>}{collection.year != null && <div><dt>개봉 연도</dt><dd>{collection.year}</dd></div>}</>}
   </dl></section>;

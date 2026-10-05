@@ -1,3 +1,5 @@
+import { EmptyState } from "../shared/ui/EmptyState";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/20/solid";
 import { ChevronRightIcon, PlusIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
@@ -162,7 +164,7 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
   return <div className="character-assign-picker ui-menu" role="listbox" aria-label="캐릭터에 넣기" aria-multiselectable="true" onKeyDown={keyDown} onClick={event => event.stopPropagation()}>
     <div className="character-assign-picker__search ui-text-input">
       <MagnifyingGlassIcon aria-hidden="true" />
-      {activeScopeId && <button type="button" className="character-assign-picker__scope" aria-label={`${activeScopeName} 범위 해제`} onMouseDown={event => event.preventDefault()} onClick={clearScope}>
+      {activeScopeId && <button type="button" className="character-assign-picker__scope" aria-label={`${activeScopeName} 범위 빼기`} onMouseDown={event => event.preventDefault()} onClick={clearScope}>
         <span>{activeScopeName}</span><XMarkIcon aria-hidden="true" />
       </button>}
       <input autoFocus type="search" role="searchbox" aria-label="캐릭터 찾기" placeholder="캐릭터 찾기" value={query}
@@ -185,9 +187,9 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
         {onCreate && <PickerSection label="새 캐릭터"><button type="button" className="character-assign-picker__create" onClick={() => void onCreate(query.trim())}>
           <span className="character-assign-picker__create-icon"><PlusIcon aria-hidden="true" /></span><span>{activeScopeName}에 “{query.trim()}” 만들기</span>
         </button></PickerSection>}
-        {otherSeriesRows.length === 0 && !onCreate && <div className="character-assign-picker__empty">일치하는 캐릭터가 없습니다.</div>}
+        {otherSeriesRows.length === 0 && !onCreate && <EmptyState inline className="character-assign-picker__empty" title="검색 결과 없음" />}
       </>}
-      {!scopedNoMatch && visibleRows.length === 0 && <div className="character-assign-picker__empty">일치하는 캐릭터가 없습니다.</div>}
+      {!scopedNoMatch && visibleRows.length === 0 && <EmptyState inline className="character-assign-picker__empty" title="검색 결과 없음" />}
     </div>
     {activeScopeId && <button type="button" className="character-assign-picker__all-series" onClick={clearScope}>
       <span className="character-assign-picker__all-series-icon"><Squares2X2Icon aria-hidden="true" /></span><span>모든 시리즈</span><ChevronRightIcon aria-hidden="true" />
@@ -203,7 +205,7 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
 
 function PickerSection({ label, children }: { label?: string; children: React.ReactNode }) {
   return <section className="character-assign-picker__section" role="group" aria-label={label}>
-    {label && <div className="character-assign-picker__section-label"><span aria-hidden="true" />{label}<i aria-hidden="true" /></div>}
+    {label && <SectionLabel className="character-assign-picker__section-label" title={label} />}
     {children}
   </section>;
 }

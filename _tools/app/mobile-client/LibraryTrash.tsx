@@ -4,7 +4,7 @@ import {assetMasked} from '../src/shared/privacy/contentMask';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckCircleIcon, PhotoIcon, TrashIcon} from '@heroicons/react/24/outline';
-import {Button, IconButton} from './ui';
+import {Button, EmptyState, IconButton} from './ui';
 import {errorText} from './transport';
 import {mediaTicket} from './media';
 import {Scrubber} from './Scrubber';
@@ -159,8 +159,8 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
     <p className="hint trash-hint">비우기는 PC에서 할 수 있습니다. 보존 기간이 지나면 PC가 영구 삭제합니다.</p>
     {(notice || deferred) && <p className="error-message trash-notice" role="alert">{notice || deferred}</p>}
     <LoadingLine label={(phase === 'loading')&&'휴지통 불러오는 중'}/>
-    {phase === 'error' && <div className="empty-state trash-empty"><h2>휴지통을 불러오지 못했습니다</h2><p>{error}</p><Button onClick={() => { setPhase('loading'); void reload(); }}>다시 시도</Button></div>}
-    {phase === 'ready' && !tiles.length && <div className="empty-state trash-empty"><TrashIcon aria-hidden="true"/><h2>휴지통이 비어 있습니다</h2>{!active && <p>이 서버는 아직 휴지통 동기화를 지원하지 않습니다.</p>}</div>}
+    {phase === 'error' && <EmptyState className="trash-empty" title="휴지통을 불러오지 못했습니다" hint={error}><Button onClick={() => { setPhase('loading'); void reload(); }}>다시 시도</Button></EmptyState>}
+    {phase === 'ready' && !tiles.length && <EmptyState className="trash-empty" icon={TrashIcon} title="휴지통이 비어 있습니다" hint={!active && '이 서버는 아직 휴지통 동기화를 지원하지 않습니다.'}/>}
     {phase === 'ready' && tiles.length > 0 && <div ref={scroller} className="trash-scroll">
       <div className="trash-grid">
         {tiles.map(tile => {

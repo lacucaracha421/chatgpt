@@ -1,6 +1,8 @@
+import { EmptyState } from "../../shared/ui/EmptyState";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useRef, useState, type ReactNode } from 'react';
 import { Badge } from '../../shared/ui/Badge';
+import { DDay } from '../../shared/ui/DDay';
 import { Button } from '../../shared/ui/Button';
 import { TextInput } from '../../shared/ui/TextInput';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
@@ -71,13 +73,13 @@ export function LedgerContents({ ledger, summary, all, today, spending, quickInp
     <div className="ledger-meter-key"><span>고정</span><span>쓴 돈</span><span>사고 싶은 것 (고른 것)</span></div>
     <section aria-label="이번 달 결제 예정"><SectionLabel as="h3" title="이번 달 결제 예정" />
       {events.length ? <ul ref={stripWheel} className="ledger-timeline">{events.map(e => <li key={`${e.recurring.id}:${e.kind}:${e.date}`}>
-        <button type="button" onClick={() => onRecurring(e.recurring)}><span>{displayDate(e.date)}{e.days !== null && <Badge>{e.days === 0 ? '오늘' : `D-${e.days}`}</Badge>}</span><strong>{e.recurring.name}{e.kind === 'trialEnd' ? ' · 무료 끝' : e.kind === 'cancellationEnd' ? ' · 끝남' : ''}</strong><span>{e.kind === 'cancellationEnd' ? '해지 예약' : won(e.amount)}</span></button>
-      </li>)}</ul> : <p className="ledger-empty">결제 예정 없음</p>}
+        <button type="button" onClick={() => onRecurring(e.recurring)}><span>{displayDate(e.date)}<DDay days={e.days} /></span><strong>{e.recurring.name}{e.kind === 'trialEnd' ? ' · 무료 끝' : e.kind === 'cancellationEnd' ? ' · 끝남' : ''}</strong><span>{e.kind === 'cancellationEnd' ? '해지 예약' : won(e.amount)}</span></button>
+      </li>)}</ul> : <EmptyState inline className="ledger-empty" title="결제 예정 없음" />}
     </section>
     <div className="ledger-columns">
       <section aria-label="구독"><SectionLabel as="h3" title="구독" />
         <ul className="ledger-items">{recurring.filter(r => !isEnded(r, today)).sort((a, b) => (nextCharge(a, today)?.date ?? a.until ?? '9999').localeCompare(nextCharge(b, today)?.date ?? b.until ?? '9999')).map(row)}</ul>
-        {!recurring.length && <p className="ledger-empty">구독 없음</p>}
+        {!recurring.length && <EmptyState inline className="ledger-empty" title="구독 없음" />}
         {recurring.some(r => isEnded(r, today)) && <details><summary>종료됨</summary><ul className="ledger-items">{recurring.filter(r => isEnded(r, today)).map(row)}</ul></details>}
         <Button size="sm" variant="quiet" onClick={() => onRecurring(null)}>+ 구독 추가</Button>
       </section>
@@ -93,7 +95,7 @@ export function LedgerContents({ ledger, summary, all, today, spending, quickInp
           </div>}
           {forksPlan.has(p.id) && <div className="ledger-conflict">두 기기에서 다르게 고침 <Button size="sm" variant="quiet" onClick={() => onKeepPlan(p.id)}>이것만 남기기</Button></div>}
         </li>)}</ul>
-          {!plans.length && <p className="ledger-empty">사고 싶은 것 없음</p>}
+          {!plans.length && <EmptyState inline className="ledger-empty" title="사고 싶은 것 없음" />}
           {dropped.length > 0 && <details><summary>안 사기로 한 것 {dropped.length}</summary>
             <ul className="ledger-items">{dropped.map(p => <li key={p.id} className="ledger-wish">
               <button type="button" className="ledger-wish__main" onClick={() => onPlan(p)}><strong>{p.name}</strong><span className="ledger-value">{won(p.amount)}</span></button>

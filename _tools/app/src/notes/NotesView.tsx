@@ -1,3 +1,5 @@
+import { EmptyState } from "../shared/ui/EmptyState";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { displayDateTime } from "../shared/displayDate";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
@@ -249,11 +251,11 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const board=<div ref={boardRef} className="notes-board">
     {sectionDrop.inline}
     <div className="notes-board__items" aria-label="메모 목록">
-    {pinnedNotes.length>0&&<><h2 className="workspace-section-label notes-board__label">고정됨</h2><NoteMasonry notes={pinnedNotes} all={state.notes} selected={selected} onOpen={open}/>
-      {otherNotes.length>0&&<h2 className="workspace-section-label notes-board__label">최근</h2>}</>}
+    {pinnedNotes.length>0&&<><SectionLabel as="h2" className="workspace-section-label notes-board__label" title="고정됨" /><NoteMasonry notes={pinnedNotes} all={state.notes} selected={selected} onOpen={open}/>
+      {otherNotes.length>0&&<SectionLabel as="h2" className="workspace-section-label notes-board__label" title="최근" />}</>}
     {otherNotes.length>0&&<NoteMasonry notes={otherNotes} all={state.notes} selected={selected} onOpen={open}/>}
     {!!state.unreadable&&<p className="notes-list-empty" role="status">읽을 수 없는 메모 {state.unreadable}개는 목록에서 뺐습니다.</p>}
-    {!notes.length&&<div className="notes-empty"><DocumentTextIcon className="notes-empty__icon" aria-hidden="true"/><p>{query?"검색 결과 없음":trash?"휴지통 비어 있음":scope==="archive"?"보관함 비어 있음":"메모 없음"}</p>{!trash&&scope!=="archive"&&!query&&<Button variant="ghost" onClick={()=>newNote()}>＋ 새 메모</Button>}</div>}
+    {!notes.length&&<EmptyState className="notes-empty" icon={DocumentTextIcon} title={query?"검색 결과 없음":trash?"휴지통 비어 있음":scope==="archive"?"보관함 비어 있음":"메모 없음"} action={!trash&&scope!=="archive"&&!query&&<Button variant="ghost" onClick={()=>newNote()}>＋ 새 메모</Button>}/>}
     </div>
   </div>;
   const listView=<div className="notes-list-view">{board}</div>;
@@ -265,7 +267,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
         {!trash&&<Menu label="메모 색상" items={colorItems} trigger={<span className={`notes-color-dot${colorValue?"":" is-empty"}`} style={colorValue?{background:colorValue}:undefined} aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>}
         <span className="notes-editor-actions__gap" aria-hidden="true"/>
         {moreItems.length>0&&<Menu label="메모 더보기" items={moreItems} trigger={<EllipsisHorizontalIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>}
-        {trash?<Button size="sm" onClick={()=>{edit({deleted:false});setScope("all");}}>복원</Button>:<Button size="icon" variant="ghost" aria-label="메모를 휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button>}
+        {trash?<Button size="sm" onClick={()=>{edit({deleted:false});setScope("all");}}>복원</Button>:<Button size="icon" variant="ghost" aria-label="휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button>}
       </div></div>
       {note.conflict&&<div className="notes-conflict" role="status"><p>다른 기기 수정과 충돌했습니다.</p><Button size="sm" disabled={state.syncing||state.saving} onClick={()=>void store.resolve(note,true)}>내 내용 보관 후 서버 버전 불러오기</Button></div>}
       {note.conflictCopy&&<div className="notes-conflict" role="status"><p>충돌한 내용을 두 개의 메모로 보관했습니다.</p><Button size="sm" variant="ghost" onClick={()=>void store.dismissConflictCopy(note.id)}>확인</Button></div>}
@@ -292,7 +294,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
         <Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ArrowLeftIcon aria-hidden="true"/>메모</Button>
         <IconButton label={note.pinned?"고정 해제":"고정"} icon={PinIcon} activeIcon={PinSolidIcon} active={!!note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>
         <Menu label="메모 더보기" items={moreItems} trigger={<EllipsisHorizontalIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>
-        <Button size="icon" variant="ghost" aria-label="메모를 휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button></>}>
+        <Button size="icon" variant="ghost" aria-label="휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button></>}>
         {note.conflict&&<div className="notes-conflict ledger-banner" role="status"><p>다른 기기 수정과 충돌했습니다.</p><Button size="sm" disabled={state.syncing||state.saving} onClick={()=>void store.resolve(note,true)}>내 내용 보관 후 서버 버전 불러오기</Button></div>}
         {limitError&&<p className="notes-limit ledger-banner" role="alert">{limitError}</p>}
       </LedgerView>

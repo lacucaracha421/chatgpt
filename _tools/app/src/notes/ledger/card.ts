@@ -1,3 +1,4 @@
+import { displayDate } from "../../shared/displayDate";
 import { localToday } from "./cycle";
 import { monthNotesOf, monthSummary } from "./summary";
 import { signedWon, won } from "./model";
@@ -15,6 +16,6 @@ export function ledgerCard(ledger: Note, notes: Note[], today = localToday()) {
     amount: summary.available !== null ? signedWon(summary.available) : won(summary.spent),
     over: summary.available !== null && summary.available < 0,
     spentRatio: summary.income > 0 ? Math.min(1, summary.spent / summary.income) : null,
-    next: next ? `다음 결제 ${Number(next.date.slice(5, 7))}월 ${Number(next.date.slice(8, 10))}일 · ${next.recurring.name}` : null,
+    next: next ? `다음 결제 ${displayDate(next.date, new Date(`${today}T12:00:00`))} · ${next.recurring.name}` : null,
   };
 }

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { displayDate } from "../shared/displayDate";
 import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import type { CollectionVolume } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -32,8 +33,8 @@ export function CollectionVolumeGrid({ volumes, selectedVolumeId, editionIndex, 
             {volume.coverArtworkId && !privacyMode ? <PhysicalCover kind="book" src={workArtworkThumbnailUrl(volume.coverArtworkId)} alt={label} scope={scope} revision={revision} /> : <span className="collection-overlay__cover-placeholder" aria-hidden="true" />}
           </span>
           <span className="collection-overlay__cover-label">{volumeLabel(volume)}</span>
-          {volume.releaseStatus === "upcoming" && <span className="collection-overlay__cover-badge" aria-description={volume.localReleaseDate ? `${volume.localReleaseDate} 출간 예정` : undefined}>
-            {volume.localReleaseDate ? `${formatKoreanDate(volume.localReleaseDate)} 예정` : "출간 예정"}
+          {volume.releaseStatus === "upcoming" && <span className="collection-overlay__cover-badge" aria-description={volume.localReleaseDate ? `${displayDate(volume.localReleaseDate)} 출간 예정` : undefined}>
+            {volume.localReleaseDate ? `${displayDate(volume.localReleaseDate)} 예정` : "출간 예정"}
           </span>}
         </button>;
       }} />}
@@ -47,7 +48,4 @@ export function CollectionEditionSelector({ volumes, editionIndex, onEditionInde
   </div>;
 }
 function editionLabel(index: number) { return index === 0 ? "기본판" : `대체판 ${index}`; }
-function formatKoreanDate(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  return match ? `${match[1]}.${match[2]}.${match[3]}` : value;
-}
+

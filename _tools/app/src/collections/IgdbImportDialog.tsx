@@ -1,6 +1,7 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
+import { displayDate } from "../shared/displayDate";
 import { igdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -254,14 +255,14 @@ function SearchStep({ step, busy, onQuery, onSearch, onSelect }: { step: Extract
       {step.results.map((result) => <button key={result.gameId} type="button" className="igdb-import__result" aria-pressed={step.selectedGameId === result.gameId} onClick={() => onSelect(result.gameId)}>
         {result.cover && !privacyMode && <img src={igdbImagePreviewUrl(result.cover.imageId, "cover")} alt={`${result.title} 표지`} />}
         <span className="igdb-import__result-title">{result.title}</span>
-        <small>{[result.releaseDate, result.developer].filter(Boolean).join(" · ")}</small>
+        <small>{[displayDate(result.releaseDate), result.developer].filter(Boolean).join(" · ")}</small>
       </button>)}
     </div>
   </>;
 }
 
 function PreviewSummary({ preview }: { preview: IgdbGamePreview }) {
-  return <div className="igdb-import__summary"><strong>{preview.proposedTitle}</strong><span>{[preview.releaseDate, preview.developer].filter(Boolean).join(" · ") || "발매일·개발사 정보 없음"}</span></div>;
+  return <div className="igdb-import__summary"><strong>{preview.proposedTitle}</strong><span>{[displayDate(preview.releaseDate), preview.developer].filter(Boolean).join(" · ") || "발매일·개발사 정보 없음"}</span></div>;
 }
 
 function ArtworkStep({ kind, candidates, selectedId, onSelect }: { kind: "cover" | "hero"; candidates: IgdbImageCandidate[]; selectedId: string | null; onSelect: (imageId: string) => void }) {

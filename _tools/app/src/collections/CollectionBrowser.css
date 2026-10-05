@@ -27,9 +27,6 @@
 .collection-list { display: grid; position: relative; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); gap: var(--space-4) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
 .collection-list__cell { min-width: 0; position: relative; }
 .collection-list__cell .collection-card { width: 100%; }
-.collection-list__group { display: flex; align-items: center; gap: var(--space-2); font-size: var(--type-meta); color: var(--color-faint); }
-.collection-list__group::before { content: ""; width: 5px; height: 5px; background: var(--color-muted); }
-.collection-list__group::after { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, var(--color-border), transparent); }
 .collection-list__plank { display: none; }
 .collection-card__light { display: none; }
 .collection-list--shelf .collection-card { position: relative; overflow: visible; height: calc(var(--case-height) + 64px); background: transparent; }

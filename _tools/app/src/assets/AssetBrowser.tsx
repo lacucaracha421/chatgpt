@@ -463,7 +463,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       assetIds: selectedIds,
       addCollectionIds: [],
       removeCollectionIds: [view.collectionId],
-    }), "컬렉션에서 제거하지 못했습니다.");
+    }), "컬렉션에서 빼지 못했습니다.");
   })();
   const setCover = (assetId: string) => void (async () => {
     if (view.kind !== "collection") return;
@@ -605,13 +605,13 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       onMessage: message => { setUndoAssetIds(null); setMessage(message); },
       onAlbum: id => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [id], removeAlbumIds: [] })),
     }),
-    ...(view.kind === "album" ? [{ id: "remove-album", label: "이 앨범에서 제외", disabled: batchPending, onSelect: () => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [], removeAlbumIds: [view.albumId] })) }] : []),
-    ...(view.kind === "collection" ? [{ id: "remove", label: "이 컬렉션에서 제거", disabled: batchPending, onSelect: removeFromCollection }] : []),
+    ...(view.kind === "album" ? [{ id: "remove-album", label: "이 앨범에서 빼기", disabled: batchPending, onSelect: () => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [], removeAlbumIds: [view.albumId] })) }] : []),
+    ...(view.kind === "collection" ? [{ id: "remove", label: "이 컬렉션에서 빼기", disabled: batchPending, onSelect: removeFromCollection }] : []),
     ...(view.kind === "collection" && selectedIds.length === 1 ? [{ id: "cover", label: "대표 이미지로 지정", disabled: batchPending, onSelect: () => setCover(selectedIds[0]!) }] : []),
     ...faultSelectionItem(playFault, selectedAssets),
     ...(gateway.artists ? [{ id: "assign-artist", label: "작가 지정", disabled: batchPending, onSelect: () => setAssignOpen(true) }] : []),
     { id: "info", label: "정보 열기", onSelect: () => setInspectorOpen(true) },
-    { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: batchPending, onSelect: trashSelection },
+    { id: "trash", label: "휴지통으로", destructive: true, disabled: batchPending, onSelect: trashSelection },
   ];
   const descriptionCount = visiblePage?.queryKey === queryKey ? visiblePage.totalCount : null;
   const descriptionAccessory = <span className="auto-tag-filters">
@@ -654,7 +654,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     : currentFirstError && !activePage
       ? <>{folderHead}<EmptyState title={descriptionQuery !== null ? currentFirstError : "자산을 불러오지 못했습니다"}><Button onClick={refresh}>다시 시도</Button></EmptyState></>
       : visibleItems.length === 0 && descriptionQuery !== null
-        ? <EmptyState title="일치하는 이미지가 없습니다.">{noMatchQuery !== undefined && <Button onClick={() => onViewChange?.({ kind: "description_search", query: noMatchQuery, force: true })}>그래도 가장 비슷한 그림 보기</Button>}</EmptyState>
+        ? <EmptyState title="검색 결과 없음">{noMatchQuery !== undefined && <Button onClick={() => onViewChange?.({ kind: "description_search", query: noMatchQuery, force: true })}>그래도 가장 비슷한 그림 보기</Button>}</EmptyState>
       : visibleItems.length === 0 && (hasActiveFilters || autoTagFiltered || styleSuggestionsOnly)
         ? <>{folderHead}<EmptyState title={styleSuggestionsOnly ? "추천이 있는 자산이 없습니다." : "조건에 맞는 자산이 없습니다."}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState></>
       : visibleItems.length === 0

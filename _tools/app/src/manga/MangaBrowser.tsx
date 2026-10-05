@@ -243,7 +243,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         : !series ? <MangaSkeletonGrid /> : series.length === 0 ? (
         <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>
       ) : visibleSeries.length === 0 ? (
-        <EmptyState title="검색 결과가 없습니다">다른 제목이나 작가 이름으로 검색하세요.</EmptyState>
+        <EmptyState title="검색 결과 없음" hint="다른 제목이나 작가 이름으로 검색하세요." />
       ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount} coverUrl={mangaCoverUrl(entry.id)} privacyMode={catalogMasked} onOpen={() => onOpenSeries?.(entry)} />)}</div>}
     </div>
     <Scrubber input="pointer" scrollRef={gridScroll} total={visibleSeries.length} sort={scrubberSort} hidden={source !== "local" || displayedSource !== "local"} />

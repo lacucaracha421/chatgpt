@@ -150,7 +150,7 @@ describe("KakaoConnectDialog", () => {
     await user.keyboard("{Escape}");
     expect(onClose).not.toHaveBeenCalled();
     resolveSearch([]);
-    expect(await screen.findByText("검색 결과가 없습니다.")).toBeInTheDocument();
+    expect(await screen.findByText("검색 결과 없음")).toBeInTheDocument();
 
     vi.mocked(gateway.searchKakao).mockRejectedValueOnce(new Error("검색 실패"));
     await user.click(screen.getByRole("button", { name: "검색" }));

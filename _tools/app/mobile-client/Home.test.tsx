@@ -65,14 +65,14 @@ describe('shared Home attention on tablet', () => {
   it('groups the shared PC pieces into media and day columns and omits totals, picks and memo cards', async () => {
     server.upcoming = {version:1, entries:[upcomingEntry], wishlist:[upcomingEntry]};
     render(<Home {...props({captures:[item('pending')]})}/>);
-    const today = await screen.findByRole('region', {name:'오늘 할 것 · 5'});
+    const today = await screen.findByRole('region', {name:'오늘 할 것'});
     await waitFor(()=>expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋7', '□유사 이미지 검토6쌍', '□처리 대기1', '□중복 판본2', '○Todo남은 항목 1개1']));
     expect(document.querySelector('.home-tablet-layout')).toBeTruthy();
     expect(document.querySelector('.home-tablet-day-column')?.querySelectorAll('section')).toHaveLength(2);
     expect(document.querySelector('.home-tablet-media-column')?.querySelectorAll('section')).toHaveLength(1);
     await screen.findByRole('region', {name:/^2주 안에 발매/});
     const regions = screen.getAllByRole('region').map(r => r.getAttribute('aria-label'));
-    expect(regions).toEqual(['오늘 할 것 · 5','1년 전 오늘 · 2장','2주 안에 발매 · 3']);
+    expect(regions).toEqual(['오늘 할 것','1년 전 오늘','2주 안에 발매']);
     for (const name of ['자산 현황','AV 배우','작가','메모','검토','이어지는 시리즈']) expect(screen.queryByRole('region',{name})).toBeNull();
     expect(mocks.api.mock.calls.some(([path]) => ['/v1/home/av-pick','/v1/library/artists'].includes(path))).toBe(false);
   });
@@ -85,7 +85,7 @@ describe('shared Home attention on tablet', () => {
       return read(path,...args);
     });
     render(<Home {...props()}/>);
-    await screen.findByRole('region', {name:'1년 전 오늘 · 2장'}); expect(screen.queryByRole('region', {name:/오늘 할 것/})).toBeNull();
+    await screen.findByRole('region', {name:'1년 전 오늘'}); expect(screen.queryByRole('region', {name:/오늘 할 것/})).toBeNull();
   });
   it.each(['2026-09-24', '2026-09-25'])('never marks an unwished Korean calendar movie NEW on %s, including a saved pending arrival', async date => {
     const key = 'lakomics.home.visit.v1:https://a.example';
@@ -244,18 +244,18 @@ it('holds the complete arrangement until a delayed cold revisit reply', async ()
   expect(screen.getByLabelText('홈').querySelector('[aria-busy=true]')).toBeTruthy(); await waitFor(() => expect(finish).toBeTypeOf('function')); expect(screen.queryByRole('button', {name: /Todo남은 항목/})).toBeNull();
   expect(screen.queryByRole('region', {name: /^2주 안에 발매/})).toBeNull();
   await act(async () => {finish(revisitReply);});
-  expect(screen.getByRole('region', {name: '1년 전 오늘 · 2장'}).querySelector('.home-revisit')).toBeTruthy();
+  expect(screen.getByRole('region', {name: '1년 전 오늘'}).querySelector('.home-revisit')).toBeTruthy();
   expect(await screen.findByRole('region', {name: /^2주 안에 발매/})).toBeTruthy();
 });
 
 it('restores the same-day revisit snapshot on the first render after a process-style cache reset', async () => {
   const first = render(<Home {...props()}/>);
-  await screen.findByRole('region', {name: '1년 전 오늘 · 2장'});
+  await screen.findByRole('region', {name: '1년 전 오늘'});
   first.unmount(); resetHomeSourceCache();
   const read = mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(() => {}) : read(path, ...args));
   render(<Home {...props()}/>);
-  expect(await screen.findByRole('region', {name: '1년 전 오늘 · 2장'})).toBeTruthy();
+  expect(await screen.findByRole('region', {name: '1년 전 오늘'})).toBeTruthy();
 });
 
 it('makes no HTTP source reads during nine minutes of visible idle with live signals', async () => {
@@ -286,12 +286,12 @@ it('uses the shared shelf only for playing games and watching movies and opens t
     return read(path, ...args);
   });
   const p = props(); render(<Home {...p} />);
-  const shelf = await screen.findByRole('region', {name: '지금 하는 중 · 2'});
+  const shelf = await screen.findByRole('region', {name: '지금 하는 중'});
   expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(2);
   fireEvent.click(within(shelf).getByRole('button', {name: 'active game 열기'}));
   expect(p.onWork).toHaveBeenCalledWith('game-active');
   expect(within(shelf).queryByText('done game')).toBeNull();
-  expect(screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))).toEqual(['오늘 할 것 · 4', '1년 전 오늘 · 2장', '지금 하는 중 · 2', '2주 안에 발매 · 3']);
+  expect(screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))).toEqual(['오늘 할 것', '1년 전 오늘', '지금 하는 중', '2주 안에 발매']);
 });
 
 function quietDay() {
@@ -346,7 +346,7 @@ it('does not read favorites or show the daily fallback while attention is presen
   const read = mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit') ? Promise.resolve({bundles: []}) : read(path, ...args));
   render(<Home {...props()} />);
-  await screen.findByRole('region', {name: '오늘 할 것 · 4'});
+  await screen.findByRole('region', {name: '오늘 할 것'});
   expect(screen.queryByRole('region', {name: '오늘의 한 장'})).toBeNull();
   expect(mocks.native.mock.calls.some(([op]) => op === 'albumTree')).toBe(false);
 });

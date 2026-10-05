@@ -129,7 +129,7 @@ it('shows the vault in the library grid and viewer with no library actions or me
   const native=vi.fn();window.LakomicsNative={request:native,cancel:vi.fn()};
   await unlocked();
   expect(screen.getByLabelText('자산 목록')).toBeTruthy();
-  expect(screen.getByRole('button',{name:'영상 제목 · 영상'}).querySelector('.video-mark')).toBeTruthy();
+  expect(screen.getByRole('button',{name:'영상 제목 · 영상'}).querySelector('.video-duration-pill')).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'사용자 지정 제목 · 이미지'}));
   const original=await screen.findByAltText('사용자 지정 제목');
   expect(screen.getByText('1 / 3')).toBeTruthy();

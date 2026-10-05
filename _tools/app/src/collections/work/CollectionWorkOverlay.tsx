@@ -150,7 +150,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
     onCopyCode: code => { if (code && navigator.clipboard?.writeText) void navigator.clipboard.writeText(code).catch(reason => setError(avError(reason))); },
     onManage: data => [
       { id: "edit", label: "컬렉션 편집", onSelect: () => setPanel({ kind: "edit", data }) },
-      { id: "showcase", label: data.collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => actions.onShowcase(data.collection) },
+      { id: "showcase", label: data.collection.showcase ? "쇼케이스에서 빼기" : "쇼케이스에 추가", onSelect: () => actions.onShowcase(data.collection) },
       ...(data.collection.type === "game" ? [
         { id: "provider", label: data.providerConnected ? "IGDB 연결됨" : "IGDB에 연결", disabled: data.providerConnected, onSelect: () => setPanel({ kind: "igdb", data }) },
         { id: "refresh", label: "IGDB 새로고침", disabled: !data.providerConnected, onSelect: () => void mutate(() => gateway.refreshIgdbGame(data.collection.id)) },

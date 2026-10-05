@@ -25,6 +25,7 @@ import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindingsModel';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
+import {displayDate} from '../src/shared/displayDate';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
 import {BellIcon, CalendarDaysIcon, SparklesIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
@@ -217,9 +218,9 @@ function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:st
   const seasons=item.series?.seasons??[];
   const [seasonId,setSeasonId]=useState(seasons.find(s=>s.seasonNumber>0)?.id??seasons[0]?.id),[limit,setLimit]=useState(30);
   const selected=seasons.find(s=>s.id===seasonId)??seasons[0];
-  return <section className="collection-block collection-series" aria-label="시즌 및 회차"><h2>시즌 {seasons.length}개</h2>
-    {seasons.length>1&&<div ref={stripWheel} className="collection-season-strip" role="group" aria-label="시즌">{seasons.map(season=><button className="collection-season" key={season.id} aria-pressed={selected?.id===season.id} onClick={()=>{setSeasonId(season.id);setLimit(30);}}><Artwork item={item} id={season.posterArtworkId} revision={revision} active={active}/><strong>{season.name}</strong><small className="numeric">{[season.airDate,`${season.episodes.length}화`].filter(Boolean).join(' · ')}</small></button>)}</div>}
-    {selected&&<><ol className="collection-episodes" aria-label={`${selected.name} 회차`}>{selected.episodes.slice(0,limit).map(episode=><li key={episode.id}><span className="numeric">{episode.episodeNumber}</span><strong>{episode.name}</strong><small>{[episode.airDate,episode.runtimeMinutes?`${episode.runtimeMinutes}분`:null].filter(Boolean).join(' · ')}</small></li>)}</ol>{selected.episodes.length>limit&&<Button variant="ghost" onClick={()=>setLimit(n=>n+30)}>회차 더 보기</Button>}</>}
+  return <section className="collection-block collection-series" aria-label="시즌 및 회차"><SectionLabel as="h2" title="시즌" count={seasons.length} unit="개" />
+    {seasons.length>1&&<div ref={stripWheel} className="collection-season-strip" role="group" aria-label="시즌">{seasons.map(season=><button className="collection-season" key={season.id} aria-pressed={selected?.id===season.id} onClick={()=>{setSeasonId(season.id);setLimit(30);}}><Artwork item={item} id={season.posterArtworkId} revision={revision} active={active}/><strong>{season.name}</strong><small className="numeric">{[displayDate(season.airDate),`${season.episodes.length}화`].filter(Boolean).join(' · ')}</small></button>)}</div>}
+    {selected&&<><ol className="collection-episodes" aria-label={`${selected.name} 회차`}>{selected.episodes.slice(0,limit).map(episode=><li key={episode.id}><span className="numeric">{episode.episodeNumber}</span><strong>{episode.name}</strong><small>{[displayDate(episode.airDate),episode.runtimeMinutes?`${episode.runtimeMinutes}분`:null].filter(Boolean).join(' · ')}</small></li>)}</ol>{selected.episodes.length>limit&&<Button variant="ghost" onClick={()=>setLimit(n=>n+30)}>회차 더 보기</Button>}</>}
     {!!item.series?.cast.length&&<p className="collection-cast">출연 · {item.series.cast.join(' · ')}</p>}</section>;
 }
 const Stars=({score}:{score:number})=><span className="collection-score" aria-label={`내 별점 ${score.toFixed(1)}점`}><StarSolid aria-hidden="true"/><span className="numeric">{score.toFixed(1)}</span></span>;

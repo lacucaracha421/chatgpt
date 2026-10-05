@@ -53,19 +53,19 @@ const actions=()=>screen.getByRole('group',{name:'작품 동작'});
 
 it('edits my rating from the sheet and shows the confirmed value',async()=>{
   await openDetail();
-  const row=await within(personal()).findByRole('button',{name:/내 평점 ★ 3.0 \/ 5/});
+  const row=await within(personal()).findByRole('button',{name:/내 별점 ★ 3.0 \/ 5/});
   fireEvent.click(row);
-  const sheet=await screen.findByRole('dialog',{name:'내 평점'});
+  const sheet=await screen.findByRole('dialog',{name:'내 별점'});
   expect(within(sheet).getByRole('radio',{name:'미평가'})).toBeTruthy();
   expect(within(sheet).getAllByRole('radio')).toHaveLength(12);
   fireEvent.click(within(sheet).getByRole('radio',{name:'4.5점'}));
   await waitFor(()=>expect(commands()).toHaveLength(1));
   expect(commands()[0]).toMatchObject({version:1,libraryId:LIBRARY,collectionId:'w',field:'myScore',value:4.5,expected:3});
   await waitFor(()=>expect(readCollectionEdits()).toEqual({}));
-  await waitFor(()=>expect(within(personal()).getByRole('button',{name:/내 평점 ★ 4.5 \/ 5/})).toBeTruthy());
+  await waitFor(()=>expect(within(personal()).getByRole('button',{name:/내 별점 ★ 4.5 \/ 5/})).toBeTruthy());
   // Unrated is a real choice, and 0.0 is a rating rather than 미평가.
-  fireEvent.click(within(personal()).getByRole('button',{name:/내 평점/}));
-  fireEvent.click(within(await screen.findByRole('dialog',{name:'내 평점'})).getByRole('radio',{name:'0.0점'}));
+  fireEvent.click(within(personal()).getByRole('button',{name:/내 별점/}));
+  fireEvent.click(within(await screen.findByRole('dialog',{name:'내 별점'})).getByRole('radio',{name:'0.0점'}));
   await waitFor(()=>expect(commands().at(-1)).toMatchObject({value:0,expected:4.5}));
 });
 
@@ -337,7 +337,7 @@ describe('work record (상태 · 기기)',()=>{
     expect(within(personal()).getByText('상태').nextElementSibling?.textContent).toBe('안 함');
     expect(within(personal()).getByText('기기').nextElementSibling?.textContent).toBe('PC');
     // My rating is still editable, and nothing was sent.
-    expect(within(personal()).getByRole('button',{name:/내 평점/})).toBeTruthy();
+    expect(within(personal()).getByRole('button',{name:/내 별점/})).toBeTruthy();
     expect(commands()).toHaveLength(0);
   });
 });
@@ -359,10 +359,10 @@ describe('manga detail layout',()=>{
     expect(within(info.getByRole('list',{name:'장르'})).getAllByRole('listitem').map(li=>li.textContent)).toEqual(['액션','로맨스','이세계','일상']);
     // 내 기록 lives in the information: rating and owned volumes, both editable.
     expect(column().contains(personal())).toBe(true);
-    fireEvent.click(within(personal()).getByRole('button',{name:/내 평점 ★ 3.0 \/ 5/}));
-    expect(await screen.findByRole('dialog',{name:'내 평점'})).toBeTruthy();
+    fireEvent.click(within(personal()).getByRole('button',{name:/내 별점 ★ 3.0 \/ 5/}));
+    expect(await screen.findByRole('dialog',{name:'내 별점'})).toBeTruthy();
     fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});
-    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'내 평점'})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'내 별점'})).toBeNull());
     // The top bar carries Showcase (off) and 신간 알림 (on) as toggles.
     expect(within(actions()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
     expect(within(actions()).getByRole('button',{name:'신간 알림'}).getAttribute('aria-pressed')).toBe('true');
@@ -384,7 +384,7 @@ describe('manga detail layout',()=>{
     await act(async()=>{});
     expect(within(actions()).queryByRole('button',{name:/쇼케이스/})).toBeNull();
     expect(within(actions()).getByRole('img',{name:'쇼케이스에 추가됨'})).toBeTruthy();
-    expect(within(personal()).queryByRole('button',{name:/내 평점/})).toBeNull();
+    expect(within(personal()).queryByRole('button',{name:/내 별점/})).toBeNull();
   });
 });
 

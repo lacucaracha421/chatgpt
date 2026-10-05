@@ -29,7 +29,7 @@ describe("CaseInside booklet", () => {
     expect(container.querySelectorAll(".case-staple")).toHaveLength(2);
     expect(container.querySelector(".case-manual-form")).toHaveTextContent("상태");
     expect(container.querySelector(".case-writing-line")).toHaveAttribute("aria-label", "미입력");
-    expect(screen.getByRole("img", { name: "별점 4" })).toHaveTextContent("☆★☆★☆★☆★☆★");
+    expect(screen.getByRole("img", { name: "내 별점 4" })).toHaveTextContent("☆★☆★☆★☆★☆★");
     expect(container.querySelector(".case-manual-footer")).toHaveTextContent("Developer · Publisher");
     expect(container.querySelector(".case-manual-footer")).toHaveTextContent("2025.1.2");
     expect(container.querySelector<HTMLElement>(".case-manual-cover")!.style.backgroundImage).toContain("/hero");
@@ -42,7 +42,7 @@ describe("CaseInside booklet", () => {
   it("leaves all status boxes empty when no status is recorded and preserves a half score", () => {
     const { container } = render(<CaseInside title="Unrecorded" type="game" record={insideRecord(game, { ...record, status: null, myScore: 3.5 })} facts={[]} />);
     expect(container.querySelectorAll(".case-status-box.is-filled")).toHaveLength(0);
-    expect(screen.getByRole("img", { name: "별점 3.5" }).querySelectorAll<HTMLElement>(":scope > span > span")[3]).toHaveStyle({ width: "50%" });
+    expect(screen.getByRole("img", { name: "내 별점 3.5" }).querySelectorAll<HTMLElement>(":scope > span > span")[3]).toHaveStyle({ width: "50%" });
   });
   it("prints a film's director, release and runtime without a device row", () => {
     const film: CollectionSummary = { ...game, type: "movie", director: "Film director", runtimeMinutes: 123 };
@@ -90,7 +90,7 @@ describe("CaseInside booklet", () => {
     expect(screen.queryByRole("img", { name: /Performer 1/ })).toBeNull();
   });
   it.each(["game", "movie", "av"])("masks the entire %s inside before rendering artwork or cast", type => {
-    const { container } = render(<CaseInside title="Secret" type={type} privacy hero="/secret-hero" front="/secret-front" record={[["별점", <CaseScore score={5} />]]} facts={[["품번", "SECRET-123"]]} people={[{ ...cast(1)[0]!, portrait: <img src="/secret-person" alt="Secret person" /> }]} />);
+    const { container } = render(<CaseInside title="Secret" type={type} privacy hero="/secret-hero" front="/secret-front" record={[["내 별점", <CaseScore score={5} />]]} facts={[["품번", "SECRET-123"]]} people={[{ ...cast(1)[0]!, portrait: <img src="/secret-person" alt="Secret person" /> }]} />);
     expect(screen.getByLabelText("비공개 모드")).toBeInTheDocument();
     expect(container.querySelector("img, .case-manual, .case-av-book, .case-cast")).toBeNull();
     expect(container.textContent).toBe("");

@@ -18,7 +18,7 @@
 .home-attention-mark { flex:none; width:16px; color:var(--color-muted); }
 .home-attention-row[data-problem] .home-attention-mark { color:var(--color-danger); }
 .home-attention-value { flex:none; font-size:var(--type-body); }
-.home-attention-empty { margin:0; padding:var(--space-4) 0; color:var(--color-faint); font-size:var(--type-meta); }
+.home-attention-empty { padding:var(--space-4) 0; }
 .home-arrival-cover { width:48px; height:64px; flex:none; display:block; overflow:hidden; background:var(--color-surface); }
 .home-arrival-cover > img, .home-arrival-cover > span { width:100%; height:100%; object-fit:cover; }
 @container home (max-width:700px) { .home-attention-layout { grid-template-columns:minmax(0, 1fr); } }

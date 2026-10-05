@@ -1,3 +1,4 @@
+import { displayDate } from "../../shared/displayDate";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaBook } from "./MangaBook";
@@ -16,7 +17,7 @@ describe("turnable manga book", () => {
     const back = () => view.container.querySelector(".manga-bb-back")!;
     expect(back()).toHaveTextContent("Volume copy"); expect(back()).toHaveTextContent("값 12,000원"); expect(back()).toHaveTextContent("Publisher");
     view.rerender(<MangaStage manga={{ ...manga, volumes: [{ ...volume, contents: undefined, price: undefined, publisher: undefined }] }} privacy={false} title="Series" author="Shinohara Kenta" frontReset={0} onPick={vi.fn()} onReady={vi.fn()} />);
-    expect(back()).toHaveTextContent("ISBN 9780306406157"); expect(back()).toHaveTextContent("2026-10-04");
+    expect(back()).toHaveTextContent("ISBN 9780306406157"); expect(back()).toHaveTextContent(displayDate("2026-10-04"));
     expect(back().querySelector(".manga-back-synopsis")).toBeNull(); expect(back().querySelector(".manga-back-price")).toBeNull();
   });
   it("waits for the generated back picture decode too", async () => {

@@ -26,7 +26,7 @@ function Shell({enabled=true,scope='connection',busy=false}:{enabled?:boolean;sc
   const [active,setActive]=useState('home'),[visited,setVisited]=useState<string[]>([]);
   const [privacy]=usePrivacyMode();
   const warm=useAreaPrewarm(scope,enabled&&active==='home'&&!privacy,host);
-  const ready=(element:HTMLElement,key:string)=>viewReady(element)&&(key==='home'||!!element.querySelector(key==='catalog'?'.catalog-card, .empty-state:not([role="status"]), .inline-error':'.collection-tile, .collection-card, .collection-grid > *, .manga-bookcase, .empty-state, .error-message'));
+  const ready=(element:HTMLElement,key:string)=>viewReady(element)&&(key==='home'||!!element.querySelector(key==='catalog'?'.catalog-card, .ui-empty-state:not([role="status"]), .inline-error':'.collection-tile, .collection-card, .collection-grid > *, .manga-bookcase, .ui-empty-state, .error-message'));
   return <MotionScope><div ref={host}>
     {areas.map(area=><button key={area} onClick={()=>{setVisited(value=>[...value,area]);setActive(area);}}>{area}</button>)}
     <AreaSwitch activeKey={active} retained={['home',...areas]} ready={ready} views={{

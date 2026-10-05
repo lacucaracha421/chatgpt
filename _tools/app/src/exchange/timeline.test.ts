@@ -15,8 +15,8 @@ it("groups a batch into one block and orders blocks oldest first", () => {
 
 it("labels days, particles, extensions and combined progress", () => {
   const now = new Date(2026, 8, 26, 15);
-  expect(dayLabel(new Date(2026, 8, 26, 9).toISOString(), now)).toEqual({ date: "9. 26", note: "오늘" });
-  expect(dayLabel(new Date(2026, 8, 25, 9).toISOString(), now)).toEqual({ date: "9. 25", note: "어제" });
+  expect(dayLabel(new Date(2026, 8, 26, 9).toISOString(), now)).toEqual({ date: "9.26", note: "오늘" });
+  expect(dayLabel(new Date(2026, 8, 25, 9).toISOString(), now)).toEqual({ date: "9.25", note: "어제" });
   expect(dayLabel(new Date(2026, 8, 22, 9).toISOString(), now).note).toBe("화");
   expect(withParticle("Galaxy Tab S11", "과", "와")).toBe("Galaxy Tab S11과");
   expect(withParticle("DESKTOP", "과", "와")).toBe("DESKTOP와");

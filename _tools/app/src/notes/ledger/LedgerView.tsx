@@ -1,4 +1,5 @@
 /** PC frame and persistence for the shared accepted ledger screen. */
+import { EmptyState } from "../../shared/ui/EmptyState";
 import { useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { ArrowPathRoundedSquareIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { Button } from "../../shared/ui/Button";
@@ -82,7 +83,7 @@ function EntryForm({ label, month, initial, submitLabel = "추가", link, onUnli
       {onCancel && <Button variant="ghost" onClick={onCancel}>취소</Button>}
       {onDelete && <Button variant="ghost" onClick={onDelete}>삭제</Button>}
     </div>
-    {link && <p className="ledger-link">계획 “{link}”과 연결해 기록합니다 <button type="button" className="ledger-text-button" onClick={onUnlink}>연결 빼기</button></p>}
+    {link && <p className="ledger-link">계획 “{link}”과 연결해 기록합니다 <button type="button" className="ledger-text-button" onClick={onUnlink}>연결 제거</button></p>}
     {problem && <p className="ledger-problem" role="alert">{problem}</p>}
   </div>;
 }
@@ -296,7 +297,7 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
 
 
   const spending = <>{summary.reviewCount > 0 && <p className="ledger-review" role="status">확인할 기록 {summary.reviewCount}건</p>}
-    {!days.length && <p className="ledger-empty">기록 없음</p>}
+    {!days.length && <EmptyState inline className="ledger-empty" title="기록 없음" />}
     {days.map(([date, day]) => <section key={date} className="ledger-day" aria-label={`${dotDate(date)} ${weekday(date)}`}>
       <header className="ledger-day__head">{dotDate(date)}</header><ul>{day.entries.map(entryRow)}{day.charges.map(chargeRow)}</ul>
     </section>)}

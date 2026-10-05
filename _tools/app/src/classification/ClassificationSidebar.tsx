@@ -1,3 +1,4 @@
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { PinSolidIcon } from "../shared/ui/PinIcon";
 import { BookOpenIcon, ChevronRightIcon, Cog6ToothIcon, EllipsisHorizontalIcon, FolderIcon, InboxIcon, PlusIcon, RectangleStackIcon, Square2StackIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
@@ -490,7 +491,7 @@ export function ClassificationSidebar({
       {classificationMode && <>
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       {pinnedIds.some((id) => entries.some((entry) => entry.id === id)) && <nav className="classification-sidebar__pins" aria-label="고정 폴더">
-        <span className="workspace-section-label">고정</span>
+        <SectionLabel className="workspace-section-label" title="고정" />
         <div className="classification-sidebar__pin-chips">
           {pinnedIds.map((id) => { const entry = entries.find((item) => item.id === id); return entry ? <ContextMenu key={id} items={[{ id: "unpin", label: "고정 해제", onSelect: () => onPinnedIdsChange(pinnedIds.filter((value) => value !== id)) }]}>
             <button type="button" className="classification-sidebar__pin" title={folderPath(id).map((item) => item.name).join(" › ")} aria-current={view.kind === "classification" && view.classificationId === id && !view.characterId && !view.characterGroupId ? "page" : undefined} aria-description={folderPath(id).map((item) => item.name).join(" / ")} onClick={() => openPinned(id)}><PinSolidIcon aria-hidden="true" /><span>{entry.name}</span></button>

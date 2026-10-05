@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { encodeEan13 } from "./ean13";
+import { displayDate } from "../../shared/displayDate";
 
 export type MangaBackData = { isbn13?: string | null; localReleaseDate?: string | null; contents?: string | null; price?: number | null; publisher?: string | null };
 export const MANGA_BACK_COLOR = "#5a3f3d";
@@ -29,7 +30,7 @@ export function MangaBack({ title, volumeNumber, color, picture, isbn13, localRe
     <span className="manga-back-volume">{title}{volumeNumber != null ? ` ${volumeNumber}` : ""}</span>
     {contents?.trim() && <span className="manga-back-synopsis">{contents.trim()}</span>}
     <span className="manga-back-bottom">
-      <span className="manga-back-publisher">{publisher?.trim()}<small>{localReleaseDate}</small></span>
+      <span className="manga-back-publisher">{publisher?.trim()}<small>{displayDate(localReleaseDate)}</small></span>
       {/^\d{13}$/.test(isbn) && <span className="manga-back-code">
         {bits && <svg viewBox="0 0 113 32" role="img" aria-label={`EAN-13 ${isbn}`} preserveAspectRatio="none" shapeRendering="crispEdges">
           {Array.from(bits, (bit, index) => bit === "1" ? <rect key={index} x={index + 11} y={0} width={1} height={index < 3 || index >= 45 && index < 50 || index >= 92 ? 32 : 28} fill="#111" /> : null)}

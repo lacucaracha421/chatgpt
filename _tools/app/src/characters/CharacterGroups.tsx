@@ -112,7 +112,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
       ariaLabel={current ? `${current.name} 그룹 캐릭터` : folderCards?.length ? "캐릭터와 일반 폴더" : "등록 캐릭터"}
     />}
     {!labelParts.length && !cards.length && <p className="series-empty">캐릭터를 등록하고 기준 이미지를 선택하세요.</p>}
-    {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => setRevision(value => value + 1)}>다시 불러오기</Button></p>}
+    {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => setRevision(value => value + 1)}>다시 시도</Button></p>}
     {draft && <Dialog open title={draft.id ? "캐릭터 그룹 편집" : "캐릭터 그룹 만들기"} onClose={() => { if (!busy) setDraft(null); }}>
       <TextField label="그룹 이름" value={draft.name} maxLength={100} disabled={busy} onChange={event => setDraft({ ...draft, name: event.target.value })} />
       <p>탐색 목록만 묶습니다. 시리즈 소속, 이미지 분류와 분석 범위는 바뀌지 않습니다.</p>

@@ -133,8 +133,8 @@ it('uses one duration pill and touch-only selection indicators, with quiet date 
  const items=[{id:'one',kind:'video',preview:'data:image/png;base64,AA',width:600,height:600,duration_ms:42000,favorite:true,collected_at:'2026-09-28'}, {id:'two',kind:'image',preview:'data:image/png;base64,AA',width:600,height:600,collected_at:'2026-09-28'}];
  const props={items,density:1,identity:'calm',restoreScroll:0,onScroll:vi.fn(),onOpen:vi.fn(),onReady:vi.fn(),onNearEnd:vi.fn(),paused:false,onSelectAsset:vi.fn(),onToggleSelection:vi.fn()};
  const {container,rerender}=render(<Gallery {...props}/>);
- expect(container.querySelectorAll('.video-mark')).toHaveLength(1);
- expect(container.querySelector('.video-mark')?.textContent).toBe('▶ 0:42');
+ expect(container.querySelectorAll('.video-duration-pill')).toHaveLength(1);
+ expect(container.querySelector('.video-duration-pill')?.textContent).toBe('▶ 0:42');
  expect(container.querySelector('.tile-caption')).toBeNull();
  expect(container.querySelector('.tile-favorite')).toBeNull();
  expect(container.querySelector('.tile-select')).toBeNull();
@@ -155,7 +155,7 @@ it('hides the video pill on tiny tiles while keeping video metadata accessible',
  render(<Gallery items={[{id:'tiny',kind:'video',width:60,height:800,preview:'blob:tiny',duration_ms:42000}]} density={1} identity="tiny" restoreScroll={0} onScroll={()=>{}} onOpen={()=>{}} onReady={()=>{}} onNearEnd={()=>{}} paused/>);
  const tile=document.querySelector('[data-asset-id="tiny"]')!;
  expect(tile.getAttribute('aria-description')).toBe('영상 0:42');
- expect(tile.querySelector('.video-mark')).toBeNull();
+ expect(tile.querySelector('.video-duration-pill')).toBeNull();
 });
 
 it('uses the duration pill class rather than a round icon badge',()=>{

@@ -47,14 +47,5 @@ export function batchLabel(value: string | null): string {
   return value.length > 12 ? value.slice(0, 8) : value;
 }
 
-export function formatDuration(durationMs: number | null | undefined): string {
-  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return "";
-  const totalSeconds = Math.round(durationMs / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const minuteText = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
-  const secondText = String(seconds).padStart(2, "0");
-  return hours > 0 ? `${hours}:${minuteText}:${secondText}` : `${minuteText}:${secondText}`;
-}
+export { displayDuration as formatDuration } from "../shared/displayDate";
 import type { ImportSource } from "../library/types";

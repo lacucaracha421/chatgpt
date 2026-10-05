@@ -1,3 +1,4 @@
+import { EmptyState } from "../shared/ui/EmptyState";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -210,6 +211,6 @@ function AutoTagAdder({ state, onClose }: { state: AssetAutoTagState; onClose: (
         <span className="auto-tags__match-count">{entry.count.toLocaleString("ko-KR")}</span>
       </div>)}
     </div>}
-    {text.trim() && matches.length === 0 && <p className="auto-tags__empty">맞는 태그가 없습니다.</p>}
+    {text.trim() && matches.length === 0 && <EmptyState inline className="auto-tags__empty" title="검색 결과 없음" />}
   </div>;
 }

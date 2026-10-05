@@ -165,7 +165,7 @@ describe('Classification assignment picker',()=>{
     render(<ClassificationAssignmentEditor assetId="asset_1" open onClose={()=>{}}/>);
     await screen.findByRole('radio',{name:'미분류'});
     fireEvent.change(screen.getByRole('searchbox',{name:'분류 검색'}),{target:{value:'없는분류'}});
-    expect(screen.getByText('일치하는 분류가 없습니다.')).toBeTruthy();
+    expect(screen.getByText('검색 결과 없음')).toBeTruthy();
     expect(names()).toEqual([]);
   });
 

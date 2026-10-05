@@ -154,7 +154,7 @@ describe("이미지 내용 palette group", () => {
     type(input, "ㅁㄴㅇㄹ");
     await pause(400);
     const group = screen.getByRole("group", { name: "이미지 내용" });
-    expect(group.querySelector(".command-palette__strip-status")).toHaveTextContent("일치하는 이미지가 없습니다.");
+    expect(group.querySelector(".command-palette__strip-status")).toHaveTextContent("검색 결과 없음");
     expect(thumbs()).toEqual([]);
     expect(search).toHaveBeenCalledExactlyOnceWith("ㅁㄴㅇㄹ", DESCRIPTION_SEARCH_LIMIT);
   });

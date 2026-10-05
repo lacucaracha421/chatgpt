@@ -893,6 +893,18 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   });
 
+  it("focuses on a single click and opens the viewer only on a double click", async () => {
+    const user = userEvent.setup();
+    renderBrowser(createGateway({ items: [asset(0), asset(1)], nextCursor: null }));
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(first);
+    expect(first).toHaveAttribute("data-focused", "true");
+    expect(first).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.dblClick(first);
+    expect(await screen.findByRole("dialog", { name: "asset-0.png" })).toBeVisible();
+  });
+
   it("clears a multi-selection when a plain click focuses another asset", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
@@ -959,7 +971,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     fireEvent.click(await screen.findByRole("option", { name: "Delete me" }), { ctrlKey: true });
-    await user.click(await selectionAction("휴지통으로 이동"));
+    await user.click(await selectionAction("휴지통으로"));
 
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0"]);
     expect(screen.getByText("1개 자산을 휴지통으로 이동했습니다.")).toBeVisible();
@@ -976,7 +988,7 @@ describe("AssetBrowser", () => {
     );
 
     fireEvent.click(await screen.findByRole("option", { name: "asset-0.png" }), { ctrlKey: true });
-    await user.click(await selectionAction("휴지통으로 이동"));
+    await user.click(await selectionAction("휴지통으로"));
 
     expect(onMembershipChanged).toHaveBeenCalledOnce();
   });
@@ -989,7 +1001,7 @@ describe("AssetBrowser", () => {
     fireEvent.click(tile, { ctrlKey: true });
     vi.useFakeTimers();
 
-    fireEvent.click(await selectionAction("휴지통으로 이동"));
+    fireEvent.click(await selectionAction("휴지통으로"));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("button", { name: "실행 취소" })).toBeVisible();
     act(() => vi.advanceTimersByTime(5_000));
@@ -1080,7 +1092,7 @@ describe("AssetBrowser", () => {
     const selectionBar = screen.getByRole("toolbar", { name: "선택 작업" });
     expect(selectionBar).toHaveTextContent("2개 선택");
 
-    await user.click(await selectionAction("휴지통으로 이동"));
+    await user.click(await selectionAction("휴지통으로"));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
     await user.click(await screen.findByRole("button", { name: "실행 취소" }));
     expect(gateway.restoreAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
@@ -1095,7 +1107,7 @@ describe("AssetBrowser", () => {
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
 
-    await user.click(await selectionAction("휴지통으로 이동"));
+    await user.click(await selectionAction("휴지통으로"));
 
     expect(await screen.findByText("batch failed")).toBeVisible();
     expect(screen.getByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "true");
@@ -1109,10 +1121,10 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     fireEvent.click(await screen.findByRole("option", { name: "Keep me" }), { ctrlKey: true });
-    await user.click(await selectionAction("휴지통으로 이동"));
+    await user.click(await selectionAction("휴지통으로"));
 
     expect(await screen.findByText("trash failed")).toBeVisible();
-    expect(await selectionAction("휴지통으로 이동")).toBeVisible();
+    expect(await selectionAction("휴지통으로")).toBeVisible();
   });
 
   it("disables trash while pending and preserves a newer selection", async () => {
@@ -1124,14 +1136,14 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     fireEvent.click(await screen.findByRole("option", { name: "First" }), { ctrlKey: true });
-    await user.click(await selectionAction("휴지통으로 이동"));
-    expect(await selectionAction("휴지통으로 이동")).toBeDisabled();
+    await user.click(await selectionAction("휴지통으로"));
+    expect(await selectionAction("휴지통으로")).toBeDisabled();
     await user.keyboard("{Escape}");
     fireEvent.click(screen.getByRole("option", { name: "Second" }), { ctrlKey: true });
     await act(async () => { resolveTrash(); await pendingTrash; });
 
     expect(await screen.findByRole("option", { name: "Second" })).toHaveAttribute("aria-selected", "true");
-    expect(await selectionAction("휴지통으로 이동")).not.toBeDisabled();
+    expect(await selectionAction("휴지통으로")).not.toBeDisabled();
   });
 
   it("excludes selected assets only from the active album without trashing originals", async () => {
@@ -1144,7 +1156,7 @@ describe("AssetBrowser", () => {
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
     const previousQueries = vi.mocked(gateway.listAssets).mock.calls.length;
-    await user.click(await selectionAction("이 앨범에서 제외"));
+    await user.click(await selectionAction("이 앨범에서 빼기"));
     await waitFor(() => expect(gateway.patchAssetAlbums).toHaveBeenCalledWith({
       assetIds: ["asset-0", "asset-1"], addAlbumIds: [], removeAlbumIds: ["album-1"],
     }));
@@ -1161,7 +1173,7 @@ describe("AssetBrowser", () => {
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
 
-    await user.click(await selectionAction("이 컬렉션에서 제거"));
+    await user.click(await selectionAction("이 컬렉션에서 빼기"));
 
     expect(gateway.patchAssetCollections).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addCollectionIds: [], removeCollectionIds: ["collection-1"] });
     expect(onCollectionsChanged).not.toHaveBeenCalled();
@@ -1230,7 +1242,7 @@ it("clears a trashed requested asset so gallery tiles open the viewer again", as
 
   const viewer = await screen.findByRole("dialog", { name: "asset-99.png" });
   await screen.findByRole("option", { name: "asset-0.png", hidden: true });
-  await user.click(within(viewer).getByRole("button", { name: "휴지통으로 이동" }));
+  await user.click(within(viewer).getByRole("button", { name: "휴지통으로" }));
 
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-99"]);
@@ -1570,7 +1582,7 @@ describe("내용 검색 result state", () => {
 
   it("shows the empty line without a filter reset", async () => {
     renderRanked(describedGateway(vi.fn().mockResolvedValue({ route: "cosine", assetIds: [], precise: true })));
-    expect(await screen.findByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    expect(await screen.findByText("검색 결과 없음")).toBeVisible();
     expect(screen.queryByRole("button", { name: "필터 초기화" })).toBeNull();
   });
 
@@ -1583,7 +1595,7 @@ describe("내용 검색 result state", () => {
     const onViewChange = vi.fn();
     const gated: AssetView = { kind: "description_search", query: "ㅁㄴㅇㄹ" };
     const { rerenderView } = renderRanked(gateway, vi.fn(), gated, onViewChange);
-    expect(await screen.findByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    expect(await screen.findByText("검색 결과 없음")).toBeVisible();
     expect(search).toHaveBeenCalledExactlyOnceWith("ㅁㄴㅇㄹ", 200);
     expect(gateway.refreshAssets).not.toHaveBeenCalled();
     expect(screen.queryByText(/관련도순/)).toBeNull();
@@ -1592,7 +1604,7 @@ describe("내용 검색 result state", () => {
     // The forced view is its own view (back returns to the gated one): it asks with force and shows normal results.
     rerenderView({ kind: "description_search", query: "ㅁㄴㅇㄹ", force: true });
     // The gated answer stays painted until the forced one arrives (no flash).
-    expect(screen.getByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    expect(screen.getByText("검색 결과 없음")).toBeVisible();
     await screen.findByRole("option", { name: "asset-1.png" });
     expect(tileNames()).toEqual(["asset-1.png", "asset-0.png"]);
     expect(search).toHaveBeenLastCalledWith("ㅁㄴㅇㄹ", 200, true);
@@ -1606,7 +1618,7 @@ describe("내용 검색 result state", () => {
 
   it("offers no forced view for an ordinary empty answer", async () => {
     renderRanked(describedGateway(vi.fn().mockResolvedValue({ route: "cosine", assetIds: [], precise: false })));
-    expect(await screen.findByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    expect(await screen.findByText("검색 결과 없음")).toBeVisible();
     expect(screen.queryByRole("button", { name: "그래도 가장 비슷한 그림 보기" })).toBeNull();
   });
 

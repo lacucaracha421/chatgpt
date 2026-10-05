@@ -1,7 +1,7 @@
 import {LoadingLine} from './TopBar';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowLeftIcon,ArrowUturnLeftIcon,BookOpenIcon,ChevronRightIcon,Square2StackIcon} from '@heroicons/react/24/outline';
-import {Button,IconButton} from './ui';
+import {Badge,Button,EmptyState,IconButton} from './ui';
 import {ApiError,api,errorText} from './transport';
 import {CatalogCover} from './CatalogCover';
 import {catalogDetailPath,type CatalogDetail} from './catalogModel';
@@ -58,7 +58,7 @@ function DuplicateCover({provider,work,context,active}:{provider:string;work:Dup
   return <div className="catalog-cover duplicate-cover">
     {cover?<CatalogCover item={{provider:'kHentai',providerWorkId:work.workId,thumbnailUrl:cover.url}} revision={cover.revision} active={active}/>
       :<span className="duplicate-cover-missing" aria-hidden="true"><BookOpenIcon/></span>}
-    <span className="catalog-cover-pages numeric">{work.pages}p</span>
+    <Badge variant="scrim" className="catalog-cover-pages">{work.pages}p</Badge>
   </div>;
 }
 
@@ -163,16 +163,12 @@ export function CatalogDuplicates({context,active=true,onClose}:{context:string|
     </div>
     {notice&&<p className="error-message review-notice" role="alert">{notice}</p>}
     <LoadingLine label={(state.phase==='loading')&&'검토 목록 불러오는 중'}/>
-    {state.phase==='error'&&<div className="empty-state review-empty">
-      <h2>{state.offline?'오프라인이에요':'목록을 불러오지 못했어요'}</h2>
-      <p>{state.offline?(pending?`저장된 결정 ${pending}개는 연결되면 전송돼요.`:'연결을 확인한 뒤 다시 시도해 주세요.'):state.message}</p>
+    {state.phase==='error'&&<EmptyState className="review-empty" title={state.offline?'오프라인이에요':'목록을 불러오지 못했어요'} hint={state.offline?(pending?`저장된 결정 ${pending}개는 연결되면 전송돼요.`:'연결을 확인한 뒤 다시 시도해 주세요.'):state.message}>
       <Button onClick={()=>{setState({phase:'loading'});setReload(n=>n+1);}}>다시 시도</Button>
-    </div>}
-    {state.phase==='ready'&&!shown.length&&<div className="empty-state review-empty">
-      <Square2StackIcon aria-hidden="true"/>
-      {tab==='undecided'?<><h2>검토할 중복 판본이 없어요</h2><p>확실한 판본은 PC가 자동으로 묶어요. 헷갈리는 것만 여기에 모여요.</p></>
-        :<><h2>처리한 판본이 없어요</h2><p>묶거나 다른 작품으로 표시한 판본이 여기에 보여요.</p></>}
-    </div>}
+    </EmptyState>}
+    {state.phase==='ready'&&!shown.length&&<EmptyState className="review-empty" icon={Square2StackIcon}
+      title={tab==='undecided'?'검토할 중복 판본이 없어요':'처리한 판본이 없어요'}
+      hint={tab==='undecided'?'확실한 판본은 PC가 자동으로 묶어요. 헷갈리는 것만 여기에 모여요.':'묶거나 다른 작품으로 표시한 판본이 여기에 보여요.'}/>}
     {state.phase==='ready'&&!!shown.length&&<div ref={scroller} className="duplicates-list">
       {shown.map(item=>{
         const local=queued[item.candidateId];

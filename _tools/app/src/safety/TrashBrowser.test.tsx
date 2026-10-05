@@ -298,7 +298,7 @@ function asset() {
 
 it("keeps policy collapsed and renders only a trash thumbnail", async () => {
   renderTrash(<TrashBrowser />);
-  const image = await screen.findByRole("img", { name: "삭제한 자산 미리보기" });
+  const image = await screen.findByRole("img", { name: "휴지통 자산 미리보기" });
   expect(image).toHaveAttribute("src", "http://lakomics.localhost/trash-thumbnail/asset-1");
   expect(document.querySelector("details")).not.toHaveAttribute("open");
 });
@@ -314,5 +314,5 @@ it("renders the shared deletion date", async () => {
   const gateway = createGateway();
   vi.mocked(gateway.listTrash).mockResolvedValue({ items: [{ asset: asset(), trashedAt: "2025-07-20T12:00:00", purgeAt: null }], nextCursor: null, totalCount: 1, totalBytes: 1024 });
   renderTrash(<TrashBrowser />, gateway);
-  expect(await screen.findByText("삭제: 2025.7.20")).toBeInTheDocument();
+  expect(await screen.findByText("옮긴 날 2025.7.20")).toBeInTheDocument();
 });

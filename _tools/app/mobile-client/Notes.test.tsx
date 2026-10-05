@@ -116,7 +116,7 @@ it('creates notes from the floating button and moves an open note to the trash',
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
  await openNote('제목');fireEvent.click(await screen.findByRole('button',{name:'고정'}));
  expect(screen.getByRole('button',{name:'고정 해제'})).toBeTruthy();
- fireEvent.click(screen.getByRole('button',{name:'메모 휴지통으로'}));
+ fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
  await waitFor(()=>expect(saves().some(s=>s.id===note.id&&s.deleted===true&&s.pinned===true)).toBe(true));
  await screen.findByRole('button',{name:'새 메모'});
 });
@@ -316,7 +316,7 @@ it('forgets the Home origin after the note opened from Home is trashed, so anoth
  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
  render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
  expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
- fireEvent.click(screen.getByRole('button',{name:'메모 휴지통으로'}));
+ fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
  await openNote('다른 메모');
  expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('다른 내용');
  act(()=>{expect(backRef.current!()).toBe(true);});
@@ -330,7 +330,7 @@ it('leaves the list to App after the note opened from Home is trashed from its s
  render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
  expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
  fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
- fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'휴지통으로 보내기'}));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'휴지통으로'}));
  await waitFor(()=>expect(saves().some(s=>s.deleted===true)).toBe(true));
  // On the list, Back is no longer a Notes step: App's tab fallback handles it, without the Home return.
  act(()=>{expect(backRef.current!()).toBe(false);});

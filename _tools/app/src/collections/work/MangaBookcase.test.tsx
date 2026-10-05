@@ -1,3 +1,4 @@
+import { displayDate } from "../../shared/displayDate";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaBookcase, MANGA_SPINE_WIDTH, type MangaWorkData } from "./MangaBookcase";
@@ -37,7 +38,7 @@ describe("accepted cover-strip bookcase",()=>{
     view.rerender(<MangaBookcase manga={{...manga,focuses:[{volumeId:"v2",coverArtworkId:"a2",focusX:.25,method:"head"}]}} privacy={false} onPick={()=>undefined}/>);
     expect(screen.getByRole("button",{name:"2권 보기"}).querySelector("img")).toBe(image);
     expect(image.style.objectPosition).not.toBe("50% 50%");
-    expect(screen.getByRole("button",{name:"3권 보기"})).toHaveAttribute("aria-description","2026-12-01 출간 예정");
+    expect(screen.getByRole("button",{name:"3권 보기"})).toHaveAttribute("aria-description",`${displayDate("2026-12-01")} 출간 예정`);
   });
   it("gives every work the same spine width and scrolls the shelf, not the page, to the current volume",()=>{
     const many=Array.from({length:60},(_,i)=>({...volumes[0],id:`m${i+1}`,volumeNumber:i+1,coverArtworkId:`c${i+1}`,localReleaseDate:null,releaseStatus:"released" as const}));

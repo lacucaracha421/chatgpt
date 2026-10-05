@@ -1,4 +1,4 @@
-import { displayDate } from '../shared/displayDate';
+import { ddayLabel, displayDate } from '../shared/displayDate';
 import { checklistMarkdown } from '../notes/model';
 import { memoItems, memoMode, parseMemo } from '../notes/memo/memoModel';
 import { LEDGER, won } from '../notes/ledger/model';
@@ -22,7 +22,7 @@ export function attentionRows(notes: Note[], reviews: ReviewCount[], connections
     const total = subscribed.reduce((sum, n) => sum + monthSummary(n, monthNotesOf(notes, n.id), today.slice(0, 7), today).recurringThisMonth, 0);
     const charges = subscribed.flatMap(n => (n.recurring ?? []).flatMap(r => { const next = nextCharge(r, today); return next ? [{ ...next, name: r.name, noteId: n.id }] : []; })).sort((a, b) => a.date.localeCompare(b.date));
     const next = charges[0];
-    rows.push({ key: 'subscriptions', label: `구독 이번 달 ${won(total)}`, secondary: next ? `다음 결제 ${daysAfter(next.date, today)}일 후 · ${next.name}` : '다음 결제 없음', value: `${subscribed.reduce((n, l) => n + (l.recurring?.length ?? 0), 0)}개`, noteId: next?.noteId ?? subscribed[0]!.id });
+    rows.push({ key: 'subscriptions', label: `구독 이번 달 ${won(total)}`, secondary: next ? `다음 결제 ${ddayLabel(daysAfter(next.date, today)) ?? displayDate(next.date, new Date(`${today}T12:00:00`))} · ${next.name}` : '다음 결제 없음', value: `${subscribed.reduce((n, l) => n + (l.recurring?.length ?? 0), 0)}개`, noteId: next?.noteId ?? subscribed[0]!.id });
   }
   // Confirmed or skipped charges (month-note entries) are no longer reminders.
   const notices = ledgers.flatMap(n => reminders(n, today, ledgerEntries(monthNotesOf(notes, n.id)))

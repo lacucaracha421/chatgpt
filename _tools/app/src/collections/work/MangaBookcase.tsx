@@ -1,6 +1,7 @@
 import { WorkZoomObject, WorkZoomStage } from "./WorkZoom";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
+import { displayDate } from "../../shared/displayDate";
 import type { CollectionVolume, CollectionCoverFocus } from "../../library/types";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { StableImage } from "../../shared/ui/StableImage";
@@ -135,12 +136,12 @@ function Spine({ volume, latest, picked, privacy, focus, owned, src, onPick, onE
       if (element.isConnected && element.getAttribute("src") === src) setFrontReady(true);
     }
   }} onPreloadError={() => { onImageError(front, src); if (front) setFrontReady(true); }} onError={() => { onImageError(front, src); if (front) setFrontReady(true); }} style={front ? undefined : { objectPosition: `${stripPosition(focus, full, MANGA_SPINE_WIDTH)}% 50%` }} /> : <span className="manga-spine-empty" aria-hidden="true" />;
-  return <button type="button" className={`manga-spine${fronted ? " is-fronted" : ""}${frontMounted && !picked ? " is-settling" : ""}${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-label={`${volumeLabel(volume)} 보기`} aria-description={volume.releaseStatus === "upcoming" ? `${volume.localReleaseDate ?? ""} 출간 예정` : missing ? "미보유" : undefined} aria-pressed={picked} data-volume-id={volume.id} onClick={onPick} onDoubleClick={onEnlarge} style={{ "--spine-width": `${MANGA_SPINE_WIDTH}px`, "--cover-width": `${full}px`, "--spine-angle": `${Math.acos(Math.min(1, MANGA_SPINE_WIDTH / full)) * 180 / Math.PI}deg` } as CSSProperties}>
+  return <button type="button" className={`manga-spine${fronted ? " is-fronted" : ""}${frontMounted && !picked ? " is-settling" : ""}${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-label={`${volumeLabel(volume)} 보기`} aria-description={volume.releaseStatus === "upcoming" ? `${displayDate(volume.localReleaseDate)} 출간 예정`.trim() : missing ? "미보유" : undefined} aria-pressed={picked} data-volume-id={volume.id} onClick={onPick} onDoubleClick={onEnlarge} style={{ "--spine-width": `${MANGA_SPINE_WIDTH}px`, "--cover-width": `${full}px`, "--spine-angle": `${Math.acos(Math.min(1, MANGA_SPINE_WIDTH / full)) * 180 / Math.PI}deg` } as CSSProperties}>
     {/* The shelf is a physical object: real cover strip, light only, no invented printing. */}
     {latest && <span className="manga-latest-label">최신</span>}
     <span className="manga-spine-strip">{image(false)}<span className="manga-spine-number">{volume.volumeNumber}</span></span>
     {frontMounted && <span className="manga-spine-front" onTransitionEnd={event => { if (!picked && event.target === event.currentTarget && event.propertyName === "transform") { setFrontMounted(false); setFrontReady(privacy || !src); } }}>{image(true)}</span>}
     {picked && <span className="manga-picked-number">{volume.volumeNumber}</span>}
-    {missing && volume.releaseStatus === "upcoming" && !picked && <span className="manga-upcoming-date">{volume.localReleaseDate?.slice(5).replace("-", ".")}</span>}
+    {missing && volume.releaseStatus === "upcoming" && !picked && <span className="manga-upcoming-date">{displayDate(volume.localReleaseDate)}</span>}
   </button>;
 }

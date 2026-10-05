@@ -288,7 +288,7 @@ it('distinguishes an older server from an unpublished character view',async()=>{
   render(<CharacterBrowser {...props}/>);
   await screen.findByText('서버에 캐릭터 보기 업데이트가 필요합니다.');
   mocks.api.mockResolvedValue({...index,ready:false,revision:null,nodes:[],scopes:[]});
-  fireEvent.click(screen.getByRole('button',{name:'새로고침'}));
+  fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));
   await screen.findByText('캐릭터 보기가 아직 공유되지 않았습니다');
 });
 

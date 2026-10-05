@@ -1,3 +1,4 @@
+import {displayDate} from '../src/shared/displayDate';
 import {workImageLoads} from './workImageLoads.test-helper';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -663,9 +664,9 @@ it('shows personal and provider metadata, hides manga imported descriptions, and
  view.unmount();
  const movie={...item,type:'movie',productionCompany:'제작사 이름',externalScore:85,overview:'한국어 줄거리',series:{status:'방영 종료',cast:['출연자'],seasons:[{id:10,seasonNumber:1,name:'시즌 1',airDate:'2020-01-01',posterArtworkId:null,episodes:[{id:20,episodeNumber:1,name:'첫 회',airDate:'2020-01-01',runtimeMinutes:24}]}]}};
  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[movie]}:{revision:'r1',item:movie});
- render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(item.name));await screen.findByText('첫 회');expect(screen.getAllByText('제작사 이름').length).toBeGreaterThan(0);expect(screen.getByText('2020-01-01 · 24분')).toBeTruthy();
+ render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(item.name));await screen.findByText('첫 회');expect(screen.getAllByText('제작사 이름').length).toBeGreaterThan(0);expect(screen.getByText(`${displayDate('2020-01-01')} · 24분`)).toBeTruthy();
  // One season needs no season picker, and its name is not repeated as a second heading.
- expect(screen.queryByRole('group',{name:'시즌'})).toBeNull();expect(screen.getByText('시즌 1개')).toBeTruthy();
+ expect(screen.queryByRole('group',{name:'시즌'})).toBeNull();expect(document.querySelector('.collection-series h2')?.textContent).toBe('시즌 1개');
  const toggle=await screen.findByRole('button',{name:'더 보기'});expect(screen.getByText('한국어 줄거리', {selector: '.collection-overview'}).classList.contains('is-clamped')).toBe(true);
  fireEvent.click(toggle);expect(screen.getByText('한국어 줄거리', {selector: '.collection-overview'}).classList.contains('is-clamped')).toBe(false);
 });
@@ -684,7 +685,7 @@ describe('film details',()=>{
     const cast=screen.getByRole('region',{name:'출연'});
     expect(within(cast).getByText('배우 가')).toBeTruthy();expect(within(cast).getByText('주인공')).toBeTruthy();
     const releases=screen.getByRole('region',{name:'개봉 정보'});
-    expect(within(releases).getAllByRole('listitem').map(row=>row.textContent)).toEqual(['2024.01.01미국 · 극장 개봉 · PG-13','2024.02.03한국 · 극장 개봉 · 15']);
+    expect(within(releases).getAllByRole('listitem').map(row=>row.textContent)).toEqual(['2024.1.1미국 · 극장 개봉 · PG-13','2024.2.3한국 · 극장 개봉 · 15']);
     const toggle=within(releases).getByRole('button',{name:'전체 보기'});fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');expect(within(releases).getAllByRole('listitem')).toHaveLength(3);
     expect(within(releases).getByText('일본 · 디지털')).toBeTruthy();
@@ -706,7 +707,7 @@ describe('film details',()=>{
 
 it('uses production company and TV date range for movie grid captions',()=>{
   const movie={...item,type:'movie' as const,productionCompany:'Studio',director:'Director',year:2016,seasonDateRange:['2016-01-14','2024-05-05']};
-  expect(collectionCardCredit(movie)).toBe('Studio');expect(collectionCardDate(movie)).toBe('16.1.14~24.5.5');expect(collectionCardDate({...movie,seasonDateRange:null})).toBe('2016');
+  expect(collectionCardCredit(movie)).toBe('Studio');expect(collectionCardDate(movie, new Date(2026, 9, 5))).toBe('2016.1.14–2024.5.5');expect(collectionCardDate({...movie,seasonDateRange:null})).toBe('2016');
 });
 it('shows the full filtered Collection count instead of the loaded page length',async()=>{
   mocks.api.mockResolvedValue({...page,totalCount:125});render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(item.name);expect(document.querySelector('.collection-type-label .ui-section-label__count')?.textContent?.trim()).toBe('125');
@@ -1090,7 +1091,7 @@ describe('shelf view',()=>{
     expect(within(record).getByText('상태').nextElementSibling?.textContent).toBe('하는 중');
     expect(within(record).getByText('기기').nextElementSibling?.textContent).toBe('Switch 2');
     // The booklet shares the PC's status, score and owned platform.
-    expect([...document.querySelectorAll('.case-manual-form dt')].map(node=>node.textContent)).toEqual(['상태','별점','기기']);
+    expect([...document.querySelectorAll('.case-manual-form dt')].map(node=>node.textContent)).toEqual(['상태','내 별점','기기']);
     expect(document.querySelector('.case-manual .case-status-box.is-filled')?.getAttribute('data-status')).toBe('playing');
     expect(document.querySelector('.case-manual-form')?.textContent).toContain('Switch 2');
     expect(document.querySelector('.case-manual .case-score')).not.toBeNull();
@@ -1103,7 +1104,7 @@ describe('shelf view',()=>{
     fireEvent.click(tile);fireEvent.click(tile);
     const record=await screen.findByRole('region',{name:'내 기록'});
     expect(within(record).queryByText('상태')).toBeNull();expect(within(record).queryByText('기기')).toBeNull();
-    expect([...document.querySelectorAll('.case-manual-form dt')].map(node=>node.textContent)).toEqual(['상태','별점','기기']);
+    expect([...document.querySelectorAll('.case-manual-form dt')].map(node=>node.textContent)).toEqual(['상태','내 별점','기기']);
     expect(document.querySelector('.case-manual .case-status-box.is-filled')).toBeNull();
     expect(document.querySelector('.case-manual .case-writing-line')?.getAttribute('aria-label')).toBe('미입력');
   });

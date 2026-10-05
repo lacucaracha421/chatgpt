@@ -7,7 +7,7 @@
       "legacyToken": 0
     },
     "_tools/app/src/artists/artists.css": {
-      "offScaleSpacing": 21,
+      "offScaleSpacing": 19,
       "offRoleFontSize": 1,
       "pillRadius": 0,
       "legacyToken": 21
@@ -118,7 +118,7 @@
       "offScaleSpacing": 1,
       "offRoleFontSize": 1,
       "pillRadius": 0,
-      "legacyToken": 4
+      "legacyToken": 3
     },
     "_tools/app/src/collections/avCollections.css": {
       "offScaleSpacing": 0,
@@ -136,7 +136,7 @@
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 1
+      "legacyToken": 0
     },
     "_tools/app/src/collections/case/CaseMaterials.css": {
       "offScaleSpacing": 0,
@@ -235,10 +235,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/exchange/exchange.css": {
-      "offScaleSpacing": 20,
+      "offScaleSpacing": 17,
       "offRoleFontSize": 3,
       "pillRadius": 0,
-      "legacyToken": 14
+      "legacyToken": 12
     },
     "_tools/app/src/external-vault/externalVault.css": {
       "offScaleSpacing": 4,
@@ -280,7 +280,7 @@
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 7
+      "legacyToken": 6
     },
     "_tools/app/src/layout/windowResizeHandles.css": {
       "offScaleSpacing": 0,
@@ -409,10 +409,10 @@
       "legacyToken": 7
     },
     "_tools/app/src/styles/chrome.css": {
-      "offScaleSpacing": 9,
-      "offRoleFontSize": 2,
+      "offScaleSpacing": 8,
+      "offRoleFontSize": 1,
       "pillRadius": 0,
-      "legacyToken": 21
+      "legacyToken": 18
     },
     "_tools/app/src/styles/collectionSpines.css": {
       "offScaleSpacing": 0,
@@ -501,8 +501,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/Catalog.css": {
-      "offScaleSpacing": 22,
-      "offRoleFontSize": 20,
+      "offScaleSpacing": 21,
+      "offRoleFontSize": 19,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -585,8 +585,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/exchange.css": {
-      "offScaleSpacing": 30,
-      "offRoleFontSize": 19,
+      "offScaleSpacing": 27,
+      "offRoleFontSize": 18,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -627,9 +627,9 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/mobile.css": {
-      "offScaleSpacing": 86,
-      "offRoleFontSize": 50,
-      "pillRadius": 2,
+      "offScaleSpacing": 85,
+      "offRoleFontSize": 48,
+      "pillRadius": 1,
       "legacyToken": 0
     },
     "_tools/app/mobile-client/notes.css": {

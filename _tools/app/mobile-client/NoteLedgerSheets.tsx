@@ -1,6 +1,7 @@
 import {useState,type ReactNode} from 'react';
 import {BackspaceIcon,CalendarIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {useNoteEditor} from './noteCaret';
+import {displayDate} from '../src/shared/displayDate';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {addDays,localToday} from '../src/notes/ledger/cycle';
 import {LEDGER_LIMITS,monthLabel,won,type LedgerEntry,type Planned,type Recurring} from '../src/notes/ledger/model';
@@ -23,8 +24,8 @@ export function pressKey(digits:string,key:string):string {
 }
 export const amountOf=(digits:string)=>digits?Number(digits):0;
 const digitsOf=(amount:number|null|undefined)=>amount?String(amount):'';
-/** "2026-09-25" → "9월 25일". */
-export const longDate=(date:string)=>`${Number(date.slice(5,7))}월 ${Number(date.slice(8,10))}일`;
+/** "2026-09-25" → "9.25" (the shared date). */
+export const longDate=(date:string)=>displayDate(date);
 
 type Saved=boolean|Promise<boolean>;
 /** The screen's save problem (limit or size); the sheet stays open with the typed input. */

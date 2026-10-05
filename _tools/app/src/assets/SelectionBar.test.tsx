@@ -28,7 +28,7 @@ it("supports a narrow album-only selection bar without desktop actions", async (
 
   expect(screen.getByRole("button", { name: "앨범에 추가" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "휴지통으로" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "앨범에 추가" }));
   expect(onAddToAlbum).toHaveBeenCalledOnce();
 });
@@ -47,7 +47,7 @@ it("shows the selection size and keeps browsing commands keyboard reachable", as
   expect(onFavorite).toHaveBeenCalledWith(false);
   await user.click(screen.getByRole("button", { name: "선택 해제" }));
   expect(onClearSelection).toHaveBeenCalledOnce();
-  expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "휴지통으로" })).toBeVisible();
 });
 
 it("places the character picker action first and exposes its C shortcut", () => {
@@ -78,7 +78,7 @@ it("keeps collection actions inside a collection detail view", async () => {
     />,
   );
 
-  await user.click(screen.getByRole("button", { name: "이 컬렉션에서 제거" }));
+  await user.click(screen.getByRole("button", { name: "이 컬렉션에서 빼기" }));
   expect(onRemoveFromCollection).toHaveBeenCalledOnce();
 });
 
@@ -108,20 +108,20 @@ it("hides the cover action outside a single-selection collection detail", () => 
   );
 
   expect(screen.queryByRole("button", { name: "대표 이미지로 지정" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "이 컬렉션에서 제거" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "이 컬렉션에서 빼기" })).toBeVisible();
 });
 
 it("does not show collection actions outside a collection detail view", () => {
   render(<SelectionBar {...baseProps} selectedCount={1} />);
 
-  expect(screen.queryByRole("button", { name: "이 컬렉션에서 제거" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "이 컬렉션에서 빼기" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "대표 이미지로 지정" })).not.toBeInTheDocument();
 });
 
 it("disables batch actions while a batch operation is pending", () => {
   render(<SelectionBar {...baseProps} batchPending />);
 
-  expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "휴지통으로" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "좋아요 켜기" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "선택 해제" })).not.toBeDisabled();
 });

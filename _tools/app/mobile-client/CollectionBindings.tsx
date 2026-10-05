@@ -3,7 +3,7 @@ import {usePrivacyMode} from './privacyMode';
 import {useEffect, useRef, useState, type FormEvent} from 'react';
 import {createPortal} from 'react-dom';
 import {CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon, MagnifyingGlassIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
-import {Button, Dialog, DialogDescription} from './ui';
+import {Button, Dialog, DialogDescription, EmptyState} from './ui';
 import {ApiError, api, errorText} from './transport';
 import {visibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS, useSyncSignal} from './syncSignals';
@@ -258,7 +258,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
       {failure && <div className="bind-message is-error" role="alert"><span>{failure.text}{failure.waitSeconds ? (wait > 0 ? ` ${wait}초 후에 다시 검색할 수 있어요.` : ' 이제 다시 검색할 수 있어요.') : ''}</span>
         {failure.retry && <Button size="sm" variant="ghost" disabled={searchDisabled} onClick={() => run(lastQuery.current)}>다시 시도</Button>}</div>}
       <BusyLabel busy={!!(busy)}><p className="hint" role="status">{name}에서 찾는 중…</p></BusyLabel>
-      {found && !busy && found.items.length === 0 && <p className="hint bind-empty">검색 결과가 없어요. 다른 제목으로 찾아 보세요.</p>}
+      {found && !busy && found.items.length === 0 && <EmptyState inline className="bind-empty" title="검색 결과 없음" />}
       {found && found.items.length > 0 && <ul className="bind-results" aria-label={`${name} 검색 결과`} aria-busy={busy || undefined}>
         {found.provider === 'mangadex'
           ? found.items.map(candidate => <li key={candidate.mangaId}><button type="button" className="bind-result" onClick={() => pickMangaDex(candidate)}>

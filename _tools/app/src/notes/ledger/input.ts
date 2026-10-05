@@ -4,6 +4,7 @@
  * stay testable without the screen.
  */
 import { dayNumber } from "./cycle";
+import { displayDate } from "../../shared/displayDate";
 import { isDate, isMonth, validAmount } from "./model";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -58,8 +59,8 @@ export function parseMonth(text: string, currentMonth: string): string | null | 
   }
   return undefined;
 }
-/** "2026-09-25" → "9.25". */
-export const dotDate = (date: string) => `${Number(date.slice(5, 7))}.${Number(date.slice(8, 10))}`;
+/** "2026-09-25" → "9.25" (the shared date; other years keep theirs). */
+export const dotDate = (date: string) => displayDate(date);
 const WEEKDAYS = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 export const weekday = (date: string) => WEEKDAYS[new Date(dayNumber(date) * 86_400_000).getUTCDay()]!;
 /** "오늘", "내일", "N일 후". */

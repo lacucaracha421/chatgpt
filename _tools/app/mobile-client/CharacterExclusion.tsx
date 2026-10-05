@@ -77,7 +77,7 @@ function refusalCode(error:unknown):string|null {
 
 function refusalText(error:unknown):string {
   const code=refusalCode(error);
-  if(code==='characterReferenceProtected')return '기준 이미지로 쓰이는 자산은 이 캐릭터에서 제외할 수 없습니다.';
+  if(code==='characterReferenceProtected')return '기준 이미지로 쓰이는 자산은 이 캐릭터에서 뺄 수 없습니다.';
   if(code==='characterSnapshotChanged')return '캐릭터 보기가 변경되었습니다. 새로고침한 뒤 다시 시도해 주세요.';
   if(code==='characterExclusionUnsupported')return '서버에 캐릭터 제외 기능이 없습니다. 서버를 업데이트해 주세요.';
   if(code==='libraryMismatch')return '다른 라이브러리에 연결되어 제외를 적용하지 않았습니다.';
@@ -193,14 +193,14 @@ export function CharacterExclusionEditor({request,target,assetLabel,characterNam
     }
   };
 
-  return <Dialog open={!!request} title={`${characterName}에서 제외`} onClose={onClose}>
-    <DialogDescription className="sr-only">{assetLabel}을(를) {characterName}에서 제외합니다. 파일과 폴더는 그대로 남고 다른 캐릭터에는 영향이 없습니다. 확인을 눌러야 서버에 적용됩니다.</DialogDescription>
-    <div className="dialog-header"><span>{characterName}에서 제외</span><IconButton label="제외 닫기" icon={XMarkIcon} onClick={onClose}/></div>
+  return <Dialog open={!!request} title={`${characterName}에서 빼기`} onClose={onClose}>
+    <DialogDescription className="sr-only">{assetLabel}을(를) {characterName}에서 뺍니다. 파일과 폴더는 그대로 남고 다른 캐릭터에는 영향이 없습니다. 확인을 눌러야 서버에 적용됩니다.</DialogDescription>
+    <div className="dialog-header"><span>{characterName}에서 빼기</span><IconButton label="닫기" icon={XMarkIcon} onClick={onClose}/></div>
     <p className="hint">파일은 삭제되지 않고 폴더도 그대로 남습니다. 이 캐릭터에서만 제외되고 다른 캐릭터에는 영향이 없습니다.</p>
     {error&&<p className="error-message" role="alert">{error}</p>}
     <div className="dialog-actions">
       <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
-      <Button variant="primary" disabled={busy||!request} onClick={()=>void confirm()}><BusyLabel busy={!!(busy)} idle={'제외'}>제외 적용 중</BusyLabel></Button>
+      <Button variant="primary" disabled={busy||!request} onClick={()=>void confirm()}><BusyLabel busy={!!(busy)} idle={'빼기'}>빼는 중</BusyLabel></Button>
     </div>
   </Dialog>;
 }

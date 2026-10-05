@@ -97,12 +97,11 @@
 .gallery-scroll.is-stale { pointer-events:none; }
 .gallery-scroll[aria-busy="true"] { cursor:progress; }
 /* Folder move, shared with the PC's FolderMove (src/assets/FolderWave.tsx): the old folder's decoded
-   images stay underneath while the new tiles decode (first viewport, capped), then the tiles enter
-   16px from the side of travel as the old images fade out. The intro rows stay put above both. */
+   images stay on screen while the new tiles decode (first viewport, capped), then the new folder
+   replaces them in one step, without animation. The intro rows stay put above the old images. */
 .gallery-scroll { position:relative; }
 .gallery-scroll > .asset-gallery__folder-snapshot { position:absolute; z-index:0; overflow:hidden; pointer-events:none; }
 .gallery-scroll > .asset-gallery__folder-snapshot * { animation:none !important; transition:none !important; }
-.gallery-scroll[data-folder-move] > .gallery-canvas { z-index:1; background:var(--color-bg); }
 .gallery-scroll[data-folder-move] > .gallery-intro { position:relative; z-index:2; background:var(--color-bg); }
 .gallery-scroll[data-folder-move="pending"] > .gallery-canvas { visibility:hidden; }
 @media (prefers-reduced-motion:no-preference) {

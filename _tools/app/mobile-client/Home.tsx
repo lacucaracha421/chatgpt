@@ -15,7 +15,7 @@ import {usePrivacyMode} from './privacyMode';
 import type {Asset, Ticket} from './types';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import {ddayLabel, displayDate} from '../src/shared/displayDate';
-import {Badge, Skeleton} from './ui';
+import {Badge, EmptyState, Skeleton} from './ui';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {HomeSection, HomeToday, type HomeReleaseCard} from '../src/home/HomeAttention';
 import {HomeReleaseGrid} from '../src/home/HomeReleaseGrid';
@@ -255,8 +255,8 @@ export function Home(props: HomeProps) {
     <div className="home-tablet-media-column">
     <div className="home-tablet-playing"><HomePlayingShelf onOpen={props.onWork} works={playing.map(work => ({id: work.id, name: work.name, platform: work.ownedPlatform || work.platforms || KIND_LABEL[work.type], score: work.myScore ?? null,
       case: selected => <HomePlayingCase item={work} revision={shelf?.revision ?? ''} active={!paused} privacy={privacy} selected={selected} />}))} /></div>
-    <div className="home-tablet-releases"><HomeSection title={`2주 안에 발매 · ${releaseCards.length}`} onOpen={props.onReleases}>
-      {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : <p className="home-attention-empty">2주 안에 예정된 발매가 없습니다</p>}
+    <div className="home-tablet-releases"><HomeSection title="2주 안에 발매" count={releaseCards.length} onOpen={props.onReleases}>
+      {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : <EmptyState inline className="home-attention-empty" title="2주 안에 예정된 발매가 없습니다" />}
     </HomeSection></div>
     </div></div>}
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}

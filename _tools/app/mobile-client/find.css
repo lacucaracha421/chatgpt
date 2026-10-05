@@ -15,7 +15,7 @@
 .tablet-find__option:active { background: var(--color-surface-pressed); }
 .tablet-find__option:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .tablet-find__more { width: 100%; margin-top: var(--space-2); }
-.tablet-find__empty { margin: 0; padding: var(--space-8) 0; font-size: var(--type-body); color: var(--color-faint); }
+.tablet-find__empty { padding: var(--space-8) 0; }
 .tablet-find__skeleton { display: grid; gap: var(--space-2); animation: tablet-find-skeleton 300ms step-end; }
 .tablet-find__skeleton .ui-skeleton { height: var(--row-height-2); }
 .tablet-find__error { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-6); color: var(--color-danger); font-size: var(--type-meta); }

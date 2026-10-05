@@ -1,3 +1,4 @@
+import { EmptyState } from "../shared/ui/EmptyState";
 import { useAutoTagInboxStatus } from "../autotags/useAutoTagInboxStatus";
 import { Button } from "../shared/ui/Button";
 import * as RadixDialog from "@radix-ui/react-dialog";
@@ -154,7 +155,7 @@ export function StatusCenter({
           <StatusBlock title="작업">
             <div className="status-center__list">
               {workCount === 0
-                ? <p className="status-center__empty">진행 중인 작업이 없습니다.</p>
+                ? <EmptyState inline className="status-center__empty" title="진행 중인 작업이 없습니다." />
                 : <>
                   <WorkTray works={works} retryFailed={retryWork} dismissWork={dismissWork}
                     openReview={() => go({ kind: "similarity_review" })} openExisting={(assetId) => { setOpen(false); openExisting(assetId); }} />
@@ -270,7 +271,7 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
   }
   if (health.assets.stopped) {
     problemCount += 1;
-    problems.push("삭제·복원 변경 전송이 멈춤");
+    problems.push("휴지통·복원 변경 전송이 멈춤");
   }
   // Both lanes share one credential and connection, so one cause is reported once.
   const failures = new Set([health.authorityPassFailure?.code, health.assetLaneFailure?.code].filter((code): code is string => Boolean(code)));
@@ -278,7 +279,7 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
   problemCount += failures.size;
 
   const notes: string[] = [];
-  if (health.assets.held) notes.push("삭제·복원 변경 · 송신 보류");
+  if (health.assets.held) notes.push("휴지통·복원 변경 · 송신 보류");
   if (health.authorityHeld) notes.push("앨범·분류 변경 · 송신 보류로 대기");
   const tabletWait = health.syncHold?.held ? health.syncHold.tabletWait : null;
   if (tabletWait && tabletWait.count > 0) notes.push(`태블릿 변경 ${tabletWait.count.toLocaleString()}개가 누락된 항목을 기다립니다 · ${tabletWait.targetIds.join(", ")}`);

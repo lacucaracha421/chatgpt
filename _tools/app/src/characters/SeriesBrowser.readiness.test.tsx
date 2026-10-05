@@ -94,9 +94,8 @@ it("keeps the outgoing scroll position through publication of the next filter pa
   expect(scroller.scrollTop).toBe(300);
 });
 
-it.each([false, true])("switches the real series shelf only after folders, suggestions and character/group/collage images are ready (view transitions: %s)", async viewTransitions => {
-  const update = vi.fn<(callback: () => void) => void>();
-  const start = vi.fn((callback: () => void) => { update(callback); return { ready: Promise.resolve(), finished: new Promise<void>(() => {}), skipTransition: vi.fn() }; });
+it.each([false, true])("switches the real series shelf only after folders, suggestions and character/group/collage images are ready, in one step (view transitions available: %s)", async viewTransitions => {
+  const start = vi.fn();
   if (viewTransitions) Object.defineProperty(document, "startViewTransition", { configurable: true, value: start });
   const api = createCharacterFixture(), originalTargets = await api.targets();
   const targets = [...originalTargets, ...originalTargets.slice(0, 2).map((target, i) => ({
@@ -143,20 +142,10 @@ it.each([false, true])("switches the real series shelf only after folders, sugge
     for (const image of images.slice(0, -1)) fireEvent.load(image);
     expect(visibleShelf().textContent).toBe(oldText);
     await act(async () => { fireEvent.load(images[images.length - 1]); });
-    if (viewTransitions) {
-      expect(start).toHaveBeenCalledOnce();
-      expect(visibleShelf()).toBe(oldShelf);
-      expect(document.documentElement).toHaveAttribute("data-series-view-transition", "forward");
-      act(() => {
-        update.mock.calls[0][0]();
-        // The browser's new snapshot is taken right after the callback: everything must be committed inside it.
-        expect(visibleShelf()).toBe(prepared);
-        expect(visibleShelf()).toHaveTextContent("캐릭터 2 · 그룹 1 · 제안 1");
-        expect(visibleShelf().querySelector(".character-suggestion-tile__mosaic")).toHaveClass("character-suggestion-tile__mosaic--suggestion");
-        expect(screen.getByRole("button", { name: "제안 숨기기" })).toBeInTheDocument();
-        expect(view.container.querySelector("[data-shelf-exit]")).toBeNull();
-      });
-    }
+    // One step without animation (user 2026-10-05): no browser view transition even where available.
+    expect(start).not.toHaveBeenCalled();
+    expect(document.documentElement).not.toHaveAttribute("data-series-view-transition");
+    expect(view.container.querySelector(".series-shelf")!.children).toHaveLength(1);
     expect(visibleShelf()).toBe(prepared);
     expect(visibleShelf()).toHaveTextContent("캐릭터 2 · 그룹 1 · 제안 1");
     expect(screen.getByRole("button", { name: "제안 숨기기" })).toBeInTheDocument();
@@ -166,6 +155,5 @@ it.each([false, true])("switches the real series shelf only after folders, sugge
   } finally {
     vi.useRealTimers();
     Reflect.deleteProperty(document, "startViewTransition");
-    document.documentElement.removeAttribute("data-series-view-transition");
   }
 });

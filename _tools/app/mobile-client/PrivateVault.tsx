@@ -3,7 +3,7 @@ import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {usePrivacyMode} from './privacyMode';
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, LockClosedIcon} from '@heroicons/react/24/outline';
-import {Button, Dialog, DialogDescription, IconButton} from './ui';
+import {Button, Dialog, DialogDescription, EmptyState, IconButton} from './ui';
 import {errorText, native} from './transport';
 import {Gallery, type GalleryVaultSource} from './Gallery';
 import {Viewer, type ViewerVaultSource} from './Viewer';
@@ -91,7 +91,7 @@ export function PrivateVault({onClose,backRef,density=1}:{onClose():void;backRef
         {state.unlocked && <Button onClick={lock}><LockClosedIcon/>잠그기</Button>}
       </header>
       {error && <p className="error-message" role="alert">{error}</p>}
-      {!ready || showChecking ? <div className="empty-state">{showChecking && <p>보관함 확인 중…</p>}{error&&<Button onClick={refresh}>다시 확인</Button>}</div> : !state.unlocked ?
+      {!ready || showChecking ? (showChecking||error ? <EmptyState role="status" title={error?'보관함을 확인하지 못했습니다':'보관함 확인 중'} action={error?<Button onClick={refresh}>다시 시도</Button>:undefined}/> : <div role="status"/>) : !state.unlocked ?
         <div className="vault-locked">
           <LockClosedIcon aria-hidden="true"/>
           <h3>{state.present?'비밀 보관함이 잠겨 있습니다':'USB를 연결해 주세요'}</h3>
@@ -112,7 +112,7 @@ export function PrivateVault({onClose,backRef,density=1}:{onClose():void;backRef
           <Gallery privacy={privacy} items={assets} vault={gallery} density={density} identity={`vault:${state.epoch}:${filters.media}`} restoreScroll={0} onScroll={ignore} onOpen={setSelected} onReady={shaped} onNearEnd={ignore} paused={open} scrubberHidden={filtersOpen!==null}
             intro={<>
               <FilterChips value={filters} onChange={value=>{setFilters(value);setFiltersOpen(null);}} open={filtersOpen} onOpen={setFiltersOpen} aspect={false} duration={false}/>
-              {assets.length===0&&<div className="empty-state"><p>{state.items.length?'조건에 맞는 항목이 없습니다.':'보관함이 비어 있습니다.'}</p></div>}
+              {assets.length===0&&<EmptyState title={state.items.length?'조건에 맞는 항목이 없습니다':'보관함이 비어 있습니다'}/>}
             </>}/>
           {open&&<Viewer items={assets} index={selected!} onIndex={setSelected} onClose={()=>setSelected(null)} vault={viewer}/>}
         </>}

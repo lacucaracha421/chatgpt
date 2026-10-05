@@ -907,11 +907,11 @@ describe('asset search scope navigation',()=>{
     fireEvent.click(await screen.findByRole('button',{name:'검색',exact:true}));
     fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'검색'}});
     fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^${names[kind]}`)}));
-    const chip=await screen.findByRole('button',{name:`${names[kind]} 범위 제거`});
+    const chip=await screen.findByRole('button',{name:`${names[kind]} 범위 빼기`});
     await screen.findByText('tile-b1');
     expect(screen.getAllByRole('group',{name:'에셋 검색 범위'})).toHaveLength(1);
     fireEvent.click(chip);
-    await waitFor(()=>expect(screen.queryByRole('button',{name:`${names[kind]} 범위 제거`})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('button',{name:`${names[kind]} 범위 빼기`})).toBeNull());
     expect(screen.getByRole('button',{name:'검색',exact:true})).toBeTruthy();
   });
 });
@@ -945,9 +945,9 @@ describe('combined asset search chips',()=>{
   render(<App/>);await screen.findByRole('heading',{name:'에셋'});
   await choose(kind==='folder'?'분류 B':'검색',kind==='folder'?/^분류 B/:kind==='album'?/^검색 앨범/:/^검색 캐릭터/);
   await screen.findByText('tile-b1');
-  await choose('긴',/^긴 머리/);await screen.findByRole('button',{name:'긴 머리 범위 제거'});
-  await choose('안경',/^안경/);await screen.findByRole('button',{name:'안경 범위 제거'});
-  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 제거'});
+  await choose('긴',/^긴 머리/);await screen.findByRole('button',{name:'긴 머리 범위 빼기'});
+  await choose('안경',/^안경/);await screen.findByRole('button',{name:'안경 범위 빼기'});
+  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 빼기'});
   const route=kind==='folder'?'/v1/library/assets':kind==='album'?'/v1/albums/assets':'/v1/library/characters/assets';
   const urls=mocks.api.mock.calls.map(([path])=>new URL(String(path),'https://test')).filter(url=>url.pathname===route&&url.searchParams.has('artist'));
   expect(urls.length).toBeGreaterThan(0);
@@ -959,11 +959,11 @@ describe('combined asset search chips',()=>{
   }
   if(kind!=='character')expect(urls.some(url=>url.searchParams.get('toc')==='1')).toBe(true);
   expect(screen.getByRole('button',{name:'모두 지우기'})).toBeTruthy();
-  fireEvent.click(screen.getByRole('button',{name:'긴 머리 범위 제거'}));
-  await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull());
-  expect(screen.getByRole('button',{name:'안경 범위 제거'})).toBeTruthy();
-  fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'안경 범위 제거'})).toBeNull());
-  expect(screen.queryByRole('button',{name:'안경 범위 제거'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'긴 머리 범위 빼기'}));
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 빼기'})).toBeNull());
+  expect(screen.getByRole('button',{name:'안경 범위 빼기'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'안경 범위 빼기'})).toBeNull());
+  expect(screen.queryByRole('button',{name:'안경 범위 빼기'})).toBeNull();
  });
  it.each(['folder','character'] as const)('drops an invalid tag after 422 in a %s scope while keeping its valid scope/artist and gallery',async kind=>{
   const original=mocks.api.getMockImplementation()!;
@@ -974,22 +974,22 @@ describe('combined asset search chips',()=>{
   });
   render(<App/>);await screen.findByRole('heading',{name:'에셋'});
   await choose(kind==='folder'?'분류 B':'검색',kind==='folder'?/^분류 B/:/^검색 캐릭터/);await screen.findByText('tile-b1');
-  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 제거'});
+  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 빼기'});
   await choose('긴',/^긴 머리/);
   await screen.findByText('사용할 수 없는 검색 조건을 지웠습니다.');
-  await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull());
-  expect(screen.getByRole('button',{name:'검색 작가 범위 제거'})).toBeTruthy();
-  expect(screen.getByRole('button',{name:kind==='folder'?'분류 B 범위 제거':'검색 캐릭터 범위 제거'})).toBeTruthy();
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 빼기'})).toBeNull());
+  expect(screen.getByRole('button',{name:'검색 작가 범위 빼기'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:kind==='folder'?'분류 B 범위 빼기':'검색 캐릭터 범위 빼기'})).toBeTruthy();
   expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('alert')).toBeNull();
  });
  it('drops a stale folder id while retaining an already selected artist',async()=>{
   const original=mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation((path:string)=>new URL(path,'https://test').searchParams.getAll('classification_id').includes('b')?Promise.reject(new ApiError('invalid folder',422,null)):original(path));
   render(<App/>);await screen.findByRole('heading',{name:'에셋'});
-  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 제거'});
+  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 빼기'});
   await choose('분류 B',/^분류 B/);await screen.findByText('사용할 수 없는 검색 조건을 지웠습니다.');
-  await waitFor(()=>expect(screen.queryByRole('button',{name:'분류 B 범위 제거'})).toBeNull());
-  expect(screen.getByRole('button',{name:'검색 작가 범위 제거'})).toBeTruthy();expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('alert')).toBeNull();
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'분류 B 범위 빼기'})).toBeNull());
+  expect(screen.getByRole('button',{name:'검색 작가 범위 빼기'})).toBeTruthy();expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('alert')).toBeNull();
  });
  it('keeps the previous gallery and committed chips during a delayed replacement, then swaps without fading the list',async()=>{
   const fades:Keyframe[][]=[];
@@ -1000,11 +1000,11 @@ describe('combined asset search chips',()=>{
   const original=mocks.api.getMockImplementation()!;let finish!:(reply:unknown)=>void;
   mocks.api.mockImplementation((path:string)=>new URL(path,'https://test').searchParams.has('tag')&&!path.includes('toc=1')?new Promise(resolve=>{finish=resolve;}):original(path));
   await choose('긴',/^긴 머리/);
-  await waitFor(()=>expect(finish).toBeDefined());expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull();
+  await waitFor(()=>expect(finish).toBeDefined());expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('button',{name:'긴 머리 범위 빼기'})).toBeNull();
   await act(async()=>finish({items:b,has_more:false,next_cursor:null,listGeneration:revision}));
-  await screen.findByRole('button',{name:'긴 머리 범위 제거'});expect(screen.getByText('tile-b1')).toBeTruthy();
+  await screen.findByRole('button',{name:'긴 머리 범위 빼기'});expect(screen.getByText('tile-b1')).toBeTruthy();
   expect(fades).toHaveLength(fadeCount);
-  fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull());expect(fades).toHaveLength(fadeCount);
+  fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 빼기'})).toBeNull());expect(fades).toHaveLength(fadeCount);
  });
 });
 

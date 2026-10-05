@@ -48,11 +48,7 @@ button.exchange-strip-tile { cursor: pointer; }
 .exchange-strip-bar .exchange-progress { margin: 0; }
 .exchange-strip-more { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .55); font: 600 16px var(--font-numeric); color: var(--color-text); }
 
-.exchange-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 0 60px; text-align: center; color: var(--color-muted); }
-.exchange-empty-glyph { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: 6px; border: 1px solid var(--color-border-strong); }
-.exchange-empty-glyph svg { width: 26px; height: 26px; }
-.exchange-empty h3 { margin: 0; color: var(--color-text); font-size: var(--text-lg); font-weight: 500; }
-.exchange-empty p { margin: 0; max-width: 480px; font-size: var(--text-sm); line-height: 1.7; }
+.exchange-empty { flex: 1; align-content: center; }
 .exchange-limits { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; list-style: none; margin: 6px 0 0; padding: 0; font-size: var(--text-xs); color: var(--color-faint, var(--color-muted)); }
 .exchange-limits li::before { content: ""; display: inline-block; width: 4px; height: 4px; margin-right: 6px; vertical-align: 3px; background: var(--color-border-strong); }
 

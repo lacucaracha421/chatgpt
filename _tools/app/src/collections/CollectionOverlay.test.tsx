@@ -9,6 +9,7 @@ vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
 
+import { displayDate } from "../shared/displayDate";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
@@ -408,7 +409,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     const summary = await screen.findByRole("region", { name: "새 출간 정보" });
 
     expect(summary).toHaveTextContent("새 권: 13권");
-    expect(summary).toHaveTextContent("출간일 변경: 12권 2026-08-21 → 2026-08-23");
+    expect(summary).toHaveTextContent(`출간일 변경: 12권 ${displayDate("2026-08-21")} → ${displayDate("2026-08-23")}`);
     expect(summary).toHaveTextContent("출간 상태 변경: 11권 출간 예정 → 출간됨");
     expect(onChanged).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "표시된 신간 알림 확인" }));

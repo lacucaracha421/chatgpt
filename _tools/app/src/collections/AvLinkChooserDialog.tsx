@@ -1,5 +1,5 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
-import { displayTime } from "../shared/displayDate";
+import { displayDate, displayTime } from "../shared/displayDate";
 import { ArrowTopRightOnSquareIcon, ArrowUturnLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
@@ -417,7 +417,7 @@ function currentPeople(candidate: AvLinkCandidate, role: "performer" | "director
 
 function fieldDisplay(key: FieldKey, value: string | null | undefined) {
   if (!value) return <span className="av-link-dash">—</span>;
-  return key === "release_date" ? value.replace(/-/g, ".") : value;
+  return key === "release_date" ? displayDate(value) : value;
 }
 
 function hasValue(value: unknown) {

@@ -101,16 +101,31 @@ export function displayDateTime(value: DisplayDate, now = new Date(), options: D
   return options.withTime ? `${dateLabel} ${time}` : dateLabel;
 }
 
-export function displayDDay(value: DisplayDate, now = new Date()): string | null {
+/** Whole local calendar days from today to the date (negative once past); null when unreadable. */
+export function daysUntil(value: DisplayDate, now = new Date()): number | null {
   const parsed = parseDisplayValue(value);
   if (!parsed) return null;
-  return ddayLabel(localDayNumber(parsed.date) - localDayNumber(now));
+  return localDayNumber(parsed.date) - localDayNumber(now);
+}
+
+export function displayDDay(value: DisplayDate, now = new Date()): string | null {
+  return ddayLabel(daysUntil(value, now));
 }
 
 /** Days until a release as shown everywhere: `오늘`, `D-6`, or nothing once it has passed. */
 export function ddayLabel(days: number | null | undefined): string | null {
   if (days === null || days === undefined || !Number.isFinite(days) || days < 0) return null;
   return days === 0 ? "오늘" : `D-${days}`;
+}
+
+/** Media length: `0:17`, `12:05`, `1:02:03`; empty when unknown. Seconds are floored, as players show them. */
+export function displayDuration(durationMs: number | null | undefined): string {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return "";
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
 
 export function displayCount(value: number, unit = ""): string {

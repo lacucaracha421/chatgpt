@@ -319,7 +319,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
                 {last && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void undo()}>되돌리기: {last.item.targetName} {last.decision === "accepted" ? "맞음" : "아님"} <kbd>Z</kbd></Button>}
                 {decisionError && <p className="character-message" role="alert">{decisionError}</p>}
                 {backfillButton}
-                <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 불러오기</Button>
+                <Button size="sm" onClick={() => setReload(value => value + 1)}>새로고침</Button>
               </EmptyState>}
     </section>
   </Dialog>;

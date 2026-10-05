@@ -1,3 +1,4 @@
+import { EmptyState } from "../shared/ui/EmptyState";
 import { AssetImage } from "../privacy/AssetImage";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -41,13 +42,7 @@ export function AlbumOverview({ albums, onNavigate, onCreateAlbum, onChanged }: 
     <ViewToolbar title="앨범" titleAccessory={<span className="album-overview__toolbar-count">{albums.length.toLocaleString("ko-KR")}</span>} ariaLabel="앨범 도구" actions={createButton} chrome={{ status: createButton }} />
     {topLevelAlbums.length > 0 ? <div className="album-overview__grid">
       {topLevelAlbums.map((album) => <AlbumCard key={album.id} album={album} subAlbumCount={albums.filter((candidate) => candidate.parentId === album.id).length} covers={covers[album.id] ?? []} privacyMode={privacyMode} onVisible={markVisible} onNavigate={onNavigate} />)}
-    </div> : <div className="album-overview__empty-state">
-      <div className="album-overview__empty">
-        <PhotoIcon aria-hidden="true" />
-        <span>앨범 없음</span>
-        <Button type="button" size="sm" onClick={requestCreate}><PlusIcon aria-hidden="true" />새 앨범</Button>
-      </div>
-    </div>}
+    </div> : <EmptyState icon={PhotoIcon} title="앨범 없음" action={<Button type="button" size="sm" onClick={requestCreate}><PlusIcon aria-hidden="true" />새 앨범</Button>} />}
   </section>;
 }
 

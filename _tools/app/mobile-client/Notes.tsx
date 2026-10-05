@@ -8,7 +8,7 @@ import {useSectionShade} from './SectionShade';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MutableRefObject} from 'react';
 import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon,PinSolidIcon} from '../src/shared/ui/PinIcon';
-import {Button,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
+import {Button,EmptyState,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useLevelMotion} from './motion';
@@ -267,7 +267,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
         {!note.deleted&&<><IconButton label={note.pinned?'고정 해제':'고정'} icon={PinIcon} activeIcon={PinSolidIcon} active={note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>
           <Button type="button" size="icon" variant="ghost" aria-label="메모 색상" onClick={()=>setSheet('color')}><span className={`notes-color-dot${colorValue?'':' is-empty'}`} style={colorValue?{background:colorValue}:undefined} aria-hidden="true"/></Button>
           <IconButton label="메모 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('more')}/>
-          <IconButton label="메모 휴지통으로" icon={TrashIcon} onClick={trashNote}/></>}
+          <IconButton label="휴지통으로" icon={TrashIcon} onClick={trashNote}/></>}
       </header>
       <div key={note.id} ref={pane} className={`notes-editor${colorValue?' has-tint':''}`} style={tint(note.color)} onInput={()=>revealCaret(pane.current)} onFocus={()=>revealCaret(pane.current)}><div className="notes-editor__inner">
         {note.deleted&&<div className="notes-restore"><span>휴지통에 있는 메모입니다.</span><Button variant="ghost" onClick={()=>edit({deleted:false})}>복원</Button></div>}
@@ -301,7 +301,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
         {!trash&&allLabels.length>0&&<div ref={stripWheel} className="notes-filter-bar"><TagIcon className="notes-filter-tag" aria-hidden="true"/><div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div></div>}
         {pinned.length>0&&<><SectionLabel as="h2" className="notes-board__label" title="고정됨"/><div className="notes-grid">{pinned.map(card)}</div></>}
         {recent.length>0&&<>{pinned.length>0&&<SectionLabel as="h2" className="notes-board__label" title="최근"/>}<div className="notes-grid">{recent.map(card)}</div></>}
-        {!visible.length&&<div className="empty-state"><h2>{trash?'휴지통이 비어 있습니다':scope==='archive'?'보관한 메모가 없습니다':query||label?'찾는 메모가 없습니다':'아직 메모가 없습니다'}</h2>{scope==='all'&&!query&&!label&&<p>아래 버튼으로 첫 메모를 써 보세요.</p>}</div>}
+        {!visible.length&&<EmptyState title={trash?'휴지통이 비어 있습니다':scope==='archive'?'보관한 메모가 없습니다':query?'검색 결과 없음':label?'찾는 메모가 없습니다':'아직 메모가 없습니다'} hint={scope==='all'&&!query&&!label&&'아래 버튼으로 첫 메모를 써 보세요.'}/>}
         {!!state.unreadable&&<p className="hint" role="status">읽을 수 없는 메모 {state.unreadable}개는 목록에서 뺐습니다.</p>}
         {scope==='all'&&archived>0&&<div className="notes-links">
           {archived>0&&<button className="notes-trash-link" onClick={()=>setScope('archive')}><ArchiveBoxIcon aria-hidden="true"/>보관함 <span className="numeric">{archived}</span></button>}
@@ -323,7 +323,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
       {/* Archive sits here next to 휴지통, away from the everyday actions. */}
       {(kind==='text'||kind==='checklist')&&editable&&<button className="sheet-option" onClick={()=>{edit({concealed:!note.concealed});setSheet(null);}}>{note.concealed?<EyeIcon aria-hidden="true"/>:<EyeSlashIcon aria-hidden="true"/>}{note.concealed?'목록에서 내용 보이기':'목록에서 내용 숨기기'}</button>}
       <button className="sheet-option" onClick={()=>{edit({archived:!note.archived});setSheet(null);}}><ArchiveBoxIcon aria-hidden="true"/>{note.archived?'보관 해제':'보관함으로 보내기'}</button>
-      <button className="sheet-option" onClick={()=>{setSheet(null);trashNote();}}><TrashIcon aria-hidden="true"/>휴지통으로 보내기</button>
+      <button className="sheet-option" onClick={()=>{setSheet(null);trashNote();}}><TrashIcon aria-hidden="true"/>휴지통으로</button>
     </BottomSheet>}
     {/* Rarely used places sit behind the top bar's ⋯, out of the way of the notes. */}
     {sheet==='list'&&<BottomSheet title="메모 더보기" onClose={()=>setSheet(null)}>

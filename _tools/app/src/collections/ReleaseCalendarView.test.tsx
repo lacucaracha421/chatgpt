@@ -151,7 +151,7 @@ describe("ReleaseCalendarView", () => {
     expect(screen.queryByText("개봉 영화")).not.toBeInTheDocument();
     expect(screen.getByText("기다리는 게임")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "새로 고침" }));
+    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
     await waitFor(() => expect(api.refresh).toHaveBeenCalledWith(true));
   });
 

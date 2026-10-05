@@ -35,7 +35,7 @@ export function CharacterConversion({ targetId, onClose, onConverted }: { target
       <p>이 캐릭터의 등록, 기준·추가 참조 설정과 판단 이력은 정리됩니다. 다른 캐릭터의 설정과 판단 이력은 유지합니다.</p>
       {confirming ? <><TextField label={`확인: ${preview.name} 입력`} value={confirmation} disabled={busy} onChange={event => setConfirmation(event.target.value)} /><Button disabled={busy || confirmation !== preview.name} onClick={() => void convert()}>확인한 내용으로 전환</Button></> : <Button onClick={() => setConfirming(true)}>내용 확인 · 계속</Button>}
     </> : showChecking && !error && <p role="status">전환 대상 확인 중…</p>}
-    {error && <p role="alert">{error}<Button disabled={busy} onClick={() => setReload(value => value + 1)}>대상 다시 확인</Button></p>}
+    {error && <p role="alert">{error}<Button disabled={busy} onClick={() => setReload(value => value + 1)}>다시 시도</Button></p>}
     <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
   </Dialog>;
 }

@@ -26,22 +26,18 @@ const gallery=(scope:string,ids:string[],path=[scope])=><Gallery items={ids.map(
 const tick=(ms:number)=>act(async()=>{await vi.advanceTimersByTimeAsync(ms);});
 const host=()=>document.querySelector<HTMLElement>('.gallery-scroll')!;
 
-it.each([[['a'],['a','b'],16],[['a','b'],['a'],-16]] as const)('keeps the old folder underneath, then moves the new tiles in from the side of travel (%j → %j)',async(from,to,offset)=>{
+it.each([[['a'],['a','b']],[['a','b'],['a']]] as const)('keeps the old folder on screen, then shows the new one in one step without animation (%j → %j)',async(from,to)=>{
  const view=render(gallery(from.at(-1)!,['old-1','old-2'],[...from]));
  await tick(1000);animate.mockClear();
  view.rerender(gallery(to.at(-1)!,['new-1'],[...to]));
- // Old decoded images stay painted under the new tiles, which wait hidden for their first viewport.
+ // Old decoded images stay painted while the new tiles wait hidden for their first viewport.
  expect(host().dataset.folderMove).toBe('pending');
  expect(host().querySelectorAll('.asset-gallery__folder-snapshot img')).toHaveLength(2);
  await tick(40);
- const canvas=host().querySelector('.gallery-canvas');
- const entrance=animate.mock.contexts.indexOf(canvas as never);
- expect(entrance).toBeGreaterThanOrEqual(0);
- expect(animate.mock.calls[entrance][0][0]).toEqual({opacity:0,transform:`translateX(${offset}px)`});
- expect(host().dataset.folderMove).toBe('running');
- await tick(200);
  expect(host().querySelector('.asset-gallery__folder-snapshot')).toBeNull();
  expect(host().dataset.folderMove).toBeUndefined();
+ await tick(200);
+ expect(animate).not.toHaveBeenCalled();
 });
 
 it('does not move folders for a filter or paging change inside the same place',async()=>{
@@ -52,7 +48,7 @@ it('does not move folders for a filter or paging change inside the same place',a
  expect(host().dataset.folderMove).toBeUndefined();
 });
 
-it('gives a place reached with nothing on screen to move from the first-batch entrance instead',async()=>{
+it('swaps in a place reached with nothing on screen to move from without the first-batch entrance (user 2026-10-05)',async()=>{
  const rises=()=>animate.mock.calls.filter((call,i)=>(animate.mock.contexts[i] as unknown as HTMLElement).matches('[data-asset-id]')&&(call[0][0] as Keyframe).transform==='translateY(8px) scale(.98)').length;
  const view=render(gallery('a',['first']));
  await tick(1000);
@@ -60,7 +56,8 @@ it('gives a place reached with nothing on screen to move from the first-batch en
  await tick(1000);animate.mockClear();
  view.rerender(gallery('c',['new-1','new-2'],['c']));
  expect(host().querySelector('.asset-gallery__folder-snapshot')).toBeNull();
- expect(rises()).toBe(2);
+ await tick(100);
+ expect(rises()).toBe(0);
  // From shown tiles the folder move owns the arrival; the first batch is not replayed.
  await tick(1000);animate.mockClear();
  view.rerender(gallery('d',['next-1'],['d']));

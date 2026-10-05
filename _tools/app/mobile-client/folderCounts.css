@@ -1,6 +1,6 @@
 /* Touch has no hover: keep the quiet count inside the thumbnail at all times. */
 .folder-thumbnail { position: relative; display: block; }
-.folder-thumbnail__count { position: absolute; right: var(--space-1); bottom: var(--space-1); padding: 0 var(--space-1); color: #fff; background: rgba(0, 0, 0, .48); font-size: var(--type-meta); line-height: var(--line-ui); font-variant-numeric: tabular-nums; opacity: .8; pointer-events: none; }
+.folder-thumbnail__count { position: absolute; right: var(--space-1); bottom: var(--space-1); pointer-events: none; }
 .folder-shelf__card-open > .folder-thumbnail { width: 148px; height: 190px; flex: none; }
 .folder-shelf__card-open .folder-thumbnail > .home-cover-group { display: grid; width: 100%; height: 100%; grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
 .folder-shelf__card-open .folder-thumbnail > .home-cover-group.single { grid-template-columns: 1fr; }

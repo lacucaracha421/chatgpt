@@ -67,7 +67,7 @@ export function CharacterAutomationSettings({ disabled, onBusyChange }: {
     <dt>캐릭터 자동 분류</dt>
     <dd className="settings-view__status"><BusyLabel busy={busy || enabled === null} idle={enabled === null ? null : enabled ? "켜짐" : "꺼짐"}>{busy ? "저장 중…" : "확인 중…"}</BusyLabel></dd>
     <dd className="settings-view__inline-controls"><Switch aria-label="캐릭터 자동 분류" checked={enabled ?? false} disabled={disabled || busy || enabled === null} onChange={event => void change(event.target.checked)} /></dd>
-    {error && <dd className="settings-view__row-message" role="alert">{error}{enabled === null && <Button size="sm" disabled={disabled} onClick={() => setRetry(value => value + 1)}>다시 확인</Button>}</dd>}
+    {error && <dd className="settings-view__row-message" role="alert">{error}{enabled === null && <Button size="sm" disabled={disabled} onClick={() => setRetry(value => value + 1)}>다시 시도</Button>}</dd>}
   </dl>
   <dl className="settings-view__property" aria-busy={busy}>
     <dt>넓은 폴더 인식</dt>

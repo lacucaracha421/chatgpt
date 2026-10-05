@@ -344,7 +344,7 @@ it('shows empty results and the offline message', async () => {
   routes.mangadex = {version: 1, provider: 'mangadex', query: '밤의 도서관', items: []};
   await renderArea();
   let sheet = await openSheet('MangaDex');
-  expect(await within(sheet).findByText('검색 결과가 없어요. 다른 제목으로 찾아 보세요.')).toBeTruthy();
+  expect(await within(sheet).findByText('검색 결과 없음')).toBeTruthy();
   fireEvent.click(within(sheet).getByRole('button', {name: '닫기'}));
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
   routes.mangadex = new Error('서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.');

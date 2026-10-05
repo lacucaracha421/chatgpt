@@ -56,13 +56,14 @@ const cardRise=(name:string)=>risen('.character-card').some(card=>card.getAttrib
 const tileRise=(id:string)=>risen('[data-asset-id]').some(tile=>tile.dataset.assetId===id);
 const canvasMoves=()=>animate.mock.calls.flatMap((call,i)=>(animate.mock.contexts[i] as unknown as HTMLElement).matches('.gallery-canvas')?[call[0][0] as Keyframe]:[]);
 
-it('gives series and character folder cards their first-batch entrance in every place, keeping the old shelf until the next place commits',async()=>{
+it('gives folder cards the first-batch entrance on the first visit only, then swaps the shelf in one step, keeping the old shelf until the next place commits',async()=>{
   render(<CharacterBrowser {...props}/>);
   const series=await screen.findByRole('button',{name:'Series · 3장'});
   await waitFor(()=>expect(cardRise('Series')).toBe(true));
   fireEvent.click(series);
   await screen.findByRole('button',{name:'Group · 2장'});
-  await waitFor(()=>expect(cardRise('Group')).toBe(true));
+  // Moving inside the browser swaps the shelf without animation (user 2026-10-05).
+  expect(cardRise('Group')).toBe(false);
   // The series opens on an empty 미분류 page; entering the group keeps the series shelf on screen
   // (never a blank or half-built shelf) until the group's page has committed.
   animate.mockClear();
@@ -73,13 +74,15 @@ it('gives series and character folder cards their first-batch entrance in every 
   expect(cardRise('Character')).toBe(false);
   await act(async()=>{releaseGroup();await groupPage;});
   await screen.findByRole('button',{name:'Character · 1장'});
-  await waitFor(()=>expect(cardRise('Character')).toBe(true));
-  // Nothing was on screen to move from, so the group's first tiles enter like a first visit's.
-  await waitFor(()=>expect(tileRise('group-1')).toBe(true));
+  expect(cardRise('Character')).toBe(false);
+  // Even with nothing on screen to move from, the group's tiles swap in without the first-visit rise.
+  await waitFor(()=>expect(document.querySelector('[data-asset-id="group-1"]')).not.toBeNull());
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
+  expect(tileRise('group-1')).toBe(false);
   expect(document.querySelector('.asset-gallery__folder-snapshot')).toBeNull();
 });
 
-it('moves from shown tiles into a character folder with the directional folder move after its images are ready',async()=>{
+it('moves from shown tiles into a character folder in one step, without animation, after its images are ready',async()=>{
   releaseGroup();
   render(<CharacterBrowser {...props} initialNode="group:g"/>);
   await waitFor(()=>expect(document.querySelector('[data-asset-id="group-1"]')).not.toBeNull());
@@ -88,21 +91,21 @@ it('moves from shown tiles into a character folder with the directional folder m
   await waitFor(()=>expect(document.querySelector('[data-asset-id="character-1"]')).not.toBeNull());
   // The group's decoded tiles stay underneath while the character's tiles wait for their images.
   expect(document.querySelector('.gallery-scroll')!.getAttribute('data-folder-move')).toBe('pending');
-  await waitFor(()=>expect(canvasMoves()).toContainEqual({opacity:0,transform:'translateX(16px)'}));
-  // The folder move owns this arrival: the tiles do not also replay the first batch.
+  await waitFor(()=>expect(document.querySelector('.gallery-scroll')!.hasAttribute('data-folder-move')).toBe(false));
+  // The folder move owns this arrival (user 2026-10-05: no animation): no canvas move, no first-batch replay.
+  expect(canvasMoves()).toHaveLength(0);
   expect(tileRise('character-1')).toBe(false);
 });
 
-it('keeps reduced motion to the folder move fade and skips the card and tile rise',async()=>{
+it('keeps a reduced-motion folder move still and skips the card and tile rise',async()=>{
   vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
   releaseGroup();
   render(<CharacterBrowser {...props} initialNode="group:g"/>);
   await waitFor(()=>expect(document.querySelector('[data-asset-id="group-1"]')).not.toBeNull());
   fireEvent.click(screen.getByRole('button',{name:'Character · 1장'}));
   await waitFor(()=>expect(document.querySelector('[data-asset-id="character-1"]')).not.toBeNull());
-  await waitFor(()=>expect(canvasMoves()).toContainEqual({opacity:0}));
-  const moves=animate.mock.calls.filter((_call,i)=>(animate.mock.contexts[i] as unknown as HTMLElement).matches('.gallery-canvas'));
-  expect(moves.every(call=>call[1]?.duration===120)).toBe(true);
+  await waitFor(()=>expect(document.querySelector('.gallery-scroll')!.hasAttribute('data-folder-move')).toBe(false));
+  expect(canvasMoves()).toHaveLength(0);
   expect(risen('.character-card, [data-asset-id]')).toHaveLength(0);
 });
 

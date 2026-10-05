@@ -136,7 +136,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
           </>}
         </div>}
       </div>
-      {error && <p role="alert">{error} <Button size="sm" disabled={busy} onClick={() => setRetry(value => value + 1)}>다시 불러오기</Button></p>}
+      {error && <p role="alert">{error} <Button size="sm" disabled={busy} onClick={() => setRetry(value => value + 1)}>다시 시도</Button></p>}
       <div className="character-suggestion-dialog__footer">
         <p>{mode === "register" ? <>{name || "캐릭터"}를 만들고 참조 {references.length}장 · 검토 후보 {candidateCount}장</> : <>{target?.displayName ?? "캐릭터"}에 최대 {detail?.images.length ?? 0}장을 검토 후보로 넣어요. 기존 참조·판단은 유지해요.</>}</p>
         <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
@@ -194,7 +194,7 @@ function ImagePreview({ image, privacyMode, selected, canAdd, onMove, onToggle, 
       <Button aria-label="이전 이미지" onClick={() => onMove(-1)}>←</Button>
       <span>{image.solo && "단독 · "}PixAI {image.pixaiScore.toFixed(2)} · canary {image.canaryScore.toFixed(2)}</span>
       <Button aria-label="다음 이미지" onClick={() => onMove(1)}>→</Button>
-      <Button disabled={!selected && !canAdd} onClick={onToggle}>{selected ? "참조에서 빼기" : "참조로"}</Button>
+      <Button disabled={!selected && !canAdd} onClick={onToggle}>{selected ? "참조에서 제거" : "참조로"}</Button>
       <Button onClick={onClose}>미리보기 닫기</Button>
     </div>
   </div>;

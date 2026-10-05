@@ -41,6 +41,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A count pinned to an icon's corner (rail, header buttons); the screen positions it. */
+.ui-badge--corner {
+  min-width: var(--badge-corner-height);
+  height: var(--badge-corner-height);
+  padding: 0 var(--space-1);
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 .ui-badge--danger {
   background: color-mix(in srgb, var(--color-danger) 16%, transparent);
   color: var(--color-danger);
@@ -67,6 +78,13 @@
 .ui-section-label__title {
   min-width: 0;
   white-space: nowrap;
+}
+
+.ui-section-label__title > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-right: var(--space-1);
+  vertical-align: -3px;
 }
 
 .ui-section-label__count {
@@ -147,6 +165,31 @@
   color: var(--color-muted);
   font: 400 var(--type-body) / 1.35 var(--font-ui);
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-empty-state__hint {
+  max-width: 40ch;
+  margin: 0;
+  color: var(--color-faint);
+  font: 400 var(--type-meta) / 1.4 var(--font-ui);
+}
+
+.ui-empty-state--inline {
+  margin: 0;
+  padding: var(--space-3) 0;
+  color: var(--color-faint);
+  font: 400 var(--type-meta) / 1.4 var(--font-ui);
+}
+
+/* D-day (DDay): badge form uses .ui-badge; the text form sits beside a date heading. */
+.ui-dday {
+  font-variant-numeric: tabular-nums;
+}
+
+span.ui-dday:not(.ui-badge) {
+  color: var(--color-faint);
+  font: 500 var(--type-meta) / 1 var(--font-numeric);
   white-space: nowrap;
 }
 

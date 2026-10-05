@@ -31,7 +31,7 @@ import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
 import {sendingSummary} from './homeDashboard';
 
-import {Button, IconButton, Mark} from './ui';
+import {Badge, Button, EmptyState, IconButton, Mark} from './ui';
 import {closeVisibleShade,useSectionShade} from './SectionShade';
 import {api, errorText, native} from './transport';
 import {clearMediaCache} from './media';
@@ -832,7 +832,7 @@ export function App() {
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
   const exchangeBadge=exchangeUnseen>0 ? (exchangeUnseen>99 ? '99+' : String(exchangeUnseen)) : exchangeSending ? (exchangeSending.progress===null ? '…' : `${Math.round(exchangeSending.progress*100)}%`) : '';
   const exchangeLabel=exchangeUnseen>0 ? `전송 · 받은 파일 ${exchangeUnseen}개` : exchangeSending ? `전송 · 보내는 중 ${exchangeBadge}` : '전송';
-  const intro=<>{!!childEntries.length&&<section className="folder-intro"><FolderCards strip place={currentEntry?.id} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{busy?'에셋을 불러오고 있습니다':hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':childEntries.length?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'}</h2></div>}</>;
+  const intro=<>{!!childEntries.length&&<section className="folder-intro"><FolderCards strip place={currentEntry?.id} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&!busy&&<EmptyState icon={RectangleStackIcon} title={hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':childEntries.length?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'}/>}</>;
   // A drill-down level is a committed Library place; its depth decides the entrance direction.
   // Home, other tabs and filter changes are not levels, so they never slide.
   const levelDepth=(view:View)=>{
@@ -945,7 +945,7 @@ export function App() {
         <div className="floating-notices">
           {searchNotice&&<p className="hint" role="status">{searchNotice}</p>}
           {indexError&&rootShown&&<p className="error-message">{indexError}</p>}
-          {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 해제</Button></div>}
+          {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 초기화</Button></div>}
           {error && <div className="inline-error" role="alert"><span>{error}</span><Button onClick={() => {const intent = lastIntent.current; void load(intent.view,intent.cursor,intent.previous,0,false,intent.filters);}}>다시 시도</Button></div>}
           {moreError && !page.view.root && !page.view.characters && page.view.tab!=='home' && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </div>
@@ -953,7 +953,7 @@ export function App() {
   );
   // Home's header belongs to the Home view, so it leaves with Home during a tab switch instead of
   // vanishing first and shifting the retained Home content up.
-  const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={AREA_ICONS.private_vault} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={AREA_ICONS.exchange} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AREA_ICONS.settings} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
+  const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={AREA_ICONS.private_vault} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={AREA_ICONS.exchange} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<Badge variant="corner" className="header-badge" aria-hidden="true">{exchangeBadge}</Badge>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AREA_ICONS.settings} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
   const homeAreaNode=<>{!artistsCovered&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
     <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
@@ -977,8 +977,8 @@ export function App() {
     const has=(selector:string)=>Array.from(host.querySelectorAll(selector)).some(element=>!element.closest('[style*="display: none"]'));
     if(!viewReady(host))return false;
     if(key==='home-work'&&has('.mobile-collections'))return has('.tablet-work, .inline-error');
-    if(key==='collections'&&has('.mobile-collections'))return has('.collection-tile, .collection-card, .collection-grid > *, .manga-bookcase, .empty-state, .inline-error, .error-message, .tablet-work');
-    if(key==='catalog'&&has('.mobile-catalog'))return has('.catalog-card, .empty-state:not([role="status"]), .inline-error, .catalog-detail-intro');
+    if(key==='collections'&&has('.mobile-collections'))return has('.collection-tile, .collection-card, .collection-grid > *, .manga-bookcase, .ui-empty-state, .inline-error, .error-message, .tablet-work');
+    if(key==='catalog'&&has('.mobile-catalog'))return has('.catalog-card, .ui-empty-state:not([role="status"]), .inline-error, .catalog-detail-intro');
     if(key==='notes'&&has('.mobile-notes'))return has('.notes-unlock, .notes-list-view, .memo-editor, .notes-recovery');
     if(key==='library'&&page.view.root)return indexReady||!!indexError;
     return key!=='library'&&key!=='home' || !busy || !!error;

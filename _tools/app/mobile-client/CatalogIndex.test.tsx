@@ -18,7 +18,7 @@ const status={ready:true,publicationRevision:'p1',authorityLibraryId:authority.l
 const page={ready:true,publicationRevision:'p1',publishedAt:null,items:[],nextCursor:null,context:'c',countToken:null,totalCount:0,countStatus:'ready'};
 const reads=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/mobile-catalog/search?'));
 const commands=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith(`${INDEX_PATH}/pins/`));
-async function openSheet(){render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('검색 결과가 없습니다');fireEvent.click(screen.getByRole('button',{name:'필터'}));return screen.findByRole('button',{name:'태그 9'});}
+async function openSheet(){render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('검색 결과 없음');fireEvent.click(screen.getByRole('button',{name:'필터'}));return screen.findByRole('button',{name:'태그 9'});}
 async function hold(button:HTMLElement){vi.useFakeTimers();fireEvent.pointerDown(button,{button:0,clientX:10,clientY:10});await act(async()=>{vi.advanceTimersByTime(500);});fireEvent.pointerUp(button,{button:0});fireEvent.click(button);vi.useRealTimers();}
 beforeEach(()=>{
   setOutboxConnection(connection);localStorage.clear();vi.stubGlobal('PointerEvent',MouseEvent);
@@ -57,13 +57,13 @@ describe('tablet filter-sheet Manga index',()=>{
     await waitFor(()=>expect(new URL(reads().at(-1)![0],'https://x').searchParams.get('text')).toBe('female:"tag"'));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(new URL(reads().at(-1)![0],'https://x').searchParams.get('sort')).toBe('latest');
-    expect(screen.getByRole('button',{name:'태그 필터 해제'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'태그 필터 빼기'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'필터 1개 적용'}));
     fireEvent.click(await screen.findByRole('button',{name:'john doe 6'}));
     await waitFor(()=>expect(new URL(reads().at(-1)![0],'https://x').searchParams.get('text')).toBe('artist:"john_doe"'));
-    fireEvent.click(screen.getByRole('button',{name:'john doe 필터 해제'}));
+    fireEvent.click(screen.getByRole('button',{name:'john doe 필터 빼기'}));
     // Clearing can reuse the previously cached browse page without another read.
-    await waitFor(()=>expect(screen.queryByRole('button',{name:'john doe 필터 해제'})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('button',{name:'john doe 필터 빼기'})).toBeNull());
     expect(screen.getByRole('button',{name:'카탈로그 정렬 오늘 인기'}).hasAttribute('disabled')).toBe(false);
   });
   it('adds one AND condition without changing a typed OR expression',async()=>{
@@ -90,7 +90,7 @@ describe('tablet filter-sheet Manga index',()=>{
   });
   it('shows the single-line empty state and quietly hides an unavailable index',async()=>{
     index={...index,bookmarkCount:0,tags:[],artists:[]};
-    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('검색 결과가 없습니다');fireEvent.click(screen.getByRole('button',{name:'필터'}));
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('검색 결과 없음');fireEvent.click(screen.getByRole('button',{name:'필터'}));
     await screen.findByText('북마크한 작품이 생기면 자주 찾는 태그와 작가가 여기에 모입니다.');
     expect(screen.queryByRole('region',{name:'자주 찾는 태그'})).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'필터 닫기'}));offline=true;fireEvent.click(screen.getByRole('button',{name:'필터'}));

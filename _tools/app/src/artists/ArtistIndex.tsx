@@ -1,3 +1,5 @@
+import { Badge } from "../shared/ui/Badge";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useMemo, useRef, useState, type ReactNode } from "react";
@@ -65,26 +67,24 @@ export function ArtistIndex({ view, onNavigate }: { view: AssetView; onNavigate:
     />
 
     {overview && overview.pinned.length > 0 && <div className="artist-index__group">
-      <span className="workspace-section-label">고정</span>
+      <SectionLabel className="workspace-section-label" title="고정" />
       {overview.pinned.map((artist) => <ArtistRow key={artist.id} artist={artist} current={creator === artist.id} onNavigate={onNavigate} />)}
     </div>}
 
     <div className="artist-index__group">
-      <span className="workspace-section-label">{trimmedQuery ? "검색 결과" : "주요 작가"}</span>
+      <SectionLabel className="workspace-section-label" title={trimmedQuery ? "검색 결과" : "주요 작가"} />
       {artists.map((artist) => <ArtistRow key={artist.id} artist={artist} current={creator === artist.id} onNavigate={onNavigate} />)}
     </div>
 
     {!trimmedQuery && <div className="artist-index__group">
-      <span className="workspace-section-label">정리</span>
+      <SectionLabel className="workspace-section-label" title="정리" />
       {sectionLink("merge", "같은 작가일 수 있어요", <MergeIcon />, overview?.mergeSuggestions, section, onNavigate)}
       <button type="button" className="workspace-index-link artist-index__link" aria-current={creator !== null && isUnknownArtist(creator) ? "page" : undefined}
         aria-label={`작가 미상 ${count(overview?.unknownNone)}`} onClick={() => onNavigate({ kind: "creator", creatorKey: UNKNOWN_NONE })}>
         <span className="artist-index__icon" aria-hidden="true"><QuestionIcon /></span>
         <span className="more-panel__label">작가 미상</span>
         {overview?.unknownNone !== undefined && <span className="more-panel__count">{count(overview.unknownNone)}</span>}
-        {styleSuggestionCount > 0 && <span className="artist-index__suggestion-badge" aria-label={`추천 ${count(styleSuggestionCount)}`}>
-          <SparklesIcon aria-hidden="true" />추천 {count(styleSuggestionCount)}
-        </span>}
+        {styleSuggestionCount > 0 && <Badge variant="count" icon={SparklesIcon} className="artist-index__suggestion-badge" aria-label={`추천 ${count(styleSuggestionCount)}`}>추천 {count(styleSuggestionCount)}</Badge>}
       </button>
     </div>}
   </nav>;

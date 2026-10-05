@@ -3,6 +3,8 @@
  * device, stacked by time. Each client normalizes its own snapshot rows into entries; this
  * module only groups, orders and labels them (no protocol knowledge).
  */
+import { displayDate, displayTime } from "../shared/displayDate";
+
 export type TimelineEntry<T> = {
   row: T;
   transferId: string;
@@ -45,20 +47,19 @@ export function dayKey(at: string): string {
   return Number.isNaN(value.getTime()) ? "" : `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
 }
 
-/** "9. 26" and "오늘" / "어제" / a weekday. */
+/** The shared date ("9.26", "2025.9.26") and "오늘" / "어제" / a weekday. */
 export function dayLabel(at: string, now = new Date()): { date: string; note: string } {
   const value = new Date(at);
   if (Number.isNaN(value.getTime())) return { date: "", note: "" };
   const start = (day: Date) => new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   const days = Math.round((start(now) - start(value)) / 86_400_000);
-  const date = value.getFullYear() === now.getFullYear() ? `${value.getMonth() + 1}. ${value.getDate()}` : `${value.getFullYear()}. ${value.getMonth() + 1}. ${value.getDate()}`;
+  const date = displayDate(value, now);
   return { date, note: days === 0 ? "오늘" : days === 1 ? "어제" : WEEKDAYS[value.getDay()] };
 }
 
 /** "14:02" in local time. */
 export function clockLabel(at: string): string {
-  const value = new Date(at);
-  return Number.isNaN(value.getTime()) ? "" : `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  return displayTime(at);
 }
 
 /** Whether a name reads with a final consonant, for 과/와 and 은/는 after device names. */

@@ -97,7 +97,7 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 - Sidebar counts appear for selected or hovered entries; folder-group add/more controls appear on hover. Show the folder shelf only at a folder's top level, never stacked above date headings.
 - The information panel docks beside the grid and pushes it aside; `I` toggles it. Preserve scroll/selection while the visible tiles move into place (§10).
 - **Information panel contents (user, 2026-10-05):** the image comes first, alone and at the panel's full width (its own aspect ratio, height capped, never cropped; a video shows its still and length; the privacy mask applies). Then the artist (name, handle, 작가 페이지) and the record under a `기록` section label as hairline rows with tabular values (게시물, 게시, 파일, 가져옴, 폴더), then the tags. Inside the viewer the panel leaves the image out. The tablet's gallery info sheet follows the same order with touch sizing.
-- **Series and character folders (user, 2026-10-05)** use the plain-folder pieces: a click focuses, the docked panel and its remembered state are shared, the viewer and tile controls are the same, and date headings stay off under the series shelf. Character-only actions (이 캐릭터에서 제외, 분류 다시 시작) plug into the selection bar and viewer. Tablet character galleries have the plain gallery's selection mode.
+- **Series and character folders (user, 2026-10-05)** use the plain-folder pieces: a click focuses, the docked panel and its remembered state are shared, the viewer and tile controls are the same, and date headings stay off under the series shelf. Character-only actions (이 캐릭터에서 빼기, 분류 다시 시작) plug into the selection bar and viewer. Tablet character galleries have the plain gallery's selection mode.
 - The heart and membership in the designated 마음에 들어요 album are the same state on PC and tablet. Adding/removing membership sets/clears the heart; the designated album cannot be deleted. A same-named ordinary album does not acquire that role. Each tile heart acts on that tile even when other assets are selected.
 - Dense scrolling has no hover scale, pointer-tracked tile transform or decorative per-tile shadow.
 
@@ -136,6 +136,7 @@ Reference: [accepted calm Asset grid](docs/prototypes/assets-calm-20261002/READM
 - **Accepted motion set (user, 2026-10-02; choices "ABAD+ABAB" in `docs/prototypes/motion-2026-10-02.html`, PC and tablet):**
   - Curves: `--ease-standard` for small feedback and open/close; `--ease-sheet` = `cubic-bezier(.32,.72,0,1)` for screen and sheet moves; `--ease-spring` = a critically damped spring sampled as CSS `linear()` (fallback `cubic-bezier(.22,1,.36,1)`).
   - Area/tab switch (A): the old view stays until the new one is ready (no blank), then the new view replaces it at once without cross-dissolve or rise (user 2026-10-04: overlap looked like an afterimage).
+  - Folder to folder (user 2026-10-05): folder-to-folder moves swap in one step without animation — plain folders, and inside a series (series → group → character and back, shelf folder cards) — the old folder and its shelf stay until the new first screen is ready, then the new one appears at once, with no slide, fade or stagger (PC and tablet). Shelf cards rise only on a visit's first load.
   - First appearance (B): on a list's first load only, tiles rise 8 px and scale 0.98 → 1 over 560 ms (`--ease-spring`), staggered 24 ms (at most 18 steps). Revisits, filters, sorts and refreshes do not animate.
   - Viewer open/close (A): the tapped tile grows into the viewer (open 380 ms, close about 320 ms, `--ease-sheet`); closing shrinks into the tile of the asset shown last.
   - Viewer strip (D+A): the current item sits in a fixed centre slot and the strip slides beneath it with the critically damped spring; next/previous, tapping a neighbour, dragging (with inertia and snap) and the wheel all move it. Thumbnails keep their real aspect ratio. The strip is slim at rest and grows about 2× when the pointer nears it (PC) or after a swipe up (tablet). The main image changes only when the new image is ready.
@@ -223,6 +224,21 @@ Do not mark state with a coloured bar along one edge of a block (an accent under
 
 Leave out text the screen does not need: explanations, captions that restate what is visible, type/status labels, instructions and filler. Content, names, numbers and icons carry the screen. When an explanation is really necessary, put it behind one help button (ⓘ, icon button) at one side of the screen or section; it opens a small popover on click or tap. It is never a hover tooltip (section 9) and never an always-visible paragraph.
 
+**One term per meaning (user, 2026-10-05; PC and tablet, labels, `aria-label`s, menus, toasts and empty text):**
+
+| Meaning | Wording | Not |
+| --- | --- | --- |
+| Move to the trash (restorable) | 휴지통으로 | 삭제, 버리기, 휴지통으로 이동/보내기, 메모를 휴지통으로 |
+| Delete for good (inside 휴지통, 비밀 보관함) | 영구 삭제, 휴지통 비우기 | 삭제 alone for a trashed item |
+| The user's own score | 내 별점 (average: 내 별점 평균) | 평점, 별점, 내 평점, 내 점수; provider scores keep `IGDB 평점` / `TMDB 평점` / `외부 평점` |
+| Pin | 고정 / 고정 해제 (state 고정됨) | 핀, 즐겨찾기 for pins |
+| Heart on an asset | 좋아요 (one label, `aria-pressed` carries the state) | 즐겨찾기, 좋아요 취소; the AV performer star stays 즐겨찾기 |
+| A search that matched nothing | 검색 결과 없음 (a hint line under it may differ per screen) | 검색 결과가 없습니다/없어요, 일치하는 … 없습니다 |
+| Reload the current view | 새로고침 | 새로 고침, 다시 불러오기, 리로드; provider data updates keep `갱신` / `<provider> 새로고침` |
+| Retry after an error | 다시 시도 | 다시 불러오기, 다시 확인, 새로고침 |
+
+**빼기 vs 제거 (and 제외):** 빼기 takes an item out of a set while the item itself remains — album, character, collection, 쇼케이스 and 관심 목록 membership, filter and scope chips, tags and labels on an item (`이 앨범에서 빼기`, `이 캐릭터에서 빼기`, `태그 필터 빼기`). 제거 removes a thing that then no longer exists in that place — a reference, a link or binding, an artwork choice (`레퍼런스 1 제거`, `참조에서 제거`, `연결 제거`). 제외 is kept for a standing rule that keeps something out of an automatic process or a search (`캐릭터 분류에서 제외`, `S36 제외`, a tag filter's 제외 mode, 작가 제외 폴더). A filter reset is `필터 초기화`. `src/shared/sharedPieces.test.ts` fails on the retired wordings.
+
 ### One cue for thin elements
 
 Large blocks (cards, dialogs, the primary button) may combine a face and a border. **Thin or small elements use one cue — a face or a line, never both.** This is why inputs are face-only and compact buttons have neither.
@@ -236,7 +252,7 @@ Large blocks (cards, dialogs, the primary button) may combine a face and a borde
 | Text input, search, select | 32 | 44 | face only (`--color-surface`), no border, no resting underline; while typing, a 2px `--color-focus` bottom line and square bottom corners; label above in meta; error = red border and one meta line below |
 | Checkbox (`--checkbox-size`) | 16 | 20 | square mark: 1.5px border, radius 2; checked = accent border with an inner solid accent square |
 | Toggle switch | 32×18 | 40×22 | round track and round knob (the one round control); on = accent track, dark knob |
-| Badge (`--badge-height`) | 20 | 24 | radius 2, padding 0 8, icon 14/16, gap 4, weight 600 meta text; variants: plain (`--color-surface-elevated` + muted text), icon-only (square), count (tabular), accent (NEW), danger; a tappable tablet badge keeps an invisible 44 hit area |
+| Badge (`--badge-height`) | 20 | 24 | radius 2, padding 0 8, icon 14/16, gap 4, weight 600 meta text; variants: plain (`--color-surface-elevated` + muted text), icon-only (square), count (tabular), scrim (over media), corner (count on an icon), accent (NEW), danger; a tappable tablet badge keeps an invisible 44 hit area |
 | Segmented control | control height | control height | 2–4 filters of the same list; surface track with a sliding ivory thumb, radius 4, selected text weight 600 |
 | Tabs | control height | control height | switch to different content; the selected tab is brighter text at weight 600 (no underline or colour stripe) |
 
@@ -258,7 +274,7 @@ Menus, popovers and dialogs are square (radius 0) with the NieR corner brackets:
 
 - **Loading:** skeleton blocks in the shape of the content, `color-mix` of surface toward the page background, breathing slowly (opacity .55 → 1, 2.4 s); they fade in only after 300 ms so fast loads show nothing; with reduced motion they are static. No "…불러오는 중" text and no spinners in content areas.
 - **Launch (user, 2026-10-05):** on app start, PC and tablet show one shared splash (`src/shared/launch/LaunchSplash.tsx`) instead of Home's first-load skeleton: the Lakomics mark (88×96, `--color-accent`) centred on `--color-bg`, painted by `index.html` before any script runs. It stays until the first screen is ready — Home's first-load data and its on-screen images (images at most 1.5 s), or the setup / connection screen — with an 8 s cap from page start, then fades once (`--motion-screen`; reduced motion snaps). A start slower than 3 s shows the thin loading line under the mark; no text, no spinner. Never shown again in the same run. On Android 12+ the system splash shows the same mark at the same size.
-- **Empty:** a faint 32px icon and one line ("이미지 없음"); one button only when there is a real next step.
+- **Empty:** a faint 32px icon and one line ("이미지 없음"); one button only when there is a real next step. Use `EmptyState` (`title`, optional `icon`, one `hint` line, one `action`); inside a list, picker, palette or section use its `inline` form (one faint meta line). No search results read "검색 결과 없음" on both clients.
 - **Error:** one line and "다시 시도"; codes and explanations go behind the ⓘ help button.
 
 ### No flash on change
@@ -273,7 +289,7 @@ Rule (user, 2026-09-29): content never blanks, flickers or jumps while it change
 
 ### Dates and numbers
 
-Dot notation: current year `10.4`, other years `2025.9.28`, no zero padding; times are 24-hour `21:45`; "오늘 21:45" is written as just `21:45` in a dated group and `어제 21:45` for yesterday — no other relative times ("3분 전"). Days left `D-6`; past dates show the date only. Counts use thousands separators (`1,284`) and a unit without a space (`23장`, `17권`). Date group headings may use the longer `9월 28일 (일)`. Use the shared formatters in `src/shared/displayDate.ts`.
+Dot notation: current year `10.4`, other years `2025.9.28`, no zero padding; times are 24-hour `21:45`; "오늘 21:45" is written as just `21:45` in a dated group and `어제 21:45` for yesterday — no other relative times ("3분 전"). Days left `D-6`; past dates show the date only. Counts use thousands separators (`1,284`) and a unit without a space (`23장`, `17권`). Date group headings may use the longer `9월 28일 (일)`; period headings keep their words (`2026년 10월`, `10월 중`, `2027 Q1`), and a month heading drops the current year (`10월`, both clients). Media lengths read `0:17`, `12:05`, `1:02:03`. Use the shared formatters in `src/shared/displayDate.ts` (`displayDate`, `displayTime`, `displayDateTime`, `daysUntil`, `ddayLabel`, `displayDuration`, `displayCount`) and the `DDay` component (`src/shared/ui/DDay.tsx`: a badge on shelves and rows, accent on the day; a quiet text form beside a date heading); `src/shared/sharedPieces.test.ts` fails on new hand-built dates or D-days.
 
 Release calendars (PC and tablet, 2026-09-29): covers released on the same day sit under one date heading (`9.29  D-1`, a hairline under it), up to four per day block, so single-cover days still pack into the row; the bookmark is an icon only on the cover's top-right corner (outline white with a soft shadow; filled accent when on; no button face). Home and calendar shelves list only exact dates; quarter/month-only dates stay in the calendar with their period label. A release that is today reads `오늘` in place of the D-day, everywhere (user, 2026-09-29); days left `D-6`; past dates show the date only. A calendar port (for example, a Switch 2 version of an older game) is tracked on the wishlist by its port platforms only.
 
@@ -307,7 +323,17 @@ Reference: [accepted Notes / Ledger design](docs/prototypes/notes-ledger-2026100
 
 ### Shared components first
 
-Buttons, inputs, checkboxes, toggles, badges, segmented controls and tabs always come from the shared components in `_tools/app/src/shared/ui/` (used by both PC and tablet): `Button` (including `variant="quiet"`), `TextInput`/`Field`, `Checkbox`, `Switch`, `Badge`, `SegmentedControl`, `Tabs`. If a screen needs a shape they lack, add a variant to the shared component instead of styling a local copy. Screen-specific controls are allowed only for surfaces designed as their own object — the media viewer, the manga reader, Works covers and cases, and the NieR selection marks — and the code says why. The older `Toggle` (a checkbox) and `TextField` are legacy; screens move to `Checkbox` and `TextInput` when they are migrated.
+Buttons, inputs, checkboxes, toggles, badges, segmented controls and tabs always come from the shared components in `_tools/app/src/shared/ui/` (used by both PC and tablet): `Button` (including `variant="quiet"`), `TextInput`/`Field`, `Checkbox`, `Switch`, `Badge`, `SegmentedControl`, `Tabs`. The small pieces are shared the same way (the tablet imports them through `mobile-client/ui.tsx`):
+
+| Piece | Component | Use |
+| --- | --- | --- |
+| Count and media badges | `Badge` / `CountBadge` | `count` on tabs, rows and menus (tabular, `1,284`); `scrim` over media (`▶ 0:17`, `+15`, `24p`, `23장`); `corner` for a count pinned to an icon (rail 더보기/전송, tablet header; `99+` cap; `--badge-corner-height` 16 / 20); `accent` for NEW |
+| Section label | `SectionLabel` | 5px square, title, optional `count` + `unit` (`1년 전 오늘 8장`), optional 16px `icon`, trailing `actions` or open chevron; the count is never written into the title |
+| Empty and no result | `EmptyState` | block or `inline`, see States |
+| Loading placeholder | `Skeleton` | one block per content shape; `label={null}` for siblings a parent already announces |
+| Dates, D-day, durations | `displayDate.ts`, `DDay` | see Dates and numbers |
+
+A screen's CSS may position these pieces (margin, absolute placement) but does not restyle their colour, size or type. If a screen needs a shape they lack, add a variant to the shared component instead of styling a local copy. Screen-specific controls are allowed only for surfaces designed as their own object — the media viewer, the manga reader, Works covers and cases, and the NieR selection marks — and the code says why. The older `Toggle` (a checkbox) and `TextField` are legacy; screens move to `Checkbox` and `TextInput` when they are migrated.
 
 ### What PC and tablet share (user, 2026-09-30)
 

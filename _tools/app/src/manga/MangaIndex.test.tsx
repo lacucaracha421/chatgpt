@@ -72,19 +72,19 @@ describe("PC Manga index", () => {
     expect(within(tags).getAllByRole("button", { name: /고정$/ })).toHaveLength(10);
     await userEvent.click(screen.getByRole("button", { name: "접기" }));
     await userEvent.click(screen.getByRole("button", { name: "태그 0 12" }));
-    expect(screen.getByRole("button", { name: "태그 0 필터 해제" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "태그 0 필터 빼기" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "태그 1 11" }));
-    expect(screen.queryByRole("button", { name: "태그 0 필터 해제" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "태그 0 필터 빼기" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "태그 1 11" }));
-    expect(screen.queryByRole("button", { name: "태그 1 필터 해제" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "태그 1 필터 빼기" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "태그 0 고정" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "태그 0 고정 해제" })).toHaveAttribute("aria-pressed", "true"));
     expect(within(tags).queryByText("태그 0")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "태그 0 고정 해제" }));
     expect(await within(tags).findByText("태그 0")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "태그 0 12" }));
-    await userEvent.click(screen.getByRole("button", { name: "태그 0 필터 해제" }));
-    expect(screen.queryByRole("button", { name: "태그 0 필터 해제" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "태그 0 필터 빼기" }));
+    expect(screen.queryByRole("button", { name: "태그 0 필터 빼기" })).not.toBeInTheDocument();
   });
   it("shows the accepted empty line", async () => {
     const gateway = gatewayFixture(); gateway.getMangaFrequentIndex.mockResolvedValue({ bookmarkCount: 0, tagLimit: 8, artistLimit: 5, tags: [], artists: [] });mount(gateway);

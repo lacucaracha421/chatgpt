@@ -1,3 +1,4 @@
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { AssetImage } from "../privacy/AssetImage";
 import { useEffect, useState, type ReactNode } from "react";
@@ -155,7 +156,7 @@ export function UnknownStyleSuggestions({ privacyMode, onNavigate }: { privacyMo
   const remaining = Math.max(0, (page?.totalArtists ?? 0) - groups.length);
   return <details className="artist-style-suggestions" open>
     <summary className="artist-style-suggestions__summary">
-      <span className="workspace-section-label"><SparklesIcon aria-hidden="true" />닮은 작가 추천</span>
+      <SectionLabel className="workspace-section-label" icon={SparklesIcon} title="닮은 작가 추천" />
       {page && <span className="artist-style-suggestions__count">{formatCount(page.totalImages)}장 · {formatCount(page.totalArtists)}명</span>}
     </summary>
     <div className="artist-style-suggestions__body">
@@ -253,7 +254,7 @@ function ArtistIntro({ detail, privacyMode, actions }: { detail: ArtistDetail; p
       {manual && <span className="artist-badge">직접 지정 {formatCount(manual.assetCount)}장</span>}
     </div>
     {(detail.onThisDay || detail.longUnseen) && <section className="artist-rediscovery" aria-label="다시보기">
-      <span className="workspace-section-label">다시보기</span>
+      <SectionLabel className="workspace-section-label" title="다시보기" />
       {detail.onThisDay && <div className="artist-rediscovery__row">
         <p><strong>{detail.onThisDay.yearsAgo}년 전 오늘</strong> <span className="artist-muted">{displayDate(detail.onThisDay.localDate)}에 {formatCount(detail.onThisDay.total)}장 저장</span></p>
         <ThumbStrip assetIds={detail.onThisDay.assetIds} privacyMode={privacyMode} label={`${detail.onThisDay.yearsAgo}년 전 오늘`} onOpen={open(detail.onThisDay.assetIds)} />
@@ -324,7 +325,7 @@ export function ArtistEditPanel({ detail, privacyMode, onClose, onNavigate }: { 
       </div>
       <p className="artist-muted">비우면 원래 이름 <strong>{summary.sourceName ?? summary.label}</strong>. 원래 이름·핸들로도 검색됩니다.</p>
 
-      <span className="workspace-section-label">원래 이름 · 핸들 {detail.members.length + detail.assignments.length}</span>
+      <SectionLabel className="workspace-section-label" title="원래 이름 · 핸들" count={detail.members.length + detail.assignments.length} />
       <ul className="artist-edit__list">
         {detail.members.map((member) => <li key={member.key} className="artist-edit__row">
           <span className="artist-edit__copy">
@@ -344,7 +345,7 @@ export function ArtistEditPanel({ detail, privacyMode, onClose, onNavigate }: { 
         </li>)}
       </ul>
 
-      <span className="workspace-section-label">합치기</span>
+      <SectionLabel className="workspace-section-label" title="합치기" />
       <label className="artist-search">
         <MagnifyingGlassIcon aria-hidden="true" />
         <input type="search" value={search} placeholder="합칠 작가를 이름 · 핸들로 찾기" aria-label="합칠 작가 찾기" onChange={(event) => setSearch(event.target.value)} />

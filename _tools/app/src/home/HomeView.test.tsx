@@ -148,9 +148,9 @@ describe('Home attention', () => {
     ] as HomeViewProps['collections'];
     gateway.getHomeMedia.mockResolvedValue({ playing: [{ collectionId: 'game', ownedPlatform: 'PS5', myScore: 4.5 }, { collectionId: 'movie', ownedPlatform: null, myScore: 3 }], dailyAsset: null });
     const { onNavigate, view } = renderHome({ props: { collections: works } });
-    const section = await screen.findByRole('region', { name: '지금 하는 중 · 2' });
+    const section = await screen.findByRole('region', { name: '지금 하는 중' });
     expect(within(section).getByText('PS5')).toBeTruthy();
-    expect(within(section).getByRole('img', { name: '별점 4.5' })).toBeTruthy();
+    expect(within(section).getByRole('img', { name: '내 별점 4.5' })).toBeTruthy();
     expect(within(section).queryByText('끝난 게임')).toBeNull();
     expect(view.container.querySelectorAll('.collection-light-case')).toHaveLength(2);
     const game = within(section).getByRole('button', { name: '진행 중 게임 열기' });
@@ -158,7 +158,7 @@ describe('Home attention', () => {
     expect(game.querySelector('.collection-light-case')?.hasAttribute('data-front')).toBe(true);
     fireEvent.click(game);
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'collection', collectionId: 'game' });
-    fireEvent.click(within(section).getByRole('button', { name: '지금 하는 중 · 2 전체' }));
+    fireEvent.click(within(section).getByRole('button', { name: '지금 하는 중 전체' }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'collections', typeFilter: 'game', showcase: false });
   });
   it('reserves the first layout until media arrives, then shows at most fourteen covers and opens the calendar', async () => {
@@ -170,18 +170,18 @@ describe('Home attention', () => {
     expect(view.container.querySelector('.home-pc-layout')?.getAttribute('aria-busy')).toBe('true');
     expect(screen.queryByRole('region', { name: /2주 안에 발매/ })).toBeNull();
     await act(async () => finish({ playing: [], dailyAsset: null }));
-    const releases = await screen.findByRole('region', { name: '2주 안에 발매 · 16' });
+    const releases = await screen.findByRole('region', { name: '2주 안에 발매' });
     expect(view.container.querySelectorAll('.home-release-tile')).toHaveLength(14);
     expect(screen.queryByRole('region', { name: /지금 하는 중/ })).toBeNull();
     expect(view.container.querySelector('.home-pc-layout')?.getAttribute('aria-busy')).toBe('false');
     expect(view.container.querySelectorAll('.home-release-tile__when .ui-badge--accent')).toHaveLength(14);
-    fireEvent.click(within(releases).getByRole('button', { name: '2주 안에 발매 · 16 전체' }));
+    fireEvent.click(within(releases).getByRole('button', { name: '2주 안에 발매 전체' }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'collections', typeFilter: 'game', showcase: false, releaseCalendar: true });
   });
   it('orders nonzero reviews, routes them, and removes the old Home sections', async () => {
     gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 10, week: 41 }, { capturesPending: 3 }, { tagger: { total: 7, recommendation: 7, veto: 0 } }));
     const { onNavigate } = renderHome({ props: { unsortedCount: 27, reviewCount: 2 } });
-    const today = await screen.findByRole('region', { name: '오늘 할 것 · 4' });
+    const today = await screen.findByRole('region', { name: '오늘 할 것' });
     await waitFor(() => expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋27', '□유사 이미지 검토2쌍', '□처리 대기3', '□태거7']));
     fireEvent.click(within(today).getByRole('button', { name: /미분류 에셋/ }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'unsorted' });
@@ -193,7 +193,7 @@ describe('Home attention', () => {
   it('shows a quiet empty state and hides an empty revisit', async () => {
     gateway.getRevisitSlate.mockResolvedValue({ bundles: [] });
     renderHome();
-    expect(await screen.findByText('즐겨찾는 이미지가 생기면 여기에 보여 드립니다')).toBeTruthy();
+    expect(await screen.findByText('좋아요한 이미지가 생기면 여기에 보여 드립니다')).toBeTruthy();
     expect(screen.queryByRole('region', { name: /오늘 할 것/ })).toBeNull();
     expect(screen.queryByRole('region', { name: /1년 전 오늘/ })).toBeNull();
     expect(screen.queryByRole('region', { name: /새로 나옴/ })).toBeNull();
@@ -201,10 +201,10 @@ describe('Home attention', () => {
   it('puts the monthly subscriptions and reminder before reviews and pinned text-body tasks', async () => {
     const subscription = { id: 'sub', name: 'Netflix', amount: 17000, every: 1, unit: 'month' as const, start: '2026-09-28', trial: true, until: null, remindDays: 3, memo: '', order: 'a' };
     const { onNavigate } = renderHome({ notes: [note('ledger', { type: 'ledger', pinned: false, recurring: [subscription] }), note('todo', { title: '피드백', type: 'text', body: '- [ ] 수정\n- [x] 완료' }), note('plain', { title: '글', body: '일반 글' })], props: { unsortedCount: 1 } });
-    const today = await screen.findByRole('region', { name: '오늘 할 것 · 4' });
+    const today = await screen.findByRole('region', { name: '오늘 할 것' });
     await waitFor(() => expect(within(today).getAllByRole('button')).toHaveLength(4));
     const buttons = within(today).getAllByRole('button');
-    expect(buttons.map(b => b.textContent)).toEqual(['○구독 이번 달 ₩17,000다음 결제 2일 후 · Netflix1개', '○Netflix 무료 끝남9.28 · ₩17,000부터 결제D-2', '□미분류 에셋1', '○피드백남은 항목 1개1']);
+    expect(buttons.map(b => b.textContent)).toEqual(['○구독 이번 달 ₩17,000다음 결제 D-2 · Netflix1개', '○Netflix 무료 끝남9.28 · ₩17,000부터 결제D-2', '□미분류 에셋1', '○피드백남은 항목 1개1']);
     fireEvent.click(buttons[3]!); expect(onNavigate).toHaveBeenCalledWith({ kind: 'notes', noteId: 'todo' });
   });
   it('shows connection failures only, using the problem wording rather than a last-success time', async () => {
@@ -232,13 +232,13 @@ describe('Home attention', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /새 게임/ })).toBeNull());
     expect(onNavigate).not.toHaveBeenCalled();
     next.view.unmount(); renderHome();
-    await screen.findByRole('region', { name: '2주 안에 발매 · 0' });
+    await screen.findByRole('region', { name: '2주 안에 발매' });
     expect(screen.queryByRole('button', { name: /새 게임/ })).toBeNull();
   });
   it('lists only the next fourteen days, including today, across the month boundary', async () => {
     gateway.releaseCalendar.wishlist.mockResolvedValue([title('today', '오늘 작품', 'game', '2026-09-26'), title('edge', '경계 작품', 'game', '2026-10-10'), title('late', '나중 작품', 'game', '2026-10-11')]);
     renderHome();
-    const region = await screen.findByRole('region', { name: '2주 안에 발매 · 2' });
+    const region = await screen.findByRole('region', { name: '2주 안에 발매' });
     expect(within(region).getByText('오늘')).toBeTruthy();
     expect(within(region).getByText('D-14')).toBeTruthy();
     expect(screen.queryByText('나중 작품')).toBeNull();

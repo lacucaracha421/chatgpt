@@ -1,3 +1,4 @@
+import { EmptyState } from "../shared/ui/EmptyState";
 import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AreaPainted, AreaRequested, AreaVisible } from "../shared/motion/AreaSwitch";
 import { useAuthoritySyncHealth, useCloudSyncStatus } from "../app/useCloudProblems";
@@ -316,14 +317,14 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
       .map(row => ({ key: row.key, name: row.name, date: row.date, detail: releaseKind(row.kind, row.volume), cover: releaseCover(row), onOpen: () => openUpcoming(row) })),
   ];
   return <div className="home-view" ref={launchHost}>
-    <ViewToolbar title="홈" titleContent={<span className="home-title-date"><span className="numeric">{`${at.getMonth() + 1}.${at.getDate()}`}</span> {weekdayLabel(at)}</span>} />
+    <ViewToolbar title="홈" titleContent={<span className="home-title-date"><span className="numeric">{displayDate(at, at)}</span> {weekdayLabel(at)}</span>} />
     <div className="home-scroll"><div className="home-content home-pc-layout" aria-busy={firstLoad}>
       <div className="home-media-column">
         {firstLoad ? <div className="home-media-waiting"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <>
           <HomePlaying collections={collections} records={media.data?.playing ?? []} privacyMode={privacyMode} active={active}
             onOpen={id => onNavigate({ kind: 'collection', collectionId: id })} onAll={() => onNavigate({ kind: 'collections', typeFilter: 'game', showcase: false })} />
-          <HomeSection title={`2주 안에 발매 · ${releaseCards.length}`} onOpen={() => onNavigate(calendarView())}>
-            {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : shelfLoading ? <Skeleton label="신간 정보" /> : <p className="home-attention-empty">2주 안에 예정된 발매가 없습니다</p>}
+          <HomeSection title="2주 안에 발매" count={releaseCards.length} onOpen={() => onNavigate(calendarView())}>
+            {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : shelfLoading ? <Skeleton label="신간 정보" /> : <EmptyState inline className="home-attention-empty" title="2주 안에 예정된 발매가 없습니다" />}
             {shelfFailed && <p role="status">신간을 확인할 수 없습니다 <Button variant="quiet" onClick={retryShelf}>다시 시도</Button></p>}
           </HomeSection>
         </>}

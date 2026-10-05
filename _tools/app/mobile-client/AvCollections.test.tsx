@@ -209,7 +209,7 @@ describe('tablet AV collections',()=>{
       expect(screen.getByRole('img',{name:'즐겨찾기한 배우'})).toBeTruthy();
       expect(screen.getByText('Wikimedia Commons · Photographer · CC BY-SA 4.0')).toBeTruthy();
       const rows=Object.fromEntries([...profile.querySelectorAll('dl > div')].map(row=>[row.querySelector('dt')?.textContent,row.querySelector('dd')?.textContent]));
-      expect(rows['생년월일']).toMatch(/^2000\.03\.04 만 \d+세$/);
+      expect(rows['생년월일']).toMatch(/^2000\.3\.4 만 \d+세$/);
       expect(rows['키']).toBe('158 cm');
       expect(rows['사이즈']).toBe('B86 (E) W58 H86');
       expect(rows['가슴']).toContain('자연');

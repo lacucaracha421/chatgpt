@@ -310,7 +310,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     : [
       { id: "export", label: "내보내기", disabled: exporting, onSelect: () => void exportItems(selectedIds) },
       { id: "title", label: "제목 변경", disabled: !single || readOnly, onSelect: () => setTitleEditorOpen(true) },
-      { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: busy || readOnly, onSelect: () => void trash(selectedIds) },
+      { id: "trash", label: "휴지통으로", destructive: true, disabled: busy || readOnly, onSelect: () => void trash(selectedIds) },
     ];
 
   return <section className="external-vault-browser" aria-label="비밀">

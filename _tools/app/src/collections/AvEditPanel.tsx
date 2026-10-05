@@ -60,7 +60,7 @@ export function AvEditPanel({ details, api, onClose, onSaved }: {
           <TextField label={`${person.displayName} 작품 내 표기`} maxLength={120} value={person.creditName ?? ""} onChange={event => setPeople(items => items.map((item, position) => position === index ? { ...item, creditName: event.target.value } : item))} />
           <Button aria-label={`${person.displayName} 위로`} disabled={saving || !people.slice(0, index).some(item => item.role === creditRole)} onClick={() => move(index, -1)}>위</Button>
           <Button aria-label={`${person.displayName} 아래로`} disabled={saving || !people.slice(index + 1).some(item => item.role === creditRole)} onClick={() => move(index, 1)}>아래</Button>
-          <Button disabled={saving} aria-label={`${person.displayName} 연결 해제`} onClick={() => setPeople(items => items.filter((_, position) => position !== index))}>해제</Button>
+          <Button disabled={saving} aria-label={`${person.displayName} 연결 제거`} onClick={() => setPeople(items => items.filter((_, position) => position !== index))}>제거</Button>
         </div>)}
       </section>)}
       {error && <p role="alert">{error}</p>}

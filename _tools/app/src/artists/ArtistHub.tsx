@@ -1,3 +1,5 @@
+import { Badge } from "../shared/ui/Badge";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { AssetImage } from "../privacy/AssetImage";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
@@ -234,7 +236,7 @@ function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privac
   const shown = rows * columns;
   return <>
     <TodaySection onNavigate={onNavigate} privacyMode={privacyMode} />
-    <div className="artist-section-head"><span className="workspace-section-label">최근 저장 순 · 고정한 작가 제외</span>{page && <span className="artist-section-count">{formatCount(page.total)}명</span>}</div>
+    <div className="artist-section-head"><SectionLabel className="workspace-section-label" title="최근 저장 순 · 고정한 작가 제외" />{page && <span className="artist-section-count">{formatCount(page.total)}명</span>}</div>
     {!page && <Skeleton className="artist-hub__skeleton" label="작가를 불러오는 중" />}
     {page && page.artists.length === 0 && <EmptyState title="주요 작가가 아직 없습니다">작가 정보가 있는 이미지를 모으면 기준에 맞는 작가가 여기에 모입니다.</EmptyState>}
     {page && <div ref={gridRef} className="artist-grid" role="list" aria-label="주요 작가">
@@ -285,7 +287,7 @@ function HeroMosaic({ assetIds, assetCount, privacyMode }: { assetIds: string[];
   return <span className={`artist-hero-mosaic artist-hero-mosaic--n${count}`} aria-hidden="true">
     {cells.map((assetId, index) => <span key={`${assetId ?? "empty"}-${index}`} className={`artist-hero-mosaic__cell${extra > 0 && index === cells.length - 1 ? " artist-hero-mosaic__cell--more" : ""}`}>
       {assetId && !privacyMode && <AssetImage src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
-      {extra > 0 && index === cells.length - 1 && <span>+{formatCount(extra)}</span>}
+      {extra > 0 && index === cells.length - 1 && <Badge variant="scrim">+{formatCount(extra)}</Badge>}
     </span>)}
   </span>;
 }
@@ -306,19 +308,18 @@ function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; priva
   useEffect(() => { if (fetched) setLastRows(fetched); }, [fetched]);
   const rows = fetched ?? lastRows;
   if (rows && rows.length === 0) return null;
-  const [, month, day] = localDate.split("-");
   // A day often has one candidate per kind, so the server's re-pick can return the same rows;
   // 다시 고르기 also moves the hero along the rows so it always visibly changes.
   const hero = rows?.find((row) => row.artist.id === heroId) ?? (rows?.length ? rows[seed % rows.length] : undefined);
   if (!hero) return <section className="artist-today" aria-label="오늘">
     <div className="artist-section-head">
-      <span className="workspace-section-label">오늘 · {Number(month)}월 {Number(day)}일</span>
+      <SectionLabel className="workspace-section-label" title={`오늘 · ${displayDate(localDate, new Date(`${localDate}T12:00:00`))}`} />
       <Button size="sm" variant="ghost" onClick={() => setSeed((value) => value + 1)}><ArrowPathIcon aria-hidden="true" />다시 고르기</Button>
     </div>
   </section>;
   return <section className="artist-today" aria-label="오늘">
     <div className="artist-section-head">
-      <span className="workspace-section-label">오늘 · {Number(month)}월 {Number(day)}일</span>
+      <SectionLabel className="workspace-section-label" title={`오늘 · ${displayDate(localDate, new Date(`${localDate}T12:00:00`))}`} />
       <Button size="sm" variant="ghost" onClick={() => { setHeroId(null); setSeed((value) => value + 1); }}><ArrowPathIcon aria-hidden="true" />다시 고르기</Button>
     </div>
     {hero && <article className="artist-today__hero" aria-label={`${hero.artist.label} · ${hero.reason}`}>
@@ -339,7 +340,7 @@ function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; priva
           <Button variant="ghost" aria-pressed={hero.artist.pinned} onClick={() => { if (gateway) void gateway.setFlags(hero.artist.id, { pinned: !hero.artist.pinned }).then(invalidateArtists, () => undefined); }}>{hero.artist.pinned ? <PinSolidIcon aria-hidden="true" /> : <PinIcon aria-hidden="true" />}{hero.artist.pinned ? "고정 해제" : "고정"}</Button>
         </div>
         <div className="artist-today__others">
-          <span className="workspace-section-label">오늘의 다른 작가</span>
+          <SectionLabel className="workspace-section-label" title="오늘의 다른 작가" />
           {(rows ?? []).filter((row) => row.artist.id !== hero.artist.id).map((row) => <button key={row.artist.id} type="button" className="artist-today__other" aria-label={`${row.artist.label} · ${row.reason}`} onClick={() => setHeroId(row.artist.id)}>
             <ArtistCollage assetIds={row.assetIds} privacyMode={privacyMode} className="artist-today__other-collage" />
             <span className="artist-today__other-copy"><strong className="artist-name">{row.artist.label}</strong><small className={`artist-today__reason artist-today__reason--${row.kind}`}>{row.reason}</small></span>

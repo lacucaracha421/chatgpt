@@ -1,4 +1,5 @@
 import { addDays, addMonths, dayNumber, inTrial, isEnded, nextCharge } from './cycle';
+import { ddayLabel } from '../../shared/displayDate';
 import { daysInMonth, isDate, validAmount, type Recurring, type LedgerEntry } from './model';
 import { chargesInMonth, monthCharges, reminders, type LedgerLike, type MonthSummary } from './summary';
 
@@ -25,7 +26,7 @@ export function subscriptionPills(r: Recurring, today: string) {
   const pills = [cycle];
   if (r.trial) pills.push(trialMonths(r) ? `처음 ${trialMonths(r)}달 무료` : '첫 결제까지 무료');
   if (r.until) pills.push(isEnded(r, today) ? '종료됨' : '해지 예약');
-  if (inTrial(r, today) && !isEnded(r, today)) pills.push(`무료 D-${dayNumber(r.start) - dayNumber(today)}`);
+  if (inTrial(r, today) && !isEnded(r, today)) pills.push(`무료 ${ddayLabel(dayNumber(r.start) - dayNumber(today)) ?? '끝'}`);
   return pills;
 }
 export function monthlyEvents(ledger: LedgerLike, month: string, today: string, entries: LedgerEntry[] = []) {

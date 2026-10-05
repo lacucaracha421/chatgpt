@@ -1,3 +1,4 @@
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { ArrowLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -275,7 +276,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
 
   const index = <nav className="crv-index" aria-label="태거 검토 시리즈">
     {groups.length > 0 && <>
-      <h2 className="workspace-section-label">시리즈</h2>
+      <SectionLabel as="h2" className="workspace-section-label" title="시리즈" />
       <IndexRow label="전체" count={total} current={!currentGroup} onClick={() => { setSelectedSeries(ALL); setSelectedTarget(null); }} />
       {groups.map((group) => <IndexRow key={group.seriesId} label={group.seriesName} count={group.items.length} current={currentGroup === group}
         onClick={() => { setSelectedSeries(group.seriesId); setSelectedTarget(null); }} />)}

@@ -3,7 +3,7 @@ import {useTabletAssetMask} from './assetMask';
 import type {ContentRating} from '../src/shared/privacy/contentMask';
 import {useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ChevronRightIcon, PhotoIcon} from '@heroicons/react/24/outline';
-import {Button, IconButton} from './ui';
+import {Button, EmptyState, IconButton} from './ui';
 import {ApiError, errorText} from './transport';
 import {loadThumbnail} from './media';
 import {clockLabel} from './homeDashboard';
@@ -100,19 +100,11 @@ export function CharacterReviewOverview({libraryId, characters, refreshKey, paus
       {value && value.total > 0 && <Button onClick={() => onOpen({target: null})}>전체 검토</Button>}
     </header>
     <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
-    {state.phase === 'unready' && <div className="empty-state review-empty">
-      <h2>PC 업데이트가 필요합니다</h2>
-      <p>PC 앱이 아직 캐릭터 검토 목록을 보내지 않았습니다.</p>
-    </div>}
-    {state.phase === 'error' && <div className="empty-state review-empty">
-      <h2>{state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'}</h2>
-      <p>{state.offline ? '연결되면 검토할 캐릭터를 보여 드립니다.' : state.message}</p>
+    {state.phase === 'unready' && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 캐릭터 검토 목록을 보내지 않았습니다."/>}
+    {state.phase === 'error' && <EmptyState className="review-empty" title={state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'} hint={state.offline ? '연결되면 검토할 캐릭터를 보여 드립니다.' : state.message}>
       <Button onClick={() => { setState({phase: 'loading'}); setRetry(n => n + 1); }}>다시 시도</Button>
-    </div>}
-    {value && value.total === 0 && <div className="empty-state review-empty">
-      <h2>모두 검토했습니다</h2>
-      <p>PC가 새 후보를 보내면 여기에 나타납니다.</p>
-    </div>}
+    </EmptyState>}
+    {value && value.total === 0 && <EmptyState className="review-empty" title="모두 검토했습니다" hint="PC가 새 후보를 보내면 여기에 나타납니다."/>}
     {value && value.total > 0 && <div ref={scroller} className="overview-scroll">
       {value.groups.map(group => <section key={group.seriesId} className="overview-series" aria-label={`${group.seriesName} ${group.count}건`}>
         <button className="overview-series-head" onClick={() => onOpen({series: {id: group.seriesId, name: group.seriesName}, serverSeries})} aria-label={`${group.seriesName} 전체 검토 ${group.count}건`}>

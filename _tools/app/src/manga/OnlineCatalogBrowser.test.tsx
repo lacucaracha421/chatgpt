@@ -51,22 +51,22 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
-  it("offers both bookmark orders and remembers the device choice", async () => {
+  it("defaults bookmarks to newest-added, offers both orders and remembers the device choice", async () => {
     localStorage.clear();
     onTestFinished(() => localStorage.clear());
     const gateway = createGateway(true);
     const first = renderBrowser(gateway, "bookmarked");
-    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledWith(expect.objectContaining({ sort: "latest", scope: "bookmarked" }), expect.any(Function), expect.any(String)));
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledWith(expect.objectContaining({ sort: "bookmarkAdded", scope: "bookmarked" }), expect.any(Function), expect.any(String)));
     await userEvent.click(screen.getByRole("button", { name: "정렬" }));
     expect(screen.queryByRole("menuitemradio", { name: "조회순" })).toBeNull();
-    await userEvent.click(await screen.findByRole("menuitemradio", { name: "최근 추가순" }));
-    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "bookmarkAdded" }), expect.any(Function), expect.any(String)));
-    first.unmount();
-    renderBrowser(gateway, "bookmarked");
-    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "bookmarkAdded" }), expect.any(Function), expect.any(String)));
-    await userEvent.click(screen.getByRole("button", { name: "정렬" }));
     await userEvent.click(await screen.findByRole("menuitemradio", { name: "최신순" }));
     await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "latest" }), expect.any(Function), expect.any(String)));
+    first.unmount();
+    renderBrowser(gateway, "bookmarked");
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "latest" }), expect.any(Function), expect.any(String)));
+    await userEvent.click(screen.getByRole("button", { name: "정렬" }));
+    await userEvent.click(await screen.findByRole("menuitemradio", { name: "최근 추가순" }));
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "bookmarkAdded" }), expect.any(Function), expect.any(String)));
   });
   it("is area-ready on first page without waiting for 48 lazy covers, count or command completion", async () => {
     const gateway = createGateway(true);
@@ -294,7 +294,7 @@ describe("OnlineCatalogBrowser", () => {
     const { rerender } = render(<LibraryProvider gateway={gateway}><OnlineCatalogBrowser onSwitchLocal={vi.fn()} requestedSource="all" /></LibraryProvider>);
     rerender(<LibraryProvider gateway={gateway}><OnlineCatalogBrowser onSwitchLocal={vi.fn()} requestedSource="bookmarked" /></LibraryProvider>);
     await act(async () => pending.resolve(status));
-    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "bookmarked", sort: "latest" })));
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "bookmarked", sort: "bookmarkAdded" })));
   });
 
   it("resets the grid scroll on a new view, not when pages append or refresh quietly", async () => {
@@ -932,7 +932,7 @@ it("opens bookmarks without the default hot-day date restriction", async () => {
   renderBrowser(gateway, "bookmarked");
   expect(screen.getByRole("radio", { name: "북마크" })).toBeInTheDocument();
   await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
-    expect.objectContaining({ scope: "bookmarked", sort: "latest", page: 0 }),
+    expect.objectContaining({ scope: "bookmarked", sort: "bookmarkAdded", page: 0 }),
   ));
 });
 

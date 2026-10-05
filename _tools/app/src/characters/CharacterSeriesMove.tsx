@@ -73,7 +73,7 @@ export function CharacterSeriesMove({ target, entries, onClose, onMoved }: {
       </>}
       <p>이동으로 미분류 분석을 시작하지 않습니다. 이 캐릭터의 진행 중인 과거 갱신은 종료되며, 새 시리즈의 자동 분류 설정은 그대로 유지됩니다.</p>
       {error && <p role="alert">{error}</p>}
-      {error && <Button variant="ghost" disabled={busy} onClick={() => setRevision(value => value + 1)}>다시 확인</Button>}
+      {error && <Button variant="ghost" disabled={busy} onClick={() => setRevision(value => value + 1)}>다시 시도</Button>}
       <div className="ui-dialog__actions"><Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button><Button disabled={busy || !preview || preview.destinationId !== destination} onClick={() => void move()}>이동</Button></div>
     </div>
   </Dialog>;

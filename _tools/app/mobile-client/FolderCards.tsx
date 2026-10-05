@@ -8,7 +8,7 @@ import {mapBounded,normalizePage} from './model';
 import type {Asset,Page,View} from './types';
 import type {CharacterIndex} from './characterModel';
 import {entryView,type Entry} from './libraryModel';
-import {SectionLabel} from './ui';
+import {CountBadge,SectionLabel} from './ui';
 import {ShelfScroller} from '../src/shared/ui/ShelfScroller';
 import {FolderIcon,UserGroupIcon,UserIcon} from '@heroicons/react/24/outline';
 export type CharacterFolderKind='series'|'group'|'character';
@@ -54,7 +54,7 @@ function ShelfFolderCard({entry,items,characters,paused,onSelect,onVisible}:{ent
   const count=entry.asset_count;
   return <article className="folder-shelf__card" ref={host}>
     <button type="button" className="folder-shelf__card-open" onClick={onSelect} aria-label={`${entry.name}${count===undefined?'':`, ${count}장`}`}>
-      <span className="folder-thumbnail"><CoverGroup items={kind?characterCovers(entry,characters):items} paused={paused||!visible}/>{count!==undefined&&<span className="folder-thumbnail__count">{count.toLocaleString('ko-KR')}장</span>}</span>
+      <span className="folder-thumbnail"><CoverGroup items={kind?characterCovers(entry,characters):items} paused={paused||!visible}/>{count!==undefined&&<CountBadge variant="scrim" className="folder-thumbnail__count" value={count} unit="장"/>}</span>
       <strong><span className="folder-shelf__icon">{kind?<CharacterGlyph kind={kind}/>:<FolderIcon aria-hidden="true"/>}</span><span className="folder-shelf__name">{entry.name}</span></strong>
     </button>
   </article>;
@@ -72,7 +72,7 @@ export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSele
     const observer=new IntersectionObserver(records=>{const next=records.some(r=>r.isIntersecting);setVisible(next);onVisible(id,next);},{rootMargin:'120px'});
     observer.observe(host.current);return()=>observer.disconnect();
   },[id,onVisible]);
-  return <button ref={host} className={`library-folder${kind?' is-character':''}`} onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><span className="folder-thumbnail"><CoverGroup items={items} paused={paused||!visible}/>{count!==undefined&&<span className="folder-thumbnail__count">{count.toLocaleString('ko-KR')}</span>}</span><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong></span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
+  return <button ref={host} className={`library-folder${kind?' is-character':''}`} onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><span className="folder-thumbnail"><CoverGroup items={items} paused={paused||!visible}/>{count!==undefined&&<CountBadge variant="scrim" className="folder-thumbnail__count" value={count}/>}</span><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong></span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
 }
 export function FolderCards({items,entries,characters,paused,revision,onSelect,strip=false,place}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;strip?:boolean;/** The folder these cards belong to; moving to another folder replays their first batch. */place?:string}) {
   const host=useRef<HTMLDivElement>(null);

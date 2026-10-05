@@ -1,3 +1,4 @@
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { CharacterSuggestionsOverview } from "../characters/suggestions/CharacterSuggestions";
@@ -68,11 +69,11 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
 
   const index = <nav className="crv-index" aria-label="캐릭터 검토 시리즈">
     {!restricted && suggestionCount > 0 && <>
-      <h2 className="workspace-section-label">제안</h2>
+      <SectionLabel as="h2" className="workspace-section-label" title="제안" />
       <IndexRow label="새 캐릭터 제안" count={suggestionCount} current={false} onClick={() => document.getElementById("new-character-suggestions")?.scrollIntoView({ block: "start" })} />
     </>}
     {groups.length > 0 && !restricted && <>
-      <h2 className="workspace-section-label">시리즈</h2>
+      <SectionLabel as="h2" className="workspace-section-label" title="시리즈" />
       <IndexRow label="전체" count={total} current={!current} onClick={() => setSelected(ALL)} />
       {groups.map((group) => <IndexRow key={seriesKey(group)} label={group.seriesName} count={group.total} current={current === group}
         onClick={() => setSelected(seriesKey(group))} />)}

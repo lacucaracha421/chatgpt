@@ -1,3 +1,4 @@
+import {releaseGroupHeading} from '../src/collections/releaseCalendarFormat';
 import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ApiError} from './transport';
@@ -114,7 +115,7 @@ describe('ReleaseCalendar', () => {
 
   it('filters by kind and then by the counted interest list', async () => {
     render(<ReleaseCalendar onClose={vi.fn()} />);
-    expect(await screen.findByRole('heading', {name: /2026년 10월/})).toBeTruthy();
+    expect(await screen.findByRole('heading', {name: new RegExp(releaseGroupHeading('2026년 10월'))})).toBeTruthy();
     for (const name of ['전체 5', '게임 2', '영화 2', '애니 1']) expect(screen.getByRole('radio', {name})).toBeTruthy();
     const game = screen.getByText('game-one').closest('li')!;
     expect(within(game).getByRole('img', {name: 'PC'})).toBeTruthy();

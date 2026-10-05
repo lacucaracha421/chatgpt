@@ -5,7 +5,7 @@ import {displayDate} from '../src/shared/displayDate';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, ChevronRightIcon, PauseIcon, PhotoIcon, PlayIcon, Square2StackIcon} from '@heroicons/react/24/outline';
-import {Button, IconButton} from './ui';
+import {Button, EmptyState, IconButton} from './ui';
 import {ApiError, api, errorText} from './transport';
 import {decodeImage, loadThumbnail, mediaTicket, warmThumbnail} from './media';
 import {sizeLabel} from './ViewerInfo';
@@ -374,19 +374,11 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     </header>
     {notice && <p className="error-message review-notice" role="alert">{notice}</p>}
     <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
-    {state.phase === 'error' && <div className="empty-state review-empty">
-      <h2>{state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'}</h2>
-      <p>{state.offline ? (queued ? `저장된 결정 ${queued}개는 연결되면 PC로 전송됩니다.` : '연결을 확인한 뒤 다시 시도해 주세요.') : state.message}</p>
+    {state.phase === 'error' && <EmptyState className="review-empty" title={state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'} hint={state.offline ? (queued ? `저장된 결정 ${queued}개는 연결되면 PC로 전송됩니다.` : '연결을 확인한 뒤 다시 시도해 주세요.') : state.message}>
       <Button onClick={() => { setState({phase: 'loading'}); void load(true); }}>다시 시도</Button>
-    </div>}
-    {state.phase === 'ready' && !state.ready && <div className="empty-state review-empty">
-      <h2>PC 업데이트가 필요합니다</h2>
-      <p>PC 앱이 아직 유사 이미지 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 검토할 수 있습니다.</p>
-    </div>}
-    {ready && !current && <div className="empty-state review-empty">
-      <h2>모두 검토했습니다</h2>
-      <p>{pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 버린 이미지가 휴지통으로 갑니다.` : 'PC가 새 유사 이미지를 찾으면 여기에 나타납니다.'}</p>
-    </div>}
+    </EmptyState>}
+    {state.phase === 'ready' && !state.ready && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 유사 이미지 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 검토할 수 있습니다."/>}
+    {ready && !current && <EmptyState className="review-empty" title="모두 검토했습니다" hint={pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 버린 이미지가 휴지통으로 갑니다.` : 'PC가 새 유사 이미지를 찾으면 여기에 나타납니다.'}/>}
     {ready && current && <div className="similarity-body" data-mode={compare ? 'compare' : 'side'}>
       {compare
         ? <div className="similarity-compare">

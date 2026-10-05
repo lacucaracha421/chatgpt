@@ -514,7 +514,7 @@ it("keeps character selection in place without a persistent refresh button",asyn
   await selectTile("이미지 5.webp");
   expect(screen.getByRole("option",{name:"이미지 5.webp"})).toHaveAttribute("aria-selected","true");
   const selectionBar=screen.getByRole("toolbar",{name:"선택 작업"});
-  expect(within(selectionBar).getByRole("button",{name:"이 캐릭터에서 제외"})).toBeVisible();
+  expect(within(selectionBar).getByRole("button",{name:"이 캐릭터에서 빼기"})).toBeVisible();
   expect(within(toolbar).getByRole("button",{name:"캐릭터 편집"})).toBeVisible();
 });
 
@@ -555,7 +555,7 @@ it("keeps character selection in the header without review status",async()=>{
   const selectionBar=screen.getByRole("toolbar",{name:"선택 작업"});
   expect(within(selectionBar).getByText("1개 선택")).toBeInTheDocument();
   expect(document.querySelector(".series-gallery .series-selection")).toBeNull();
-  await user.click(within(selectionBar).getByRole("button",{name:"이 캐릭터에서 제외"}));
+  await user.click(within(selectionBar).getByRole("button",{name:"이 캐릭터에서 빼기"}));
   await waitFor(()=>expect(decide).toHaveBeenCalledWith(expect.objectContaining({targetId:"hina",assetIds:["image-5"],decision:"rejected"})));
   expect(screen.queryByText("1개 선택")).not.toBeInTheDocument();
 });
@@ -588,7 +588,7 @@ it("keeps character assignment collapsed and filters the list on demand", async 
   await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
   await user.keyboard("c");
   const picker = await screen.findByRole("listbox", { name: "캐릭터에 넣기" });
-  expect(screen.getByRole("button", { name: "블루 아카이브 범위 해제" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "블루 아카이브 범위 빼기" })).toBeVisible();
   const search = within(picker).getByRole("searchbox", { name: "캐릭터 찾기" });
   await user.type(search, "키사");
   expect(within(picker).getAllByRole("option", { name: /키사키/ })[0]).toBeInTheDocument();
@@ -1080,7 +1080,7 @@ it("trashes from the series in place and puts the tile back on 실행 취소", a
   await screen.findByRole("option", { name: "이미지 5.webp" });
   const reads = browse.mock.calls.length;
   await selectTile("이미지 6.webp");
-  await userEvent.click(within(screen.getByRole("toolbar", { name: "선택 작업" })).getByRole("button", { name: "휴지통으로 이동" }));
+  await userEvent.click(within(screen.getByRole("toolbar", { name: "선택 작업" })).getByRole("button", { name: "휴지통으로" }));
   await waitFor(() => expect(screen.queryByRole("option", { name: "이미지 6.webp" })).toBeNull());
   expect(trashAssets).toHaveBeenCalledWith(["image-6"]);
   await userEvent.click(screen.getByRole("button", { name: "실행 취소" }));
@@ -1091,11 +1091,11 @@ it("trashes from the series in place and puts the tile back on 실행 취소", a
   expect(changed).not.toHaveBeenCalled();
 });
 
-it("offers 이 캐릭터에서 제외 in the viewer opened from a character, but not on its references", async () => {
+it("offers 이 캐릭터에서 빼기 in the viewer opened from a character, but not on its references", async () => {
   const { api } = await mount("hina");
   const decide = vi.spyOn(api, "decide");
   await userEvent.dblClick(await screen.findByRole("option", { name: "이미지 5.webp" }));
-  const exclude = await screen.findByRole("button", { name: "이 캐릭터에서 제외" });
+  const exclude = await screen.findByRole("button", { name: "이 캐릭터에서 빼기" });
   expect(screen.getByRole("button", { name: "캐릭터" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "정보" })).toBeInTheDocument();
   await userEvent.click(exclude);
@@ -1104,7 +1104,7 @@ it("offers 이 캐릭터에서 제외 in the viewer opened from a character, but
   await mount("hina", false, [], undefined, false, { targetOverrides: { references: [{ slot: 0, assetId: "image-5", assetHash: "hash-image-5", status: "ready" }] } });
   await userEvent.dblClick(await screen.findByRole("option", { name: "이미지 5.webp" }));
   await screen.findByRole("button", { name: "정보" });
-  expect(screen.queryByRole("button", { name: "이 캐릭터에서 제외" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "이 캐릭터에서 빼기" })).toBeNull();
 });
 
 it("hides date headings under the series shelf and shows them in a character", async () => {
@@ -1115,4 +1115,43 @@ it("hides date headings under the series shelf and shows them in a character", a
   await mount("hina");
   await screen.findByRole("option", { name: "이미지 5.webp" });
   await waitFor(() => expect(document.querySelector("[data-gallery-date]")).not.toBeNull());
+});
+
+// A single click only focuses a tile; double click or Enter opens the viewer (DESIGN §6–7), in the
+// series root, a group and a character alike.
+it.each([
+  ["series root", undefined, undefined],
+  ["group", undefined, "group"],
+  ["character", "hina", undefined],
+])("focuses on a single click and opens the viewer only on double click or Enter: %s", async (_label, targetId, groupId) => {
+  await mount(targetId, false, groupId ? [{ id: groupId, name: "Group", seriesId: "series", revision: 1, targetIds: ["kisaki", "hina"] }] : [], groupId);
+  const user = userEvent.setup();
+  const tile = await screen.findByRole("option", { name: "이미지 5.webp" });
+  await user.click(tile);
+  await waitFor(() => expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("data-focused", "true"));
+  expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "false");
+  expect(screen.queryByRole("button", { name: "감상 화면 닫기" })).toBeNull();
+  await user.dblClick(screen.getByRole("option", { name: "이미지 5.webp" }));
+  await user.click(await screen.findByRole("button", { name: "감상 화면 닫기" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "감상 화면 닫기" })).toBeNull());
+  screen.getByRole("option", { name: "이미지 5.webp" }).focus();
+  await user.keyboard("{Enter}");
+  expect(await screen.findByRole("button", { name: "감상 화면 닫기" })).toBeInTheDocument();
+});
+
+// Double-clicking a character card (Explorer habit): the first click opens the character and the
+// second lands on a tile that has just appeared under the pointer. Chromium still fires dblclick on
+// that tile, which must not open the viewer; a real double click on the tile still does.
+it("does not open a tile from a double click whose first click opened the character", async () => {
+  const mounted = await mount();
+  mounted.navigate.mockImplementation(view => { if (view.characterId) mounted.navigateToCharacter(view.characterId); });
+  const card = await screen.findByRole("button", { name: "히나 열기" });
+  fireEvent.mouseDown(card, { detail: 1 }); fireEvent.mouseUp(card, { detail: 1 }); fireEvent.click(card, { detail: 1 });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "히나 열기" })).toBeNull());
+  const tile = await screen.findByRole("option", { name: "이미지 5.webp" });
+  fireEvent.mouseDown(tile, { detail: 2 }); fireEvent.mouseUp(tile, { detail: 2 }); fireEvent.click(tile, { detail: 2 }); fireEvent.doubleClick(tile, { detail: 2 });
+  expect(screen.queryByRole("button", { name: "감상 화면 닫기" })).toBeNull();
+  for (const detail of [1, 2]) { fireEvent.mouseDown(tile, { detail }); fireEvent.mouseUp(tile, { detail }); fireEvent.click(tile, { detail }); }
+  fireEvent.doubleClick(tile, { detail: 2 });
+  expect(await screen.findByRole("button", { name: "감상 화면 닫기" })).toBeInTheDocument();
 });

@@ -49,10 +49,10 @@ export function SelectionBar({
         <Button aria-label="좋아요 켜기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(true)}><HeartSolidIcon aria-hidden="true" /></Button>
         <Button aria-label="좋아요 끄기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(false)}><HeartIcon aria-hidden="true" /></Button>
       </>}
-      {inCollection && <Button aria-label="이 컬렉션에서 제거" size="icon" variant="ghost" disabled={batchPending} onClick={onRemoveFromCollection}><MinusCircleIcon aria-hidden="true" /></Button>}
+      {inCollection && <Button aria-label="이 컬렉션에서 빼기" size="icon" variant="ghost" disabled={batchPending} onClick={onRemoveFromCollection}><MinusCircleIcon aria-hidden="true" /></Button>}
       {inCollection && selectedCount === 1 && <Button aria-label="대표 이미지로 지정" size="icon" variant="ghost" disabled={batchPending} onClick={onSetCover}><PhotoIcon aria-hidden="true" /></Button>}
       {onAssignArtist && <Button size="sm" variant="ghost" aria-label="작가 지정" disabled={batchPending} onClick={onAssignArtist}><UserPlusIcon aria-hidden="true" />{!compact && <span className="asset-selection-bar__label">작가 지정</span>}</Button>}
-      {onTrash && <Button aria-label="휴지통으로 이동" size="icon" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon aria-hidden="true" /></Button>}
+      {onTrash && <Button aria-label="휴지통으로" size="icon" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon aria-hidden="true" /></Button>}
       <Button aria-label="선택 해제" size="icon" variant="ghost" onClick={onClearSelection}><XMarkIcon aria-hidden="true" /></Button>
     </div>
     </MotionPresence>

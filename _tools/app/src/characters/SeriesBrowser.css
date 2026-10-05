@@ -46,7 +46,7 @@
 /* The series switch and total count form the gallery's own first line, not a separate band. */
 .series-gallery { position: relative; isolation: isolate; min-width: 0; min-height: 0; container: asset-selection-host / inline-size; }
 .series-gallery > .asset-gallery { height: 100%; }
-.series-gallery__empty { padding: var(--space-4); color: var(--color-muted); pointer-events: none; }
+.series-gallery__empty { pointer-events: none; }
 .series-character-folder-head { padding: var(--space-4) var(--space-4) 0; }
 .series-character-folder-head .folder-shelf__label { display: flex; align-items: center; gap: var(--space-2); margin: 0; min-height: var(--line-ui); }
 .series-character-folder-head .folder-shelf__label::before { content: ""; width: 5px; height: 5px; flex: none; background: var(--color-section-mark); }
@@ -206,24 +206,3 @@
 
 .series-shelf { position: relative; display: grid; }
 .series-shelf > div { grid-area: 1 / 1; min-width: 0; }
-/* Opaque incoming paint covers the retained shelf, including its taller empty space. */
-.series-shelf > [data-motion-view] { position: relative; background: var(--color-bg); }
-
-/* Series shelf swap: one browser snapshot of the shelf only, named while SeriesShelf owns the transition.
-   The rest of the page (root) switches in place, exactly as without the API. */
-html[data-series-view-transition] .series-shelf[data-series-shelf-transition] { view-transition-name: series-shelf; }
-html[data-series-view-transition]::view-transition { pointer-events: none; }
-html[data-series-view-transition]::view-transition-old(root) { display: none; }
-html[data-series-view-transition]::view-transition-new(root),
-html[data-series-view-transition]::view-transition-group(series-shelf) { animation: none; }
-html[data-series-view-transition]::view-transition-old(series-shelf) { animation: series-shelf-out 90ms cubic-bezier(.2,0,0,1) both; }
-html[data-series-view-transition="forward"]::view-transition-new(series-shelf) { animation: series-shelf-in-forward 240ms var(--spring-gentle) both; }
-html[data-series-view-transition="back"]::view-transition-new(series-shelf) { animation: series-shelf-in-back 240ms var(--spring-gentle) both; }
-@keyframes series-shelf-out { to { opacity: 0; } }
-@keyframes series-shelf-in-forward { from { opacity: 0; transform: translateX(16px); } }
-@keyframes series-shelf-in-back { from { opacity: 0; transform: translateX(-16px); } }
-@keyframes series-shelf-fade-in { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  html[data-series-view-transition]::view-transition-old(series-shelf) { animation: series-shelf-out 120ms cubic-bezier(.2,0,0,1) both; }
-  html[data-series-view-transition]::view-transition-new(series-shelf) { animation: series-shelf-fade-in 120ms cubic-bezier(.2,0,0,1) both; }
-}

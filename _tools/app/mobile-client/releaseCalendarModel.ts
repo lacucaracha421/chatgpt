@@ -1,4 +1,5 @@
 import {groupReleaseDays, groupReleases, isVisibleCalendarRelease, releaseDateLabel} from '../src/collections/releaseCalendarFormat';
+import {daysUntil} from '../src/shared/displayDate';
 export type ReleasePrecision = 'exact' | 'month' | 'quarter' | 'year' | 'tbd';
 export {releaseDateLabel,releaseEventLine,releaseTokenLabel} from '../src/collections/releaseCalendarFormat';
 export type ReleaseKind = 'game' | 'movie' | 'anime';
@@ -149,10 +150,7 @@ export function visibleWishlistIds(authoritative: Set<string>, intents: Record<s
 }
 
 export function releaseDaysUntil(date: string | null, today = new Date()): number | null {
-  if (!date || !DATE_RE.test(date)) return null;
-  const [year, month, day] = date.split('-').map(Number);
-  const start = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  return Math.round((Date.UTC(year, month - 1, day) - start) / 86_400_000);
+  return date && DATE_RE.test(date) ? daysUntil(date, today) : null;
 }
 
 /** PC and tablet share the window, section order and within-section date order. */

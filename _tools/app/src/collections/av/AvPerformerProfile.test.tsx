@@ -22,7 +22,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 it("renders birthday age, centimetres, natural breasts and career; omits missing fields", () => {
   const { rerender } = render(<ProfileRows profile={profile()} today={new Date(2026, 8, 28)} />);
   expect(screen.getByText("만 24세")).toBeVisible();
-  expect(screen.getByText("2001.12.08")).toBeVisible();
+  expect(screen.getByText("2001.12.8")).toBeVisible();
   expect(screen.getByText("156 cm")).toBeVisible();
   expect(screen.getByText("B86 (E) W58 H84")).toBeVisible();
   expect(screen.getByText("자연")).toBeVisible();
@@ -79,7 +79,7 @@ const candidates = [{ stashdbId: "a", name: "Candidate", aliases: ["Alias"], bir
 it("opens ambiguous candidates and stores the selected identity", async () => {
   const ambiguous = profile({ status: "ambiguous", candidates }); const api = gateway({ getPerformerProfile: vi.fn().mockResolvedValue(ambiguous), refreshPerformerProfile: vi.fn().mockResolvedValue(ambiguous), choosePerformerProfile: vi.fn().mockResolvedValue(profile({ heightCm: 165 })) });
   render(panel(api)); await waitFor(() => expect(screen.getByRole("button", { name: "고르기" })).toBeEnabled()); fireEvent.click(screen.getByRole("button", { name: "고르기" }));
-  const dialog = screen.getByRole("dialog"); expect(within(dialog).getByText("Candidate")).toBeVisible(); expect(within(dialog).getByText("2000.01")).toBeVisible();
+  const dialog = screen.getByRole("dialog"); expect(within(dialog).getByText("Candidate")).toBeVisible(); expect(within(dialog).getByText("2000.1")).toBeVisible();
   expect(dialog.querySelector("img")).toHaveAttribute("src", "https://stashdb.org/images/a"); fireEvent.click(within(dialog).getByRole("button", { name: "이 사람" }));
   expect(await screen.findByText("165 cm")).toBeVisible(); expect(api.choosePerformerProfile).toHaveBeenCalledWith("p", "a");
 });
@@ -108,5 +108,5 @@ it("keeps a stored StashDB portrait visible on the performer page", async () => 
   expect(await screen.findByRole("img", { name: "배우 대표 이미지" })).toHaveAttribute("src", "data:image/jpeg;base64,stored");
   expect(screen.getByRole("button", { name: "대표 이미지 출처 열기" })).toBeVisible();
   expect(screen.getByRole("button", { name: "사진 바꾸기" })).toBeVisible();
-  expect(screen.getByText("별점 평균")).toBeVisible();
+  expect(screen.getByText("내 별점 평균")).toBeVisible();
 });

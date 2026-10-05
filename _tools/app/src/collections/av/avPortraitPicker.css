@@ -2,8 +2,7 @@
 .av-portrait-picker__sources, .av-portrait-picker__previews { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); background: var(--color-bg); }
 .av-portrait-picker__sources { border-right: 1px solid var(--color-border); }
 .av-portrait-picker__previews { border-left: 1px solid var(--color-border); }
-.av-portrait-picker__section-label { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-1); color: var(--color-muted); font-size: var(--text-sm); }
-.av-portrait-picker__section-label::before { width: 5px; height: 5px; content: ""; background: var(--color-section-mark); }
+.av-portrait-picker__section-label { margin: 0 0 var(--space-1); }
 .av-portrait-picker__source { display: grid; gap: 2px; padding: var(--space-2); color: var(--color-muted); text-align: left; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer; }
 .av-portrait-picker__source:hover { background: var(--color-surface-hover); }
 .av-portrait-picker__source.is-selected { color: var(--color-text); border-color: var(--color-accent); box-shadow: var(--selection-echo); }

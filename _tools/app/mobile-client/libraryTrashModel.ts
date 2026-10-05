@@ -1,5 +1,6 @@
 import {api, native} from './transport';
 import type {Asset} from './types';
+import {displayDate} from '../src/shared/displayDate';
 
 /**
  * Mobile Library Trash: the web side of the native lifecycle outbox.
@@ -95,7 +96,7 @@ export {formatBytes} from '../src/assets/assetMetadata';
 
 export function trashDate(value: string | undefined): string {
   const date = value ? new Date(value) : null;
-  return date && !Number.isNaN(date.getTime()) ? `${date.getMonth() + 1}월 ${date.getDate()}일` : '';
+  return date && !Number.isNaN(date.getTime()) ? displayDate(date) : '';
 }
 
 /** One tile of the trash browser: a server trash row, or a local intent the server has not seen. */

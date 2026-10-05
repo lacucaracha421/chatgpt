@@ -52,7 +52,7 @@ it('prints the shared manual using queued tablet status, rating and platform', (
   expect(manual).toHaveTextContent('Game manual');
   expect(manual).toHaveTextContent('PS5');
   expect(manual.querySelector('.is-filled')).toHaveAttribute('data-status', 'playing');
-  expect(manual.querySelector('.case-score')).toHaveAttribute('aria-label', '별점 3.5');
+  expect(manual.querySelector('.case-score')).toHaveAttribute('aria-label', '내 별점 3.5');
   expect(manual.querySelector<HTMLElement>('.case-manual-cover')!.style.backgroundImage).toContain('/hero');
   rerender(<CaseWork item={item} revision="r1" active privacy={false} position={1} total={1} score={() => null} record={() => []} onStep={vi.fn()} info={() => null}/>);
   expect(container.querySelector('.case-manual .case-writing-line')).toBeInTheDocument();

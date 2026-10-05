@@ -1,6 +1,7 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
+import { displayDate } from "../shared/displayDate";
 import { tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -221,7 +222,7 @@ function SearchStep({ step, results, busy, onQuery, onSearch, onSelect }: { step
         {result.posterPath && !privacyMode && <img src={tmdbImagePreviewUrl(result.posterPath, "poster")} alt={`${result.title} 포스터`} />}
         <span className="tmdb-movie-dialog__result-title">{result.title}</span>
         {result.originalTitle && result.originalTitle !== result.title && <small>{result.originalTitle}</small>}
-        <small>{result.releaseDate ?? "개봉일 정보 없음"}</small>
+        <small>{displayDate(result.releaseDate) || "개봉일 정보 없음"}</small>
       </button>)}
     </div>
   </>;
@@ -231,7 +232,7 @@ function PreviewSummary({ preview }: { preview: TmdbMoviePreview }) {
   return <div className="tmdb-movie-dialog__summary">
     <strong>{preview.proposedTitle}</strong>
     {preview.originalTitle && preview.originalTitle !== preview.proposedTitle && <span>{preview.originalTitle}</span>}
-    <small>{[preview.releaseDate, preview.runtimeMinutes ? `${preview.runtimeMinutes}분` : null, preview.director].filter(Boolean).join(" · ") || "영화 정보 없음"}</small>
+    <small>{[displayDate(preview.releaseDate), preview.runtimeMinutes ? `${preview.runtimeMinutes}분` : null, preview.director].filter(Boolean).join(" · ") || "영화 정보 없음"}</small>
     {preview.overview && <p>{preview.overview}</p>}
   </div>;
 }

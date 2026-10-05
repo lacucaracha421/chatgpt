@@ -48,7 +48,7 @@ it('shows root cards and All without recent folders, then searches every charact
  fireEvent.click(screen.getByRole('button',{name:/학생회/}));expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({characterNode:'group:g'}));
  fireEvent.change(search,{target:{value:'유우'}});expect(screen.getByRole('button',{name:/유우카/})).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:/유우카/}));expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({characterNode:'character:c'}));
- fireEvent.change(search,{target:{value:'없는 폴더'}});await screen.findByText('검색 결과가 없습니다.');
+ fireEvent.change(search,{target:{value:'없는 폴더'}});await screen.findByText('검색 결과 없음');
 });
 it('searches nested albums from the unified field and opens a Library scope',async()=>{
  const tree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'a',parentId:null,name:'앨범 A',iconKey:null,colorKey:null},{id:'b',parentId:'a',name:'여행',iconKey:null,colorKey:null}]};
@@ -62,7 +62,7 @@ it('searches nested albums from the unified field and opens a Library scope',asy
  fireEvent.click(result);expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({album:{id:'b',libraryId:tree.libraryId,epoch:1}}));
  expect(screen.queryByRole('dialog')).toBeNull();
  fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'missing'}});
- await screen.findByText('검색 결과가 없습니다.');
+ await screen.findByText('검색 결과 없음');
 });
 it('keeps folder thumbnails mounted while switching to albums and back',async()=>{
  const tree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'a',parentId:null,name:'앨범 A',iconKey:null,colorKey:null}]};

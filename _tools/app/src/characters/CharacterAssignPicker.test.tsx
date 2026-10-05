@@ -91,12 +91,12 @@ it("limits a scoped picker to one series, marks the current character, and widen
     loadSuggestions={vi.fn().mockResolvedValue([{ targetId: "fern", matched: 1, total: 1 }, { targetId: "kazusa", matched: 1, total: 1 }])} />);
 
   const picker = await screen.findByRole("listbox", { name: "캐릭터에 넣기" });
-  expect(screen.getByRole("button", { name: "블루 아카이브 범위 해제" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "블루 아카이브 범위 빼기" })).toBeVisible();
   expect(within(picker).getAllByRole("option", { name: /카즈사 · 현재/ })[0]).toBeVisible();
   expect(within(picker).queryByRole("option", { name: /페른/ })).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "모든 시리즈" }));
-  expect(screen.queryByRole("button", { name: "블루 아카이브 범위 해제" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "블루 아카이브 범위 빼기" })).not.toBeInTheDocument();
   expect(screen.getByRole("option", { name: /페른 · 40/ })).toBeVisible();
 });
 
@@ -120,6 +120,6 @@ it("clears a scoped picker with Backspace and offers other-series results plus c
 
   await user.clear(search);
   fireEvent.keyDown(search, { key: "Backspace" });
-  expect(screen.queryByRole("button", { name: "블루 아카이브 범위 해제" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "블루 아카이브 범위 빼기" })).not.toBeInTheDocument();
   expect(screen.getByRole("option", { name: /페른 · 40/ })).toBeVisible();
 });

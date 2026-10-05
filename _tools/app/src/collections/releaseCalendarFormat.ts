@@ -1,5 +1,5 @@
 import type { ReleaseDatePrecision, ReleaseTitle, ReleaseWishlistEvent } from "../library/types";
-import { localDay } from "../shared/displayDate";
+import { displayDate, localDay } from "../shared/displayDate";
 
 /**
  * Precision-aware wording for the 발매 캘린더: "10월 22일", "10월 중", "2027 Q1", "2027년 중",
@@ -10,15 +10,20 @@ export function releaseDateLabel(date: string | null, precision: ReleaseDatePrec
   if (!parts || precision === "tbd") return "미정";
   const year = Number(parts[1]);
   const month = Number(parts[2]);
-  const day = Number(parts[3]);
   const prefix = year === referenceYear ? "" : `${year}년 `;
   switch (precision) {
-    // Compact numeric date, same as the tablet: 9.12, or 2027.1.5 outside the current year.
-    case "exact": return year === referenceYear ? `${month}.${day}` : `${year}.${month}.${day}`;
+    // The shared date: 9.12, or 2027.1.5 outside the reference year.
+    case "exact": return displayDate(date!, new Date(referenceYear, 0, 1));
     case "month": return `${prefix}${month}월 중`;
     case "quarter": return `${year} Q${Math.floor((month - 1) / 3) + 1}`;
     case "year": return `${year}년 중`;
   }
+}
+
+/** A month section heading drops the reference year: "2026년 10월" → "10월" (PC and tablet). */
+export function releaseGroupHeading(label: string, referenceYear = new Date().getFullYear()): string {
+  const month = /^(\d{4})년 (\d{1,2})월$/.exec(label);
+  return month && Number(month[1]) === referenceYear ? `${month[2]}월` : label;
 }
 
 /** The wording of an event value (`2026-10-15`, `2026-10`, `2026-Q4`, `2026` or `tbd`). */

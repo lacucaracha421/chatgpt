@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
 import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline';
 import { PinIcon, PinSolidIcon } from '../src/shared/ui/PinIcon';
-import { Button, IconButton } from './ui';
+import {Button, EmptyState, IconButton} from './ui';
 import { keyBetween } from '../src/notes/model';
 import type { Note, NotesStore } from '../src/notes/store';
 import { addMonths, localToday } from '../src/notes/ledger/cycle';
@@ -74,7 +74,7 @@ export function NoteLedger({ store, ledger, notes, saveState, onLeave, onMore, b
   const spending = <>{summary.reviewCount > 0 && <p className="ledger-review" role="status">확인할 기록 {summary.reviewCount}건</p>}
     <ul className="ledger-items">{summary.entries.map(e => <li key={e.id}><button type="button" className="ledger-spending-row" onClick={() => openSheet({ kind: 'entry', draft: e })}><span>{dotDate(e.date)}</span><strong>{e.name || '이름 없음'}</strong><span>{e.in ? '+' : ''}{won(e.amount)}</span></button>{forks.has(e.id) && <div className="ledger-conflict">두 기기에서 다르게 고침 <Button size="sm" variant="quiet" onClick={() => keepEntry(e.id)}>이것만 남기기</Button></div>}</li>)}</ul>
     {summary.pastCharges.map(c => <button type="button" key={`${c.recurring.id}:${c.date}`} className="ledger-spending-row is-derived" onClick={() => openSheet({ kind: 'charge', charge: c })}><span>{dotDate(c.date)}</span><strong>{c.recurring.name}</strong><span>{won(c.amount)}</span></button>)}
-    {!summary.entries.length && !summary.pastCharges.length && <p className="ledger-empty">기록 없음</p>}
+    {!summary.entries.length && !summary.pastCharges.length && <EmptyState inline className="ledger-empty" title="기록 없음" />}
     <Button size="sm" variant="quiet" onClick={() => openSheet({ kind: 'entry', draft: {} })}>기록</Button>
   </>;
   return <div className="ledger-view">

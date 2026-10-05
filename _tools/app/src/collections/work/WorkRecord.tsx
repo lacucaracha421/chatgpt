@@ -26,11 +26,11 @@ export function platformOptions(platforms: string | null | undefined, owned: str
 }
 export function RecordStars({ score, onChange, disabled = false }: { score: number | null; onChange?(score: number | null): void; disabled?: boolean }) {
   // Stars are the personal rating control; a half already stored remains visible.
-  return <span className="work-stars" role={onChange ? "group" : "img"} aria-label={`별점 ${score ?? "미평가"}`}>
+  return <span className="work-stars" role={onChange ? "group" : "img"} aria-label={`내 별점 ${score ?? "미평가"}`}>
     {[1, 2, 3, 4, 5].map(value => {
       const star = <><StarIcon aria-hidden="true" /><span style={{ width: `${Math.max(0, Math.min(1, (score ?? 0) - value + 1)) * 100}%` }}><StarIcon aria-hidden="true" /></span></>;
       const current = score !== null && score > 0 && Math.ceil(score) === value;
-      return onChange ? <button className="work-star" key={value} type="button" disabled={disabled} aria-label={`별점 ${value}점`} aria-description={current ? `현재 ${score}점, 다시 누르면 해제` : undefined} aria-pressed={current} onClick={() => onChange(current ? null : value)}>{star}</button> : <span className="work-star" key={value}>{star}</span>;
+      return onChange ? <button className="work-star" key={value} type="button" disabled={disabled} aria-label={`내 별점 ${value}점`} aria-description={current ? `현재 ${score}점, 다시 누르면 해제` : undefined} aria-pressed={current} onClick={() => onChange(current ? null : value)}>{star}</button> : <span className="work-star" key={value}>{star}</span>;
     })}
   </span>;
 }
@@ -107,7 +107,7 @@ export function WorkRecordEditor({ collection, record, onSave }: { collection: C
   return <section className="work-record"><SectionLabel title="내 기록" /><dl>
     <div><dt>들인 날</dt><dd>{displayDate(collection.createdAt)}</dd></div>
     <div><dt>상태</dt><dd><Menu label="상태" triggerClassName="work-record-menu" disabled={busy} trigger={<>{statusLabel(collection.type, draft.status)}<ChevronDownIcon /></>} items={[["", "미입력"], ...(recordStates[collection.type] ?? [])].map(([id, label]) => ({ id, label, group: "status", selected: (draft.status ?? "") === id, onSelect: () => { setDraft(current => ({ ...current, status: id || null })); save({ field: "status", value: id || null }); } }))} /></dd></div>
-    <div><dt>별점</dt><dd><RecordStars score={draft.myScore} disabled={busy} onChange={value => { setDraft(current => ({ ...current, myScore: value })); save({ field: "myScore", value }); }} /></dd></div>
+    <div><dt>내 별점</dt><dd><RecordStars score={draft.myScore} disabled={busy} onChange={value => { setDraft(current => ({ ...current, myScore: value })); save({ field: "myScore", value }); }} /></dd></div>
     {collection.type === "game" && <div><dt>기기</dt><dd><Menu label="소유 기기" disabled={busy} triggerClassName="work-record-menu" trigger={<>{draft.ownedPlatform ?? "미입력"}<ChevronDownIcon /></>} items={["", ...platforms].map(value => ({ id: value, label: value || "미입력", group: "platform", selected: (draft.ownedPlatform ?? "") === value, onSelect: () => { setDraft(current => ({ ...current, ownedPlatform: value || null })); save({ field: "ownedPlatform", value: value || null }); } }))} /></dd></div>}
     <div><dt>메모</dt><dd><TextInput aria-label="메모" className="work-record-memo" placeholder="메모 남기기" value={draft.memo ?? ""} onChange={event => editMemo(event.target.value)} onBlur={() => { if (timer.current) { clearTimeout(timer.current); timer.current = null; save({ field: "memo", value: memoValue.current || null }); } }} /></dd></div>
   </dl>{feedback && <Toast tone={feedback.failed ? "error" : "status"} onDismiss={() => setFeedback(null)} actionLabel={feedback.failed ? "다시 시도" : undefined} onAction={feedback.failed ? () => { if (retry.current) save(retry.current); } : undefined}>{feedback.message}</Toast>}</section>;

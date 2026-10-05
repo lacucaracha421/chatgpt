@@ -1,5 +1,4 @@
 import { Component, type ReactNode, type RefObject } from 'react';
-import { contentCross, EASE_STANDARD, reducedMotion } from '../shared/motion/curves';
 import { READY_CAP_MS } from '../shared/motion/AreaSwitch';
 import { IMAGE_READY_CAP_MS, revealTogether, waitForViewportImages } from '../shared/motion/viewportImages';
 
@@ -16,26 +15,7 @@ export function folderMoveScope(scopeKey?: string) {
   return scopeKey;
 }
 
-/** Shared folder/shelf entrance; sibling navigation moves forward. */
-export function folderMoveEntrance(element: HTMLElement, back = false) {
-  if (typeof element.animate !== 'function') return null;
-  const reduced = reducedMotion();
-  return element.animate(
-    reduced ? [{opacity: 0}, {opacity: 1}] : [{opacity: 0, transform: `translateX(${back ? -16 : 16}px)`}, {opacity: 1, transform: 'none'}],
-    {duration: reduced ? contentCross.reduced : contentCross.enter, easing: EASE_STANDARD},
-  );
-}
-
-export function folderMoveExit(element: HTMLElement) {
-  if (typeof element.animate !== 'function') return null;
-  return element.animate([{opacity: 1}, {opacity: 0}],
-    {duration: reducedMotion() ? contentCross.reduced : contentCross.exit, easing: EASE_STANDARD, fill: 'forwards'});
-}
-
-type Props = { scope?: string; queryKey?: string; visible: boolean; privacyKey: string; count: number; path?: readonly string[]; host: RefObject<HTMLDivElement | null>; children: ReactNode;
-  /** The host's child that holds the tiles (the tablet gallery names its own). */
-  space?: string };
-const VIRTUAL_SPACE = '.asset-gallery__virtual-space';
+type Props = { scope?: string; queryKey?: string; visible: boolean; privacyKey: string; count: number; host: RefObject<HTMLDivElement | null>; children: ReactNode };
 const interactionEvents = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;
 
 function visibleCells(host: HTMLElement) {
@@ -44,15 +24,17 @@ function visibleCells(host: HTMLElement) {
     .filter(({rect}) => rect.width > 0 && rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom && rect.right > viewport.left && rect.left < viewport.right);
 }
 
-/** A pre-mutation snapshot is needed: layout-effect cleanup already sees replaced tiles. */
+/**
+ * Folder to folder: the old folder's decoded images stay painted while the new tiles wait hidden for
+ * their first viewport (capped), then the new folder appears in one step with no animation (user
+ * 2026-10-05). A pre-mutation snapshot is needed: layout-effect cleanup already sees replaced tiles.
+ */
 export class FolderMove extends Component<Props> {
   private layer: HTMLDivElement | null = null;
-  private animations: Animation[] = [];
   private frame = 0;
   private timer = 0;
   private generation = 0;
   private scrollTop = 0;
-  private query: MediaQueryList | undefined;
   private stopImages: (() => void) | undefined;
   /** Releases first-screen tiles still loading at the cap; they appear together, not one by one. */
   private releaseLate: (() => void) | undefined;
@@ -60,7 +42,7 @@ export class FolderMove extends Component<Props> {
   getSnapshotBeforeUpdate(previous: Props) {
     if (!previous.visible || !this.props.visible || previous.scope === undefined || previous.scope === this.props.scope || previous.privacyKey !== this.props.privacyKey) return null;
     const host = this.props.host.current;
-    if (!host || !this.props.count || typeof host.animate !== 'function') return null;
+    if (!host || !this.props.count) return null;
     if (this.layer) return this.layer;
     const viewport = host.getBoundingClientRect();
     const layer = document.createElement('div');
@@ -94,8 +76,6 @@ export class FolderMove extends Component<Props> {
     this.positionSnapshot();
     for (const event of interactionEvents) host.addEventListener(event, this.finish, {capture: true, passive: true});
     host.addEventListener('scroll', this.onScroll);
-    this.query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    this.query?.addEventListener?.('change', this.finish);
     const generation = this.generation;
     this.timer = window.setTimeout(this.finish, READY_CAP_MS);
     // Let scope scroll restoration and virtual row measurement settle before choosing the batch.
@@ -104,25 +84,9 @@ export class FolderMove extends Component<Props> {
       this.positionSnapshot();
       const cells = visibleCells(host);
       if (!cells.length) { this.finish(); return; }
-      this.stopImages = waitForViewportImages(host, () => {
-        if (generation !== this.generation) return;
-        if (cells.some(({cell}) => !cell.isConnected)) { this.finish(); return; }
-        this.frame = window.requestAnimationFrame(() => {
-          this.frame = 0;
-          const space = host.querySelector<HTMLElement>(this.props.space ?? VIRTUAL_SPACE);
-          if (!space) { this.finish(); return; }
-          const reduced = reducedMotion(), duration = reduced ? contentCross.reduced : contentCross.enter;
-          const back = previous.path && this.props.path && this.props.path.length < previous.path.length
-            && this.props.path.every((id, index) => previous.path![index] === id);
-          space.style.willChange = 'transform, opacity';
-          this.animations = [folderMoveEntrance(space, Boolean(back))!, folderMoveExit(snapshot)!];
-          host.dataset.folderMove = 'running';
-          this.animations[0].onfinish = this.finish;
-          window.clearTimeout(this.timer);
-          this.timer = window.setTimeout(this.finish, duration);
-        });
-      }, IMAGE_READY_CAP_MS, late => {
-        // Hold late tiles past the entrance until the whole batch is ready (within the fail-safe).
+      // Ready: drop the old images and unhide the new tiles together, in one step.
+      this.stopImages = waitForViewportImages(host, () => { if (generation === this.generation) this.finish(); }, IMAGE_READY_CAP_MS, late => {
+        // Hold late tiles past the swap until the whole batch is ready (within the fail-safe).
         this.releaseLate?.();
         this.releaseLate = revealTogether(late, READY_CAP_MS - IMAGE_READY_CAP_MS);
       });
@@ -140,18 +104,13 @@ export class FolderMove extends Component<Props> {
     this.stopImages?.(); this.stopImages = undefined;
     window.cancelAnimationFrame(this.frame); window.clearTimeout(this.timer);
     this.frame = 0; this.timer = 0;
-    for (const animation of this.animations) { animation.onfinish = null; animation.cancel(); }
-    this.animations = [];
     this.layer?.remove(); this.layer = null;
     const host = this.props.host.current;
     if (host) {
       delete host.dataset.folderMove;
-      const space = host.querySelector<HTMLElement>(this.props.space ?? VIRTUAL_SPACE);
-      if (space) space.style.willChange = '';
       for (const event of interactionEvents) host.removeEventListener(event, this.finish, true);
       host.removeEventListener('scroll', this.onScroll);
     }
-    this.query?.removeEventListener?.('change', this.finish);
   };
   componentWillUnmount() { this.finish(); this.releaseLate?.(); }
   render() { return this.props.children; }

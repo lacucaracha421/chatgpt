@@ -21,7 +21,7 @@ it("pops the PC viewer heart from a click and the F shortcut, never on open or w
   rerender(<AssetViewer items={items} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} onToggleFavorite={onToggleFavorite} />);
   expect(pop.popToggle).not.toHaveBeenCalled();
 
-  const heart = screen.getByRole("button", { name: "좋아요 취소" });
+  const heart = screen.getByRole("button", { name: "좋아요", pressed: true });
   expect(heart).toHaveAttribute("data-toggle-key", "b");
   fireEvent.click(heart);
   expect(pop.popToggle).toHaveBeenLastCalledWith(heart, false);

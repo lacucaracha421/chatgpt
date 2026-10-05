@@ -1,4 +1,5 @@
 import type { ReleaseWatchEvent } from "../library/types";
+import { displayDate } from "../shared/displayDate";
 
 export function ReleaseWatchSummary({ events }: { events: ReleaseWatchEvent[] }) {
   if (events.length === 0) return null;
@@ -33,11 +34,11 @@ function summaryLines(events: ReleaseWatchEvent[]) {
 }
 
 function dateValue(value: string | null) {
-  return value ?? "알 수 없음";
+  return value ? displayDate(value) : "알 수 없음";
 }
 
 function statusValue(value: string | null) {
   if (value === "upcoming") return "출간 예정";
   if (value === "released") return "출간됨";
-  return value ?? "알 수 없음";
+  return value ? displayDate(value) : "알 수 없음";
 }

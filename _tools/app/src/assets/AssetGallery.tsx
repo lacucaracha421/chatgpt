@@ -46,6 +46,7 @@ type AssetGalleryProps = {
   scopeKey?: string;
   /** Navigation identity shared by segments that preserve the same shelf/scroll position. */
   navigationScopeKey?: string;
+  /** Unused since folder moves stopped animating (user 2026-10-05); remove together with its callers. */
   folderPath?: readonly string[];
   infoOpen?: boolean;
   favoritesView?: boolean;
@@ -85,16 +86,21 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, folderPath, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const masked = useAssetMasks();
   void _metadataVisible;
   const sourceAssets = useMemo(() => new Map(items.map(asset => [asset.id, asset])), [items]);
+  // Chromium counts a double click by time and position, not by element: when the first click opens a
+  // folder or character card and a tile then appears under the pointer, the second click fires dblclick
+  // on that tile. A tile opens on a double click only when both presses landed on it (one click never opens).
+  const clickSequence = useRef({ firstId: null as string | null, strayed: false });
   const tileEvents = {
     onToggleFavorite: useGalleryEvent(onToggleFavorite),
     onRetryVideo: useGalleryEvent(onRetryVideo),
     onSelectionGesture: useGalleryEvent(onSelectionGesture),
     onFocusAsset: useGalleryEvent(onFocusAsset),
     onOpen: useGalleryEvent(onOpen),
+    onDoubleOpen: useGalleryEvent(onOpen ? (asset: AssetSummary) => { if (!clickSequence.current.strayed) onOpen(asset); } : undefined),
     onPointerDragStart: useGalleryEvent(onPointerDragStart ? (id: string, event: React.PointerEvent<HTMLElement>) => {
       onPointerDragStart({ kind: "assets", assetIds: assetDragIds(id, selectedAssetIds) }, event);
     } : undefined),
@@ -391,11 +397,16 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const visitScope = useRef(folderScope);
   if (!areaVisible || visitScope.current === undefined) visitScope.current = folderScope;
   useFirstAppearance(scrollRef, items.length, visitScope.current === folderScope, `asset-gallery:${mediaSource}`);
-  return <FolderMove path={folderPath} scope={folderScope} queryKey={scopeKey} visible={areaVisible} privacyKey={`${privacyMode || contextPrivacy}:${nsfwFilter}:${mediaSource}`} count={items.length} host={scrollRef}><div className={`asset-gallery asset-gallery--${layout}`} data-per-row={perRow}>
+  return <FolderMove scope={folderScope} queryKey={scopeKey} visible={areaVisible} privacyKey={`${privacyMode || contextPrivacy}:${nsfwFilter}:${mediaSource}`} count={items.length} host={scrollRef}><div className={`asset-gallery asset-gallery--${layout}`} data-per-row={perRow}>
     <div
       ref={scrollRef}
       className="asset-gallery__scroll"
       tabIndex={0}
+      onMouseDownCapture={(event) => {
+        const id = (event.target as HTMLElement).closest?.<HTMLElement>(".asset-gallery__asset")?.dataset.assetId ?? null;
+        if (event.detail <= 1) clickSequence.current = { firstId: id, strayed: false };
+        else if (id === null || id !== clickSequence.current.firstId) clickSequence.current.strayed = true;
+      }}
       role={intro ? undefined : "listbox"}
       aria-label={intro ? undefined : "자산"}
       aria-multiselectable={intro ? undefined : true}
@@ -483,7 +494,7 @@ function isTextEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favoritesView, onToggleFavorite, height, selected, hasSelection, focused, focusVisible, captionLabel, privacyMode: requestedPrivacy, thumbnailCacheKey, mediaSource, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onFocusAsset, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; width: number; favoritesView: boolean; onToggleFavorite?: (asset: AssetSummary) => void; height: number; selected: boolean; hasSelection: boolean; focused: boolean; focusVisible: boolean; captionLabel?: string | null; privacyMode: boolean; thumbnailCacheKey?: string | number; mediaSource: "library" | "vault"; activePreview: boolean; onRequestPreview(id: string): void; onReleasePreview(id: string): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onFocusAsset?: (asset: AssetSummary, preserveSelection?: boolean) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: (id: string, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
+const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favoritesView, onToggleFavorite, height, selected, hasSelection, focused, focusVisible, captionLabel, privacyMode: requestedPrivacy, thumbnailCacheKey, mediaSource, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onFocusAsset, onOpen, onDoubleOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; width: number; favoritesView: boolean; onToggleFavorite?: (asset: AssetSummary) => void; height: number; selected: boolean; hasSelection: boolean; focused: boolean; focusVisible: boolean; captionLabel?: string | null; privacyMode: boolean; thumbnailCacheKey?: string | number; mediaSource: "library" | "vault"; activePreview: boolean; onRequestPreview(id: string): void; onReleasePreview(id: string): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onFocusAsset?: (asset: AssetSummary, preserveSelection?: boolean) => void; onOpen?: (asset: AssetSummary) => void; onDoubleOpen?: (asset: AssetSummary) => void; onPointerDragStart?: (id: string, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
   const masked = useAssetMasks();
   const privacyMode = masked(sourceAsset, requestedPrivacy);
   // Preserve the existing display-width asset passed to media and action handlers.
@@ -492,7 +503,7 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
   const creatorKey = asset.creatorHandle?.replace(/^@+/, "") || asset.creatorUrl || "";
   // A caption the view supplies (the artist's own name on an artist page) wins over the account handle.
   const metadataLabel = (captionLabel ?? (creatorKey ? artistHandle({ keys: [creatorKey] }) : asset.creatorName?.trim())) ?? "";
-  return <div role="option" data-asset-id={asset.id} data-focused={focusVisible ? "true" : undefined} className="asset-gallery__asset ui-selectable-media" style={{ width: asset.width, height }} aria-label={alt} aria-description={[metadataLabel, collectedDate(asset.collectedAt).full].filter(Boolean).join(" · ")} aria-selected={selected} tabIndex={focused ? 0 : -1} onFocus={event => { if (event.target === event.currentTarget) onFocusAsset?.(asset, true); }} onClick={(event) => { const gesture = { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }; if (onFocusAsset && !gesture.toggle && !gesture.range) onFocusAsset(asset); else onSelectionGesture?.(asset, gesture); }} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.(asset.id, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
+  return <div role="option" data-asset-id={asset.id} data-focused={focusVisible ? "true" : undefined} className="asset-gallery__asset ui-selectable-media" style={{ width: asset.width, height }} aria-label={alt} aria-description={[metadataLabel, collectedDate(asset.collectedAt).full].filter(Boolean).join(" · ")} aria-selected={selected} tabIndex={focused ? 0 : -1} onFocus={event => { if (event.target === event.currentTarget) onFocusAsset?.(asset, true); }} onClick={(event) => { const gesture = { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }; if (onFocusAsset && !gesture.toggle && !gesture.range) onFocusAsset(asset); else onSelectionGesture?.(asset, gesture); }} onDoubleClick={() => onDoubleOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.(asset.id, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
     <div className="asset-gallery__image" style={{ height }}>
     {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileHasThumbnail(asset, mediaSource) ? tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource) : null} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <StableImage src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
     {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}

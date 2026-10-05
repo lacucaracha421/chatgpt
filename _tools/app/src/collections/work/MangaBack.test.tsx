@@ -1,3 +1,4 @@
+import { displayDate } from "../../shared/displayDate";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { coverAverageColor, MangaBack, MANGA_BACK_COLOR } from "./MangaBack";
@@ -9,7 +10,7 @@ describe("generated manga back", () => {
     const { container } = render(<MangaBack {...props} isbn13="9780306406157" contents="Volume synopsis" localReleaseDate="2026-10-04" publisher="Publisher" price={12000} />);
     expect(container).toHaveTextContent("Series 12");
     expect(container).toHaveTextContent("Volume synopsis");
-    expect(container).toHaveTextContent("Publisher2026-10-04");
+    expect(container).toHaveTextContent(`Publisher${displayDate("2026-10-04")}`);
     expect(container).toHaveTextContent("ISBN 9780306406157");
     expect(container).toHaveTextContent("값 12,000원");
     expect(container.querySelector("svg")).toHaveAttribute("viewBox", "0 0 113 32");
@@ -21,7 +22,7 @@ describe("generated manga back", () => {
     expect(container.querySelector(".manga-back-synopsis")).toBeNull();
     rerender(<MangaBack {...props} isbn13="9780306406157" localReleaseDate="2026-10-04" contents="  " price={0} />);
     expect(container.querySelector("svg")).not.toBeNull();
-    expect(container).toHaveTextContent("2026-10-04");
+    expect(container).toHaveTextContent(displayDate("2026-10-04"));
     expect(container.querySelector(".manga-back-price")).toBeNull();
     expect(container.querySelector(".manga-back-synopsis")).toBeNull();
     rerender(<MangaBack {...props} isbn13="9780306406158" price={NaN} />);

@@ -1,3 +1,4 @@
+import {EmptyState} from './ui';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useEffect,useRef,useState} from 'react';
@@ -72,5 +73,5 @@ export function Albums({tree,paused,revision,onSelect,query='',parentId}:{tree:A
   return <div ref={element=>{host.current=element;return stripWheel(parentId&&!search?element:null);}} className={search?'library-results':parentId?'library-children':'library-folder-grid'}>{items.map(album=>search
     ? <AlbumResult key={album.id} album={album} path={albumAncestors(tree.albums,album.id).map(parent=>parent.name).join(' › ')||'최상위'} items={covers[album.id]??[]} paused={paused} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))}/>
     : <FolderCard key={album.id} id={album.id} name={album.name} count={album.assetCount} items={covers[album.id]??[]} paused={paused} childrenLabel={tree.albums.some(child=>child.parentId===album.id&&child.id!==album.id)?`하위 앨범 ${tree.albums.filter(child=>child.parentId===album.id&&child.id!==album.id).length}`:undefined} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))}/>
-  )}{search&&!items.length&&<p className="hint">일치하는 앨범이 없습니다.</p>}</div>;
+  )}{search&&!items.length&&<EmptyState inline title="검색 결과 없음" />}</div>;
 }

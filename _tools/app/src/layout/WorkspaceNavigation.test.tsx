@@ -377,7 +377,7 @@ it("never offers asset text search in the palette", async () => {
   await user.click(screen.getByRole("button", { name: "찾기" }));
   await user.type(screen.getByRole("combobox"), "sunset");
   expect(screen.queryAllByRole("option")).toHaveLength(0);
-  expect(screen.getByText("일치하는 이름이 없습니다.")).toBeVisible();
+  expect(screen.getByText("검색 결과 없음")).toBeVisible();
   expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", "작품, 작가, 메모, 폴더 찾기");
   expect(screen.queryByText("이 화면은 검색이 없어 이름으로 이동만 합니다")).not.toBeInTheDocument();
 });

@@ -85,26 +85,26 @@ describe('character exclusion confirmation',()=>{
       character={character as never} onCharacterExcluded={excluded}/>);
     return {view,excluded};
   };
-  const open=()=>fireEvent.click(screen.getByRole('button',{name:'Lumi에서 제외'}));
+  const open=()=>fireEvent.click(screen.getByRole('button',{name:'Lumi에서 빼기'}));
 
   it('offers the action only from a character origin and names that character',()=>{
     const {view}=renderViewer();
-    expect(screen.getByRole('button',{name:'Lumi에서 제외'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'Lumi에서 빼기'})).toBeTruthy();
     expect(screen.queryByRole('button',{name:'캐릭터에 추가'})).toBeNull();
     view.rerender(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}} endpoint={endpoint}/>);
-    expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/에서 빼기/})).toBeNull();
   });
   it('withholds the action without a configured endpoint',()=>{
     renderViewer(undefined,vi.fn(),'');
-    expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/에서 빼기/})).toBeNull();
   });
   it('withholds the action for one of the character\'s own reference assets',()=>{
     renderViewer({...viewerCharacterContext(node('character:c'),index),protectedAssetIds:['asset-1']});
-    expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/에서 빼기/})).toBeNull();
   });
   it('says the file, folder and other characters are untouched, and sends nothing until confirmed',async()=>{
     renderViewer();open();
-    const dialog=await screen.findByRole('dialog',{name:'Lumi에서 제외'});
+    const dialog=await screen.findByRole('dialog',{name:'Lumi에서 빼기'});
     expect(dialog.textContent).toContain('파일은 삭제되지 않고 폴더도 그대로 남습니다.');
     expect(dialog.textContent).toContain('다른 캐릭터에는 영향이 없습니다.');
     expect(mocks.api).not.toHaveBeenCalled();
@@ -121,14 +121,14 @@ describe('character exclusion confirmation',()=>{
     let consumed=false;
     act(()=>{consumed=backRef.current?.()??false;});
     expect(consumed).toBe(true);
-    expect(screen.queryByRole('dialog',{name:'Lumi에서 제외'})).toBeNull();
+    expect(screen.queryByRole('dialog',{name:'Lumi에서 빼기'})).toBeNull();
     expect(screen.getByRole('dialog',{name:'미디어 감상'})).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(false);});
   });
   it('sends the agreed body and reports success only after a matching receipt',async()=>{
     echoReceipt();
     const {excluded}=renderViewer();
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await waitFor(()=>expect(excluded).toHaveBeenCalledTimes(1));
     const sent=bodies()[0];
     expect(mocks.api.mock.calls[0][0]).toBe('/v1/library/characters/exclusions');
@@ -146,7 +146,7 @@ describe('character exclusion confirmation',()=>{
       localStorage.clear();mocks.api.mockReset();
       mocks.api.mockImplementation(async()=>receipt(bad as never));
       const {view,excluded}=renderViewer();
-      open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+      open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
       await screen.findByRole('alert');
       expect(excluded).not.toHaveBeenCalled();
       // The pending operation survives a reply that was not this operation's receipt.
@@ -157,12 +157,12 @@ describe('character exclusion confirmation',()=>{
   it('keeps the asset and the exact body on a transport failure',async()=>{
     mocks.api.mockImplementation(async()=>{throw new Error('연결 실패');});
     const {excluded}=renderViewer();
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await screen.findByText('연결 실패');
     expect(excluded).not.toHaveBeenCalled();
     const first=stored('asset-1');
     expect(first).toMatchObject({assetId:'asset-1'});
-    fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(2));
     expect(bodies()[1]).toEqual(bodies()[0]);
     expect(stored('asset-1')).toEqual(first);
@@ -173,7 +173,7 @@ describe('character exclusion confirmation',()=>{
   it('replays the exact stored body after close and reopen with an advanced revision',async()=>{
     mocks.api.mockImplementation(async()=>{throw new Error('연결 실패');});
     const {view}=renderViewer();
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await screen.findByText('연결 실패');
     const original=stored('asset-1');
     expect(original.operationId).toMatch(/^[a-f0-9-]{36}$/);
@@ -189,7 +189,7 @@ describe('character exclusion confirmation',()=>{
     const excluded=vi.fn();
     view.rerender(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}} endpoint={endpoint}
       character={viewerCharacterContext(node('character:c'),{...index,revision:advanced})} onCharacterExcluded={excluded}/>);
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await waitFor(()=>expect(excluded).toHaveBeenCalledTimes(1));
     const sent=bodies()[0];
     // The exact stored body is resent: same operation id AND the old revision, because the
@@ -204,16 +204,16 @@ describe('character exclusion confirmation',()=>{
   it('does not replay one asset\'s pending operation for another asset',async()=>{
     mocks.api.mockImplementation(async()=>{throw new Error('연결 실패');});
     const {view,excluded}=renderViewer();
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await screen.findByText('연결 실패');
     const first=stored('asset-1');
     const character=viewerCharacterContext(node('character:c'),index);
     view.rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}} endpoint={endpoint} character={character} onCharacterExcluded={excluded}/>);
-    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Lumi에서 제외'})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Lumi에서 빼기'})).toBeNull());
     // The first asset's operation is still pending under its own key, untouched.
     expect(stored('asset-1')).toEqual(first);
     expect(stored('asset-2')).toBeNull();
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(2));
     const [sentFirst,sentSecond]=bodies();
     expect(sentSecond.assetId).toBe('asset-2');
@@ -229,7 +229,7 @@ describe('character exclusion confirmation',()=>{
     mocks.api.mockImplementation((_path:string,_signal:AbortSignal,body:unknown)=>
       new Promise(resolve=>{release=()=>resolve(receipt({operationId:(body as {operationId:string}).operationId}));}));
     const {view,excluded}=renderViewer(undefined,vi.fn(),other);
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(1));
     const pendingAtOther=stored('asset-1',other);
     expect(pendingAtOther).not.toBeNull();
@@ -251,7 +251,7 @@ describe('character exclusion confirmation',()=>{
     mocks.api.mockImplementation((_path:string,_signal:AbortSignal,body:unknown)=>
       new Promise(resolve=>{release=()=>resolve(receipt({operationId:(body as {operationId:string}).operationId}));}));
     const {view,excluded}=renderViewer();
-    open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(1));
     view.unmount();
     await act(async()=>release(undefined));
@@ -271,7 +271,7 @@ describe('character exclusion confirmation',()=>{
       localStorage.clear();mocks.api.mockReset();
       mocks.api.mockImplementation(async()=>{throw new ApiError('서버가 요청을 거부했습니다.',409,{detail:{code}});});
       const {view,excluded}=renderViewer();
-      open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+      open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
       await screen.findByText(expected);
       expect(excluded).not.toHaveBeenCalled();
       // Nothing was accepted, so the operation is retired rather than left to resend.
@@ -282,13 +282,13 @@ describe('character exclusion confirmation',()=>{
   it('reads a coded reason from the rejection body root as well as its detail object',async()=>{
     // The native bridge passes the parsed body as `details`, so a flat `code` must also work.
     mocks.api.mockImplementation(async()=>{throw new ApiError('거부',409,{code:'libraryMismatch'});});
-    renderViewer();open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    renderViewer();open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await screen.findByText(/다른 라이브러리/);
     expect(stored('asset-1')).toBeNull();
   });
   it('keeps the pending operation for an uncoded failure',async()=>{
     mocks.api.mockImplementation(async()=>{throw new ApiError('서버가 요청을 처리하지 못했습니다.',500,{detail:{code:'somethingNew'}});});
-    renderViewer();open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+    renderViewer();open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
     await screen.findByText(/서버가 요청을 처리하지 못했습니다/);
     // An unrecognized failure proves nothing about acceptance, so the retry identity stays.
     expect(stored('asset-1')).not.toBeNull();
@@ -296,7 +296,7 @@ describe('character exclusion confirmation',()=>{
   it('does not send when the pending operation cannot be stored durably',async()=>{
     const setItem=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('quota');});
     try{
-      renderViewer();open();fireEvent.click(screen.getByRole('button',{name:'제외'}));
+      renderViewer();open();fireEvent.click(screen.getByRole('button',{name:'빼기'}));
       await screen.findByText(/안전하게 보관할 수 없습니다/);
       expect(mocks.api).not.toHaveBeenCalled();
     }finally{setItem.mockRestore();}
@@ -319,12 +319,12 @@ describe('character exclusion refresh',()=>{
     render(<CharacterBrowser {...props}/>);
     fireEvent.click(await screen.findByRole('button',{name:'Series · 2장'}));
     // The action is viewer-only: no gallery offers it from its own header.
-    expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/에서 빼기/})).toBeNull();
     fireEvent.click(await screen.findByRole('button',{name:'Group · 2장'}));
-    expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/에서 빼기/})).toBeNull();
     fireEvent.click(await screen.findByRole('button',{name:'Lumi · 2장'}));
     await screen.findByText('asset-1');
-    expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/에서 빼기/})).toBeNull();
     fireEvent.click(screen.getByText('asset-1'));
     await waitFor(()=>expect(onOpen).toHaveBeenCalled());
     expect(onOpen.mock.calls[0][2]).toMatchObject({targetId:'char-77',libraryId,revision});

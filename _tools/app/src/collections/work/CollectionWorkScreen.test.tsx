@@ -201,9 +201,9 @@ describe("merged work screen", () => {
     const { actions, container } = view(); const user = userEvent.setup();
     expect(container.querySelectorAll('.work-stars button > span')[3]).toHaveStyle({width:"50%"});
     expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button",{name:"저장"})).toBeNull();
-    await user.click(screen.getByRole("button", {name:"별점 5점"}));
+    await user.click(screen.getByRole("button", {name:"내 별점 5점"}));
     expect(actions.onSave).toHaveBeenCalledWith(fixtureWork,{field:"myScore",value:5});
-    await user.click(screen.getByRole("button", {name:"별점 5점"}));
+    await user.click(screen.getByRole("button", {name:"내 별점 5점"}));
     expect(actions.onSave).toHaveBeenLastCalledWith(fixtureWork,{field:"myScore",value:null});
     await user.click(screen.getByRole("button",{name:"상태"}));
     await user.click(screen.getByRole("menuitemradio",{name:"하는 중"}));
@@ -288,12 +288,12 @@ it.each(["game", "av", "movie"] as const)("prints the %s booklet record and fact
   const booklet = container.querySelector<HTMLElement>(".case-booklet")!;
   expect(booklet.querySelectorAll(".case-status-box").length).toBeGreaterThan(0);
   expect(booklet.querySelector(".case-status-box.is-filled")).toBeNull();
-  expect(within(booklet).getByRole("img", { name: "별점 3.5" })).toBeInTheDocument();
+  expect(within(booklet).getByRole("img", { name: "내 별점 3.5" })).toBeInTheDocument();
   if (type === "av") {
     expect(booklet).toHaveTextContent("ABC-123메이커");
     expect([...booklet.querySelectorAll("dt")].map(node => node.textContent)).toEqual(["레이블", "발매", "수록"]);
   } else {
-    expect([...booklet.querySelectorAll("dt")].map(node => node.textContent)).toEqual(type === "game" ? ["상태", "별점", "기기"] : ["상태", "별점"]);
+    expect([...booklet.querySelectorAll("dt")].map(node => node.textContent)).toEqual(type === "game" ? ["상태", "내 별점", "기기"] : ["상태", "내 별점"]);
     expect(booklet.querySelector(".case-manual-footer")).toHaveTextContent(type === "game" ? "개발사 · 배급사" : "감독 이름");
     if (type === "game") expect(booklet).toHaveTextContent(data.record.ownedPlatform);
   }

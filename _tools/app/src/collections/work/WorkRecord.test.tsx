@@ -11,7 +11,7 @@ describe("auto-saving personal record", () => {
   it("preserves a stored half and clears it when its selected star is clicked", async () => {
     const save = vi.fn().mockResolvedValue({ ...record, myScore: null });
     const { container } = render(<WorkRecordEditor collection={work} record={record} onSave={save} />);
-    const current = screen.getByRole("button", { name: "별점 4점" });
+    const current = screen.getByRole("button", { name: "내 별점 4점" });
     expect(current).toHaveAttribute("aria-pressed", "true");
     expect(container.querySelectorAll('.work-stars button > span')[3]).toHaveStyle({ width: "50%" });
     expect(save).not.toHaveBeenCalled();
@@ -21,9 +21,9 @@ describe("auto-saving personal record", () => {
   it("restores a failed edit with shared error feedback and retries the exact field", async () => {
     const save = vi.fn().mockRejectedValueOnce(new Error("save failed")).mockResolvedValue({ ...record, myScore: 5 });
     render(<WorkRecordEditor collection={work} record={record} onSave={save} />);
-    await userEvent.click(screen.getByRole("button", {name:"별점 5점"}));
+    await userEvent.click(screen.getByRole("button", {name: "내 별점 5점"}));
     expect(await screen.findByRole("alert")).toHaveTextContent("save failed");
-    expect(screen.getByRole("button", {name:"별점 4점"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {name: "내 별점 4점"})).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(screen.getByRole("button", {name:"다시 시도"}));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save).toHaveBeenLastCalledWith({field:"myScore",value:5});
@@ -57,7 +57,7 @@ describe("auto-saving personal record", () => {
     if (field === "status" || field === "ownedPlatform") {
       await userEvent.click(screen.getByRole("button", { name: field === "status" ? "상태" : "소유 기기" }));
       await userEvent.click(screen.getByRole("menuitemradio", { name: field === "status" ? "다 함" : "PC" }));
-    } else if (field === "myScore") await userEvent.click(screen.getByRole("button", { name: "별점 5점" }));
+    } else if (field === "myScore") await userEvent.click(screen.getByRole("button", { name: "내 별점 5점" }));
     else {
       const memo = screen.getByRole("textbox", { name: "메모" });
       fireEvent.change(memo, { target: { value: "new memo" } }); fireEvent.blur(memo);
@@ -67,7 +67,7 @@ describe("auto-saving personal record", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("저장 실패");
     expect(screen.getByRole("button", { name: "상태" })).toHaveTextContent("하는 중");
     expect(screen.getByRole("button", { name: "소유 기기" })).toHaveTextContent("Switch 2");
-    expect(screen.getByRole("button", { name: "별점 4점" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "내 별점 4점" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("textbox", { name: "메모" })).toHaveValue("kept");
   });
   it("saves the owned platform from a quiet menu and limits labels by work type", async () => {

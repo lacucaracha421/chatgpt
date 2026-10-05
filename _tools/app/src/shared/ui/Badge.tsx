@@ -1,6 +1,11 @@
 import type { ComponentType, HTMLAttributes, ReactNode, SVGProps } from "react";
+import { displayCount } from "../displayDate";
 
-type BadgeVariant = "plain" | "accent" | "danger" | "count" | "scrim";
+/**
+ * plain · accent (NEW) · danger · count (a number on a tab, row or menu) ·
+ * scrim (over media: video length, `+15`, page counts) · corner (a count pinned to an icon's corner).
+ */
+type BadgeVariant = "plain" | "accent" | "danger" | "count" | "scrim" | "corner";
 type BadgeIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
 type BadgeBaseProps = Omit<HTMLAttributes<HTMLSpanElement>, "aria-label" | "children" | "className" | "role"> & {
@@ -23,4 +28,19 @@ export function Badge({ children, className, icon: Icon, variant = "plain", ...p
       {children}
     </span>
   );
+}
+
+type CountBadgeProps = Omit<BadgeBaseProps, "variant"> & {
+  value: number;
+  /** Above this the badge reads `99+`; omit to show every count. */
+  max?: number;
+  unit?: string;
+  variant?: "count" | "corner" | "scrim" | "accent";
+  "aria-label"?: string;
+};
+
+/** A number badge: tabular figures, thousands separators, optional `99+` cap. */
+export function CountBadge({ value, max, unit, variant = "count", ...props }: CountBadgeProps) {
+  const text = max !== undefined && value > max ? `${displayCount(max)}+` : displayCount(value, unit);
+  return <Badge {...props} variant={variant}>{text}</Badge>;
 }

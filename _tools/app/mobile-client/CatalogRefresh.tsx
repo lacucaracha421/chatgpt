@@ -1,6 +1,7 @@
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useVisibleInterval} from './useVisibleInterval';
 import {useEffect, useRef, useState} from 'react';
+import {displayDateTime} from '../src/shared/displayDate';
 import {ArrowPathIcon, CloudArrowDownIcon} from '@heroicons/react/24/outline';
 import {IconButton} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -71,15 +72,11 @@ export function useCatalogRefresh({supported=false, active, language, publicatio
 }
 export type CatalogRefreshState = ReturnType<typeof useCatalogRefresh>;
 
-/** Elapsed time since the catalog was last published, for the title bar. */
+/** When the catalog was last published, for the title bar (`갱신 14:02`, `갱신 9.28`). */
 export function syncedLabel(publishedAt:string|null|undefined, now:number) {
   const at=publishedAt?Date.parse(publishedAt):Number.NaN;
   if(!Number.isFinite(at))return '';
-  const minutes=Math.max(0,Math.floor((now-at)/60_000));
-  if(minutes<1)return '방금 갱신';
-  if(minutes<60)return `${minutes}분 전 갱신`;
-  if(minutes<1440)return `${Math.floor(minutes/60)}시간 전 갱신`;
-  return `${Math.floor(minutes/1440)}일 전 갱신`;
+  return `갱신 ${displayDateTime(at, new Date(now))}`;
 }
 export function useNow(active:boolean, interval=30_000) {
   const [now,setNow]=useState(()=>Date.now());

@@ -19,7 +19,7 @@ describe('shared attention rows', () => {
   it('uses actual monthly charges including price history and yearly renewals', () => {
     const rows=attentionRows([note('ledger',{type:'ledger',recurring:[recurring({start:'2026-10-31',amount:20000,priceHistory:[{until:'2026-11-01',amount:10000}]}),recurring({id:'year',start:'2026-10-01',unit:'year',amount:120000,remindDays:null})]})],[],[],today);
     expect(rows[0]?.label).toBe('구독 이번 달 ₩130,000');
-    expect(rows[0]?.secondary).toBe('다음 결제 1일 후 · 구독');
+    expect(rows[0]?.secondary).toBe('다음 결제 D-1 · 구독');
   });
   it.each(['2026-10-29','2026-11-02'])('hides reminders outside the window on %s', date => {
     expect(attentionRows([note('ledger',{type:'ledger',recurring:[recurring() ]})],[],[],date).filter(r=>r.days!==undefined)).toEqual([]);

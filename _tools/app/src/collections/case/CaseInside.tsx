@@ -7,7 +7,7 @@ export type CasePerson = { id: string; name: string; role: "performer" | "direct
 
 /** Printed stars retain fractional ratings without turning the booklet into an editor. */
 export function CaseScore({ score }: { score: number | null }) {
-  return <span className="case-score" role="img" aria-label={`별점 ${score ?? "미평가"}`}>
+  return <span className="case-score" role="img" aria-label={`내 별점 ${score ?? "미평가"}`}>
     {[1, 2, 3, 4, 5].map(value => <span key={value} aria-hidden="true">☆<span style={{ width: `${Math.max(0, Math.min(1, (score ?? 0) - value + 1)) * 100}%` }}>★</span></span>)}
   </span>;
 }
@@ -34,7 +34,7 @@ export function CaseInside({ title, type, record, facts, hero, front, privacy = 
     return <>{clips}<div className="case-booklet case-av-book">
       <b className="case-av-code">{fact("품번") || title}</b><span className="case-booklet-subtitle">{fact("메이커")}</span>
       <dl className="case-av-rows">{["레이블", "발매", "수록"].map(label => <div key={label}><dt>{label}</dt><dd>{fact(label) || blank}</dd></div>)}</dl>
-      <div className="case-av-record">{status}{personal("별점")}</div>
+      <div className="case-av-record">{status}{personal("내 별점")}</div>
     </div>
       {directors.length > 0 && <div className="case-director">감독 · {directors.map(person => person.name).join(" · ")}</div>}
       {cast.length > 0 && <div className="case-cast" data-count={Math.min(cast.length, 3)} aria-label="출연">
@@ -57,7 +57,7 @@ export function CaseInside({ title, type, record, facts, hero, front, privacy = 
     <div className="case-manual-cover" style={cover ? { backgroundImage: `url(${JSON.stringify(cover)})` } : undefined} />
     <b className="case-manual-title">{title}</b><span className="case-booklet-subtitle">취급 설명서</span>
     <dl className="case-manual-form">
-      <div><dt>상태</dt><dd>{status}</dd></div><div><dt>별점</dt><dd>{personal("별점")}</dd></div>
+      <div><dt>상태</dt><dd>{status}</dd></div><div><dt>내 별점</dt><dd>{personal("내 별점")}</dd></div>
       {type === "game" && <div><dt>기기</dt><dd>{platform && platform !== "미입력" ? platform : blank}</dd></div>}
     </dl>
     <div className="case-manual-footer">{type === "movie" ? <>

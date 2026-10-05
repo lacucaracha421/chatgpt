@@ -1,6 +1,8 @@
+import { EmptyState } from "../../shared/ui/EmptyState";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
+import { displayDate, displayDateTime } from "../../shared/displayDate";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import { Button } from "../../shared/ui/Button";
@@ -11,7 +13,7 @@ export function safeProfileUrl(value: string): boolean {
   try { const url = new URL(value); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password; } catch { return false; }
 }
 function birthLabel(value: string, today: Date) {
-  const display = value.replace(/-/g, ".");
+  const display = displayDate(value, today);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return display;
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(year, month - 1, day);
@@ -106,14 +108,12 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
   }
   if (configured === false) return <p className="av-profile__quiet">StashDB 키가 없어요 · <button type="button" onClick={onOpenSettings}>설정</button></p>;
   const aliases = [...new Set([profile?.name, ...(profile?.aliases ?? [])].filter((name): name is string => Boolean(name?.trim())).map(name => name.trim()))].filter(name => name !== displayName && name !== nameJa);
-  const checked = profile ? Date.parse(profile.fetchedAt) : NaN;
-  const days = Number.isFinite(checked) ? Math.max(0, Math.floor((Date.now() - checked) / 86400000)) : 0;
   return <div className="av-profile" aria-busy={busy}>
     {profile?.status === "matched" && <>
       {aliases.length > 0 && <p className="av-profile__aliases">{aliases.slice(0, 3).join(" · ")}</p>}
       <ProfileRows profile={profile} />
       <ProfileLinks key={`${personId}:${profile.stashdbId}`} profile={profile} />
-      <div className="av-profile__footer"><span>StashDB · {days}일 전 확인</span><button type="button" disabled={busy} aria-label="StashDB 새로고침" onClick={() => void refresh()}><ArrowPathIcon className={busy ? "av-profile__spinning" : ""} aria-hidden="true" /></button></div>
+      <div className="av-profile__footer"><span>StashDB · {displayDateTime(profile.fetchedAt)} 확인</span><button type="button" disabled={busy} aria-label="StashDB 새로고침" onClick={() => void refresh()}><ArrowPathIcon className={busy ? "av-profile__spinning" : ""} aria-hidden="true" /></button></div>
       <button type="button" className="av-profile__change" disabled={busy} onClick={() => void refresh(true)}>다른 사람으로 바꾸기</button>
     </>}
     {profile?.status === "ambiguous" && <p className="av-profile__quiet">StashDB에서 여러 명이 찾아졌어요 · <button type="button" disabled={busy} onClick={() => setCandidates(profile.candidates)}>고르기</button></p>}
@@ -123,9 +123,9 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
     {candidates !== null && <Dialog open title="StashDB 배우 고르기" onClose={() => { if (!busy) setCandidates(null); }}>
       <div className="av-profile__candidates">{candidates.map(candidate => <div className="av-profile__candidate" key={candidate.stashdbId}>
         {!privacyMode && candidate.imageUrl && safeProfileUrl(candidate.imageUrl) && <img src={candidate.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />}
-        <div><b>{candidate.name}</b><p>{candidate.aliases.join(" · ")}</p>{candidate.birthDate && <small>{candidate.birthDate.replace(/-/g, ".")}</small>}</div>
+        <div><b>{candidate.name}</b><p>{candidate.aliases.join(" · ")}</p>{candidate.birthDate && <small>{displayDate(candidate.birthDate)}</small>}</div>
         <Button size="sm" disabled={busy} onClick={() => void choose(candidate.stashdbId)}>이 사람</Button>
-      </div>)}{candidates.length === 0 && <p>검색 결과가 없어요.</p>}</div>
+      </div>)}{candidates.length === 0 && <EmptyState inline title="검색 결과 없음" />}</div>
       {error && <p role="alert">{error}</p>}
       <div className="ui-dialog__actions"><Button disabled={busy} onClick={() => setCandidates(null)}>취소</Button><Button disabled={busy} onClick={() => void choose(null)}>아무도 아님</Button></div>
     </Dialog>}

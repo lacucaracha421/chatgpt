@@ -1,3 +1,4 @@
+import { EmptyState } from "../shared/ui/EmptyState";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
@@ -104,7 +105,7 @@ export function KakaoConnectDialog({
 
         <div className="book-connect__body">
           <div className="book-connect__results" aria-label="카카오 검색 결과">
-            {results?.length === 0 && <p className="book-connect__empty">검색 결과가 없습니다.</p>}
+            {results?.length === 0 && <EmptyState inline className="book-connect__empty" title="검색 결과 없음" />}
             {results?.map((candidate) => {
               const checked = selectedKeys.includes(candidate.groupFingerprint);
               return (

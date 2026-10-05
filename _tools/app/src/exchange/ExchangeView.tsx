@@ -1,3 +1,5 @@
+import { EmptyState } from "../shared/ui/EmptyState";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import {useAssetMask} from "../privacy/PrivacyContext";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -312,7 +314,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
   const statusText = showConnecting ? "연결 중…" : availability.state === "held" ? "받기만 · 파일 교환 보류" : availability.state === "ready" ? (snapshot.selfName ? `이 PC · ${snapshot.selfName}` : "연결됨") : availability.state === "starting" ? "" : availability.state === "offline" ? "서버에 연결할 수 없음 — 자동 재시도" : "사용할 수 없음";
   const navigation = <div className="exchange-index">
     <div className="exchange-index-body">
-      <span className="workspace-section-label">기기</span>
+      <SectionLabel className="workspace-section-label" title="기기" />
       {devices.length
         ? <div className="exchange-devices" role="group" aria-label="주고받을 기기">
             {devices.map((device) => {
@@ -328,7 +330,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
           </div>
         : <p className="exchange-index-value">등록된 기기 없음</p>}
       {chosen && <>
-        <span className="workspace-section-label">보기</span>
+        <SectionLabel className="workspace-section-label" title="보기" />
         <div className="exchange-filter" role="group" aria-label="보기">
           <button type="button" aria-pressed={!receivedOnly} onClick={() => setReceivedOnly(false)}>전체</button>
           <button type="button" aria-pressed={receivedOnly} onClick={() => setReceivedOnly(true)}>받은 파일</button>
@@ -364,12 +366,9 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
               <Block block={block} peerName={peerOf(block.entries[0].row).name || peer} store={store} onError={setError} />
             </Fragment>)}
           </ol>
-        : <div className="exchange-empty">
-            <span className="exchange-empty-glyph" aria-hidden="true"><ArrowsUpDownIcon /></span>
-            <h3>{emptyText.title}</h3>
-            <p>{emptyText.text}</p>
+        : <EmptyState className="exchange-empty" icon={ArrowsUpDownIcon} title={emptyText.title} hint={emptyText.text}>
             {chosen && !receivedOnly && <ul className="exchange-limits"><li>파일당 최대 2GB</li><li>한 번에 100개까지</li><li>안 받으면 24시간 뒤 삭제</li></ul>}
-          </div>}
+          </EmptyState>}
     </div>
     {chosen && <footer className="exchange-composer">
       <p className="exchange-composer-to"><b>{peer}(으)로 보내기</b>파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로</p>

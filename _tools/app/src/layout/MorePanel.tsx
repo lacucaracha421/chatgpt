@@ -1,6 +1,8 @@
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useState } from "react";
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
+import { CountBadge } from "../shared/ui/Badge";
 import { NAVIGATION_GROUP_LABELS, type NavigationEntry } from "./navigationEntries";
 
 /** The rail's 더보기 entry: non-empty review queues first, then every destination that left the rail. */
@@ -23,7 +25,7 @@ export function MorePanel({ entries, current = false, onOpenChange }: { entries:
       aria-current={current ? "page" : undefined}>
       <span className="workspace-rail__icon">
         <EllipsisHorizontalIcon aria-hidden="true" />
-        {queueTotal > 0 && <span className="workspace-rail__count" aria-hidden="true">{queueTotal > 99 ? "99+" : queueTotal}</span>}
+        {queueTotal > 0 && <CountBadge variant="corner" className="workspace-rail__count" aria-hidden="true" value={queueTotal} max={99} />}
       </span>
       <span>더보기</span>
       {activity && <span className="workspace-rail__activity" aria-hidden="true" />}
@@ -38,7 +40,7 @@ export function MorePanel({ entries, current = false, onOpenChange }: { entries:
 export function MoreEntryList({ entries, heading, onRun }: { entries: NavigationEntry[]; heading: string; onRun?: () => void }) {
   if (!entries.length) return null;
   return <nav className="more-panel__navigation" aria-label={heading}>
-    <span className="workspace-section-label">{heading}</span>
+    <SectionLabel className="workspace-section-label" title={heading} />
     {entries.map((entry) => <button key={entry.id} type="button" className="workspace-index-link"
       aria-label={entry.count === undefined ? undefined : `${entry.label} ${entry.count.toLocaleString()}개`}
       aria-current={entry.selected ? "page" : undefined} aria-description={entry.activity}

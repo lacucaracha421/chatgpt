@@ -16,7 +16,7 @@ function Chip({chip,leaving,onRemove}:{chip:AssetSearchName;leaving:boolean;onRe
     if(!leaving)animation.onfinish=()=>animation.cancel();
     return()=>animation.cancel();
   },[leaving]);
-  return <span ref={host} className="asset-scope-chip-slot" aria-hidden={leaving||undefined}><Button type="button" variant="ghost" className="asset-scope-chip" disabled={leaving} aria-label={`${chip.name} 범위 제거`} onClick={()=>onRemove(chip)}>{chip.name}<XMarkIcon aria-hidden="true"/></Button></span>;
+  return <span ref={host} className="asset-scope-chip-slot" aria-hidden={leaving||undefined}><Button type="button" variant="ghost" className="asset-scope-chip" disabled={leaving} aria-label={`${chip.name} 범위 빼기`} onClick={()=>onRemove(chip)}>{chip.name}<XMarkIcon aria-hidden="true"/></Button></span>;
 }
 export function AssetScopeChips({chips,onRemove,onClear}:{chips:readonly AssetSearchName[];onRemove(chip:AssetSearchName):void;onClear?():void}) {
   const stripWheel=useHorizontalWheel();

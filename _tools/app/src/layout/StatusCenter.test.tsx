@@ -278,7 +278,7 @@ it("counts blocked changes, a stopped Asset queue and a failing lane as problems
   await user.click(trigger);
   const block = screen.getByRole("region", { name: "서버 동기화" });
   expect(block).toHaveTextContent("서버에서 막힌 변경 3개");
-  expect(block).toHaveTextContent("삭제·복원 변경 전송이 멈춤");
+  expect(block).toHaveTextContent("휴지통·복원 변경 전송이 멈춤");
   expect(within(block).getAllByText("서버 동기화 실패 · 비밀번호 보관함이 잠겨 있음")).toHaveLength(1);
 });
 
@@ -310,5 +310,5 @@ it("reports held lanes and missing tablet targets as waiting, retaining receive 
   });
   expect(summary.problemCount).toBe(1);
   expect(summary.problems).toEqual(["서버 동기화 실패 · 서버가 인증을 거부함"]);
-  expect(summary.notes).toEqual(["삭제·복원 변경 · 송신 보류", "앨범·분류 변경 · 송신 보류로 대기", "태블릿 변경 2개가 누락된 항목을 기다립니다 · asset-a, collection-b"]);
+  expect(summary.notes).toEqual(["휴지통·복원 변경 · 송신 보류", "앨범·분류 변경 · 송신 보류로 대기", "태블릿 변경 2개가 누락된 항목을 기다립니다 · asset-a, collection-b"]);
 });

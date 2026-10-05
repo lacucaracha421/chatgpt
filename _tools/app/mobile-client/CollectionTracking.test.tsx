@@ -173,7 +173,7 @@ it('shows tracking read-only with a short note while the PC has not been upgrade
   expect(within(section()).queryByRole('button',{name:/소장/})).toBeNull();
   expect(within(section()).getByText('3권까지')).toBeTruthy();
   // Rating stays editable: only the tracking fields wait for the PC.
-  expect(within(personalSection()).getByRole('button',{name:/내 평점/})).toBeTruthy();
+  expect(within(personalSection()).getByRole('button',{name:/내 별점/})).toBeTruthy();
 });
 
 it('withholds a queued tracking edit until the capability returns, while other edits still send',async()=>{
@@ -193,13 +193,13 @@ it('withholds a queued tracking edit until the capability returns, while other e
 it('shows nothing extra for a legacy manga publication or other Collection types',async()=>{
   item={...base,releaseWatch:undefined,ownedVolumes:undefined};
   await openDetail();
-  await waitFor(()=>expect(within(personalSection()).getByRole('button',{name:/내 평점/})).toBeTruthy());
+  await waitFor(()=>expect(within(personalSection()).getByRole('button',{name:/내 별점/})).toBeTruthy());
   expect(within(personalSection()).queryByText(/신간 알림|소장/)).toBeNull();
   expect(within(actions()).queryByRole('button',{name:/신간 알림/})).toBeNull();
   cleanup();
   item={...base,type:'game',volumes:[]};
   await openDetail();
-  await waitFor(()=>expect(within(personalSection()).getByRole('button',{name:/내 평점/})).toBeTruthy());
+  await waitFor(()=>expect(within(personalSection()).getByRole('button',{name:/내 별점/})).toBeTruthy());
   expect(within(personalSection()).queryByText(/신간 알림|소장/)).toBeNull();
 });
 

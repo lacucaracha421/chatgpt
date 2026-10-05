@@ -23,7 +23,6 @@
 .release-calendar-card { display:flex; flex-direction:column; min-width:0; gap:var(--space-1); }
 .release-calendar-card.is-pending { opacity:.82; }
 .release-calendar-date { overflow:hidden; color:var(--color-text); font-size:var(--type-body); white-space:nowrap; text-overflow:ellipsis; }
-.release-calendar-dday { color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
 .release-calendar-cover { position:relative; width:100%; aspect-ratio:2 / 3; overflow:hidden; border-radius:var(--radius-mark); background:var(--color-surface-elevated); }
 .release-calendar-cover img, .release-calendar-cover-placeholder { display:block; width:100%; height:100%; }
 .release-calendar-cover img { object-fit:cover; }

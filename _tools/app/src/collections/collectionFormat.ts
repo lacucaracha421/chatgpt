@@ -1,3 +1,5 @@
+import { displayDate, displayDateRange } from "../shared/displayDate";
+
 export const KIND_LABEL = {
   game: "게임",
   movie: "영화",
@@ -31,14 +33,10 @@ export function collectionCredit(collection: CollectionCardValue): string {
 }
 
 /** Movie season range, AV release date, or the collection year. */
-export function collectionCardDate(collection: CollectionCardValue): string {
-  const short = (date: string) => {
-    const [year, month, day] = date.split("-");
-    return `${year!.slice(-2)}.${Number(month)}.${Number(day)}`;
-  };
+export function collectionCardDate(collection: CollectionCardValue, now = new Date()): string {
   const range = collection.type === "movie" && collection.seasonDateRange?.length === 2 ? collection.seasonDateRange : null;
-  if (range) return range[0] === range[1] ? short(range[0]!) : `${short(range[0]!)}~${short(range[1]!)}`;
-  if (collection.type === "av" && collection.av?.releaseDate) return short(collection.av.releaseDate);
+  if (range) return displayDateRange(range[0], range[1], now);
+  if (collection.type === "av" && collection.av?.releaseDate) return displayDate(collection.av.releaseDate, now);
   return collection.year ? String(collection.year) : collection.releaseDate?.slice(0, 4) ?? "";
 }
 

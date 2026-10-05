@@ -327,7 +327,7 @@ describe('Artists', () => {
     const remove=vi.fn();
     render(<Artists endpoint="https://example.invalid" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()} scopeChips={<AssetScopeChips chips={[{kind:'artist',id:primary.id,name:'하늘빛'}]} onRemove={remove}/>}/>);
     await screen.findByText('PC 앱이 작가 목록을 아직 보내지 않았습니다');
-    fireEvent.click(screen.getByRole('button',{name:'하늘빛 범위 제거'}));
+    fireEvent.click(screen.getByRole('button',{name:'하늘빛 범위 빼기'}));
     expect(remove).toHaveBeenCalledTimes(1);
   });
 

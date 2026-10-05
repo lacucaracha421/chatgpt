@@ -10,7 +10,7 @@ export function HomePlayingShelf({ works, onOpen, onAll }: { works: HomePlayingW
   const [hovered, setHovered] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   if (!works.length) return null;
-  return <HomeSection title={`지금 하는 중 · ${works.length}`} onOpen={onAll}>
+  return <HomeSection title="지금 하는 중" count={works.length} onOpen={onAll}>
     <div className="home-playing"><ShelfScroller previousLabel="이전 지금 하는 중" nextLabel="다음 지금 하는 중"><div className="home-playing__track">
       <span className="home-playing__plank" aria-hidden="true" />
       {works.map(work => <button type="button" className="home-playing__work" key={work.id} aria-label={`${work.name} 열기`}

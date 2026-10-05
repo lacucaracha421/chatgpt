@@ -130,7 +130,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
         <dl>
           <div><dt>내 작품</dt><dd className="numeric">{page.works.length.toLocaleString()}편 · 단독 {page.works.filter(page.solo).length.toLocaleString()}</dd></div>
           <div><dt>발매 기간</dt><dd className="numeric">{releaseRange(page.dates)}</dd></div>
-          <div><dt>별점 평균</dt><dd className="numeric">{page.average === null ? '—' : page.average.toFixed(1)}</dd></div>
+          <div><dt>내 별점 평균</dt><dd className="numeric">{page.average === null ? '—' : page.average.toFixed(1)}</dd></div>
         </dl>
         {published?.profile && <ProfileRows profile={sharedProfile(published.id, published.profile)}/>}
         {links.length > 0 && <div className="tablet-performer__links" aria-label="배우 링크">{links.map(link => <Button key={link.url} variant="secondary" onClick={() => { void native('openExternal', {url: link.url}).catch(() => {}); }}>{link.label}</Button>)}</div>}

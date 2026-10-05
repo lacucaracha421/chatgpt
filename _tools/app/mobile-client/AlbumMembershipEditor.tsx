@@ -76,7 +76,7 @@ export function AlbumMembershipEditor({assetId,open,onClose}:{assetId:string;ope
     finally{setSaving(current=>{const next=new Set(current);next.delete(album.id);return next;});}
   };
   return <Dialog open={open} title="앨범" onClose={onClose}>
-    <DialogDescription className="sr-only">현재 자산을 앨범에 추가하거나 제거합니다. 오프라인 변경은 저장 대기 상태로 유지됩니다.</DialogDescription>
+    <DialogDescription className="sr-only">현재 자산을 앨범에 추가하거나 앨범에서 뺍니다. 오프라인 변경은 저장 대기 상태로 유지됩니다.</DialogDescription>
     <div className="dialog-header"><span>앨범에 추가</span><IconButton label="앨범 선택 닫기" icon={XMarkIcon} onClick={onClose}/></div>
     <LoadingLine label={(!state&&!error)&&'앨범 상태를 불러오는 중'}/>
     {error&&<p className="error-message" role="alert">{error}</p>}

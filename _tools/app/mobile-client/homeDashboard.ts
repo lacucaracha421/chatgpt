@@ -12,6 +12,7 @@ import {fetchLibrarySummary, type LibrarySummary} from './librarySummary';
 import type {Asset, Revisit} from './types';
 import type {Note, NotesState} from '../src/notes/store';
 import {daysAfter,UPCOMING_DAYS} from '../src/home/homeModel';
+import {displayDate} from '../src/shared/displayDate';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
 
 export {clockLabel,daysAfter,UPCOMING_DAYS} from '../src/home/homeModel';
@@ -116,9 +117,9 @@ export function shelfEntries(releases: ReleaseRow[], upcoming: UpcomingRow[], to
 
 /* ---- 다시 보기 ---- */
 export type RevisitGroup = {key: string; title: string; name?: string; count: number; items: Asset[]; label: string};
-const dotDate = (at: string | null | undefined) => {
+const dotDate = (at: string | null | undefined, now: number) => {
   const date = at ? new Date(at) : null;
-  return date && Number.isFinite(date.getTime()) ? `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}` : null;
+  return date && Number.isFinite(date.getTime()) ? displayDate(date, new Date(now)) : null;
 };
 const savedAt = (asset: Asset) => asset.collected_at ?? asset.created_at ?? null;
 /**
@@ -130,7 +131,7 @@ export function revisitGroups(reply: Revisit | null | undefined, now = Date.now(
   for (const bundle of reply?.bundles ?? []) {
     if (bundle.kind === 'date' && bundle.items?.length) {
       const dates = bundle.items.map(savedAt).filter((at): at is string => !!at && Number.isFinite(Date.parse(at))).sort();
-      const first = dotDate(dates[0]), last = dotDate(dates[dates.length - 1]);
+      const first = dotDate(dates[0], now), last = dotDate(dates[dates.length - 1], now);
       const when = first && last ? (first === last ? `${first} 저장` : `${first} – ${last} 저장`) : '예전에 저장';
       groups.push({key: 'date', title: bundle.title || '과거의 이날', count: bundle.items.length, items: bundle.items, label: `${when} · ${bundle.items.length}장`});
     }

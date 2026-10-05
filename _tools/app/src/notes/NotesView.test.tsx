@@ -23,7 +23,7 @@ it("creates, edits, pins, trashes and restores through the actual notes editor",
   expect(document.querySelector("time")?.textContent).toBe(displayDateTime("2026-09-07T00:00:00Z", new Date(), { withTime: true }));
   await userEvent.click(screen.getByRole("button",{name:"고정"}));
   await waitFor(()=>expect(store.snapshot().notes[0].pinned).toBe(true));
-  await userEvent.click(screen.getByRole("button",{name:"메모를 휴지통으로"}));
+  await userEvent.click(screen.getByRole("button",{name:"휴지통으로"}));
   await userEvent.click(screen.getByRole("button",{name:/보기/}));
   await userEvent.click(await screen.findByRole("menuitem",{name:"휴지통"}));
   await userEvent.click(screen.getByRole("button",{name:/읽을 책.*내일 2장 읽기/}));

@@ -5,9 +5,10 @@ export const BOOKMARK_SORT_OPTIONS: { value: BookmarkSort; label: string }[] = [
   { value: "bookmarkAdded", label: "최근 추가순" },
 ];
 const KEY = "lakomics.catalogBookmarkSort.v1";
+/** Newest bookmarks first unless this device explicitly chose publication order. */
 export function readBookmarkSort(): BookmarkSort {
-  try { return localStorage.getItem(KEY) === "bookmarkAdded" ? "bookmarkAdded" : "latest"; }
-  catch { return "latest"; }
+  try { return localStorage.getItem(KEY) === "latest" ? "latest" : "bookmarkAdded"; }
+  catch { return "bookmarkAdded"; }
 }
 export function writeBookmarkSort(value: BookmarkSort): void {
   try { localStorage.setItem(KEY, value); } catch { /* Keep the session choice if storage is unavailable. */ }

@@ -22,7 +22,7 @@ export function CollectionInfoPanel({ collection, compact = false }: CollectionI
   if (collection.productionCompany) rows.push(["제작사", collection.productionCompany]);
   if (collection.platforms) rows.push(["플랫폼", collection.platforms]);
   if (collection.runtimeMinutes) rows.push(["상영 시간", `${collection.runtimeMinutes}분`]);
-  if (collection.myScore != null) rows.push(["내 평점", `${collection.myScore}/5`]);
+  if (collection.myScore != null) rows.push(["내 별점", `${collection.myScore}/5`]);
   if (collection.externalScore != null) rows.push([collection.type === "game" ? "IGDB 평점" : collection.type === "movie" ? "TMDB 평점" : "외부 평점", String(collection.externalScore)]);
   // Manga genres are MangaDex tags stored in English; they are shown in Korean.
   if (collection.genres) rows.push(["장르", collection.type === "manga" ? koreanGenreText(collection.genres) : displayGenres(collection.genres)]);

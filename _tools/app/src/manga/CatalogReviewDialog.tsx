@@ -41,7 +41,7 @@ export function CatalogReviewDialog({ onClose, onChange }: { onClose: () => void
       <p>검토에는 숨긴 작품의 메타데이터도 포함됩니다. 분리는 연결된 수동 묶음을 함께 해제할 수 있으며, 검증된 계보는 유지됩니다.</p>
       <div className="catalog-review__actions">
         <Button size="sm" disabled={busy} onClick={() => void run(() => gateway.generateCatalogReview())}>후보 생성</Button>
-        <Button size="sm" disabled={busy} onClick={() => void run(() => gateway.listCatalogReview())}>다시 불러오기</Button>
+        <Button size="sm" disabled={busy} onClick={() => void run(() => gateway.listCatalogReview())}>새로고침</Button>
       </div>
       {error && <p role="alert">{error}</p>}
       {data && data.inspectedWorks > 0 && <p role="status">{data.inspectedWorks}개 확인 · {data.comparisons}쌍 비교 · 큰 제목 묶음 {data.skippedBuckets}개 제외</p>}

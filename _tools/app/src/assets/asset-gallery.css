@@ -33,10 +33,7 @@
 .asset-gallery__folder-snapshot * { animation: none !important; transition: none !important; }
 /* First-screen tiles still loading when a folder move's cap fires appear together (revealTogether). */
 .asset-gallery img[data-reveal-hold] { opacity: 0 !important; }
-.asset-gallery__scroll[data-folder-move] > .asset-gallery__virtual-space { z-index: 1; background: var(--color-bg); }
 .asset-gallery__scroll[data-folder-move] > .asset-gallery__intro { position: relative; z-index: 2; background: var(--color-bg); }
-.asset-gallery__scroll[data-folder-move] .asset-gallery__justified-unit,
-.asset-gallery__scroll[data-folder-move] .asset-gallery__row { background: transparent !important; }
 .asset-gallery__scroll[data-folder-move="pending"] > .asset-gallery__virtual-space { visibility: hidden; }
 
 /* An inline section bar already supplies the same 4px inset as its dropped copy.

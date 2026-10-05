@@ -93,7 +93,7 @@ it("blocks repeated submission after stale failure until a new preview is checke
   await user.click(screen.getByRole("button", { name: "이동" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("설정이 바뀌었습니다.");
   expect(screen.getByRole("button", { name: "이동" })).toBeDisabled();
-  await user.click(screen.getByRole("button", { name: "다시 확인" }));
+  await user.click(screen.getByRole("button", { name: "다시 시도" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "이동" })).toBeEnabled());
   expect(vi.mocked(invoke).mock.calls.filter(call => call[0] === "character_series_move_preview")).toHaveLength(2);
 });

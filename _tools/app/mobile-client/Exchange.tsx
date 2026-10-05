@@ -6,7 +6,7 @@ import {
   ArrowLeftIcon, ArrowsUpDownIcon, CheckIcon, ChevronDownIcon, ComputerDesktopIcon, DeviceTabletIcon, EllipsisHorizontalIcon,
   ExclamationTriangleIcon, FolderIcon, PaperClipIcon,
 } from '@heroicons/react/24/outline';
-import {Button, IconButton} from './ui';
+import {Button, EmptyState, IconButton} from './ui';
 import {errorText, native} from './transport';
 import {formatBytes} from './libraryTrashModel';
 import {useExchangeThumbnail} from './useExchange';
@@ -182,12 +182,9 @@ function DeviceIcon({device}: {device: ExchangeDevice}) {
 }
 
 function Empty({title, text, limits}: {title: string; text: string; limits?: string[]}) {
-  return <div className="exchange-empty">
-    <span className="exchange-empty-glyph" aria-hidden="true"><ArrowsUpDownIcon/></span>
-    <h2>{title}</h2>
-    <p>{text}</p>
+  return <EmptyState className="exchange-empty" icon={ArrowsUpDownIcon} title={title} hint={text}>
     {limits && <ul className="exchange-limits">{limits.map(limit => <li key={limit}>{limit}</li>)}</ul>}
-  </div>;
+  </EmptyState>;
 }
 
 function DaySeparator({at}: {at: string}) {

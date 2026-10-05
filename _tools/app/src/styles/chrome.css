@@ -61,9 +61,8 @@
 .workspace-index__view-navigation:empty { display: none; }
 .workspace-index__view-navigation, .workspace-index__fallback { padding: var(--space-3); }
 .workspace-index__view-navigation:empty { padding: 0; }
-.workspace-section-label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--line-ui); color: var(--color-faint); font: 400 var(--type-meta) / 1.2 var(--font-ui); margin: var(--space-3) 0 var(--space-2); }
-.workspace-section-label::before, .workspace-index .chrome-settings-group > legend::before { content: ""; flex: none; width: var(--selection-cursor-size); height: var(--selection-cursor-size); background: var(--color-section-mark); }
-.workspace-section-label::after, .workspace-index .chrome-settings-group > legend::after { content: ""; flex: 1; height: 1px; background: var(--section-label-rule); }
+/* Index section labels are the shared SectionLabel; this class only spaces them in the index. */
+.workspace-section-label { margin: var(--space-3) 0 var(--space-2); }
 .workspace-index-link { width: 100%; display: flex; align-items: center; gap: var(--space-2); min-height: 36px; text-align: left; border: 0; border-radius: var(--chrome-radius); color: var(--color-text); background: transparent; padding: var(--space-2); }
 .workspace-index-link:hover { background: var(--color-surface-hover); }
 .workspace-index-link[aria-current=page] { position: relative; color: var(--color-on-accent); background: var(--color-accent); border-radius: 0; box-shadow: var(--selection-echo); }
@@ -117,8 +116,6 @@
 .ui-anchored-panel kbd { font: inherit; color: var(--color-muted); }
 .chrome-settings-group { margin: 0; padding: var(--space-3) 0; border: 0; border-top: 1px solid var(--color-border); min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .chrome-settings-group:first-child { border-top: 0; padding-top: var(--space-1); }
-.chrome-settings-group > legend { color: var(--color-muted); font-size: var(--text-xs); padding: 0 var(--space-compact) 0 0; }
-.workspace-index .chrome-settings-group > legend { display: flex; align-items: center; gap: var(--space-compact); width: 100%; }
 .chrome-settings-controls .ui-select, .chrome-settings-controls .ui-slider { width: 100%; display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 .chrome-settings-controls .ui-select > span, .chrome-settings-controls .ui-slider > span { display: block; position: static; width: auto; height: auto; clip: auto; clip-path: none; overflow: visible; color: var(--color-muted); }
 .chrome-settings-controls select { min-width: 0; width: 100%; height: 32px; padding: 0 var(--space-2); color: var(--color-text); background: var(--color-bg); border: 1px solid var(--chrome-border); border-radius: var(--chrome-radius); font-size: var(--text-sm); }
@@ -245,7 +242,7 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 /* PC-DECLUTTER A: the rail tail (이동, 더보기), the 더보기 panel and the 이동 palette. */
 .workspace-rail__hint { font: inherit; font-size: 10px; line-height: 1; color: var(--color-muted); padding: 2px 3px; border: 1px solid var(--color-border); border-radius: var(--radius-tile); opacity: .8; }
 .workspace-rail__icon { position: relative; display: inline-flex; }
-.workspace-rail__count { position: absolute; bottom: calc(100% - 4px); left: calc(100% - 2px); min-width: 14px; height: 14px; padding: 0 3px; display: grid; place-items: center; font-size: 9px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--color-text); background: var(--color-sidebar); border: 1px solid var(--color-border-strong); border-radius: var(--radius-tile); pointer-events: none; }
+.workspace-rail__count { position: absolute; bottom: calc(100% - 8px); left: calc(100% - 4px); }
 .more-panel__navigation { display: grid; gap: 2px; }
 .more-panel__navigation + .more-panel__navigation { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
 .more-panel__navigation > .workspace-section-label { padding: 0 var(--space-2) var(--space-1); }
@@ -280,7 +277,7 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .command-palette__thumb { position: relative; display: block; flex: none; width: 64px; height: 64px; overflow: hidden; border-radius: var(--radius-tile); }
 .command-palette__thumb img, .command-palette__thumb .privacy-mask { display: block; width: 100%; height: 100%; object-fit: cover; }
 .command-palette__strip-status { color: var(--color-muted); font-size: var(--type-meta); }
-.command-palette__empty { margin: 0; padding: var(--space-4) var(--space-2); color: var(--color-muted); font-size: var(--text-sm); }
+.command-palette__empty { padding: var(--space-4) var(--space-2); }
 .command-palette__foot { flex: none; display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--color-border); color: var(--color-muted); font-size: var(--text-xs); }
 .command-palette__foot kbd { font: inherit; padding: 1px 4px; margin: 0 2px 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-tile); }
 .command-palette__foot kbd:first-child { margin-left: 0; }

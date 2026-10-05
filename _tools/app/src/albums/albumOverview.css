@@ -15,6 +15,3 @@
 .album-overview__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-body); font-weight: 600; }
 .album-overview__count, .album-overview__children { flex: none; color: var(--color-faint); font-family: var(--font-numeric); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
 .album-overview__children { margin-left: auto; font-family: var(--font-ui); font-size: var(--type-meta); }
-.album-overview__empty-state { padding: var(--space-8) var(--space-4); }
-.album-overview__empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); color: var(--color-faint); }
-.album-overview__empty svg { width: 28px; height: 28px; }

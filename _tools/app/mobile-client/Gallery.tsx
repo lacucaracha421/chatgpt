@@ -1,10 +1,12 @@
 import {useTabletAssetMask} from './assetMask';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
+import {AreaVisible} from '../src/shared/motion/AreaSwitch';
 import {StableImage} from '../src/shared/ui/StableImage';
+import {Badge} from '../src/shared/ui/Badge';
 import {FolderMove} from '../src/assets/FolderWave';
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
+import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
 import {defaultRangeExtractor, observeElementOffset, observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PhotoIcon} from '@heroicons/react/24/outline';
 import {collectedDate} from '../src/assets/masonryLayout';
@@ -89,7 +91,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy: re
         if (vault && !asset.ratio && !(asset.width && asset.height) && element.naturalWidth > 0 && element.naturalHeight > 0) onReady({...asset, ratio: element.naturalWidth / element.naturalHeight});
         void (typeof element.decode === 'function' ? element.decode() : Promise.resolve()).catch(() => {}).then(settle);
       }}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
-      {asset.kind === 'video' && width > 100 && <span className="video-mark video-duration-pill" aria-label="영상">▶ {formatDuration(asset.duration_ms)}</span>}
+      {asset.kind === 'video' && width > 100 && <Badge variant="scrim" className="video-duration-pill" aria-label="영상">▶ {formatDuration(asset.duration_ms)}</Badge>}
       {selected && onSelect && <span className="tile-select" data-selected={selected} aria-hidden="true">{selected && <span className="ui-selection-check"/>}</span>}
     </span>
   </button></div>;
@@ -127,9 +129,9 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope, folderPath}: {sparse?:SparseGallerySource;
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope}: {sparse?:SparseGallerySource;
   /** The place these tiles belong to (a folder, album or character), without filters: a change moves folders like the PC. */folderScope?:string;
-  /** Ancestor ids then the place itself; a shorter prefix is a move back. */folderPath?:readonly string[]; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+  /** Unused since folder moves stopped animating (user 2026-10-05); remove together with its callers. */folderPath?:readonly string[]; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
   /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
   /** Tablet Library and character selection; absent for Revisit and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
@@ -137,13 +139,12 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
   const parent = useRef<HTMLDivElement>(null);
-  // A place reached with nothing on screen to move from (an empty folder or series filter, or a
-  // gallery re-entered from outside) gets no folder move, so it is a new visit: its first batch
-  // enters like a first visit's. A place reached from shown tiles is the folder move's.
-  const visit = useRef({scope: folderScope, count: 0}), shownCount = useRef(0);
-  if (folderScope !== visit.current.scope) visit.current = {scope: folderScope, count: visit.current.count + (shownCount.current ? 0 : 1)};
-  useLayoutEffect(() => { shownCount.current = items.length; });
-  useFirstAppearance(parent, items.length, !paused && !stale, vault ? 'vault-gallery' : 'asset-gallery', undefined, visit.current.count);
+  // Only the place an area visit opens on rises; once the visit moves to another place, even from
+  // an empty one, tiles swap in one step like the PC (user 2026-10-05).
+  const areaVisible = useContext(AreaVisible), entryScope = useRef(folderScope), moved = useRef(false);
+  if (!areaVisible) { entryScope.current = folderScope; moved.current = false; }
+  else if (folderScope !== entryScope.current) moved.current = true;
+  useFirstAppearance(parent, items.length, !paused && !stale && !moved.current, vault ? 'vault-gallery' : 'asset-gallery');
   const activePress = useRef<(() => void)|null>(null);
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};
   const releasePress=(cancel:()=>void)=>{if(activePress.current===cancel)activePress.current=null;};
@@ -315,7 +316,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     if (last && now - last.at < 350 && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 32) { lastBackgroundTap.current = null; onClearSelection(); return; }
     lastBackgroundTap.current = {at: now, x: event.clientX, y: event.clientY};
   };
-  return <FolderMove scope={folderScope} queryKey={identity} visible={!paused} privacyKey={`${privacy}`} count={items.length} path={folderPath} host={parent} space=".gallery-canvas"><div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
+  return <FolderMove scope={folderScope} queryKey={identity} visible={!paused} privacyKey={`${privacy}`} count={items.length} host={parent}><div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
     {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
     {pull}
     {intro!=null&&<div ref={introduction} className="gallery-intro">{intro}</div>}

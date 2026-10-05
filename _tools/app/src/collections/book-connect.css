@@ -12,13 +12,7 @@
 
 .book-connect__note,
 .book-connect__error,
-.book-connect__empty {
-  margin: 0;
-  font-size: var(--text-sm);
-}
-
 .book-connect__note,
-.book-connect__empty,
 .book-connect__actions span {
   color: var(--color-muted);
 }

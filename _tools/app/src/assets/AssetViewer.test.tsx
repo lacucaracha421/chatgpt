@@ -58,7 +58,7 @@ it("toggles favorite and moves to trash from the keyboard and buttons", () => {
   expect(onTrash).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
   fireEvent.click(screen.getByRole("button", { name: "좋아요" }));
   expect(onToggleFavorite).toHaveBeenCalledTimes(2);
-  fireEvent.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+  fireEvent.click(screen.getByRole("button", { name: "휴지통으로" }));
   expect(onTrash).toHaveBeenCalledTimes(2);
 });
 
@@ -66,7 +66,7 @@ it("hides library management actions when handlers are absent", () => {
   render(<AssetViewer items={[asset("a", "a.gif")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
 
   expect(screen.queryByRole("button", { name: "좋아요" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "휴지통으로" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "캐릭터" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "앨범" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "이동" })).not.toBeInTheDocument();

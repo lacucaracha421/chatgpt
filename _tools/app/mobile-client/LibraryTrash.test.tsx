@@ -1,3 +1,4 @@
+import {displayDate} from '../src/shared/displayDate';
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {useState} from 'react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
@@ -84,7 +85,7 @@ describe('Library Trash browser',()=>{
     const restored=vi.fn();
     render(<LibraryTrash backRef={{current:null}} known={new Map()} onClose={()=>{}} onRestored={restored}/>);
     const tiles=await screen.findAllByRole('button',{pressed:false});
-    fireEvent.click(tiles.find(tile=>tile.getAttribute('aria-label')?.includes('9월 24일')&&!tile.getAttribute('aria-label')?.includes('이동 대기'))!);
+    fireEvent.click(tiles.find(tile=>tile.getAttribute('aria-label')?.includes(displayDate('2026-09-24T03:00:00Z'))&&!tile.getAttribute('aria-label')?.includes('이동 대기'))!);
     fireEvent.click(screen.getByRole('button',{name:'복원'}));
     await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('assetLifecycleSet',{assetId:'a',command:'restore',seenRevision:4}));
     await waitFor(()=>expect(restored).toHaveBeenCalledWith(['a']));

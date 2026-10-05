@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
 import {SparklesIcon, StarIcon} from '@heroicons/react/24/outline';
 import {SparklesIcon as SparklesSolid} from '@heroicons/react/24/solid';
-import {Button, Dialog, DialogDescription, IconButton} from './ui';
+import {Button, Dialog, DialogDescription, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {MEMO_LIMIT, memoLength, type CollectionEditField, type CollectionEditValue} from './collectionEditOutbox';
 import {platformOptions, recordStates, statusLabel} from '../src/collections/work/WorkRecord';
@@ -80,10 +80,10 @@ export function PersonalRecord({item, edits, onSheet, includeTracking = true}: {
   const anyPending = score.pending || showcase.pending || memo.pending || !!trackingPending || recordPending;
   return <section className="collection-personal" aria-label="내 기록">
     {edits.supported
-      ? <button className={`collection-personal-row${score.pending ? ' is-pending' : ''}`} aria-label={`내 평점 ${scoreText(score.value)}${score.pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet('rating')}>
-          <span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span><PendingSlot shown={score.pending}/>
+      ? <button className={`collection-personal-row${score.pending ? ' is-pending' : ''}`} aria-label={`내 별점 ${scoreText(score.value)}${score.pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet('rating')}>
+          <span className="collection-personal-label">내 별점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span><PendingSlot shown={score.pending}/>
         </button>
-      : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
+      : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 별점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
     <RecordRows item={item} edits={edits} onSheet={onSheet}/>
     {includeTracking && <TrackingRows item={item} edits={edits} onOwned={edition => onSheet(`owned-${edition}`)}/>}
     {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}
@@ -132,12 +132,12 @@ export function CollectionPersonal({item, edits, sheet, onSheet}: {item: Collect
 
   return <>
     {(editable || memo.value || memo.pending) && <section className="collection-block collection-memo" aria-label="내 메모">
-      <div className="collection-memo-heading"><h2>내 메모</h2>{memo.pending && !memo.conflict && <Pending/>}{editable && <Button variant="ghost" className="collection-memo-edit" onClick={() => onSheet('memo')}>{memo.value ? '편집' : '메모 쓰기'}</Button>}</div>
+      <div className="collection-memo-heading"><SectionLabel as="h2" title="내 메모" />{memo.pending && !memo.conflict && <Pending/>}{editable && <Button variant="ghost" className="collection-memo-edit" onClick={() => onSheet('memo')}>{memo.value ? '편집' : '메모 쓰기'}</Button>}</div>
       {memo.conflict && <div className="collection-memo-conflict" role="alert"><span>PC에서 메모가 바뀌었습니다</span><Button variant="ghost" onClick={() => onSheet('conflict')}>확인</Button></div>}
       {memo.value ? <p className={`collection-memo-text${memo.pending ? ' is-pending' : ''}`}>{memo.value}</p> : <p className="hint">메모가 없습니다.</p>}
     </section>}
-    {sheet === 'rating' && <BottomSheet title="내 평점" onClose={() => onSheet(null)}>
-      <div role="radiogroup" aria-label="내 평점">
+    {sheet === 'rating' && <BottomSheet title="내 별점" onClose={() => onSheet(null)}>
+      <div role="radiogroup" aria-label="내 별점">
         <button className="sheet-option" role="radio" aria-checked={score.value === null} onClick={() => { edits.edit(item.id, 'myScore', null, item.myScore ?? null); onSheet(null); }}>미평가<span className="radio-dot"/></button>
         <div className="collection-star-grid">{Array.from({length: 11}, (_, i) => (10 - i) / 2).map(value => <button key={value} role="radio" aria-checked={score.value === value} aria-label={`${value.toFixed(1)}점`} onClick={() => { edits.edit(item.id, 'myScore', value, item.myScore ?? null); onSheet(null); }}><StarIcon aria-hidden="true"/><span className="numeric">{value.toFixed(1)}</span></button>)}</div>
       </div>

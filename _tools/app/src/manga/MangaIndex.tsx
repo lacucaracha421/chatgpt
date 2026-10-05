@@ -152,5 +152,5 @@ export function MangaIndex({ source, filter, onFilter, folder, onFolder, localCo
   </nav>;
 }
 export function MangaIndexToken({ filter, onClear }: { filter: MangaIndexIdentity | null; onClear: () => void }) {
-  return filter ? <span className="manga-index-token">{filter.label}<button type="button" aria-label={`${filter.label} 필터 해제`} onClick={onClear}>×</button></span> : null;
+  return filter ? <span className="manga-index-token">{filter.label}<button type="button" aria-label={`${filter.label} 필터 빼기`} onClick={onClear}>×</button></span> : null;
 }

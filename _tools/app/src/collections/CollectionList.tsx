@@ -1,3 +1,4 @@
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import "./collectionShelfRules.css";
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
@@ -140,7 +141,7 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     const children: ReactNode[] = [];
     let row = 1, itemIndex = 0;
     for (const group of groups) {
-      if (group.label) children.push(<div key={`group:${group.label}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}>{group.label}<span>{group.items.length.toLocaleString()}</span></div>);
+      if (group.label) children.push(<div key={`group:${group.label}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}><SectionLabel title={group.label} count={group.items.length} /></div>);
       group.items.forEach(item => {
         const position = positions[itemIndex];
         const windowKey = showcase ? itemIndex + 1 : position.row;

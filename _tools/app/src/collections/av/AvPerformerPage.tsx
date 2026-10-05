@@ -1,3 +1,4 @@
+import { Skeleton } from "../../shared/ui/Skeleton";
 import { ArrowLeftIcon, ArrowTopRightOnSquareIcon, ChevronDownIcon, EllipsisHorizontalIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -93,7 +94,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   }
 
   if (!page) return <article className="av-performer-page" aria-label="AV 배우 상세">
-    {error ? <><p role="alert">{error}</p><Button onClick={onBack}>작품으로 돌아가기</Button></> : <div className="av-performer-page__skeleton ui-skeleton" aria-label="배우 정보" aria-busy="true" />}
+    {error ? <><p role="alert">{error}</p><Button onClick={onBack}>작품으로 돌아가기</Button></> : <Skeleton className="av-performer-page__skeleton" label="배우 정보" />}
   </article>;
 
   const source = portraitSource(page, page.works);
@@ -129,7 +130,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
           <dl className="av-performer-page__summary">
             <div><dt>내 작품</dt><dd className="numeric">{page.stats.workCount.toLocaleString()}편 · 단독 {page.works.filter(work => work.solo).length}</dd></div>
             <div><dt>발매 기간</dt><dd className="numeric">{releaseRange(page.stats.firstRelease, page.stats.lastRelease)}</dd></div>
-            <div><dt>별점 평균</dt><dd className="numeric">{page.stats.averageScore === null ? "—" : page.stats.averageScore.toFixed(1)}</dd></div>
+            <div><dt>내 별점 평균</dt><dd className="numeric">{page.stats.averageScore === null ? "—" : page.stats.averageScore.toFixed(1)}</dd></div>
             {page.person.fanzaActressId && <div><dt>FANZA</dt><dd className="numeric">{page.person.fanzaActressId}</dd></div>}
             {page.person.wikidataId && <div><dt>Wikidata</dt><dd className="numeric">{page.person.wikidataId}</dd></div>}
           </dl>

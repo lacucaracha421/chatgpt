@@ -1,3 +1,4 @@
+import { SectionLabel } from "../../shared/ui/SectionLabel";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -183,7 +184,7 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
         {sourceKind === "none" && <div className="av-portrait-picker__none"><Portrait portrait={null} name={personName} size="performer" /><p>사진 없이 이름 첫 글자를 사용합니다.</p></div>}
       </div>
       <aside className="av-portrait-picker__previews" aria-label="대표 이미지 미리보기">
-        <p className="av-portrait-picker__section-label">미리보기</p>
+        <SectionLabel className="av-portrait-picker__section-label" title="미리보기" />
         {sourceKind === "stashdb" ? <>
           <div className="av-portrait-picker__performer-preview"><PreviewPortrait portrait={previewPortrait} name={personName} size="performer" /></div>
           {stashdb && <span>{stashdb.width}×{stashdb.height} · StashDB</span>}

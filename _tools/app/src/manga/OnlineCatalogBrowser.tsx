@@ -757,7 +757,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
           <Button onClick={() => void importCatalog()} disabled={loading}>VCK 데이터 가져오기</Button>
         </EmptyState>
         : loading && !results ? <MangaSkeletonGrid />
-        : results?.works.length === 0 ? <EmptyState title="검색 결과가 없습니다">다른 제목이나 태그로 검색하세요.</EmptyState>
+        : results?.works.length === 0 ? <EmptyState title="검색 결과 없음" hint="다른 제목이나 태그로 검색하세요." />
         : results && <>
           <div className="manga-grid">
             {results.works.map((work) => <OnlineCatalogCard

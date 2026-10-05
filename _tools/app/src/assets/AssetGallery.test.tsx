@@ -913,3 +913,17 @@ it.each(["justified", "masonry"] as const)("keeps a folder shelf in view when %s
   rerender(<AssetGallery layout={layout} intro={intro} items={page1} scopeKey={folder} groupDates={false} />);
   expect(scroller.scrollTop).toBe(200);
 });
+
+it("opens a tile on a double click only when both presses landed on it", () => {
+  const onOpen = vi.fn();
+  render(<AssetGallery intro={<button type="button">폴더 열기</button>} layout="masonry" items={[asset(0)]} onOpen={onOpen} onFocusAsset={vi.fn()} />);
+  const press = (target: Element, detail: number) => { fireEvent.mouseDown(target, { detail }); fireEvent.mouseUp(target, { detail }); fireEvent.click(target, { detail }); };
+  const tile = screen.getByRole("option", { name: "asset-0.png" });
+  // The first click opened a folder card; the tile appeared under the pointer for the second.
+  press(screen.getByRole("button", { name: "폴더 열기" }), 1); press(tile, 2); fireEvent.doubleClick(tile, { detail: 2 });
+  expect(onOpen).not.toHaveBeenCalled();
+  press(tile, 1); press(tile, 2); fireEvent.doubleClick(tile, { detail: 2 });
+  expect(onOpen).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(tile, { key: "Enter" });
+  expect(onOpen).toHaveBeenCalledTimes(2);
+});
