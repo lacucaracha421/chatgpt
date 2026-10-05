@@ -412,6 +412,36 @@ it('keeps the committed gallery page while a series filter replacement is pendin
   expect(screen.getByLabelText('character gallery').getAttribute('data-stale')).toBeNull();
   expect(screen.getByText('이 보기에 자산이 없습니다')).toBeTruthy();
 });
+
+it('keeps each character header with its own images when returning and opening a sibling',async()=>{
+  const siblings=structuredClone(index);
+  siblings.nodes.push(node('character','other','Other','group:g'));
+  siblings.scopes.push({nodeId:'character:other',filter:'all',totalCount:7,sourceCount:7});
+  const next=Promise.withResolvers<CharacterPage>();
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/characters'))return siblings;
+    if(path.includes('toc=1'))return {};
+    const selected=new URL(path,'https://test').searchParams.get('node');
+    return selected==='character:other'?next.promise:page([selected==='character:c'?'first-character':'group-image']);
+  });
+  render(<CharacterBrowser {...props} initialNode="group:g"/>);
+  await screen.findByText('group-image');
+  fireEvent.click(screen.getByRole('button',{name:'Character · 2장'}));
+  await screen.findByText('first-character');
+  expect(screen.getByRole('heading',{name:'Character'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
+  await screen.findByText('group-image');
+  expect(screen.getByRole('heading',{name:'Group'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'Other · 7장'}));
+  await waitFor(()=>expect(screen.getByLabelText('character gallery').getAttribute('data-stale')).toBe('true'));
+  expect(screen.getByRole('heading',{name:'Group'})).toBeTruthy();
+  expect(screen.getByText('group-image')).toBeTruthy();
+  expect(screen.queryByText('first-character')).toBeNull();
+  await act(async()=>next.resolve({...page(['second-character']),totalCount:7,sourceCount:7}));
+  await screen.findByText('second-character');
+  expect(screen.getByRole('heading',{name:'Other'})).toBeTruthy();
+  expect(screen.queryByText('group-image')).toBeNull();
+});
 it('shows the character breadcrumb parents and keeps the title free of a count',async()=>{
   const characterIndex=structuredClone(index);
   characterIndex.nodes.push(node('character','child','Child','character:c'));

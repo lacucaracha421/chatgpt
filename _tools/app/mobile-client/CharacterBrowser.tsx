@@ -1,5 +1,5 @@
 import {LoadingLine} from './TopBar';
-import {useTabletAssetMask} from './assetMask';
+import {mediaMasked,useTabletAssetMask} from './assetMask';
 import type {ContentRating} from '../src/shared/privacy/contentMask';
 import {usePrivacyMode} from './privacyMode';
 import {assetSearchSelectionKey,type AssetSearchName} from '../src/assets/assetSearch';
@@ -26,6 +26,8 @@ import {characterChildren,characterExclusion,characterExclusionTarget,characterP
 import {FolderShelf} from './FolderCards';
 import {FolderIcon,PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
 import {useLevelMotion} from './motion';
+import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
+import {preloadImages} from '../src/shared/motion/viewportImages';
 import './characters.css';
 
 /**
@@ -130,6 +132,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   const [restore,setRestore]=useState(0);
   const [retry,setRetry]=useState(0);
   const host=useRef<HTMLDivElement>(null),scroll=useRef(0);
+  const swapOwner=useRef({});
   const indexGate=useRef(new RequestGate()),pageGate=useRef(new RequestGate()),moreGate=useRef(new RequestGate());
   const cache=useRef(new Map<string,Cached>()),morePending=useRef(false);
   const [filtersOpen,setFiltersOpen]=useState<FilterGroup|null>(null),[filterHelpOpen,setFilterHelpOpen]=useState(false);
@@ -144,8 +147,10 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     }
   },[]);
   const navigate=useCallback((next:Location)=>{
+    cancelSegmentSwap(swapOwner.current);
     remember();pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;
-    setRestore(0);scroll.current=0;
+    // The kept screen also keeps its offset until the destination commits.
+    if(!next.node){setRestore(0);scroll.current=0;}
     setPage(undefined);setCommitted(null);setError('');setMoreError('');setMore(false);setWhere(next);
   },[remember]);
   /**
@@ -158,6 +163,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     setFiltersOpen(null);
     const current=latest.current.where;
     if(sameFilters(next,current.filters))return;
+    cancelSegmentSwap(swapOwner.current);
     // Unlike a scope change, narrowing the scope already displayed keeps the committed page on
     // screen until the replacement succeeds: the scope is unchanged, so the old page is still a
     // truthful answer for this view, and discarding it would blank the gallery for the duration
@@ -174,6 +180,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   const applyCharacterFilter=useCallback((filter:CharacterFilter)=>{
     const current=latest.current.where;
     if(current.filter===filter)return;
+    cancelSegmentSwap(swapOwner.current);
     // The series scope stays mounted while its page is replaced. This is the character-folder
     // equivalent of the PC pageScope rule: a filter switch is not hierarchy navigation.
     pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;
@@ -190,6 +197,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   useLayoutEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:defaultCharacterFilter(initialNode,latest.current.index),filters:{...EMPTY_FILTERS},search});}},[initialNode,entryKey,active,navigate,search]);
   useEffect(()=>{
     if(!active||assetSearchSelectionKey(search)===assetSearchSelectionKey(latest.current.where.search))return;
+    cancelSegmentSwap(swapOwner.current);
     pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;setMore(false);
     setWhere(current=>({...current,search}));
   },[active,search]);
@@ -267,7 +275,11 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
       readScopedToc(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search,true),request.signal),'newest'))
       // A switch keeps the old page, and an entry its empty gallery, until the new first screen
       // is decoded (capped like the PC's first viewport); later images load in place.
-      .then(result=>Promise.all([readyFirstScreen(result.items,request.signal),readyShelf(index,where.node,request.signal)]).then(([items])=>{
+      // Cached preview URLs bypass readyFirstScreen's missing-thumbnail work; decode them
+      // within the same readiness budget before replacing the painted list.
+      .then(result=>Promise.all([readyFirstScreen(result.items,request.signal),readyShelf(index,where.node,request.signal),
+        preloadImages(result.items.slice(0,24).flatMap(asset=>asset.preview&&!mediaMasked(asset)?[asset.preview]:[])),
+      ]).then(([items])=>{
         const prepared=new Map(items.map(asset=>[asset.id,asset]));
         return {...result,items,assetRanges:result.assetRanges?{...result.assetRanges,ranges:result.assetRanges.ranges.map(range=>({...range,items:range.items.map(asset=>prepared.get(asset.id)??asset)}))}:undefined};
       }))
@@ -276,13 +288,23 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
         // The reader's own envelope declares the contract under the wire name, so it is resolved
         // through the one contract reader rather than read as a page field.
         if(hasActiveFilters(where.filters)&&result.filter_version!==ASSET_FILTER_VERSION)throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
-        setPage(result);setCommitted(where);setRestore(usable?.scroll??scroll.current);scroll.current=usable?.scroll??scroll.current;
+        const before=latest.current.committed;
+        const commit=()=>{
+          if(!pageGate.current.current(request.id))return;
+          const top=usable?.scroll??(before?.node===where.node?scroll.current:0);
+          setPage(result);setCommitted(where);setRestore(top);scroll.current=top;
+        };
+        if(before?.node===where.node&&before.filter!==where.filter)swapSegment(swapOwner.current,{
+          forward:where.filter==='all',target:host.current?.querySelector<HTMLElement>('.gallery-scroll'),
+          still:host.current?.querySelector<HTMLElement>('.character-filters'),commit,
+        });
+        else commit();
       });
     void promise.catch(async reason=>{if(pageGate.current.current(request.id)){if(await recoverSearch(where,reason,request.signal)||!pageGate.current.current(request.id))return;setError((reason as {status?:number}).status===409?'캐릭터 보기가 변경되었습니다. 새로고침해 주세요.':errorText(reason));}})
       .finally(()=>{if(pageGate.current.current(request.id))setBusy(false);});
-    return()=>pageGate.current.cancel();
+    return()=>{pageGate.current.cancel();cancelSegmentSwap(swapOwner.current);};
   },[active,index,where]);
-  useEffect(()=>()=>{indexGate.current.cancel();pageGate.current.cancel();moreGate.current.cancel();},[]);
+  useEffect(()=>()=>{indexGate.current.cancel();pageGate.current.cancel();moreGate.current.cancel();cancelSegmentSwap(swapOwner.current);},[]);
   // A scope change (drill-down, Series filter, or Back) closes the dialog, so the surface can
   // never be left open over a page it no longer describes.
   useEffect(()=>{setFiltersOpen(null);},[where.node,where.filter]);
@@ -372,21 +394,26 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   let parent=node?.parentId;
   while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
   const folderStrip=!!node&&node.kind!=='character';
-  const foldable=folderStrip&&children.length>0;
-  const childCharacterCount=children.filter(child=>child.kind!=='folder').length;
-  const childFolderCount=children.filter(child=>child.kind==='folder').length;
+  // Keep the containing shelf mounted while a character is open. Returning reuses its
+  // decoded image elements and horizontal offset, rather than replaying blank cards.
+  const shelfHidden=node?.kind==='character'&&!children.length;
+  const shelfPlace=shelfHidden?[...ancestors].reverse().find(item=>item.kind!=='character')?.id??null:place.node;
+  const shelfChildren=index?characterChildren(index,shelfPlace):[];
+  const foldable=folderStrip&&shelfChildren.length>0;
+  const childCharacterCount=shelfChildren.filter(child=>child.kind!=='folder').length;
+  const childFolderCount=shelfChildren.filter(child=>child.kind==='folder').length;
   const shelfLabel=childCharacterCount>0&&childFolderCount>0?`캐릭터 ${childCharacterCount} · 폴더 ${childFolderCount}`:childCharacterCount>0?`캐릭터 ${childCharacterCount}`:`폴더 ${childFolderCount}`;
   const scopeCount=(filter:CharacterFilter)=>node?.kind==='series'?index?.scopes.find(scope=>scope.nodeId===node.id&&scope.filter===filter)?.totalCount:undefined;
   const filterControls=node?.kind==='series'&&<div className="folder-filter character-filters">
     <SegmentedControl<CharacterFilter> label="이미지 범위" options={SERIES_FILTERS.map(filter=>({value:filter,label:filter==='unclassified'?'미분류':'전체',count:scopeCount(filter)}))} value={place.filter} onChange={applyCharacterFilter}/>
     <IconButton label="미분류와 전체 설명" icon={InformationCircleIcon} onClick={()=>setFilterHelpOpen(true)}/>
   </div>;
-  const shelf=children.length>0&&<FolderShelf label={shelfLabel} cards={children.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearancePlace={place.node??'root'} appearanceEnabled={active&&!paused&&!navigating} appearanceSelector=".character-card"/>;
+  const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearancePlace={shelfPlace??'root'} appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
   const overview=<>
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
     {index&&!index.ready&&<div className="empty-state"><h3>캐릭터 보기가 아직 공유되지 않았습니다</h3><p>PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다.</p></div>}
     {landscape&&node?.kind==='series'&&node.heroAssetId&&<div className="character-hero"><Preview id={node.heroAssetId} rating={index?.contentRatings?.[node.heroAssetId]} paused={!active||paused} label={`${node.name} 대표 이미지`}/></div>}
-    {!!children.length&&shelf}
+    {shelf}
     {filterControls}
     {node?.description&&<p className="character-description">{node.description}</p>}
     {scope&&scope.sourceCount>scope.totalCount&&<p className="character-description">서버에 보관된 {scope.totalCount}개를 표시합니다. 아직 공유되지 않은 자산 {scope.sourceCount-scope.totalCount}개가 있습니다.</p>}

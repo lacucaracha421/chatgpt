@@ -184,6 +184,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     return result;
   },[destination,rows,density,width]);
   const oldRows = useRef(rows);
+  const rowsIdentity=useRef(identity);
   const offsetPublisher=useRef<((offset:number,scrolling:boolean)=>void)|null>(null);
   const observeOffset=useCallback((instance:Virtualizer<HTMLDivElement,Element>,callback:(offset:number,scrolling:boolean)=>void)=>{
     offsetPublisher.current=callback;return observeElementOffset(instance,callback);
@@ -207,12 +208,13 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     if (!scroll) return;
     const anchor=galleryAnchor(oldRows.current,scroll.scrollTop-introHeight,rowSize);
     virtualizer.measure();
-    if(scroll.scrollTop>=introHeight&&oldRows.current!==rows&&anchor) {
+    if(rowsIdentity.current===identity&&scroll.scrollTop>=introHeight&&oldRows.current!==rows&&anchor) {
       const top=galleryAnchorTop(rows,anchor,rowSize);
       if(top!==undefined)moveViewport(introHeight+top);
     }
     oldRows.current = rows;
-  }, [rows, virtualizer, introHeight]);
+    rowsIdentity.current=identity;
+  }, [rows, virtualizer, introHeight, identity]);
   useEffect(()=>{
     seekController.current?.abort();backgroundController.current?.abort();setDestination(null);
     return()=>{seekController.current?.abort();backgroundController.current?.abort();};
@@ -261,7 +263,17 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   },[destination,destinationRows,rows,introHeight,onScroll]);
   const indexAtScroll=useCallback(()=>galleryAnchor(rows,(parent.current?.scrollTop??0)-introHeight,rowSize)?.index??0,[rows,introHeight]);
   // A cached character page may arrive after its navigation identity committed.
-  useLayoutEffect(() => { if (parent.current) parent.current.scrollTop = restoreScroll; }, [identity, restoreScroll]);
+  const restoredScope=useRef({identity,folderScope});
+  useLayoutEffect(() => {
+    const before=restoredScope.current;restoredScope.current={identity,folderScope};
+    const scroll=parent.current;if(!scroll)return;
+    const segment=before.identity!==identity&&folderScope!==undefined&&before.folderScope===folderScope;
+    const top=segment?Math.min(restoreScroll,Math.max(0,introHeight+virtualizer.getTotalSize()-scroll.clientHeight)):restoreScroll;
+    // Publish the restored/clamped offset before the new view-transition snapshot. Waiting
+    // for a native scroll event leaves virtual rows at the previous list's offset for a frame.
+    moveViewport(top);
+    if(segment)onScroll(scroll.scrollTop);
+  }, [identity, restoreScroll]);
   useEffect(() => {
     const element = parent.current; if (!element) return;
     // A retained tab reports zero width under display:none, not a new gallery layout.

@@ -32,11 +32,11 @@ const KIND_NAMES:Record<CharacterFolderKind,string>={series:'캐릭터 시리즈
  * presentation-only, so it keeps the same wheel, drag and clipped-last-card behaviour on both
  * clients.
  */
-export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,cardsHidden,appearanceKey,appearanceEnabled=true,appearancePlace,appearanceSelector='.folder-shelf__card'}:{label:string;cards:ReactNode[];accessory?:ReactNode;ariaLabel?:string;className?:string;cardsId?:string;cardsHidden?:boolean;appearanceKey?:string;appearanceEnabled?:boolean;
+export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,cardsHidden,hidden=false,appearanceKey,appearanceEnabled=true,appearancePlace,appearanceSelector='.folder-shelf__card'}:{label:string;cards:ReactNode[];accessory?:ReactNode;ariaLabel?:string;className?:string;cardsId?:string;cardsHidden?:boolean;hidden?:boolean;appearanceKey?:string;appearanceEnabled?:boolean;
   /** The place whose cards are shown: a new place's first cards enter like the first visit's (the PC shelf's first batch). */appearancePlace?:string;appearanceSelector?:string}) {
   const host=useRef<HTMLElement>(null);
-  useFirstAppearance(host,cards.length,!!appearanceKey&&appearanceEnabled&&!cardsHidden,appearanceKey,appearanceSelector,appearancePlace);
-  return <section ref={host} className={['folder-shelf',className].filter(Boolean).join(' ')} aria-label={ariaLabel??label}>
+  useFirstAppearance(host,cards.length,!!appearanceKey&&appearanceEnabled&&!cardsHidden&&!hidden,appearanceKey,appearanceSelector,appearancePlace);
+  return <section ref={host} style={{display:hidden?'none':undefined}} inert={hidden||undefined} aria-hidden={hidden||undefined} className={['folder-shelf',className].filter(Boolean).join(' ')} aria-label={ariaLabel??label}>
     <SectionLabel as="h3" className="folder-shelf__label" title={label} actions={accessory}/>
     {cards.length>0&&<Fold keepMounted open={!cardsHidden} id={cardsId}><ShelfScroller previousLabel="이전 항목" nextLabel="다음 항목">{cards}</ShelfScroller></Fold>}
   </section>;
