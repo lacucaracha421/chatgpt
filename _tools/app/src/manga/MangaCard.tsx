@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCatalogMasked } from "../privacy/catalogMask";
 import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Badge } from "../shared/ui/Badge";
@@ -14,6 +14,7 @@ export type MangaCardProps = {
   privacyMode?: boolean;
   opening?: boolean;
   onOpen: (opener: HTMLButtonElement) => void;
+  onRead?: (opener: HTMLButtonElement) => void;
   selected?: boolean;
   bookmarked?: boolean;
   savedEdition?: boolean;
@@ -22,9 +23,19 @@ export type MangaCardProps = {
 };
 
 /** Shared cover object: the corner bookmark and page badge belong to the artwork. */
-export function MangaCard({ title, displayTitle = title, artist, pageCount, coverUrl, privacyMode, opening, onOpen, selected, bookmarked, savedEdition, bookmarkPending, onBookmark }: MangaCardProps) {
+export function MangaCard({ title, displayTitle = title, artist, pageCount, coverUrl, privacyMode, opening, onOpen, onRead, selected, bookmarked, savedEdition, bookmarkPending, onBookmark }: MangaCardProps) {
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelClick = () => { if (clickTimer.current !== null) clearTimeout(clickTimer.current); clickTimer.current = null; };
+  useEffect(() => cancelClick, []);
+  useEffect(() => { if (opening) cancelClick(); }, [opening]);
   return <article className="manga-card">
-    <button type="button" className="manga-card__body" aria-label={`${title} 상세 보기`} aria-pressed={selected} disabled={opening} onClick={(event) => onOpen(event.currentTarget)}>
+    <button type="button" className="manga-card__body" aria-label={`${title} 상세 보기`} aria-pressed={selected} disabled={opening} onClick={event => {
+      cancelClick();
+      const opener = event.currentTarget;
+      if (!onRead || event.detail === 0) { onOpen(opener); return; }
+      // Wait for a second pointer click so the detail never flashes before the reader.
+      if (event.detail === 1) clickTimer.current = setTimeout(() => { clickTimer.current = null; onOpen(opener); }, 500);
+    }} onDoubleClick={onRead ? event => { cancelClick(); onRead(event.currentTarget); } : undefined}>
       <span className="manga-card__frame ui-selectable-media" aria-selected={selected ?? false}>
         <MangaCover src={coverUrl} title={title} privacyMode={privacyMode} className="manga-card__cover" reportBusy={false} />
         <Badge variant="scrim" className="manga-card__pages">{pageCount}p</Badge>

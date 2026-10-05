@@ -656,7 +656,7 @@ describe("OnlineCatalogBrowser", () => {
     renderBrowser(gateway);
 
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
-    expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
+    await waitFor(() => expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" }));
     expect(gateway.getRemoteReadingProgress).not.toHaveBeenCalled();
     expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
 
@@ -668,11 +668,12 @@ describe("OnlineCatalogBrowser", () => {
     expect(screen.getByText("업로더")).toBeVisible();
 
     await userEvent.click(await screen.findByRole("button", { name: "character:teitoku 검색" }));
-    expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: "character:teitoku", page: 0 }),
-    );
+    ));
 
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
+    await waitFor(() => expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledTimes(2));
     await userEvent.click(await screen.findByRole("button", { name: "읽기" }));
     expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(await findReaderPosition("1 / 3")).toBeVisible();
@@ -1113,7 +1114,7 @@ it("shows grouped cards before exact count and rejects stale counts and failures
   expect(document.querySelector(".online-catalog__list-end")).toHaveTextContent("1개");
   await chooseMenu("언어", "일본어");
   await act(async () => { events[1]({ type: "count", totalCount: 0 }); events[0]({ type: "count", totalCount: 999 }); old.reject(new Error("old failure")); });
-  expect(screen.getByText("0개 결과")).toBeVisible();
+  expect(await screen.findByText("0개 결과")).toBeVisible();
   expect(screen.queryByText("999개 결과")).not.toBeInTheDocument();
   expect(screen.queryByText("old failure")).not.toBeInTheDocument();
 });
@@ -1243,7 +1244,7 @@ it("swaps cards without unmounting the panel and holds inert old content until t
   expect(screen.getByRole("complementary", { name: "망가 상세" })).toBe(panel);
   expect(panel).toHaveAttribute("data-state", "open");
   expect(within(panel).getByRole("heading", { name: work.title })).toBeInTheDocument();
-  expect(panel.querySelector("[inert]")).not.toBeNull();
+  await waitFor(() => expect(panel.querySelector("[inert]")).not.toBeNull());
   expect(firstCard).toHaveAttribute("aria-pressed", "true");
   await act(async () => second.resolve({ ...detail, providerWorkId: "4", title: "함대 일지" }));
   expect(screen.getByRole("complementary", { name: "망가 상세" })).toBe(panel);
@@ -1347,9 +1348,11 @@ it("rejects stale card responses and bookmark refreshes during a card switch", a
   await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
   const panel = await screen.findByRole("complementary", { name: "망가 상세" });
   await userEvent.click(screen.getByRole("button", { name: "함대 일지 상세 보기" }));
+  await waitFor(() => expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledTimes(2));
   act(() => window.dispatchEvent(new Event(CATALOG_BOOKMARKS_CHANGED_EVENT)));
   expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledTimes(2);
   await userEvent.click(screen.getByRole("button", { name: "제독의 하루 상세 보기" }));
+  await waitFor(() => expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledTimes(3));
   await act(async () => latest.resolve({ ...detail, providerWorkId: "5", title: "제독의 하루" }));
   await act(async () => old.resolve({ ...detail, providerWorkId: "4", title: "함대 일지" }));
   expect(within(panel).getByRole("heading", { name: "제독의 하루" })).toBeInTheDocument();
@@ -1439,6 +1442,7 @@ it("keeps the old work and its editions until both parts of the next work arrive
   await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
   const panel = await screen.findByRole("complementary", { name: "망가 상세" });
   await userEvent.click(screen.getByRole("button", { name: "다음 작품 상세 보기" }));
+  await waitFor(() => expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledTimes(2));
   await act(async () => nextDetail.resolve({ ...detail, providerWorkId: "4", title: "다음 작품" }));
   expect(within(panel).getByRole("heading", { name: work.title })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: `${work.title} 판본 열기` })).toBeInTheDocument();
@@ -1597,4 +1601,31 @@ describe("load more", () => {
     await waitFor(() => expect(panel).not.toBeInTheDocument());
     expect(other).toHaveFocus();
   });
+});
+
+it("double clicks straight into page one without opening detail or reading resume progress", async () => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway);
+  const card = await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+  const flashes: Element[] = [];
+  const observer = new MutationObserver(() => { const panel = document.querySelector('.ui-overlay-panel'); if (panel) flashes.push(panel); });
+  observer.observe(document.body, { childList: true, subtree: true });
+  try {
+    await userEvent.dblClick(card);
+    expect(await findReaderPosition("1 / 3")).toBeVisible();
+    expect(gateway.getOnlineCatalogWorkDetail).not.toHaveBeenCalled();
+    expect(gateway.getRemoteReadingProgress).not.toHaveBeenCalled();
+    expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
+    expect(flashes).toHaveLength(0);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(card).toHaveFocus());
+  } finally { observer.disconnect(); }
+});
+
+it("single clicks still open the detail and never resolve reader pages", async () => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
+  expect(await screen.findByRole("complementary", { name: "망가 상세" })).toBeVisible();
+  expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
 });

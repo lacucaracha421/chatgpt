@@ -11,13 +11,14 @@ type OnlineCatalogCardProps = {
   bookmarkPending: boolean;
   selected?: boolean;
   onOpen: (work: CatalogWork, opener: HTMLButtonElement) => void;
+  onRead?: (work: CatalogWork, opener: HTMLButtonElement) => void;
   onBookmark: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
 };
 
-export function OnlineCatalogCard({ work, opening, bookmarkPending, selected, onOpen, onBookmark }: OnlineCatalogCardProps) {
+export function OnlineCatalogCard({ work, opening, bookmarkPending, selected, onOpen, onRead, onBookmark }: OnlineCatalogCardProps) {
   const privacyMode = useCatalogMasked();
   return <MangaCard title={work.title} displayTitle={catalogDisplayTitle(work.title)} artist={work.artists.join(" · ")}
     pageCount={work.fileCount} coverUrl={work.thumbnailUrl ? nativeMediaUrl(work.thumbnailUrl) : null} privacyMode={privacyMode}
     opening={opening} selected={selected} bookmarkPending={bookmarkPending} bookmarked={work.bookmarked} savedEdition={work.hasBookmarkedVersion && !work.bookmarked}
-    onOpen={(opener) => onOpen(work, opener)} onBookmark={() => onBookmark(catalogIdentityOf(work), !work.bookmarked)} />;
+    onRead={onRead ? opener => onRead(work, opener) : undefined} onOpen={(opener) => onOpen(work, opener)} onBookmark={() => onBookmark(catalogIdentityOf(work), !work.bookmarked)} />;
 }

@@ -548,21 +548,31 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
 
   async function readDetail() {
     if (!detail || !detailOpen || openingWorkKey || reading) return;
+    await readWork(detail, detail.tagGroups.find(group => group.namespace === "artist")?.values.join(" · ") || null);
+  }
+
+  async function readWork(work: CatalogWorkIdentity & { title: string }, artist: string | null, opener?: HTMLButtonElement) {
+    detailRequest.current += 1;
+    editionRequest.current += 1;
     const request = ++readRequest.current;
-    const selectedDetail = detail;
+    setEditionsLoading(false);
+    setOpeningWorkKey(opener ? catalogIdentityKey(work) : null);
+    if (opener) detailReturnFocus.current = opener;
     setReading(true);
     try {
-      const gallery = await gateway.resolveOnlineCatalogWork(catalogIdentityOf(selectedDetail));
+      const gallery = await gateway.resolveOnlineCatalogWork(catalogIdentityOf(work));
       if (!mounted.current || request !== readRequest.current) return;
-      const artist = selectedDetail.tagGroups.find(group => group.namespace === "artist")?.values.join(" · ") || null;
       setDetailOpen(false);
-      setViewer({ title: selectedDetail.title, ...gallery, initialPage: 1, artist });
+      setViewer({ title: work.title, ...gallery, initialPage: 1, artist });
     } catch (error) {
       if (mounted.current && request === readRequest.current) {
         setMessage(commandErrorMessage(error, "온라인 작품을 열지 못했습니다"));
       }
     } finally {
-      if (mounted.current && request === readRequest.current) setReading(false);
+      if (mounted.current && request === readRequest.current) {
+        setReading(false);
+        setOpeningWorkKey(null);
+      }
     }
   }
 
@@ -747,10 +757,11 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
             {results.works.map((work) => <OnlineCatalogCard
               key={`${work.provider}:${work.groupId}`}
               work={work}
-              opening={openingWorkKey === catalogIdentityKey(work)}
+              opening={reading || loading || !active || requestedSource === "local" || openingWorkKey === catalogIdentityKey(work)}
               selected={detailOpen && detailGroup?.provider === work.provider && detailGroup.groupId === work.groupId}
               bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
               onOpen={(selected, opener) => void openDetail(selected, work, opener)}
+              onRead={(selected, opener) => void readWork(selected, selected.artists.join(" · ") || null, opener)}
               onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
             />)}
           </div>
