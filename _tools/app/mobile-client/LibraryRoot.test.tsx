@@ -89,7 +89,8 @@ it('shows the three asset segments and lazily browses pinned artists with search
  expect(cards[0].getAttribute('aria-label')).toBe('지우, 2장, 고정됨');
  expect(document.querySelector('.artist-grid-pin')).toBeTruthy();
  fireEvent.click(cards[0]);
- expect(props.onOpenArtist).toHaveBeenCalledWith(artists[0]);
+ // The list stays until the artist's first page is prepared, then the detail opens with it.
+ await waitFor(()=>expect(props.onOpenArtist).toHaveBeenCalledWith(expect.objectContaining({id:'pin',label:'지우'})));
  fireEvent.click(screen.getByRole('button',{name:'검색'}));
  fireEvent.change(screen.getByPlaceholderText('에셋 찾기'),{target:{value:'다람'}});
  expect(screen.getAllByRole('button',{name:/다람/})).toHaveLength(1);

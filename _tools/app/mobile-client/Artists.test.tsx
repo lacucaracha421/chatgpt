@@ -93,7 +93,7 @@ describe('Artists', () => {
     const view = renderArtists();
     await screen.findByRole('button', {name: /하늘빛, 74장/});
     fireEvent.click(screen.getByRole('button', {name: /하늘빛, 74장/}));
-    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
     fireEvent.click(screen.getByRole('button', {name: '이름 바꾸기'}));
     fireEvent.change(screen.getByRole('textbox', {name: '작가 이름'}), {target: {value: '새 이름'}});
     fireEvent.click(screen.getByRole('button', {name: '저장'}));
@@ -111,7 +111,7 @@ describe('Artists', () => {
       ? Promise.reject(new Error('offline')) : original(path, ...args));
     renderArtists();
     fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
-    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
     fireEvent.click(screen.getByRole('button', {name: '숨기기'}));
     act(() => backRef.current?.());
     expect(screen.queryByRole('button', {name: /하늘빛, 74장/})).toBeNull();
@@ -129,9 +129,9 @@ describe('Artists', () => {
       ? Promise.reject(new Error('offline')) : original(path, ...args));
     renderArtists();
     fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
-    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
     fireEvent.click(screen.getByRole('button', {name: '고정'}));
-    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
     expect(screen.getByRole('button', {name: '고정 해제'})).toBeTruthy();
     expect(screen.queryByRole('button', {name: /합치기/})).toBeNull();
     fireEvent.click(screen.getByRole('button', {name: '고정 해제'}));
@@ -293,15 +293,16 @@ describe('Artists', () => {
     expect(mocks.api.mock.calls.filter(([path])=>path.includes('media_kind=videos'))).toHaveLength(2);
   });
 
-  it('keeps local artwork offline but an offline video scope has no image fallback', async () => {
+  it('does not fabricate a cover-only page when direct entry is offline, and can retry', async () => {
     const original=mocks.api.getMockImplementation()!;
     mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/library/assets?')?Promise.reject(new Error('offline')):original(path));
     render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
     await screen.findByRole('alert');
-    expect(screen.getByText('asset-haneul-1')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button',{name:/영상 0/}));
-    await screen.findByText('조건에 맞는 자산이 없습니다.');
     expect(screen.queryByText('asset-haneul-1')).toBeNull();
+    expect(screen.queryByLabelText('자산 목록')).toBeNull();
+    mocks.api.mockImplementation(original);
+    fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));
+    await screen.findByText('asset-haneul-1');
   });
 
   it('does not read artwork pages or TOCs in private mode', async () => {

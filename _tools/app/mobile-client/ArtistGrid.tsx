@@ -8,6 +8,7 @@ import {ARTIST_LIST_ENTRANCE,PreparedCovers,usePreparedCovers} from './artistCov
 import {EmptyState,SegmentedControl} from './ui';
 import {usePrivacyMode} from './privacyMode';
 import {PinIcon} from './PinIcon';
+import {useArtistEntry} from './ArtistGridEntry';
 import {artistName,assetsFromIds,sortArtists,type ArtistSort,type LibraryArtist} from './artistsModel';
 
 const SORT_LABELS: Record<ArtistSort,string> = {recent:'최근 저장 순',count:'장수',name:'이름'};
@@ -38,6 +39,7 @@ function ArtistGridCard({artist,privateMode,paused,onOpen}:{artist:LibraryArtist
 
 export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{artists:LibraryArtist[];state:'idle'|'loading'|'ready'|'empty';paused:boolean;onOpenArtist(artist:LibraryArtist):void;onVisibleNames?(names:string[]):void}) {
   const [privateMode] = usePrivacyMode();
+  const entry=useArtistEntry(paused,onOpenArtist);
   const [sort,setSort] = useState<ArtistSort>(readSort);
   const [sortOpen,setSortOpen] = useState(false);
   const visible = useMemo(() => sortArtists(artists.some(artist=>artist.main)?artists.filter(artist=>artist.main):artists,sort),[artists,sort]);
@@ -55,11 +57,11 @@ export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{a
     setSortOpen(false);
   };
 
-  return <div ref={host} className="artist-grid-pane" aria-label="작가 목록">
+  return <><div ref={host} className="artist-grid-pane" aria-label="작가 목록" inert={entry.pending} aria-busy={entry.pending}>
     <div className="artist-grid-toolbar">
       <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
     </div>
-    {state === 'idle' || state === 'loading' || showLoading || state === 'ready' && !covers ? <div className="artist-empty" role="status"><span>{showLoading && "작가 목록을 불러오는 중입니다"}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <PreparedCovers.Provider value={covers ?? new Map()}><div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => onOpenArtist(artist)}/>)}</div></PreparedCovers.Provider> : <EmptyState title="검색 결과가 없습니다"/>}
+    {state === 'idle' || state === 'loading' || showLoading || state === 'ready' && !covers ? <div className="artist-empty" role="status"><span>{showLoading && "작가 목록을 불러오는 중입니다"}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <PreparedCovers.Provider value={covers ?? new Map()}><div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => void entry.open(artist)}/>)}</div></PreparedCovers.Provider> : <EmptyState title="검색 결과가 없습니다"/>}
     {sortOpen && <BottomSheet title="정렬" onClose={() => setSortOpen(false)}><SegmentedControl fullWidth label="작가 정렬" options={SORT_OPTIONS} value={sort} onChange={chooseSort}/></BottomSheet>}
-  </div>;
+  </div>{entry.error&&<div className="inline-error" role="alert">{entry.error}</div>}</>;
 }
