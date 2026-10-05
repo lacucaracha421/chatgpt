@@ -37,9 +37,12 @@ export function useConnectionRows({ gateway, cloud, authorityHealth, active = tr
       ? { key: "server", label: "서버", value: "연결 안 됨", time: outage.since ? `${clockLabel(outage.since)}부터` : undefined, tone: "off", view: { kind: "settings", section: "connection" } }
       : { key: "server", label: "서버", value: "연결됨", tone: "ok", view: { kind: "settings", section: "connection" } });
   }
-  if (transfer.availability.state !== "unavailable") {
-    const tone: Tone = transfer.availability.state === "ready" ? "ok" : transfer.availability.state === "starting" ? "busy" : outage ? "idle" : "off";
-    rows.push({ key: "tablet", label: "태블릿", value: transfer.devices[0]?.name ?? "연결된 기기 없음", time: transfer.availability.state === "offline" ? "연결 안 됨" : undefined, tone, view: { kind: "exchange" } });
+  // 파일 전송 (exchange) only: asset sync with the tablet is a separate connection, so the row says 전송
+  // and a missing transfer token reads as such instead of "no tablet".
+  const needsToken = transfer.availability.needsToken;
+  if (transfer.availability.state !== "unavailable" || needsToken) {
+    const tone: Tone = needsToken ? "idle" : transfer.availability.state === "ready" ? "ok" : transfer.availability.state === "starting" ? "busy" : outage ? "idle" : "off";
+    rows.push({ key: "tablet", label: "태블릿 전송", value: needsToken ? "토큰 미발급" : transfer.devices[0]?.name ?? "등록된 기기 없음", time: transfer.availability.state === "offline" ? "연결 안 됨" : undefined, tone, view: { kind: "exchange" } });
   }
   const cloudState = cloudLine(cloud?.progress ?? null, cloud?.problemCount ?? 0);
   if (cloudState) rows.push({ key: "cloud", label: "클라우드", value: cloudState.text, tone: outage && cloudState.tone !== "ok" ? "idle" : cloudState.tone, view: { kind: "settings", section: "connection" } });

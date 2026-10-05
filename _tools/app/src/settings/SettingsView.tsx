@@ -509,7 +509,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </SettingsGroup>
           <SettingsGroup title="동기화">
             <SimpleRow name="서버" status={<BusyLabel busy={!serverRow} idle={serverRow && joinStatus(serverRow.value, serverRow.time)}>확인 중…</BusyLabel>} tone={serverRow?.tone} control={<Button size="sm" variant="quiet" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void syncCloudNow()}>지금 받기</Button>} />
-            <SimpleRow name="태블릿" status={tabletRow?.value ?? "연결된 기기 없음"} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("qr")}>QR 연결</Button>} />
+            <SimpleRow name="태블릿" status={tabletRow ? `전송 · ${tabletRow.value}` : "전송 사용 불가"} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("qr")}>QR 연결</Button>} />
             <SimpleRow name="브라우저 확장" status={<BusyLabel busy={!extensionConnection} idle={extensionConnection && (extensionConnection.status === "ready" ? "PC 연결 준비됨" : "사용 불가")}>확인 중…</BusyLabel>} tone={extensionConnection?.status === "ready" ? "ok" : extensionConnection ? "off" : undefined} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("pc")}>PC 연결</Button>} />
             {pairing && <ExtensionPairingQr value={pairing} mode={pairingMode} onCopy={copyPairing} onRefresh={() => void createPairing(pairingMode)} onClose={() => setPairing(null)} />}
           </SettingsGroup>
@@ -575,7 +575,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             </CloudBackfillSettings>
           </SettingsGroup>
           <SettingsGroup title="기기">
-            <SimpleRow name="태블릿" status={tabletRow?.value ?? "연결된 기기 없음"} control={<Button size="sm" variant="secondary" onClick={() => void createPairing("qr")}>QR 연결</Button>} />
+            <SimpleRow name="태블릿" status={tabletRow ? `전송 · ${tabletRow.value}` : "전송 사용 불가"} control={<Button size="sm" variant="secondary" onClick={() => void createPairing("qr")}>QR 연결</Button>} />
             <SimpleRow name="브라우저 확장" status={<BusyLabel busy={!extensionConnection} idle={extensionConnection?.baseUrl}>확인 중…</BusyLabel>} control={<span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={!extensionConnection?.token} onClick={() => void copyExtensionToken()}>키 복사</Button><Button size="sm" variant="secondary" onClick={() => void createPairing("pc")}>PC 연결</Button></span>} />
             {pairing && <ExtensionPairingQr value={pairing} mode={pairingMode} onCopy={copyPairing} onRefresh={() => void createPairing(pairingMode)} onClose={() => setPairing(null)} />}
           </SettingsGroup>
