@@ -3,7 +3,8 @@ import { assetFolderFilters, prefetchRead } from "../assets/folderPrefetch";
 import { getAutoTagFilter, hasAutoTagFilter } from "../autotags/autoTagFilter";
 import { opensAsSeries } from "../characters/CharacterFolderContent";
 import type { CharacterSeries } from "../characters/hubApi";
-import { prefetchSeriesOverview } from "../characters/SeriesBrowser";
+import { prefetchSeriesOverview, seriesFolderBrowseView } from "../characters/SeriesBrowser";
+import { seriesDataRevision } from "../characters/seriesMountCache";
 import type { AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 
 /**
@@ -16,7 +17,13 @@ export function planFolderPrefetch(target: AssetView, { current, gateway, series
   if (target.kind !== "classification" || !target.classificationId || target.characterId || target.characterGroupId) return null;
   const id = target.classificationId;
   if (current.kind === "classification" && current.classificationId === id && !current.characterId && !current.characterGroupId) return null;
-  if (opensAsSeries(id, series, classifications)) return prefetchSeriesOverview(id);
+  if (opensAsSeries(id, series, classifications)) {
+    const revision = seriesDataRevision(gateway);
+    // The mounted hub owns the same refreshVersion + hub.revision passed to SeriesBrowser.
+    // Without it, do not guess a revision and start reads the switch cannot consume.
+    if (!revision) return null;
+    return prefetchSeriesOverview(id, undefined, undefined, { ...revision, gateway, view: seriesFolderBrowseView(sort) });
+  }
   // A plain folder: the mounted browser keeps its filters across folders; a fresh one starts unfiltered.
   const filters = assetFolderFilters() ?? { mediaFilter: "all" as const, aspectFilter: "all" as const, randomPivot: null };
   if (sort === "random" && !filters.randomPivot) return null;

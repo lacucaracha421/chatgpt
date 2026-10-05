@@ -48,6 +48,42 @@ it("marks changed suggestion requests loading on the first committed render", as
   expect(screen.getByText("loading")).toBeInTheDocument();
 });
 
+it("shares pending suggestions across mounts and never publishes an older revision over a newer one", async () => {
+  const client = api();
+  let finishOld!: (rows: Suggestion[]) => void;
+  vi.mocked(client.list).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+  const tree = (version: number) => <CharacterSuggestionsOverview version={version} privacyMode={false} api={client} />;
+  const first = render(tree(0));
+  first.unmount();
+  const second = render(tree(0));
+  expect(client.list).toHaveBeenCalledTimes(1);
+  vi.mocked(client.list).mockResolvedValue([{ ...suggestion, tag: "current_suggestion" }]);
+  second.rerender(tree(1));
+  await screen.findByText("current suggestion");
+  finishOld([suggestion]);
+  await waitFor(() => expect(screen.queryByText("이졸데")).not.toBeInTheDocument());
+  second.unmount();
+  render(tree(1));
+  expect(screen.getByText("current suggestion")).toBeInTheDocument();
+  expect(client.list).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a dismissed suggestion dismissed after a remount at the same data revision", async () => {
+  const client = api();
+  const tree = () => <CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />;
+  const first = render(tree());
+  await screen.findByText("이졸데");
+  vi.mocked(client.list).mockResolvedValue([]);
+  vi.mocked(client.ignored).mockResolvedValue([{ tag: suggestion.tag, ignoredAt: "now" }]);
+  fireEvent.click(screen.getByRole("button", { name: "무시" }));
+  await screen.findByRole("button", { name: "무시 목록 1" });
+  first.unmount();
+  render(tree());
+  expect(screen.queryByText("이졸데")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "무시 목록 1" })).toBeInTheDocument();
+  expect(client.list).toHaveBeenCalledTimes(2);
+});
+
 describe("character suggestions", () => {
   it("ships reviewed Korean names and humanises unknown qualifiers", () => {
     expect(suggestionName(suggestion.tag)).toBe("이졸데");

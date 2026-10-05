@@ -1,6 +1,9 @@
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { AssetImage } from "../../privacy/AssetImage";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useOptionalLibrary } from "../../library/LibraryContext";
+import { RevisionReadCache, seriesDataScope } from "../seriesMountCache";
+import { onFolderPrefetchInvalidated } from "../../assets/folderPrefetch";
 import { thumbnailUrl } from "../../assets/mediaUrl";
 import { commandErrorMessage } from "../../library/errorMessage";
 import { AnchoredPanel } from "../../shared/ui/AnchoredPanel";
@@ -17,27 +20,39 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 const snapshot = () => filters;
 const setFilters = (next: typeof filters) => { filters = next; listeners.forEach(listener => listener()); };
 
+const suggestionCache = new RevisionReadCache<{ rows: Suggestion[]; ignored: IgnoredTag[] }>();
+onFolderPrefetchInvalidated(() => suggestionCache.clear());
+export function prefetchCharacterSuggestions(version: number, scope: string, api: SuggestionApi = suggestionApi) {
+  return suggestionCache.read(api, scope, version, String(filters.minimum), async () => {
+    const [rows, ignored] = await Promise.all([api.list(filters.minimum), api.ignored()]);
+    return { rows, ignored };
+  });
+}
+
 export function useCharacterSuggestions(version: number, api: SuggestionApi = suggestionApi) {
   const currentFilters = useSyncExternalStore(subscribe, snapshot);
+  const library = useOptionalLibrary();
+  const dataScope = seriesDataScope(library?.gateway, library?.library?.root);
+  const revision = useSyncExternalStore(suggestionCache.subscribe, () => suggestionCache.generation(api, dataScope));
+  const cached = suggestionCache.peek(api, dataScope, version, String(currentFilters.minimum));
   const [rows, setRows] = useState<Suggestion[]>([]);
   const [ignored, setIgnored] = useState<IgnoredTag[]>([]);
-  const [settledRequest, setSettledRequest] = useState<{ api: SuggestionApi; minimum: number; version: number; revision: number } | null>(null);
+  const [settledRequest, setSettledRequest] = useState<{ api: SuggestionApi; scope: string; minimum: number; version: number; revision: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [revision, setRevision] = useState(0);
-  const loading = !settledRequest || settledRequest.api !== api || settledRequest.minimum !== currentFilters.minimum || settledRequest.version !== version || settledRequest.revision !== revision;
+  const loading = !cached && (!settledRequest || settledRequest.api !== api || settledRequest.scope !== dataScope || settledRequest.minimum !== currentFilters.minimum || settledRequest.version !== version || settledRequest.revision !== revision);
   const [message, setMessage] = useState<string | null>(null);
   const [postponed, setPostponed] = useState<string[]>([]);
-  const refresh = useCallback(() => setRevision(value => value + 1), []);
+  const refresh = useCallback(() => suggestionCache.invalidate(api, dataScope), [api, dataScope]);
   useEffect(() => {
     let live = true;
     setError(null);
-    const request = { api, minimum: currentFilters.minimum, version, revision };
-    void Promise.all([api.list(currentFilters.minimum), api.ignored()]).then(([next, hidden]) => {
+    const request = { api, scope: dataScope, minimum: currentFilters.minimum, version, revision };
+    void prefetchCharacterSuggestions(version, dataScope, api).then(({ rows: next, ignored: hidden }) => {
       if (live) { setRows(next); setIgnored(hidden); setSettledRequest(request); }
     }, reason => { if (live) { setSettledRequest(request); setError(commandErrorMessage(reason, "새 캐릭터 제안을 불러오지 못했습니다.")); } });
     return () => { live = false; };
-  }, [api, currentFilters.minimum, version, revision]);
+  }, [api, dataScope, currentFilters.minimum, version, revision]);
   const ignore = async (tag: string, value: boolean) => {
     if (busy) return;
     setBusy(true); setError(null);
@@ -47,8 +62,8 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
   };
   const saved = (result: SuggestionResult) => { setMessage(`${result.target.displayName} · ${result.queuedCount}장을 태거 검토 후보로 넣었습니다.`); refresh(); };
   return {
-    rows: rows.filter(row => (!currentFilters.insideOnly || row.insideCount > 0) && !postponed.includes(row.tag)),
-    ignored, loading, busy, error, message, refresh, ignore, saved, api,
+    rows: (cached?.rows ?? rows).filter(row => (!currentFilters.insideOnly || row.insideCount > 0) && !postponed.includes(row.tag)),
+    ignored: cached?.ignored ?? ignored, loading, busy, error, message, refresh, ignore, saved, api,
     filters: currentFilters, setFilters,
     postponed, postpone: (tag: string) => setPostponed(tags => [...tags, tag]), clearPostponed: () => setPostponed([]),
   };

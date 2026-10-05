@@ -16,6 +16,12 @@ export const FOLDER_PREFETCH_FRESH_MS = 5_000;
 type Entry = { at: number; epoch: number; promise: Promise<unknown> };
 const caches = new WeakMap<object, Map<string, Entry>>();
 let epoch = 0;
+const invalidationListeners = new Set<() => void>();
+/** Revision caches of mount-wide reads follow the App's existing library-change invalidation. */
+export function onFolderPrefetchInvalidated(listener: () => void) {
+  invalidationListeners.add(listener);
+  return () => { invalidationListeners.delete(listener); };
+}
 
 /** JSON with sorted object keys, so a request object's key does not depend on property order. */
 function stableJson(value: unknown): string {
@@ -51,7 +57,9 @@ export function prefetchedRead<T>(source: object, command: string, args: unknown
   const key = `${command}:${stableJson(args)}`;
   const entry = cache.get(key);
   if (!entry) return read();
-  cache.delete(key);
+  // React StrictMode replays mount effects synchronously. Both effects take the same read;
+  // a subsequent switch/reload still sees the normal one-shot cache after this microtask.
+  queueMicrotask(() => { if (cache.get(key) === entry) cache.delete(key); });
   if (!fresh(entry)) return read();
   // A failed prefetch is not the switch's answer.
   return (entry.promise as Promise<T>).catch(() => read());
@@ -60,6 +68,7 @@ export function prefetchedRead<T>(source: object, command: string, args: unknown
 /** Drop every prefetched result (any library change). Reads still running are ignored when they land. */
 export function invalidateFolderPrefetch() {
   epoch += 1;
+  invalidationListeners.forEach(listener => listener());
 }
 
 // ---- Hover intent: one dwell timer, one prefetch in flight, only the latest hovered target waits.
@@ -103,7 +112,7 @@ export function leaveFolder(id: string) {
 export function resetFolderPrefetch() {
   if (timer !== null) clearTimeout(timer);
   timer = null; pending = null; queued = null; running = null;
-  epoch += 1;
+  invalidateFolderPrefetch();
 }
 
 // ---- Plain-folder filters of the mounted AssetBrowser, so a prefetch builds the switch's exact query.

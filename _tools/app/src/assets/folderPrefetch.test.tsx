@@ -67,6 +67,15 @@ it("keeps one prefetch in flight; only the latest hovered folder starts after it
   expect(api.read.mock.calls).toEqual([["a"], ["c"]]);
 });
 
+it("shares a taken prefetch with synchronous mount-effect replay, then consumes it once", async () => {
+  void prefetchRead(api, "read", "a", () => api.read("a"));
+  const first = switchRead("a"), replay = switchRead("a");
+  await expect(Promise.all([first, replay])).resolves.toEqual(["page a", "page a"]);
+  expect(api.read).toHaveBeenCalledTimes(1);
+  await switchRead("a");
+  expect(api.read).toHaveBeenCalledTimes(2);
+});
+
 it("drops a waiting hover when the pointer leaves it", async () => {
   let finish!: (value: string) => void;
   api.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));

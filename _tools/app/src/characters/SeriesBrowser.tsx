@@ -2,16 +2,17 @@ import { SeriesShelf } from "./SeriesShelf";
 import { AssetImage } from "../privacy/AssetImage";
 import { folderPreviewCache, rememberFolderPreview } from "../assets/folderPreviewCache";
 import { AssetStableImage as StableImage } from "../privacy/AssetImage";
-import { CharacterSuggestionTile, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
+import { CharacterSuggestionTile, prefetchCharacterSuggestions, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
+import { readSeriesSidebarCounts, seriesDataScope, sidebarCountCache } from "./seriesMountCache";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
-import { cloneElement, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
+import { cloneElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
 import { READY_CAP_MS } from "../shared/motion/AreaSwitch";
 import { motionDefaults, motionTime, reducedMotion } from "../shared/motion/curves";
 import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, PencilIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
-import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
+import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetSummary, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { AssetGallery, galleryFirstScreen, tileHasThumbnail, tileThumbnailUrl } from "../assets/AssetGallery";
@@ -78,14 +79,34 @@ const CharacterPanelIcon = (props: ComponentProps<"svg">) => <svg viewBox="0 0 2
 </svg>;
 const emptyPage = (): CharacterBrowsePage => ({ items: [], nextCursor: null, totalCount: 0 });
 const createRandomPivot = () => crypto.randomUUID().split("-").join("");
+type SeriesViewFilters = { mediaFilter: AssetMediaFilter; aspectFilter: AssetAspectFilter; randomPivot: string };
+let activeViewFilters: (() => SeriesViewFilters) | null = null;
+let prefetchedRandomPivot: string | null = null;
+function initialRandomPivot() {
+  // StrictMode can call the initializer twice before commit; both must match the hovered request.
+  return prefetchedRandomPivot ?? createRandomPivot();
+}
+function characterBrowseView(sort: AssetSort, filters: SeriesViewFilters): CharacterBrowseView | undefined {
+  return sort !== "newest" || filters.mediaFilter !== "all" || filters.aspectFilter !== "all"
+    ? { sort, randomPivot: sort === "random" ? filters.randomPivot : null, mediaKind: filters.mediaFilter === "all" ? null : filters.mediaFilter, aspectRatio: filters.aspectFilter === "all" ? null : filters.aspectFilter }
+    : undefined;
+}
+export function seriesFolderBrowseView(sort: AssetSort) {
+  const filters = activeViewFilters?.() ?? {
+    mediaFilter: "all", aspectFilter: "all",
+    randomPivot: sort === "random" ? (prefetchedRandomPivot ??= createRandomPivot()) : "",
+  };
+  return characterBrowseView(sort, filters);
+}
 /**
  * Hover prefetch of a series overview: the reads its switch gates on (the first page in `load` and the
  * excluded-count, folder and candidate reads below), with the same arguments, so the switch takes them.
  */
-export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, shadowApi: Pick<ShadowReviewApi, "page"> = shadowReviewApi): Promise<unknown>[] {
-  const query = { seriesId, targetId: null, groupId: null, seriesFilter: "unclassified" as const, all: false, after: null, limit: 100 };
+export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, shadowApi: Pick<ShadowReviewApi, "page"> = shadowReviewApi, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number }): Promise<unknown>[] {
+  const query = { seriesId, targetId: null, groupId: null, seriesFilter: "unclassified" as const, all: false, after: null, limit: 100, ...(options?.view ? { view: options.view } : {}) };
   const candidates = { offset: 0, limit: 1, seriesId };
   return [
+    ...(options ? [prefetchCharacterSuggestions(options.version, options.scope), readSeriesSidebarCounts(options.gateway, options.scope, options.version)] : []),
     prefetchRead(hubApi, "browse", query, () => hubApi.browse(query)),
     prefetchRead(hubApi, "excludedAssets", [seriesId, null, 1], () => hubApi.excludedAssets(seriesId, null, 1)),
     prefetchRead(hubApi, "seriesFolders", seriesId, () => hubApi.seriesFolders(seriesId)),
@@ -105,6 +126,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
+  const dataScope = seriesDataScope(gateway, library?.root);
   const previewCache = folderPreviewCache(gateway, library?.root);
   const folderIntent = useFolderPrefetchIntent();
   const suggestions = useCharacterSuggestions(refreshVersion);
@@ -148,7 +170,15 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // 보기 filters, as in a plain folder: they stay while moving between series, groups and characters.
   const [mediaFilter, setMediaFilter] = useState<AssetMediaFilter>("all");
   const [aspectFilter, setAspectFilter] = useState<AssetAspectFilter>("all");
-  const [randomPivot, setRandomPivot] = useState(createRandomPivot);
+  const [randomPivot, setRandomPivot] = useState(initialRandomPivot);
+  const viewFilters = useRef({ mediaFilter, aspectFilter, randomPivot });
+  viewFilters.current = { mediaFilter, aspectFilter, randomPivot };
+  useLayoutEffect(() => {
+    if (prefetchedRandomPivot === viewFilters.current.randomPivot) prefetchedRandomPivot = null;
+    const read = () => viewFilters.current;
+    activeViewFilters = read;
+    return () => { if (activeViewFilters === read) activeViewFilters = null; };
+  }, []);
   const generation = useRef(0), pending = useRef(false), saving = useRef(false);
   const loadedScope = useRef<string | null>(null);
   // The scope the shown page belongs to. On a scope switch the previous images stay until the new
@@ -192,26 +222,27 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // pickers or the legacy 자동 분류 제외 list (its own command has no sort or filters).
   const viewApplies = !picking && !(!targetId && !currentGroup && excludedOnly);
   const sorted = viewApplies && Boolean(onSortChange) ? sort : "newest";
-  const browseView: CharacterBrowseView | undefined = viewApplies && (sorted !== "newest" || mediaFilter !== "all" || aspectFilter !== "all")
-    ? { sort: sorted, randomPivot: sorted === "random" ? randomPivot : null, mediaKind: mediaFilter === "all" ? null : mediaFilter, aspectRatio: aspectFilter === "all" ? null : aspectFilter }
-    : undefined;
+  const browseView = viewApplies ? characterBrowseView(sorted, { mediaFilter, aspectFilter, randomPivot }) : undefined;
   const filtered = Boolean(browseView?.mediaKind || browseView?.aspectRatio);
   const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
   // Per-character image counts come from the character index (character folders are hidden from the
   // folder tree, so their tree counts are missing); the folder tree is only a fallback.
-  const [sidebarCounts, setSidebarCounts] = useState<Record<string, number> | null>(null);
-  const [sidebarLoading, setSidebarLoading] = useState(Boolean(gateway.characterSidebarCounts));
+  const cachedCounts = sidebarCountCache.peek(gateway, dataScope, refreshVersion);
+  const countRevision = useSyncExternalStore(sidebarCountCache.subscribe, () => sidebarCountCache.generation(gateway, dataScope));
+  const [sidebarCounts, setSidebarCounts] = useState<Record<string, number> | null>(cachedCounts?.targets ?? null);
+  const [settledCounts, setSettledCounts] = useState<{ gateway: LibraryGateway; scope: string; version: number; revision: string } | null>(null);
+  const sidebarLoading = Boolean(gateway.characterSidebarCounts && !cachedCounts && (!settledCounts || settledCounts.gateway !== gateway || settledCounts.scope !== dataScope || settledCounts.version !== refreshVersion || settledCounts.revision !== countRevision));
   useEffect(() => {
-    if (!gateway.characterSidebarCounts) { setSidebarLoading(false); return; }
+    if (!gateway.characterSidebarCounts) return;
     let active = true;
-    setSidebarLoading(true);
-    void gateway.characterSidebarCounts().then(result => { if (active) setSidebarCounts(result.targets); }, () => undefined)
-      .finally(() => { if (active) setSidebarLoading(false); });
+    const request = { gateway, scope: dataScope, version: refreshVersion, revision: countRevision };
+    void readSeriesSidebarCounts(gateway, dataScope, refreshVersion).then(result => { if (active && result) setSidebarCounts(result.targets); }, () => undefined)
+      .finally(() => { if (active) setSettledCounts(request); });
     return () => { active = false; };
-  }, [gateway, refreshVersion, reload]);
+  }, [gateway, dataScope, refreshVersion, countRevision, reload]);
   const characterCounts: Record<string, number> = Object.fromEntries(targets.flatMap(target => {
     const folder = target.linkedClassificationId ? classifications.find(entry => entry.id === target.linkedClassificationId) : undefined;
-    const count = sidebarCounts?.[target.id] ?? folder?.totalAssetCount ?? folder?.assetCount;
+    const count = (cachedCounts?.targets ?? sidebarCounts)?.[target.id] ?? folder?.totalAssetCount ?? folder?.assetCount;
     return count === undefined ? [] : [[target.id, count] as const];
   }));
   const memberCounts: Record<string, number | undefined> = Object.fromEntries(members.map(target => [target.id, characterCounts[target.id]]));
@@ -232,7 +263,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   ] : []);
   const selectedReferenceCount = selectedIds.filter(id => currentReferenceIds.has(id)).length;
   useAutoDismiss(message, setMessage);
-  function refresh() { setReload(v => v + 1); onChanged(); }
+  function refresh() { sidebarCountCache.invalidate(gateway, dataScope); suggestions.refresh(); setReload(v => v + 1); onChanged(); }
   async function load(after: string | null = null) {
     if (after && pending.current) return;
     if (!after && pickerScope) {

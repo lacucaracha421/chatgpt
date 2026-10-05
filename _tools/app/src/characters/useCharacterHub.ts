@@ -1,5 +1,7 @@
 import { CHARACTER_SUGGESTIONS_CHANGED_EVENT } from "./suggestions/client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useOptionalLibrary } from "../library/LibraryContext";
+import { publishSeriesDataRevision } from "./seriesMountCache";
 import { characterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterGroup, type CharacterSeries } from "./hubApi";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -11,6 +13,10 @@ export function useCharacterHub(refreshVersion: number) {
   const [groups, setGroups] = useState<CharacterGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const library = useOptionalLibrary();
+  useLayoutEffect(() => {
+    if (library) return publishSeriesDataRevision(library.gateway, library.library?.root, refreshVersion + revision);
+  }, [library?.gateway, library?.library?.root, refreshVersion, revision]);
   const refresh = useCallback(() => setRevision(v => v + 1), []);
   useEffect(() => {
     window.addEventListener(CHARACTER_SUGGESTIONS_CHANGED_EVENT, refresh);
