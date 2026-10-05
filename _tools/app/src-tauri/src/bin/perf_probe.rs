@@ -266,6 +266,9 @@ struct Options {
     character_settings: PathBuf,
     /// What-if: collect planner statistics on the snapshot before `Library::open`.
     statistics: Option<String>,
+    /// A prepared snapshot directory (a consistent copy of `library.sqlite` and its WAL,
+    /// made while the app is closed) used instead of copying the library; never deleted.
+    reuse_snapshot: Option<PathBuf>,
 }
 
 fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
@@ -282,6 +285,7 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut detail_threshold_ms = 20.0;
     let mut character_idle = None;
     let mut statistics = None;
+    let mut reuse_snapshot = None;
     let mut character_settings = env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default()
@@ -313,6 +317,13 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
                 statistics = Some(mode);
             }
             "--skip" => skip = args.next(),
+            "--reuse-snapshot" => {
+                reuse_snapshot = Some(
+                    args.next()
+                        .map(PathBuf::from)
+                        .ok_or("--reuse-snapshot <dir>")?,
+                )
+            }
             "--detail-ms" => {
                 detail_threshold_ms = args.next().ok_or("--detail-ms <ms>")?.parse()?
             }
@@ -347,13 +358,14 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
         character_idle,
         character_settings,
         statistics,
+        reuse_snapshot,
     })
 }
 
 fn usage() -> String {
     "usage: cargo run --release --bin perf_probe -- --library <path> [--snapshot-dir <dir>] \
      [--iterations <n>] [--with-catalog] [--no-video-media] [--idle-ticks] [--disk-stats] [--keep-snapshot] [--only <substr>] [--skip <substr>] \
-     [--detail-ms <ms>] [--statistics <optimize|optimize-stat1|analyze>] [--character-idle <seconds> [--character-settings <character-runtime.json>]]"
+     [--detail-ms <ms>] [--statistics <optimize|optimize-stat1|analyze>] [--character-idle <seconds> [--character-settings <character-runtime.json>]] [--reuse-snapshot <dir>]"
         .to_owned()
 }
 
@@ -480,6 +492,19 @@ fn snapshot(options: &Options) -> Result<PathBuf, Box<dyn std::error::Error>> {
         );
     }
     Ok(snapshot_root)
+}
+
+/// A snapshot prepared outside the library (see `--reuse-snapshot`).
+fn prepared_snapshot(dir: &Path, library: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let root = fs::canonicalize(dir)?;
+    if root.starts_with(fs::canonicalize(library)?) {
+        return Err("the snapshot directory must be outside the library".into());
+    }
+    if !root.join("library.sqlite").is_file() {
+        return Err("the prepared snapshot has no library.sqlite".into());
+    }
+    println!("snapshot_reused: {}", root.display());
+    Ok(root)
 }
 
 /// Plain recursive copy (read-only on the source; symlinks are not followed).
@@ -854,6 +879,24 @@ fn run_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
         series_switch_paths(bench, library, snapshot_root);
         return;
     }
+    if bench
+        .options
+        .only
+        .as_deref()
+        .is_some_and(|s| s.contains("series_open"))
+    {
+        series_open_paths(bench, library, snapshot_root);
+        return;
+    }
+    if bench
+        .options
+        .only
+        .as_deref()
+        .is_some_and(|s| s.starts_with("home/"))
+    {
+        home_paths(bench, library, snapshot_root);
+        return;
+    }
     connection_paths(bench, snapshot_root);
     let sidebar = sidebar_paths(bench, library);
     grid_paths(bench, library, &sidebar);
@@ -1111,6 +1154,621 @@ fn series_switch_paths(bench: &mut Bench, library: &Library, snapshot_root: &Pat
         serde_json::to_vec_pretty(&audit).unwrap(),
     )
     .unwrap();
+}
+
+/// One read a folder switch issues: its name, whether the swap waits for it, and the call.
+type SwitchRead<'a> = (
+    &'static str,
+    bool,
+    Box<dyn Fn() -> Result<Value, String> + Sync + 'a>,
+);
+
+/// Issues `reads` together, one thread each, started in the given order (the order the
+/// frontend's effects invoke them; each Tauri command body runs on its own blocking-pool
+/// thread). Returns each read's completion time in ms from the common start, so reads that
+/// serialize on the Library's `database_lock` show up as staggered completions.
+fn race(reads: &[SwitchRead]) -> Result<Vec<f64>, String> {
+    let started = Instant::now();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = reads
+            .iter()
+            .map(|(_, _, call)| {
+                scope.spawn(move || call().map(|_| started.elapsed().as_secs_f64() * 1000.0))
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| {
+                worker
+                    .join()
+                    .map_err(|_| "switch worker panicked".to_owned())?
+            })
+            .collect()
+    })
+}
+
+/// Times one switch model: when every read the swap waits for has finished (`swapReadyMs`),
+/// and each read's completion p50/p95 (warm-up call excluded).
+fn switch_model(bench: &mut Bench, label: String, reads: &[SwitchRead]) {
+    let samples = std::cell::RefCell::new(Vec::<Vec<f64>>::new());
+    let ready = |done: &[f64]| {
+        reads
+            .iter()
+            .zip(done)
+            .filter(|((_, gates, _), _)| *gates)
+            .map(|(_, ms)| *ms)
+            .fold(0.0, f64::max)
+    };
+    let value = bench.run("series_open", label.clone(), || {
+        let done = race(reads).inspect_err(|error| println!("{label}: race error: {error}"))?;
+        let swap_ready = ready(&done);
+        let all = done.iter().copied().fold(0.0, f64::max);
+        samples.borrow_mut().push(done);
+        Ok(json!({"swapReadyMs":swap_ready,"allDoneMs":all}))
+    });
+    let samples = samples.into_inner();
+    if value.is_none() || samples.len() < 2 {
+        return;
+    }
+    let timed = &samples[1..];
+    let mut swap: Vec<f64> = timed.iter().map(|done| ready(done)).collect();
+    swap.sort_by(f64::total_cmp);
+    let per_read = reads
+        .iter()
+        .enumerate()
+        .map(|(index, (name, gates, _))| {
+            let mut column: Vec<f64> = timed.iter().map(|done| done[index]).collect();
+            column.sort_by(f64::total_cmp);
+            format!(
+                "{name}{}={:.1}/{:.1}",
+                if *gates { "*" } else { "" },
+                percentile(&column, 50.0),
+                percentile(&column, 95.0)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!(
+        "series_open_model: {label} n={} swap_ready_p50={:.1} p95={:.1} | done p50/p95 ms (* gates the swap): {per_read}",
+        swap.len(),
+        percentile(&swap, 50.0),
+        percentile(&swap, 95.0)
+    );
+}
+
+/// Opening a series folder vs a plain one (2026-10-05): the reads each switch type issues,
+/// alone and raced together as the frontend issues them, plus the 보기 view variants of the
+/// series browse. Folders are looked up by name under 게임 in the snapshot.
+fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
+    let connection = rusqlite::Connection::open_with_flags(
+        snapshot_root.join("library.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .expect("snapshot database");
+    let folder = |name: &str| -> (String, bool) {
+        connection
+            .query_row(
+                "SELECT c.id, EXISTS(SELECT 1 FROM character_series s WHERE s.classification_id=c.id)
+                 FROM classification_entries c JOIN classification_entries p ON p.id=c.parent_id
+                 WHERE p.name='게임' AND c.name=?1",
+                [name],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or_else(|e| panic!("게임/{name}: {e}"))
+    };
+    // Mount-only reads of a freshly mounted SeriesBrowser (global, not per series).
+    let suggestions = bench
+        .run(
+            "series_open",
+            "series_open/global/character_suggestions_min5",
+            || to_value(library.character_suggestions(Some(5))),
+        )
+        .unwrap_or(Value::Null);
+    bench.run(
+        "series_open",
+        "series_open/global/ignored_character_suggestions",
+        || to_value(library.ignored_character_suggestions()),
+    );
+    bench.run(
+        "series_open",
+        "series_open/global/character_sidebar_counts",
+        || to_value(library.character_sidebar_counts()),
+    );
+    let all_buckets = json!({"startUtc":"0001-01-01T00:00:00.000Z","endUtc":"9999-12-31T23:59:59.999Z","offsetMinutes":540});
+    bench.run(
+        "series_open",
+        "series_open/global/list_asset_date_buckets_all",
+        || to_value(library.list_asset_date_buckets(from_json(all_buckets.clone()))),
+    );
+    let targets = bench
+        .run(
+            "series_open",
+            "series_open/global/list_character_targets",
+            || to_value(library.list_character_targets()),
+        )
+        .unwrap_or(Value::Null);
+
+    // The plain destination (series → plain): AssetBrowser's first page (directOnly, newest),
+    // its folder-shelf covers and, for children without one, a 1-asset read each (up to 40).
+    let (plain_id, plain_is_series) = folder("엔필");
+    assert!(
+        !plain_is_series,
+        "게임/엔필 is expected to be a plain folder"
+    );
+    let plain_page =
+        json!({"classificationId":plain_id,"directOnly":true,"sort":"newest","limit":PAGE_SIZE});
+    bench.run(
+        "series_open",
+        "series_open/엔필/list_assets_direct",
+        || to_value(library.list_assets(from_json(plain_page.clone()))),
+    );
+    let plain_folders = bench
+        .run(
+            "series_open",
+            "series_open/엔필/character_series_folders",
+            || to_value(library.character_series_folders(&plain_id)),
+        )
+        .unwrap_or(Value::Null);
+    let covered: Vec<&str> = plain_folders
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|f| f["thumbnailAssetId"].is_string())
+        .filter_map(|f| f["classificationId"].as_str())
+        .collect();
+    let children: Vec<String> = connection
+        .prepare("SELECT id FROM classification_entries WHERE parent_id=?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([&plain_id], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| !covered.contains(&id.as_str()))
+        .take(40)
+        .collect();
+    println!(
+        "series_open_plain_folder: id={plain_id} children_without_cover={}",
+        children.len()
+    );
+    let child_cover = |child: &str| {
+        to_value(library.list_assets(from_json(
+            json!({"classificationId":child,"mediaKind":"images","sort":"newest","limit":1}),
+        )))
+    };
+    bench.run(
+        "series_open",
+        "series_open/엔필/child_covers_sequential",
+        || {
+            for child in &children {
+                child_cover(child)?;
+            }
+            Ok(json!({"reads":children.len()}))
+        },
+    );
+    switch_model(
+        bench,
+        "series_open/to_plain/엔필".into(),
+        &[
+            (
+                "list_assets",
+                true,
+                Box::new(|| to_value(library.list_assets(from_json(plain_page.clone())))),
+            ),
+            (
+                "date_buckets",
+                false,
+                Box::new(|| {
+                    to_value(library.list_asset_date_buckets(from_json(all_buckets.clone())))
+                }),
+            ),
+            (
+                "folder_covers",
+                false,
+                Box::new(|| {
+                    to_value(library.character_series_folders(&plain_id))?;
+                    std::thread::scope(|scope| {
+                        for child in &children {
+                            scope.spawn(|| child_cover(child));
+                        }
+                    });
+                    Ok(Value::Null)
+                }),
+            ),
+        ],
+    );
+
+    for name in ["닌텐도", "명조", "니케", "블아"] {
+        let (id, is_series) = folder(name);
+        assert!(is_series, "게임/{name} is expected to be a series");
+        let id = id.as_str();
+        println!("series_open_folder: name={name} id={id}");
+        let browse = json!({"seriesId":id,"targetId":null,"groupId":null,"seriesFilter":"unclassified","after":null,"limit":100,"all":false});
+        let browse_call = || to_value(library.browse_character_assets(from_json(browse.clone())));
+        let excluded = || to_value(library.character_series_excluded_assets(id, None, 1));
+        let folders = || to_value(library.character_series_folders(id));
+        let candidates = || {
+            to_value(library.character_shadow_review_page(from_json(
+                json!({"offset":0,"limit":1,"seriesId":id}),
+            )))
+        };
+        let readiness = || to_value(library.character_s36_readiness(id));
+        bench.run(
+            "series_open",
+            format!("series_open/{name}/browse_unclassified"),
+            browse_call,
+        );
+        bench.run(
+            "series_open",
+            format!("series_open/{name}/excluded_assets_limit1"),
+            excluded,
+        );
+        bench.run(
+            "series_open",
+            format!("series_open/{name}/series_folders"),
+            folders,
+        );
+        bench.run(
+            "series_open",
+            format!("series_open/{name}/shadow_review_page_limit1"),
+            candidates,
+        );
+        bench.run(
+            "series_open",
+            format!("series_open/{name}/s36_readiness"),
+            readiness,
+        );
+        // The 보기 sort/filters (any non-default view goes through the view path).
+        for (variant, view) in [
+            ("default_via_view", json!({})),
+            ("oldest", json!({"sort":"oldest"})),
+            (
+                "random",
+                json!({"sort":"random","randomPivot":"0123456789abcdef0123456789abcdef"}),
+            ),
+            ("favorites", json!({"sort":"favorites"})),
+            ("images", json!({"mediaKind":"images"})),
+            ("videos", json!({"mediaKind":"videos"})),
+            ("portrait", json!({"aspectRatio":"portrait"})),
+            (
+                "oldest_images_portrait",
+                json!({"sort":"oldest","mediaKind":"images","aspectRatio":"portrait"}),
+            ),
+        ] {
+            bench.run(
+                "series_open",
+                format!("series_open/{name}/browse_view/{variant}"),
+                || {
+                    to_value(library.browse_character_assets_with_view(
+                        from_json(browse.clone()),
+                        &from_json(view.clone()),
+                    ))
+                },
+            );
+        }
+        let gating = || -> Vec<SwitchRead> {
+            vec![
+                ("browse", true, Box::new(browse_call)),
+                ("excluded", true, Box::new(excluded)),
+                ("folders", true, Box::new(folders)),
+                ("candidates", true, Box::new(candidates)),
+            ]
+        };
+        // Effect order of a fresh SeriesBrowser: suggestions (list + ignored), sidebar counts,
+        // S36 readiness, then the page and the gated per-series reads.
+        let mount_extra = || -> Vec<SwitchRead> {
+            vec![
+                (
+                    "suggestions",
+                    true,
+                    Box::new(|| to_value(library.character_suggestions(Some(5)))),
+                ),
+                (
+                    "ignored",
+                    true,
+                    Box::new(|| to_value(library.ignored_character_suggestions())),
+                ),
+                (
+                    "sidebar_counts",
+                    true,
+                    Box::new(|| to_value(library.character_sidebar_counts())),
+                ),
+                ("readiness", false, Box::new(readiness)),
+            ]
+        };
+        // plain → series, nothing prefetched.
+        let mut reads = mount_extra();
+        reads.extend(gating());
+        switch_model(bench, format!("series_open/from_plain/{name}"), &reads);
+        // plain → series after the hover prefetch landed (it covers only the four gated reads).
+        switch_model(
+            bench,
+            format!("series_open/from_plain_prefetched/{name}"),
+            &mount_extra(),
+        );
+        // plain → series without the suggestions gate (what reserving their space would leave).
+        let mut reads: Vec<SwitchRead> = mount_extra()
+            .into_iter()
+            .map(|(read, gates, call)| {
+                let gates = gates && !matches!(read, "suggestions" | "ignored");
+                (read, gates, call)
+            })
+            .collect();
+        reads.extend(gating());
+        switch_model(
+            bench,
+            format!("series_open/from_plain_no_suggestion_gate/{name}"),
+            &reads,
+        );
+        // series → series (SeriesBrowser stays mounted; readiness runs alongside, not gated).
+        let mut reads = gating();
+        reads.push(("readiness", false, Box::new(readiness)));
+        switch_model(bench, format!("series_open/sibling/{name}"), &reads);
+        // Thumbnails: the gated first-screen set at today's media cost (pooled reads).
+        let page: Vec<String> = browse_call()
+            .ok()
+            .and_then(|value| {
+                value["items"].as_array().map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|a| a["id"].as_str().map(str::to_owned))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        let shelf = shelf_thumbnail_ids(id, &targets, &suggestions);
+        for asset_id in shelf.iter().chain(&page) {
+            let relative: Option<String> = connection
+                .query_row(
+                    "SELECT thumbnail_relative_path FROM assets WHERE id=?1",
+                    [asset_id],
+                    |r| r.get(0),
+                )
+                .ok()
+                .flatten();
+            if let Some(relative) = relative.filter(|p| safe_relative_path(p)) {
+                copy_thumbnail_into_snapshot(&bench.options.library, snapshot_root, &relative);
+            }
+        }
+        preload_paths(
+            bench,
+            library,
+            &format!("series_open_{name}"),
+            &shelf,
+            &page,
+        );
+    }
+}
+
+/// PC Home first load (2026-10-05): the reads the launch mark waits for, alone and raced, plus
+/// the once-per-start/once-per-day work around them (cold duplicate-edition scan, revisit
+/// rebuild, daily backup) and how long a main-thread `list_collections` waits behind the
+/// backup. Everything writes only into the snapshot (the backup lands in its `backups/`).
+fn home_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
+    // Cold first: the duplicate-edition cache is in memory, so this is every app start.
+    bench.run("home", "home/list_catalog_review(first=cold scan)", || {
+        to_value(library.list_catalog_review())
+    });
+    let today = chrono::Local::now().date_naive();
+    let local_date = today.format("%Y-%m-%d").to_string();
+    let now_utc = || chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    // get_home_overview / get_home_media run private SQL on `library.connection()`; the same
+    // statements on a reader connection (connection open + query, without the lock wait).
+    let overview_sql = |c: &rusqlite::Connection| -> Result<Value, String> {
+        let assets: i64 = c
+            .query_row(
+                "SELECT COUNT(*)+COALESCE(SUM(collected_at >= ?1),0)+COALESCE(SUM(collected_at >= ?2),0)
+                    +COALESCE(SUM(media_kind IN ('image','gif')),0)+COALESCE(SUM(media_kind='video'),0)
+                 FROM assets WHERE status='normal'",
+                ["2026-10-04T15:00:00.000Z", "2026-09-28T15:00:00.000Z"],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let collections: i64 = c
+            .query_row(
+                "SELECT COALESCE(SUM(type='game'),0)+COALESCE(SUM(type='manga'),0)
+                    +COALESCE(SUM(type='movie'),0)+COALESCE(SUM(type='av'),0)
+                 FROM collections WHERE legacy_kind IS NULL OR legacy_kind <> 'gacha'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(json!({"assets":assets,"collections":collections}))
+    };
+    let media_sql = |c: &rusqlite::Connection| -> Result<Value, String> {
+        let mut rows = 0usize;
+        for sql in [
+            "SELECT c.id,p.owned_platform,c.my_score FROM collections c
+             JOIN collection_pc_records p ON p.collection_id=c.id
+             WHERE c.type IN ('game','movie') AND p.status IN ('playing','watching')
+             ORDER BY c.updated_at DESC,c.id",
+            "SELECT id,collected_at,width*1.0/height FROM assets
+             WHERE status='normal' AND media_kind='image' AND favorite=1
+               AND width>0 AND height>0 AND width<=height*2.0",
+        ] {
+            let mut statement = c.prepare(sql).map_err(|e| e.to_string())?;
+            let mut result = statement.query([]).map_err(|e| e.to_string())?;
+            while result.next().map_err(|e| e.to_string())?.is_some() {
+                rows += 1;
+            }
+        }
+        Ok(json!({"rows":rows}))
+    };
+    let fresh_reader = || {
+        rusqlite::Connection::open_with_flags(
+            snapshot_root.join("library.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|e| e.to_string())
+    };
+    let overview = || {
+        let c = fresh_reader()?;
+        overview_sql(&c)?;
+        to_value(library.tagger_review_counts())?;
+        to_value(library.home_av_performer(today))
+    };
+    let media = || media_sql(&fresh_reader()?);
+    let reads: Vec<(
+        &'static str,
+        Box<dyn Fn() -> Result<Value, String> + Sync + '_>,
+    )> = vec![
+        (
+            "list_classifications",
+            Box::new(|| to_value(library.list_classifications())),
+        ),
+        ("list_albums", Box::new(|| to_value(library.list_albums()))),
+        (
+            "list_collections",
+            Box::new(|| to_value(library.list_collections())),
+        ),
+        (
+            "list_similarity_reviews_limit1",
+            Box::new(|| to_value(library.list_similarity_reviews(None, 1))),
+        ),
+        (
+            "list_trash_limit1",
+            Box::new(|| to_value(library.list_trash(None, 1))),
+        ),
+        (
+            "list_character_targets",
+            Box::new(|| to_value(library.list_character_targets())),
+        ),
+        (
+            "character_series",
+            Box::new(|| to_value(library.character_series())),
+        ),
+        ("home_media_sql", Box::new(media)),
+        (
+            "revisit_slate_cached",
+            Box::new(|| to_value(library.get_or_create_revisit_slate(&local_date, &now_utc()))),
+        ),
+        (
+            "list_release_inbox",
+            Box::new(|| to_value(library.list_release_inbox())),
+        ),
+        (
+            "list_release_watch",
+            Box::new(|| to_value(library.list_release_watch())),
+        ),
+        (
+            "release_calendar",
+            Box::new(|| to_value(library.release_calendar())),
+        ),
+        ("overview_sql_tagger_av", Box::new(overview)),
+        (
+            "overview_unused_totals_sql_only",
+            Box::new(|| overview_sql(&fresh_reader()?)),
+        ),
+        (
+            "character_shadow_review_summary",
+            Box::new(|| to_value(library.character_shadow_review_summary())),
+        ),
+        (
+            "list_catalog_review_warm",
+            Box::new(|| to_value(library.list_catalog_review())),
+        ),
+        ("notes_state", Box::new(|| to_value(library.notes_state()))),
+        (
+            "av_link_pending_count",
+            Box::new(|| to_value(library.av_link_pending_count())),
+        ),
+    ];
+    for (name, call) in &reads {
+        bench.run("home", format!("home/{name}"), call);
+    }
+    // Revisit rebuild: a slate is built once per local date; distinct future dates force it.
+    if bench.selected("home/revisit_rebuild") {
+        let mut samples = Vec::new();
+        for day in 0..bench.options.iterations.min(10) {
+            let date = format!("2027-01-{:02}", day + 1);
+            let started = Instant::now();
+            if let Err(error) = library.get_or_create_revisit_slate(&date, &now_utc()) {
+                println!("home/revisit_rebuild: error: {error}");
+                break;
+            }
+            samples.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+        if !samples.is_empty() {
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "home_revisit_rebuild: n={} p50={:.1} p95={:.1} min={:.1}",
+                samples.len(),
+                percentile(&samples, 50.0),
+                percentile(&samples, 95.0),
+                samples[0]
+            );
+        }
+    }
+    // The first-load reads issued together (warm caches): what the splash waits on, without
+    // the cold scan, the rebuild and the backup measured separately.
+    let gated = [
+        "list_classifications",
+        "list_albums",
+        "list_collections",
+        "home_media_sql",
+        "revisit_slate_cached",
+        "list_release_inbox",
+        "list_release_watch",
+        "release_calendar",
+        "overview_sql_tagger_av",
+        "character_shadow_review_summary",
+        "list_catalog_review_warm",
+        "notes_state",
+    ];
+    let raced: Vec<SwitchRead> = reads
+        .iter()
+        .filter(|(name, _)| *name != "overview_unused_totals_sql_only")
+        .map(|(name, call)| -> SwitchRead {
+            (*name, gated.contains(name), Box::new(move || call()))
+        })
+        .collect();
+    switch_model(bench, "home/first_load_raced_warm".into(), &raced);
+    // Daily backup (first launch after 09:00 KST): the copy holds database_lock. Measure it
+    // alone, then a main-thread list_collections issued 20 ms into it.
+    if bench.selected("home/daily_backup") {
+        let started = Instant::now();
+        let (backup, waits) = std::thread::scope(|scope| {
+            let backup = scope.spawn(|| {
+                let result = library.ensure_daily_backup(chrono::Utc::now());
+                (
+                    started.elapsed().as_secs_f64() * 1000.0,
+                    result.map(|b| b.is_some()),
+                )
+            });
+            std::thread::sleep(Duration::from_millis(20));
+            let mut waits = Vec::new();
+            for (name, call) in reads.iter().filter(|(name, _)| {
+                matches!(
+                    *name,
+                    "list_collections" | "list_classifications" | "revisit_slate_cached"
+                )
+            }) {
+                let issued = started.elapsed().as_secs_f64() * 1000.0;
+                let one = Instant::now();
+                let ok = call().is_ok();
+                waits.push(format!(
+                    "{name}: issued_at={issued:.0} took={:.1} ok={ok}",
+                    one.elapsed().as_secs_f64() * 1000.0
+                ));
+            }
+            (backup.join().expect("backup thread"), waits)
+        });
+        println!(
+            "home_daily_backup: ms={:.0} created={:?} | {}",
+            backup.0,
+            backup.1,
+            waits.join(" | ")
+        );
+        let size: u64 = fs::read_dir(snapshot_root.join("backups"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| entry.metadata().ok())
+            .map(|metadata| metadata.len())
+            .sum();
+        println!("home_daily_backup_bytes: {size}");
+    }
 }
 
 /// Plain read-only file copy of one source thumbnail into the snapshot, so the snapshot
@@ -2113,7 +2771,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         print_disk_stats(&options.library)?;
     }
 
-    let snapshot_root = snapshot(&options)?;
+    let snapshot_root = match &options.reuse_snapshot {
+        Some(dir) => prepared_snapshot(dir, &options.library)?,
+        None => snapshot(&options)?,
+    };
     isolate_snapshot_network(&snapshot_root, &options.library)?;
     if let Some(mode) = options.statistics.as_deref() {
         collect_snapshot_statistics(&snapshot_root, &options.library, mode)?;
@@ -2188,7 +2849,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("changed_or_removed: {entry:?}");
         }
     }
-    if options.keep_snapshot {
+    if options.keep_snapshot || options.reuse_snapshot.is_some() {
         println!("snapshot kept: {}", snapshot_root.display());
     } else {
         fs::remove_dir_all(&snapshot_root)?;
