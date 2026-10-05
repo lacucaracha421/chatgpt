@@ -2,7 +2,7 @@ import {useEffect, useState, useSyncExternalStore} from 'react';
 import {rowView, type ExchangeSnapshot} from './exchangeModel';
 import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
 import type {CollectionSummary} from './collectionModel';
-import {currentShelf, invalidateReleases, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
+import {currentShelf, forgetHomeShelf, invalidateReleases, loadShelf, observePublication, readHomeShelf, releaseEpoch, rememberHomeShelf, subscribeReleases} from './releaseStore';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useDuplicateCount} from './CatalogDuplicates';
 import {useCachedHomeSource, useCachedHomeSourceRead} from './homeCache';
@@ -345,10 +345,11 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     enabled, scope, source: 'releaseCounts', signalKey: 'releases', initial: null, forceKey: refreshKey,
     read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); if (!signal.aborted) result('releases'); return reply ? releaseCounts(reply) : NO_RELEASES; }, onError: reason => result('releases', reason),
   });
-  const {value: collectionRevision, ready: collectionsReady} = useCachedHomeSourceRead<string | null>({
+  const {value: collectionStatus, ready: collectionsReady} = useCachedHomeSourceRead<{revision?: string | null; libraryId?: string | null} | null>({
     enabled, scope, source: 'collectionsStatus', signalKey: 'collections', initial: null, forceKey: refreshKey,
-    read: async signal => { const reply = await api<{revision?: string | null}>('/v1/collections/status', signal); if (!signal.aborted) result('collections'); return reply?.revision ?? null; }, onError: reason => result('collections', reason),
+    read: async signal => { const reply = await api<{revision?: string | null; libraryId?: string | null}>('/v1/collections/status', signal); if (!signal.aborted) result('collections'); return reply ?? null; }, onError: reason => result('collections', reason),
   });
+  const collectionRevision = collectionStatus?.revision;
   const summary = useCachedHomeSource<LibrarySummary | null | undefined>({
     enabled, scope, source: 'summary', signalKey: 'listGeneration', initial: undefined, forceKey: refreshKey,
     read: async signal => { const reply = await fetchLibrarySummary(signal); if (!signal.aborted) result('summary'); return reply; }, onError: reason => result('summary', reason),
@@ -359,9 +360,19 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
   });
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
   const epoch = useSyncExternalStore(subscribeReleases, releaseEpoch);
-  const shelf = useSyncExternalStore(subscribeReleases, currentShelf);
+  const freshShelf = useSyncExternalStore(subscribeReleases, currentShelf);
   const [snapshot, setSnapshot] = useState(() => readHomeSnapshot(scope));
   useEffect(() => setSnapshot(readHomeSnapshot(scope)), [scope]);
+  const [keptShelf, setKeptShelf] = useState(() => readHomeShelf(scope));
+  useEffect(() => setKeptShelf(readHomeShelf(scope)), [scope]);
+  const libraryChanged = Boolean(collectionStatus?.libraryId && keptShelf?.libraryId !== collectionStatus.libraryId);
+  const savedShelf = keptShelf?.scope === scope && !libraryChanged ? keptShelf.value : null;
+  const shelf = freshShelf ?? savedShelf ?? null;
+  useEffect(() => {
+    if (libraryChanged && keptShelf) { forgetHomeShelf(scope); setKeptShelf(null); }
+    if (!freshShelf?.ready || !collectionsReady || collectionRevision && freshShelf.revision !== collectionRevision) return;
+    setKeptShelf(rememberHomeShelf(scope, freshShelf, collectionStatus?.libraryId ?? null));
+  }, [freshShelf, scope, collectionStatus, collectionsReady]);
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine !== false);
@@ -401,7 +412,10 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     todosAt: offline ? Math.max(0, ...TODO_ORDER.map(key => snapshot.counts[key]?.at ?? 0)) || null : null,
     applicable: TODO_ORDER.filter(key => key !== 'character'),
     unreadWorks: counts ? Object.keys(counts.byCollection).length : snapshot.counts.releases?.value ?? null,
-    releasesReady: countsReady && collectionsReady && Boolean(shelf?.ready && (!collectionRevision || shelf.revision === collectionRevision)),
+    // A kept publication is display input only; loadShelf still refreshes the
+    // shared store in the background, including when the status revision moved.
+    releasesReady: Boolean(savedShelf?.ready || (countsReady && collectionsReady && freshShelf?.ready && (!collectionRevision || freshShelf.revision === collectionRevision))),
+    shelf,
     releases: pick(releases, snapshot.releases),
     releasesAt: offline || !releases ? snapshot.releases?.at ?? null : null,
     upcoming: pick(upcoming, snapshot.upcoming),

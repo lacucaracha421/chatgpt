@@ -7,7 +7,7 @@ import type {Note} from '../src/notes/store';
 import {ApiError} from './transport';
 import {Home, type HomeProps} from './Home';
 import {setOutboxConnection} from './outboxConnection';
-import {resetReleaseStore} from './releaseStore';
+import {HOME_RELEASE_SHELF_KEY, readHomeShelf, resetReleaseStore} from './releaseStore';
 import {resetHomeSourceCache} from './homeCache';
 import {commitUpcomingWishlist} from './upcomingWishlistOutbox';
 import {PRIVACY_MODE_KEY, PRIVACY_MODE_EVENT} from './privacyMode';
@@ -62,6 +62,54 @@ beforeEach(() => {
 afterEach(() => {cleanup(); vi.useRealTimers(); setOutboxConnection(null); delete window.LakomicsNative;});
 
 describe('shared Home attention on tablet', () => {
+  it('shows the kept shelf before paging finishes and converges to the refreshed shelf', async () => {
+    const oldGame: CollectionSummary = {id: 'old-game', name: 'Kept Game', type: 'game', showcase: false, releaseDate: '2026-10-02'};
+    const newGame: CollectionSummary = {id: 'new-game', name: 'Refreshed Game', type: 'game', showcase: false, releaseDate: '2026-10-03'};
+    localStorage.setItem(HOME_RELEASE_SHELF_KEY, JSON.stringify({scope: props().scope, libraryId: null,
+      value: {ready: true, revision: 'r0', works: [oldGame]}}));
+    const read = mocks.api.getMockImplementation()!;
+    const pages: {finish(value: unknown): void; path: string}[] = [];
+    mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/collections?')
+      ? new Promise(finish => pages.push({finish, path})) : read(path, ...args));
+    render(<Home {...props()}/>);
+    await screen.findByRole('region', {name: /^2주 안에 발매/});
+    expect(screen.getByText('Kept Game')).toBeTruthy();
+    expect(pages).toHaveLength(3);
+    expect(readHomeShelf(props().scope)?.value.revision).toBe('r0');
+    await act(async () => {
+      pages.forEach(page => page.finish({ready: true, revision: 'r1', items: [], nextCursor: 'next'}));
+    });
+    expect(pages).toHaveLength(6);
+    expect(screen.getByText('Kept Game')).toBeTruthy();
+    await act(async () => {
+      pages.slice(3).forEach(page => page.finish({ready: true, revision: 'r1',
+        items: page.path.includes('type=game') ? [newGame] : works, nextCursor: null}));
+    });
+    await screen.findByText('Refreshed Game');
+    expect(screen.queryByText('Kept Game')).toBeNull();
+    expect(readHomeShelf(props().scope)?.value.works).toEqual([...works, newGame]);
+    // A new process has an empty module store but retains the complete input.
+    cleanup(); resetReleaseStore(); resetHomeSourceCache(); pages.length = 0;
+    render(<Home {...props()}/>);
+    await screen.findByText('Refreshed Game');
+    expect(pages).toHaveLength(3);
+  });
+
+  it.each(['other-server', 'other-library', 'invalid'])('does not use a shelf belonging to %s', async kind => {
+    localStorage.setItem(HOME_RELEASE_SHELF_KEY, JSON.stringify({scope: kind === 'other-server' ? 'https://other.example' : props().scope, libraryId: 'old-library',
+      value: {ready: true, revision: 'r0', works: kind === 'invalid' ? {} : works}}));
+    const read = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path, ...args) => {
+      if (path === '/v1/collections/status') return Promise.resolve({revision: 'r1', libraryId: 'current-library'});
+      if (path.startsWith('/v1/collections?')) return new Promise(() => {});
+      return read(path, ...args);
+    });
+    render(<Home {...props()}/>);
+    await act(async () => {});
+    expect(screen.queryByRole('region', {name: /^2주 안에 발매/})).toBeNull();
+    expect(screen.getByRole('status', {name: '홈 미디어'})).toBeTruthy();
+  });
+
   it('groups the shared PC pieces into media and day columns and omits totals, picks and memo cards', async () => {
     server.upcoming = {version:1, entries:[upcomingEntry], wishlist:[upcomingEntry]};
     render(<Home {...props({captures:[item('pending')]})}/>);

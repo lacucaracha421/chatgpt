@@ -195,6 +195,7 @@ public final class ThumbnailCacheTest {
   }finally{for(File file:actual.listFiles())Files.delete(file.toPath());Files.delete(actual.toPath());}
  }
  public static void main(String[] args)throws Exception{
+  asyncRestoreTests();
   File dir=Files.createTempDirectory("lakomics-thumbnails-").toFile();
   try{
    ThumbnailCache cache=new ThumbnailCache(dir,10);
@@ -264,6 +265,32 @@ public final class ThumbnailCacheTest {
    policyTests();
    artworkProbeTests();
    System.out.println("ThumbnailCache: "+checks+" checks passed");
+  }finally{for(File file:dir.listFiles())Files.deleteIfExists(file.toPath());Files.deleteIfExists(dir.toPath());}
+ }
+ private static void asyncRestoreTests()throws Exception{
+  File dir=Files.createTempDirectory("lakomics-cache-restore-").toFile();
+  try{
+   ThumbnailCache original=new ThumbnailCache(dir);put(original,A,10);
+   String marker=original.warmGeneration();byte[] journal=Files.readAllBytes(new File(dir,".media-usage").toPath());
+   Files.write(new File(dir,".media-usage.part").toPath(),new byte[]{1,2,3});
+   Thread caller=Thread.currentThread();java.util.concurrent.atomic.AtomicReference<Thread> scanned=new java.util.concurrent.atomic.AtomicReference<>();
+   File observed=new File(dir.getPath()){@Override public File[] listFiles(){scanned.set(Thread.currentThread());return super.listFiles();}};
+   java.util.concurrent.atomic.AtomicReference<Runnable> queued=new java.util.concurrent.atomic.AtomicReference<>();
+   java.util.concurrent.FutureTask<ThumbnailCache> restore=ThumbnailCache.restoreAsync(observed,queued::set);
+   check(!restore.isDone()&&scanned.get()==null); // Submission never scans on the caller.
+   Thread worker=new Thread(queued.get(),"cache-test-restore");worker.start();
+   ThumbnailCache restored=restore.get(5,java.util.concurrent.TimeUnit.SECONDS);worker.join(5000);
+   check(scanned.get()!=caller&&scanned.get()==worker);
+   check(!new File(dir,".media-usage.part").exists());
+   check(java.util.Arrays.equals(journal,Files.readAllBytes(new File(dir,".media-usage").toPath())));
+   check(restored.warmGeneration().equals(marker));
+   restored.obtain(A,restored.generation(),file->{throw new AssertionError("Recovered hit downloaded");});
+   check(restored.status()[0]==10);
+   // Clearing before any other use must wait for recovery, then invalidate it.
+   java.util.concurrent.FutureTask<ThumbnailCache> next=ThumbnailCache.restoreAsync(dir,task->new Thread(task).start());
+   ThumbnailCache clearing=next.get(5,java.util.concurrent.TimeUnit.SECONDS);long old=clearing.generation();clearing.clear();
+   check(clearing.status()[0]==0&&!clearing.warmGeneration().equals(marker));
+   try{clearing.file(A,old);throw new AssertionError("stale read");}catch(IOException expected){check(true);}
   }finally{for(File file:dir.listFiles())Files.deleteIfExists(file.toPath());Files.deleteIfExists(dir.toPath());}
  }
 }

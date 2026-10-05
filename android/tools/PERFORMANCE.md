@@ -59,13 +59,15 @@ js startup=1 firstReactRenderMs=60 homeReadyMs=500 viewportImagesReadyMs=630 spl
 - `startupNative` offsets use `elapsedRealtime` from `onCreate` entry and
   `Process.getStartElapsedRealtime()` (API 24+; otherwise `processMs=-1`). Phases
   include entry/end, WebView creation, `loadUrl`, page started/finished, settings,
-  Notes DB setup, vault initialization, media cache initialization (with a nested
-  thumbnail directory scan/journal restore), first Picker read/resume, and native
+  Notes DB setup, vault initialization, media cache setup, background thumbnail
+  directory scan/journal restore, first Picker read/resume, and native
   Album/Exchange initialization. `uiThread` shows where measured helpers actually
-  ran. Nested phases overlap; never sum them. Page finished is not Home ready.
+  ran. Thumbnail scan/journal restore now runs on a background thread; its
+  duration remains logged with `uiThread=0`. Nested phases overlap; never sum
+  them. Page finished is not Home ready.
 - Native bridge submissions in the first 15 s after `onCreate` report executor
   queue wait, total task run time and submit-time live pool size/active/queued
-  counts. Lanes distinguish `bridge` (four workers), `media` (four), `thumbnail`
+  counts. Lanes distinguish `bridge` (six workers), `media` (four), `thumbnail`
   (eight) and `catalogCover` (six). Live `poolSize` may be zero before workers
   start. Errors, cancellation and rejection remain visible; an operation that
   never started has `queueMs=-1` and `runMs=-1`.
@@ -78,7 +80,7 @@ js startup=1 firstReactRenderMs=60 homeReadyMs=500 viewportImagesReadyMs=630 spl
   measurement excludes the timer's intentional delay. Multiple HTTP calls in
   one executor task share its queue/snapshot; never add those queue times.
   `lane=direct` and `-1` pool/queue fields mean no measured executor context,
-  not zero wait or evidence that the request used the four-worker bridge.
+  not zero wait or evidence that the request used the six-worker bridge.
 - `js startup=1` is emitted once when the existing React splash disappears.
   Offsets use `performance.now()` (navigation start), not the native clock.
   `firstReactRenderMs` is App's first render entry; `homeReadyMs` is the existing

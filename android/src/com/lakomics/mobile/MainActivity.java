@@ -27,7 +27,7 @@ public final class MainActivity extends Activity {
  }
  private void setVaultSnapshotSensitive(boolean value){vaultSnapshotSensitive=value;updateSecureWindow();}
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
- private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
+ private final ThreadPoolExecutor workers=new ThreadPoolExecutor(6,6,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
  private final ThreadPoolExecutor thumbnailWorkers=new ThreadPoolExecutor(8,8,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  // Covers have their own lane: slow originals cannot occupy its six workers.

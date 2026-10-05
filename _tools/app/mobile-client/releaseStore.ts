@@ -1,5 +1,28 @@
 import {allWorks, type MangaShelf, type ReleaseEvent} from './collectionReleasesModel';
 
+export const HOME_RELEASE_SHELF_KEY = 'lakomics.mobile.homeReleaseShelf.v1';
+type HomeShelf = {scope: string; libraryId: string | null; value: MangaShelf};
+/** Keep the complete input separately from the small, frequently updated Home values. */
+export function readHomeShelf(scope: string): HomeShelf | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOME_RELEASE_SHELF_KEY) ?? 'null') as HomeShelf | null;
+    const shelf = saved?.value;
+    if (saved?.scope === scope && shelf?.ready === true && typeof shelf.revision === 'string' && Array.isArray(shelf.works)
+      && shelf.works.every(work => work && typeof work.id === 'string' && typeof work.name === 'string'
+        && ['manga', 'game', 'movie'].includes(work.type))) return saved;
+  } catch { /* Optional: an unreadable snapshot is no snapshot. */ }
+  return null;
+}
+export function rememberHomeShelf(scope: string, value: MangaShelf, libraryId: string | null): HomeShelf {
+  const saved = {scope, value, libraryId};
+  try { localStorage.setItem(HOME_RELEASE_SHELF_KEY, JSON.stringify(saved)); } catch { /* Optional first-paint input. */ }
+  return saved;
+}
+export function forgetHomeShelf(scope: string) {
+  if (!readHomeShelf(scope)) return;
+  try { localStorage.removeItem(HOME_RELEASE_SHELF_KEY); } catch { /* Optional storage. */ }
+}
+
 /**
  * The manga, game and movie shelf and unread release events last read for the 신간 screen, shared with Home.
  *

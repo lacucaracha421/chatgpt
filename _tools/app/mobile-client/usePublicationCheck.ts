@@ -51,7 +51,7 @@ function subscribe(path:string,listener:Listener) {
       entry.arm();
       const next=syncSignal(key);
       if(next===undefined)return;
-      const moved=next!==entry.seen;
+      const moved=entry.seen!==undefined&&next!==entry.seen;
       entry.seen=next;
       if(moved)void entry.check(true);
     });

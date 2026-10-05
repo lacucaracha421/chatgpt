@@ -7,6 +7,8 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.function.LongSupplier;
+import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
 import java.util.zip.CRC32;
 
 /** Private, disposable media bytes. Network work runs outside the disk lock. */
@@ -45,6 +47,11 @@ final class ThumbnailCache {
  private long bytes=-1,count;
  private long sweptAt;
  private static final long SWEEP_EVERY=60L*60*1000;
+ /** Publish only a fully recovered cache; consumers wait on the same restore task. */
+ static FutureTask<ThumbnailCache> restoreAsync(File directory,Executor executor){
+  FutureTask<ThumbnailCache> restore=new FutureTask<>(()->new ThumbnailCache(directory));
+  executor.execute(restore);return restore;
+ }
  ThumbnailCache(File directory)throws IOException{this(directory,LIMIT);}
  ThumbnailCache(File directory,long limit)throws IOException{this(directory,limit,System::currentTimeMillis);}
  ThumbnailCache(File directory,long limit,LongSupplier clock)throws IOException{

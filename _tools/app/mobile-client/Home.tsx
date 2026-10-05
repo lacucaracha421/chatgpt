@@ -1,10 +1,9 @@
 import {startupMark} from './startupPerf';
-import {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {RectangleStackIcon} from '@heroicons/react/24/outline';
 import {collectionCover, type CollectionSummary} from './collectionModel';
 import {localToday} from './collectionReleasesModel';
 import {Cover} from './CoverGroup';
-import {currentShelf, subscribeReleases} from './releaseStore';
 import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type UpcomingHomeEntry} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchangeModel';
@@ -147,10 +146,7 @@ export function Home(props: HomeProps) {
   const refreshHome = () => { d.retry(); props.onRefresh?.(); };
   const pull = usePullToRefresh(homeScroll, refreshHome, props.busy, paused);
   const [detail, setDetail] = useState<UpcomingHomeEntry | null>(null);
-  const freshShelf = useSyncExternalStore(subscribeReleases, currentShelf);
-  const keptShelf = useRef({scope: props.scope, value: freshShelf});
-  if (keptShelf.current.scope !== props.scope || freshShelf) keptShelf.current = {scope: props.scope, value: freshShelf};
-  const shelf = freshShelf ?? keptShelf.current.value;
+  const shelf = d.shelf;
   const works = useMemo(() => new Map((shelf?.works ?? []).map(work => [work.id, work])), [shelf]);
   const cover = (id: string, name: string) => {
     const work = works.get(id);

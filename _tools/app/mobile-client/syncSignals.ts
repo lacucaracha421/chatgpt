@@ -62,7 +62,7 @@ export function useSyncSignal(key: string, onMoved: () => void, enabled = true):
       setLive(syncSignalsLive());
       const next = syncSignal(key);
       if (next === undefined) return;
-      const moved = next !== seen;
+      const moved = seen !== undefined && next !== seen;
       seen = next;
       if (moved) latest.current();
     });

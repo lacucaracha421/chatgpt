@@ -79,6 +79,16 @@ export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, i
     setSignalRevision(revision => revision + 1);
   }, enabled && !!signalKey);
 
+  // Becoming live establishes the startup baseline, not an obsolete read. Losing
+  // support still wakes the legacy timer promptly without cancelling a pending read.
+  const wasLive = useRef(signalsLive);
+  useEffect(() => {
+    if (wasLive.current && !signalsLive && currentEntry(scope, source)) {
+      setSignalRevision(revision => revision + 1);
+    }
+    wasLive.current = signalsLive;
+  }, [signalsLive, key]);
+
   useEffect(() => {
     const entry = currentEntry(scope, source);
     if (entry) setValue(entry.value as T);
@@ -105,7 +115,7 @@ export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, i
       if (live && !controller.signal.aborted) errorRef.current?.(reason);
     });
     return () => { live = false; controller.abort(); };
-  }, [enabled, key, signalKey, forceKey, signalRevision, signalsLive]); // read/onError intentionally use refs
+  }, [enabled, key, signalKey, forceKey, signalRevision]); // read/onError intentionally use refs
 
   const entry = currentEntry(scope, source);
   const nextCheck = enabled ? Math.max(1_000, (entry?.at && entry.at > 0 ? entry.at : Date.now()) + sourceTtl(signalKey) - Date.now()) : null;
