@@ -144,6 +144,7 @@ it("reflects playback position in the scrub control while playing", () => {
   const slider = container.querySelector(".video-tile__scrub") as HTMLDivElement;
   fireEvent.keyDown(slider, { key: "ArrowRight" });
   const media = container.querySelector("video") as HTMLVideoElement;
+  fireEvent.playing(media);
   Object.defineProperty(media, "currentTime", { value: 2.5, writable: true, configurable: true });
   fireEvent.seeked(media);
   fireEvent(media, new Event("timeupdate"));
@@ -240,4 +241,19 @@ it("keeps the hover preview playing while the pointer is on the gallery cell's o
   expect(release).toHaveBeenCalledOnce();
   expect(container.querySelector("video")).toBeNull();
   cell.remove();
+});
+
+it("keeps the scrub frame, not the first frame, until a scrubbed video is on screen", () => {
+  const { container } = render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const slider = container.querySelector(".video-tile__scrub") as HTMLDivElement;
+  vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, right: 100, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) });
+  fireEvent.pointerDown(slider, { pointerId: 1, clientX: 50 });
+  fireEvent.pointerUp(slider, { pointerId: 1, clientX: 50 });
+  const media = container.querySelector("video") as HTMLVideoElement;
+  act(() => vi.advanceTimersByTime(120));
+  // Seeked before the video's first frame shows: the still must stay on the scrubbed frame.
+  fireEvent.seeked(media);
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/5"));
+  fireEvent.playing(media);
+  expect(media).toHaveAttribute("data-shown");
 });

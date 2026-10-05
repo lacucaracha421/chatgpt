@@ -163,12 +163,13 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       loop
       playsInline
       data-shown={videoShown || undefined}
-      onPlaying={() => setVideoShown(true)}
+      // Once the video shows the new position it covers the still; until then the scrub frame stays.
+      onPlaying={() => { setVideoShown(true); if (!scrubbingRef.current) setPreviewRatio(null); }}
       draggable={false}
       preload="metadata"
       aria-label={`${alt} 미리보기`}
       onTimeUpdate={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); }}
-      onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); setPreviewRatio(null); } }}
+      onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); if (videoShown) setPreviewRatio(null); } }}
       onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setVideoDuration(d); }}
     />}
     {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(asset.media.durationMs)}` : formatDuration(asset.media.durationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
