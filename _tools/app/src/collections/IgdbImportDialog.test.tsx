@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, IgdbGamePreview, IgdbSearchResult, LibraryGateway } from "../library/types";
-import { IgdbImportDialog } from "./IgdbImportDialog";
+import { IgdbImportDialog, type IgdbImportTarget } from "./IgdbImportDialog";
 
 afterEach(cleanup);
 
@@ -42,13 +42,14 @@ function makeGateway(overrides: Partial<LibraryGateway> = {}) {
     searchIgdbGames: vi.fn().mockResolvedValue([result]),
     previewIgdbGame: vi.fn().mockResolvedValue(preview),
     applyIgdbGame: vi.fn().mockResolvedValue(collection),
+    connectIgdbGame: vi.fn().mockResolvedValue(collection),
     getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 17, lastSyncedAt: null }),
     replaceIgdbGameArtwork: vi.fn().mockResolvedValue(collection),
     ...overrides,
   } as unknown as LibraryGateway;
 }
 
-function renderDialog(gateway: LibraryGateway = makeGateway(), target: { kind: "new" } | { kind: "existing"; collectionId: string } = { kind: "new" }, onOpenSettings = vi.fn()) {
+function renderDialog(gateway: LibraryGateway = makeGateway(), target: IgdbImportTarget = { kind: "new" }, onOpenSettings = vi.fn()) {
   const onApplied = vi.fn().mockResolvedValue(undefined);
   const onClose = vi.fn();
   render(
@@ -60,6 +61,66 @@ function renderDialog(gateway: LibraryGateway = makeGateway(), target: { kind: "
 }
 
 describe("IgdbImportDialog", () => {
+  it("connects an unbound local game, then applies the chosen cover and hero without creating another work", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway({ getIgdbConnection: vi.fn().mockResolvedValue(null) });
+    const { onApplied } = renderDialog(gateway, { kind: "connect", collectionId: "local-game" });
+    await user.type(screen.getByRole("searchbox", { name: "게임 검색" }), "astral");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByRole("button", { name: /Astral Chain/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    expect(await screen.findByRole("heading", { name: "표지 선택" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: /co-1/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("radio", { name: /art-1/ }));
+    await user.click(screen.getByRole("button", { name: "연결" }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(collection));
+    expect(gateway.connectIgdbGame).toHaveBeenCalledExactlyOnceWith("local-game", 17);
+    expect(gateway.replaceIgdbGameArtwork).toHaveBeenCalledExactlyOnceWith({ collectionId: "local-game", cover: { kind: "select", imageId: "co-1" }, hero: { kind: "select", imageId: "art-1" } });
+    expect(gateway.getIgdbConnection).not.toHaveBeenCalled();
+    expect(gateway.applyIgdbGame).not.toHaveBeenCalled();
+  });
+
+  it("links without artwork calls when nothing is chosen", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway({ getIgdbConnection: vi.fn().mockResolvedValue(null) });
+    const { onApplied } = renderDialog(gateway, { kind: "connect", collectionId: "local-game" });
+    await user.type(screen.getByRole("searchbox", { name: "게임 검색" }), "astral");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByRole("button", { name: /Astral Chain/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(await screen.findByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("button", { name: "연결" }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(collection));
+    expect(gateway.connectIgdbGame).toHaveBeenCalledExactlyOnceWith("local-game", 17);
+    expect(gateway.replaceIgdbGameArtwork).not.toHaveBeenCalled();
+  });
+
+  it("shows connection failures for retry, and a retry after an artwork failure does not link again", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway({
+      connectIgdbGame: vi.fn().mockRejectedValueOnce({ code: "duplicate_provider_binding", message: "이 MangaDex 작품은 이미 다른 Work에 연결되어 있습니다" }).mockResolvedValue(collection),
+      replaceIgdbGameArtwork: vi.fn().mockRejectedValueOnce(new Error("이미지를 받지 못했습니다.")).mockResolvedValue(collection),
+    });
+    const { onClose } = renderDialog(gateway, { kind: "connect", collectionId: "local-game" });
+    await user.type(screen.getByRole("searchbox", { name: "게임 검색" }), "astral");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByRole("button", { name: /Astral Chain/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(await screen.findByRole("radio", { name: /co-1/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("button", { name: "연결" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("이 IGDB 게임 또는 컬렉션은 이미 연결되어 있습니다.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("MangaDex");
+    await user.click(screen.getByRole("button", { name: "연결" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("이미지를 받지 못했습니다.");
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "연결" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(gateway.connectIgdbGame).toHaveBeenCalledTimes(2);
+    expect(gateway.replaceIgdbGameArtwork).toHaveBeenCalledTimes(2);
+  });
+
   it("searches, previews on Next, keeps artwork unselected, and applies hero-none", async () => {
     const user = userEvent.setup();
     const gateway = makeGateway();

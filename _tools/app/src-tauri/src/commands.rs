@@ -1254,6 +1254,19 @@ pub async fn refresh_igdb_game(
 }
 
 #[tauri::command]
+pub async fn connect_igdb_game(
+    collection_id: String,
+    game_id: i64,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.connect_igdb_game(&collection_id, game_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn get_igdb_connection(
     collection_id: String,
     state: State<'_, AppState>,

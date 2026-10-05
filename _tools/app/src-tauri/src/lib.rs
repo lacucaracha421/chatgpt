@@ -337,6 +337,7 @@ pub fn run() {
             commands::search_igdb_games,
             commands::preview_igdb_game,
             commands::apply_igdb_game,
+            commands::connect_igdb_game,
             commands::refresh_igdb_game,
             commands::get_igdb_connection,
             commands::replace_igdb_game_artwork,

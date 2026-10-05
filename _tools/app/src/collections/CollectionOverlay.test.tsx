@@ -683,12 +683,12 @@ describe("CollectionOverlay game detail flow", () => {
     expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeInTheDocument();
   });
 
-  it("keeps disconnected game IGDB mutations disabled", async () => {
+  it("offers IGDB connection for a disconnected game and keeps its IGDB mutations disabled", async () => {
     const user = userEvent.setup();
     renderOverlay({ getIgdbConnection: vi.fn().mockResolvedValue(null) }, undefined, undefined, gameCollection);
 
     await user.click(await screen.findByRole("button", { name: "작품 관리" }));
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 미연결" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB에 연결" })).toBeEnabled());
     expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeDisabled();
   });

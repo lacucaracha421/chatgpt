@@ -123,6 +123,85 @@ pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
 FROM collections AS collection";
 
 impl Library {
+    pub fn connect_igdb_game(
+        &self,
+        collection_id: &str,
+        game_id: i64,
+    ) -> Result<CollectionSummary, LibraryError> {
+        let credentials = super::credential::read_igdb_credentials_os()?;
+        let game = self.igdb_client().game(&credentials, game_id)?;
+        if game.id != game_id {
+            return Err(LibraryError::InvalidIgdbIdentity);
+        }
+        self.connect_fetched_igdb_game(collection_id, game)
+    }
+
+    fn connect_fetched_igdb_game(
+        &self,
+        collection_id: &str,
+        game: super::models::IgdbRemoteGame,
+    ) -> Result<CollectionSummary, LibraryError> {
+        if game.id <= 0 {
+            return Err(LibraryError::InvalidIgdbIdentity);
+        }
+        let snapshot: serde_json::Value = serde_json::from_str(&game.snapshot_json)
+            .map_err(|_| LibraryError::IgdbInvalidResponse)?;
+        if !snapshot.is_object() {
+            return Err(LibraryError::IgdbInvalidResponse);
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let collection = collection_by_id(&transaction, collection_id)?;
+        if collection.collection_type != CollectionType::Game {
+            return Err(LibraryError::InvalidIgdbIdentity);
+        }
+        let occupied: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM collection_external_bindings WHERE provider = 'igdb' AND (collection_id = ?1 OR external_id = ?2))",
+            params![collection_id, game.id.to_string()],
+            |row| row.get(0),
+        )?;
+        if occupied {
+            return Err(LibraryError::DuplicateProviderBinding);
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        // First connection fills missing metadata while retaining the user's work and artwork.
+        transaction.execute(
+            "UPDATE collections SET
+                developer = CASE WHEN developer IS NULL OR TRIM(developer) = '' THEN ?2 ELSE developer END,
+                publisher = CASE WHEN publisher IS NULL OR TRIM(publisher) = '' THEN ?3 ELSE publisher END,
+                release_date = CASE WHEN release_date IS NULL OR TRIM(release_date) = '' THEN ?4 ELSE release_date END,
+                platforms = CASE WHEN platforms IS NULL OR TRIM(platforms) = '' THEN NULLIF(?5, '') ELSE platforms END,
+                genres = CASE WHEN genres IS NULL OR TRIM(genres) = '' THEN NULLIF(?6, '') ELSE genres END,
+                overview = CASE WHEN overview IS NULL OR TRIM(overview) = '' THEN ?7 ELSE overview END,
+                updated_at = ?8 WHERE id = ?1",
+            params![
+                collection_id,
+                game.developer,
+                game.publisher,
+                game.release_date,
+                game.platforms.join(" · "),
+                game.genres.join(" · "),
+                game.summary,
+                now,
+            ],
+        )?;
+        super::external_binding::upsert_external_binding(
+            &transaction,
+            collection_id,
+            super::models::ExternalBindingInput {
+                provider: "igdb".into(),
+                external_id: game.id.to_string(),
+                provider_config_json: None,
+                provider_data_json: Some(game.snapshot_json),
+                last_synced_at: Some(now.clone()),
+            },
+            &now,
+        )?;
+        let summary = collection_by_id(&transaction, collection_id)?;
+        transaction.commit()?;
+        Ok(summary)
+    }
+
     pub fn list_collections(&self) -> Result<Vec<CollectionSummary>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(&list_collections_sql())?;
@@ -616,6 +695,103 @@ pub(crate) fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
 
 #[cfg(test)]
 mod tests {
+    fn igdb_game(id: i64) -> crate::library::models::IgdbRemoteGame {
+        crate::library::models::IgdbRemoteGame {
+            id,
+            name: "Remote title".into(),
+            summary: Some("Remote overview".into()),
+            release_date: Some("2026-10-05".into()),
+            genres: vec!["Action".into()],
+            platforms: vec!["PC".into()],
+            developer: Some("Remote developer".into()),
+            publisher: Some("Remote publisher".into()),
+            cover: None,
+            artworks: vec![],
+            screenshots: vec![],
+            snapshot_json: format!("{{\"id\":{id},\"name\":\"Remote title\"}}"),
+        }
+    }
+
+    #[test]
+    fn igdb_connection_preserves_local_work_and_fills_missing_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let item = library
+            .create_collection(CreateCollection {
+                name: "My title".into(),
+                description: Some("My memo".into()),
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        library.connection().unwrap().execute("UPDATE collections SET developer = 'My developer', my_score = 4, showcase = 1 WHERE id = ?1", [&item.id]).unwrap();
+        let linked = library
+            .connect_fetched_igdb_game(&item.id, igdb_game(17))
+            .unwrap();
+        assert_eq!(linked.id, item.id);
+        assert_eq!(linked.name, "My title");
+        assert_eq!(linked.description.as_deref(), Some("My memo"));
+        assert_eq!(linked.developer.as_deref(), Some("My developer"));
+        assert_eq!(linked.publisher.as_deref(), Some("Remote publisher"));
+        assert_eq!(linked.platforms.as_deref(), Some("PC"));
+        assert_eq!(linked.my_score, Some(4.0));
+        assert!(linked.showcase);
+        assert_eq!(
+            library
+                .get_igdb_connection(&item.id)
+                .unwrap()
+                .unwrap()
+                .game_id,
+            17
+        );
+        assert_eq!(library.list_collections().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn igdb_connection_rejects_duplicates_and_non_games_without_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let create = |name: &str, collection_type| {
+            library
+                .create_collection(CreateCollection {
+                    name: name.into(),
+                    description: None,
+                    collection_type,
+                })
+                .unwrap()
+        };
+        let first = create("First", CollectionType::Game);
+        let second = create("Second", CollectionType::Game);
+        let movie = create("Movie", CollectionType::Movie);
+        library
+            .connect_fetched_igdb_game(&first.id, igdb_game(17))
+            .unwrap();
+        for (id, game_id, duplicate) in [
+            (&second.id, 17, true),
+            (&first.id, 18, true),
+            (&movie.id, 19, false),
+        ] {
+            let error = library
+                .connect_fetched_igdb_game(id, igdb_game(game_id))
+                .unwrap_err();
+            assert!(if duplicate {
+                matches!(error, LibraryError::DuplicateProviderBinding)
+            } else {
+                matches!(error, LibraryError::InvalidIgdbIdentity)
+            });
+        }
+        assert_eq!(library.get_collection(&second.id).unwrap(), second);
+        assert_eq!(library.get_collection(&movie.id).unwrap(), movie);
+        assert_eq!(
+            library
+                .get_igdb_connection(&first.id)
+                .unwrap()
+                .unwrap()
+                .game_id,
+            17
+        );
+        assert!(library.get_igdb_connection(&second.id).unwrap().is_none());
+    }
+
     #[test]
     fn series_card_dates_use_regular_season_premieres_from_cached_binding() {
         let temp = tempfile::tempdir().unwrap();

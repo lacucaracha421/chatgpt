@@ -152,7 +152,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
       { id: "edit", label: "컬렉션 편집", onSelect: () => setPanel({ kind: "edit", data }) },
       { id: "showcase", label: data.collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => actions.onShowcase(data.collection) },
       ...(data.collection.type === "game" ? [
-        { id: "provider", label: data.providerConnected ? "IGDB 연결됨" : "IGDB 미연결", disabled: true, onSelect: () => undefined },
+        { id: "provider", label: data.providerConnected ? "IGDB 연결됨" : "IGDB에 연결", disabled: data.providerConnected, onSelect: () => setPanel({ kind: "igdb", data }) },
         { id: "refresh", label: "IGDB 새로고침", disabled: !data.providerConnected, onSelect: () => void mutate(() => gateway.refreshIgdbGame(data.collection.id)) },
         { id: "artwork", label: "표지·hero 변경", disabled: !data.providerConnected, onSelect: () => setPanel({ kind: "igdb", data }) },
       ] : data.collection.type === "movie" ? [
@@ -175,7 +175,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
     {error && <div className="work-error" role="alert">{error} <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 시도</Button></div>}
     {panel?.kind === "edit" && <CollectionEditDialog open mode={{ kind: "edit", collection: panel.data.collection }} onClose={() => setPanel(null)} onSubmit={async input => { await gateway.updateCollection(panel.data.collection.id, input as UpdateCollection); await onChanged(); setReload(value => value + 1); }} />}
     {tmdbPanel && <TmdbMovieDialog open target={tmdbPanel} onClose={() => setTmdbPanel(null)} onOpenSettings={() => { setTmdbPanel(null); onOpenSettings(); }} onApplied={async () => { setTmdbPanel(null); await mutate(async () => undefined); }} />}
-    {panel?.kind === "igdb" && <IgdbImportDialog open target={{ kind: "existing", collectionId: panel.data.collection.id }} onClose={() => setPanel(null)} onOpenSettings={() => { setPanel(null); onOpenSettings(); }} onApplied={async () => { setPanel(null); await mutate(async () => undefined); }} />}
+    {panel?.kind === "igdb" && <IgdbImportDialog open target={{ kind: panel.data.providerConnected ? "existing" : "connect", collectionId: panel.data.collection.id }} onClose={() => setPanel(null)} onOpenSettings={() => { setPanel(null); onOpenSettings(); }} onApplied={async () => { setPanel(null); await mutate(async () => undefined); }} />}
     {panel?.kind === "av" && panel.data.av && <AvEditPanel details={panel.data.av} api={api} onClose={() => setPanel(null)} onSaved={() => { void mutate(async () => undefined); }} />}
     {panel?.kind === "artwork" && panel.data.covers && <AvArtworkDialog collectionId={panel.data.collection.id} covers={panel.data.covers} api={api} onClose={() => setPanel(null)} onSaved={() => { void mutate(async () => undefined); }} />}
     {panel?.kind === "delete" && <Dialog open title="컬렉션 삭제" onClose={() => setPanel(null)}><p>{panel.data.collection.name} 컬렉션을 삭제하시겠습니까? 원본 에셋은 삭제하지 않습니다.</p><div className="ui-dialog__actions"><Button onClick={() => setPanel(null)}>취소</Button><Button variant="danger" onClick={() => void (async () => { try { await gateway.deleteCollection(panel.data.collection.id); await onChanged(); setPanel(null); onExit(); } catch (reason) { setError(avError(reason)); } })()}>삭제</Button></div></Dialog>}

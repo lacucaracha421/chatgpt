@@ -540,6 +540,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<IgdbGamePreview>("preview_igdb_game", { gameId }),
   applyIgdbGame: (request: IgdbApplyRequest) =>
     invoke<CollectionSummary>("apply_igdb_game", { request }),
+  connectIgdbGame: (collectionId, gameId) =>
+    invoke<CollectionSummary>("connect_igdb_game", { collectionId, gameId }),
   refreshIgdbGame: (collectionId) =>
     invoke<CollectionSummary>("refresh_igdb_game", { collectionId }),
   getIgdbConnection: (collectionId) =>

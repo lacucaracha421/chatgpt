@@ -1532,6 +1532,7 @@ export interface LibraryGateway {
   searchIgdbGames(query: string): Promise<IgdbSearchResult[]>;
   previewIgdbGame(gameId: number): Promise<IgdbGamePreview>;
   applyIgdbGame(request: IgdbApplyRequest): Promise<CollectionSummary>;
+  connectIgdbGame?(collectionId: string, gameId: number): Promise<CollectionSummary>;
   refreshIgdbGame(collectionId: string): Promise<CollectionSummary>;
   getIgdbConnection(collectionId: string): Promise<IgdbConnection | null>;
   replaceIgdbGameArtwork(request: IgdbArtworkReplaceRequest): Promise<CollectionSummary>;
