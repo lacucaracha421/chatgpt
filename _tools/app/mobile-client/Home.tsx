@@ -121,7 +121,7 @@ function HomePlayingCase({item, revision, active, privacy, selected}: {item: Col
   const front = useHomeArtwork(item, revision, active && !privacy);
   const spine = useHomeArtwork(item, revision, active && !privacy, item.spineArtworkId ?? null, null);
   return <LightCase selected={selected} frontPending={!privacy && !!(collectionCover(item) || item.coverAssetId) && !front} spinePending={!privacy && !!item.spineArtworkId && !spine}
-    data={{title: item.name, author: item.author, publisher: item.publisher, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: privacy ? null : front || null, spine: privacy ? null : spine || null, privacy}} />;
+    data={{title: item.name, author: item.author, publisher: item.publisher, developer: item.developer, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: privacy ? null : front || null, spine: privacy ? null : spine || null, privacy}} />;
 }
 
 const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;

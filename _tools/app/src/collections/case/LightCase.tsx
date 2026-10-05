@@ -61,7 +61,7 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
   }, [active, privacy, collection.id, collection.type, avKey]);
   const av = avArt?.key === avKey ? avArt.info : rememberedAvArt.get(avKey);
   const spine = collection.type === "manga" ? null : collection.type === "av" ? av?.spine ?? null : info?.spineArtworkId ? workArtworkThumbnailUrl(info.spineArtworkId) : null;
-  const data: CaseData = { title: collection.name, author: collection.author, publisher: collection.publisher, platform: workCasePlatform(collection.type, collection.platforms, collection.type === "game" ? info?.ownedPlatform : null), front: av?.front ?? front, spine, privacy };
+  const data: CaseData = { title: collection.name, author: collection.author, publisher: collection.publisher, developer: collection.developer, platform: workCasePlatform(collection.type, collection.platforms, collection.type === "game" ? info?.ownedPlatform : null), front: av?.front ?? front, spine, privacy };
   const spinePending = !privacy && (collection.type === "av" ? active && !av && avSettled !== avKey : wanted && !info && shelfSettled !== key);
   return <LightCase data={data} selected={selected} spinePending={spinePending} />;
 }

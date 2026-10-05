@@ -194,10 +194,12 @@ describe("CollectionCase", () => {
     expect(container.querySelector("[data-spine-template]")).toBeNull();
   });
   it.each(["sw2", "sw", "ps5"] as const)("draws the %s package blocks without invented logos", platform => {
-    const { container } = render(<Case value={{ ...data, platform }} />);
+    const { container } = render(<Case value={{ ...data, platform, developer: "개발사" }} />);
     expect(container.querySelector(`[data-spine-template="${platform}"]`)).not.toBeNull();
     expect(container.querySelector(".k-spine")).toHaveTextContent("게임");
-    expect(container.querySelector(".k-spine")).toHaveTextContent("배급사");
+    // A game spine names the developer, not the publisher (user, 2026-10-05).
+    expect(container.querySelector(".k-spine")).toHaveTextContent("개발사");
+    expect(container.querySelector(".k-spine")).not.toHaveTextContent("배급사");
     expect(container.querySelector(".t-head img")).toBeNull();
   });
   it("derives the template from actual platform data", () => {

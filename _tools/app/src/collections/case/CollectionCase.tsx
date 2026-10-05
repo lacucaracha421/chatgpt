@@ -24,7 +24,7 @@ export const CASE_PLASTIC: Record<CasePlatform, string> = {
   sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)",
   pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)", book: "rgb(236,231,220)",
 };
-export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean; discLabel?: string };
+export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; /** A game spine names its developer (user, 2026-10-05); books, films and AV keep the publisher/maker. */ developer?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean; discLabel?: string };
 export function spineInsertClass(data: CaseData) {
   return `ins${data.spine || data.privacy ? "" : ["sw2", "sw", "ps5"].includes(data.platform) ? " full" : " bare"}`;
 }
@@ -176,7 +176,7 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
       }} onError={() => { if (wanted.current === url) setFailed(url); }} />)}
     {!hasPaintedSpine && (templatePainted.current || failed === data.spine) && (template ?
     <span className={`tpl ${data.platform}`} data-spine-template={data.platform} data-nintendo={/nintendo|닌텐도/i.test(data.publisher ?? "") ? "" : undefined}>
-      <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot"><span className="t-pub">{data.publisher}</span></span>
+      <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot"><span className="t-pub">{data.platform === "book" || data.platform === "film" || data.platform === "av" ? data.publisher : data.developer}</span></span>
     </span> : title)}
   </>}</span>;
 }

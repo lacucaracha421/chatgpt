@@ -48,7 +48,7 @@ export function workCaseData(item: CollectionSummary, urls: {front?: string | nu
   const volume = item.type === 'manga' && cover ? item.volumes?.find(volume => volume.coverArtworkId === cover) : null;
   const focus = volume?.coverFocusX;
   return {title: item.name, author: item.author ?? null, coverFocus: typeof focus === 'number' && focus >= 0 && focus <= 1 ? focus : null,
-    volumeNumber: volume?.volumeNumber === 1 ? 1 : null, publisher: item.publisher ?? null, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: urls.front ?? null, spine: urls.spine ?? null, back: urls.back ?? null, privacy};
+    volumeNumber: volume?.volumeNumber === 1 ? 1 : null, publisher: item.publisher ?? null, developer: item.developer ?? null, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: urls.front ?? null, spine: urls.spine ?? null, back: urls.back ?? null, privacy};
 }
 
 // Case data is all scalar. Parent picking/count updates must not redraw unchanged 3D faces.
