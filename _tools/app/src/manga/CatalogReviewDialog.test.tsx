@@ -19,6 +19,8 @@ it("opens read-only, shows evidence and explicitly generates candidates", async 
   expect(await screen.findByText("제목·작가·페이지·언어 일치")).toBeVisible();
   expect(screen.getAllByText("artist:alice")).toHaveLength(2);
   expect(screen.getAllByText("20페이지 · korean · 만화")).toHaveLength(2);
+  expect(screen.getByText(/전체 카탈로그/)).toBeVisible();
+  expect(screen.queryByText(/최근 500개/)).toBeNull();
   expect(gateway.generateCatalogReview).not.toHaveBeenCalled();
   expect(gateway.decideCatalogReview).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "후보 생성" }));

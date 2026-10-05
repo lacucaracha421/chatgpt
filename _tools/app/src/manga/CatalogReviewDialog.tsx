@@ -37,7 +37,7 @@ export function CatalogReviewDialog({ onClose, onChange }: { onClose: () => void
   }
   return <Dialog open title="중복 후보 검토" variant="medium" onClose={onClose}>
     <div className="catalog-review" aria-busy={busy}>
-      <p>최근 500개 작품에서 최대 50개 후보를 찾습니다. 확인한 관계만 묶이며, 다른 작품·분리 결정은 재생성 후에도 유지됩니다.</p>
+      <p>전체 카탈로그에서 아직 결정하지 않은 판본 묶음 쌍을 찾습니다. 확인한 관계만 묶이며, 다른 작품·분리 결정은 재생성 후에도 유지됩니다.</p>
       <p>검토에는 숨긴 작품의 메타데이터도 포함됩니다. 분리는 연결된 수동 묶음을 함께 해제할 수 있으며, 검증된 계보는 유지됩니다.</p>
       <div className="catalog-review__actions">
         <Button size="sm" disabled={busy} onClick={() => void run(() => gateway.generateCatalogReview())}>후보 생성</Button>
@@ -53,14 +53,14 @@ export function CatalogReviewDialog({ onClose, onChange }: { onClose: () => void
             <p>{w.pages}페이지 · {w.languages.join(", ")} · {catalogCategoryLabel(w.category) ?? "분류 없음"}</p>
             <p>작품 {w.workId} · 그룹 {w.groupId}</p>
           </div>)}</div>
-          <p>{row.evidence.reason}</p><p>{labels[row.state]}{!row.actionable && " · 원본 변경 또는 누락: 후보 재생성 필요"}</p>
+          <p>{row.evidence.reason}</p><p>{labels[row.state]}{!row.actionable && " · 현재 판정할 수 없음: 다시 불러오거나 후보를 생성해 주세요"}</p>
           {row.state === "confirm" && row.evidence.left.groupId !== row.evidence.right.groupId && <p>분리 결정과 충돌하여 현재 묶음에 적용되지 않습니다.</p>}
           <div className="catalog-review__actions">
             {row.state === "pending" && <><Button size="sm" disabled={busy || !row.actionable} onClick={() => decide(row, "confirm")}>같은 작품으로 확인</Button><Button size="sm" disabled={busy || !row.actionable} onClick={() => decide(row, "falsePositive")}>다른 작품</Button></>}
             {row.state === "confirm" && <Button size="sm" disabled={busy || !row.actionable} onClick={() => decide(row, "split")}>분리</Button>}
           </div>
         </section>)}
-        {data?.rows.length === 0 && <p>검토 후보가 없습니다. 후보 생성으로 제한된 범위를 확인할 수 있습니다.</p>}
+        {data?.rows.length === 0 && <p>검토 후보가 없습니다.</p>}
       </div>
       <Button size="sm" onClick={onClose}>닫기</Button>
     </div>

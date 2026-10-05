@@ -271,7 +271,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const dialogs = dialog && <Suspense fallback={null}>
     {dialog.kind === "character"
       ? <ShadowReview onClose={closeDialog} onChanged={() => undefined} privacyMode={privacyMode} series={dialog.series} target={dialog.target} />
-      : <CatalogReviewDialog onClose={closeDialog} onChange={() => undefined} />}
+      : <CatalogReviewDialog onClose={closeDialog} onChange={() => setQueueRead((value) => value + 1)} />}
   </Suspense>;
 
   const shelfLoading = (Boolean(tracking) && !release.data && !release.error) || (!wishlistReady && !wishlistError);

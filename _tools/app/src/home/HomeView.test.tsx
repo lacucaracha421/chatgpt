@@ -38,7 +38,7 @@ vi.mock("../app/workloadProfile", async (importOriginal) => ({ ...await importOr
 type Scope = { id: string; name: string } | undefined;
 vi.mock("../characters/ShadowReview", () => ({ ShadowReview: ({ onClose, series, target }: { onClose: () => void; series?: Scope; target?: Scope }) =>
   <div role="dialog" aria-label="S36 확인"><span>{`범위 ${series?.id ?? "-"}/${target?.id ?? "-"}`}</span><button type="button" onClick={onClose}>닫기</button></div> }));
-vi.mock("../manga/CatalogReviewDialog", () => ({ CatalogReviewDialog: ({ onClose }: { onClose: () => void }) => <div role="dialog" aria-label="중복 후보 검토"><button type="button" onClick={onClose}>닫기</button></div> }));
+vi.mock("../manga/CatalogReviewDialog", () => ({ CatalogReviewDialog: ({ onClose, onChange }: { onClose: () => void; onChange: () => void }) => <div role="dialog" aria-label="중복 후보 검토"><button type="button" onClick={onChange}>Save duplicate decision</button><button type="button" onClick={onClose}>닫기</button></div> }));
 
 // Saturday 2026-09-26 14:31 local.
 const NOW = new Date(2026, 8, 26, 14, 31);
@@ -105,6 +105,19 @@ afterEach(() => {
 });
 
 describe('Home attention', () => {
+  it('counts the actionable pending dialog queue and refreshes after a duplicate decision', async () => {
+    const rows = Array.from({ length: 95 }, (_, id) => ({ leftAnchor: `${id}:left`, rightAnchor: `${id}:right`, state: 'pending', actionable: true }));
+    gateway.listCatalogReview.mockResolvedValue({ rows: [...rows, { state: 'confirm', actionable: true }, { state: 'pending', actionable: false }], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
+    renderHome();
+    await userEvent.click(await screen.findByRole('button', { name: /중복 판본95/ }));
+    const dialog = await screen.findByRole('dialog', { name: '중복 후보 검토' });
+    gateway.listCatalogReview.mockResolvedValue({ rows: rows.slice(1), inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save duplicate decision' }));
+    expect(await screen.findByRole('button', { name: /중복 판본94/ })).toBeVisible();
+    await userEvent.click(within(dialog).getByRole('button', { name: '닫기' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '중복 후보 검토' })).toBeNull());
+    expect(screen.getByRole('button', { name: /중복 판본94/ })).toBeVisible();
+  });
   it('shows the existing shelf cases only for playing works and opens their work or Collections', async () => {
     const works = [
       { id: 'game', name: '진행 중 게임', type: 'game', platforms: 'PC', updatedAt: '1' },

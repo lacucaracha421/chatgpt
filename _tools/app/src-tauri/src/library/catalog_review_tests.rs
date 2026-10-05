@@ -1,5 +1,283 @@
 use super::*;
 
+fn queue_decide(
+    c: &Connection,
+    cache: &QueueCache,
+    row: &ReviewRow,
+    decision: &str,
+) -> Result<(), LibraryError> {
+    let query = ReviewDecision {
+        review_token: row.review_token.clone(),
+        left_anchor: row.left_anchor.clone(),
+        right_anchor: row.right_anchor.clone(),
+        decision: decision.into(),
+    };
+    let tx = c.unchecked_transaction()?;
+    let current = queue_decision_row(&tx, cache, &query)?;
+    decide_row(&tx, &query, current)?;
+    tx.commit()?;
+    Ok(())
+}
+
+#[test]
+fn catalog_review_whole_queue_public_commands_share_cache_and_save_without_canary() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("catalogs")).unwrap();
+    let c = fixture(&dir.path().join("library.sqlite"));
+    c.execute_batch(
+        "ALTER TABLE catalog.Works ADD COLUMN Views INTEGER DEFAULT 0;
+        ALTER TABLE catalog.Works ADD COLUMN Posted INTEGER DEFAULT 0;",
+    )
+    .unwrap();
+    catalog_groups::ensure_membership(&c).unwrap();
+    c.execute(
+        "VACUUM catalog INTO ?1",
+        [dir.path().join("catalogs/kdata.db").to_str().unwrap()],
+    )
+    .unwrap();
+    drop(c);
+    let library = Library::open(dir.path()).unwrap();
+    let first = library.list_catalog_review().unwrap();
+    let row = first.rows.iter().find(|r| r.state == "pending").unwrap();
+    assert!(row.actionable);
+    let dialog = library.clone().generate_catalog_review().unwrap();
+    assert_eq!(dialog.rows[0].review_token, row.review_token);
+    library
+        .decide_catalog_review(ReviewDecision {
+            review_token: row.review_token.clone(),
+            left_anchor: row.left_anchor.clone(),
+            right_anchor: row.right_anchor.clone(),
+            decision: "falsePositive".into(),
+        })
+        .unwrap();
+    let page = library.list_catalog_review().unwrap();
+    assert!(page.rows.iter().all(|r| r.state != "pending"));
+    assert_eq!(page.rows[0].state, "falsePositive");
+    let reader = library.catalog_read_connection().unwrap();
+    assert_eq!(
+        super::super::mobile_catalog::user_snapshot(&reader).unwrap()["decisions"][0][2],
+        "falsePositive"
+    );
+    assert_eq!(
+        reader
+            .query_row(
+                "SELECT COUNT(*) FROM online_catalog_review_candidates",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn catalog_review_whole_queue_includes_old_pairs_and_preserves_decisions_in_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = fixture(&dir.path().join("test.sqlite"));
+    // Push the matching works outside the old latest-500 window.
+    for id in 1000..1501 {
+        c.execute("INSERT INTO catalog.Works(Id,Title,FileCount,Category) VALUES(?1,'Unrelated filler',20,2)", [id]).unwrap();
+    }
+    assert!(generate(&c).unwrap().rows.is_empty());
+    let mut cache = QueueCache::default();
+    let row = whole_catalog_page(&c, &mut cache).unwrap().rows.remove(0);
+    assert_eq!(
+        (row.left_anchor.as_str(), row.right_anchor.as_str()),
+        ("1", "2")
+    );
+    assert!(row.actionable);
+    // No canary candidate is persisted to enable the action.
+    assert_eq!(
+        c.query_row(
+            "SELECT COUNT(*) FROM online_catalog_review_candidates",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    queue_decide(&c, &cache, &row, "confirm").unwrap();
+    let page = whole_catalog_page(&c, &mut cache).unwrap();
+    assert!(page.rows.iter().all(|r| r.state != "pending"));
+    let saved = page
+        .rows
+        .into_iter()
+        .find(|r| r.state == "confirm")
+        .unwrap();
+    assert_eq!(saved.evidence.left.group_id, saved.evidence.right.group_id);
+    let snapshot = super::super::mobile_catalog::user_snapshot(&c).unwrap();
+    assert_eq!(snapshot["decisions"][0][2], "confirm");
+    queue_decide(&c, &cache, &saved, "split").unwrap();
+    let page = whole_catalog_page(&c, &mut cache).unwrap();
+    assert!(page.rows.iter().all(|r| r.state != "pending"));
+    assert_eq!(page.rows[0].state, "split");
+    // Reopening/rebuilding must keep the veto; it is not a cache-only decision.
+    catalog_groups::rebuild(&c, &catalog_groups::ensure_membership(&c).unwrap()).unwrap();
+    let page = whole_catalog_page(&c, &mut QueueCache::default()).unwrap();
+    assert!(page.rows.iter().all(|r| r.state != "pending"));
+    assert_eq!(
+        super::super::mobile_catalog::user_snapshot(&c).unwrap()["decisions"][0][2],
+        "split"
+    );
+}
+
+#[test]
+fn catalog_review_whole_queue_deduplicates_groups_and_invalidates_displayed_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = fixture(&dir.path().join("test.sqlite"));
+    // The actual matching work is 4, but its lineage anchor is 1. Decisions must use
+    // matching work IDs so the existing publication/sync path carries that exact pair.
+    c.execute_batch(
+        "UPDATE catalog.Works SET Title='Unrelated anchor',TitleJpn=NULL WHERE Id=1;
+        UPDATE catalog.Works SET Title='Same title 01',TitleJpn=NULL WHERE Id=4;
+        INSERT INTO catalog.Tags VALUES(4,'artist','alice'),(4,'language','korean');
+        INSERT INTO catalog.Works(Id,Token,ParentGid,ParentKey,Title,FileCount,Category)
+            VALUES(5,'five',2,'two','Same title 01',20,2);
+        INSERT INTO catalog.Tags VALUES(5,'artist','alice'),(5,'language','korean');",
+    )
+    .unwrap();
+    catalog_groups::ensure_membership(&c).unwrap();
+    let mut cache = QueueCache::default();
+    let page = whole_catalog_page(&c, &mut cache).unwrap();
+    assert_eq!(page.rows.len(), 1);
+    let row = &page.rows[0];
+    assert_eq!(
+        (row.left_anchor.as_str(), row.right_anchor.as_str()),
+        ("2", "4")
+    );
+    let cached = cache.found.as_ptr();
+    let again = whole_catalog_page(&c, &mut cache).unwrap();
+    assert_eq!(
+        cache.found.as_ptr(),
+        cached,
+        "unchanged Home/dialog input must reuse comparison"
+    );
+    assert_eq!(row.review_token, again.rows[0].review_token);
+    c.execute("UPDATE catalog.CrawlState SET Value='changed'", [])
+        .unwrap();
+    assert!(queue_decide(&c, &cache, row, "confirm").is_err());
+    catalog_groups::ensure_membership(&c).unwrap();
+    let page = whole_catalog_page(&c, &mut cache).unwrap();
+    assert!(queue_decide(&c, &cache, row, "confirm").is_err());
+    queue_decide(&c, &cache, &page.rows[0], "falsePositive").unwrap();
+    let page = whole_catalog_page(&c, &mut cache).unwrap();
+    assert!(
+        page.rows.iter().all(|r| r.state != "pending"),
+        "veto must exclude other work pairs of the same groups"
+    );
+}
+
+#[test]
+fn catalog_review_whole_queue_has_no_canary_or_list_candidate_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = fixture(&dir.path().join("test.sqlite"));
+    for pair in 0..560 {
+        for side in 0..2 {
+            let id = 1000 + pair * 2 + side;
+            c.execute(
+                "INSERT INTO catalog.Works(Id,Title,FileCount,Category) VALUES(?1,?2,20,2)",
+                params![id, format!("Unique matching title {pair:04}")],
+            )
+            .unwrap();
+            c.execute("INSERT INTO catalog.Tags VALUES(?1,'artist','alice')", [id])
+                .unwrap();
+            c.execute(
+                "INSERT INTO catalog.Tags VALUES(?1,'language','korean')",
+                [id],
+            )
+            .unwrap();
+        }
+    }
+    catalog_groups::ensure_membership(&c).unwrap();
+    let page = whole_catalog_page(&c, &mut QueueCache::default()).unwrap();
+    assert_eq!(
+        page.rows
+            .iter()
+            .filter(|r| r.state == "pending" && r.actionable)
+            .count(),
+        561
+    );
+}
+
+#[test]
+fn catalog_review_whole_queue_does_not_count_saves_blocked_by_the_existing_ledger_bound() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = fixture(&dir.path().join("test.sqlite"));
+    catalog_groups::ensure_membership(&c).unwrap();
+    let mut cache = QueueCache::default();
+    let row = whole_catalog_page(&c, &mut cache).unwrap().rows.remove(0);
+    let evidence = serde_json::to_string(&row.evidence).unwrap();
+    for id in 0..HUMAN_DECISIONS {
+        c.execute(
+            "INSERT INTO online_catalog_review_decisions VALUES(?1,?2,'falsePositive',?3,'now')",
+            params![format!("absent-a-{id}"), format!("absent-b-{id}"), evidence],
+        )
+        .unwrap();
+    }
+    let page = whole_catalog_page(&c, &mut cache).unwrap();
+    let row = page.rows.iter().find(|r| r.state == "pending").unwrap();
+    assert!(!row.actionable);
+    assert_eq!(
+        page.rows
+            .iter()
+            .filter(|r| r.state == "pending" && r.actionable)
+            .count(),
+        0
+    );
+    assert!(queue_decide(&c, &cache, row, "falsePositive").is_err());
+}
+
+/// Opt-in measurement on operator-provided COPIES only. No Library::open, migration,
+/// production path, network client, decision or publication is invoked.
+#[test]
+#[ignore = "requires CATALOG_REVIEW_BENCH_COPY_ROOT containing disposable copied SQLite files"]
+fn catalog_review_copied_database_queue_measurement() {
+    use std::time::Instant;
+    let root = std::path::PathBuf::from(
+        std::env::var_os("CATALOG_REVIEW_BENCH_COPY_ROOT").expect("copied fixture root"),
+    );
+    let c = Connection::open_with_flags(
+        root.join("library.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut uri = url::Url::from_file_path(root.join("kdata.db")).unwrap();
+    uri.set_query(Some("mode=ro"));
+    c.execute("ATTACH ?1 AS catalog", [uri.as_str()]).unwrap();
+    let tx = c.unchecked_transaction().unwrap();
+    let start = Instant::now();
+    let baseline = super::super::catalog_duplicate_sync::scan(&tx).unwrap();
+    let scan_ms = start.elapsed().as_millis();
+    let mut cache = QueueCache::default();
+    let start = Instant::now();
+    let first = whole_catalog_page(&tx, &mut cache).unwrap();
+    let first_ms = start.elapsed().as_millis();
+    let start = Instant::now();
+    let second = whole_catalog_page(&tx, &mut cache).unwrap();
+    let warm_ms = start.elapsed().as_millis();
+    let count = |page: &ReviewPage| {
+        page.rows
+            .iter()
+            .filter(|r| r.state == "pending" && r.actionable)
+            .count()
+    };
+    assert_eq!(count(&first), baseline.len());
+    assert_eq!(count(&first), count(&second));
+    let legacy_pending = list(&tx)
+        .unwrap()
+        .iter()
+        .filter(|r| r.state == "pending" && r.actionable)
+        .count();
+    let uncertain = baseline
+        .iter()
+        .filter(|p| {
+            super::super::catalog_duplicate_sync::duplicate_tier(&p.left, &p.right)
+                == super::super::catalog_duplicate_sync::Tier::Uncertain
+        })
+        .count();
+    eprintln!("copied DB: legacy_pending={legacy_pending}, whole_pending={}, uncertain={uncertain}; baseline_scan_ms={scan_ms}, cold_queue_ms={first_ms}, warm_queue_ms={warm_ms}", count(&first));
+}
+
 #[test]
 fn catalog_review_appended_translation_with_small_page_difference() {
     let original = "(C108) [Nobutorakai (Nidaime)] Natsu no Majo ni wa Ki o Tsukero! (Genshin Impact) [Korean]";

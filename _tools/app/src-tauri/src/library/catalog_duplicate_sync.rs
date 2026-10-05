@@ -745,7 +745,7 @@ pub(super) fn chunk_publications(
 /// pair state), excluding report bookkeeping and the server's echo of this PC's own reports,
 /// so reporting never forces a new comparison. Caller has `catalog` attached; read it in the
 /// same snapshot as the data it describes.
-fn fingerprint(c: &Connection) -> Result<String, LibraryError> {
+pub(super) fn fingerprint(c: &Connection) -> Result<String, LibraryError> {
     let content: String = c.query_row(
         "SELECT COALESCE((SELECT Value FROM catalog.CrawlState WHERE Key='lakomics.catalog.contentRevision'),'legacy')",
         [],
@@ -1001,9 +1001,13 @@ impl Library {
         )?;
         let revision = self.with_catalog_write(membership_revision)?;
         let found = {
+            let mut cache = self
+                .catalog_review_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut reader = self.catalog_read_connection()?;
             let tx = reader.transaction()?;
-            scan(&tx)?
+            cache.candidates(&tx)?.to_vec()
         };
         let merged = self.with_catalog_write(|c| {
             if membership_revision(c)? != revision {

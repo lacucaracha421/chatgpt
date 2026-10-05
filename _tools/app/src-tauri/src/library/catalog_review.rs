@@ -1,13 +1,17 @@
-//! Explicit, same-provider canary. Discovery never participates in search.
+//! Whole-catalog duplicate-edition review. Discovery never participates in search.
 use super::{catalog_groups, error::LibraryError, Library};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+#[cfg(test)]
+use std::collections::BTreeSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub(super) const ALGORITHM: &str = "translated-title-multisignal-canary-v2";
+#[cfg(test)]
 const WINDOW: usize = 500;
 pub(super) const BUCKET: usize = 8;
+#[cfg(test)]
 const CANDIDATES: usize = 50;
 const TAGS: usize = 64;
 /// The bounded canary ledger of human decisions. Automatic merges
@@ -70,6 +74,103 @@ pub struct ReviewDecision {
     pub left_anchor: String,
     pub right_anchor: String,
     pub decision: String,
+}
+
+/// Shared by Library clones: opening Home and its dialog compares an unchanged catalog
+/// once. No schema change or catalog write is needed to discover pending candidates.
+#[derive(Debug, Default)]
+pub(super) struct QueueCache {
+    input: Option<String>,
+    found: Vec<super::catalog_duplicate_sync::Found>,
+}
+
+impl QueueCache {
+    pub(super) fn candidates(
+        &mut self,
+        c: &Connection,
+    ) -> Result<&[super::catalog_duplicate_sync::Found], LibraryError> {
+        let input = queue_input(c)?;
+        if self.input.as_deref() != Some(input.as_str()) {
+            self.found = super::catalog_duplicate_sync::scan(c)?;
+            self.input = Some(input);
+        }
+        Ok(&self.found)
+    }
+}
+
+fn queue_input(c: &Connection) -> Result<String, LibraryError> {
+    Ok(format!(
+        "{}:{}",
+        candidate_context(c)?,
+        super::catalog_duplicate_sync::fingerprint(c)?
+    ))
+}
+
+fn pending_row(
+    c: &Connection,
+    pair: &super::catalog_duplicate_sync::Found,
+) -> Result<ReviewRow, LibraryError> {
+    let (exact, gap) =
+        pair_match(&pair.left, &pair.right).ok_or(LibraryError::InvalidOnlineCatalog)?;
+    let mut row = make_row(
+        c,
+        pair.left.work_id.clone(),
+        pair.right.work_id.clone(),
+        "pending".into(),
+        ReviewEvidence {
+            left: pair.left.clone(),
+            right: pair.right.clone(),
+            reason: reason_text(exact, gap),
+            algorithm: ALGORITHM.into(),
+        },
+        Some(candidate_context(c)?),
+    )?;
+    // Home counts actionable rows. Do not advertise a save that the existing
+    // bounded decision ledger would reject even with unchanged evidence.
+    row.actionable &= human_decisions(c)? < HUMAN_DECISIONS;
+    Ok(row)
+}
+
+fn whole_catalog_page(c: &Connection, cache: &mut QueueCache) -> Result<ReviewPage, LibraryError> {
+    cache.candidates(c)?;
+    // Retain decision history and its split action, but never mix in the canary queue.
+    let mut queue = Vec::new();
+    for pair in &cache.found {
+        queue.push(pending_row(c, pair)?);
+    }
+    queue.extend(rows(c, None, false)?);
+    Ok(ReviewPage {
+        rows: queue,
+        inspected_works: 0,
+        comparisons: 0,
+        skipped_buckets: 0,
+    })
+}
+
+fn queue_decision_row(
+    c: &Connection,
+    cache: &QueueCache,
+    query: &ReviewDecision,
+) -> Result<ReviewRow, LibraryError> {
+    if let Some(row) = rows(c, Some((&query.left_anchor, &query.right_anchor)), false)?
+        .into_iter()
+        .next()
+    {
+        return Ok(row);
+    }
+    // Never recompare the catalog while holding the library writer lock.
+    // Any concurrent change requires reloading the queue before deciding.
+    if cache.input.as_deref() != Some(queue_input(c)?.as_str()) {
+        return Err(LibraryError::InvalidOnlineCatalog);
+    }
+    let pair = cache
+        .found
+        .iter()
+        .find(|pair| {
+            pair.left.work_id == query.left_anchor && pair.right.work_id == query.right_anchor
+        })
+        .ok_or(LibraryError::OnlineCatalogWorkNotFound)?;
+    pending_row(c, pair)
 }
 
 fn root(parent: &mut [usize], i: usize) -> usize {
@@ -198,6 +299,7 @@ pub(super) fn work(c: &Connection, id: &str) -> Result<ReviewWork, LibraryError>
     }
     Ok(w)
 }
+#[cfg(test)]
 fn anchor(c: &Connection, group: &str) -> Result<String, LibraryError> {
     Ok(c.query_row("SELECT anchor_work_id FROM online_catalog_group_handles WHERE provider='kHentai' AND group_id=?1",[group],|r|r.get(0))?)
 }
@@ -248,6 +350,8 @@ pub(super) fn reviewed(
         params![left, right, left_group, right_group], |r| r.get(0))?)
 }
 
+// Historical canary fixtures retain coverage of the original discovery/token contract.
+#[cfg(test)]
 pub(super) fn generate(c: &Connection) -> Result<ReviewPage, LibraryError> {
     catalog_groups::ensure_membership(c)?;
     let revision = candidate_context(c)?;
@@ -341,21 +445,27 @@ fn candidate_context(c: &Connection) -> Result<String, LibraryError> {
     Ok(c.query_row("SELECT s.source_revision || ':' || s.generation || ':' || COALESCE((SELECT Value FROM catalog.CrawlState WHERE Key='lakomics.catalog.contentRevision'),'legacy')
         FROM online_catalog_group_state s WHERE provider='kHentai'",[],|r|r.get(0)).optional()?.unwrap_or_default())
 }
+#[cfg(test)]
 pub(super) fn list(c: &Connection) -> Result<Vec<ReviewRow>, LibraryError> {
-    rows(c, None)
+    rows(c, None, true)
 }
 
 /// One pair's row exactly as `list` would show it (same token), found directly so a pair
 /// beyond the list bounds stays decidable.
+#[cfg(test)]
 fn row(c: &Connection, left: &str, right: &str) -> Result<Option<ReviewRow>, LibraryError> {
-    Ok(rows(c, Some((left, right)))?.into_iter().next())
+    Ok(rows(c, Some((left, right)), true)?.into_iter().next())
 }
 
 /// Pending and decided rows are bounded separately (550 each), so thousands of decisions
 /// never push pending candidates out. Human decisions come before automatic merges
 /// (`catalog_duplicate_sync`), which fill the rest of the decided bound. Decisions are never
 /// deleted to make room.
-fn rows(c: &Connection, pair: Option<(&str, &str)>) -> Result<Vec<ReviewRow>, LibraryError> {
+fn rows(
+    c: &Connection,
+    pair: Option<(&str, &str)>,
+    include_canary: bool,
+) -> Result<Vec<ReviewRow>, LibraryError> {
     let (left, right) = pair.unzip();
     let read =
         |sql: &str| -> Result<Vec<(String, String, String, String, Option<String>)>, LibraryError> {
@@ -371,57 +481,75 @@ fn rows(c: &Connection, pair: Option<(&str, &str)>) -> Result<Vec<ReviewRow>, Li
         WHERE ?1 IS NULL OR (d.left_anchor=?1 AND d.right_anchor=?2)
         ORDER BY EXISTS(SELECT 1 FROM catalog_duplicate_pairs p WHERE p.left_work_id=d.left_anchor
             AND p.right_work_id=d.right_anchor AND p.origin='auto'),1,2 LIMIT 550")?;
-    raw.extend(read("SELECT left_anchor,right_anchor,'pending',evidence,source_revision FROM online_catalog_review_candidates c
+    if include_canary {
+        raw.extend(read("SELECT left_anchor,right_anchor,'pending',evidence,source_revision FROM online_catalog_review_candidates c
         WHERE NOT EXISTS(SELECT 1 FROM online_catalog_review_decisions d WHERE d.left_anchor=c.left_anchor AND d.right_anchor=c.right_anchor)
         AND (?1 IS NULL OR (c.left_anchor=?1 AND c.right_anchor=?2))
         ORDER BY 1,2 LIMIT 550")?);
+    }
     raw.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
-    let revision = candidate_context(c)?;
     raw.into_iter()
         .map(|(a, b, state, json, source)| {
-            let mut evidence: ReviewEvidence =
+            let evidence: ReviewEvidence =
                 serde_json::from_str(&json).map_err(|_| LibraryError::InvalidOnlineCatalog)?;
-            let left = work(c, &evidence.left.work_id).ok();
-            let right = work(c, &evidence.right.work_id).ok();
-            let mut actionable = left.is_some() && right.is_some();
-            if let Some(w) = left {
-                evidence.left = w;
-            }
-            if let Some(w) = right {
-                evidence.right = w;
-            }
-            if state == "pending" {
-                actionable &=
-                    source.as_deref() == Some(revision.as_str()) && evidence.algorithm == ALGORITHM;
-            }
-            // Bind the action to the exact evidence/context shown to the human,
-            // including replacement candidates generated in another window.
-            let token_input = serde_json::to_vec(&(&a, &b, &state, &evidence, &source, &revision))
-                .map_err(|_| LibraryError::InvalidOnlineCatalog)?;
-            let review_token = Sha256::digest(token_input)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect();
-            Ok(ReviewRow {
-                review_token,
-                left_anchor: a,
-                right_anchor: b,
-                state,
-                evidence,
-                actionable,
-            })
+            make_row(c, a, b, state, evidence, source)
         })
         .collect()
 }
+
+fn make_row(
+    c: &Connection,
+    a: String,
+    b: String,
+    state: String,
+    mut evidence: ReviewEvidence,
+    source: Option<String>,
+) -> Result<ReviewRow, LibraryError> {
+    let revision = candidate_context(c)?;
+    let left = work(c, &evidence.left.work_id).ok();
+    let right = work(c, &evidence.right.work_id).ok();
+    let mut actionable = left.is_some() && right.is_some();
+    if let Some(w) = left {
+        evidence.left = w;
+    }
+    if let Some(w) = right {
+        evidence.right = w;
+    }
+    if state == "pending" {
+        actionable &=
+            source.as_deref() == Some(revision.as_str()) && evidence.algorithm == ALGORITHM;
+    }
+    // Bind the action to the exact evidence/context shown to the human,
+    // including replacement candidates generated in another window.
+    let token_input = serde_json::to_vec(&(&a, &b, &state, &evidence, &source, &revision))
+        .map_err(|_| LibraryError::InvalidOnlineCatalog)?;
+    let review_token = Sha256::digest(token_input)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(ReviewRow {
+        review_token,
+        left_anchor: a,
+        right_anchor: b,
+        state,
+        evidence,
+        actionable,
+    })
+}
+#[cfg(test)]
 pub(super) fn decide(c: &Connection, q: &ReviewDecision) -> Result<(), LibraryError> {
+    let row =
+        row(c, &q.left_anchor, &q.right_anchor)?.ok_or(LibraryError::OnlineCatalogWorkNotFound)?;
+    decide_row(c, q, row)
+}
+
+fn decide_row(c: &Connection, q: &ReviewDecision, row: ReviewRow) -> Result<(), LibraryError> {
     if q.left_anchor >= q.right_anchor
         || !["confirm", "falsePositive", "split"].contains(&q.decision.as_str())
     {
         return Err(LibraryError::InvalidOnlineCatalog);
     }
     let revision = catalog_groups::ensure_membership(c)?;
-    let row =
-        row(c, &q.left_anchor, &q.right_anchor)?.ok_or(LibraryError::OnlineCatalogWorkNotFound)?;
     // Reject stale candidates and prevent an ordinary confirm from undoing a veto.
     if !row.actionable
         || row.review_token != q.review_token
@@ -460,29 +588,23 @@ pub(super) fn decide(c: &Connection, q: &ReviewDecision) -> Result<(), LibraryEr
 }
 impl Library {
     pub fn list_catalog_review(&self) -> Result<ReviewPage, LibraryError> {
+        let mut cache = self
+            .catalog_review_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut reader = self.catalog_read_connection()?;
         let tx = reader.transaction()?;
-        Ok(ReviewPage {
-            rows: list(&tx)?,
-            inspected_works: 0,
-            comparisons: 0,
-            skipped_buckets: 0,
-        })
+        whole_catalog_page(&tx, &mut cache)
     }
     pub fn generate_catalog_review(&self) -> Result<ReviewPage, LibraryError> {
-        let _guard = self
-            .catalog_file_lock
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut c = self.connection()?;
-        super::catalog_preparation::attach_catalog_readonly(&c, &self.root)?;
-        let tx = c.transaction()?;
-        let result = generate(&tx)?;
-        tx.commit()?;
-        Ok(result)
+        self.list_catalog_review()
     }
     pub fn decide_catalog_review(&self, query: ReviewDecision) -> Result<(), LibraryError> {
         {
+            let cache = self
+                .catalog_review_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let _guard = self
                 .catalog_file_lock
                 .read()
@@ -490,7 +612,8 @@ impl Library {
             let mut c = self.connection()?;
             super::catalog_preparation::attach_catalog_readonly(&c, &self.root)?;
             let tx = c.transaction()?;
-            decide(&tx, &query)?;
+            let row = queue_decision_row(&tx, &cache, &query)?;
+            decide_row(&tx, &query, row)?;
             tx.commit()?;
         }
         self.request_catalog_preparation();
