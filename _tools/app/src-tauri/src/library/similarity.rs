@@ -342,15 +342,10 @@ impl Library {
         let transaction = connection.transaction()?;
         verify_asset_status(&transaction, existing_id, "normal")?;
         verify_asset_status(&transaction, candidate_id, "review")?;
-        let existing_classifications = transaction.prepare(
-            "SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
-            .query_map([existing_id], |r| r.get::<_,String>(0))?
-            .collect::<Result<Vec<_>,_>>()?;
-        // Do not silently choose a location for legacy invalid memberships.
-        if existing_classifications.len() > 1 {
-            return Err(LibraryError::InvalidAssetSelection);
-        }
-        if let Some(classification_id) = existing_classifications.first() {
+        let existing_classification = incoming_promotion_classification(&transaction, existing_id)?;
+        let candidate_classification =
+            incoming_promotion_classification(&transaction, candidate_id)?;
+        if let Some(classification_id) = existing_classification.as_deref() {
             transaction.execute(
                 "DELETE FROM asset_classifications WHERE asset_id=?1",
                 [candidate_id],
@@ -360,14 +355,7 @@ impl Library {
                 params![candidate_id, classification_id],
             )?;
         }
-        let count: i64 = transaction.query_row(
-            "SELECT COUNT(*) FROM asset_classifications WHERE asset_id=?1",
-            [candidate_id],
-            |r| r.get(0),
-        )?;
-        if count > 1 {
-            return Err(LibraryError::InvalidAssetSelection);
-        }
+        let final_classification = existing_classification.or(candidate_classification);
         transaction.execute(
             "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
              SELECT collection_id, ?2, added_at
@@ -393,6 +381,11 @@ impl Library {
         transaction.execute(
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
+        )?;
+        Library::enqueue_classification_assignment_intent(
+            &transaction,
+            candidate_id,
+            final_classification.as_deref(),
         )?;
         super::character_autotag::enqueue(
             &transaction,
@@ -421,9 +414,15 @@ impl Library {
         let transaction = connection.transaction()?;
         verify_asset_status(&transaction, existing_id, "normal")?;
         verify_asset_status(&transaction, candidate_id, "review")?;
+        let final_classification = incoming_promotion_classification(&transaction, candidate_id)?;
         transaction.execute(
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
+        )?;
+        Library::enqueue_classification_assignment_intent(
+            &transaction,
+            candidate_id,
+            final_classification.as_deref(),
         )?;
         super::character_autotag::enqueue(
             &transaction,
@@ -934,6 +933,21 @@ fn resolve_review(
     }
 }
 
+// Do not silently choose a folder when a legacy Asset has multiple memberships.
+fn incoming_promotion_classification(
+    connection: &Connection,
+    asset_id: &str,
+) -> Result<Option<String>, LibraryError> {
+    let classifications = connection
+        .prepare("SELECT classification_id FROM asset_classifications WHERE asset_id = ?1")?
+        .query_map([asset_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if classifications.len() > 1 {
+        return Err(LibraryError::InvalidAssetSelection);
+    }
+    Ok(classifications.into_iter().next())
+}
+
 /// Close open incoming reviews whose existing Asset is no longer `normal` (or is `departing`,
 /// i.e. about to be deleted), keeping the candidate.
 ///
@@ -947,6 +961,14 @@ pub(crate) fn release_incoming_reviews_without_existing(
     connection: &Connection,
     departing: Option<&str>,
 ) -> Result<usize, LibraryError> {
+    // Legacy cleanup can call without a transaction. Promotion and both outboxes
+    // must still commit together; existing transactional callers keep their boundary.
+    if connection.is_autocommit() {
+        let transaction = connection.unchecked_transaction()?;
+        let released = release_incoming_reviews_without_existing(&transaction, departing)?;
+        transaction.commit()?;
+        return Ok(released);
+    }
     let stranded = connection
         .prepare(
             "SELECT id, candidate_asset_id FROM similarity_reviews r
@@ -955,15 +977,23 @@ pub(crate) fn release_incoming_reviews_without_existing(
                     OR NOT EXISTS (SELECT 1 FROM assets a
                                    WHERE a.id = r.existing_asset_id AND a.status = 'normal'))",
         )?
-        .query_map([departing], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .query_map([departing], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     let now = chrono::Utc::now().to_rfc3339();
     for (review_id, candidate_id) in &stranded {
+        let final_classification = incoming_promotion_classification(connection, candidate_id)?;
         let promoted = connection.execute(
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
         )?;
         if promoted > 0 {
+            Library::enqueue_classification_assignment_intent(
+                connection,
+                candidate_id,
+                final_classification.as_deref(),
+            )?;
             super::character_autotag::enqueue(
                 connection,
                 candidate_id,

@@ -137,6 +137,333 @@ fn create_root(library: &Library, name: &str) -> String {
         .id
 }
 
+// Adapted from the classification-38 audit draft. Use the public decision path,
+// with disposable database rows so these tests never need managed media files.
+fn incoming_similarity_fixture() -> (tempfile::TempDir, Library, String, String) {
+    let (temp, library) = open();
+    let existing_folder = create_root(&library, "Existing destination");
+    let candidate_folder = create_root(&library, "Incoming destination");
+    insert_asset(&library, "similarity-existing");
+    insert_asset(&library, "similarity-candidate");
+    {
+        let db = library.connection().unwrap();
+        db.execute_batch(
+            "UPDATE assets SET status='review' WHERE id='similarity-candidate';
+             UPDATE library_settings SET cloud_sync_enabled=1,
+                 cloud_api_base_url='http://127.0.0.1' WHERE singleton=1;
+             INSERT INTO similarity_reviews
+                 (id,existing_asset_id,candidate_asset_id,distance,fingerprint_kind,status,created_at)
+             VALUES ('similarity-review','similarity-existing','similarity-candidate',1,
+                 'pdq-v1','open','2026-09-26T12:17:05Z');",
+        ).unwrap();
+        for (asset, folder) in [
+            ("similarity-existing", &existing_folder),
+            ("similarity-candidate", &candidate_folder),
+        ] {
+            db.execute(
+                "INSERT INTO asset_classifications VALUES (?1, ?2)",
+                rusqlite::params![asset, folder],
+            )
+            .unwrap();
+        }
+    }
+    (temp, library, existing_folder, candidate_folder)
+}
+
+fn decide_incoming_similarity(library: &Library, replace: bool) -> Result<(), LibraryError> {
+    use crate::library::models::{SimilarityDecision, SimilarityDecisionRequest};
+    library.decide_similarity_review(SimilarityDecisionRequest {
+        review_id: "similarity-review".into(),
+        decision: if replace {
+            SimilarityDecision::ReplaceExisting
+        } else {
+            SimilarityDecision::KeepBoth
+        },
+    })
+}
+
+fn assert_similarity_promotion(db: &Connection, folder: Option<&str>, adopted: bool) {
+    assert_eq!(
+        db.query_row(
+            "SELECT status FROM assets WHERE id='similarity-candidate'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "normal"
+    );
+    let memberships = db.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id='similarity-candidate'")
+        .unwrap().query_map([], |r| r.get::<_, String>(0)).unwrap()
+        .collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(
+        memberships,
+        folder.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    );
+    assert_eq!(cloud_sync_queue_rows(db, "similarity-candidate"), 1);
+    let queued = payloads(db);
+    assert_eq!(queued.len(), usize::from(adopted));
+    if adopted {
+        assert_eq!(queued[0]["commandType"], "setAssetClassification");
+        assert_eq!(queued[0]["assetId"], "similarity-candidate");
+        assert_eq!(queued[0]["classificationId"], serde_json::json!(folder));
+        assert_eq!(queued[0]["expectedRevision"], 0);
+    }
+}
+
+#[test]
+fn incoming_similarity_promotions_declare_final_assignment_once() {
+    for replace in [true, false] {
+        for no_folder in [false, true] {
+            let (_temp, library, existing_folder, candidate_folder) = incoming_similarity_fixture();
+            if no_folder {
+                library
+                    .connection()
+                    .unwrap()
+                    .execute("DELETE FROM asset_classifications", [])
+                    .unwrap();
+            }
+            adopt(&library, 1, 0);
+            // Undecided incoming candidates declare neither placement nor upload.
+            {
+                let db = library.connection().unwrap();
+                assert!(payloads(&db).is_empty());
+                assert_eq!(cloud_sync_queue_rows(&db, "similarity-candidate"), 0);
+            }
+            decide_incoming_similarity(&library, replace).unwrap();
+            let first = outbox(&library.connection().unwrap());
+            decide_incoming_similarity(&library, replace).unwrap();
+            let db = library.connection().unwrap();
+            assert_eq!(outbox(&db), first, "retry must preserve the same operation");
+            let folder = if no_folder {
+                None
+            } else if replace {
+                Some(existing_folder.as_str())
+            } else {
+                Some(candidate_folder.as_str())
+            };
+            assert_similarity_promotion(&db, folder, true);
+        }
+    }
+}
+
+#[test]
+fn incoming_similarity_replacement_retains_candidate_folder_when_existing_has_none() {
+    let (_temp, library, _, candidate_folder) = incoming_similarity_fixture();
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "DELETE FROM asset_classifications WHERE asset_id='similarity-existing'",
+            [],
+        )
+        .unwrap();
+    adopt(&library, 1, 0);
+    decide_incoming_similarity(&library, true).unwrap();
+    assert_similarity_promotion(
+        &library.connection().unwrap(),
+        Some(&candidate_folder),
+        true,
+    );
+}
+
+#[test]
+fn incoming_similarity_automatic_release_declares_assignment_once() {
+    for no_folder in [false, true] {
+        let (_temp, library, _, candidate_folder) = incoming_similarity_fixture();
+        if no_folder {
+            library
+                .connection()
+                .unwrap()
+                .execute("DELETE FROM asset_classifications", [])
+                .unwrap();
+        }
+        adopt(&library, 1, 0);
+        let mut db = library.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        tx.execute(
+            "UPDATE assets SET status='trash' WHERE id='similarity-existing'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            super::similarity::release_incoming_reviews_without_existing(&tx, None).unwrap(),
+            1
+        );
+        let first = outbox(&tx);
+        assert_eq!(
+            super::similarity::release_incoming_reviews_without_existing(&tx, None).unwrap(),
+            0
+        );
+        assert_eq!(outbox(&tx), first);
+        tx.commit().unwrap();
+        assert_similarity_promotion(
+            &db,
+            if no_folder {
+                None
+            } else {
+                Some(&candidate_folder)
+            },
+            true,
+        );
+    }
+}
+
+#[test]
+fn incoming_similarity_promotions_before_adoption_have_no_assignment_intent() {
+    for mode in 0..3 {
+        let (_temp, library, existing_folder, candidate_folder) = incoming_similarity_fixture();
+        if mode == 2 {
+            let mut db = library.connection().unwrap();
+            let tx = db.transaction().unwrap();
+            super::similarity::release_incoming_reviews_without_existing(
+                &tx,
+                Some("similarity-existing"),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        } else {
+            decide_incoming_similarity(&library, mode == 0).unwrap();
+        }
+        assert_similarity_promotion(
+            &library.connection().unwrap(),
+            Some(if mode == 0 {
+                &existing_folder
+            } else {
+                &candidate_folder
+            }),
+            false,
+        );
+    }
+}
+
+#[test]
+fn incoming_similarity_promotions_reject_multiple_legacy_memberships() {
+    for mode in 0..3 {
+        for invalid_asset in ["similarity-existing", "similarity-candidate"] {
+            // KeepBoth and release only use the candidate's membership.
+            if mode != 0 && invalid_asset == "similarity-existing" {
+                continue;
+            }
+            let (_temp, library, existing_folder, candidate_folder) = incoming_similarity_fixture();
+            let other = if invalid_asset == "similarity-existing" {
+                candidate_folder
+            } else {
+                existing_folder
+            };
+            library
+                .connection()
+                .unwrap()
+                .execute(
+                    "INSERT INTO asset_classifications VALUES (?1, ?2)",
+                    rusqlite::params![invalid_asset, other],
+                )
+                .unwrap();
+            adopt(&library, 1, 0);
+            let result = if mode == 2 {
+                let mut db = library.connection().unwrap();
+                let tx = db.transaction().unwrap();
+                super::similarity::release_incoming_reviews_without_existing(
+                    &tx,
+                    Some("similarity-existing"),
+                )
+                .map(|_| ())
+            } else {
+                decide_incoming_similarity(&library, mode == 0)
+            };
+            assert!(matches!(result, Err(LibraryError::InvalidAssetSelection)));
+            let db = library.connection().unwrap();
+            assert!(outbox(&db).is_empty());
+            assert_eq!(cloud_sync_queue_rows(&db, "similarity-candidate"), 0);
+            assert_eq!(
+                db.query_row(
+                    "SELECT status FROM assets WHERE id='similarity-candidate'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "review"
+            );
+        }
+    }
+}
+
+#[test]
+fn incoming_similarity_promotion_rolls_back_both_queues_and_retries() {
+    for mode in 0..3 {
+        let (_temp, library, existing_folder, candidate_folder) = incoming_similarity_fixture();
+        adopt(&library, 1, 0);
+        library.connection().unwrap().execute_batch(
+            "CREATE TRIGGER fail_similarity_resolution BEFORE UPDATE OF status ON similarity_reviews
+             WHEN NEW.status='resolved' BEGIN SELECT RAISE(ABORT, 'simulated resolution failure'); END;"
+        ).unwrap();
+        let result = if mode == 2 {
+            let db = library.connection().unwrap();
+            super::similarity::release_incoming_reviews_without_existing(
+                &db,
+                Some("similarity-existing"),
+            )
+            .map(|_| ())
+        } else {
+            decide_incoming_similarity(&library, mode == 0)
+        };
+        assert!(result.is_err());
+        {
+            let db = library.connection().unwrap();
+            assert!(outbox(&db).is_empty());
+            assert_eq!(cloud_sync_queue_rows(&db, "similarity-candidate"), 0);
+            assert_eq!(
+                db.query_row(
+                    "SELECT status FROM assets WHERE id='similarity-candidate'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "review"
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT status FROM assets WHERE id='similarity-existing'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "normal"
+            );
+            assert_eq!(db.query_row("SELECT classification_id FROM asset_classifications WHERE asset_id='similarity-candidate'", [], |r| r.get::<_, String>(0)).unwrap(), candidate_folder);
+            assert_eq!(
+                db.query_row(
+                    "SELECT status FROM similarity_reviews WHERE id='similarity-review'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "open"
+            );
+            db.execute_batch("DROP TRIGGER fail_similarity_resolution")
+                .unwrap();
+        }
+        if mode == 2 {
+            let db = library.connection().unwrap();
+            super::similarity::release_incoming_reviews_without_existing(
+                &db,
+                Some("similarity-existing"),
+            )
+            .unwrap();
+        } else {
+            decide_incoming_similarity(&library, mode == 0).unwrap();
+        }
+        assert_similarity_promotion(
+            &library.connection().unwrap(),
+            Some(if mode == 0 {
+                &existing_folder
+            } else {
+                &candidate_folder
+            }),
+            true,
+        );
+    }
+}
+
 #[test]
 fn create_then_delete_keeps_the_create_ahead_of_revision_one_delete() {
     let (_temp, library) = open();
