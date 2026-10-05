@@ -101,6 +101,11 @@ it("renders a bounded filmstrip and moves from a thumbnail", () => {
   expect(onActiveIdChange).toHaveBeenCalledWith("asset-5");
 });
 
+it("loops a video in the viewer (user 2026-10-06)", () => {
+  render(<AssetViewer items={[videoAsset("video", "video.webm")]} activeId="video" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+  expect(document.querySelector("video")).toHaveProperty("loop", true);
+});
+
 it("shows the video strip when paused, hides it while playing, and omits it for single assets", () => {
   const { rerender } = render(<AssetViewer items={[videoAsset("video", "video.webm"), asset("b", "b.png")]} activeId="video" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
   expect(document.querySelector(".asset-viewer__filmstrip")).toBeInTheDocument();

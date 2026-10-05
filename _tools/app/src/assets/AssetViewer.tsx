@@ -381,7 +381,7 @@ export function AssetViewer({
         {privacyMode
           ? <Skeleton className="privacy-mask asset-viewer__media-mask" label="비공개 모드" />
           : asset.media.kind === "video"
-            ? <VideoPlayer ref={videoPlayerRef} key={asset.id} source={mediaSource} mediaEvents={{onPlay: () => setVideoPlaying(true), onPause: () => { setVideoPlaying(false); revealChrome(); }, onEnded: () => { setVideoPlaying(false); revealChrome(); }}} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
+            ? <VideoPlayer ref={videoPlayerRef} key={asset.id} source={mediaSource} loop mediaEvents={{onPlay: () => setVideoPlaying(true), onPause: () => { setVideoPlaying(false); revealChrome(); }, onEnded: () => { setVideoPlaying(false); revealChrome(); }}} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
             : imageFailed
               ? <EmptyState title="이미지를 불러오지 못했습니다">다른 자산으로 이동하면 자동으로 다시 시도합니다.</EmptyState>
               : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} className="asset-viewer__media" style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
