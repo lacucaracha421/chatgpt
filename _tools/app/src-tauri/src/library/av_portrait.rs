@@ -100,6 +100,21 @@ pub(super) fn portrait(c: &Connection, person: &str) -> Result<Option<AvPortrait
             |r| Ok(AvStashdbPreview { data_url: data_url("image/jpeg", &r.get::<_, Vec<u8>>(0)?), width: r.get(1)?, height: r.get(2)?, source_url: r.get(3)? })
         )? })),
         Some("commons") => Ok(Some(AvPortrait::Commons {preview:c.query_row("SELECT image_bytes,mime,file_name,author,license,license_url,source_url FROM collection_person_portraits WHERE person_id=?1",[person],|r|Ok(AvCommonsPreview{data_url:data_url(&r.get::<_,String>(1)?,&r.get::<_,Vec<u8>>(0)?),file_name:r.get(2)?,author:r.get(3)?,license:r.get(4)?,license_url:r.get(5)?,source_url:r.get(6)?}))?})),
+        // Stored portraits are explicit choices. Only an unchosen performer uses the matched profile.
+        None => {
+            let images: Option<String> = c.query_row(
+                "SELECT images_json FROM collection_person_profiles WHERE person_id=?1 AND source='stashdb' AND status='matched'",
+                [person], |r| r.get(0),
+            ).optional()?;
+            let images: Vec<super::av_stashdb::ProfileImage> = images
+                .and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
+            Ok(images.into_iter().find(|image| {
+                image.width > 0 && image.height > 0 && url::Url::parse(&image.url).is_ok_and(|url|
+                    url.scheme() == "https" && url.host_str() == Some("stashdb.org") && url.username().is_empty() && url.password().is_none())
+            }).map(|image| AvPortrait::Stashdb { preview: AvStashdbPreview {
+                data_url: image.url.clone(), width: image.width, height: image.height, source_url: image.url,
+            } }))
+        }
         _ => Ok(None),
     }
 }

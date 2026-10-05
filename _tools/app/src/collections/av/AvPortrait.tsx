@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import type { AvPortrait as AvPortraitData } from "../avTypes";
@@ -21,12 +21,14 @@ function initials(name: string) {
 
 export function AvPortrait({ portrait, name, size = "detail", className = "" }: AvPortraitProps) {
   const { privacyMode } = usePrivacy();
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const imageSrc = portrait?.kind === "commons" || portrait?.kind === "stashdb" ? portrait.dataUrl : null;
   const dimension = typeof size === "number" ? size : size === "performer" ? 225 : size === "home" ? 112 : 84;
   const height = size === "performer" ? 300 : size === "home" ? 150 : dimension;
   const classNames = `av-portrait av-portrait--${typeof size === "string" ? size : "custom"}${className ? ` ${className}` : ""}`;
   const style = { "--portrait-width": `${dimension}px`, "--portrait-height": `${height}px` } as CSSProperties;
-  if (privacyMode || !portrait) return <span className={classNames} style={style} aria-label={`${name} 이니셜`}>{initials(name)}</span>;
-  if ((portrait.kind === "commons" || portrait.kind === "stashdb")) return <span className={classNames} style={style}><img src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} /></span>;
+  if (privacyMode || !portrait || (imageSrc && imageSrc === failedSrc)) return <span className={classNames} style={style} aria-label={`${name} 이니셜`}>{initials(name)}</span>;
+  if ((portrait.kind === "commons" || portrait.kind === "stashdb")) return <span className={classNames} style={style}><img src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} referrerPolicy="no-referrer" onError={() => setFailedSrc(portrait.dataUrl)} /></span>;
 
   const rect = portrait.rect;
   const backgroundSize = `${100 / rect.w}% ${100 / rect.h}%`;

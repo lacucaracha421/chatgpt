@@ -10,6 +10,7 @@ import type { AvCommonsPreview, AvStashdbPreview, AvPerformerProfile, AvGateway,
 import { safeProfileUrl } from "./AvPerformerProfile";
 import { AvPortrait as Portrait } from "./AvPortrait";
 import "./avPortraitPicker.css";
+import { defaultPortraitSource } from "./portraitSource";
 
 type PortraitSourceKind = "crop" | "commons" | "stashdb" | "none";
 
@@ -34,14 +35,15 @@ function artworkUrl(id: string, revision: string, large = false) {
   return `${base}?v=${encodeURIComponent(revision)}`;
 }
 
-export function AvPortraitPicker({ personId, personName, wikidataId = null, api, onClose, onSaved }: {
-  personId: string; personName: string; wikidataId?: string | null; api: AvGateway; onClose(): void; onSaved(portrait: AvPortrait | null): void;
+export function AvPortraitPicker({ personId, personName, wikidataId = null, currentPortrait, api, onClose, onSaved }: {
+  currentPortrait?: AvPortrait | null; personId: string; personName: string; wikidataId?: string | null; api: AvGateway; onClose(): void; onSaved(portrait: AvPortrait | null): void;
 }) {
+  const sourceChosen = useRef(false);
   const stripWheel = useHorizontalWheel();
   const { privacyMode } = usePrivacy();
   const [sources, setSources] = useState<AvPortraitSource[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sourceKind, setSourceKind] = useState<PortraitSourceKind>("crop");
+  const [sourceKind, setSourceKind] = useState<PortraitSourceKind>(currentPortrait?.kind ?? "stashdb");
   const [rect, setRect] = useState<PortraitRect>(() => initialRect(null));
   const [baseRect, setBaseRect] = useState<PortraitRect>(() => initialRect(null));
   const [zoom, setZoom] = useState(1);
@@ -64,7 +66,7 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
     setError(null); setProfile(null); setStashdb(null); setStashdbId(null);
     setStashdbConfigured(null);
     void Promise.all([api.getPerformerProfile(personId), api.getStashdbCredentialStatus()]).then(([value, status]) => {
-      if (active) { setStashdbConfigured(status.configured); setProfile(status.configured ? value : null); }
+      if (active) { setStashdbConfigured(status.configured); setProfile(status.configured ? value : null); if (!sourceChosen.current) setSourceKind(defaultPortraitSource(currentPortrait, value, status.configured)); }
     }, () => { if (active) setError("StashDB 사진 목록을 불러오지 못했습니다."); });
     void api.listPortraitSources(personId).then(value => {
       if (!active) return;
@@ -75,7 +77,7 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
       setRect(next); setBaseRect(next); setZoom(1);
     }, reason => { if (active) setError(avError(reason)); });
     return () => { active = false; };
-  }, [api, personId]);
+  }, [api, personId, currentPortrait]);
 
   useEffect(() => {
     if (sourceKind !== "commons") return;
@@ -137,10 +139,10 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
   return <Dialog open title={`${personName} 대표 이미지`} variant="wide" onClose={() => { if (!busy) onClose(); }}>
     <div className="av-portrait-picker">
       <nav className="av-portrait-picker__sources" aria-label="대표 이미지 출처">
-        <SourceButton disabled={busy} active={sourceKind === "crop"} onClick={() => setSourceKind("crop")} title="표지에서 자르기" detail={`앞표지 ${sources.length}장`} />
-        <SourceButton disabled={busy} active={sourceKind === "commons"} onClick={() => setSourceKind("commons")} title="위키미디어 공용" detail="Wikidata 대표 사진" />
-        <SourceButton disabled={busy} active={sourceKind === "stashdb"} onClick={() => setSourceKind("stashdb")} title="StashDB" detail={profile?.status === "matched" ? `${profile.images.length}장` : "프로필 사진"} />
-        <SourceButton disabled={busy} active={sourceKind === "none"} onClick={() => setSourceKind("none")} title="사진 없이" detail="이니셜 모노그램" />
+        <SourceButton disabled={busy} active={sourceKind === "stashdb"} onClick={() => { sourceChosen.current = true; setSourceKind("stashdb"); }} title="StashDB" detail={profile?.status === "matched" ? `${profile.images.length}장` : "프로필 사진"} />
+        <SourceButton disabled={busy} active={sourceKind === "crop"} onClick={() => { sourceChosen.current = true; setSourceKind("crop"); }} title="표지에서 자르기" detail={`앞표지 ${sources.length}장`} />
+        <SourceButton disabled={busy} active={sourceKind === "commons"} onClick={() => { sourceChosen.current = true; setSourceKind("commons"); }} title="위키미디어 공용" detail="Wikidata 대표 사진" />
+        <SourceButton disabled={busy} active={sourceKind === "none"} onClick={() => { sourceChosen.current = true; setSourceKind("none"); }} title="사진 없이" detail="이니셜 모노그램" />
 
       </nav>
       <div className="av-portrait-picker__work">

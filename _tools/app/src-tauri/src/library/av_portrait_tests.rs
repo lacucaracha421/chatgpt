@@ -621,3 +621,35 @@ fn av_cloud_snapshot_excludes_portraits_and_retains_shared_people() {
         .windows(b"Portrait name.png".len())
         .any(|w| w == b"Portrait name.png"));
 }
+
+#[test]
+fn av_default_stashdb_portrait_preserves_explicit_choices_and_rejects_unmatched_profiles() {
+    let (_dir, lib) = setup();
+    let c = lib.connection().unwrap();
+    c.execute("INSERT INTO collection_person_profiles(person_id,source,status,stashdb_id,name,images_json,fetched_at) VALUES('p','stashdb','matched','s','Person',?1,'t')", [r#"[{"id":"photo","url":"https://stashdb.org/images/photo","width":300,"height":400}]"#]).unwrap();
+    assert!(
+        matches!(portrait(&c, "p").unwrap(), Some(AvPortrait::Stashdb { preview }) if preview.source_url == "https://stashdb.org/images/photo")
+    );
+    drop(c);
+    let id = work(&lib, "Work", None, None, None, &[("p", "performer")]);
+    let artwork = cover(&lib, &id);
+    lib.set_av_portrait_crop("p", &artwork, rect()).unwrap();
+    let c = lib.connection().unwrap();
+    assert!(matches!(
+        portrait(&c, "p").unwrap(),
+        Some(AvPortrait::Crop { .. })
+    ));
+    c.execute(
+        "DELETE FROM collection_person_portraits WHERE person_id='p'",
+        [],
+    )
+    .unwrap();
+    c.execute(
+        "UPDATE collection_person_profiles SET status='ambiguous' WHERE person_id='p'",
+        [],
+    )
+    .unwrap();
+    assert!(portrait(&c, "p").unwrap().is_none());
+    c.execute("UPDATE collection_person_profiles SET status='matched',images_json='[{\"id\":\"bad\",\"url\":\"https://example.invalid/photo\",\"width\":300,\"height\":400}]' WHERE person_id='p'", []).unwrap();
+    assert!(portrait(&c, "p").unwrap().is_none());
+}
