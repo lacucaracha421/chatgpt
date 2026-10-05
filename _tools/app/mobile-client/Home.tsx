@@ -1,3 +1,4 @@
+import {startupMark} from './startupPerf';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {RectangleStackIcon} from '@heroicons/react/24/outline';
 import {collectionCover, type CollectionSummary} from './collectionModel';
@@ -217,6 +218,7 @@ export function Home(props: HomeProps) {
   const layoutShown = useRef(false);
   if ((d.releasesReady && upcoming.ready || d.offline || d.serverProblem) && (!attentionPending || d.offline || d.serverProblem) && !dayPending) layoutShown.current = true;
   const firstLoad = !layoutShown.current;
+  if(!firstLoad)startupMark('homeReadyMs');
   // On app start the launch splash covers this first load, then leaves with Home's first images.
   useLaunchReady(!firstLoad, homeScroll);
   useLayoutEffect(() => {

@@ -1,3 +1,4 @@
+import {startupRequest} from './startupPerf';
 import {onVisible} from './useVisibleInterval';
 declare global {
   interface Window { LakomicsNative?: {request(id: string, operation: string, payload: string): void; cancel(id: string): void; localStatus?(): string; perfEnabled?():boolean; setResumeSnapshotSensitive?(value:boolean):void} }
@@ -52,11 +53,13 @@ export function native<T>(operation: string, payload: Record<string, unknown> = 
     return Promise.reject(new Error('서버 연결은 Android 앱에서 설정할 수 있습니다.'));
   }
   return new Promise<T>((resolve, reject) => {
+    const timing=startupRequest(operation,payload);
     const id = String(++sequence);
-    const abort = () => { window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new DOMException('Cancelled', 'AbortError')); };
-    const timer = window.setTimeout(() => { window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new Error('연결 시간이 초과되었습니다. 다시 시도해 주세요.')); }, 45_000);
+    const abort = () => { timing?.('canceled'); window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new DOMException('Cancelled', 'AbortError')); };
+    const timer = window.setTimeout(() => { timing?.('error'); window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new Error('연결 시간이 초과되었습니다. 다시 시도해 주세요.')); }, 45_000);
     const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); };
     const resume=()=>{
+      timing?.('canceled');
       if(signal?.aborted){reject(new DOMException('Cancelled','AbortError'));return;}
       // onStop releases native transfers. Keep the live caller, with no deadline timer
       // or network work while hidden; on resume it gets a fresh native request.
@@ -68,10 +71,10 @@ export function native<T>(operation: string, payload: Record<string, unknown> = 
       signal?.addEventListener('abort',cancelWaiting,{once:true});
       retry();
     };
-    pending.set(id, {resolve: value => resolve(value as T), reject, cleanup, ...(resumable.has(operation)?{resume}:{})});
+    pending.set(id, {resolve: value => {timing?.('ok');resolve(value as T);}, reject: error=>{timing?.(error.name==='AbortError'?'canceled':'error');reject(error);}, cleanup, ...(resumable.has(operation)?{resume}:{})});
     signal?.addEventListener('abort', abort, {once: true});
     try { window.LakomicsNative!.request(id, operation, JSON.stringify(payload)); }
-    catch { pending.delete(id); cleanup(); reject(new Error('앱 연결을 시작하지 못했습니다.')); }
+    catch { timing?.('error'); pending.delete(id); cleanup(); reject(new Error('앱 연결을 시작하지 못했습니다.')); }
   });
 }
 /**

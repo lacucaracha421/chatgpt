@@ -42,7 +42,7 @@ final class AlbumReplicaService {
     private static AlbumReplicaService instance;
 
     static synchronized AlbumReplicaService get(Context context) {
-        if (instance == null) instance = new AlbumReplicaService(context);
+        if (instance == null) {long step=StartupPerf.clock();instance = new AlbumReplicaService(context);StartupPerf.step("albumReplicaServiceInit",step);}
         return instance;
     }
 
@@ -52,7 +52,7 @@ final class AlbumReplicaService {
     /** The status read made with the device exchange token, with its own ETag cache. */
     private final CloudClient exchangeStatus;
     private volatile String refusedStatusToken="";
-    private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(task -> {
+    private final ScheduledExecutorService worker = StartupPerf.scheduled("albumReplica",task -> {
         Thread thread = new Thread(task, "lakomics-album-replica");
         thread.setDaemon(true);
         return thread;
@@ -80,7 +80,7 @@ final class AlbumReplicaService {
     /** Receives `lakomics-sync-signals` details ({live, signals}) for the WebView. */
     private volatile java.util.function.Consumer<JSONObject> signalsListener;
     void setSignalsListener(java.util.function.Consumer<JSONObject> listener){signalsListener=listener;}
-    private final ScheduledExecutorService watchThread = Executors.newSingleThreadScheduledExecutor(task -> {
+    private final ScheduledExecutorService watchThread = StartupPerf.scheduled("statusWatch",task -> {
         Thread thread = new Thread(task, "lakomics-status-watch");
         thread.setDaemon(true);
         return thread;

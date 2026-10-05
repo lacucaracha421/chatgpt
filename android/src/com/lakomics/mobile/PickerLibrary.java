@@ -16,12 +16,12 @@ import java.util.concurrent.*;
 final class PickerLibrary {
     static final String AUTHORITY="com.lakomics.mobile.cloud";
     private static PickerLibrary instance;
-    static synchronized PickerLibrary get(Context context){if(instance==null)instance=new PickerLibrary(context);return instance;}
+    static synchronized PickerLibrary get(Context context){if(instance==null){long step=StartupPerf.clock();instance=new PickerLibrary(context);StartupPerf.step("pickerFirstRead",step);}return instance;}
     private final Context context;
     private final SecureSettings settings;
     private final CloudClient client;
     private final AtomicFile file;
-    private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService worker=StartupPerf.scheduled("picker",Executors.defaultThreadFactory());
     private final PickerRefreshSchedule schedule=new PickerRefreshSchedule();
     private ScheduledFuture<?> trailing;
     private volatile PickerSnapshot snapshot=PickerSnapshot.empty();

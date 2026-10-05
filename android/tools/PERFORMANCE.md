@@ -15,6 +15,98 @@ log events and cancellation; it does not simulate device speed.
 
 For the whole mobile suite use `npm run mobile:test -- --maxWorkers=2`.
 
+## Startup
+
+Startup instrumentation uses the same opt-in `LakomicsPerf=DEBUG` property as
+Catalog. Install a controller-supplied instrumentation-only build first; this
+step changes no request order, pool limits, launch readiness or cache policy.
+Keep the connection, library, orientation, network, cache, device and power
+conditions identical across runs. Force-stop gives a new process, not an empty
+cache. Do not clear storage or caches. Repeat each build at least three times.
+
+Run these commands from the repository root (replace `SERIAL`). Start capture
+in a second terminal before launching, and leave it running for at least 20 s
+after launch. If startup requests remain pending, capture until their terminal
+lines arrive (a status long-poll may take about 70 s).
+
+```sh
+adb -s SERIAL shell setprop log.tag.LakomicsPerf DEBUG
+adb -s SERIAL shell am force-stop com.lakomics.mobile
+# Second terminal: capture only new timing lines. Ctrl+C ends capture.
+adb -s SERIAL logcat -v threadtime -T 1 -s LakomicsPerf:I '*:S' > startup-before.log
+# First terminal:
+adb -s SERIAL shell am start -W -n com.lakomics.mobile/.MainActivity
+# After capture ends:
+python android/tools/perf_summary.py startup-before.log
+adb -s SERIAL shell setprop log.tag.LakomicsPerf INFO
+```
+
+Use a separate log per process. Save `am start -W` output alongside the log:
+Android's activity launch time is not the time until Home's data/images appear.
+In PowerShell, `> startup-before.log` is also supported; the summary reads UTF-8.
+Repeat as `startup-after.log` only after a later optimization build is supplied.
+
+The new lines have these formats (all times in milliseconds):
+
+```text
+startupNative phase=notesDb activityMs=40 processMs=90 durationMs=30 uiThread=1
+startupRequest route=library.assets lane=bridge status=ok submitMs=300 queueMs=10 runMs=80 poolSize=4 active=4 queued=2
+startupHttp route=library.assets lane=bridge status=finished startMs=310 queueMs=10 runMs=75 poolSize=4 active=4
+js startupRequest=library.assets status=ok startMs=100 endMs=200
+js startup=1 firstReactRenderMs=60 homeReadyMs=500 viewportImagesReadyMs=630 splashLeavingMs=630 splashEndMs=870 issued=3 cancelled=1 reissued=1 pending=0 requests=library.assets:100:120:200:3:1:1:0
+```
+
+- `startupNative` offsets use `elapsedRealtime` from `onCreate` entry and
+  `Process.getStartElapsedRealtime()` (API 24+; otherwise `processMs=-1`). Phases
+  include entry/end, WebView creation, `loadUrl`, page started/finished, settings,
+  Notes DB setup, vault initialization, media cache initialization (with a nested
+  thumbnail directory scan/journal restore), first Picker read/resume, and native
+  Album/Exchange initialization. `uiThread` shows where measured helpers actually
+  ran. Nested phases overlap; never sum them. Page finished is not Home ready.
+- Native bridge submissions in the first 15 s after `onCreate` report executor
+  queue wait, total task run time and submit-time live pool size/active/queued
+  counts. Lanes distinguish `bridge` (four workers), `media` (four), `thumbnail`
+  (eight) and `catalogCover` (six). Live `poolSize` may be zero before workers
+  start. Errors, cancellation and rejection remain visible; an operation that
+  never started has `queueMs=-1` and `runMs=-1`.
+- `startupHttp` records CloudClient API calls, status long-polls and downloads
+  started in that window, including terminal lines after 15 s. Routes are fixed
+  names; signed downloads use `download`, never a URL. `finished` means the call
+  terminated, including failures; use bridge `status` for caller success. HTTP
+  time includes response reading/parsing. Background lanes identify Album,
+  Picker, Exchange, status-watch and ticket executors separately. Their queue
+  measurement excludes the timer's intentional delay. Multiple HTTP calls in
+  one executor task share its queue/snapshot; never add those queue times.
+  `lane=direct` and `-1` pool/queue fields mean no measured executor context,
+  not zero wait or evidence that the request used the four-worker bridge.
+- `js startup=1` is emitted once when the existing React splash disappears.
+  Offsets use `performance.now()` (navigation start), not the native clock.
+  `firstReactRenderMs` is App's first render entry; `homeReadyMs` is the existing
+  Home first-load condition. Image readiness is sampled when the splash starts
+  leaving, after the existing image/quiet wait: it requires every current
+  viewport image to have decoded or settled. It is not GPU paint or successful
+  decoding of every image. `-1` means unobserved (for example a launch cap,
+  connection screen or images still loading); it never means zero.
+- `requests` is a comma-separated list of
+  `name:firstStartMs:firstEndMs:lastEndMs:issued:cancelled:reissued:pending`.
+  Those are all native bridge attempts admitted before splash removal,
+  including local reads/cache probes. Each terminal `js startupRequest` also
+  records its own start/end and status, including finishes after splash removal.
+  Cancellation means an actual aborted attempt. Reissue means the same canceled
+  API path (including its cursor), or the same native read identity/revision,
+  was issued again; it does not guess why or count a different pagination cursor
+  or media identity as a retry. These counts are evidence,
+  not proof that a sync signal caused the cancellation.
+- `collections.manga`, `.game` and `.movie` count individual shelf page reads;
+  `library.assets` exposes the Home entry's first Asset-page fetch. Counts do
+  not claim its returned data was consumed. Queries, cursors, IDs, tokens,
+  titles and file names are never emitted in these startup lines.
+
+The summary groups native phases, queue/run samples by route/lane/status, JS
+milestones and per-route counts; `-1` values are omitted, not counted as zero.
+Compare milestone median/p90 and request counts together. No latency threshold
+or speed improvement is claimed by this instrumentation-only change.
+
 ## Catalog covers
 
 Catalog timing is opt-in; the existing Library logs remain unchanged. On a build

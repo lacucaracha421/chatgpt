@@ -35,6 +35,9 @@ final class CloudClient {
   return authenticatedReply(s,path,method,body,cancel,etag,device);
  }
  private ConditionalRead.Reply authenticatedReply(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel,String etag,String device)throws Exception{
+  StartupPerf.Http timing=StartupPerf.http(path);try{return startupAuthenticatedReply(s,path,method,body,cancel,etag,device);}finally{if(timing!=null)timing.finish(cancel!=null&&cancel.isCanceled());}
+ }
+ private ConditionalRead.Reply startupAuthenticatedReply(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel,String etag,String device)throws Exception{
   NetworkPolicy.api(path,method);if(!s.has("token"))throw new IllegalStateException("Not configured");
   HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
   try {
@@ -56,6 +59,9 @@ final class CloudClient {
   * own, never the conditional cache's; the read timeout covers the server's hold plus 20 s.
   */
  StatusWatcher.Reply longPollStatus(JSONObject s,String etag,int wait,CancellationSignal cancel)throws Exception{
+  StartupPerf.Http timing=StartupPerf.http("/v1/sync/status");try{return startupLongPollStatus(s,etag,wait,cancel);}finally{if(timing!=null)timing.finish(cancel!=null&&cancel.isCanceled());}
+ }
+ private StatusWatcher.Reply startupLongPollStatus(JSONObject s,String etag,int wait,CancellationSignal cancel)throws Exception{
   String path="/v1/sync/status?wait="+wait+"&signals=1";
   NetworkPolicy.api(path,"GET");if(!s.has("token"))throw new IllegalStateException("Not configured");
   HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
@@ -95,6 +101,9 @@ final class CloudClient {
  static void prepare(HttpURLConnection c,CancellationSignal signal){c.setConnectTimeout(3000);c.setReadTimeout(20000);c.setInstanceFollowRedirects(false);if(signal!=null){signal.throwIfCanceled();signal.setOnCancelListener(c::disconnect);}}
  static void copy(InputStream in,OutputStream out,long max,CancellationSignal signal)throws IOException {byte[] b=new byte[32768];long deadline=System.currentTimeMillis()+90000;long count=0;int n;while((n=in.read(b))!=-1){if(signal!=null)signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new SocketTimeoutException("Transfer deadline exceeded");count+=n;if(count>max)throw new IOException("Media exceeds cache limit");out.write(b,0,n);}}
  void download(String url,File file,long max,CancellationSignal signal)throws Exception {
+  StartupPerf.Http timing=StartupPerf.http("download");try{startupDownload(url,file,max,signal);}finally{if(timing!=null)timing.finish(signal!=null&&signal.isCanceled());}
+ }
+ private void startupDownload(String url,File file,long max,CancellationSignal signal)throws Exception {
   PerfLog.Op perf=PerfLog.current.get();long downloadStarted=System.nanoTime();
   try{URI u=new URI(url);if(!"https".equals(u.getScheme()) || u.getHost()==null || u.getUserInfo()!=null)throw new IOException("Invalid media URL");
   long deadline=System.nanoTime()+MediaTransfer.DEADLINE_NANOS;

@@ -654,7 +654,7 @@ describe("PageViewer", () => {
     expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("20");
   });
 
-  it("fades the bars after idle time and brings them back on pointer movement or a key", () => {
+  it("fades the bars after idle time, brings them back on pointer movement or a key, and keeps them hidden while turning pages", () => {
     vi.useFakeTimers();
     try {
       render(<PageViewer {...viewerProps()} />);
@@ -665,14 +665,21 @@ describe("PageViewer", () => {
       expect(reader).toHaveAttribute("data-chrome-visible", "false");
       expect(reader).toHaveClass("asset-viewer--chrome-hidden");
 
-      fireEvent.pointerMove(reader);
+      fireEvent.pointerMove(reader, { clientX: 10, clientY: 10 });
       expect(reader).toHaveAttribute("data-chrome-visible", "true");
       act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS); });
       expect(reader).toHaveAttribute("data-chrome-visible", "false");
 
+      // Page turns by key or wheel, and the still-pointer move Chromium sends after them, keep the bars hidden.
       fireEvent.keyDown(reader, { key: "ArrowRight" });
-      expect(reader).toHaveAttribute("data-chrome-visible", "true");
       expect(position()).toBe("2 / 6");
+      fireEvent.wheel(reader, { deltaY: 400 });
+      expect(position()).toBe("3 / 6");
+      fireEvent.pointerMove(reader, { clientX: 10, clientY: 10 });
+      expect(reader).toHaveAttribute("data-chrome-visible", "false");
+
+      fireEvent.keyDown(reader, { key: "v" });
+      expect(reader).toHaveAttribute("data-chrome-visible", "true");
     } finally {
       vi.useRealTimers();
     }

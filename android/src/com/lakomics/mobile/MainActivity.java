@@ -98,19 +98,22 @@ public final class MainActivity extends Activity {
   try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",false).put("cancelled",true));}catch(JSONException ignored){}
  }
  private synchronized void stopNonEssential(){stopped=true;for(Map.Entry<String,CancellationSignal> entry:nonEssential.entrySet())cancelOptional(entry.getKey(),entry.getValue());}
- @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);vault=new PrivateVault(this,state->emit("lakomics-vault",state),this::setVaultSnapshotSensitive);
-  try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
+ @Override public void onCreate(Bundle b){StartupPerf.begin();long step=StartupPerf.clock();super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);StartupPerf.step("settings",step);
+  step=StartupPerf.clock();notes=new NotesRepository(this,settings);StartupPerf.step("notesDb",step);
+  step=StartupPerf.clock();vault=new PrivateVault(this,state->emit("lakomics-vault",state),this::setVaultSnapshotSensitive);StartupPerf.step("vaultInit",step);
+  step=StartupPerf.clock();
+  try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}StartupPerf.step("mediaCacheInit",step);
   configureWindow();
   frame=new android.widget.FrameLayout(this);frame.setBackgroundColor(PAGE_BACKGROUND);setContentView(frame);
   // The host alone handles keyboard resize; system bars stay transient overlays.
   if(Build.VERSION.SDK_INT>=30)frame.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(0,0,0,insets.getInsets(WindowInsets.Type.ime()).bottom);return new WindowInsets.Builder(insets).setInsets(WindowInsets.Type.ime(),android.graphics.Insets.NONE).build();});
   createWebView();
   resumeCover=new WebViewResumeCover(frame,()->!noteSnapshotSensitive&&(getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_SECURE)==0);
-  ExchangeService.get(this).addListener(exchangeListener);
-  hideStatusBar();
+  step=StartupPerf.clock();ExchangeService.get(this).addListener(exchangeListener);StartupPerf.step("exchangeInit",step);
+  hideStatusBar();StartupPerf.phase("onCreateEnd");
  }
  private void createWebView(){
-  web=new WebView(this);web.setBackgroundColor(PAGE_BACKGROUND);
+  long step=StartupPerf.clock();web=new WebView(this);StartupPerf.step("webViewInit",step);StartupPerf.phase("webViewCreated");web.setBackgroundColor(PAGE_BACKGROUND);
   frame.addView(web,0,new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));
   // Status bars are transient overlays: never turn their visibility into page padding.
   // Keep navigation/cutout insets for CSS env(safe-area-inset-*), and the frame's IME handling.
@@ -122,6 +125,8 @@ public final class MainActivity extends Activity {
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(false);
   web.addJavascriptInterface(new Bridge(),"LakomicsNative");
   web.setWebViewClient(new WebViewClient(){
+   @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){if((ORIGIN+"/index.html").equals(url))StartupPerf.phase("pageStarted");}
+   @Override public void onPageFinished(WebView v,String url){if((ORIGIN+"/index.html").equals(url))StartupPerf.phase("pageFinished");}
    @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest r){return !bundled(r.getUrl());}
    @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u)){if(u.getPath()!=null && u.getPath().startsWith("/vault/"))return vault.serve(r);if(u.getPath()!=null && u.getPath().startsWith(MediaStreamProxy.PREFIX))return mediaStream(r);return asset(u);}if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
    @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){h.cancel();}
@@ -137,7 +142,7 @@ public final class MainActivity extends Activity {
     if(!destroyed&&foreground)createWebView();
     return true;
    }
-  });web.loadUrl(ORIGIN+"/index.html");
+  });StartupPerf.phase("loadUrl");web.loadUrl(ORIGIN+"/index.html");
  }
  // The bundled FAULT game (single self-contained file: inline scripts, data: font) runs only as a same-origin
  // frame of the app. It gets no network access beyond this origin and blob: photos handed over by the app.
@@ -314,7 +319,8 @@ public final class MainActivity extends Activity {
     if(perf!=null){if(signal.isCanceled())perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}
     if(!signal.isCanceled())reply(id,false,null,errorMessage(e));return;
    }
-   final Runnable task=()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
+   final StartupPerf.Request startup=StartupPerf.submit(operation,payload,mediaWork?mediaLane:workers,mediaWork?(catalogCover?"catalogCover":small?"thumbnail":"media"):"bridge");
+   final Runnable task=()->{if(startup!=null)startup.start();if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
     if(perf!=null){perf.asset=PerfLog.id(p.optString(catalogCover?"workId":operation.equals("collectionArtwork")?"artworkId":"assetId"));perf.request=PerfLog.id(p.optString("perfId"));if(catalogCover)perf.jsQueue=PerfLog.millis(p,"jsQueueMs");}
     switch(operation){
      case "vaultPick":data=vault.pick();break;
@@ -400,12 +406,12 @@ public final class MainActivity extends Activity {
      case "copyText":copyText(p.getString("text"),signal);data=new JSONObject();break;
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();
-    }if(perf!=null)perf.status="ok";if(!signal.isCanceled())reply(id,true,data,null);
+    }if(startup!=null)startup.status="ok";if(perf!=null)perf.status="ok";if(!signal.isCanceled())reply(id,true,data,null);
    }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}};
    CancellableDispatch dispatch=new CancellableDispatch(new CancellableDispatch.Cancellation(){
     public boolean isCanceled(){return signal.isCanceled();}
     public void setListener(Runnable listener){signal.setOnCancelListener(listener==null?null:listener::run);}
-   },task,status->{if(prepared!=null)prepared.close();active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(status!=null)perf.status=status;perfPool.remove(perf);perf.finish(payload);}});
+   },task,status->{if(startup!=null)startup.finish(status);if(prepared!=null)prepared.close();active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(status!=null)perf.status=status;perfPool.remove(perf);perf.finish(payload);}});
    try{dispatch.submit(mediaWork?mediaLane:workers,mediaWork);}catch(RejectedExecutionException e){
     // A full media queue means the request never started: the "media_busy" code lets a visible caller retry it later instead of showing it as broken.
     if(!signal.isCanceled())reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
@@ -451,7 +457,7 @@ public final class MainActivity extends Activity {
   }else if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_FULLSCREEN)==0)getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
  @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused){hideStatusBar();clipboardHandler.post(clearSecretClip);}}
- @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web==null&&!destroyed)createWebView();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(resumeCover!=null)resumeCover.resume(web);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).resume();}
+ @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web==null&&!destroyed)createWebView();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(resumeCover!=null)resumeCover.resume(web);if(Build.VERSION.SDK_INT>=33){long step=StartupPerf.clock();PickerLibrary.get(this).resume();StartupPerf.step("pickerFirstResume",step);}}
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
   AlbumReplicaService.get(this).setListGenerationListener(generation->{try{emit("lakomics-list-generation",new JSONObject().put("generation",generation));}catch(JSONException ignored){}});

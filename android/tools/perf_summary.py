@@ -51,7 +51,7 @@ def records(lines):
     for line in lines:
         if 'LakomicsPerf' in line:
             line = re.sub(r'^.*?\bLakomicsPerf\b[^:]*:\s*', '', line)
-        match = re.match(r'\s*(media|thumbnail|collectionArtwork|catalogCover|js)\s+(.*)', line)
+        match = re.match(r'\s*(startupNative|startupRequest|startupHttp|media|thumbnail|collectionArtwork|catalogCover|js)\s+(.*)', line)
         if match:
             yield match[1], dict(re.findall(r'(\w+)=([^\s]+)', match[2]))
 
@@ -71,6 +71,33 @@ def summarize(lines):
 
     for op, p in rows:
         status = p.get('status', 'unknown')
+        if op == 'startupNative':
+            for phase in ('activityMs', 'processMs', 'durationMs', 'uiThread'):
+                add(f'startup/native {p.get("phase", "unknown")}', phase, p.get(phase))
+            continue
+        if op in ('startupRequest', 'startupHttp'):
+            group = f'startup/{"request" if op == "startupRequest" else "http"} {p.get("route", "other")} lane={p.get("lane", "unknown")} status={status}'
+            for phase in ('submitMs', 'startMs', 'queueMs', 'runMs', 'poolSize', 'active', 'queued'):
+                add(group, phase, p.get(phase))
+            continue
+        if op == 'js' and 'startup' in p:
+            for phase in ('firstReactRenderMs', 'homeReadyMs', 'viewportImagesReadyMs', 'splashLeavingMs', 'splashEndMs', 'issued', 'cancelled', 'reissued', 'pending'):
+                add('startup/js', phase, p.get(phase))
+            for row in p.get('requests', '-').split(','):
+                parts = row.split(':')
+                if len(parts) != 8:
+                    continue
+                for phase, value in zip(('firstStartMs', 'firstEndMs', 'lastEndMs', 'issued', 'cancelled', 'reissued', 'pending'), parts[1:]):
+                    add(f'startup/js route={parts[0]}', phase, value)
+            continue
+        if op == 'js' and 'startupRequest' in p:
+            group = f'startup/js request={p["startupRequest"]} status={status}'
+            for phase in ('startMs', 'endMs'):
+                add(group, phase, p.get(phase))
+            start, end = number(p.get('startMs')), number(p.get('endMs'))
+            if start is not None and end is not None:
+                add(group, 'runMs', end-start)
+            continue
         if op != 'js':
             # A batch can serve successful and canceled operations; count it once.
             for batch in p.get('batch', '-').split(','):

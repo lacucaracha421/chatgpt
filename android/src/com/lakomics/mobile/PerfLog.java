@@ -62,8 +62,29 @@ final class PerfLog {
  /** One-way bridge: fixed vocabulary and numeric fields only, never arbitrary JS text. */
  static void javascript(String payload){
   try{
-   if(payload==null||payload.length()>2048)return;
+   if(payload==null||payload.length()>16384)return;
    JSONObject p=new JSONObject(payload);
+   if("startup".equals(p.optString("event"))||"startup_request".equals(p.optString("event"))){
+    if(!enabled())return;
+    if("startup_request".equals(p.optString("event"))){
+     String name=p.optString("name"),status=p.optString("status");if(!StartupPerf.jsName(name)||!status.matches("ok|error|canceled"))return;
+     write("js startupRequest="+name+" status="+status+" startMs="+millis(p,"startMs")+" endMs="+millis(p,"endMs"));return;
+    }
+    StringBuilder line=new StringBuilder("js startup=1");
+    for(String key:new String[]{"firstReactRenderMs","homeReadyMs","viewportImagesReadyMs","splashLeavingMs","splashEndMs"})line.append(' ').append(key).append('=').append(millis(p,key));
+    org.json.JSONArray requests=p.optJSONArray("requests");int issued=0,cancelled=0,reissued=0,pending=0;
+    StringBuilder routes=new StringBuilder();
+    if(requests==null||requests.length()>64)return;
+    for(int i=0;i<requests.length();i++){
+     JSONObject r=requests.getJSONObject(i);String name=r.optString("name");if(!StartupPerf.jsName(name))return;
+     int n=r.optInt("issued"),c=r.optInt("cancelled"),a=r.optInt("reissued"),w=r.optInt("pending");if(n<0||n>10000||c<0||c>n||a<0||a>n||w<0||w>n)return;
+     issued+=n;cancelled+=c;reissued+=a;pending+=w;
+     if(routes.length()>0)routes.append(',');
+     routes.append(name).append(':').append(millis(r,"firstStartMs")).append(':').append(millis(r,"firstEndMs")).append(':').append(millis(r,"lastEndMs")).append(':').append(n).append(':').append(c).append(':').append(a).append(':').append(w);
+    }
+    write(line+" issued="+issued+" cancelled="+cancelled+" reissued="+reissued+" pending="+pending+" requests="+(routes.length()==0?"-":routes));return;
+   }
+   if(payload.length()>2048)return;
    if("catalog_screen".equals(p.optString("event"))){
     if(!enabled())return;
     int visible=p.optInt("visible",0),loaded=p.optInt("loaded",-1);

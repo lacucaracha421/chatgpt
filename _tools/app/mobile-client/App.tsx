@@ -1,3 +1,4 @@
+import {startupMark} from './startupPerf';
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {ClassificationBatchSheet} from './ClassificationBatchSheet';
 import {AreaSwitch, MotionScope, viewReady} from '../src/shared/motion/AreaSwitch';
@@ -111,6 +112,7 @@ type Committed = Page & AssetTocPage & {generation:string|null; view: View; curs
 const KIND_SWAP={};
 
 export function App() {
+  startupMark('firstReactRenderMs');
   const [area,setArea] = useState<'assets'|'collections'|'catalog'|'notes'>('assets');
   const [focusedCharacter,setFocusedCharacter]=useState<string|null>(null);
   const [characterEntry,setCharacterEntry]=useState(0);

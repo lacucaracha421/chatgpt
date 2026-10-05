@@ -33,7 +33,7 @@ final class MediaRepository {
  private static final class Scope{boolean cover,small;String key,ticketGroup;long generation;JSONObject connection;ThumbnailCache.Kind kind=ThumbnailCache.Kind.VIEW;}
  private MediaRepository(Context context)throws IOException{
   settings=new SecureSettings(context);client=new CloudClient(settings);
-  cache=new ThumbnailCache(new File(context.getCacheDir(),"thumbnail-media"));
+  long step=StartupPerf.clock();cache=new ThumbnailCache(new File(context.getCacheDir(),"thumbnail-media"));StartupPerf.step("thumbnailScanJournalRestore",step);
   // Retired provider cache contains only disposable downloads; metadata stays intact.
   File[] legacy=new File(context.getCacheDir(),"document-media").listFiles();
   if(legacy!=null)for(File file:legacy)if(file.isFile())file.delete();
@@ -104,10 +104,10 @@ final class MediaRepository {
  }
  void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache.clear();}finally{tickets.clear();thumbnailTickets.clear();proxy.clear();}}}
  InputStream stream(String key,long generation)throws IOException{return cache.open(key,generation);}
- private final ScheduledExecutorService ticketWorker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
+ private final ScheduledExecutorService ticketWorker=StartupPerf.scheduled("mediaTickets",r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
  private final TicketBatcher<Scope,JSONObject> tickets=new TicketBatcher<>(ticketWorker,this::fetchTickets,MediaRepository::ticketExpiry,System::currentTimeMillis);
  // Thumbnail batches cannot delay the viewer's ticket round trip.
- private final ScheduledExecutorService thumbnailTicketWorker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lakomics-thumbnail-tickets");t.setDaemon(true);return t;});
+ private final ScheduledExecutorService thumbnailTicketWorker=StartupPerf.scheduled("thumbnailTickets",r->{Thread t=new Thread(r,"lakomics-thumbnail-tickets");t.setDaemon(true);return t;});
  private final TicketBatcher<Scope,JSONObject> thumbnailTickets=new TicketBatcher<>(thumbnailTicketWorker,this::fetchTickets);
  final class PreparedThumbnail implements AutoCloseable {
   final Scope scope;

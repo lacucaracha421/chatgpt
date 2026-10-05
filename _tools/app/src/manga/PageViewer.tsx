@@ -95,6 +95,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
   const overviewOpenedOnceRef = useRef(false);
   const overviewGridRef = useRef<HTMLDivElement>(null);
   const chrome = useIdleChrome();
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
   const wheelGesture = useRef({ delta: 0, axis: "y", turned: false, timer: null as number | null });
   useEffect(() => () => {
     if (wheelGesture.current.timer !== null) window.clearTimeout(wheelGesture.current.timer);
@@ -161,7 +162,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
     gesture.delta += delta;
     if (Math.abs(gesture.delta) < WHEEL_PAGE_THRESHOLD_PX) return;
     gesture.turned = true;
-    chrome.reveal();
+    // Turning pages leaves the bars as they are (user 2026-10-06); only pointer movement or other keys bring them back.
     const advance = horizontal ? edgeAdvance(delta < 0 ? "left" : "right", direction)
       : delta > 0 ? "next" : "prev";
     if (advance === "next") goNext();
@@ -287,10 +288,10 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
 
   return <Dialog open variant="fullscreen" title={title} onClose={overviewOpen ? closeOverview : onClose} onKeyDown={(event) => {
     if (event.key === "Tab") chrome.keyboardFocus.current = true;
-    chrome.reveal();
     // The page scrubber moves with its own arrow keys.
-    if (event.target instanceof HTMLInputElement) return;
+    if (event.target instanceof HTMLInputElement) { chrome.reveal(); return; }
     const advance = arrowAdvance(event.key, direction);
+    if (!advance) chrome.reveal();
     if (advance) {
       event.preventDefault();
       if (advance === "next") goNext();
@@ -304,7 +305,13 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
       className={`asset-viewer manga-reader${chrome.visible ? "" : " asset-viewer--chrome-hidden"}`}
       data-chrome-visible={chrome.visible}
       onWheel={turnWithWheel}
-      onPointerMove={() => { chrome.keyboardFocus.current = false; chrome.reveal(); }}
+      onPointerMove={(event) => {
+        // Chromium sends a still pointer a move event when the page under it changes; only real movement reveals.
+        const last = lastPointer.current;
+        lastPointer.current = { x: event.clientX, y: event.clientY };
+        if (last && Math.abs(last.x - event.clientX) < 2 && Math.abs(last.y - event.clientY) < 2) return;
+        chrome.keyboardFocus.current = false; chrome.reveal();
+      }}
       onPointerDown={() => { chrome.keyboardFocus.current = false; }}
     >
       <div className="asset-viewer__stage manga-reader__stage">

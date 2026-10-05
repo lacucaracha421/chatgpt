@@ -51,7 +51,7 @@ final class ExchangeService {
 
     private static ExchangeService instance;
     static synchronized ExchangeService get(Context context) {
-        if (instance == null) instance = new ExchangeService(context.getApplicationContext());
+        if (instance == null) {long step=StartupPerf.clock();instance = new ExchangeService(context.getApplicationContext());StartupPerf.step("exchangeServiceInit",step);}
         return instance;
     }
 
@@ -103,7 +103,7 @@ final class ExchangeService {
     private int epoch;
 
     private static ScheduledExecutorService executor(String name) {
-        return Executors.newSingleThreadScheduledExecutor(task -> { Thread t = new Thread(task, name); t.setDaemon(true); return t; });
+        return StartupPerf.scheduled(name,task -> { Thread t = new Thread(task, name); t.setDaemon(true); return t; });
     }
 
     private ExchangeService(Context context) {
