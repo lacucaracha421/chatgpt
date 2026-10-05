@@ -128,3 +128,13 @@ it("uses the shared 24-hour time for the source lookup", async () => {
   show(candidate);
   expect(await screen.findByText("00:07")).toBeInTheDocument();
 });
+
+it("draws each split line on the exact cut position", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync("src/collections/avLink.css", "utf8");
+  // Hit area is centred on the cut: the drawn line (and cap) must sit at its centre, not its left edge.
+  expect(css).toMatch(/\.av-link-split \{[^}]*width: 12px; margin-left: -6px;[^}]*border: 0;/);
+  expect(css).toMatch(/\.av-link-split::after \{[^}]*left: 5px; width: 2px;/);
+  expect(css).toMatch(/\.av-link-split::before \{[^}]*left: 2px; width: 8px;[^}]*box-sizing: border-box;/);
+  expect(css).not.toMatch(/\.av-link-zone \{[^}]*border-right/);
+});

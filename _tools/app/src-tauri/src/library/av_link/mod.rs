@@ -2,6 +2,7 @@
 mod apply;
 pub(crate) mod models;
 pub(crate) mod provider;
+mod spine;
 #[cfg(test)]
 mod tests;
 
@@ -9,6 +10,7 @@ use crate::library::{av_models::AvError, error::LibraryError, Library};
 use models::*;
 use provider::*;
 use rusqlite::{params, Connection, OptionalExtension};
+use spine::detect_split;
 use std::{
     fs,
     io::Write,
@@ -209,6 +211,7 @@ impl Library {
             return Err(AvError::Invalid);
         }
         let candidate = stored(&connection, id)?;
+        let split = self.candidate_split(&candidate);
         let target = collection_id.or(item.collection_id.as_deref());
         let current = target
             .map(|id| current_collection(&connection, id))
@@ -239,15 +242,27 @@ impl Library {
             jacket_url: format!("http://lakomics.localhost/av-link-jacket/{id}"),
             jacket_width: candidate.width,
             jacket_height: candidate.height,
-            default_split: DefaultSplit {
-                split: candidate.split,
-                ..default_split(candidate.width, candidate.height)
-            },
+            default_split: describe_split(candidate.width, candidate.height, split),
             inbox: item,
             current,
             performers,
             directors,
         })
+    }
+    /// Candidates saved before seam detection (or where it found nothing) still hold the ratio
+    /// guess, so their saved jacket is checked again; any read or decode failure keeps it.
+    fn candidate_split(&self, candidate: &StoredCandidate) -> Split {
+        let ratio = default_split(candidate.width, candidate.height);
+        if !ratio.is_wrap || candidate.split != ratio.split {
+            return candidate.split.clone();
+        }
+        self.read_av_link_jacket(&candidate.path)
+            .and_then(|(bytes, _)| decode_jacket(&bytes))
+            .ok()
+            .filter(|(image, _)| {
+                (image.width(), image.height()) == (candidate.width, candidate.height)
+            })
+            .map_or(ratio.split, |(image, _)| detect_split(&image).split)
     }
     pub fn retry_av_link(&self, id: &str) -> Result<(), AvError> {
         self.reset_av_link(id, None, false)
@@ -304,8 +319,11 @@ impl Library {
             return Err(AvError::Invalid);
         }
         let candidate = stored(&connection, id)?;
+        self.read_av_link_jacket(&candidate.path)
+    }
+    fn read_av_link_jacket(&self, path: &str) -> Result<(Vec<u8>, &'static str), AvError> {
         // Resolve through the same canonical library containment check as WorkArtwork.
-        let mut media = self.open_library_media(&candidate.path)?;
+        let mut media = self.open_library_media(path)?;
         if media.length > MAX_JACKET_BYTES as u64 {
             return Err(AvError::Image);
         }
@@ -546,6 +564,7 @@ impl Library {
             let (decoded, format) = decode_jacket(&cover.bytes)?;
             let width = decoded.width();
             let height = decoded.height();
+            let split = detect_split(&decoded);
             drop(decoded);
             let names = self.enrich_names(http, &movie, now).unwrap_or_else(|_| {
                 movie
@@ -555,7 +574,6 @@ impl Library {
                     .chain(movie.directors.iter().map(|p| NameMapping::japanese(p)))
                     .collect()
             });
-            let split = default_split(width, height);
             let extension = match format {
                 image::ImageFormat::Jpeg => "jpg",
                 image::ImageFormat::Png => "png",

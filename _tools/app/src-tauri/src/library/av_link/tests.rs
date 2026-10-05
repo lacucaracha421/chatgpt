@@ -218,6 +218,53 @@ fn av_link_default_splits() {
     assert!(!portrait.is_wrap && !portrait.use_spine);
 }
 #[test]
+fn av_link_candidate_split_follows_printed_spine() {
+    let (_dir, lib) = setup();
+    let id = enqueue(&lib, "SSIS-001");
+    let mut wrap = Cursor::new(Vec::new());
+    image::RgbImage::from_fn(800, 538, |x, _| match x {
+        0..384 => image::Rgb([200, 40, 40]),
+        384..425 => image::Rgb([240, 240, 230]),
+        _ => image::Rgb([30, 40, 190]),
+    })
+    .write_to(&mut wrap, image::ImageFormat::Png)
+    .unwrap();
+    let http = FixtureHttp::new(vec![
+        (
+            "https://www.libredmm.com/movies/SSIS-001.json",
+            response(200, SSIS),
+        ),
+        ("https://pics.dmm.co.jp/", response(200, &wrap.into_inner())),
+        ("https://query.wikidata.org/sparql", response(503, b"")),
+    ]);
+    assert!(lib.fetch_next_av_link_with(&http, 1000).unwrap());
+    let stored = || -> (u32, u32) {
+        lib.connection()
+            .unwrap()
+            .query_row(
+                "SELECT split_x1,split_x2 FROM av_link_candidates WHERE inbox_id=?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    };
+    // The ratio would say 378..422; the stored and offered split follow the printed seams.
+    assert_eq!(stored(), (384, 425));
+    let split = lib.get_av_link_candidate(&id, None).unwrap().default_split;
+    assert_eq!(split.split, Split { x1: 384, x2: 425 });
+    assert!(split.is_wrap && split.use_spine);
+    // A candidate saved with the ratio guess (before detection existed) is re-checked on read.
+    lib.connection()
+        .unwrap()
+        .execute(
+            "UPDATE av_link_candidates SET split_x1=378,split_x2=422 WHERE inbox_id=?1",
+            [&id],
+        )
+        .unwrap();
+    let split = lib.get_av_link_candidate(&id, None).unwrap().default_split;
+    assert_eq!(split.split, Split { x1: 384, x2: 425 });
+}
+#[test]
 fn av_link_feed_idempotency_matching_and_cursor_atomicity() {
     let (_dir, lib) = setup();
     let target = av_collection(&lib, "Existing");

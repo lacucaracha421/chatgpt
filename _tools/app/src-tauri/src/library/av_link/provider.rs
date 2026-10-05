@@ -194,20 +194,28 @@ pub fn normalize_code(input: &str) -> Option<String> {
     let digits = if digits.is_empty() { "0" } else { digits };
     Some(format!("{label}-{digits:0>3}"))
 }
+/// The ratio guess: each face is about 0.703 of the height wide, the spine is the centre remainder.
 pub fn default_split(width: u32, height: u32) -> DefaultSplit {
-    let is_wrap = width as f64 / height.max(1) as f64 >= 1.2;
-    let (x1, x2) = if is_wrap {
+    let (x1, x2) = if is_wrap(width, height) {
         let side = ((height as f64 * 0.703).round() as u32).min(width / 2);
         (side, width - side)
     } else {
         (0, 0)
     };
-    let fraction = (x2 - x1) as f64 / width.max(1) as f64;
+    describe_split(width, height, Split { x1, x2 })
+}
+/// Flags for a split: the spine is offered only when it is 1–12% of the jacket width.
+pub fn describe_split(width: u32, height: u32, split: Split) -> DefaultSplit {
+    let is_wrap = is_wrap(width, height);
+    let fraction = split.x2.saturating_sub(split.x1) as f64 / width.max(1) as f64;
     DefaultSplit {
-        split: Split { x1, x2 },
+        split,
         is_wrap,
         use_spine: is_wrap && (0.01..=0.12).contains(&fraction),
     }
+}
+fn is_wrap(width: u32, height: u32) -> bool {
+    width as f64 / height.max(1) as f64 >= 1.2
 }
 pub(super) fn parse_movie(bytes: &[u8], code: &str) -> Result<Movie, AvError> {
     if bytes.len() > MAX_JSON_BYTES {
