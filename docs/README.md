@@ -46,6 +46,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `agents/implementation.md` — implementation/shared-UI rules, review scope, and verification evidence.
 - `agents/cloud-capture.md` — Cloud Capture / sync architecture and known gaps.
 - `agents/mobile.md` — Mobile direction and current checkpoint.
+- `agents/pc-required-features.md` — source-audited list of what only the PC can do, which tablet actions wait for the PC, and what works with the PC off.
 - `agents/mobile-character-contract.md` — implemented character read publication/API/mobile navigation, authority limits and verification evidence.
 - `research/server-authority-model-audit-20260913.md` — current PC/server/mobile data mapping, character and Collection gaps, and server-authority transition design inputs; execution status lives in CLOUD-AUTH-001.
 - `research/server-authority-v2-product-decisions-20260915.md` — confirmed Server Authority v2 product decisions, Android/mobile audit findings, and pre-design migration constraints; not an implementation plan.
