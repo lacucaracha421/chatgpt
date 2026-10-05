@@ -258,6 +258,9 @@ impl Library {
 
     fn restore_snapshot_locked(&self, selected_path: &Path) -> Result<(), LibraryError> {
         self.stop_character_scan();
+        // The media protocol's idle read connections would keep the file being replaced
+        // open; close them and hold off new ones until the swap is over.
+        let _media_reads = self.media_reads.exclusive();
         check_interrupted_restore(&self.root)?;
         // Refuse before any destructive work. The swap replaces sync cursors,
         // durable outbox rows and `library_id` along with the canonical tables, so
@@ -1361,6 +1364,60 @@ mod tests {
         library.restore_backup(&backup.id).unwrap();
 
         assert!(!temporary.exists());
+    }
+
+    #[test]
+    fn restore_closes_idle_media_reads_and_serves_the_restored_thumbnail() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        for (name, bytes) in [("before", b"before"), ("after_", b"after_")] {
+            fs::write(
+                library.root().join(format!("thumbnails/{name}.webp")),
+                bytes,
+            )
+            .unwrap();
+        }
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at, status
+                 ) VALUES (?1, 'hash', 'image', 'a.png', 'assets/a.png',
+                           'thumbnails/before.webp', 1, 1, 1, '2026-07-30T00:00:00Z', 'normal')",
+                [id],
+            )
+            .unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET thumbnail_relative_path = 'thumbnails/after_.webp' WHERE id = ?1",
+                [id],
+            )
+            .unwrap();
+        let served = |library: &Library| {
+            let mut media = library
+                .resolve_media(id, crate::library::MediaVariant::Thumbnail)
+                .unwrap();
+            let mut bytes = Vec::new();
+            io::Read::read_to_end(&mut media.file, &mut bytes).unwrap();
+            bytes
+        };
+        assert_eq!(served(&library), b"after_");
+        assert_eq!(library.media_reads_idle(), 1);
+
+        // An idle read connection must not keep the replaced file open (Windows refuses
+        // the rename) nor keep reading it after the swap.
+        library.restore_backup(&backup.id).unwrap();
+
+        assert_eq!(served(&library), b"before");
     }
 
     #[test]

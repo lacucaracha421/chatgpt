@@ -26,7 +26,7 @@ use std::{
 
 use app_lib::library::{
     models::{AssetCursor, AssetPage, AssetQuery, AssetSort, MediaKindFilter},
-    Library,
+    Library, MediaVariant,
 };
 use rusqlite::ffi;
 use serde_json::{json, Value};
@@ -376,6 +376,13 @@ fn fingerprint(root: &Path) -> Result<Fingerprint, Box<dyn std::error::Error>> {
         )?;
     }
     let catalogs = root.join("catalogs");
+    for suffix in ["", "-wal", "-shm"] {
+        let relative = format!(".cache/characters/s36_shadow.sqlite{suffix}");
+        let path = root.join(&relative);
+        if path.exists() {
+            push(relative, &path)?;
+        }
+    }
     if catalogs.is_dir() {
         for entry in fs::read_dir(&catalogs)? {
             let entry = entry?;
@@ -439,7 +446,13 @@ fn snapshot(options: &Options) -> Result<PathBuf, Box<dyn std::error::Error>> {
     }
     // The idle character engine reads the S36 score cache on every catch-up check.
     let s36_cache = library.join(".cache/characters/s36_shadow.sqlite");
-    if options.character_idle.is_some() && s36_cache.is_file() {
+    if (options.character_idle.is_some()
+        || options
+            .only
+            .as_deref()
+            .is_some_and(|s| s.contains("series_switch")))
+        && s36_cache.is_file()
+    {
         fs::create_dir_all(snapshot_root.join(".cache/characters"))?;
         let bytes = copy_database(
             &s36_cache,
@@ -832,6 +845,15 @@ fn page(library: &Library, query: &AssetQuery) -> Result<Value, String> {
 }
 
 fn run_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
+    if bench
+        .options
+        .only
+        .as_deref()
+        .is_some_and(|s| s.contains("series_switch"))
+    {
+        series_switch_paths(bench, library, snapshot_root);
+        return;
+    }
     connection_paths(bench, snapshot_root);
     let sidebar = sidebar_paths(bench, library);
     grid_paths(bench, library, &sidebar);
@@ -844,6 +866,437 @@ fn run_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
         idle_paths(bench, library);
     }
     contention_paths(bench, library);
+}
+
+/// Exact SeriesBrowser overview reads. All SQL uses the disposable snapshot;
+/// thumbnail metadata/bytes are read from the source without opening its database.
+fn series_switch_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
+    let connection = rusqlite::Connection::open_with_flags(
+        snapshot_root.join("library.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .expect("snapshot database");
+    let mut globals = Vec::new();
+    for (label, call) in [
+        ("series_switch/global/character_suggestions", 0),
+        ("series_switch/global/ignored_character_suggestions", 1),
+        ("series_switch/global/character_sidebar_counts", 2),
+        ("series_switch/global/list_character_targets", 3),
+        ("series_switch/global/character_series", 4),
+        ("series_switch/global/character_folder_exclusions", 5),
+    ] {
+        let value = bench.run("series_switch", label, || match call {
+            0 => to_value(library.character_suggestions(Some(5))),
+            1 => to_value(library.ignored_character_suggestions()),
+            2 => to_value(library.character_sidebar_counts()),
+            3 => to_value(library.list_character_targets()),
+            4 => to_value(library.character_series()),
+            _ => to_value(library.character_folder_exclusions()),
+        });
+        globals.push(value.unwrap_or(Value::Null));
+    }
+    let mut audit = Vec::new();
+    for name in ["명조", "니케", "포켓몬", "블아"] {
+        let matches = connection.prepare(
+            "SELECT c.id,c.name FROM classification_entries c JOIN character_series s ON s.classification_id=c.id JOIN classification_entries p ON p.id=c.parent_id WHERE p.name='게임' AND c.name=?1"
+        ).unwrap().query_map([name], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(matches.len(), 1, "expected one registered 게임/{name}");
+        let id = &matches[0].0;
+        println!("series_switch_folder: name={name} id={id}");
+        for filter in ["unclassified", "all"] {
+            let query = json!({"seriesId":id,"targetId":null,"groupId":null,"seriesFilter":filter,"after":null,"limit":100,"all":filter=="all"});
+            let value = bench.run(
+                "series_switch",
+                format!("series_switch/{name}/{filter}/browse_character_assets"),
+                || to_value(library.browse_character_assets(from_json(query.clone()))),
+            );
+            if let Some(value) = value {
+                let mut tiles = Vec::new();
+                let mut thumbnail_paths = Vec::new();
+                let mut page_thumbnail_bytes = 0u64;
+                let mut page_thumbnail_files = 0usize;
+                let mut page_ids = Vec::new();
+                for (index, asset) in value["items"].as_array().unwrap().iter().enumerate() {
+                    let asset_id = asset["id"].as_str().unwrap();
+                    page_ids.push(asset_id.to_owned());
+                    let relative: Option<String> = connection
+                        .query_row(
+                            "SELECT thumbnail_relative_path FROM assets WHERE id=?1",
+                            [asset_id],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    // Reject an absolute/traversing stored path before reading the source.
+                    let path = relative
+                        .as_deref()
+                        .filter(|p| safe_relative_path(p))
+                        .map(|p| bench.options.library.join(p));
+                    let bytes = path
+                        .as_ref()
+                        .and_then(|p| fs::metadata(p).ok())
+                        .filter(|m| m.is_file())
+                        .map(|m| m.len());
+                    if let Some(bytes) = bytes {
+                        page_thumbnail_bytes += bytes;
+                        page_thumbnail_files += 1;
+                        copy_thumbnail_into_snapshot(
+                            &bench.options.library,
+                            snapshot_root,
+                            relative.as_deref().unwrap(),
+                        );
+                    }
+                    if index >= 30 {
+                        continue;
+                    }
+                    if bytes.is_some() {
+                        thumbnail_paths.push(path.unwrap());
+                    }
+                    tiles.push(json!({"id":asset_id,"thumbnailRelativePath":relative,"bytes":bytes,"thumbnailRevision":asset.get("thumbnailRevision")}));
+                }
+                // Isolate JSON encoding work; excludes IPC and JS parsing.
+                bench.run(
+                    "series_switch",
+                    format!("series_switch/{name}/{filter}/json_encode_only"),
+                    || {
+                        serde_json::to_vec(&value)
+                            .map(|b| json!({"bytes":b.len()}))
+                            .map_err(|e| e.to_string())
+                    },
+                );
+                // Diagnostic CPU/disk batch, NOT WebView protocol or browser decode.
+                // Metadata and repeated reads warm the OS cache; never call this cold.
+                bench.run(
+                    "series_switch",
+                    format!("series_switch/{name}/{filter}/warm_read_decode_first30_rust"),
+                    || {
+                        let mut bytes = 0usize;
+                        let mut pixels = 0u64;
+                        for path in &thumbnail_paths {
+                            let data = fs::read(path).map_err(|e| e.to_string())?;
+                            bytes += data.len();
+                            let decoded =
+                                image::load_from_memory(&data).map_err(|e| e.to_string())?;
+                            pixels += u64::from(decoded.width()) * u64::from(decoded.height());
+                        }
+                        Ok(json!({"files":thumbnail_paths.len(),"bytes":bytes,"pixels":pixels}))
+                    },
+                );
+                if filter == "unclassified" {
+                    let shelf = shelf_thumbnail_ids(id, &globals[3], &globals[0]);
+                    for asset_id in &shelf {
+                        let relative: Option<String> = connection
+                            .query_row(
+                                "SELECT thumbnail_relative_path FROM assets WHERE id=?1",
+                                [asset_id],
+                                |r| r.get(0),
+                            )
+                            .ok()
+                            .flatten();
+                        if let Some(relative) = relative.filter(|p| safe_relative_path(p)) {
+                            copy_thumbnail_into_snapshot(
+                                &bench.options.library,
+                                snapshot_root,
+                                &relative,
+                            );
+                        }
+                    }
+                    preload_paths(bench, library, name, &shelf, &page_ids);
+                }
+                audit.push(json!({"folder":name,"seriesId":id,"filter":filter,"pageCount":value["items"].as_array().unwrap().len(),"totalCount":value["totalCount"],"pageThumbnailBytes":page_thumbnail_bytes,"pageThumbnailFiles":page_thumbnail_files,"tiles":tiles}));
+            }
+        }
+        bench.run(
+            "series_switch",
+            format!("series_switch/{name}/character_series_folders"),
+            || to_value(library.character_series_folders(id)),
+        );
+        bench.run(
+            "series_switch",
+            format!("series_switch/{name}/character_series_excluded_assets_limit1"),
+            || to_value(library.character_series_excluded_assets(id, None, 1)),
+        );
+        let query = json!({"offset":0,"limit":1,"seriesId":id});
+        bench.run(
+            "series_switch",
+            format!("series_switch/{name}/character_shadow_review_page_limit1"),
+            || to_value(library.character_shadow_review_page(from_json(query.clone()))),
+        );
+        bench.run(
+            "series_switch",
+            format!("series_switch/{name}/character_s36_readiness"),
+            || to_value(library.character_s36_readiness(id)),
+        );
+        bench.run(
+            "series_switch",
+            format!("series_switch/{name}/character_groups"),
+            || to_value(library.character_groups(id)),
+        );
+        // The four reads that gate shelfLoading/preparedPage, without the S36 readiness read.
+        bench.run(
+            "series_switch",
+            format!("series_switch/{name}/parallel_gating4_unclassified"),
+            || {
+                std::thread::scope(|scope| {
+                    let browse = scope.spawn(|| to_value(library.browse_character_assets(from_json(json!({"seriesId":id,"targetId":null,"groupId":null,"seriesFilter":"unclassified","after":null,"limit":100,"all":false})))));
+                    let folders = scope.spawn(|| to_value(library.character_series_folders(id)));
+                    let excluded = scope.spawn(|| to_value(library.character_series_excluded_assets(id, None, 1)));
+                    let candidates = scope.spawn(|| to_value(library.character_shadow_review_page(from_json(json!({"offset":0,"limit":1,"seriesId":id})))));
+                    for worker in [browse, folders, excluded, candidates] {
+                        worker.join().map_err(|_| "switch worker panicked".to_owned())??;
+                    }
+                    Ok(json!({"commands":4}))
+                })
+            },
+        );
+        // Time until the four gating reads finish while readiness runs alongside them.
+        let gating_done = std::cell::RefCell::new(Vec::new());
+        bench.run(
+            "series_switch",
+            format!("series_switch/{name}/parallel_switch_unclassified_gating_done"),
+            || {
+                let started = Instant::now();
+                let timed = |result: Result<Value, String>| result.map(|_| started.elapsed());
+                std::thread::scope(|scope| {
+                    let browse = scope.spawn(|| timed(to_value(library.browse_character_assets(from_json(json!({"seriesId":id,"targetId":null,"groupId":null,"seriesFilter":"unclassified","after":null,"limit":100,"all":false}))))));
+                    let folders = scope.spawn(|| timed(to_value(library.character_series_folders(id))));
+                    let excluded = scope.spawn(|| timed(to_value(library.character_series_excluded_assets(id, None, 1))));
+                    let candidates = scope.spawn(|| timed(to_value(library.character_shadow_review_page(from_json(json!({"offset":0,"limit":1,"seriesId":id}))))));
+                    let readiness = scope.spawn(|| timed(to_value(library.character_s36_readiness(id))));
+                    let mut gating = Duration::ZERO;
+                    for worker in [browse, folders, excluded, candidates] {
+                        gating = gating.max(worker.join().map_err(|_| "switch worker panicked".to_owned())??);
+                    }
+                    let all = readiness.join().map_err(|_| "switch worker panicked".to_owned())??;
+                    let gating_ms = gating.as_secs_f64() * 1000.0;
+                    gating_done.borrow_mut().push(gating_ms);
+                    Ok(json!({"gatingMs":gating_ms,"readinessMs":all.as_secs_f64() * 1000.0}))
+                })
+            },
+        );
+        let mut samples = gating_done.into_inner();
+        if !samples.is_empty() {
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "series_switch_gating_done: name={name} n={} p50={:.2} p95={:.2}",
+                samples.len(),
+                percentile(&samples, 50.0),
+                percentile(&samples, 95.0)
+            );
+        }
+        // Model the sibling switch's five per-series requests arriving together.
+        // The frontend starts them independently; the Library database mutex may
+        // serialize their database work. Thread dispatch here is not Tauri IPC.
+        for filter in ["unclassified", "all"] {
+            bench.run("series_switch", format!("series_switch/{name}/parallel_switch_{filter}"), || {
+            std::thread::scope(|scope| {
+                let browse = scope.spawn(|| to_value(library.browse_character_assets(from_json(json!({"seriesId":id,"targetId":null,"groupId":null,"seriesFilter":filter,"after":null,"limit":100,"all":filter=="all"})))));
+                let folders = scope.spawn(|| to_value(library.character_series_folders(id)));
+                let excluded = scope.spawn(|| to_value(library.character_series_excluded_assets(id, None, 1)));
+                let candidates = scope.spawn(|| to_value(library.character_shadow_review_page(from_json(json!({"offset":0,"limit":1,"seriesId":id})))));
+                let readiness = scope.spawn(|| to_value(library.character_s36_readiness(id)));
+                for worker in [browse, folders, excluded, candidates, readiness] {
+                    worker.join().map_err(|_| "switch worker panicked".to_owned())??;
+                }
+                Ok(json!({"commands":5}))
+            })
+        });
+        }
+    }
+    fs::write(
+        bench
+            .options
+            .snapshot_parent
+            .join("series-switch-thumbnails.json"),
+        serde_json::to_vec_pretty(&audit).unwrap(),
+    )
+    .unwrap();
+}
+
+/// Plain read-only file copy of one source thumbnail into the snapshot, so the snapshot
+/// Library's media resolver can serve it. The source database is never opened.
+fn copy_thumbnail_into_snapshot(library_root: &Path, snapshot_root: &Path, relative: &str) {
+    if !safe_relative_path(relative) {
+        return;
+    }
+    let destination = snapshot_root.join(relative);
+    if destination.is_file() {
+        return;
+    }
+    if let Some(parent) = destination.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::copy(library_root.join(relative), destination);
+}
+
+/// SeriesBrowser's preloadImages shelf ids: each member's thumbnailAssetId or first ready
+/// reference, then shown suggestion samples for the series (folder previews are empty here).
+fn shelf_thumbnail_ids(series_id: &str, targets: &Value, suggestions: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut push = |id: &str| {
+        if !ids.iter().any(|known| known == id) {
+            ids.push(id.to_owned());
+        }
+    };
+    for target in targets.as_array().into_iter().flatten() {
+        if target["seriesClassificationId"].as_str() != Some(series_id) {
+            continue;
+        }
+        let reference = || {
+            ["references", "learnedReferences"]
+                .iter()
+                .flat_map(|key| target[*key].as_array().into_iter().flatten())
+                .find(|r| r["status"] == "ready" && r["assetId"].is_string())
+                .and_then(|r| r["assetId"].as_str())
+        };
+        if let Some(id) = target["thumbnailAssetId"].as_str().or_else(reference) {
+            push(id);
+        }
+    }
+    for row in suggestions.as_array().into_iter().flatten() {
+        if row["seriesId"].as_str() == Some(series_id) {
+            for id in row["sampleAssetIds"].as_array().into_iter().flatten() {
+                if let Some(id) = id.as_str() {
+                    push(id);
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// Native share of SeriesBrowser.preloadImages with a cold WebView cache: every URL
+/// reaches the media protocol (thumbnail route: 4 slots on the main profile), each
+/// resolving its row on the Library's reused media read connection (not traced by the SQL
+/// accounting once it is warm) then reading the file. Excludes the
+/// WebView custom-scheme round trip, browser decode and the 250 ms cap.
+fn preload_paths(
+    bench: &mut Bench,
+    library: &Library,
+    name: &str,
+    shelf: &[String],
+    page: &[String],
+) {
+    let fetch = |id: &str| -> bool {
+        match library.resolve_media_with_revision(id, MediaVariant::Thumbnail) {
+            Ok((mut media, _)) => {
+                let mut bytes = Vec::new();
+                std::io::Read::read_to_end(&mut media.file, &mut bytes).is_ok() && !bytes.is_empty()
+            }
+            Err(_) => false,
+        }
+    };
+    let batch = |ids: &[String], slots: usize| -> Result<Value, String> {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let served = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..slots {
+                scope.spawn(|| loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(id) = ids.get(index) else { break };
+                    if fetch(id) {
+                        served.fetch_add(1, Ordering::Relaxed);
+                    }
+                });
+            }
+        });
+        Ok(json!({"urls":ids.len(),"served":served.load(Ordering::Relaxed)}))
+    };
+    let full: Vec<String> = shelf.iter().chain(page).cloned().collect();
+    let first30: Vec<String> = shelf.iter().chain(page.iter().take(30)).cloned().collect();
+    println!(
+        "series_switch_preload_set: name={name} shelf={} page={} full={} first30={}",
+        shelf.len(),
+        page.len(),
+        full.len(),
+        first30.len()
+    );
+    bench.run(
+        "series_switch",
+        format!("series_switch/{name}/unclassified/preload_native_full_1slot"),
+        || batch(&full, 1),
+    );
+    bench.run(
+        "series_switch",
+        format!("series_switch/{name}/unclassified/preload_native_full_4slots"),
+        || batch(&full, 4),
+    );
+    bench.run(
+        "series_switch",
+        format!("series_switch/{name}/unclassified/preload_native_shelf_first30_4slots"),
+        || batch(&first30, 4),
+    );
+    bench.run(
+        "series_switch",
+        format!("series_switch/{name}/unclassified/preload_native_one_thumbnail"),
+        || Ok(json!({"served": page.first().is_some_and(|id| fetch(id))})),
+    );
+    if !bench.selected(&format!(
+        "series_switch/{name}/unclassified/preload_native_per_thumbnail"
+    )) {
+        return;
+    }
+    // Per-request latency inside the full preload set (served and not-found alike), over
+    // `iterations` rounds after the warm-up above.
+    for slots in [1, 4] {
+        let latencies = Mutex::new(Vec::new());
+        let missing = std::sync::atomic::AtomicUsize::new(0);
+        for _ in 0..bench.options.iterations {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            std::thread::scope(|scope| {
+                for _ in 0..slots {
+                    scope.spawn(|| loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(id) = full.get(index) else { break };
+                        let started = Instant::now();
+                        let served = fetch(id);
+                        let ms = started.elapsed().as_secs_f64() * 1000.0;
+                        if !served {
+                            missing.fetch_add(1, Ordering::Relaxed);
+                        }
+                        latencies.lock().unwrap().push(ms);
+                    });
+                }
+            });
+        }
+        let mut latencies = latencies.into_inner().unwrap();
+        latencies.sort_by(f64::total_cmp);
+        println!(
+            "series_switch_per_thumbnail: name={name} slots={slots} requests={} not_served={} \
+             p50={:.3} p95={:.3} max={:.3}",
+            latencies.len(),
+            missing.load(Ordering::Relaxed),
+            percentile(&latencies, 50.0),
+            percentile(&latencies, 95.0),
+            latencies.last().copied().unwrap_or_default()
+        );
+    }
+}
+
+fn safe_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && Path::new(path)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+#[cfg(test)]
+mod series_switch_tests {
+    use super::*;
+    #[test]
+    fn thumbnail_audit_never_reads_outside_the_library() {
+        assert!(safe_relative_path("thumbnails/aa/image.webp"));
+        for path in [
+            "",
+            "../outside.webp",
+            "/outside.webp",
+            "thumbnails/../../outside.webp",
+        ] {
+            assert!(!safe_relative_path(path), "{path}");
+        }
+        #[cfg(windows)]
+        assert!(!safe_relative_path("C:\\outside.webp"));
+    }
 }
 
 /// Local halves of the native idle timers that are safe on a snapshot: the Cloud API

@@ -147,6 +147,7 @@ pub(crate) mod manga_index_sync;
 mod manga_root_guard;
 pub(crate) mod mangadex;
 mod mangadex_flow;
+mod media_reads;
 pub mod metadata_import;
 pub(crate) mod mobile_catalog;
 #[cfg(test)]
@@ -261,6 +262,9 @@ pub struct Library {
     volume_import_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
+    // Lock-free read connections for the media protocol's per-request row lookups.
+    // When combined with database_lock: database_lock -> media_reads (file replacement only).
+    media_reads: Arc<media_reads::MediaReads>,
     // One outbox delivery pass per authority domain at a time.
     //
     // Single-flight belongs *here* rather than in any one caller. Several independent callers
@@ -398,6 +402,7 @@ impl Library {
             manga_scan_lock: Arc::new(Mutex::new(())),
             volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
+            media_reads: Arc::default(),
             asset_sync_lock: Arc::new(Mutex::new(())),
             album_flush_lock: Arc::new(Mutex::new(())),
             classification_flush_lock: Arc::new(Mutex::new(())),
@@ -585,6 +590,11 @@ impl Library {
             character_wake: &self.character_wake,
             _guard: guard,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn media_reads_idle(&self) -> usize {
+        self.media_reads.idle_count()
     }
 
     fn unlocked_connection(&self) -> Result<Connection, LibraryError> {
@@ -817,19 +827,23 @@ impl Library {
                 .optional()?
                 .flatten(),
             MediaVariant::Thumbnail => {
-                let connection = self.connection()?;
-                let _query = crate::media_protocol_timing::stage(
-                    crate::media_protocol_timing::Stage::ThumbnailQuery,
-                );
-                thumbnail_path = connection
-                    .query_row(
-                        "SELECT thumbnail_relative_path FROM assets
-                         WHERE id = ?1 AND status IN ('normal', 'review')",
-                        [asset_id],
-                        |row| row.get::<_, Option<String>>(0),
-                    )
-                    .optional()?
-                    .flatten();
+                // Runs for every grid tile and shelf card, so it reads the current row on a
+                // reused read connection instead of opening one under database_lock.
+                thumbnail_path =
+                    self.media_reads
+                        .read(&self.root.join("library.sqlite"), |connection| {
+                            let _query = crate::media_protocol_timing::stage(
+                                crate::media_protocol_timing::Stage::ThumbnailQuery,
+                            );
+                            Ok(connection
+                                .prepare_cached(
+                                    "SELECT thumbnail_relative_path FROM assets
+                                     WHERE id = ?1 AND status IN ('normal', 'review')",
+                                )?
+                                .query_row([asset_id], |row| row.get::<_, Option<String>>(0))
+                                .optional()?
+                                .flatten())
+                        })?;
                 thumbnail_path.clone()
             }
             MediaVariant::Playback => self

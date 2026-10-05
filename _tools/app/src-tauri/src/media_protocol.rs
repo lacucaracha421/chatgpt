@@ -1741,6 +1741,157 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    fn thumbnail(library: &Library, id: &str) -> Response<Vec<u8>> {
+        media_response(Some(library), &Method::GET, &format!("/thumbnail/{id}"))
+    }
+
+    fn set_thumbnail(library: &Library, id: &str, relative_path: &str, bytes: &[u8]) {
+        let path = library.root().join(relative_path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET thumbnail_relative_path = ?2 WHERE id = ?1",
+                params![id, relative_path],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn thumbnail_lookups_read_the_current_row_on_every_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_asset(&library, ASSET_ID, "assets/a.png", "thumbnails/aa/old.webp");
+        set_thumbnail(&library, ASSET_ID, "thumbnails/aa/old.webp", b"old");
+        assert_eq!(thumbnail(&library, ASSET_ID).body(), b"old");
+
+        // A replaced thumbnail is served from the next request on.
+        set_thumbnail(&library, ASSET_ID, "thumbnails/aa/new.webp", b"new");
+        assert_eq!(thumbnail(&library, ASSET_ID).body(), b"new");
+
+        // Trash hides it at once; restore brings it back.
+        library.trash_assets(&[ASSET_ID.to_owned()]).unwrap();
+        assert_eq!(
+            thumbnail(&library, ASSET_ID).status(),
+            StatusCode::NOT_FOUND
+        );
+        library.restore_assets(&[ASSET_ID.to_owned()]).unwrap();
+        let restored = thumbnail(&library, ASSET_ID);
+        assert_eq!(restored.status(), StatusCode::OK);
+        assert_eq!(restored.body(), b"new");
+
+        // Review keeps it, any other status hides it, and a deleted row is gone.
+        for (status, expected) in [
+            ("review", StatusCode::OK),
+            ("trash", StatusCode::NOT_FOUND),
+            ("normal", StatusCode::OK),
+        ] {
+            library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE assets SET status = ?2 WHERE id = ?1",
+                    params![ASSET_ID, status],
+                )
+                .unwrap();
+            assert_eq!(thumbnail(&library, ASSET_ID).status(), expected, "{status}");
+        }
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM assets WHERE id = ?1", [ASSET_ID])
+            .unwrap();
+        assert_eq!(
+            thumbnail(&library, ASSET_ID).status(),
+            StatusCode::NOT_FOUND
+        );
+        // The reads reuse a bounded set of connections instead of opening one each.
+        assert_eq!(library.media_reads_idle(), 1);
+    }
+
+    #[test]
+    fn an_asset_without_a_thumbnail_answers_not_found_until_one_is_installed() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_asset(&library, ASSET_ID, "assets/v.webm", "thumbnails/v.webp");
+        // Like every video in the real library: a video Asset with no poster yet.
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET media_kind = 'video', thumbnail_relative_path = NULL
+                 WHERE id = ?1",
+                [ASSET_ID],
+            )
+            .unwrap();
+        for _ in 0..3 {
+            let response = thumbnail(&library, ASSET_ID);
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert!(response.body().is_empty());
+            assert_eq!(cache_control(&response), None);
+        }
+
+        set_thumbnail(&library, ASSET_ID, "thumbnails/v.webp", b"poster");
+        let installed = thumbnail(&library, ASSET_ID);
+        assert_eq!(installed.status(), StatusCode::OK);
+        assert_eq!(installed.body(), b"poster");
+    }
+
+    #[test]
+    fn thumbnail_lookups_never_cross_libraries() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = Library::open(temp.path().join("first")).unwrap();
+        let second = Library::open(temp.path().join("second")).unwrap();
+        insert_asset(&first, ASSET_ID, "assets/a.png", "thumbnails/a.webp");
+        set_thumbnail(&first, ASSET_ID, "thumbnails/a.webp", b"first");
+        assert_eq!(thumbnail(&first, ASSET_ID).body(), b"first");
+        assert_eq!(thumbnail(&second, ASSET_ID).status(), StatusCode::NOT_FOUND);
+
+        insert_asset(&second, ASSET_ID, "assets/a.png", "thumbnails/a.webp");
+        set_thumbnail(&second, ASSET_ID, "thumbnails/a.webp", b"second");
+        drop(first);
+        assert_eq!(thumbnail(&second, ASSET_ID).body(), b"second");
+    }
+
+    #[test]
+    fn thumbnail_lookups_do_not_wait_for_the_database_lock_or_see_uncommitted_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_asset(&library, ASSET_ID, "assets/a.png", "thumbnails/old.webp");
+        set_thumbnail(&library, ASSET_ID, "thumbnails/old.webp", b"old");
+        std::fs::write(library.root().join("thumbnails/new.webp"), b"new").unwrap();
+
+        // Hold the database lock inside an open write transaction that replaces the thumbnail.
+        let mut connection = library.connection().unwrap();
+        let transaction = connection.transaction().unwrap();
+        transaction
+            .execute(
+                "UPDATE assets SET thumbnail_relative_path = 'thumbnails/new.webp' WHERE id = ?1",
+                [ASSET_ID],
+            )
+            .unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                let sender = sender.clone();
+                let library = &library;
+                scope.spawn(move || sender.send(thumbnail(library, ASSET_ID)).unwrap());
+            }
+            for _ in 0..4 {
+                let response = receiver
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .expect("a thumbnail lookup waited for the database lock");
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(response.body(), b"old");
+            }
+        });
+        transaction.commit().unwrap();
+        drop(connection);
+        assert_eq!(thumbnail(&library, ASSET_ID).body(), b"new");
+    }
+
     fn write_test_png(path: &std::path::Path) {
         let image = image::RgbImage::from_pixel(8, 6, image::Rgb([10, 20, 30]));
         image
