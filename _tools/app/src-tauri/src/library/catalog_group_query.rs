@@ -231,7 +231,7 @@ impl GroupQueryPlan {
     fn seed_page_statement(&self) -> Option<(String, Vec<Value>)> {
         let (seed, seed_values) = self.seed.as_ref()?;
         let (order, better) = match self.query.sort {
-            CatalogSort::Latest => (
+            CatalogSort::Latest | CatalogSort::BookmarkAdded => (
                 "donor.Posted DESC,donor.Id DESC",
                 "(work.Posted IS NOT NULL,COALESCE(work.Posted,0),work.Id)>(donor.Posted IS NOT NULL,COALESCE(donor.Posted,0),donor.Id)",
             ),
@@ -239,6 +239,11 @@ impl GroupQueryPlan {
                 "donor.Views DESC,donor.Posted DESC,donor.Id DESC",
                 "(work.Views,work.Posted IS NOT NULL,COALESCE(work.Posted,0),work.Id)>(donor.Views,donor.Posted IS NOT NULL,COALESCE(donor.Posted,0),donor.Id)",
             ),
+        };
+        let order = if self.query.sort == CatalogSort::BookmarkAdded {
+            BOOKMARK_ADDED_ORDER
+        } else {
+            order
         };
         let canonical = if self.route == CountRoute::Bookmark {
             " AND CAST(donor.Id AS TEXT)=candidate.Id"
@@ -343,6 +348,9 @@ pub(super) fn select_groups(
     Ok((page, count))
 }
 
+// Use the newest eligible bookmarked edition; invalid or missing timestamps sort last.
+const BOOKMARK_ADDED_ORDER: &str = "(SELECT MAX(julianday(b.created_at)) FROM online_catalog_group_members m JOIN matching w ON w.Id=m.catalog_work_id JOIN online_catalog_bookmarks b ON b.provider=m.provider AND b.work_id=m.work_id WHERE m.provider=member.provider AND m.group_id=member.group_id) DESC,donor.Posted DESC,donor.Id DESC";
+
 pub(super) fn select_page(
     connection: &Connection,
     plan: &GroupQueryPlan,
@@ -351,7 +359,7 @@ pub(super) fn select_page(
     let cte = plan.cte("");
     let values = plan.values.clone();
     let (order, better) = match query.sort {
-        CatalogSort::Latest => (
+        CatalogSort::Latest | CatalogSort::BookmarkAdded => (
             "donor.Posted DESC,donor.Id DESC",
             "(work.Posted IS NOT NULL,COALESCE(work.Posted,0),work.Id)>(donor.Posted IS NOT NULL,COALESCE(donor.Posted,0),donor.Id)",
         ),
@@ -372,6 +380,11 @@ pub(super) fn select_page(
     let order = if query.sort == CatalogSort::Latest && posted_index && plan.route != CountRoute::Id
     {
         "ordered.Posted DESC,ordered.Id DESC"
+    } else {
+        order
+    };
+    let order = if query.sort == CatalogSort::BookmarkAdded {
+        BOOKMARK_ADDED_ORDER
     } else {
         order
     };

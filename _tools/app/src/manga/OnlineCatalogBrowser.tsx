@@ -48,6 +48,8 @@ import { mangaIndexQuery, withMangaIndexQuery } from "./mangaIndexModel";
 import type { MangaIndexIdentity } from "../library/types";
 import { displayDateTime } from "../shared/displayDate";
 
+import { BOOKMARK_SORT_OPTIONS, readBookmarkSort, writeBookmarkSort, type BookmarkSort } from "./bookmarkSort";
+
 const CATALOG_PAGE_SIZE = 48;
 
 type CatalogView = { indexQuery: string; text: string; sort: CatalogSort; scope: CatalogScope; revealBlocked: boolean; language: CatalogLanguage };
@@ -107,7 +109,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState<CatalogLanguage>("korean");
   const languageRef = useRef<CatalogLanguage>("korean");
-  const [sort, setSort] = useState<CatalogSort>(initialScope === "bookmarked" ? "latest" : "hotDay");
+  const [bookmarkSort, setBookmarkSort] = useState<BookmarkSort>(readBookmarkSort);
+  const [sort, setSort] = useState<CatalogSort>(initialScope === "bookmarked" ? bookmarkSort : "hotDay");
   const [scope, setScope] = useState<CatalogScope>(initialScope);
   const [revealBlocked, setRevealBlocked] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -160,7 +163,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   }, [status, scope, onReady]);
   useEffect(() => {
     if (!requestedSource || requestedSource === "local" || requestedSource === scope) return;
-    const nextSort = requestedSource === "bookmarked" ? "latest" : sort;
+    const nextSort = requestedSource === "bookmarked" ? bookmarkSort : sort === "bookmarkAdded" ? "latest" : sort;
     setScope(requestedSource); setSort(nextSort);
     if (status?.installed) void search(query.trim(), nextSort, requestedSource);
     // The selected source owns scope; all accepted pages report their own scope back.
@@ -636,7 +639,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     if (next === "local") { closeDetail(); closeViewer(); onSwitchLocal(); return; }
     onSourceChange?.(next);
     if (next === scope) return;
-    const nextSort = next === "bookmarked" ? "latest" : sort;
+    const nextSort = next === "bookmarked" ? bookmarkSort : sort === "bookmarkAdded" ? "latest" : sort;
     setScope(next); setSort(nextSort);
     void search(query.trim(), nextSort, next);
   }
@@ -646,9 +649,12 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       setKnownBookmarkCount(undefined); onBookmarkCount?.(undefined);
       void search(query.trim(), sort, scope, revealBlocked, nextLanguage);
     }} />
-    <MangaChoiceMenu label="정렬" value={sort} options={[
+    <MangaChoiceMenu label="정렬" value={sort} options={scope === "bookmarked" ? BOOKMARK_SORT_OPTIONS : [
       { value: "latest", label: "최신순" }, { value: "views", label: "조회순" }, { value: "hotDay", label: "오늘 인기" }, { value: "hotWeek", label: "주간 인기" }, { value: "hotMonth", label: "월간 인기" },
-    ]} onChange={nextSort => { setSort(nextSort); void search(appliedQuery, nextSort, scope); }} />
+    ]} onChange={nextSort => {
+      if (scope === "bookmarked") { setBookmarkSort(nextSort as BookmarkSort); writeBookmarkSort(nextSort as BookmarkSort); }
+      setSort(nextSort); void search(appliedQuery, nextSort, scope);
+    }} />
   </> : undefined;
   // Rarely used catalog actions share one overflow menu in the top bar; the catalog also refreshes hourly on its own.
   const catalogMenu = status?.installed ? <Menu label="카탈로그 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
@@ -819,5 +825,5 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
 }
 
 function catalogSortLabel(sort: CatalogSort): string {
-  return sort === "views" ? "조회순" : sort === "hotDay" ? "오늘 인기" : sort === "hotWeek" ? "주간 인기" : sort === "hotMonth" ? "월간 인기" : "최신순";
+  return sort === "bookmarkAdded" ? BOOKMARK_SORT_OPTIONS[1].label : sort === "views" ? "조회순" : sort === "hotDay" ? "오늘 인기" : sort === "hotWeek" ? "주간 인기" : sort === "hotMonth" ? "월간 인기" : "최신순";
 }

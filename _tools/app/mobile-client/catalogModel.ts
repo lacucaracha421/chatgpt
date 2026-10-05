@@ -10,7 +10,7 @@
  * advertises the capability, so an older server keeps its exact old semantics
  * instead of receiving a parameter it rejects.
  */
-export type CatalogQuery = {provider:'kHentai';language:'all'|'korean'|'japanese';text:string;categories:number[]|null;excludedTags:CatalogExcludedTag[];sort:'latest'|'views'|'hotDay'|'hotWeek'|'hotMonth';scope:'all'|'bookmarked';revealBlocked:boolean;limit:number};
+export type CatalogQuery = {provider:'kHentai';language:'all'|'korean'|'japanese';text:string;categories:number[]|null;excludedTags:CatalogExcludedTag[];sort:'latest'|'bookmarkAdded'|'views'|'hotDay'|'hotWeek'|'hotMonth';scope:'all'|'bookmarked';revealBlocked:boolean;limit:number};
 export type CatalogExcludedTag = {namespace:string;value:string};
 export const DEFAULT_CATALOG_QUERY:CatalogQuery={provider:'kHentai',language:'korean',text:'',categories:null,excludedTags:[],sort:'hotDay',scope:'all',revealBlocked:false,limit:40};
 export type CatalogWork = {provider:'kHentai';providerWorkId:string;title:string;titleJpn:string|null;thumbnailUrl:string|null;bookmarked:boolean;fileCount:number;views:number;posted:number;artists:string[];series:string[]};

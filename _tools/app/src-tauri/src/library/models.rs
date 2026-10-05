@@ -1270,6 +1270,7 @@ pub struct RemoteReadingProgress {
 #[serde(rename_all = "camelCase")]
 pub enum CatalogSort {
     Latest,
+    BookmarkAdded,
     Views,
     HotDay,
     HotWeek,

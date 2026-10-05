@@ -32,6 +32,7 @@ import {useBookmarks,usePendingRetry} from './useBookmarks';
 import {BOOKMARK_CONTRACT_VERSION,type BookmarkAuthority} from './bookmarkOutbox';
 import {DEFAULT_CATALOG_QUERY,FILTER_JSON_MAX_BYTES,catalogPath,catalogPathIssue,catalogDetailPath,catalogEditionsPath,catalogReaderPath,catalogTagQuery,catalogError,supportsDisplayPreferences,supportsSuggestions,catalogSuggestionPath,suggestionQuery,utf8Bytes,SUGGESTION_LIMIT,SUGGESTION_TEXT_MAX_BYTES,type CatalogSuggestion,type CatalogQuery,type CatalogItem,type CatalogPage,type CatalogDetail,type CatalogEditions,type CatalogReaderManifest} from './catalogModel';
 import {DEFAULT_CATALOG_PREFERENCES,clearCatalogPreferences,readCatalogPreferences,writeCatalogPreferences,type CatalogPreferences} from './catalogPreferences';
+import {BOOKMARK_SORT_OPTIONS,readBookmarkSort,writeBookmarkSort,type BookmarkSort} from '../src/manga/bookmarkSort';
 import './Catalog.css';
 
 function lruGet<K,V>(map:Map<K,V>,key:K){const value=map.get(key);if(value!==undefined){map.delete(key);map.set(key,value);}return value;}
@@ -59,6 +60,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   /** Set while 중복 검토 was opened from Home: closing it returns there. */
   onReturnHome?:()=>void}){
   const editionWheel=useHorizontalWheel();
+  const [bookmarkSort,setBookmarkSort]=useState<BookmarkSort>(readBookmarkSort);
   const [preferences,setPreferences]=useState<CatalogPreferences>(()=>readCatalogPreferences(endpoint));
   const [query,setQuery]=useState<CatalogQuery>(()=>({...DEFAULT_CATALOG_QUERY,...preferences})),[draft,setDraft]=useState('');
   const [settings,setSettings]=useState(false);
@@ -154,7 +156,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   },[active,listEnabled]);
   const bookmarks=useBookmarks({active:active&&!paused,authority});
   const index=useMangaIndex({active:active&&!paused,open:settings,authority,query,revision:refresh});
-  const catalogQuery={...query,text:withMangaIndexQuery(query.text,mangaIndexQuery(indexFilter)),sort:indexFilter?'latest' as const:query.sort};
+  const catalogQuery={...query,text:withMangaIndexQuery(query.text,mangaIndexQuery(indexFilter)),sort:indexFilter&&query.scope!=='bookmarked'?'latest' as const:query.sort};
   const pendingWork=selected?bookmarks.hasPending(selected.provider,selected.providerWorkId):false;
   usePendingRetry(active&&!paused,pendingWork,bookmarks.flush);
   const pageCache=useRef(new Map<string,CatalogPage>()),detailCache=useRef(new Map<string,CatalogDetail>()),editionCache=useRef(new Map<string,CatalogEditions>()),readerCache=useRef(new Map<string,CatalogReaderManifest>());
@@ -353,6 +355,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   const [browseSort,setBrowseSort]=useState<CatalogQuery['sort']|null>(null);
   function search(text:string){
     const searching=text.trim()!=='';
+    if(query.scope==='bookmarked'){change({text});return;}
     if(searching&&browseSort===null){setBrowseSort(query.sort);change({text,sort:'latest'});}
     else if(!searching&&browseSort!==null){setBrowseSort(null);change(query.scope==='all'?{text,sort:browseSort}:{text});}
     else change({text});
@@ -451,15 +454,15 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   // A first page shorter than the screen cannot be scrolled, so it asks for the next page itself.
   useEffect(()=>{if(!selected&&list.current&&page?.ready&&nextCursor&&nearEnd(list.current))loadMore();});
   const LANGUAGES:Record<CatalogQuery['language'],string>={korean:'한국어',japanese:'일본어',all:'전체 언어'};
-  const SORTS:Record<CatalogQuery['sort'],string>={latest:'최신순',views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
+  const SORTS:Record<CatalogQuery['sort'],string>={latest:'최신순',bookmarkAdded:BOOKMARK_SORT_OPTIONS[1].label,views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
   const bookmarkScope=query.scope==='bookmarked';
   const viewControls=<div className="ui-segmented ui-segmented--full-width catalog-view-controls" role="group" aria-label="카탈로그 보기">
     <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 언어 ${LANGUAGES[query.language]}`} onClick={()=>setSheet('language')}>{LANGUAGES[query.language]}<ChevronDownIcon aria-hidden="true"/></button>
-    <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 정렬 ${bookmarkScope?'최신순':SORTS[catalogQuery.sort]}`} disabled={bookmarkScope||!!indexFilter} onClick={()=>setSheet('sort')}>{bookmarkScope?'최신순':SORTS[catalogQuery.sort]}<ChevronDownIcon aria-hidden="true"/></button>
+    <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 정렬 ${SORTS[catalogQuery.sort]}`} disabled={!!indexFilter&&!bookmarkScope} onClick={()=>setSheet('sort')}>{SORTS[catalogQuery.sort]}<ChevronDownIcon aria-hidden="true"/></button>
     <button type="button" className={`ui-segmented__cell${filterCount?' is-active':''}`} aria-haspopup="dialog" aria-label={filterCount?`필터 ${filterCount}개 적용`:defaultTags?`필터, 기본 회피 태그 ${defaultTags}개`:'필터'} disabled={!active} onClick={openSettings}><FunnelIcon aria-hidden="true"/>필터{filterCount>0?<span className="catalog-view-count numeric">{filterCount}</span>:defaultTags>0&&<span className="catalog-view-default">기본</span>}</button>
   </div>;
-  // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down. 북마크 lists newest first.
-  const sources=useSectionShade<CatalogQuery['scope']>({label:'카탈로그 출처',options:SOURCES,value:query.scope,onChange:scope=>{if(scope!==query.scope)change(scope==='bookmarked'?{scope,sort:'latest'}:{scope});},extra:viewControls},{active:active&&!paused&&!selected&&!reader&&!settings&&!duplicates});
+  // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down.
+  const sources=useSectionShade<CatalogQuery['scope']>({label:'카탈로그 출처',options:SOURCES,value:query.scope,onChange:scope=>{if(scope!==query.scope)change(scope==='bookmarked'?{scope,sort:bookmarkSort}:{scope,sort:query.sort==='bookmarkAdded'?'latest':query.sort});},extra:viewControls},{active:active&&!paused&&!selected&&!reader&&!settings&&!duplicates});
   const revision=page?.publicationRevision??NO_REVISION;
   const shownList=active&&!paused&&!selected&&!reader&&!privacy&&page?.ready&&committed.current===key;
   const shownListKey=shownList?committed.current:null;
@@ -515,7 +518,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     </div>}
     {!privacy&&reader&&selected&&<CatalogReader manifest={reader} title={catalogDisplayTitle(detail?.title??selected.title)} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy}/>}
     {sheet==='language'&&<BottomSheet title="언어" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 언어">{(Object.keys(LANGUAGES) as CatalogQuery['language'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.language===value} onClick={()=>{setSheet(null);if(query.language!==value)change({language:value});}}>{LANGUAGES[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
-    {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 정렬">{(Object.keys(SORTS) as CatalogQuery['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.sort===value} onClick={()=>{setSheet(null);if(query.sort!==value)change({sort:value});}}>{SORTS[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
+    {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 정렬">{(bookmarkScope?BOOKMARK_SORT_OPTIONS.map(option=>option.value):(Object.keys(SORTS) as CatalogQuery['sort'][]).filter(value=>value!=='bookmarkAdded')).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.sort===value} onClick={()=>{setSheet(null);if(bookmarkScope){setBookmarkSort(value as BookmarkSort);writeBookmarkSort(value as BookmarkSort);}if(query.sort!==value)change({sort:value});}}>{SORTS[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences} index={<CatalogIndex index={index} filter={indexFilter} onFilter={row=>{setIndexFilter(row);setSettings(false);}}/>} tools={<DuplicateReviewEntry count={duplicateCount} onOpen={()=>{setSettings(false);setDuplicates(true);}}/>}/>
     {duplicates&&<CatalogDuplicates context={page?.context??null} active={active&&!paused} onClose={closeDuplicates}/>}
   </section>;

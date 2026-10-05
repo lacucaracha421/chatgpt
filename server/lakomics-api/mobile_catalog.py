@@ -96,7 +96,7 @@ def normalize(params):
     if set(params) - allowed:
         replica.fail(400, "Unsupported catalog parameter")
     q = {"provider": "kHentai", "language": "korean", "text": "", "sort": "latest", "scope": "all", "revealBlocked": "false", "limit": "40", **dict(params)}
-    if q["provider"] != "kHentai" or q["language"] not in ("all", "korean", "japanese") or q["sort"] not in ("latest", "views", "hotDay", "hotWeek", "hotMonth") or q["scope"] not in ("all", "bookmarked") or q["revealBlocked"] not in ("true", "false"):
+    if q["provider"] != "kHentai" or q["language"] not in ("all", "korean", "japanese") or q["sort"] not in ("latest", "bookmarkAdded", "views", "hotDay", "hotWeek", "hotMonth") or q["scope"] not in ("all", "bookmarked") or q["revealBlocked"] not in ("true", "false"):
         replica.fail(400, "Unsupported catalog query")
     try:
         q["limit"] = int(q["limit"])

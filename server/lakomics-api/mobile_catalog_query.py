@@ -380,21 +380,27 @@ def count_groups(db, query):
 
 def search_groups(db, query, offset=0, limit=40):
     prefix, params = cte(query)
-    latest = query["sort"] == "latest"
+    latest = query["sort"] in ("latest", "bookmarkAdded")
     rank_order = "donor.Posted IS NOT NULL DESC,COALESCE(donor.Posted,0) DESC,donor.Id DESC"
     final_order = "Posted DESC,Id DESC"
     if not latest:
         rank_order = "donor.Views DESC," + rank_order
         final_order = "Views DESC,Posted DESC,Id DESC"
+    bookmark_time = "NULL"
+    if query["sort"] == "bookmarkAdded":
+        bookmark_time = "(SELECT julianday(b.created_at) FROM online_catalog_bookmarks b WHERE b.provider='kHentai' AND b.work_id=CAST(donor.Id AS TEXT))"
+        final_order = "bookmark_time DESC," + final_order
     if query.get("preparedState"):
+        bookmark_column = f"MAX({bookmark_time}) OVER(PARTITION BY donor._group_id)" if query["sort"] == "bookmarkAdded" else "NULL"
         ranked = f""", ranked AS (
-          SELECT donor._group_id AS group_id,donor.Posted,donor.Id,donor.Views,
+          SELECT donor._group_id AS group_id,donor.Posted,donor.Id,donor.Views,{bookmark_column} AS bookmark_time,
                  ROW_NUMBER() OVER(PARTITION BY donor._group_id ORDER BY {rank_order}) AS rn
           FROM matching donor
         ) SELECT group_id FROM ranked WHERE rn=1 ORDER BY {final_order} LIMIT ? OFFSET ?"""
     else:
+        bookmark_column = f"MAX({bookmark_time}) OVER(PARTITION BY member.group_id)" if query["sort"] == "bookmarkAdded" else "NULL"
         ranked = f""", ranked AS (
-          SELECT member.group_id,donor.Posted,donor.Id,donor.Views,
+          SELECT member.group_id,donor.Posted,donor.Id,donor.Views,{bookmark_column} AS bookmark_time,
                  ROW_NUMBER() OVER(PARTITION BY member.group_id ORDER BY {rank_order}) AS rn
           FROM matching donor JOIN online_catalog_group_members member
             ON member.provider='kHentai' AND member.catalog_work_id=donor.Id

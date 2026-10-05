@@ -29,7 +29,7 @@ pub(super) fn active_work_predicate(sort: CatalogSort) -> &'static str {
     // This no-op hint avoids rank-index row lookups and a full latest sort.
     // Views/hot sorts must retain the Expunged-leading rank-index lookup.
     match sort {
-        CatalogSort::Latest => "likely(work.Expunged = 0)",
+        CatalogSort::Latest | CatalogSort::BookmarkAdded => "likely(work.Expunged = 0)",
         _ => "work.Expunged = 0",
     }
 }
@@ -345,6 +345,7 @@ impl Library {
 
         let order = match query.sort {
             CatalogSort::Latest => "work.Posted DESC, work.Id DESC",
+            CatalogSort::BookmarkAdded => "(SELECT julianday(b.created_at) FROM online_catalog_bookmarks b WHERE b.provider='kHentai' AND b.work_id=CAST(work.Id AS TEXT)) DESC, work.Posted DESC, work.Id DESC",
             CatalogSort::Views => "work.Views DESC, work.Posted DESC, work.Id DESC",
             CatalogSort::HotDay | CatalogSort::HotWeek | CatalogSort::HotMonth => {
                 let now = chrono::Utc::now().timestamp();

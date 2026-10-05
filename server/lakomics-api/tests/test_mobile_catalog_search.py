@@ -445,5 +445,25 @@ class SharedFixtureContractTests(unittest.TestCase):
         db.close()
 
 
+
+class BookmarkOrderTests(unittest.TestCase):
+    def test_bookmark_dates_nulls_grouping_and_pagination(self):
+        for projection in (False, True):
+            with self.subTest(projection=projection), fixture(projection) as db:
+                # Permit legacy missing timestamps while exercising the real query.
+                db.executescript("DROP TABLE online_catalog_bookmarks; CREATE TABLE online_catalog_bookmarks(provider TEXT,work_id TEXT,created_at TEXT);")
+                db.executemany("INSERT INTO online_catalog_bookmarks VALUES('kHentai',?,?)", [
+                    ('1', None), ('3', '2026-10-04T00:00:00Z'),
+                    ('6', '2026-10-05T00:00:00Z'), ('7', '2026-10-03T00:00:00Z')])
+                if projection:
+                    build_projection(db)
+                latest, count = groups(db, scope='bookmarked', sort='latest')
+                self.assertEqual((latest, count), (['g3', 'g1', 'g6'], 3))
+                recent, count = groups(db, scope='bookmarked', sort='bookmarkAdded')
+                self.assertEqual((recent, count), (['g6', 'g3', 'g1'], 3))
+                q = frozen(db, scope='bookmarked', sort='bookmarkAdded')
+                self.assertEqual([r['groupId'] for r in search_groups(db, q, offset=2, limit=1)], ['g1'])
+
+
 if __name__ == "__main__":
     unittest.main()

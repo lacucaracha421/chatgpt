@@ -401,3 +401,31 @@ fn catalog_group_bookmark_short_page_guard_boundaries() {
         "unrestricted bookmarks retain existing rank page"
     );
 }
+
+#[test]
+fn bookmark_added_order_uses_matching_group_time_and_sorts_nulls_last() {
+    let (_root, library) = fixture();
+    let connection = library.connection().unwrap();
+    seed(&connection);
+    // The production column is NOT NULL; allow legacy missing times in this fixture.
+    connection.execute_batch("DROP TABLE online_catalog_bookmarks;
+      CREATE TABLE online_catalog_bookmarks(provider TEXT,work_id TEXT,created_at TEXT,PRIMARY KEY(provider,work_id));
+      INSERT INTO online_catalog_bookmarks VALUES('kHentai','1','2026-10-05T00:00:00Z'),('kHentai','2',NULL),('kHentai','3','2026-10-04T00:00:00Z');").unwrap();
+    let mut q = query("");
+    q.scope = CatalogScope::Bookmarked;
+    let latest = select_groups(&connection, &q).unwrap().0;
+    assert_eq!(latest[0].representative_id, 1);
+    q.sort = CatalogSort::BookmarkAdded;
+    let recent = select_groups(&connection, &q).unwrap().0;
+    assert_eq!(recent[0].representative_id, 1);
+    q.text = "id:2 OR id:3".into();
+    let recent = select_groups(&connection, &q).unwrap().0;
+    assert_eq!(recent[0].representative_id, 3);
+    assert_eq!(recent[1].representative_id, 2);
+    q.sort = CatalogSort::Latest;
+    assert_eq!(select_groups(&connection, &q).unwrap().0[0].representative_id, 2);
+    q.sort = CatalogSort::BookmarkAdded;
+    q.page_size = 1;
+    q.page = 1;
+    assert_eq!(select_groups(&connection, &q).unwrap().0[0].representative_id, 2);
+}
