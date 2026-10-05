@@ -170,9 +170,9 @@ export function CollectionBrowser({
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
 
   function setTypeFilter(next: CollectionType) {
-    if (next === typeFilter && !releaseProvider && !releaseCalendar && !showcase) return;
-    const commit = () => onViewChange({ kind: "collections", typeFilter: next, showcase: false });
-    // Leaving the showcase or releases is not a type switch; those views keep their own motion.
+    if (next === typeFilter && !releaseProvider && !releaseCalendar) return;
+    const commit = () => onViewChange({ kind: "collections", typeFilter: next, showcase });
+    // These views keep their own motion; a type switch retains Showcase and closes releases.
     if (releaseProvider || releaseCalendar || showcase) { commit(); return; }
     // A type switch moves the list in from the side of the chosen type (the shared view swap);
     // the section bar stays still. The old list stays painted until the new one commits.

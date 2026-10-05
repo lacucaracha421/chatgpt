@@ -1326,3 +1326,23 @@ it('blocks spine double-tap during privacy and closes an already open original c
 let stopWorkImages: (() => void) | undefined;
 beforeEach(() => { stopWorkImages = workImageLoads(); });
 afterEach(() => { stopWorkImages?.(); });
+
+it('switches types inside the retained Showcase overlay including AV and returns to the chosen library',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/status'))return {revision:'r1'};
+    if(path.startsWith('/v1/collections?')){const type=new URL(path,'https://example.invalid').searchParams.get('type') as CollectionDetail['type'];return {...page,items:[{...item,id:type,name:type,type}]};}
+    return {revision:'r1',item};
+  });
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  pressShowcase(await screen.findByRole('button',{name:'쇼케이스'}));
+  const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
+  for(const [label,type] of [['영화','movie'],['만화','manga'],['AV','av'],['게임','game']]){
+    fireEvent.click(within(overlay).getByRole('radio',{name:label}));
+    expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBe(overlay);
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('type='+type)&&String(path).includes('showcase=true'))).toBe(true));
+    expect(within(overlay).getByRole('radio',{name:label}).getAttribute('aria-checked')).toBe('true');
+  }
+  fireEvent.click(within(overlay).getByRole('button',{name:'쇼케이스 닫기'}));
+  expect(screen.queryByRole('dialog',{name:'쇼케이스'})).toBeNull();
+  expect(screen.getByRole('radio',{name:'게임'}).getAttribute('aria-checked')).toBe('true');
+});

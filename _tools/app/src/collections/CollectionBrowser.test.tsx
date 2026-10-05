@@ -652,7 +652,7 @@ describe("CollectionBrowser", () => {
     expect(screen.getByText("쇼케이스에 컬렉션이 없습니다.")).toBeInTheDocument();
   });
 
-  it("leaves the whole Showcase through the header back button or the current type section", async () => {
+  it("leaves Showcase through Back and retains it when choosing a type", async () => {
     const user = userEvent.setup();
     const onViewChange = vi.fn();
     renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true, onViewChange });
@@ -664,9 +664,9 @@ describe("CollectionBrowser", () => {
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: false });
     onViewChange.mockClear();
     await user.click(screen.getByRole("radio", { name: "게임" }));
-    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: false });
+    expect(onViewChange).not.toHaveBeenCalled();
     await user.click(screen.getByRole("radio", { name: "만화" }));
-    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false });
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: true });
   });
 
   it("shows showcase collections when showcase on and a collection is showcased", () => {
@@ -988,3 +988,18 @@ function createGateway(): LibraryGateway {
   listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getKakaoCredentialStatus: vi.fn(), setKakaoApiKey: vi.fn(), deleteKakaoApiKey: vi.fn(), searchKakao: vi.fn(), applyKakao: vi.fn(), refreshKakao: vi.fn(), getBookConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), listUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
   };
 }
+
+it.each(["movie", "manga", "av"] as const)("retains Showcase when switching from games to %s", async type => {
+  const onViewChange = vi.fn();
+  renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true, onViewChange });
+  const label = { movie: "영화", manga: "만화", av: "AV" }[type];
+  await userEvent.click(screen.getByRole("radio", { name: label }));
+  expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: type, showcase: true });
+});
+
+it("returns from the release calendar without entering Showcase", async () => {
+  const onViewChange = vi.fn();
+  renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, releaseCalendar: true, onViewChange });
+  await userEvent.click(screen.getByRole("button", { name: "컬렉션으로 돌아가기" }));
+  expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: false });
+});

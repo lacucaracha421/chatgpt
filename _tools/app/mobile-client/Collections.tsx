@@ -32,6 +32,7 @@ import {SparklesIcon as SparklesSolidIcon, StarIcon as StarSolid} from '@heroico
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {Overlay} from './Overlay';
+import {SegmentedControl} from '../src/shared/ui/SegmentedControl';
 import {ReleaseCalendar} from './ReleaseCalendar';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {StepSlider} from './StepSlider';
@@ -514,7 +515,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
 
-  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
+  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;if(showcaseRef.current)showcaseRef.current.scrollTop=0;setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
   const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   /** Opens a work; `from` is the list it was opened in, which a swipe on the work steps through. */
@@ -675,6 +676,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <Overlay deferContent open={showcaseAll} covered={!live||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
     {ready=><div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}
+      <SegmentedControl label="쇼케이스 컬렉션 유형" options={typeOptions} value={tab} onChange={chooseTab}/>
       <BusyLabel busy={!!(showcase.busy&&!showcaseItems.length)}><p className="hint" role="status">쇼케이스를 불러오는 중…</p></BusyLabel>
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
