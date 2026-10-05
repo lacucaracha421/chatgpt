@@ -107,8 +107,10 @@
 .work-own-row .ui-choice { display: flex; gap: var(--space-3); }
 .manga-work-stage.work-stage { bottom: 184px; }
 /* The approved book is one physical object, scaled with its material and spine type. */
-.manga-work-book { --bh: 560px; --bd: 34px; --bw: calc(var(--bh) * var(--ratio)); position: absolute; inset: var(--space-4) 96px var(--space-8); perspective: 1800px; }
-.manga-bigbook { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); transform-style: preserve-3d; scale: var(--book-scale); transform: rotateY(var(--ty)); cursor: grab; touch-action: none; user-select: none; transition: transform 520ms var(--ease-standard); }
+.manga-work-book { --bh: 560px; --bd: 34px; --bw: calc(var(--bh) * var(--ratio)); position: absolute; inset: var(--space-4) 96px var(--space-8); }
+/* Keep the snapshot outside the preserve-3d book, with object-sized bounds. */
+.manga-book-object { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); scale: var(--book-scale); perspective: calc(1800px / var(--book-scale)); }
+.manga-bigbook { position: relative; width: var(--bw); height: var(--bh); transform-style: preserve-3d; transform: rotateY(var(--ty)); cursor: grab; touch-action: none; user-select: none; transition: transform 520ms var(--ease-standard); }
 .manga-bigbook.is-dragging { transition: none; cursor: grabbing; }
 .manga-bigbook > span { position: absolute; display: block; backface-visibility: hidden; overflow: hidden; }
 .manga-bb-front { inset: 0; transform: translateZ(calc(var(--bd) / 2)); border-radius: var(--radius-mark); background: var(--color-surface); }

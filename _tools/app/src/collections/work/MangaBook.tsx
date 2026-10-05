@@ -133,6 +133,7 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
   return <div ref={host} className="manga-work-book" style={{ "--book-scale": scale, "--ratio": ratio } as CSSProperties}>
     <span className="manga-book-shadow" aria-hidden="true" />
     {/* Rotation is an interaction with the physical book, separate from volume navigation. */}
+    <div className="manga-book-object">
     <div className={`manga-bigbook${dragging ? " is-dragging" : ""}`} role="group" aria-label="책" tabIndex={0} data-angle={angle} style={{ "--ty": `${angle}deg` } as CSSProperties}
       onPointerDown={event => {
         if (blocked?.current) { drag.current = null; setDragging(false); return; }
@@ -162,6 +163,7 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
       <span className="manga-bb-spine">{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <MangaSpineFace title={title} author={author} volumeNumber={volumeNumber} illustration={cover("illustration")} illustrationRef={illustration} />}</span>
       <span className="manga-bb-pages" aria-hidden="true" /><span className="manga-bb-top" aria-hidden="true" />
       <span className="manga-bb-front">{cover("front")}{!privacy && !src && <span className="manga-cover-empty">표지가 없습니다.</span>}</span>
+    </div>
     </div>
   </div>;
 }

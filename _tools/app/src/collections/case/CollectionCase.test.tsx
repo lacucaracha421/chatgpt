@@ -18,15 +18,19 @@ describe("CollectionCase", () => {
       const stageBox = { width: 900, height: 700 };
       const view = render(<CollectionCase data={data} stageBox={stageBox} large open={false} onOpenChange={vi.fn()} />);
       const root = view.container.querySelector<HTMLElement>(".collection-case")!, kase = root.querySelector<HTMLElement>(".kase")!;
+      const object = root.querySelector<HTMLElement>(".collection-case-object")!;
+      expect(kase.parentElement).toBe(object);
+      for (const face of [".k-front", ".k-spine", ".k-floor", ".k-inner"]) expect(object.querySelector(face)).not.toBeNull();
       const closedScale = root.style.getPropertyValue("--case-scale");
       // A stage resize or settling cover applies at once: no scale transition at rest.
       expect(root).not.toHaveAttribute("data-unfolding");
-      expect(getComputedStyle(kase).transition).not.toContain("scale");
+      expect(getComputedStyle(object).transition).not.toContain("scale");
       view.rerender(<CollectionCase data={data} stageBox={stageBox} large open onOpenChange={vi.fn()} />);
       // The open case is twice as wide, so its fit shrinks; that change moves with the rotation and lid.
       expect(Number(root.style.getPropertyValue("--case-scale"))).toBeLessThan(Number(closedScale));
       expect(root).toHaveAttribute("data-unfolding");
-      expect(getComputedStyle(kase).transition).toBe("transform 560ms var(--ease-standard), scale 560ms var(--ease-standard)");
+      expect(getComputedStyle(kase).transition).toBe("transform 560ms var(--ease-standard)");
+      expect(getComputedStyle(object).transition).toBe("scale 560ms var(--ease-standard), perspective 560ms var(--ease-standard)");
       act(() => vi.advanceTimersByTime(600));
       expect(root).not.toHaveAttribute("data-unfolding");
       view.rerender(<CollectionCase data={data} stageBox={stageBox} large open={false} onOpenChange={vi.fn()} />);

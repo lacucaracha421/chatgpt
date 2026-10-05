@@ -1,5 +1,7 @@
 /* Physical media geometry and material colours match the approved kase mockup. */
-.collection-case { --ch: 330px; --cw: calc(var(--ch) * var(--ratio)); --cd: 24px; position: relative; width: 100%; height: 100%; display: grid; place-items: center; perspective: 2200px; }
+.collection-case { --ch: 330px; --cw: calc(var(--ch) * var(--ratio)); --cd: 24px; position: relative; width: 100%; height: 100%; display: grid; place-items: center; }
+/* A tight snapshot boundary outside the 3D renderer keeps all faces in one hero. */
+.collection-case-object { position: relative; width: var(--cw); height: var(--ch); perspective: 2200px; }
 .collection-case--large { --ch: min(520px, calc(100vh - 280px)); --cd: 34px; }
 .collection-case::before { content: ""; position: absolute; border-top: 0; top: calc(50% + var(--ch) / 2 - var(--ch) * .16); height: calc(var(--ch) * .34); left: 50%; width: calc(var(--ch) * 2.6); transform: translateX(-50%); background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--color-text) 9%, transparent), color-mix(in srgb, var(--color-text) 3%, transparent) 45%, transparent 70%); }
 .collection-case .floor-shadow { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 50%; top: calc(50% + var(--ch) / 2 - 3px); height: 10px; width: calc(var(--cw) * 1.02); background: var(--case-contact); filter: blur(5px); box-shadow: 0 calc(var(--ch) * .03) calc(var(--ch) * .09) calc(var(--ch) * .035) var(--case-contact-spread); }
@@ -18,13 +20,13 @@
 .collection-case .kase { transition: transform 560ms var(--ease-standard); }
 .collection-case .kase.is-dragging { transition: none; }
 /* Scale the entire reference object, including paper, type and media, as one unit.
-   The fit scale lives in `scale`, outside the transitioned `transform`: the model appears at its
+   The fit scale lives on the snapshot boundary, outside the transitioned `transform`: the model appears at its
    size instead of growing and shrinking while the stage and cover proportions settle (user, 2026-10-03). */
-.collection-case--fitted .kase { --ch: 520px; --cw: calc(var(--ch) * var(--ratio)); --cd: 34px; position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); scale: var(--case-scale); transform: rotateX(-5deg) rotateY(var(--ry)) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5)); }
+.collection-case--fitted .collection-case-object { --ch: 520px; --cw: calc(var(--ch) * var(--ratio)); --cd: 34px; position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); scale: var(--case-scale); perspective: calc(2200px / var(--case-scale)); }
 .collection-case .k-hinge, .collection-case .k-lid { transition-duration: 560ms; }
 /* Opening refits the model (the open case is twice as wide). While it opens or closes, the fit scale and the
    floor shadows move on the same 560 ms curve as the rotation and lid, so the model never snaps smaller first. */
-.collection-case--fitted[data-unfolding] .kase:not(.is-dragging) { transition: transform 560ms var(--ease-standard), scale 560ms var(--ease-standard); }
+.collection-case--fitted[data-unfolding] .collection-case-object { transition: scale 560ms var(--ease-standard), perspective 560ms var(--ease-standard); }
 .collection-case--fitted[data-unfolding]::before { transition: top 560ms var(--ease-standard), height 560ms var(--ease-standard), width 560ms var(--ease-standard); }
 .collection-case--fitted[data-unfolding] .floor-shadow { transition: width 560ms var(--ease-standard), top 560ms var(--ease-standard); }
 .collection-case .kase > span, .collection-case .k-hinge > span, .collection-case .k-lid > span { position: absolute; display: block; backface-visibility: hidden; }
@@ -117,7 +119,7 @@
 .case-spine-art .ps5 .t-head { aspect-ratio: 96 / 271; background: url("./marks/ps5-head.png") center / 100% 100% no-repeat, #fff; box-shadow: 0 2px 0 #2a4fb0; }
 .case-spine-art .ps5 .t-band, .case-spine-art .ps5 .t-foot { background: #050505; }
 @media (prefers-reduced-motion: reduce) { .collection-case .kase, .collection-case .k-hinge, .collection-case .k-lid, .collection-case .floor-shadow,
-  .collection-case--fitted[data-unfolding] .kase:not(.is-dragging), .collection-case--fitted[data-unfolding]::before, .collection-case--fitted[data-unfolding] .floor-shadow { transition: none; } }
+  .collection-case--fitted[data-unfolding] .collection-case-object, .collection-case--fitted[data-unfolding]::before, .collection-case--fitted[data-unfolding] .floor-shadow { transition: none; } }
 /* Platform marks are cut from real package spines (user decision, 2026-10-01). A Nintendo-published Switch 2 game carries the publisher oval at the foot. */
 .case-spine-art .sw2[data-nintendo] .t-foot { aspect-ratio: 96 / 198; padding: 0; background: url("./marks/switch2-nintendo.png") center / 100% 100% no-repeat; }
 .case-spine-art .sw2[data-nintendo] .t-pub { display: none; }

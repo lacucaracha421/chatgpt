@@ -120,6 +120,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} data-unfolding={unfolding || undefined} style={{ "--ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
+    <div className="collection-case-object">
     <div className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
       onPointerDown={event => { if (blocked?.current) { drag.current = null; setDragging(false); return; } if (event.button !== 0 || drag.current) return; drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
       onPointerMove={event => { if (blocked?.current) { drag.current = null; setDragging(false); return; } const start = drag.current; if (!start || start.pointer !== event.pointerId) return; if (!start.moved && Math.abs(event.clientX - start.x) < 4) return; if (!start.moved) { start.moved = true; setDragging(true); } turn(start.angle + (event.clientX - start.x) * .6); }}
@@ -138,6 +139,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
         <CaseSpine data={data} onSettled={url => images.failed("spine", url)} />
       </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner"><span className="tray-ledge" aria-hidden="true" />{data.privacy ? <span className="case-mask" aria-label="비공개 모드" /> : inside}</span><TrayWalls tray="lid" /></span></span>
+    </div>
     </div>
   </div>;
 }
