@@ -238,6 +238,18 @@ describe("App", () => {
   });
   afterEach(cleanup);
 
+  it("notifies the media queue when switching workspace areas", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    render(<App gateway={gateway()} subscribeDrops={noDrops} />);
+    const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+    nativeInvoke.mockClear();
+    await userEvent.click(within(rail).getByRole("button", { name: "에셋" }));
+    await waitFor(() => expect(nativeInvoke).toHaveBeenCalledWith("media_view_changed"));
+    nativeInvoke.mockClear();
+    await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
+    await waitFor(() => expect(nativeInvoke).toHaveBeenCalledWith("media_view_changed"));
+  });
+
   it("opens the selected library and persists it", async () => {
     const user = userEvent.setup();
     const selectFolder = vi.fn().mockResolvedValue("C:\\Lakomics");
@@ -433,7 +445,9 @@ describe("App", () => {
       const host = stage.querySelector(`[data-motion-view="${area}"]`);
       // A viewer outside every area paints over whatever area is shown.
       const overlay = document.querySelector('.asset-viewer') && !document.querySelector('[data-motion-view] .asset-viewer') ? '+viewer over it' : '';
-      const frame = `${area}:${host?.querySelector('.asset-viewer') ? 'viewer' : host?.querySelector('.asset-browser') ? 'gallery' : 'home'}${overlay}`;
+      // The 에셋 sidebar (분류 / 에셋 보기) must not flash in while a Home image opens or closes.
+      const sidebar = document.querySelector('.workspace-index-slot[data-state="open"] [aria-label="에셋 보기"]') ? '+asset sidebar' : '';
+      const frame = `${area}:${host?.querySelector('.asset-viewer') ? 'viewer' : host?.querySelector('.asset-browser') ? 'gallery' : 'home'}${overlay}${sidebar}`;
       if (frames[frames.length - 1] !== frame) frames.push(frame);
     };
     render(<Profiler id="home-navigation" onRender={record}><App gateway={libraryGateway} subscribeDrops={noDrops} /></Profiler>);

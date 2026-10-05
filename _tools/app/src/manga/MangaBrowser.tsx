@@ -21,6 +21,7 @@ import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
 import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
 import { createKoreanMatcher } from "../shared/koreanSearch";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
+import { useLocalMangaDrop } from "./useLocalMangaDrop";
 
 type MangaSort = "recent" | "title_asc" | "author_asc" | "pages_desc";
 
@@ -70,6 +71,30 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   // shared view swap moves it in from the side of the chosen source, with the source bar still.
   const onlineScreen = useRef<HTMLDivElement>(null), localScreen = useRef<HTMLElement>(null);
   const displayedRef = useRef(displayedSource); displayedRef.current = displayedSource;
+  const [thumbnailBusy, setThumbnailBusy] = useState(false);
+  const thumbnailBusyVisible = useDelayedBusy(thumbnailBusy);
+  const [thumbnailRevisions, setThumbnailRevisions] = useState<Record<string, string>>({});
+  const thumbnailFailure = useRef<{ message: string; ids?: string[] } | null>(null);
+  const reloadLocal = useCallback(async () => {
+    setSeries(await gateway.listMangaSeries());
+    setRefreshedAt(new Date().toISOString());
+  }, [gateway]);
+  const drop = useLocalMangaDrop(gateway, source === "local" && displayedSource === "local" && !!root, localScreen, reloadLocal);
+  async function refreshThumbnails(ids?: string[]) {
+    if (!gateway.refreshLocalMangaThumbnails || thumbnailBusy) return;
+    thumbnailFailure.current = null;
+    setThumbnailBusy(true);
+    try {
+      const result = await gateway.refreshLocalMangaThumbnails(ids);
+      setThumbnailRevisions(previous => ({ ...previous, ...Object.fromEntries(result.refreshedIds.map(id => [id, result.revision])) }));
+      await reloadLocal();
+      if (result.failures.length) {
+        const text = result.failures.map(f => `${f.path}: ${f.message}`).join(" · ");
+        thumbnailFailure.current = { message: text, ids }; setMessage(text);
+      }
+    } catch { const text = "썸네일을 갱신하지 못했습니다"; thumbnailFailure.current = { message: text, ids }; setMessage(text); }
+    finally { setThumbnailBusy(false); }
+  }
   const sourceSwap = useRef({}).current;
   useEffect(() => () => cancelSegmentSwap(sourceSwap), [sourceSwap]);
   useEffect(() => {
@@ -227,24 +252,32 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       controls={<MangaChoiceMenu label="정렬" value={sort} onChange={setSort} options={[
         { value: "recent", label: "최근 변경순" }, { value: "title_asc", label: "제목순" }, { value: "author_asc", label: "작가순" }, { value: "pages_desc", label: "페이지 많은 순" },
       ]} />}
-      actions={root && gateway.previewMangaCatalogRecovery ? <Menu label="망가 관리" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
-        { id: "recovery", label: "카탈로그로 복구", disabled: recoveryBusy, onSelect: () => void previewRecovery() },
+      actions={root ? <Menu label="망가 관리" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+        ...(gateway.refreshLocalMangaThumbnails ? [{ id: "refresh-thumbnails", label: "썸네일 갱신", disabled: thumbnailBusy, onSelect: () => void refreshThumbnails() }] : []),
+        ...(gateway.previewMangaCatalogRecovery ? [{ id: "recovery", label: "카탈로그로 복구", disabled: recoveryBusy, onSelect: () => void previewRecovery() }] : []),
       ]} /> : undefined}
       chrome={{
-        status: scanStatusVisible && source === "local" ? <span role="status">폴더 스캔 중</span> : undefined,
+        status: thumbnailBusyVisible ? <span role="status">썸네일 갱신 중</span> : scanStatusVisible && source === "local" ? <span role="status">폴더 스캔 중</span> : undefined,
         summary: `${mangaSortLabel(sort)}${privacyMode ? " · 비공개" : ""}${nsfwFilter ? " · NSFW 필터" : ""}`,
         search: { scope: "로컬 망가", label: "망가 검색", placeholder: "제목 또는 작가 검색", query, onApply: setQuery },
       }} />}
-    {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
+    {message && <Toast onDismiss={() => setMessage(null)} actionLabel={thumbnailFailure.current?.message === message ? "다시 시도" : undefined}
+      onAction={() => void refreshThumbnails(thumbnailFailure.current?.ids)}>{message}</Toast>}
+    {drop.notice && <Toast onDismiss={drop.dismiss} actionLabel={drop.notice.token ? "되돌리기" : "다시 시도"} onAction={drop.notice.token ? () => void drop.undo() : drop.retry}
+      actionDisabled={drop.undoing} secondaryActionLabel={drop.notice.token && drop.notice.failedPaths.length ? "다시 시도" : undefined} onSecondaryAction={drop.retry}>{drop.notice.text}</Toast>}
+    {drop.over && <div className="manga-browser__drop" role="status">폴더 또는 ZIP·CBZ를 놓아 작품 가져오기</div>}
     {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onRemoteLookup={gateway.refreshMangaCatalogRecoveryRemote ? () => void refreshRecoveryRemote() : undefined} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}
     <div ref={gridScroll} tabIndex={0} data-search-results="" className="manga-browser__content" inert={source !== "local"}>
       {loadError && !series ? <EmptyState title="망가 목록을 불러오지 못했습니다" />
         : root === null ? <EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState>
         : !series ? <MangaSkeletonGrid /> : series.length === 0 ? (
-        <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>
+        <EmptyState title="망가가 없습니다">폴더 또는 ZIP·CBZ 파일을 여기에 놓아 가져오세요.</EmptyState>
       ) : visibleSeries.length === 0 ? (
         <EmptyState title="검색 결과 없음" hint="다른 제목이나 작가 이름으로 검색하세요." />
-      ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount} coverUrl={mangaCoverUrl(entry.id)} privacyMode={catalogMasked} onOpen={() => onOpenSeries?.(entry)} />)}</div>}
+      ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount}
+        coverUrl={`${mangaCoverUrl(entry.id)}${thumbnailRevisions[entry.id] ? `?revision=${encodeURIComponent(thumbnailRevisions[entry.id])}` : ""}`}
+        onRefreshThumbnail={gateway.refreshLocalMangaThumbnails ? () => void refreshThumbnails([entry.id]) : undefined} refreshingThumbnail={thumbnailBusy}
+        privacyMode={catalogMasked} onOpen={() => onOpenSeries?.(entry)} />)}</div>}
     </div>
     <Scrubber input="pointer" scrollRef={gridScroll} total={visibleSeries.length} sort={scrubberSort} hidden={source !== "local" || displayedSource !== "local"} />
   </section>}</>;

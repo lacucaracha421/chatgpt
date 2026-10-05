@@ -37,6 +37,7 @@ import { hasWorkspaceIndex, WorkspaceNavigation, workspaceArea } from "../layout
 import { AreaPainted, AreaSwitch, MotionScope, viewReady } from "../shared/motion/AreaSwitch";
 import { ChromeContext, useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { LightweightModeIndicator, WindowControls } from "../layout/WindowControls";
+import { useMediaViewChanged } from "../library/mediaViewChanged";
 import { libraryGateway } from "../library/client";
 import { commandErrorMessage } from "../library/errorMessage";
 import { LibraryProvider, useLibrary } from "../library/LibraryContext";
@@ -104,6 +105,9 @@ type AppProps = {
   subscribeExtensionIngest?: ExtensionIngestListener;
 };
 
+/** An image opened from Home keeps Home's sidebar: the viewer is the destination, not the 에셋 area behind it. */
+const HOME_VIEW: AssetView = { kind: "home" };
+
 export function App({
   gateway = libraryGateway,
   selectFolder = selectLibraryFolder,
@@ -163,6 +167,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const assetNavigationMemory = useRef<AssetNavigationMemory>(new Map());
   // The app opens on Home (HOME-DASH-001); the rail's 에셋 opens the library.
   const [view, setView] = useState<AssetView>(initialWorkspaceView);
+  useMediaViewChanged(JSON.stringify(view));
   const area = workspaceSwitchKey(view);
   const [shownArea, setShownArea] = useState(area);
   const [areaSettling, setAreaSettling] = useState(false);
@@ -220,6 +225,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   /** The requested asset was opened from Home: its viewer is the destination, and closing it returns Home. */
   const [homeAsset, setHomeAsset] = useState(false);
+  /** Closing that image keeps Home's sidebar until Home is shown again, so the 에셋 sidebar never flashes. */
+  const [homeAssetLeaving, setHomeAssetLeaving] = useState(false);
+  useEffect(() => { if (homeAssetLeaving && shownArea === "home") setHomeAssetLeaving(false); }, [homeAssetLeaving, shownArea]);
   const [reviewCount, setReviewCount] = useState(0);
   const [videoReviewAssetIds, setVideoReviewAssetIds] = useState<string[]>([]);
   const [trashCount, setTrashCount] = useState(0);
@@ -434,6 +442,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const homeReturnRef = useRef(false);
   const assetOpenRequest = useRef(0);
   function navigateView(next: AssetView, options: { fromHome?: boolean } = {}) {
+    setHomeAssetLeaving(false);
     // A vault recovery key shown once in Settings is lost if Settings closes (asks first).
     if (view.kind === "settings" && !confirmLeaveVaultRecovery()) return;
     assetOpenRequest.current += 1;
@@ -560,6 +569,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
   function leaveHomeAsset() {
     navigateView({ kind: "home" });
+    setHomeAssetLeaving(true);
     setRequestedAsset(null);
     setHomeAsset(false);
   }
@@ -680,7 +690,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         <WorkspaceChromeProvider scope={JSON.stringify(shownView.current)} pending={area !== shownArea}>
         <AppShell
           sidebar={
-            <WorkspaceNavigation view={shownView.current} requestedView={view} settling={areaSettling} collectionType={preferences.collectionType}
+            <WorkspaceNavigation view={homeAsset || homeAssetLeaving ? HOME_VIEW : shownView.current} requestedView={homeAsset || homeAssetLeaving ? HOME_VIEW : view} settling={areaSettling} collectionType={preferences.collectionType}
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               unsortedCount={unsortedCount} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}

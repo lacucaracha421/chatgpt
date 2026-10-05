@@ -16,6 +16,9 @@ use super::Library;
 
 const THUMB_DIR: &str = ".lakomics-thumbs";
 
+#[path = "manga_import.rs"]
+mod manga_import;
+
 /// The manga root for this computer. With machine settings configured, a
 /// machine-local entry wins; otherwise the legacy shared value is adopted (and
 /// recorded for this machine) only when it is an existing absolute directory
@@ -487,6 +490,12 @@ pub(crate) fn list_page_files(folder: &Path) -> Result<Vec<String>, LibraryError
         return Ok(Vec::new());
     };
     for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        if entry.path().symlink_metadata().is_ok_and(|m| manga_import::is_link(&m)) {
+            continue;
+        }
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(stem) = name.split_once('.') else {
             continue;

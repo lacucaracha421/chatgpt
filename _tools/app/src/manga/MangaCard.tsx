@@ -4,6 +4,8 @@ import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { StableImage } from "../shared/ui/StableImage";
+import { Menu } from "../shared/ui/Menu";
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 
 export type MangaCardProps = {
   title: string;
@@ -20,11 +22,16 @@ export type MangaCardProps = {
   savedEdition?: boolean;
   bookmarkPending?: boolean;
   onBookmark?: () => void;
+  onRefreshThumbnail?: () => void;
+  refreshingThumbnail?: boolean;
 };
 
 /** Shared cover object: the corner bookmark and page badge belong to the artwork. */
-export function MangaCard({ title, displayTitle = title, artist, pageCount, coverUrl, privacyMode, opening, onOpen, onRead, selected, bookmarked, savedEdition, bookmarkPending, onBookmark }: MangaCardProps) {
+export function MangaCard({ title, displayTitle = title, artist, pageCount, coverUrl, privacyMode, opening, onOpen, onRead, selected, bookmarked, savedEdition, bookmarkPending, onBookmark, onRefreshThumbnail, refreshingThumbnail }: MangaCardProps) {
   return <article className="manga-card">
+    {onRefreshThumbnail && <div className="manga-card__menu"><Menu label={`${title} 관리`} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+      { id: "refresh-thumbnail", label: "썸네일 갱신", disabled: refreshingThumbnail, onSelect: onRefreshThumbnail },
+    ]} /></div>}
     <button type="button" className="manga-card__body" aria-label={`${title} 상세 보기`} aria-pressed={selected} disabled={opening} onClick={event => {
       // One click opens the detail at once (user 2026-10-05); the second click of a double click
       // is ignored here so only the double click's reader opens.

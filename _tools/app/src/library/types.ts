@@ -1591,6 +1591,10 @@ export interface LibraryGateway {
   getOtherMachineMangaRoot?(): Promise<string | null>;
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;
+  importLocalManga?(paths: string[]): Promise<{ count: number; undoToken: string | null; archivesRetained: number; failures: { path: string; message: string }[] }>;
+  undoLocalMangaImport?(token: string): Promise<{ count: number; failures: { path: string; message: string }[] }>;
+  dismissLocalMangaImport?(token: string): Promise<void>;
+  refreshLocalMangaThumbnails?(ids?: string[]): Promise<{ refreshedIds: string[]; revision: string; failures: { path: string; message: string }[] }>;
   getMangaFrequentIndex?(tagLimit?: number, artistLimit?: number): Promise<MangaFrequentIndex>;
   listMangaIndexPins?(): Promise<MangaIndexIdentity[]>;
   addMangaIndexPin?(identity: MangaIndexIdentity): Promise<void>;

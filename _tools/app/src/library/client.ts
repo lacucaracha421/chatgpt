@@ -661,6 +661,10 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   getOtherMachineMangaRoot: () => invoke<string | null>("get_other_machine_manga_root"),
   setMangaRoot: (path) => invoke("set_manga_root", { path }),
   scanManga: () => invoke<number>("scan_manga"),
+  importLocalManga: paths => invoke("import_local_manga", { paths }),
+  undoLocalMangaImport: token => invoke("undo_local_manga_import", { token }),
+  dismissLocalMangaImport: token => invoke("dismiss_local_manga_import", { token }),
+  refreshLocalMangaThumbnails: ids => invoke("refresh_local_manga_thumbnails", { ids: ids ?? null }),
   listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),
   previewMangaCatalogRecovery: () =>
     invoke<MangaCatalogRecoveryPreview>("preview_manga_catalog_recovery"),

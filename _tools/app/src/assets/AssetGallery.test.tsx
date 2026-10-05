@@ -7,6 +7,12 @@ import { GalleryViewMenu } from "./GalleryViewMenu";
 import { useState } from "react";
 import { readFileSync } from "node:fs";
 
+const mediaBridge = vi.hoisted(() => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@tauri-apps/api/core", async (original) => ({
+  ...await original<typeof import("@tauri-apps/api/core")>(),
+  invoke: mediaBridge.invoke,
+}));
+
 // Width 840 rounds to 848; six square items, 6px gaps, one date heading.
 const MEASURED_EIGHT = 2 * ((848 - 5 * 6) / 6) + 44 + 6;
 const RESERVED_HUNDRED = Math.ceil(100 / 4) * (MEASURED_EIGHT / 2);
@@ -24,6 +30,21 @@ afterEach(() => {
 });
 
 describe("AssetGallery", () => {
+  it("notifies the media queue when the gallery folder or query scope changes", () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    try {
+      const { rerender } = render(<AssetGallery layout="masonry" scopeKey="folder-a" items={[]} />);
+      mediaBridge.invoke.mockClear();
+      rerender(<AssetGallery layout="masonry" scopeKey="folder-b" items={[]} />);
+      expect(mediaBridge.invoke).toHaveBeenCalledExactlyOnceWith("media_view_changed");
+      rerender(<AssetGallery layout="masonry" scopeKey="folder-b:filtered" items={[]} />);
+      expect(mediaBridge.invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+      mediaBridge.invoke.mockClear();
+    }
+  });
+
   it("measures changed folder content before paint without waiting for ResizeObserver", () => {
     const measured: string[] = [];
     const original = HTMLElement.prototype.getBoundingClientRect;

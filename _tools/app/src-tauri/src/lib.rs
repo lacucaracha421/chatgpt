@@ -229,6 +229,7 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
+            media_protocol_queue::media_view_changed,
             workload::workload_profile,
             performance::performance_profile,
             workload::workload_quit,
@@ -530,6 +531,10 @@ pub fn run() {
             commands::set_manga_root,
             commands::get_other_machine_manga_root,
             commands::scan_manga,
+            commands::import_local_manga,
+            commands::undo_local_manga_import,
+            commands::dismiss_local_manga_import,
+            commands::refresh_local_manga_thumbnails,
             commands::list_manga_series,
             commands::get_manga_frequent_index,
             commands::list_manga_index_pins,

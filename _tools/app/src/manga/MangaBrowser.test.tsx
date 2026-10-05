@@ -7,6 +7,20 @@ import { MangaBrowser } from "./MangaBrowser";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WindowControls } from "../layout/WindowControls";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
+import type { NativeFileDropEvent } from "../ingestion/useFileDrop";
+
+const nativeDrops = vi.hoisted(() => ({ handlers: new Set<(event: NativeFileDropEvent) => void>() }));
+vi.mock("../ingestion/useFileDrop", async importOriginal => ({
+  ...await importOriginal<typeof import("../ingestion/useFileDrop")>(),
+  subscribeToTauriDrops: vi.fn(async (handler: (event: NativeFileDropEvent) => void) => {
+    nativeDrops.handlers.add(handler);
+    return () => nativeDrops.handlers.delete(handler);
+  }),
+}));
+
+function nativeDrop(event: NativeFileDropEvent) {
+  act(() => { for (const handler of nativeDrops.handlers) handler(event); });
+}
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -40,6 +54,76 @@ const series: MangaSeries[] = [
 ];
 
 describe("MangaBrowser", () => {
+  it("imports only drops on the shown local view, shows a target and an undo toast", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.importLocalManga = vi.fn().mockResolvedValue({ count: 2, undoToken: "import-1", archivesRetained: 1, failures: [{ path: "bad.rar", message: "ZIP, CBZ만 가져올 수 있습니다" }] });
+    gateway.undoLocalMangaImport = vi.fn().mockResolvedValue({ count: 2, failures: [] });
+    gateway.dismissLocalMangaImport = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderBrowser(gateway);
+    nativeDrop({ type: "drop", paths: ["elsewhere"], position: { x: 0, y: 0 } });
+    expect(gateway.importLocalManga).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("radio", { name: "로컬" }));
+    await screen.findByText("T1");
+    await waitFor(() => expect(screen.getByText("T1")).toBeVisible());
+    const bounds = vi.spyOn(container.querySelector<HTMLElement>(".manga-browser.manga-browser__screen")!, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 600, width: 400, height: 600, toJSON: () => ({}) });
+    nativeDrop({ type: "enter", paths: ["folder", "book.cbz"], position: { x: 0, y: 0 } });
+    expect(screen.getByText("폴더 또는 ZIP·CBZ를 놓아 작품 가져오기")).toBeVisible();
+    nativeDrop({ type: "leave" });
+    expect(screen.queryByText("폴더 또는 ZIP·CBZ를 놓아 작품 가져오기")).not.toBeInTheDocument();
+    nativeDrop({ type: "drop", paths: ["folder", "book.cbz"], position: { x: 0, y: 0 } });
+    await waitFor(() => expect(gateway.importLocalManga).toHaveBeenCalledWith(["folder", "book.cbz"]));
+    expect(await screen.findByText(/2개 작품을 가져왔습니다/)).toHaveTextContent("압축 파일 원본은 그대로 두었습니다");
+    expect(screen.getByText(/2개 작품을 가져왔습니다/)).toHaveTextContent("bad.rar");
+    await userEvent.click(screen.getByRole("button", { name: "되돌리기" }));
+    await waitFor(() => expect(gateway.undoLocalMangaImport).toHaveBeenCalledWith("import-1"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument());
+    nativeDrop({ type: "drop", paths: ["outside"], position: { x: 10000, y: 10000 } });
+    expect(gateway.importLocalManga).toHaveBeenCalledTimes(1);
+    bounds.mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) });
+    nativeDrop({ type: "drop", paths: ["hidden-view"], position: { x: 0, y: 0 } });
+    expect(gateway.importLocalManga).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes a selected work or all thumbnails manually and changes displayed URLs", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.refreshLocalMangaThumbnails = vi.fn().mockResolvedValueOnce({ refreshedIds: ["s1"], revision: "new-one", failures: [] }).mockResolvedValueOnce({ refreshedIds: ["s1", "s2"], revision: "new-all", failures: [] });
+    const { container } = renderBrowser(gateway);
+    await userEvent.click(screen.getByRole("radio", { name: "로컬" }));
+    await screen.findByText("T1");
+    const first = container.querySelector<HTMLImageElement>('img[alt="T1 표지"]')!;
+    const before = first.getAttribute("src");
+    fireEvent.load(first);
+    expect(gateway.refreshLocalMangaThumbnails).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "T1 관리" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "썸네일 갱신" }));
+    await waitFor(() => expect(gateway.refreshLocalMangaThumbnails).toHaveBeenCalledWith(["s1"]));
+    await waitFor(() => expect(container.querySelector('img[src*="revision=new-one"]')).not.toBeNull());
+    const refreshed = container.querySelector<HTMLImageElement>('img[src*="revision=new-one"]')!;
+    fireEvent.load(refreshed);
+    expect(refreshed.getAttribute("src")).not.toBe(before);
+    await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "썸네일 갱신" }));
+    await waitFor(() => expect(gateway.refreshLocalMangaThumbnails).toHaveBeenLastCalledWith(undefined));
+    await waitFor(() => expect(container.querySelectorAll('img[src*="revision=new-all"]')).toHaveLength(2));
+    for (const image of container.querySelectorAll('img[src*="revision=new-all"]')) fireEvent.load(image);
+  });
+
+  it("keeps the grid visible and delays the busy label during bulk thumbnail refresh", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    let complete!: (value: { refreshedIds: string[]; revision: string; failures: [] }) => void;
+    gateway.refreshLocalMangaThumbnails = vi.fn(() => new Promise<{ refreshedIds: string[]; revision: string; failures: [] }>(resolve => { complete = resolve; }));
+    renderBrowser(gateway);
+    await userEvent.click(screen.getByRole("radio", { name: "로컬" }));
+    await screen.findByText("T1");
+    await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "썸네일 갱신" }));
+    expect(screen.queryByText("썸네일 갱신 중")).not.toBeInTheDocument();
+    expect(screen.getByText("T1")).toBeVisible();
+    expect(await screen.findByText("썸네일 갱신 중")).toBeVisible();
+    await act(async () => complete({ refreshedIds: ["s1", "s2"], revision: "bulk", failures: [] }));
+    await waitFor(() => expect(screen.queryByText("썸네일 갱신 중")).not.toBeInTheDocument());
+    expect(screen.getByText("T1")).toBeVisible();
+  });
   it("keeps the current grid inert until the other source is ready, then keeps both screens cached", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     gateway.getOnlineCatalogStatus = vi.fn().mockResolvedValue({ installed: true, workCount: 1, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null });

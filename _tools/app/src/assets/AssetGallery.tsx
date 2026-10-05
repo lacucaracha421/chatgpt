@@ -1,3 +1,4 @@
+import { useMediaViewChanged } from "../library/mediaViewChanged";
 import { useAssetMasks, usePrivacy } from "../privacy/PrivacyContext";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { IconButton } from "../shared/ui/IconButton";
@@ -394,6 +395,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   useLayoutEffect(() => { paintedRef.current = { scopeKey, scrollTop, ids: new Set(mountedTiles.map(tile => tile.asset.id)) }; });
   const areaVisible = useContext(AreaVisible);
   const folderScope = folderMoveScope(navigationScopeKey);
+  useMediaViewChanged(scopeKey, areaVisible);
   const visitScope = useRef(folderScope);
   if (!areaVisible || visitScope.current === undefined) visitScope.current = folderScope;
   useFirstAppearance(scrollRef, items.length, visitScope.current === folderScope, `asset-gallery:${mediaSource}`);

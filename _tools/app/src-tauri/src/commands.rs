@@ -2014,6 +2014,48 @@ pub async fn scan_manga(state: State<'_, AppState>) -> Result<u64, CommandError>
 }
 
 #[tauri::command]
+pub async fn import_local_manga(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let library = current_required(state).map_err(|e| e.message)?;
+    tauri::async_runtime::spawn_blocking(move || library.import_local_manga(paths))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn undo_local_manga_import(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let library = current_required(state).map_err(|e| e.message)?;
+    tauri::async_runtime::spawn_blocking(move || library.undo_local_manga_import(&token))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn dismiss_local_manga_import(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?.dismiss_local_manga_import(&token);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn refresh_local_manga_thumbnails(
+    ids: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let library = current_required(state).map_err(|e| e.message)?;
+    tauri::async_runtime::spawn_blocking(move || library.refresh_local_manga_thumbnails(ids))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
     let library = current_required(state)?;
     library.list_manga_series().map_err(CommandError::from)
