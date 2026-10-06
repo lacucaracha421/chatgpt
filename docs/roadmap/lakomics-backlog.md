@@ -303,6 +303,13 @@ Thumbnail-size slider is superseded by user-chosen shared row-count control (202
 
 Status: `PARTIAL` — clarify any remaining inventory/recorded-era metric definitions (unverified 2026-10-03); never infer activity from file timestamps. Source exists; native acceptance was closed 2026-10-05.
 
+<a id="collector-radar-001--image-based-already-have-and-taste-match-marks-on-x"></a>
+## COLLECTOR-RADAR-001 — Image-based "already have" and taste-match marks on X
+
+Status: `IDEA` — user 2026-10-03 liked this one among the brainstormed tools; not approved for implementation, do not start until the user explicitly asks.
+While browsing X, the collector marks each image as already in the library by image content, not only by URL, so reposts from other accounts are caught; it may also show a taste-match score based on the library. Today's collector saved marks are URL-based only (`extension-list/src/x-gallery.js` `savedMedia`). Reuse the PC similarity and artist-style data through the existing collector ↔ PC connection; the score's definition and privacy of what is sent stay open.
+Not chosen 2026-10-03 (judged impractical): source-loss monitoring, reverse-search quality upgrade, bookstore barcode check, yearly recap, tablet photo-frame mode.
+
 <a id="idea-002--asset-date-timeline-exploration"></a>
 ## IDEA-002 — Date timeline exploration
 
