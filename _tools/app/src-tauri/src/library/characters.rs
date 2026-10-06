@@ -87,6 +87,114 @@ fn scoped_images(
     Ok(rows.collect::<std::result::Result<_, _>>()?)
 }
 
+/// The database rows behind [`Library::read_character_targets`]; turned into targets by
+/// [`Library::assemble_character_targets`], which needs no database lock.
+#[derive(Debug, Default)]
+pub(super) struct TargetRows {
+    ids: Vec<String>,
+    rows: BTreeMap<String, Target>,
+    regions: BTreeMap<String, super::character_reference_regions::RegionBindings>,
+    references: BTreeMap<String, Vec<(u32, Option<String>, String)>>,
+    learned: BTreeMap<String, Vec<LearnedRow>>,
+    scoped: BTreeMap<(String, String), (String, String)>,
+}
+
+/// (asset id, stored hash, current hash, relative path, Asset status, media kind)
+type LearnedRow = (String, String, String, String, String, String);
+
+impl TargetRows {
+    /// Every Asset a listed card may show (thumbnail, references, learned references).
+    pub(super) fn shown_asset_ids(&self) -> impl Iterator<Item = &str> {
+        self.rows
+            .values()
+            .filter_map(|target| target.thumbnail_asset_id.as_deref())
+            .chain(
+                self.references
+                    .values()
+                    .flatten()
+                    .filter_map(|(_, asset_id, _)| asset_id.as_deref()),
+            )
+            .chain(self.learned.values().flatten().map(|row| row.0.as_str()))
+    }
+}
+
+/// Every database read for the listed targets, a fixed number of statements.
+pub(super) fn read_character_target_rows(
+    connection: &Connection,
+    ids: &[String],
+) -> Result<TargetRows> {
+    if ids.is_empty() {
+        return Ok(TargetRows::default());
+    }
+    let ids_json = serde_json::to_string(ids)?;
+    let rows = connection
+            .prepare_cached("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
+            (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal'),manual_only,
+            (SELECT position FROM character_folder_order WHERE target_id=character_targets.id AND legacy_sidebar=0)
+            FROM character_targets WHERE id IN (SELECT value FROM json_each(?1))")?
+            .query_map([&ids_json], |r| Ok(Target {
+                id:r.get(0)?,folder_order:r.get(9)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
+                enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new(),thumbnail_revisions:BTreeMap::new()
+            }))?
+            .map(|row| row.map(|target| (target.id.clone(), target)))
+            .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
+    let regions = super::character_reference_regions::read_regions_of(connection, &ids_json)?;
+    let mut references = BTreeMap::<String, Vec<(u32, Option<String>, String)>>::new();
+    for row in connection
+            .prepare_cached("SELECT target_id,slot,asset_id,asset_hash FROM character_references WHERE target_id IN (SELECT value FROM json_each(?1)) ORDER BY target_id,slot")?
+            .query_map([&ids_json], |r| {
+                Ok((r.get::<_, String>(0)?, (r.get::<_, u32>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, String>(3)?)))
+            })?
+        {
+            let (target, reference) = row?;
+            references.entry(target).or_default().push(reference);
+        }
+    let mut learned = BTreeMap::<String, Vec<LearnedRow>>::new();
+    for row in connection
+            .prepare_cached("SELECT l.target_id,l.asset_id,l.asset_hash,a.content_hash,a.relative_path,a.status,a.media_kind FROM character_learned_references l JOIN assets a ON a.id=l.asset_id WHERE l.target_id IN (SELECT value FROM json_each(?1)) ORDER BY l.target_id,l.created_at,l.asset_id")?
+            .query_map([&ids_json], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    (
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ),
+                ))
+            })?
+        {
+            let (target, reference) = row?;
+            learned.entry(target).or_default().push(reference);
+        }
+    // Every (series, Asset) pair any reference may check, resolved in one statement.
+    let mut pairs = BTreeSet::<(&str, &str)>::new();
+    for (id, target) in &rows {
+        let Some(series) = target.series_classification_id.as_deref() else {
+            continue;
+        };
+        for (_, asset_id, _) in references.get(id).into_iter().flatten() {
+            if let Some(asset_id) = asset_id {
+                pairs.insert((series, asset_id));
+            }
+        }
+        for (asset_id, ..) in learned.get(id).into_iter().flatten() {
+            pairs.insert((series, asset_id));
+        }
+    }
+    let scoped = scoped_images(connection, &pairs)?;
+    Ok(TargetRows {
+        ids: ids.to_vec(),
+        rows,
+        regions,
+        references,
+        learned,
+        scoped,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetDraft {
@@ -315,16 +423,19 @@ pub struct Decision {
 
 impl Library {
     pub fn list_character_targets(&self) -> Result<Vec<Target>> {
-        let connection = self.connection()?;
-        let ids = connection
-            .prepare("SELECT t.id FROM character_targets t JOIN character_folder_order o ON o.target_id=t.id ORDER BY o.position, t.id")?
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut targets = self.read_character_targets(&connection, &ids)?;
-        let revisions = thumbnail_revisions(
-            &connection,
-            targets.iter().flat_map(Target::shown_asset_ids),
-        )?;
+        // Rows and thumbnail revisions under the database lock; the reference file checks
+        // (one per reference, a disk access each when not cached) after releasing it.
+        let (rows, revisions) = {
+            let connection = self.connection()?;
+            let ids = connection
+                .prepare("SELECT t.id FROM character_targets t JOIN character_folder_order o ON o.target_id=t.id ORDER BY o.position, t.id")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let rows = read_character_target_rows(&connection, &ids)?;
+            let revisions = thumbnail_revisions(&connection, rows.shown_asset_ids())?;
+            (rows, revisions)
+        };
+        let mut targets = self.assemble_character_targets(rows)?;
         for target in &mut targets {
             target.thumbnail_revisions = target
                 .shown_asset_ids()
@@ -335,8 +446,17 @@ impl Library {
     }
 
     pub fn get_character_target(&self, id: &str) -> Result<Target> {
-        let connection = self.connection()?;
-        self.read_character_target(&connection, id)
+        self.character_targets_unlocked(&[id.to_owned()])?
+            .pop()
+            .ok_or(Error::NotFound)
+    }
+
+    /// The listed targets (missing ids skipped), holding the database lock only while their
+    /// rows are read: the reference file checks run after it is released. For reads that
+    /// need no transaction around the targets.
+    pub(super) fn character_targets_unlocked(&self, ids: &[String]) -> Result<Vec<Target>> {
+        let rows = read_character_target_rows(&*self.connection()?, ids)?;
+        self.assemble_character_targets(rows)
     }
 
     pub fn character_folder_image_count(
@@ -1615,77 +1735,31 @@ impl Library {
 
     /// The listed targets (missing ids are skipped) in the given order. Each table is read
     /// once for all of them, so the statement count does not grow with the target count.
+    /// Callers that can release the database lock first use [`read_character_target_rows`]
+    /// and [`Self::assemble_character_targets`] instead, so the reference file checks run
+    /// without the lock.
     pub(super) fn read_character_targets(
         &self,
         connection: &Connection,
         ids: &[String],
     ) -> Result<Vec<Target>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let ids_json = serde_json::to_string(ids)?;
-        let mut rows = connection
-            .prepare_cached("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
-            (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal'),manual_only,
-            (SELECT position FROM character_folder_order WHERE target_id=character_targets.id AND legacy_sidebar=0)
-            FROM character_targets WHERE id IN (SELECT value FROM json_each(?1))")?
-            .query_map([&ids_json], |r| Ok(Target {
-                id:r.get(0)?,folder_order:r.get(9)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
-                enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new(),thumbnail_revisions:BTreeMap::new()
-            }))?
-            .map(|row| row.map(|target| (target.id.clone(), target)))
-            .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
-        let mut regions =
-            super::character_reference_regions::read_regions_of(connection, &ids_json)?;
-        let mut references = BTreeMap::<String, Vec<(u32, Option<String>, String)>>::new();
-        for row in connection
-            .prepare_cached("SELECT target_id,slot,asset_id,asset_hash FROM character_references WHERE target_id IN (SELECT value FROM json_each(?1)) ORDER BY target_id,slot")?
-            .query_map([&ids_json], |r| {
-                Ok((r.get::<_, String>(0)?, (r.get::<_, u32>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, String>(3)?)))
-            })?
-        {
-            let (target, reference) = row?;
-            references.entry(target).or_default().push(reference);
-        }
-        type Learned = (String, String, String, String, String, String);
-        let mut learned = BTreeMap::<String, Vec<Learned>>::new();
-        for row in connection
-            .prepare_cached("SELECT l.target_id,l.asset_id,l.asset_hash,a.content_hash,a.relative_path,a.status,a.media_kind FROM character_learned_references l JOIN assets a ON a.id=l.asset_id WHERE l.target_id IN (SELECT value FROM json_each(?1)) ORDER BY l.target_id,l.created_at,l.asset_id")?
-            .query_map([&ids_json], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    (
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                    ),
-                ))
-            })?
-        {
-            let (target, reference) = row?;
-            learned.entry(target).or_default().push(reference);
-        }
-        // Every (series, Asset) pair any reference may check, resolved in one statement.
-        let mut pairs = BTreeSet::<(&str, &str)>::new();
-        for (id, target) in &rows {
-            let Some(series) = target.series_classification_id.as_deref() else {
-                continue;
-            };
-            for (_, asset_id, _) in references.get(id).into_iter().flatten() {
-                if let Some(asset_id) = asset_id {
-                    pairs.insert((series, asset_id));
-                }
-            }
-            for (asset_id, ..) in learned.get(id).into_iter().flatten() {
-                pairs.insert((series, asset_id));
-            }
-        }
-        let scoped = scoped_images(connection, &pairs)?;
+        self.assemble_character_targets(read_character_target_rows(connection, ids)?)
+    }
+
+    /// Reference statuses, readiness and fingerprints from rows read by
+    /// [`read_character_target_rows`]. Checks reference files; reads no database row.
+    pub(super) fn assemble_character_targets(&self, rows: TargetRows) -> Result<Vec<Target>> {
+        let _span = crate::perf_log::StartupSpan::start("character.reference_files");
+        let TargetRows {
+            ids,
+            mut rows,
+            mut regions,
+            mut references,
+            mut learned,
+            scoped,
+        } = rows;
         let mut targets = Vec::with_capacity(ids.len());
-        for id in ids {
+        for id in &ids {
             let Some(mut target) = rows.remove(id) else {
                 continue;
             };

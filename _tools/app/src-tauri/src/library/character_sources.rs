@@ -17,6 +17,8 @@ struct Stamp {
     modified: std::time::SystemTime,
     identity: Vec<u64>,
 }
+/// A file's identity from its metadata alone (no read handle). Used for the reference
+/// availability cache; [`stamp`] (with the Windows file index) guards inference snapshots.
 #[cfg(unix)]
 fn metadata_stamp(m: &std::fs::Metadata) -> Result<Stamp> {
     use std::os::unix::fs::MetadataExt;
@@ -24,6 +26,17 @@ fn metadata_stamp(m: &std::fs::Metadata) -> Result<Stamp> {
         length: m.len(),
         modified: m.modified()?,
         identity: vec![m.dev(), m.ino(), m.ctime() as u64, m.ctime_nsec() as u64],
+    })
+}
+/// Stable std exposes no file index from path metadata on Windows: size, last write and
+/// creation time (a replaced file is a new file with its own creation time) identify it.
+#[cfg(windows)]
+fn metadata_stamp(m: &std::fs::Metadata) -> Result<Stamp> {
+    use std::os::windows::fs::MetadataExt;
+    Ok(Stamp {
+        length: m.file_size(),
+        modified: m.modified()?,
+        identity: vec![m.creation_time(), m.last_write_time()],
     })
 }
 fn stamp(file: &File) -> Result<Stamp> {
@@ -58,59 +71,82 @@ fn stamp(file: &File) -> Result<Stamp> {
 /// content key and filesystem identity match; missing/unreadable files are retried.
 #[derive(Debug, Default)]
 pub(super) struct ReferenceFiles {
-    #[cfg(unix)]
     files: std::collections::HashMap<String, (String, Stamp)>,
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 impl ReferenceFiles {
     pub(super) fn clear(&mut self) {
         self.files.clear();
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Reference availability checks on this thread: (all, made while the library's
+    /// database lock was held, files opened to confirm an uncached identity).
+    pub(super) static REFERENCE_CHECKS: std::cell::Cell<(usize, usize, usize)> =
+        const { std::cell::Cell::new((0, 0, 0)) };
+}
+
 impl Library {
+    /// True when `relative` is a readable library file whose identity was confirmed for
+    /// `hash`. A cached identity costs one metadata read; a new or changed file (other
+    /// size, times or file identity) is opened once to confirm it. Call it without the
+    /// database lock: on a cold disk cache every uncached check is a disk access.
     pub(super) fn character_reference_available(&self, relative: &str, hash: &str) -> bool {
-        #[cfg(unix)]
-        {
-            let mut cache = self
-                .character_reference_files
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let current = self
-                .library_media_path(relative)
-                .ok()
-                .and_then(|path| std::fs::metadata(path).ok())
-                .filter(|m| m.is_file())
-                .and_then(|m| metadata_stamp(&m).ok());
-            if let Some(identity) = current {
-                if cache
-                    .files
-                    .get(relative)
-                    .is_some_and(|(cached_hash, cached_identity)| {
-                        cached_hash == hash && cached_identity == &identity
-                    })
+        #[cfg(test)]
+        REFERENCE_CHECKS.with(|checks| {
+            let (all, locked, opened) = checks.get();
+            let held = matches!(
+                self.database_lock.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)
+            );
+            checks.set((all + 1, locked + usize::from(held), opened));
+        });
+        let current = self
+            .library_media_path(relative)
+            .ok()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .filter(|m| m.is_file())
+            .and_then(|m| metadata_stamp(&m).ok());
+        let mut cache = self
+            .character_reference_files
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(identity) = current {
+            if cache
+                .files
+                .get(relative)
+                .is_some_and(|(cached_hash, cached_identity)| {
+                    cached_hash == hash && cached_identity == &identity
+                })
+            {
+                return true;
+            }
+            #[cfg(test)]
+            REFERENCE_CHECKS.with(|checks| {
+                let (all, locked, opened) = checks.get();
+                checks.set((all, locked, opened + 1));
+            });
+            if let Ok(media) = self.open_library_media(relative) {
+                if media
+                    .file
+                    .metadata()
+                    .ok()
+                    .and_then(|m| metadata_stamp(&m).ok())
+                    .is_some_and(|opened| opened == identity)
                 {
+                    if cache.files.len() >= 4096 {
+                        cache.files.clear();
+                    }
+                    cache.files.insert(relative.into(), (hash.into(), identity));
                     return true;
                 }
-                if let Ok(media) = self.open_library_media(relative) {
-                    if stamp(&media.file).is_ok_and(|opened| opened == identity) {
-                        if cache.files.len() >= 4096 {
-                            cache.files.clear();
-                        }
-                        cache.files.insert(relative.into(), (hash.into(), identity));
-                        return true;
-                    }
-                }
             }
-            cache.files.remove(relative);
-            false
         }
-        #[cfg(windows)]
-        {
-            let _ = hash;
-            self.open_library_media(relative).is_ok()
-        }
+        cache.files.remove(relative);
+        false
     }
 }
 
@@ -321,5 +357,106 @@ mod tests {
         eprintln!("reference_lifecycle before_assets_per_sec={:.2} after_assets_per_sec={:.2} before_ms_per_asset={:.2} after_ms_per_asset={:.2}",
             candidates as f64 / old.as_secs_f64(), candidates as f64 / prepared_time.as_secs_f64(),
             old.as_secs_f64() * 1000.0 / candidates as f64, prepared_time.as_secs_f64() * 1000.0 / candidates as f64);
+    }
+
+    fn checks() -> (usize, usize, usize) {
+        REFERENCE_CHECKS.with(|checks| checks.get())
+    }
+
+    #[test]
+    fn reference_availability_is_cached_until_the_file_metadata_changes() {
+        let f = Fixture::new();
+        let target = f.ready("Cached");
+        f.library.character_reference_files.lock().unwrap().clear();
+        let hash = &target.references[0].asset_hash;
+        let available = || {
+            f.library
+                .character_reference_available("assets/asset-0.png", hash)
+        };
+        REFERENCE_CHECKS.with(|checks| checks.set((0, 0, 0)));
+        assert!(available());
+        assert!(available());
+        assert!(available());
+        // The first check opens the file once; the rest are metadata reads.
+        assert_eq!(checks(), (3, 0, 1));
+        std::fs::write(f.temp.path().join("assets/asset-0.png"), b"edited in place").unwrap();
+        assert!(available());
+        assert_eq!(checks().2, 2, "a changed file is confirmed again");
+        assert!(available());
+        assert_eq!(checks().2, 2);
+        // A different content key is never answered from the cache.
+        assert!(f
+            .library
+            .character_reference_available("assets/asset-0.png", "other-hash"));
+        assert_eq!(checks().2, 3);
+        std::fs::remove_file(f.temp.path().join("assets/asset-0.png")).unwrap();
+        assert!(!available());
+        assert_eq!(checks().2, 3, "a missing file is not opened");
+    }
+
+    #[test]
+    fn reference_statuses_match_between_locked_and_unlocked_reads() {
+        let f = Fixture::new();
+        let target = f.ready("Statuses");
+        let slot_of = |asset: &str| {
+            target
+                .references
+                .iter()
+                .position(|r| r.asset_id.as_deref() == Some(asset))
+                .unwrap()
+        };
+        std::fs::remove_file(f.temp.path().join("assets/asset-1.png")).unwrap();
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET content_hash='changed' WHERE id='asset-2'",
+                [],
+            )
+            .unwrap();
+        let locked = {
+            let c = f.library.connection().unwrap();
+            f.library.read_character_target(&c, &target.id).unwrap()
+        };
+        let unlocked = f.library.get_character_target(&target.id).unwrap();
+        let listed = f
+            .library
+            .list_character_targets()
+            .unwrap()
+            .into_iter()
+            .find(|t| t.id == target.id)
+            .unwrap();
+        let statuses = |t: &super::super::characters::Target| {
+            t.references.iter().map(|r| r.status).collect::<Vec<_>>()
+        };
+        let mut expected = vec!["ready"; 5];
+        expected[slot_of("asset-1")] = "missing_file";
+        expected[slot_of("asset-2")] = "changed_content";
+        assert_eq!(statuses(&locked), expected);
+        assert_eq!(statuses(&unlocked), expected);
+        assert_eq!(statuses(&listed), expected);
+        assert_eq!(locked.fingerprint, unlocked.fingerprint);
+        assert_eq!(locked.fingerprint, listed.fingerprint);
+        assert!(!listed.ready);
+    }
+
+    #[test]
+    fn listing_and_review_reads_check_reference_files_without_the_database_lock() {
+        let f = Fixture::new();
+        f.ready("A");
+        let b = f.ready("B");
+        REFERENCE_CHECKS.with(|checks| checks.set((0, 0, 0)));
+        assert_eq!(f.library.list_character_targets().unwrap().len(), 2);
+        f.library.get_character_target(&b.id).unwrap();
+        f.library.character_review_pending_map().unwrap();
+        f.library.b36_recommended_pairs().unwrap();
+        f.library.shadow_review_items(None).unwrap();
+        let (all, locked, _) = checks();
+        assert!(all >= 30, "{all}");
+        assert_eq!(locked, 0);
+        // The hook does see a check made under the lock (transactional callers keep it).
+        let c = f.library.connection().unwrap();
+        f.library.read_character_target(&c, &b.id).unwrap();
+        assert_eq!(checks().1, 5);
     }
 }

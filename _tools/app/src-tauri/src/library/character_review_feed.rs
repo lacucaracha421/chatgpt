@@ -152,6 +152,23 @@ impl Library {
             .shadow_review_items(Some("doubtful"))
             .map_err(character_error)?;
         let b36 = self.b36_recommended_pairs().map_err(character_error)?;
+        // Every target the feed may name, read before taking the lock below so their
+        // reference file checks run without it.
+        let wanted = candidates
+            .items
+            .iter()
+            .map(|item| item.target_id.clone())
+            .chain(b36.iter().map(|(target_id, _)| target_id.clone()))
+            .chain(doubtful.items.iter().map(|item| item.target_id.clone()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut read = self
+            .character_targets_unlocked(&wanted)
+            .map_err(character_error)?
+            .into_iter()
+            .map(|target| (target.id.clone(), target))
+            .collect::<HashMap<_, _>>();
         let connection = self.connection()?;
 
         struct Target {
@@ -161,7 +178,7 @@ impl Library {
         let mut targets: HashMap<String, Option<Target>> = HashMap::new();
         let mut target = |id: &str| -> Result<Option<String>, LibraryError> {
             if !targets.contains_key(id) {
-                let info = match self.read_character_target(&connection, id) {
+                let info = match read.remove(id).ok_or(CharacterError::NotFound) {
                     Ok(target) => target
                         .series_classification_id
                         .clone()

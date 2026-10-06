@@ -522,6 +522,26 @@ impl Library {
         };
         let manual = latest_decisions(&c, &rows, true)?;
         let assets = eligible_assets(&c, &rows)?;
+        // The targets of the rows still pending (not decided, Asset eligible), read after
+        // releasing the database lock so their reference file checks run without it.
+        let wanted = rows
+            .iter()
+            .filter(|row| {
+                let decided = manual
+                    .get(&(row.target_id.clone(), row.asset_id.clone()))
+                    .is_some_and(|(decision, _)| decision != "cleared");
+                !decided && assets.contains_key(&(row.asset_id.clone(), row.content_hash.clone()))
+            })
+            .map(|row| row.target_id.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        drop(c);
+        let mut read = self
+            .character_targets_unlocked(&wanted)?
+            .into_iter()
+            .map(|target| (target.id.clone(), target))
+            .collect::<BTreeMap<_, _>>();
         let mut targets: BTreeMap<String, Option<TargetInfo>> = BTreeMap::new();
         for row in rows {
             let origin_tiers = page
@@ -567,7 +587,7 @@ impl Library {
             let target = match targets.entry(row.target_id.clone()) {
                 std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::btree_map::Entry::Vacant(entry) => {
-                    let info = match self.read_character_target(&c, &row.target_id) {
+                    let info = match read.remove(&row.target_id).ok_or(Error::NotFound) {
                         Ok(target) => Some(TargetInfo {
                             name: target.display_name.clone(),
                             enabled: target.enabled,
@@ -865,6 +885,29 @@ mod tests {
                 insert(fixture.temp.path(), &borrowed);
             }
             fixture
+        }
+
+        #[test]
+        fn shadow_review_page_checks_reference_files_without_the_database_lock() {
+            let fixture = fixture_with_rows(10);
+            let checks = &crate::library::character_sources::REFERENCE_CHECKS;
+            checks.with(|count| count.set((0, 0, 0)));
+            let page = fixture
+                .library
+                .character_shadow_review_page(ShadowReviewQuery {
+                    offset: 0,
+                    limit: 200,
+                    mode: None,
+                    series_id: None,
+                })
+                .unwrap();
+            assert_eq!(
+                page.summary.automatic.pending + page.summary.recommended.pending,
+                10
+            );
+            let (all, locked, _) = checks.with(|count| count.get());
+            assert!(all > 0);
+            assert_eq!(locked, 0);
         }
 
         #[test]

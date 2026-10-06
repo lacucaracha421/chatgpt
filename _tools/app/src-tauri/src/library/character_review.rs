@@ -273,18 +273,20 @@ impl Library {
     /// are deliberately left out: this feeds the mobile candidate feed, which only lists what
     /// is saved and lets the PC re-validate every decision when it applies it.
     pub(crate) fn b36_recommended_pairs(&self) -> Result<Vec<(String, String)>> {
-        let connection = self.connection()?;
-        let ids = connection
+        let ids = self
+            .connection()?
             .prepare(
                 "SELECT id FROM character_targets
                  WHERE enabled=1 AND series_classification_id IS NOT NULL ORDER BY id",
             )?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        // Reference file checks without the database lock; the pair queries take it again.
+        let targets = self.character_targets_unlocked(&ids)?;
+        let connection = self.connection()?;
         let mut statement = connection.prepare(B36_RECOMMENDED_TARGET_SQL)?;
         let mut pairs = Vec::new();
-        for id in ids {
-            let target = self.read_character_target(&connection, &id)?;
+        for target in targets {
             let Some(series) = target.series_classification_id.as_deref() else {
                 continue;
             };
@@ -656,14 +658,16 @@ impl Library {
     /// characters, so one round trip beats one call per row. Results are keyed by
     /// target ID and only include characters that actually have pending review.
     pub fn character_review_pending_map(&self) -> Result<std::collections::BTreeMap<String, bool>> {
-        let connection = self.connection()?;
-        let ids = connection
+        let ids = self
+            .connection()?
             .prepare("SELECT id FROM character_targets ORDER BY display_name COLLATE NOCASE, id")?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        // Reference file checks without the database lock; the badge queries take it again.
+        let targets = self.character_targets_unlocked(&ids)?;
+        let connection = self.connection()?;
         let mut pending = std::collections::BTreeMap::new();
-        for id in ids {
-            let target = self.read_character_target(&connection, &id)?;
+        for target in targets {
             if self.review_pending_in(&connection, &target)? {
                 pending.insert(target.id.clone(), true);
             }
