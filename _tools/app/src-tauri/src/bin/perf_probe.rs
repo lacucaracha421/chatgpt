@@ -1067,6 +1067,11 @@ fn series_switch_paths(bench: &mut Bench, library: &Library, snapshot_root: &Pat
         );
         bench.run(
             "series_switch",
+            format!("series_switch/{name}/character_shadow_review_page_limit1_uncached"),
+            || to_value(library.character_shadow_review_page_uncached(from_json(query.clone()))),
+        );
+        bench.run(
+            "series_switch",
             format!("series_switch/{name}/character_s36_readiness"),
             || to_value(library.character_s36_readiness(id)),
         );
@@ -1413,6 +1418,15 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
             "series_open",
             format!("series_open/{name}/shadow_review_page_limit1"),
             candidates,
+        );
+        bench.run(
+            "series_open",
+            format!("series_open/{name}/shadow_review_page_limit1_uncached"),
+            || {
+                to_value(library.character_shadow_review_page_uncached(from_json(
+                    json!({"offset":0,"limit":1,"seriesId":id}),
+                )))
+            },
         );
         bench.run(
             "series_open",
@@ -2564,6 +2578,15 @@ fn character_paths(bench: &mut Bench, library: &Library) {
     let query = json!({"offset": 0, "limit": 40});
     bench.run("characters", "shadow_review_page_all", || {
         to_value(library.character_shadow_review_page(from_json(query.clone())))
+    });
+    // The same pages computed from scratch; the cached ones above reuse the first run.
+    let query = json!({"offset": 0, "limit": 40, "seriesId": series_id});
+    bench.run("characters", "shadow_review_page_series_uncached", || {
+        to_value(library.character_shadow_review_page_uncached(from_json(query.clone())))
+    });
+    let query = json!({"offset": 0, "limit": 40});
+    bench.run("characters", "shadow_review_page_all_uncached", || {
+        to_value(library.character_shadow_review_page_uncached(from_json(query.clone())))
     });
 }
 

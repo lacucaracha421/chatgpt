@@ -11,8 +11,11 @@ use super::{
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
+    io::Read,
     path::Path,
+    sync::{Arc, Mutex, PoisonError},
+    time::SystemTime,
 };
 
 const MAX_PAGE: u32 = 200;
@@ -116,6 +119,7 @@ pub struct ShadowReviewPendingSummary {
     pub targets: Vec<ShadowReviewPendingTarget>,
 }
 
+#[derive(Debug, Clone)]
 struct ShadowRow {
     asset_id: String,
     content_hash: String,
@@ -231,13 +235,6 @@ fn shadow_rows(root: &Path, doubtful: bool) -> Result<Option<(String, Vec<Shadow
         )
     });
     Ok(Some((version, rows)))
-}
-
-struct TargetInfo {
-    name: String,
-    enabled: bool,
-    fingerprint: String,
-    reference_asset_ids: Vec<String>,
 }
 
 fn row_pairs_json(rows: &[ShadowRow]) -> Result<String> {
@@ -373,9 +370,9 @@ fn enabled_target_names(
 
 /// Every pending item of one review list, in review order, with its summary.
 ///
-/// The page command slices this list; the mobile candidate feed exports it whole, so the
-/// shadow cache is scanned once per list. Library eligibility and latest decisions are loaded
-/// in batches so the statement count does not grow with the number of scored pairs.
+/// The page command slices this list; the mobile candidate feed exports it whole. Library
+/// eligibility and latest decisions are loaded in batches so the statement count does not grow
+/// with the number of scored pairs, and the list is cached (see [`ReviewCache`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShadowReviewItems {
     pub items: Vec<ShadowReviewItem>,
@@ -391,22 +388,307 @@ fn shadow_review_mode(mode: Option<&str>) -> Result<bool> {
     }
 }
 
+/// Newest-policy rows of the S36 shadow cache, shared while the cache is unchanged.
+type ShadowRows = Arc<(String, Vec<ShadowRow>)>;
+
+/// Change marker of the S36 shadow cache file: its size, modification time and SQLite file
+/// change counter, which every commit increments (the cache uses a rollback journal, never
+/// WAL). Writers in and outside this process all move it. `None` while there is no file.
+#[derive(Debug, Clone, PartialEq)]
+struct ShadowStamp(Option<(u64, Option<SystemTime>, [u8; 4])>);
+
+fn shadow_cache_stamp(root: &Path) -> ShadowStamp {
+    let path = root
+        .join(".cache")
+        .join("characters")
+        .join("s36_shadow.sqlite");
+    let file = std::fs::File::open(path).ok().and_then(|mut file| {
+        let metadata = file.metadata().ok()?;
+        // Header bytes 24..28: the change counter every rollback-journal commit increments.
+        let mut header = [0u8; 28];
+        let counter = match file.read_exact(&mut header) {
+            Ok(()) => [header[24], header[25], header[26], header[27]],
+            Err(_) => [0; 4],
+        };
+        Some((metadata.len(), metadata.modified().ok(), counter))
+    });
+    ShadowStamp(file)
+}
+
+/// What a cached review list was computed from, besides its mode and series scope. Target
+/// names, references and fingerprints are not part of it: they are read on every call.
+#[derive(Debug, Clone, PartialEq)]
+struct ListKey {
+    /// [`super::character_changes::CharacterChanges::shadow_review_generation`].
+    inputs: u64,
+    shadow: ShadowStamp,
+    broad_folder_scope: bool,
+}
+
+/// A pair still waiting for a judgment, with its Asset already checked eligible. It becomes an
+/// item when its character exists and is enabled.
+#[derive(Debug)]
+struct PendingRow {
+    row: ShadowRow,
+    original_name: String,
+    width: u32,
+    height: u32,
+}
+
+/// The part of a review list computed from the database rows under one [`ListKey`]: the
+/// judged counts and the pending pairs in review order.
+#[derive(Debug, Default)]
+struct Prepared {
+    policy_version: Option<String>,
+    judged: ShadowReviewSummary,
+    pending: Vec<PendingRow>,
+    target_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TargetInfo {
+    name: String,
+    enabled: bool,
+    fingerprint: String,
+    reference_asset_ids: Vec<String>,
+}
+
+#[derive(Debug)]
+struct CachedList {
+    key: ListKey,
+    prepared: Arc<Prepared>,
+    /// The last list assembled from `prepared` and the characters it was assembled with.
+    assembled: Option<(BTreeMap<String, TargetInfo>, Arc<ShadowReviewItems>)>,
+}
+
+type ListSlot = Arc<Mutex<Option<CachedList>>>;
+
+/// Lists kept at most; past it the slots start over (a slot in use stays valid).
+const MAX_CACHED_LISTS: usize = 64;
+
+/// Cache of the S36 review lists, one per (mode, series scope).
+///
+/// A list is recomputed only when its [`ListKey`] moves: a write to one of the library input
+/// tables, an S36 shadow cache commit, or the broad-folder rule. Pages slice the cached list.
+/// Each list's slot lock is its single flight: concurrent identical requests wait for the one
+/// computing. Lock order: list slot, then shadow rows, then the library connection.
+#[derive(Debug, Default)]
+pub(crate) struct ReviewCache {
+    /// Indexed by mode: candidates, doubtful.
+    rows: [Mutex<Option<(ShadowStamp, Option<ShadowRows>)>>; 2],
+    lists: Mutex<HashMap<(bool, Option<String>), ListSlot>>,
+    /// Times a list's database part was computed.
+    #[cfg(test)]
+    prepared_count: std::sync::atomic::AtomicUsize,
+}
+
+impl ReviewCache {
+    fn slot(&self, doubtful: bool, series_id: Option<&str>) -> ListSlot {
+        let mut lists = self.lists.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = (doubtful, series_id.map(str::to_owned));
+        if !lists.contains_key(&key) && lists.len() >= MAX_CACHED_LISTS {
+            lists.clear();
+        }
+        lists.entry(key).or_default().clone()
+    }
+}
+
+/// The database part of a review list. `rows` is the newest policy's rows (`None`: no cache).
+fn prepare(
+    c: &Connection,
+    rows: Option<&ShadowRows>,
+    doubtful: bool,
+    series_id: Option<&str>,
+) -> Result<Prepared> {
+    let Some(rows) = rows else {
+        return Ok(Prepared::default());
+    };
+    let (version, all) = &**rows;
+    let mut rows = match series_id {
+        Some(series_id) => {
+            let in_series = c
+                .prepare("SELECT id FROM character_targets WHERE series_classification_id=?1")?
+                .query_map([series_id], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+            all.iter()
+                .filter(|row| in_series.contains(&row.target_id))
+                .cloned()
+                .collect()
+        }
+        None => all.clone(),
+    };
+    // With the broad-folder rule off, scores of images filed outside every registered
+    // series stay in the cache but are not offered (turning the rule on shows them again).
+    retain_in_character_scope(c, &mut rows)?;
+    // Pairs the native pass already accepted automatically come after new findings
+    // and are labelled as such; each group keeps the stable pseudo-random order.
+    // (Backfill rows recorded "none" as the native outcome for them.)
+    let rows = {
+        let native = latest_decisions(c, &rows, false)?;
+        let mut keyed = Vec::with_capacity(rows.len());
+        for (index, mut row) in rows.into_iter().enumerate() {
+            let classified = native
+                .get(&(row.target_id.clone(), row.asset_id.clone()))
+                .is_some_and(|(decision, _)| decision == "accepted");
+            if classified && row.native_outcome == "none" {
+                row.native_outcome = "accepted_automatic".into();
+            }
+            if doubtful && !classified {
+                continue;
+            }
+            keyed.push(((row.verdict != "automatic", classified, index), row));
+        }
+        keyed.sort_by_key(|(key, _)| *key);
+        keyed.into_iter().map(|(_, row)| row).collect::<Vec<_>>()
+    };
+    let manual = latest_decisions(c, &rows, true)?;
+    let assets = eligible_assets(c, &rows)?;
+    let mut prepared = Prepared {
+        policy_version: Some(version.clone()),
+        ..Prepared::default()
+    };
+    let summary = &mut prepared.judged;
+    let mut target_ids = BTreeSet::new();
+    for row in rows {
+        let origin_tiers = summary.by_origin.get_mut(&row.origin).ok_or(Error::Stale)?;
+        let origin_counts = if row.verdict == "automatic" {
+            &mut origin_tiers.automatic
+        } else {
+            &mut origin_tiers.recommended
+        };
+        let counts = match row.verdict.as_str() {
+            _ if doubtful => &mut summary.doubtful,
+            "automatic" => &mut summary.automatic,
+            _ => &mut summary.recommended,
+        };
+        let decision = manual.get(&(row.target_id.clone(), row.asset_id.clone()));
+        match decision.as_ref().map(|(d, at)| (d.as_str(), at.as_str())) {
+            Some(("cleared", _)) | None => {}
+            Some((decision, at)) => {
+                if at > row.scored_at.as_str() {
+                    if decision == "accepted" {
+                        counts.accepted += 1;
+                        if !doubtful {
+                            origin_counts.accepted += 1;
+                        }
+                    } else {
+                        counts.rejected += 1;
+                        if !doubtful {
+                            origin_counts.rejected += 1;
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+        let Some((original_name, width, height)) =
+            assets.get(&(row.asset_id.clone(), row.content_hash.clone()))
+        else {
+            continue;
+        };
+        target_ids.insert(row.target_id.clone());
+        prepared.pending.push(PendingRow {
+            original_name: original_name.clone(),
+            width: u32::try_from(*width).unwrap_or(0),
+            height: u32::try_from(*height).unwrap_or(0),
+            row,
+        });
+    }
+    prepared.target_ids = target_ids.into_iter().collect();
+    Ok(prepared)
+}
+
+/// The list from its database part and the current characters: pending pairs of a missing or
+/// disabled character are left out of items and counts alike.
+fn assemble(
+    prepared: &Prepared,
+    doubtful: bool,
+    targets: &BTreeMap<String, TargetInfo>,
+) -> ShadowReviewItems {
+    let mut summary = prepared.judged.clone();
+    let mut items = Vec::new();
+    for pending in &prepared.pending {
+        let row = &pending.row;
+        let Some(target) = targets.get(&row.target_id).filter(|t| t.enabled) else {
+            continue;
+        };
+        let origin = summary.by_origin.get_mut(&row.origin);
+        if doubtful {
+            summary.doubtful.pending += 1;
+        } else if row.verdict == "automatic" {
+            summary.automatic.pending += 1;
+            if let Some(origin) = origin {
+                origin.automatic.pending += 1;
+            }
+        } else {
+            summary.recommended.pending += 1;
+            if let Some(origin) = origin {
+                origin.recommended.pending += 1;
+            }
+        }
+        items.push(ShadowReviewItem {
+            asset_id: row.asset_id.clone(),
+            content_hash: row.content_hash.clone(),
+            original_name: pending.original_name.clone(),
+            width: pending.width,
+            height: pending.height,
+            target_id: row.target_id.clone(),
+            target_name: target.name.clone(),
+            target_fingerprint: target.fingerprint.clone(),
+            reference_asset_ids: target.reference_asset_ids.iter().take(4).cloned().collect(),
+            verdict: row.verdict.clone(),
+            origin: row.origin.clone(),
+            knn3: row.knn3,
+            native_outcome: row.native_outcome.clone(),
+            scored_at: row.scored_at.clone(),
+        });
+    }
+    ShadowReviewItems {
+        items,
+        policy_version: prepared.policy_version.clone(),
+        summary,
+    }
+}
+
+fn page_of(all: &ShadowReviewItems, query: &ShadowReviewQuery) -> ShadowReviewPage {
+    let start = (query.offset as usize).min(all.items.len());
+    let end = start
+        .saturating_add(query.limit as usize)
+        .min(all.items.len());
+    ShadowReviewPage {
+        next_offset: (end < all.items.len()).then(|| query.offset + query.limit),
+        items: all.items[start..end].to_vec(),
+        policy_version: all.policy_version.clone(),
+        summary: all.summary.clone(),
+    }
+}
+
+fn validate_page_query(query: &ShadowReviewQuery) -> Result<bool> {
+    let doubtful = shadow_review_mode(query.mode.as_deref())?;
+    if query.limit == 0 || query.limit > MAX_PAGE {
+        return Err(Error::Invalid("한 번에 1~200개 항목을 불러올 수 있습니다."));
+    }
+    Ok(doubtful)
+}
+
 impl Library {
     /// Pending counts for PC Home. Unlike the review page, this does not validate reference
     /// files or construct item fingerprints; all row-dependent database reads stay batched.
     pub fn character_shadow_review_summary(&self) -> Result<ShadowReviewPendingSummary> {
-        let Some((_, mut rows)) = shadow_rows(&self.root, false)? else {
+        let Some(shared) = self.shadow_rows_cached(false)?.1 else {
             return Ok(ShadowReviewPendingSummary {
                 automatic: 0,
                 recommended: 0,
                 targets: Vec::new(),
             });
         };
+        let mut rows = shared.1.clone();
         let connection = self.connection()?;
         retain_in_character_scope(&connection, &mut rows)?;
         let manual = latest_decisions(&connection, &rows, true)?;
         let assets = eligible_assets(&connection, &rows)?;
         let targets = enabled_target_names(&connection, &rows)?;
+        drop(connection);
         let mut automatic = 0;
         let mut recommended = 0;
         let mut tallies = BTreeMap::<String, ShadowReviewPendingTarget>::new();
@@ -449,185 +731,118 @@ impl Library {
         &self,
         query: ShadowReviewQuery,
     ) -> Result<ShadowReviewPage> {
-        shadow_review_mode(query.mode.as_deref())?;
-        if query.limit == 0 || query.limit > MAX_PAGE {
-            return Err(Error::Invalid("한 번에 1~200개 항목을 불러올 수 있습니다."));
-        }
-        let all = self.shadow_review_items_in(query.mode.as_deref(), query.series_id.as_deref())?;
-        let start = (query.offset as usize).min(all.items.len());
-        let end = start
-            .saturating_add(query.limit as usize)
-            .min(all.items.len());
-        Ok(ShadowReviewPage {
-            next_offset: (end < all.items.len()).then(|| query.offset + query.limit),
-            items: all.items[start..end].to_vec(),
-            policy_version: all.policy_version,
-            summary: all.summary,
-        })
+        let doubtful = validate_page_query(&query)?;
+        let all = self.shadow_review_list(doubtful, query.series_id.as_deref())?;
+        Ok(page_of(&all, &query))
+    }
+
+    /// The page computed from scratch, bypassing every review cache; for `perf_probe`
+    /// measurements and tests only.
+    #[doc(hidden)]
+    pub fn character_shadow_review_page_uncached(
+        &self,
+        query: ShadowReviewQuery,
+    ) -> Result<ShadowReviewPage> {
+        let doubtful = validate_page_query(&query)?;
+        let rows = shadow_rows(&self.root, doubtful)?.map(Arc::new);
+        let c = self.connection()?;
+        let prepared = prepare(&c, rows.as_ref(), doubtful, query.series_id.as_deref())?;
+        drop(c);
+        // Characters are read after releasing the database lock so their reference file
+        // checks never hold it.
+        let targets = self.review_targets(&prepared.target_ids)?;
+        Ok(page_of(&assemble(&prepared, doubtful, &targets), &query))
     }
 
     /// All pending items of the `candidates` (default) or `doubtful` list.
     pub(crate) fn shadow_review_items(&self, mode: Option<&str>) -> Result<ShadowReviewItems> {
-        self.shadow_review_items_in(mode, None)
+        let doubtful = shadow_review_mode(mode)?;
+        Ok((*self.shadow_review_list(doubtful, None)?).clone())
     }
 
-    /// Like [`Self::shadow_review_items`], limited to the targets of one series when given;
-    /// items and summary counts both follow the scope.
-    fn shadow_review_items_in(
-        &self,
-        mode: Option<&str>,
-        series_id: Option<&str>,
-    ) -> Result<ShadowReviewItems> {
-        let doubtful = shadow_review_mode(mode)?;
-        let mut page = ShadowReviewItems {
-            items: Vec::new(),
-            policy_version: None,
-            summary: ShadowReviewSummary::default(),
-        };
-        let Some((version, mut rows)) = shadow_rows(&self.root, doubtful)? else {
-            return Ok(page);
-        };
-        page.policy_version = Some(version);
-        let c = self.connection()?;
-        if let Some(series_id) = series_id {
-            let in_series = c
-                .prepare("SELECT id FROM character_targets WHERE series_classification_id=?1")?
-                .query_map([series_id], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()?;
-            rows.retain(|row| in_series.contains(&row.target_id));
-        }
-        // With the broad-folder rule off, scores of images filed outside every registered
-        // series stay in the cache but are not offered (turning the rule on shows them again).
-        retain_in_character_scope(&c, &mut rows)?;
-        // Pairs the native pass already accepted automatically come after new findings
-        // and are labelled as such; each group keeps the stable pseudo-random order.
-        // (Backfill rows recorded "none" as the native outcome for them.)
-        let rows = {
-            let native = latest_decisions(&c, &rows, false)?;
-            let mut keyed = Vec::with_capacity(rows.len());
-            for (index, mut row) in rows.into_iter().enumerate() {
-                let classified = native
-                    .get(&(row.target_id.clone(), row.asset_id.clone()))
-                    .is_some_and(|(decision, _)| decision == "accepted");
-                if classified && row.native_outcome == "none" {
-                    row.native_outcome = "accepted_automatic".into();
-                }
-                if doubtful && !classified {
-                    continue;
-                }
-                keyed.push(((row.verdict != "automatic", classified, index), row));
+    /// The newest policy's rows of one list kind, read again only when the shadow cache's
+    /// stamp moved. Read without the library connection.
+    fn shadow_rows_cached(&self, doubtful: bool) -> Result<(ShadowStamp, Option<ShadowRows>)> {
+        let mut cached = self.character_changes.shadow_review.rows[usize::from(doubtful)]
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // Stamp before reading: a write landing meanwhile moves the stamp past this key.
+        let stamp = shadow_cache_stamp(&self.root);
+        if let Some((seen, rows)) = cached.as_ref() {
+            if *seen == stamp {
+                return Ok((stamp, rows.clone()));
             }
-            keyed.sort_by_key(|(key, _)| *key);
-            keyed.into_iter().map(|(_, row)| row).collect::<Vec<_>>()
-        };
-        let manual = latest_decisions(&c, &rows, true)?;
-        let assets = eligible_assets(&c, &rows)?;
-        // The targets of the rows still pending (not decided, Asset eligible), read after
-        // releasing the database lock so their reference file checks run without it.
-        let wanted = rows
-            .iter()
-            .filter(|row| {
-                let decided = manual
-                    .get(&(row.target_id.clone(), row.asset_id.clone()))
-                    .is_some_and(|(decision, _)| decision != "cleared");
-                !decided && assets.contains_key(&(row.asset_id.clone(), row.content_hash.clone()))
+        }
+        let rows = shadow_rows(&self.root, doubtful)?.map(Arc::new);
+        *cached = Some((stamp.clone(), rows.clone()));
+        Ok((stamp, rows))
+    }
+
+    /// The characters a list's pending pairs point at (missing ids are left out).
+    fn review_targets(&self, ids: &[String]) -> Result<BTreeMap<String, TargetInfo>> {
+        Ok(self
+            .character_targets_unlocked(ids)?
+            .into_iter()
+            .map(|target| {
+                let info = TargetInfo {
+                    name: target.display_name.clone(),
+                    enabled: target.enabled,
+                    fingerprint: target.fingerprint.clone(),
+                    reference_asset_ids: target
+                        .usable_references()
+                        .filter_map(|r| r.asset_id.clone())
+                        .collect(),
+                };
+                (target.id, info)
             })
-            .map(|row| row.target_id.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+            .collect())
+    }
+
+    /// One review list, limited to the targets of one series when given; items and summary
+    /// counts both follow the scope. The database part is reused while its [`ListKey`] holds;
+    /// the characters are read on every call, and the assembled list is reused while they are
+    /// unchanged too.
+    fn shadow_review_list(
+        &self,
+        doubtful: bool,
+        series_id: Option<&str>,
+    ) -> Result<Arc<ShadowReviewItems>> {
+        let cache = &self.character_changes.shadow_review;
+        let slot = cache.slot(doubtful, series_id);
+        let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+        let (stamp, rows) = self.shadow_rows_cached(doubtful)?;
+        let c = self.connection()?;
+        let key = ListKey {
+            inputs: self.character_changes.shadow_review_generation(),
+            shadow: stamp,
+            broad_folder_scope: super::character_scope::broad_folder_scope_enabled(&c)?,
+        };
+        let prepared = match slot.as_ref() {
+            Some(cached) if cached.key == key => cached.prepared.clone(),
+            _ => {
+                *slot = None;
+                #[cfg(test)]
+                cache
+                    .prepared_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Arc::new(prepare(&c, rows.as_ref(), doubtful, series_id)?)
+            }
+        };
         drop(c);
-        let mut read = self
-            .character_targets_unlocked(&wanted)?
-            .into_iter()
-            .map(|target| (target.id.clone(), target))
-            .collect::<BTreeMap<_, _>>();
-        let mut targets: BTreeMap<String, Option<TargetInfo>> = BTreeMap::new();
-        for row in rows {
-            let origin_tiers = page
-                .summary
-                .by_origin
-                .get_mut(&row.origin)
-                .ok_or(Error::Stale)?;
-            let origin_counts = if row.verdict == "automatic" {
-                &mut origin_tiers.automatic
-            } else {
-                &mut origin_tiers.recommended
-            };
-            let counts = match row.verdict.as_str() {
-                _ if doubtful => &mut page.summary.doubtful,
-                "automatic" => &mut page.summary.automatic,
-                _ => &mut page.summary.recommended,
-            };
-            let decision = manual.get(&(row.target_id.clone(), row.asset_id.clone()));
-            match decision.as_ref().map(|(d, at)| (d.as_str(), at.as_str())) {
-                Some(("cleared", _)) | None => {}
-                Some((decision, at)) => {
-                    if at > row.scored_at.as_str() {
-                        if decision == "accepted" {
-                            counts.accepted += 1;
-                            if !doubtful {
-                                origin_counts.accepted += 1;
-                            }
-                        } else {
-                            counts.rejected += 1;
-                            if !doubtful {
-                                origin_counts.rejected += 1;
-                            }
-                        }
-                    }
-                    continue;
-                }
+        let targets = self.review_targets(&prepared.target_ids)?;
+        let cached = slot.get_or_insert_with(|| CachedList {
+            key,
+            prepared: prepared.clone(),
+            assembled: None,
+        });
+        if let Some((seen, items)) = &cached.assembled {
+            if *seen == targets {
+                return Ok(items.clone());
             }
-            let Some((original_name, width, height)) =
-                assets.get(&(row.asset_id.clone(), row.content_hash.clone()))
-            else {
-                continue;
-            };
-            let target = match targets.entry(row.target_id.clone()) {
-                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    let info = match read.remove(&row.target_id).ok_or(Error::NotFound) {
-                        Ok(target) => Some(TargetInfo {
-                            name: target.display_name.clone(),
-                            enabled: target.enabled,
-                            fingerprint: target.fingerprint.clone(),
-                            reference_asset_ids: target
-                                .usable_references()
-                                .filter_map(|r| r.asset_id.clone())
-                                .collect(),
-                        }),
-                        Err(Error::NotFound) => None,
-                        Err(error) => return Err(error),
-                    };
-                    entry.insert(info)
-                }
-            };
-            let Some(target) = target.as_ref().filter(|t| t.enabled) else {
-                continue;
-            };
-            counts.pending += 1;
-            if !doubtful {
-                origin_counts.pending += 1;
-            }
-            page.items.push(ShadowReviewItem {
-                asset_id: row.asset_id,
-                content_hash: row.content_hash,
-                original_name: original_name.clone(),
-                width: u32::try_from(*width).unwrap_or(0),
-                height: u32::try_from(*height).unwrap_or(0),
-                target_id: row.target_id,
-                target_name: target.name.clone(),
-                target_fingerprint: target.fingerprint.clone(),
-                reference_asset_ids: target.reference_asset_ids.iter().take(4).cloned().collect(),
-                verdict: row.verdict,
-                origin: row.origin,
-                knn3: row.knn3,
-                native_outcome: row.native_outcome,
-                scored_at: row.scored_at,
-            });
         }
-        Ok(page)
+        let items = Arc::new(assemble(&prepared, doubtful, &targets));
+        cached.assembled = Some((targets, items.clone()));
+        Ok(items)
     }
 }
 
@@ -664,9 +879,7 @@ pub(super) fn readiness_status(reviewed: u32, wrong: u32, examples: u32) -> &'st
 impl Library {
     /// Read-only: the shadow cache and the library decisions of one series.
     pub fn character_s36_readiness(&self, series_id: &str) -> Result<Vec<S36Readiness>> {
-        let rows = shadow_rows(&self.root, false)?
-            .map(|(_, rows)| rows)
-            .unwrap_or_default();
+        let rows = self.shadow_rows_cached(false)?.1;
         let c = self.connection()?;
         let targets = c
             .prepare(
@@ -674,41 +887,41 @@ impl Library {
             )?
             .query_map([series_id], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut decision = c.prepare(
-            "SELECT decision,created_at FROM character_decisions
-             WHERE target_id=?1 AND source_asset_id=?2 AND origin='manual'
-             ORDER BY sequence DESC LIMIT 1",
-        )?;
-        let mut result = Vec::with_capacity(targets.len());
-        for target in targets {
-            let (mut reviewed, mut wrong) = (0u32, 0u32);
-            for row in rows
-                .iter()
-                .filter(|r| r.target_id == target && r.verdict == "automatic")
-            {
-                let judged: Option<(String, String)> = decision
-                    .query_row(params![row.target_id, row.asset_id], |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })
-                    .optional()?;
-                if let Some((value, at)) = judged {
-                    if at.as_str() > row.scored_at.as_str() && value != "cleared" {
-                        reviewed += 1;
-                        wrong += u32::from(value == "rejected");
-                    }
-                }
+        let in_series = targets.iter().collect::<BTreeSet<_>>();
+        let automatic = rows
+            .iter()
+            .flat_map(|rows| &rows.1)
+            .filter(|r| r.verdict == "automatic" && in_series.contains(&r.target_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let judged = latest_decisions(&c, &automatic, true)?;
+        // (reviewed, wrong) per character: automatic candidates judged after scoring.
+        let mut tallies = BTreeMap::<&str, (u32, u32)>::new();
+        for row in &automatic {
+            let Some((value, at)) = judged.get(&(row.target_id.clone(), row.asset_id.clone()))
+            else {
+                continue;
+            };
+            if at.as_str() > row.scored_at.as_str() && value != "cleared" {
+                let tally = tallies.entry(row.target_id.as_str()).or_default();
+                tally.0 += 1;
+                tally.1 += u32::from(value == "rejected");
             }
+        }
+        let mut result = Vec::with_capacity(targets.len());
+        for target in &targets {
+            let (reviewed, wrong) = tallies.get(target.as_str()).copied().unwrap_or_default();
             let examples: u32 = c.query_row(
                 "SELECT COUNT(*) FROM (SELECT d.source_asset_id,
                    (SELECT x.decision FROM character_decisions x WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id ORDER BY x.sequence DESC LIMIT 1) AS latest
                  FROM character_decisions d WHERE d.target_id=?1 AND d.origin='manual' GROUP BY d.source_asset_id)
                  WHERE latest='accepted'",
-                [&target],
+                [target],
                 |r| r.get(0),
             )?;
             let status = readiness_status(reviewed, wrong, examples).to_string();
             result.push(S36Readiness {
-                target_id: target,
+                target_id: target.clone(),
                 reviewed,
                 wrong,
                 examples,
@@ -1080,6 +1293,16 @@ mod tests {
             .unwrap()
     }
 
+    /// The cached list of one mode and series scope.
+    fn items_in(
+        library: &Library,
+        mode: Option<&str>,
+        series_id: Option<&str>,
+    ) -> ShadowReviewItems {
+        let doubtful = shadow_review_mode(mode).unwrap();
+        (*library.shadow_review_list(doubtful, series_id).unwrap()).clone()
+    }
+
     /// Pre-batching implementation retained only as an executable compatibility oracle.
     fn legacy_items(
         library: &Library,
@@ -1418,10 +1641,7 @@ mod tests {
             (Some("doubtful"), Some(fixture.series.as_str())),
         ] {
             assert_eq!(
-                fixture
-                    .library
-                    .shadow_review_items_in(mode, series)
-                    .unwrap(),
+                items_in(&fixture.library, mode, series),
                 legacy_items(&fixture.library, mode, series),
                 "mode={mode:?} series={series:?}"
             );
@@ -1432,7 +1652,7 @@ mod tests {
             .unwrap();
         assert_summary_matches();
         assert_eq!(
-            fixture.library.shadow_review_items_in(None, None).unwrap(),
+            items_in(&fixture.library, None, None),
             legacy_items(&fixture.library, None, None)
         );
     }
@@ -1976,5 +2196,269 @@ mod tests {
         assert_eq!(readiness_status(40, 0, 49), "collecting");
         assert_eq!(readiness_status(12, 2, 80), "hold");
         assert_eq!(readiness_status(30, 4, 80), "keep");
+    }
+
+    fn review_query(offset: u32, limit: u32, series_id: Option<&str>) -> ShadowReviewQuery {
+        ShadowReviewQuery {
+            offset,
+            limit,
+            mode: None,
+            series_id: series_id.map(Into::into),
+        }
+    }
+
+    fn prepared_lists(f: &Fixture) -> usize {
+        f.library
+            .character_changes
+            .shadow_review
+            .prepared_count
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The cached page, after checking it against the page computed from scratch.
+    fn checked_page(f: &Fixture, query: impl Fn() -> ShadowReviewQuery) -> serde_json::Value {
+        let cached =
+            serde_json::to_value(f.library.character_shadow_review_page(query()).unwrap()).unwrap();
+        let fresh = serde_json::to_value(
+            f.library
+                .character_shadow_review_page_uncached(query())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cached, fresh);
+        cached
+    }
+
+    /// A ready character with five scored series images.
+    fn cached_review_fixture() -> (Fixture, Target) {
+        let f = Fixture::new();
+        let target = f.ready("Cached");
+        let at = "2026-09-23T01:00:00Z";
+        let ids: Vec<String> = (0..5).map(|i| format!("cached-{i}")).collect();
+        for id in &ids {
+            series_asset(&f, id);
+        }
+        let rows: Vec<_> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let verdict = if i % 2 == 0 {
+                    "automatic"
+                } else {
+                    "recommended"
+                };
+                (
+                    id.as_str(),
+                    target.id.as_str(),
+                    verdict,
+                    0.1,
+                    "v1",
+                    "none",
+                    at,
+                )
+            })
+            .collect();
+        insert(f.temp.path(), &rows);
+        (f, target)
+    }
+
+    #[test]
+    fn character_shadow_review_pages_slice_one_cached_list() {
+        let (f, _) = cached_review_fixture();
+        let whole = checked_page(&f, || review_query(0, 50, None));
+        assert_eq!(whole["items"].as_array().unwrap().len(), 5);
+        assert_eq!(prepared_lists(&f), 1);
+        let mut sliced = Vec::new();
+        for offset in [0, 2, 4] {
+            let page = checked_page(&f, || review_query(offset, 2, None));
+            assert_eq!(page["summary"], whole["summary"]);
+            assert_eq!(page["policyVersion"], whole["policyVersion"]);
+            sliced.extend(page["items"].as_array().unwrap().iter().cloned());
+        }
+        assert_eq!(&sliced, whole["items"].as_array().unwrap());
+        // Every page, and the same page again, came from the one computation.
+        assert_eq!(prepared_lists(&f), 1);
+        let series = f.series.clone();
+        checked_page(&f, || review_query(0, 1, Some(&series)));
+        checked_page(&f, || review_query(1, 1, Some(&series)));
+        assert_eq!(prepared_lists(&f), 2, "one list per series scope");
+        let doubtful = || ShadowReviewQuery {
+            mode: Some("doubtful".into()),
+            ..review_query(0, 50, None)
+        };
+        checked_page(&f, doubtful);
+        checked_page(&f, doubtful);
+        assert_eq!(prepared_lists(&f), 3, "one list per mode");
+    }
+
+    #[test]
+    fn character_shadow_review_cache_follows_every_input() {
+        let (f, target) = cached_review_fixture();
+        let series = f.series.clone();
+        let all = || review_query(0, 50, None);
+        let scoped = || review_query(0, 50, Some(&series));
+        let count = |page: &serde_json::Value| page["items"].as_array().unwrap().len();
+        // Each change recomputes the list once, and the result matches a fresh computation.
+        let mut expected = 0;
+        let mut step = |label: &str, change: &dyn Fn()| -> serde_json::Value {
+            change();
+            let page = checked_page(&f, all);
+            expected += 1;
+            assert_eq!(prepared_lists(&f), expected, "{label}");
+            // Unchanged inputs: served from the cache.
+            assert_eq!(checked_page(&f, all), page, "{label}");
+            assert_eq!(prepared_lists(&f), expected, "{label} (repeat)");
+            page
+        };
+        assert_eq!(count(&step("first read", &|| ())), 5);
+
+        let page = step("manual decision", &|| {
+            decide(&f, &target, "cached-0", DecisionKind::Accepted)
+        });
+        assert_eq!(count(&page), 4);
+
+        let page = step("rejection", &|| {
+            decide(&f, &target, "cached-1", DecisionKind::Rejected)
+        });
+        assert_eq!(count(&page), 3);
+
+        let page = step("Asset moved to the trash", &|| {
+            f.library
+                .connection()
+                .unwrap()
+                .execute("UPDATE assets SET status='trash' WHERE id='cached-2'", [])
+                .unwrap();
+        });
+        assert_eq!(count(&page), 2);
+
+        let page = step("Asset filed outside every series", &|| {
+            f.library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='cached-3'",
+                    [&f.outside],
+                )
+                .unwrap();
+        });
+        assert_eq!(count(&page), 1);
+
+        let page = step("broad-folder rule on", &|| {
+            f.library.set_character_broad_folder_scope(true).unwrap()
+        });
+        assert_eq!(count(&page), 2);
+
+        let page = step("S36 shadow cache rewritten", &|| {
+            series_asset(&f, "cached-5");
+            insert(
+                f.temp.path(),
+                &[(
+                    "cached-5",
+                    target.id.as_str(),
+                    "automatic",
+                    0.1,
+                    "v1",
+                    "none",
+                    "2026-09-23T02:00:00Z",
+                )],
+            );
+        });
+        assert_eq!(count(&page), 3);
+
+        // Series membership: the series-scoped list follows the character out of the series.
+        assert_eq!(count(&checked_page(&f, scoped)), 3);
+        expected += 1;
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE character_targets SET series_classification_id=?1 WHERE id=?2",
+                [&f.child, &target.id],
+            )
+            .unwrap();
+        assert_eq!(count(&checked_page(&f, scoped)), 0);
+        expected += 1;
+        assert_eq!(prepared_lists(&f), expected);
+    }
+
+    #[test]
+    fn character_shadow_review_cache_reads_characters_on_every_call() {
+        let (f, target) = cached_review_fixture();
+        let all = || review_query(0, 50, None);
+        let before = checked_page(&f, all);
+        let references = before["items"][0]["referenceAssetIds"].clone();
+        assert!(!references.as_array().unwrap().is_empty());
+        // A reference original disappears: no library table changes, yet the items follow.
+        let removed = references[0].as_str().unwrap();
+        std::fs::remove_file(f.temp.path().join(format!("assets/{removed}.png"))).unwrap();
+        let after = checked_page(&f, all);
+        assert_ne!(after["items"][0]["referenceAssetIds"], references);
+        assert_eq!(prepared_lists(&f), 1);
+        // Disabling the character empties the list and its pending counts.
+        let current = f.library.list_character_targets().unwrap();
+        let current = current.iter().find(|t| t.id == target.id).unwrap();
+        f.library
+            .save_character_target(super::super::characters::TargetDraft {
+                id: Some(current.id.clone()),
+                expected_revision: Some(current.revision),
+                series_classification_id: current.series_classification_id.clone(),
+                linked_classification_id: current.linked_classification_id.clone(),
+                display_name: current.display_name.clone(),
+                description: current.description.clone(),
+                thumbnail_asset_id: current.thumbnail_asset_id.clone(),
+                enabled: false,
+            })
+            .unwrap();
+        let disabled = checked_page(&f, all);
+        assert_eq!(disabled["items"].as_array().unwrap().len(), 0);
+        assert_eq!(disabled["summary"]["automatic"]["pending"], 0);
+    }
+
+    #[test]
+    fn character_shadow_review_concurrent_requests_compute_once() {
+        let (f, _) = cached_review_fixture();
+        let barrier = std::sync::Barrier::new(8);
+        let pages = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|i| {
+                    let (library, barrier) = (&f.library, &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        serde_json::to_value(
+                            library
+                                .character_shadow_review_page(review_query(i % 3, 2, None))
+                                .unwrap(),
+                        )
+                        .unwrap()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(prepared_lists(&f), 1);
+        for (i, page) in pages.iter().enumerate() {
+            let fresh = f
+                .library
+                .character_shadow_review_page_uncached(review_query(i as u32 % 3, 2, None))
+                .unwrap();
+            assert_eq!(page, &serde_json::to_value(fresh).unwrap());
+        }
+    }
+
+    #[test]
+    fn s36_readiness_counts_judged_automatic_candidates() {
+        let (f, target) = cached_review_fixture();
+        decide(&f, &target, "cached-0", DecisionKind::Accepted);
+        decide(&f, &target, "cached-2", DecisionKind::Rejected);
+        decide(&f, &target, "cached-1", DecisionKind::Rejected); // recommended: not counted
+        decide(&f, &target, "cached-4", DecisionKind::Accepted);
+        decide(&f, &target, "cached-4", DecisionKind::Cleared);
+        let readiness = f.library.character_s36_readiness(&f.series).unwrap();
+        let row = readiness.iter().find(|r| r.target_id == target.id).unwrap();
+        assert_eq!((row.reviewed, row.wrong), (2, 1));
+        assert_eq!(row.examples, 1);
     }
 }

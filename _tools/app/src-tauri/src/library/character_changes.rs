@@ -7,7 +7,8 @@
 //!   analysis progress, which writes none of these tables;
 //! - per-series activity of the automatic analysis, so only the analysed series' gallery
 //!   and counts refresh;
-//! - the input generation of the 새 캐릭터 suggestion list, which keys its cache.
+//! - the input generation of the 새 캐릭터 suggestion list, which keys its cache;
+//! - the library input generation of the S36 review lists, which keys theirs.
 //!
 //! SQLite does not report `WITHOUT ROWID` tables to the update hook; their writers call
 //! [`CharacterChanges::suggestion_inputs_changed`] explicitly (tagger import, tagger tag
@@ -40,10 +41,25 @@ const SUGGESTION_INPUT_TABLES: &[&str] = &[
     "character_targets",
 ];
 
+/// Rowid tables read by the S36 review lists (`character_shadow_review`): series membership,
+/// decisions, Asset eligibility and the registered-series folder scope. Target names,
+/// references and fingerprints are read on every call, so they are not listed.
+const SHADOW_REVIEW_INPUT_TABLES: &[&str] = &[
+    "assets",
+    "asset_classifications",
+    "classification_entries",
+    "character_series",
+    "character_targets",
+    "character_decisions",
+];
+
 #[derive(Debug, Default)]
 pub(crate) struct CharacterChanges {
     definitions: AtomicU64,
     suggestion_inputs: AtomicU64,
+    shadow_review_inputs: AtomicU64,
+    /// Cache and single flight of the S36 review lists.
+    pub(super) shadow_review: super::character_shadow_review::ReviewCache,
     series_activity: Mutex<BTreeMap<String, u64>>,
     /// Single flight and cache of the suggestion list: (input generation, minimum, rows).
     pub(super) suggestions:
@@ -58,6 +74,9 @@ impl CharacterChanges {
         if SUGGESTION_INPUT_TABLES.contains(&table) {
             self.suggestion_inputs_changed();
         }
+        if SHADOW_REVIEW_INPUT_TABLES.contains(&table) {
+            self.shadow_review_inputs.fetch_add(1, Ordering::AcqRel);
+        }
     }
 
     pub(crate) fn suggestion_inputs_changed(&self) {
@@ -68,6 +87,7 @@ impl CharacterChanges {
     pub(crate) fn database_replaced(&self) {
         self.definitions.fetch_add(1, Ordering::AcqRel);
         self.suggestion_inputs_changed();
+        self.shadow_review_inputs.fetch_add(1, Ordering::AcqRel);
         let mut activity = self
             .series_activity
             .lock()
@@ -83,6 +103,11 @@ impl CharacterChanges {
 
     pub(crate) fn suggestion_generation(&self) -> u64 {
         self.suggestion_inputs.load(Ordering::Acquire)
+    }
+
+    /// Read while holding the library connection, when no writer can be mid-transaction.
+    pub(crate) fn shadow_review_generation(&self) -> u64 {
+        self.shadow_review_inputs.load(Ordering::Acquire)
     }
 
     /// One automatic analysis result touched these series (gallery views, member counts).

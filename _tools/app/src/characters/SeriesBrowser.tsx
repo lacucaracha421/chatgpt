@@ -111,9 +111,12 @@ export function seriesFolderBrowseView(sort: AssetSort) {
   };
   return characterBrowseView(sort, filters);
 }
+/** Last pending S36 candidate count per series, shown on re-entry until the fresh count lands. */
+const lastCandidateCounts = new Map<string, number>();
 /**
- * Hover prefetch of a series overview: the reads its switch gates on (the first page in `load` and the
+ * Hover prefetch of a series overview: the reads its switch makes (the first page in `load` and the
  * excluded-count, folder and candidate reads below), with the same arguments, so the switch takes them.
+ * The switch gates on all but the candidate count.
  */
 export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, shadowApi: Pick<ShadowReviewApi, "page"> = shadowReviewApi, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number; seriesRevisions?: SeriesRevisions }): Promise<unknown>[] {
   const query = { seriesId, targetId: null, groupId: null, seriesFilter: "unclassified" as const, all: false, after: null, limit: 100, ...(options?.view ? { view: options.view } : {}) };
@@ -157,8 +160,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // `series`: opened from this series' candidate count, so scoped to it; `all`: the overflow entry.
   const [shadowReview, setShadowReview] = useState<false | "series" | "all">(false);
   const [s36Setup, setS36Setup] = useState(false);
-  const [candidateCount, setCandidateCount] = useState(0);
-  const [candidateLoading, setCandidateLoading] = useState(true);
+  const [candidateCount, setCandidateCount] = useState(() => lastCandidateCounts.get(series.classificationId) ?? 0);
   const [groupCreateRequest, setGroupCreateRequest] = useState(0);
   const [groupEditRequest, setGroupEditRequest] = useState(0);
   const [readinessVersion, setReadinessVersion] = useState(0);
@@ -366,14 +368,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   useEffect(() => {
     // Pending S36 candidates (automatic + recommended) drive the quiet 후보 N 확인 action
     // on the series count line. Without the runtime the action stays hidden.
+    // The gallery does not wait for it: the shown count stays (this series' last known one, else
+    // the previous) until the read lands, then changes in place.
     if (targetId || currentGroup || picking) return;
     let active = true;
-    setCandidateLoading(true);
-    const candidates = { offset: 0, limit: 1, seriesId: series.classificationId };
+    const seriesId = series.classificationId;
+    const remembered = lastCandidateCounts.get(seriesId);
+    if (remembered !== undefined) setCandidateCount(remembered);
+    const candidates = { offset: 0, limit: 1, seriesId };
     void prefetchedRead(shadowApi, "page", candidates, () => shadowApi.page(candidates))
-      .then(result => { if (active) setCandidateCount(result.summary.automatic.pending + result.summary.recommended.pending); })
-      .catch(() => { if (active) setCandidateCount(0); })
-      .finally(() => { if (active) setCandidateLoading(false); });
+      .then(result => {
+        const count = result.summary.automatic.pending + result.summary.recommended.pending;
+        lastCandidateCounts.set(seriesId, count);
+        if (active) setCandidateCount(count);
+      })
+      .catch(() => { if (active) setCandidateCount(0); });
     return () => { active = false; };
   }, [shadowApi, series.classificationId, targetId, currentGroup?.id, Boolean(picking), readinessVersion]);
   useEffect(() => setSelection(emptySelection()), [clearSelectionRequest]);
@@ -672,7 +681,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // Date headings stay off while the series shelf heads the gallery, as plain folders do under their folder shelf.
   const shelfShown = !picking && !excludedOnly && !current;
   // The first page alone is not ready: the shelf and its count/header reads also change layout.
-  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.loading || candidateLoading || excludedLoading || (!s36Settings && !s36Error))));
+  // The S36 candidate count is not waited for (it only relabels or shows one header button).
+  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.loading || excludedLoading || (!s36Settings && !s36Error))));
   useEffect(() => {
     if (!pcPerfEnabled() || loading || shelfLoading || pageScope !== scope || error) return;
     return pcFolderReady(pcFolderScope({ kind: "classification", classificationId: series.classificationId, characterId: targetId, characterGroupId: groupId }), host.current,

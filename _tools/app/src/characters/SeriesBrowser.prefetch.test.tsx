@@ -182,6 +182,22 @@ it("switches to a prefetched series without reading its first page again", async
   expect(reads("series-b")).toEqual({ browse: 1, excluded: 1, folders: 1, candidates: 1 });
 });
 
+it("enters a series with one candidate read and shows the gallery before the count lands", async () => {
+  const { view, tree, shadowApi, reads } = mount();
+  await screen.findByRole("option", { name: "series-a 0.webp" });
+  let land: (count: number) => void = () => undefined;
+  vi.mocked(shadowApi.page).mockImplementation(() => new Promise(resolve => {
+    land = count => resolve({ items: [], nextOffset: null, policyVersion: null, summary: { ...emptyShadowSummary(), automatic: { pending: count, accepted: 0, rejected: 0 } } });
+  }));
+  view.rerender(tree("series-b"));
+  // The candidate count is still on its way; the new gallery does not wait for it.
+  expect(await screen.findByRole("option", { name: "series-b 0.webp" })).toBeInTheDocument();
+  expect(reads("series-b").candidates).toBe(1);
+  await act(async () => { land(3); });
+  await waitFor(() => expect(screen.queryByRole("option", { name: "series-a 0.webp" })).not.toBeInTheDocument());
+  expect(reads("series-b").candidates).toBe(1);
+});
+
 it("prefetches a series folder card after the pointer rests on it", async () => {
   const plan = vi.fn<FolderPrefetchPlan>(() => null);
   mount(plan);
