@@ -1240,3 +1240,267 @@ fn collection_authority_baseline_removes_stale_shared_rows_and_can_restart_at_lo
 
 #[path = "collection_authority_writer_guard.rs"]
 mod writer_guard;
+
+#[test]
+fn collection_authority_artwork_auto_import_is_content_idempotent_and_clear_is_null() {
+    use crate::library::work_artwork::WorkArtworkKind;
+    let (_temp, l, s) = fixture();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut w = work(&id, 1);
+    w["type"] = json!("game");
+    adopt(&l, &s, json!({"works":[w]}));
+    let source = l.root().join("collection-sources");
+    let covers = source.join("game/covers");
+    std::fs::create_dir_all(&covers).unwrap();
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(12, 18)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    std::fs::write(covers.join("first.png"), bytes.get_ref()).unwrap();
+    l.set_collection_source_root(Some(source.to_str().unwrap()))
+        .unwrap();
+    l.connection()
+        .unwrap()
+        .execute(
+            "UPDATE collections SET source_path='game' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    assert_eq!(l.import_local_collection_artworks(&id).unwrap(), 1);
+    assert_eq!(count(&l, "collection_authority_outbox"), 2);
+    std::fs::write(covers.join("same-content.png"), bytes.get_ref()).unwrap();
+    l.collection_artwork_scan_cache.lock().unwrap().clear();
+    assert_eq!(l.import_local_collection_artworks(&id).unwrap(), 0);
+    assert_eq!(count(&l, "collection_work_artworks"), 1);
+    assert_eq!(count(&l, "collection_authority_outbox"), 2);
+    let mut db = l.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    Library::clear_work_artwork_kind_in_transaction(&tx, &id, WorkArtworkKind::Cover).unwrap();
+    let raw: String = tx
+        .query_row(
+            "SELECT payload FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let body: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(body["commandType"], "selectArtwork");
+    assert!(body["artworkId"].is_null());
+    assert!(body["expectedArtworkId"].is_string());
+    tx.commit().unwrap();
+    drop(db);
+    l.collection_artwork_scan_cache.lock().unwrap().clear();
+    assert_eq!(l.import_local_collection_artworks(&id).unwrap(), 0);
+    assert_eq!(count(&l, "collection_authority_outbox"), 3);
+}
+
+#[test]
+fn collection_authority_volume_view_only_enqueues_shared_changes_and_keeps_filenames_local() {
+    let (_temp, l, s) = fixture();
+    let id = uuid::Uuid::new_v4().to_string();
+    adopt(&l, &s, json!({"works":[work(&id,1)]}));
+    let source = l.root().join("collection-sources");
+    let covers = source.join("manga/covers");
+    std::fs::create_dir_all(&covers).unwrap();
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(12, 18)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    std::fs::write(covers.join("vol_1_original.png"), bytes.get_ref()).unwrap();
+    l.set_collection_source_root(Some(source.to_str().unwrap()))
+        .unwrap();
+    l.connection()
+        .unwrap()
+        .execute(
+            "UPDATE collections SET source_path='manga' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    let first = l.list_collection_volumes(&id).unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(count(&l, "collection_authority_outbox"), 2);
+    assert_eq!(l.list_collection_volumes(&id).unwrap()[0].id, first[0].id);
+    assert_eq!(count(&l, "collection_authority_outbox"), 2);
+    let db = l.connection().unwrap();
+    let payloads = db
+        .prepare("SELECT payload FROM collection_authority_outbox ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(payloads
+        .iter()
+        .all(|p| !p.contains("vol_1_original.png") && !p.contains("relativePath")));
+    let volume: Value = serde_json::from_str(&payloads[1]).unwrap();
+    assert_eq!(volume["commandType"], "upsertVolume");
+    assert_eq!(volume["expectedRevision"], 0);
+    let file: String = db
+        .query_row("SELECT source_file_name FROM collection_volumes", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(file, "vol_1_original.png");
+}
+
+#[test]
+fn collection_authority_range_round_trip_and_active_fences() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    l.set_collection_volume_range("w", Some(2), Some(4), true)
+        .unwrap();
+    l.set_collection_volume_range("w", Some(2), Some(4), true)
+        .unwrap();
+    assert_eq!(count(&l, "collection_authority_outbox"), 1);
+    let mut w = work("w", 2);
+    w["derived"]["volumeRange"] = json!({"minVolume":3,"maxVolume":5,"hideConnectionPrompt":false});
+    l.apply_collection_changes(&changes(&s, 1, json!([change(1, json!({"works":[w]}))])))
+        .unwrap();
+    let range =
+        crate::library::collection_volume_range::load(&*l.connection().unwrap(), "w").unwrap();
+    assert_eq!(range.min_volume, Some(3));
+    assert_eq!(range.max_volume, Some(5));
+    assert!(matches!(
+        fence_collection_operation(&*l.connection().unwrap()),
+        Err(LibraryError::CollectionAuthorityOperationUnavailable)
+    ));
+}
+
+#[test]
+fn collection_authority_source_changes_are_semantic_and_predict_pending_revisions() {
+    let (_temp, l, s) = fixture();
+    adopt(
+        &l,
+        &s,
+        json!({"works":[work("w",1)],"volumeSources":[source()]}),
+    );
+    let mut db = l.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    let before = volume_source_state(&tx, "w", 1, "kakao").unwrap();
+    tx.execute(
+        "UPDATE collection_volume_sources SET provider_data_json=' { } ',updated_at='new'",
+        [],
+    )
+    .unwrap();
+    let unchanged = volume_source_state(&tx, "w", 1, "kakao").unwrap();
+    enqueue_volume_source_changes(&tx, &s, &before, unchanged.clone()).unwrap();
+    assert_eq!(
+        tx.query_row(
+            "SELECT COUNT(*) FROM collection_authority_outbox",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    tx.execute("UPDATE collection_volume_sources SET title='New title'", [])
+        .unwrap();
+    let changed = volume_source_state(&tx, "w", 1, "kakao").unwrap();
+    enqueue_volume_source_changes(&tx, &s, &unchanged, changed.clone()).unwrap();
+    tx.execute(
+        "UPDATE collection_volume_sources SET publisher='New publisher'",
+        [],
+    )
+    .unwrap();
+    let changed_again = volume_source_state(&tx, "w", 1, "kakao").unwrap();
+    enqueue_volume_source_changes(&tx, &s, &changed, changed_again).unwrap();
+    let revisions=tx.prepare("SELECT json_extract(payload,'$.expectedRevision') FROM collection_authority_outbox ORDER BY seq").unwrap().query_map([],|r|r.get::<_,i64>(0)).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+    assert_eq!(revisions, vec![1, 2]);
+    tx.commit().unwrap();
+}
+
+#[test]
+fn collection_authority_newer_artwork_selection_survives_an_earlier_receipt() {
+    use crate::library::work_artwork::WorkArtworkKind;
+    let (_temp, l, s) = fixture();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut w = work(&id, 1);
+    w["type"] = json!("game");
+    adopt(&l, &s, json!({"works":[w]}));
+    let mut ids = Vec::new();
+    for width in [12, 13] {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(width, 18)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let prepared = l.prepare_work_artwork(&id, bytes.get_ref()).unwrap();
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        ids.push(
+            Library::insert_work_artwork_in_transaction(
+                &tx,
+                &id,
+                "local",
+                "image",
+                WorkArtworkKind::Cover,
+                None,
+                &prepared,
+            )
+            .unwrap(),
+        );
+        tx.commit().unwrap();
+        prepared.commit();
+    }
+    let calls = Cell::new(0);
+    l.flush_collection_outbox_with(
+        &s,
+        &|body| {
+            calls.set(calls.get() + 1);
+            if calls.get() > 1 {
+                return Ok(CollectionDelivery::Retry);
+            }
+            let mut artwork = body.clone();
+            artwork["createdAt"] = json!(NOW);
+            artwork["entityRevision"] = json!(1);
+            let mut receipt = envelope(&s);
+            receipt["operationId"] = body["operationId"].clone();
+            receipt["commandType"] = body["commandType"].clone();
+            receipt["changed"] = json!(true);
+            receipt["authorityCursor"] = json!(1);
+            receipt["entities"] = json!({"artworks":[artwork]});
+            Ok(CollectionDelivery::Accepted(receipt))
+        },
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        artwork_slot(&*l.connection().unwrap(), &id, "work").unwrap(),
+        Some(ids[1].clone())
+    );
+}
+
+#[test]
+fn collection_authority_range_expectation_uses_confirmed_and_pending_state() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    // An older baseline has no range; retained inactive PC settings are local state.
+    l.connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO collection_volume_ranges VALUES('w',1,9,1,'before')",
+            [],
+        )
+        .unwrap();
+    l.set_collection_volume_range("w", Some(2), Some(8), true)
+        .unwrap();
+    l.set_collection_volume_range("w", Some(3), Some(7), false)
+        .unwrap();
+    let db = l.connection().unwrap();
+    let payloads = db
+        .prepare("SELECT payload FROM collection_authority_outbox ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let first: Value = serde_json::from_str(&payloads[0]).unwrap();
+    let second: Value = serde_json::from_str(&payloads[1]).unwrap();
+    assert_eq!(
+        first["expectedRange"],
+        json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false})
+    );
+    assert_eq!(
+        second["expectedRange"],
+        json!({"minVolume":2,"maxVolume":8,"hideConnectionPrompt":true})
+    );
+}

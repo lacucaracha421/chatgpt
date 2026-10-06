@@ -8,22 +8,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "batch 1: confirmed replica/outbox apply",
     ),
     (
-        "library/collection_source.rs",
-        "batch 3: source artwork; local-only (stays): source paths",
-    ),
-    (
-        "library/work_artwork.rs",
-        "batch 3: artwork; local-only (stays): thumbnails",
-    ),
-    (
-        "library/collection_volume.rs",
-        "batch 3: volumes and local import",
-    ),
-    (
-        "library/collection_volume_range.rs",
-        "batch 3: volume ranges",
-    ),
-    (
         "library/collection_tracking.rs",
         "batch 4: ownership/tracking/acknowledgement",
     ),
@@ -57,10 +41,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
     (
         "library/collection_release_sync.rs",
         "batch 4: inbound acknowledgements",
-    ),
-    (
-        "library/launchbox.rs",
-        "batch 3: artwork; batch 4: provider fence",
     ),
     (
         "library/av_collection.rs",
@@ -220,11 +200,6 @@ const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
         "write_record_platform",
         "batch 4: inbound personal replay helper",
     ),
-    (
-        "library/collection_pc.rs",
-        "store_cover_focus",
-        "batch 3: focus fence",
-    ),
 ];
 const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
     ("library/collection.rs", "create_collection"),
@@ -235,13 +210,51 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
     ("library/collection.rs", "set_collection_showcase_order"),
     ("library/collection.rs", "patch_asset_collections"),
     ("library/collection_pc.rs", "save_collection_work_record"),
+    (
+        "library/work_artwork.rs",
+        "insert_work_artwork_in_transaction",
+    ),
+    (
+        "library/work_artwork.rs",
+        "select_work_artwork_kind_in_transaction",
+    ),
+    (
+        "library/work_artwork.rs",
+        "clear_work_artwork_kind_in_transaction",
+    ),
+    (
+        "library/work_artwork.rs",
+        "insert_volume_work_artwork_in_transaction",
+    ),
+    ("library/collection_source.rs", "import_local_artwork_files"),
+    (
+        "library/collection_volume.rs",
+        "materialize_mangadex_volumes",
+    ),
+    ("library/collection_volume.rs", "set_local_volume"),
+    ("library/collection_volume.rs", "attach_volume_artwork"),
+    (
+        "library/collection_volume.rs",
+        "sync_mangadex_volume_covers_with",
+    ),
+    (
+        "library/collection_volume_range.rs",
+        "set_collection_volume_range",
+    ),
+    ("library/aladin_flow.rs", "reconcile_source"),
+];
+
+const FENCED_FUNCTIONS: &[(&str, &str)] = &[
+    ("library/launchbox.rs", "store_spine"),
+    ("library/launchbox.rs", "fill_launchbox_platforms"),
+    ("library/collection_pc.rs", "store_cover_focus"),
 ];
 
 // Functions in these two files use a standalone closing brace at their declaration
 // indentation. Bound exemptions to that brace, never to the next function or EOF.
 fn function_range(source: &str, name: &str) -> std::ops::Range<usize> {
     let declaration = regex::Regex::new(&format!(
-        r"(?m)^(    )?(?:pub(?:\([^)]*\))? )?fn {}\(",
+        r"(?m)^(    )?(?:pub(?:\([^)]*\))? )?fn {}(?:<[^>]+>)?\(",
         regex::escape(name)
     ))
     .unwrap();
@@ -256,7 +269,11 @@ fn function_range(source: &str, name: &str) -> std::ops::Range<usize> {
 }
 
 fn remaining_source(file: &str, source: &str) -> String {
-    if !ROUTED_FUNCTIONS.iter().any(|(f, _)| *f == file) {
+    if !ROUTED_FUNCTIONS
+        .iter()
+        .chain(FENCED_FUNCTIONS)
+        .any(|(f, _)| *f == file)
+    {
         return source.to_owned();
     }
     let mut remaining = source.to_owned();
@@ -269,8 +286,21 @@ fn remaining_source(file: &str, source: &str) -> String {
             "{f}::{name} lost adoption fence"
         );
         assert!(
-            body.contains("enqueue_work_changes(") || body.contains("enqueue_collection_command("),
+            body.contains("enqueue_work_changes(")
+                || body.contains("enqueue_collection_command(")
+                || body.contains("enqueue_artwork(")
+                || body.contains("enqueue_artwork_selection(")
+                || body.contains("enqueue_volume_changes(")
+                || body.contains("import_authority_artwork_files("),
             "{f}::{name} lost transactional outbox"
+        );
+        ranges.push(range);
+    }
+    for (_, name) in FENCED_FUNCTIONS.iter().filter(|(f, _)| *f == file) {
+        let range = function_range(source, name);
+        assert!(
+            source[range.clone()].contains("fence_collection_operation("),
+            "{file}::{name} lost activation fence"
         );
         ranges.push(range);
     }
@@ -464,7 +494,15 @@ fn collection_authority_writer_guard_covers_sql_forms_split_literals_and_ignores
 fn collection_authority_writer_guard_rejects_new_writers_in_routed_files() {
     let tables = ["collections".to_owned()].into_iter().collect();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for file in ["library/collection.rs", "library/collection_pc.rs"] {
+    for file in [
+        "library/collection.rs",
+        "library/collection_pc.rs",
+        "library/work_artwork.rs",
+        "library/collection_source.rs",
+        "library/collection_volume.rs",
+        "library/collection_volume_range.rs",
+        "library/launchbox.rs",
+    ] {
         let mut source = std::fs::read_to_string(root.join(file)).unwrap();
         source.push_str("\nfn unreviewed_writer() { db.execute(\"UPDATE collections SET name='lost'\", []); }\n");
         assert_eq!(writers(&remaining_source(file, &source), &tables).len(), 1);

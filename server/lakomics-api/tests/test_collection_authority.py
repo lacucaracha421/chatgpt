@@ -67,6 +67,45 @@ class CollectionAuthorityTests(unittest.TestCase):
         movie = work('m', '가', 'movie')
         self.items = [first, shown, movie]
 
+    def test_volume_range_cas_receipt_feed_and_projection(self):
+        self.ready()
+        empty = {'minVolume': None, 'maxVolume': None, 'hideConnectionPrompt': False}
+        fields = dict(workId='a', minVolume=2, maxVolume=4, hideConnectionPrompt=True,
+                      expectedRange=empty, expectedRevision=None)
+        op = str(uuid.uuid4())
+        receipt = self.ok(self.command('setVolumeRange', operation_id=op, **fields))
+        self.assertTrue(receipt['changed'])
+        row = receipt['entities']['works'][0]
+        self.assertEqual(row['derived']['volumeRange'],
+                         {'minVolume': 2, 'maxVolume': 4, 'hideConnectionPrompt': True})
+        self.assertEqual(row['entityRevision'], 2)
+        self.assertEqual(self.ok(self.command('setVolumeRange', operation_id=op, **fields)), receipt)
+        self.assertFalse(self.ok(self.command('setVolumeRange', **fields))['changed'])
+        conflict = self.command('setVolumeRange', **{**fields, 'minVolume': 3})
+        self.assertEqual(conflict.status_code, 409)
+        with api_app.get_db() as db:
+            payload = json.loads(db.execute('SELECT payload FROM collection_authority_projection WHERE id=?', ['a']).fetchone()[0])
+            self.assertEqual(payload['volumes'], [])
+            self.assertEqual(payload['volumeRange'], row['derived']['volumeRange'])
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM collection_authority_changes').fetchone()[0], 1)
+        reset = self.ok(self.command('setVolumeRange', **{**fields, **empty,
+                        'expectedRange': row['derived']['volumeRange']}))
+        self.assertTrue(reset['changed'])
+        with api_app.get_db() as db:
+            payload = json.loads(db.execute('SELECT payload FROM collection_authority_projection WHERE id=?', ['a']).fetchone()[0])
+            self.assertEqual(len(payload['volumes']), 1)
+
+    def test_volume_range_validation_and_work_type(self):
+        self.ready()
+        fields = dict(workId='a', minVolume=None, maxVolume=None, hideConnectionPrompt=False,
+                      expectedRange={'minVolume': None, 'maxVolume': None, 'hideConnectionPrompt': False},
+                      expectedRevision=None)
+        for delta in ({'minVolume': -1}, {'maxVolume': 10000}, {'minVolume': True},
+                      {'minVolume': 3, 'maxVolume': 2}, {'hideConnectionPrompt': 1},
+                      {'expectedRange': {}}, {'expectedRevision': 0}):
+            self.assertEqual(self.command('setVolumeRange', **{**fields, **delta}).status_code, 422)
+        self.assertEqual(self.command('setVolumeRange', **{**fields, 'workId': 'm'}).status_code, 409)
+
     # --- helpers ---------------------------------------------------------------
     def confirm(self, *blobs):
         with api_app.get_db() as db:

@@ -110,12 +110,14 @@ OWNERSHIP = "setVolumeOwnership"
 MEMBERSHIP = "setMembership"
 TRACK_OWNERSHIP = "setOwnershipTracking"
 RELEASE_SUBSCRIPTION = "setReleaseSubscription"
+VOLUME_RANGE = "setVolumeRange"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
-                        SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION)
+                        SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
+                        VOLUME_RANGE)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -147,6 +149,8 @@ COMMAND_KEYS = {
     MEMBERSHIP: {"workId", "assetId", "desiredState", "expectedRevision"},
     TRACK_OWNERSHIP: {"workId", "editionIndex", "count", "expectedCount", "expectedRevision"},
     RELEASE_SUBSCRIPTION: {"workId", "enabled", "expectedEnabled", "expectedRevision"},
+    VOLUME_RANGE: {"workId", "minVolume", "maxVolume", "hideConnectionPrompt",
+                   "expectedRange", "expectedRevision"},
 }
 
 #: Editable work fields. Limits mirror the shipped mobile replica model so every
@@ -956,7 +960,7 @@ def season_date_range(details, bindings):
 
 
 def build_payload(db, library_id, row):
-    """One work in the exact legacy replica item shape (validated by that model)."""
+    """One validated read row, with authority-only volume ranges when present."""
     import mobile_collections
 
     state = work_state(row)
@@ -989,6 +993,12 @@ def build_payload(db, library_id, row):
             "SELECT * FROM collection_authority_volumes WHERE library_id=? AND work_id=? AND deleted=0"
             " ORDER BY published_order IS NULL, published_order, edition_index, sort_order,"
             " volume_number, volume_id", [library_id, work_id]):
+        volume_range = state["derived"].get("volumeRange") or {}
+        if (volume_range.get("minVolume") is not None
+                and volume["volume_number"] < volume_range["minVolume"]) or (
+                volume_range.get("maxVolume") is not None
+                and volume["volume_number"] > volume_range["maxVolume"]):
+            continue
         source = sources.get(volume["volume_number"])
         volumes.append({"id": volume["volume_id"], "volumeNumber": volume["volume_number"],
                         "editionIndex": volume["edition_index"],
@@ -1046,7 +1056,12 @@ def build_payload(db, library_id, row):
         "series": state["details"].get("series"), "film": state["details"].get("film"),
         "av": av, "volumes": volumes, "artworks": art_items,
     }
-    return mobile_collections.stored(mobile_collections.Collection.model_validate(payload))
+    payload = mobile_collections.stored(mobile_collections.Collection.model_validate(payload))
+    volume_range = state["derived"].get("volumeRange")
+    if volume_range is not None:
+        payload["volumeRange"] = mobile_collections.CollectionVolumeRange.model_validate(
+            volume_range).model_dump()
+    return payload
 
 
 def refresh_projection(db, library_id, work_id):
@@ -1758,6 +1773,31 @@ def _release_subscription(ctx, entity, payload_sha):
     return _finish(ctx, payload_sha, work_id)
 
 
+def normalize_volume_range(value):
+    if not isinstance(value, dict) or set(value) != {"minVolume", "maxVolume", "hideConnectionPrompt"}:
+        fail(422, "invalidCollectionCommand", "Invalid volume range.")
+    low = _int(value["minVolume"], low=0, high=9999)
+    high = _int(value["maxVolume"], low=0, high=9999)
+    if low is not None and high is not None and high < low:
+        fail(422, "invalidCollectionCommand", "Invalid volume range.")
+    return {"minVolume": low, "maxVolume": high,
+            "hideConnectionPrompt": _bool(value["hideConnectionPrompt"])}
+
+
+def _volume_range(ctx, entity, payload_sha):
+    state = _tracking_work(ctx, entity["workId"])
+    current = state["derived"].get("volumeRange") or {
+        "minVolume": None, "maxVolume": None, "hideConnectionPrompt": False}
+    desired = {key: entity[key] for key in ("minVolume", "maxVolume", "hideConnectionPrompt")}
+    if current == desired:
+        return _finish(ctx, payload_sha, entity["workId"])
+    if entity["expectedRevision"] != state["entityRevision"] and entity["expectedRange"] != current:
+        conflict(ctx, "work", state)
+    state["derived"]["volumeRange"] = desired
+    _bump_work(ctx, state)
+    return _finish(ctx, payload_sha, entity["workId"])
+
+
 def _upsert_volume(ctx, entity, payload_sha):
     work_id, volume_id = entity["workId"], entity["volumeId"]
     require_work(ctx, work_id)
@@ -1929,6 +1969,7 @@ HANDLERS = {
     SELECT_ARTWORK: _select_artwork, UPSERT_VOLUME: _upsert_volume,
     UPSERT_VOLUME_SOURCE: _upsert_source, OWNERSHIP: _ownership, MEMBERSHIP: _membership,
     TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
+    VOLUME_RANGE: _volume_range,
 }
 
 
@@ -2133,6 +2174,12 @@ def parse_command(body):
                       editionIndex=_int(body["editionIndex"], low=0, high=255, nullable=False),
                       physical=_bool(body["physical"]), digital=_bool(body["digital"]),
                       expectedRevision=_revision(body["expectedRevision"]))
+    elif command_type == VOLUME_RANGE:
+        entity.update(normalize_volume_range({key: body[key] for key in
+                      ("minVolume", "maxVolume", "hideConnectionPrompt")}))
+        entity["expectedRange"] = normalize_volume_range(body["expectedRange"])
+        entity["expectedRevision"] = (None if body["expectedRevision"] is None
+                                      else _revision(body["expectedRevision"], minimum=1))
     elif command_type in (TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION):
         revision = body["expectedRevision"]
         entity["expectedRevision"] = None if revision is None else _revision(revision, minimum=1)

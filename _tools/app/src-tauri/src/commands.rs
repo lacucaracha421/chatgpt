@@ -179,6 +179,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CollectionAuthorityNotAdopted => "collection_authority_not_adopted",
             LibraryError::CollectionAuthorityMismatch => "collection_authority_mismatch",
             LibraryError::CollectionAuthorityTypeChangeUnavailable => "collection_authority_type_change_unavailable",
+            LibraryError::CollectionAuthorityOperationUnavailable => "collection_authority_operation_unavailable",
             LibraryError::CloudMetadataBackupNotFound => "cloud_metadata_backup_not_found",
             LibraryError::CloudMetadataBackupTooLarge => "cloud_metadata_backup_too_large",
             LibraryError::RestoreAuthorityActive { .. } => "restore_authority_active",
@@ -4267,6 +4268,7 @@ pub async fn start_collection_cover_focus(
     state: State<'_, AppState>,
 ) -> Result<crate::library::collection_pc::FocusJobResult, CommandError> {
     let library = current_required(state)?;
+    crate::library::collection_authority::fence_collection_operation(&*library.connection()?)?;
     let (script, settings) = characters::runtime_paths(&app)?;
     let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
     tauri::async_runtime::spawn_blocking(move || {

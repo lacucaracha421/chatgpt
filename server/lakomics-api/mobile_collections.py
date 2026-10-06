@@ -330,6 +330,18 @@ class Person(StrictModel):
     portrait: PersonPortrait | None = None
 
 
+class CollectionVolumeRange(StrictModel):
+    minVolume: Annotated[StrictInt, Field(ge=0, le=9999)] | None = None
+    maxVolume: Annotated[StrictInt, Field(ge=0, le=9999)] | None = None
+    hideConnectionPrompt: StrictBool = False
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.minVolume is not None and self.maxVolume is not None and self.maxVolume < self.minVolume:
+            raise ValueError("Invalid volume range")
+        return self
+
+
 class Collection(StrictModel):
     id: ID
     name: str = Field(min_length=1, max_length=2000)

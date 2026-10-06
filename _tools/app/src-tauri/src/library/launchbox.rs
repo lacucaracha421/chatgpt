@@ -1197,6 +1197,7 @@ fn store_spine(
     image: &SpineImage,
     bytes: &[u8],
 ) -> Result<Option<String>> {
+    super::collection_authority::fence_collection_operation(&*library.connection()?)?;
     let prepared = library.prepare_work_artwork(&game.id, bytes)?;
     let mut connection = library.connection()?;
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1228,6 +1229,7 @@ fn fill_launchbox_platforms(
     let mut connection = library.connection()?;
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    super::collection_authority::fence_collection_operation(&transaction)?;
     let game = load_game_on(&transaction, id)?;
     if game
         .platforms
@@ -1277,6 +1279,7 @@ impl FetchState {
         id: &str,
         cancel: &AtomicBool,
     ) -> Result<SpineOutcome> {
+        super::collection_authority::fence_collection_operation(&*library.connection()?)?;
         let mut information_error = None;
         let platforms_filled = std::cell::Cell::new(0);
         let information_updated = std::cell::Cell::new(false);
@@ -1333,6 +1336,7 @@ impl FetchState {
         after: Option<String>,
         report: &dyn Fn(SpineProgress),
     ) -> Result<SpineBatchResult> {
+        super::collection_authority::fence_collection_operation(&*library.connection()?)?;
         self.information_with(
             library,
             cache,
@@ -1604,6 +1608,7 @@ impl FetchState {
         after: Option<String>,
         report: &dyn Fn(SpineProgress),
     ) -> Result<SpineBatchResult> {
+        super::collection_authority::fence_collection_operation(&*library.connection()?)?;
         self.batch_with(
             library,
             cache,

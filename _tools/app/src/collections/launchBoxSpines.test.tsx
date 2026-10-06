@@ -230,3 +230,11 @@ it("reads a whole shelf of cases in one call and prints a remounted case at once
   await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
 });
 
+
+it("settles an authority fence quietly across automatic detail reopens", async () => {
+  const gateway = { fetchLaunchBoxSpine: vi.fn().mockRejectedValue({code:"collection_authority_operation_unavailable",message:"서버 이전 후 다음 단계에서 다시 지원합니다."}) } as unknown as LibraryGateway;
+  const first = await requestMissingGameSpine(gateway,"authority-library",game,[]);
+  expect(first).toMatchObject({status:"skipped",reason:"authority_fenced"});
+  expect(await requestMissingGameSpine(gateway,"authority-library",game,[])).toBe(first);
+  expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledTimes(1);
+});

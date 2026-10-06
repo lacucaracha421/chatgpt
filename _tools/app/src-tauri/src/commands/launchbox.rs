@@ -28,6 +28,7 @@ pub async fn fetch_launchbox_spine(
     collection_id: String,
 ) -> Result<SpineOutcome, CommandError> {
     let library = current_required(state)?;
+    crate::library::collection_authority::fence_collection_operation(&*library.connection()?)?;
     let cache = app
         .path()
         .app_cache_dir()
@@ -85,6 +86,7 @@ pub async fn fetch_launchbox_spines(
         return Err(Error::InvalidRequest.into());
     }
     let library = current_required(state)?;
+    crate::library::collection_authority::fence_collection_operation(&*library.connection()?)?;
     let cache = app
         .path()
         .app_cache_dir()

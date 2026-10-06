@@ -16,6 +16,17 @@ use super::{collection::require_collection, error::LibraryError, models::WorkArt
 pub(crate) const MAX_WORK_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 const WORK_ARTWORK_THUMBNAIL_BOUND: u32 = 360;
 
+fn artwork_blob(bytes: &[u8], mime: &str) -> crate::cloud::collections::ArtworkBlob {
+    let sha256 = Sha256::digest(bytes)
+        .iter().map(|b| format!("{b:02x}")).collect::<String>();
+    crate::cloud::collections::ArtworkBlob {
+        object_key: format!("work-artwork/mobile/{sha256}"),
+        sha256,
+        size_bytes: bytes.len() as u64,
+        content_type: mime.to_owned(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkArtworkKind {
     Cover,
@@ -45,6 +56,7 @@ pub(crate) struct PreparedWorkArtwork {
     pub mime_type: &'static str,
     pub width: u32,
     pub height: u32,
+    pub original: crate::cloud::collections::ArtworkBlob,
     pending: PendingArtwork,
 }
 
@@ -164,6 +176,7 @@ impl Library {
             mime_type,
             width: image.width(),
             height: image.height(),
+            original: artwork_blob(bytes, mime_type),
             pending,
         })
     }
@@ -267,6 +280,7 @@ impl Library {
             mime_type,
             width,
             height,
+            original: artwork_blob(bytes, mime_type),
             pending,
         }))
     }
@@ -300,6 +314,19 @@ impl Library {
         prepared: &PreparedWorkArtwork,
     ) -> Result<String, LibraryError> {
         require_collection(transaction, collection_id)?;
+        let authority = super::collection_authority::collection_write_status(transaction)?;
+        if authority.active {
+            let id = super::collection_authority::enqueue_artwork(
+                transaction, &authority, collection_id, provider, provider_image_id,
+                kind.as_str(), language, prepared,
+            )?;
+            if kind != WorkArtworkKind::Screenshot {
+                super::collection_authority::enqueue_artwork_selection(
+                    transaction, &authority, collection_id, kind.as_str(), Some(&id),
+                )?;
+            }
+            return Ok(id);
+        }
         // 한 provider 이미지는 컬렉션당 한 행(한 kind)만 가진다. 스크린샷 행은 갤러리 전용
         // 역할이라 hero 등으로 승격될 수 있고, 이미 다른 역할을 가진 이미지를 스크린샷으로
         // 다시 넣으면 기존 역할과 선택 상태를 그대로 둔다(갤러리는 모든 kind를 보여 준다).
@@ -370,6 +397,12 @@ impl Library {
         kind: WorkArtworkKind,
     ) -> Result<(), LibraryError> {
         require_collection(transaction, collection_id)?;
+        let authority = super::collection_authority::collection_write_status(transaction)?;
+        if authority.active {
+            return super::collection_authority::enqueue_artwork_selection(
+                transaction, &authority, collection_id, kind.as_str(), Some(artwork_id),
+            );
+        }
         let belongs: bool = transaction.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM collection_work_artworks
@@ -403,6 +436,12 @@ impl Library {
         kind: WorkArtworkKind,
     ) -> Result<(), LibraryError> {
         require_collection(transaction, collection_id)?;
+        let authority = super::collection_authority::collection_write_status(transaction)?;
+        if authority.active {
+            return super::collection_authority::enqueue_artwork_selection(
+                transaction, &authority, collection_id, kind.as_str(), None,
+            );
+        }
         transaction.execute(
             "UPDATE collection_work_artworks
              SET selected = 0, updated_at = ?1
@@ -425,6 +464,13 @@ impl Library {
         prepared: &PreparedWorkArtwork,
     ) -> Result<String, LibraryError> {
         require_collection(transaction, collection_id)?;
+        let authority = super::collection_authority::collection_write_status(transaction)?;
+        if authority.active {
+            return super::collection_authority::enqueue_artwork(
+                transaction, &authority, collection_id, provider, provider_image_id,
+                "volume_cover", language, prepared,
+            );
+        }
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
             "INSERT INTO collection_work_artworks (

@@ -411,6 +411,7 @@ impl Library {
         &self,
         collection_id: &str,
     ) -> Result<u64, LibraryError> {
+        let authority = super::collection_authority::collection_write_status(&*self.connection()?)?;
         let (collection_type, source_path) = {
             let connection = self.connection()?;
             connection
@@ -452,9 +453,11 @@ impl Library {
                 .collection_artwork_scan_cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if cache
-                .get(collection_id)
-                .is_some_and(|cached| *cached == source_signature)
+            // Directory timestamps do not detect edited image contents.
+            if !authority.active
+                && cache
+                    .get(collection_id)
+                    .is_some_and(|cached| *cached == source_signature)
             {
                 return Ok(0);
             }
@@ -517,6 +520,12 @@ impl Library {
         directory_label: &str,
         preferred_path: Option<&Path>,
     ) -> Result<u64, LibraryError> {
+        let authority = super::collection_authority::collection_write_status(&*self.connection()?)?;
+        if authority.active {
+            return self.import_authority_artwork_files(
+                collection_id, directory, kind, directory_label, preferred_path,
+            );
+        }
         let scan_started = Instant::now();
         let images = naturally_sorted_images(directory)?
             .into_iter()
@@ -653,6 +662,74 @@ impl Library {
                  reuse {reuse_elapsed:?}, prepare {prepare_elapsed:?})",
                 scan_elapsed + identity_elapsed + reuse_elapsed + prepare_elapsed,
             );
+        }
+        Ok(imported)
+    }
+
+    fn import_authority_artwork_files(
+        &self,
+        work: &str,
+        directory: &Path,
+        kind: WorkArtworkKind,
+        label: &str,
+        preferred: Option<&Path>,
+    ) -> Result<u64, LibraryError> {
+        let mut imported = 0;
+        let mut first = None;
+        let mut chosen = None;
+        for path in naturally_sorted_images(directory)? {
+            if label == "root"
+                && !path.file_name().unwrap_or_default().to_string_lossy()
+                    .to_lowercase().starts_with("thumbnail.")
+            {
+                continue;
+            }
+            let bytes = fs::read(&path).map_err(|source| LibraryError::ReadMedia {
+                path: path.clone(), source,
+            })?;
+            if bytes.len() > 16 * 1024 * 1024 {
+                continue;
+            }
+            let sha = Sha256::digest(&bytes).iter()
+                .map(|b| format!("{b:02x}")).collect::<String>();
+            let existing = super::collection_authority::local_artwork_by_hash(
+                &*self.connection()?, work, kind.as_str(), &sha,
+            )?;
+            let id = if let Some(id) = existing {
+                id
+            } else {
+                let Ok(prepared) = self.prepare_work_artwork(work, &bytes) else {
+                    continue;
+                };
+                let mut db = self.connection()?;
+                let tx = db.transaction()?;
+                let authority = super::collection_authority::collection_write_status(&tx)?;
+                let id = super::collection_authority::enqueue_artwork(
+                    &tx, &authority, work, "local", "", kind.as_str(), None, &prepared,
+                )?;
+                tx.commit()?;
+                prepared.commit();
+                imported += 1;
+                id
+            };
+            if first.is_none() {
+                first = Some(id.clone());
+            }
+            if preferred.is_some_and(|p| p == path) {
+                chosen = Some(id);
+            }
+        }
+        if let Some(id) = chosen.or(first).filter(|_| imported > 0) {
+            let mut db = self.connection()?;
+            let tx = db.transaction()?;
+            let authority = super::collection_authority::collection_write_status(&tx)?;
+            let selected: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_work_artworks WHERE collection_id=?1 AND kind=?2 AND selected=1)",rusqlite::params![work,kind.as_str()],|r|r.get(0))?;
+            if !selected {
+                super::collection_authority::enqueue_artwork_selection(
+                    &tx, &authority, work, kind.as_str(), Some(&id),
+                )?;
+            }
+            tx.commit()?;
         }
         Ok(imported)
     }

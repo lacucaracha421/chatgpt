@@ -666,6 +666,23 @@ fn reconcile_source(
     now: &str,
     result: &mut AladinSyncResult,
 ) -> Result<Option<StoredAladinSource>, LibraryError> {
+    let authority = super::collection_authority::collection_write_status(transaction)?;
+    let before = if authority.active {
+        super::collection_authority::volume_source_state(
+            transaction,
+            collection_id,
+            item.volume_number,
+            provider,
+        )?
+    } else {
+        serde_json::Value::Null
+    };
+    let volume_before = super::collection_authority::volume_slot_state(
+        transaction,
+        collection_id,
+        item.volume_number,
+        0,
+    )?;
     let existing: Option<StoredAladinSource> = transaction
         .query_row(
             "SELECT provider_item_id, title, author, publisher, isbn13,
@@ -750,6 +767,32 @@ fn reconcile_source(
             now
         ],
     )?;
+    if authority.active {
+        let after = super::collection_authority::volume_source_state(
+            transaction,
+            collection_id,
+            item.volume_number,
+            provider,
+        )?;
+        super::collection_authority::enqueue_volume_source_changes(
+            transaction,
+            &authority,
+            &before,
+            after,
+        )?;
+        let volume_after = super::collection_authority::volume_slot_state(
+            transaction,
+            collection_id,
+            item.volume_number,
+            0,
+        )?;
+        super::collection_authority::enqueue_volume_changes(
+            transaction,
+            &authority,
+            &volume_before,
+            volume_after,
+        )?;
+    }
     Ok(existing)
 }
 

@@ -36,6 +36,7 @@ const COMMANDS: &[&str] = &[
     "setMembership",
     "setOwnershipTracking",
     "setReleaseSubscription",
+    "setVolumeRange",
 ];
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
@@ -230,11 +231,254 @@ pub(crate) fn collection_write_status(
     Ok(status)
 }
 
+pub(crate) fn fence_collection_operation(db: &Connection) -> Result<(), LibraryError> {
+    if local(db)?.is_some() {
+        return Err(LibraryError::CollectionAuthorityOperationUnavailable);
+    }
+    Ok(())
+}
+
 /// Read stored values, not summary fallback covers, for field-level compare-and-set.
 pub(crate) fn editable_work(db: &Connection, work: &str) -> Result<Value, LibraryError> {
     db.query_row("SELECT name,description,cover_asset_id,year,original_title,runtime_minutes,author,director,developer,publisher,platforms,production_company,release_date,external_score,my_score,genres,overview,showcase,p.status,p.owned_platform FROM collections c LEFT JOIN collection_pc_records p ON p.collection_id=c.id WHERE c.id=?1", [work], |r| {
         Ok(json!({"name":r.get::<_,String>(0)?,"description":r.get::<_,Option<String>>(1)?,"coverAssetId":r.get::<_,Option<String>>(2)?,"year":r.get::<_,Option<i64>>(3)?,"originalTitle":r.get::<_,Option<String>>(4)?,"runtimeMinutes":r.get::<_,Option<i64>>(5)?,"author":r.get::<_,Option<String>>(6)?,"director":r.get::<_,Option<String>>(7)?,"developer":r.get::<_,Option<String>>(8)?,"publisher":r.get::<_,Option<String>>(9)?,"platforms":r.get::<_,Option<String>>(10)?,"productionCompany":r.get::<_,Option<String>>(11)?,"releaseDate":r.get::<_,Option<String>>(12)?,"externalScore":r.get::<_,Option<i64>>(13)?,"myScore":r.get::<_,Option<f64>>(14)?,"genres":r.get::<_,Option<String>>(15)?,"overview":r.get::<_,Option<String>>(16)?,"showcase":r.get::<_,bool>(17)?,"status":r.get::<_,Option<String>>(18)?,"ownedPlatform":r.get::<_,Option<String>>(19)?}))
     }).optional()?.ok_or(LibraryError::CollectionNotFound)
+}
+
+pub(crate) fn artwork_identity(provider: &str, kind: &str, image: &str, sha: &str) -> String {
+    if provider == "local" {
+        format!("sha256:{kind}:{sha}")
+    } else {
+        image.to_owned()
+    }
+}
+
+pub(crate) fn local_artwork_by_hash(
+    db: &Connection,
+    work: &str,
+    kind: &str,
+    sha: &str,
+) -> Result<Option<String>, LibraryError> {
+    let image = artwork_identity("local", kind, "", sha);
+    db.query_row("SELECT a.id FROM collection_work_artworks a WHERE a.collection_id=?1 AND a.provider='local' AND a.kind=?2 AND (a.provider_image_id=?3 OR EXISTS(SELECT 1 FROM collection_authority_revisions r WHERE r.section='artworks' AND r.deleted=0 AND json_extract(r.payload,'$.artworkId')=a.id AND json_extract(r.payload,'$.original.sha256')=?4)) ORDER BY a.id LIMIT 1",params![work,kind,image,sha],|r|r.get(0)).optional().map_err(Into::into)
+}
+
+pub(crate) fn enqueue_artwork(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    provider: &str,
+    image: &str,
+    kind: &str,
+    language: Option<&str>,
+    prepared: &super::work_artwork::PreparedWorkArtwork,
+) -> Result<String, LibraryError> {
+    if prepared.original.size_bytes > 16 * 1024 * 1024 {
+        return Err(LibraryError::InvalidWorkArtwork);
+    }
+    if provider == "local" {
+        if let Some(id) = local_artwork_by_hash(tx, work, kind, &prepared.original.sha256)? {
+            return Ok(id);
+        }
+    }
+    let image = artwork_identity(provider, kind, image, &prepared.original.sha256);
+    let existing: Option<String> = tx.query_row(
+        "SELECT id FROM collection_work_artworks WHERE collection_id=?1 AND provider=?2 AND provider_image_id=?3",
+        params![work, provider, image], |r| r.get(0),
+    ).optional()?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute("INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,language,selected,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,?11,?11)",
+        params![prepared.id,work,provider,image,kind,prepared.relative_path,prepared.mime_type,prepared.width,prepared.height,language,now])?;
+    enqueue_collection_command(
+        tx,
+        status,
+        "addArtwork",
+        &prepared.id,
+        json!({
+            "workId":work,"artworkId":prepared.id,"kind":kind,"provider":provider,
+            "providerImageId":image,"width":prepared.width,"height":prepared.height,
+            "language":language,"original":prepared.original,"thumbnail":null
+        }),
+    )?;
+    Ok(prepared.id.clone())
+}
+
+fn selection_slot(kind: &str) -> Result<&str, LibraryError> {
+    match kind {
+        "cover" | "volume_cover" => Ok("work"),
+        "hero" | "backdrop" | "spine" | "back" => Ok(kind),
+        _ => Err(LibraryError::InvalidWorkArtwork),
+    }
+}
+
+fn artwork_slot(db: &Connection, work: &str, slot: &str) -> Result<Option<String>, LibraryError> {
+    db.query_row("SELECT id FROM collection_work_artworks WHERE collection_id=?1 AND selected=1 AND (kind=?2 OR (?2='work' AND kind IN ('cover','volume_cover'))) ORDER BY id LIMIT 1",params![work,slot],|r|r.get(0)).optional().map_err(Into::into)
+}
+
+fn project_selection(
+    tx: &Transaction<'_>,
+    work: &str,
+    slot: &str,
+    art: Option<&str>,
+) -> Result<(), LibraryError> {
+    tx.execute("UPDATE collection_work_artworks SET selected=(id IS ?3) WHERE collection_id=?1 AND (kind=?2 OR (?2='work' AND kind IN ('cover','volume_cover')))",params![work,slot,art])?;
+    Ok(())
+}
+
+pub(crate) fn enqueue_artwork_selection(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    kind: &str,
+    art: Option<&str>,
+) -> Result<(), LibraryError> {
+    let slot = selection_slot(kind)?;
+    if let Some(art) = art {
+        let belongs: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_work_artworks WHERE id=?1 AND collection_id=?2 AND kind=?3)",params![art,work,kind],|r|r.get(0))?;
+        if !belongs {
+            return Err(LibraryError::InvalidWorkArtwork);
+        }
+    }
+    let current = artwork_slot(tx, work, slot)?;
+    if current.as_deref() == art {
+        return Ok(());
+    }
+    enqueue_collection_command(
+        tx,
+        status,
+        "selectArtwork",
+        work,
+        json!({"workId":work,"slot":slot,"artworkId":art,"expectedArtworkId":current}),
+    )?;
+    project_selection(tx, work, slot, art)
+}
+
+pub(crate) fn volume_state(db: &Connection, id: &str) -> Result<Value, LibraryError> {
+    Ok(db.query_row("SELECT id,collection_id,volume_number,edition_index,sort_order,cover_artwork_id,source_provider,source_cover_id FROM collection_volumes WHERE id=?1",[id],|r| {
+        let n: i64 = r.get(2)?;
+        let e: i64 = r.get(3)?;
+        Ok(json!({"volumeId":r.get::<_,String>(0)?,"workId":r.get::<_,String>(1)?,"volumeNumber":n,"editionIndex":e,"sortOrder":r.get::<_,i64>(4)?,"displayLabel":if e==0 {n.to_string()} else {format!("{n}.{e}")},"coverArtworkId":r.get::<_,Option<String>>(5)?,"sourceProvider":r.get::<_,Option<String>>(6)?,"sourceCoverId":r.get::<_,Option<String>>(7)?,"deleted":false}))
+    }).optional()?.unwrap_or(Value::Null))
+}
+
+pub(crate) fn volume_slot_state(
+    db: &Connection,
+    work: &str,
+    number: i64,
+    edition: u8,
+) -> Result<Value, LibraryError> {
+    let id: Option<String> = db.query_row("SELECT id FROM collection_volumes WHERE collection_id=?1 AND volume_number=?2 AND edition_index=?3",params![work,number,edition],|r|r.get(0)).optional()?;
+    match id {
+        Some(id) => volume_state(db, &id),
+        None => Ok(Value::Null),
+    }
+}
+
+pub(crate) fn enqueue_volume_changes(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    before: &Value,
+    after: Value,
+) -> Result<(), LibraryError> {
+    if status.active && *before != after {
+        let id = text(&after, "volumeId")?.to_owned();
+        let mut body = after;
+        body["expectedRevision"] = json!(predicted_collection_revision(
+            tx,
+            "volumes",
+            &json!([id]).to_string()
+        )?);
+        enqueue_collection_command(tx, status, "upsertVolume", &id, body)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn expected_volume_range(db: &Connection, work: &str) -> Result<Value, LibraryError> {
+    let raw: Option<String> = db.query_row(
+        "SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id=?1",
+        [work], |r| r.get(0),
+    ).optional()?;
+    let confirmed: Value = raw
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| LibraryError::InvalidCloudResponse)?
+        .unwrap_or(Value::Null);
+    let mut expected = confirmed["derived"]
+        .get("volumeRange")
+        .cloned()
+        .unwrap_or(json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false}));
+    let pending: Option<String> = db.query_row(
+        "SELECT payload FROM collection_authority_outbox WHERE state='pending' AND command_type='setVolumeRange' AND json_extract(payload,'$.workId')=?1 ORDER BY seq DESC LIMIT 1",
+        [work], |r| r.get(0),
+    ).optional()?;
+    if let Some(raw) = pending {
+        let body: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        for field in ["minVolume", "maxVolume", "hideConnectionPrompt"] {
+            expected[field] = body[field].clone();
+        }
+    }
+    Ok(expected)
+}
+
+pub(crate) fn project_volume_range(
+    tx: &Transaction<'_>,
+    work: &str,
+    range: &Value,
+    now: &str,
+) -> Result<(), LibraryError> {
+    if range["minVolume"].is_null()
+        && range["maxVolume"].is_null()
+        && range["hideConnectionPrompt"] == false
+    {
+        tx.execute(
+            "DELETE FROM collection_volume_ranges WHERE collection_id=?1",
+            [work],
+        )?;
+    } else {
+        tx.execute("INSERT INTO collection_volume_ranges(collection_id,min_volume,max_volume,hide_connection_prompt,updated_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(collection_id) DO UPDATE SET min_volume=excluded.min_volume,max_volume=excluded.max_volume,hide_connection_prompt=excluded.hide_connection_prompt,updated_at=excluded.updated_at",params![work,sql_value(&range["minVolume"])?,sql_value(&range["maxVolume"])?,boolean(range,"hideConnectionPrompt")?,now])?;
+    }
+    Ok(())
+}
+
+pub(crate) fn volume_source_state(
+    db: &Connection,
+    work: &str,
+    number: i64,
+    provider: &str,
+) -> Result<Value, LibraryError> {
+    let row: Option<(Value,String)> = db.query_row("SELECT provider_item_id,title,author,publisher,isbn13,publication_date,item_url,provider_data_json FROM collection_volume_sources WHERE collection_id=?1 AND volume_number=?2 AND provider=?3",params![work,number,provider],|r| {
+        Ok((json!({"workId":work,"volumeNumber":number,"provider":provider,"providerItemId":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"author":r.get::<_,Option<String>>(2)?,"publisher":r.get::<_,Option<String>>(3)?,"isbn13":r.get::<_,Option<String>>(4)?,"publicationDate":r.get::<_,Option<String>>(5)?,"itemUrl":r.get::<_,Option<String>>(6)?,"deleted":false}),r.get(7)?))
+    }).optional()?;
+    if let Some((mut value, raw)) = row {
+        value["data"] =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCollectionMetadata)?;
+        Ok(value)
+    } else {
+        Ok(Value::Null)
+    }
+}
+
+pub(crate) fn enqueue_volume_source_changes(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    before: &Value,
+    mut after: Value,
+) -> Result<(), LibraryError> {
+    if status.active && *before != after {
+        let entity_key = key("volumeSources", &after)?;
+        after["expectedRevision"] = json!(predicted_collection_revision(
+            tx,
+            "volumeSources",
+            &entity_key
+        )?);
+        enqueue_collection_command(tx, status, "upsertVolumeSource", &entity_key, after)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn enqueue_work_changes(
@@ -401,6 +645,43 @@ pub(crate) fn predicted_collection_revision(
                 }
                 _ => {}
             }
+        } else if section == "volumeSources"
+            && command == "upsertVolumeSource"
+            && key("volumeSources", &body)? == entity_key
+        {
+            let fields = [
+                "providerItemId",
+                "title",
+                "author",
+                "publisher",
+                "isbn13",
+                "publicationDate",
+                "itemUrl",
+                "data",
+                "deleted",
+            ];
+            if fields.iter().any(|f| state[*f] != body[*f]) {
+                predicted += 1;
+            }
+            state = body.clone();
+        } else if section == "volumes"
+            && command == "upsertVolume"
+            && key("volumes", &body)? == entity_key
+        {
+            let fields = [
+                "volumeNumber",
+                "editionIndex",
+                "sortOrder",
+                "displayLabel",
+                "coverArtworkId",
+                "sourceProvider",
+                "sourceCoverId",
+                "deleted",
+            ];
+            if fields.iter().any(|f| state[*f] != body[*f]) {
+                predicted += 1;
+            }
+            state = body.clone();
         } else if section == "memberships"
             && command == "setMembership"
             && key("memberships", &body)? == entity_key
@@ -671,6 +952,9 @@ fn apply_work(tx: &Transaction<'_>, v: &Value, now: &str) -> Result<(), LibraryE
             params![id,sql_value(&v["fields"]["status"])?,sql_value(&v["fields"]["ownedPlatform"]) ?])?;
     }
     apply_av(tx, v, now)?;
+    if let Some(range) = v["derived"].get("volumeRange") {
+        project_volume_range(tx, id, range, now)?;
+    }
     Ok(())
 }
 
@@ -848,15 +1132,9 @@ fn selections(tx: &Transaction<'_>) -> Result<(), LibraryError> {
     for raw in works {
         let w: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
-        for (slot, kind) in [
-            ("work", "cover"),
-            ("hero", "hero"),
-            ("backdrop", "backdrop"),
-            ("spine", "spine"),
-        ] {
+        for slot in ["work", "hero", "backdrop", "spine", "back"] {
             if let Some(selected) = w["selection"].get(slot) {
-                tx.execute("UPDATE collection_work_artworks SET selected=0 WHERE collection_id=?1 AND kind=?2 AND selected=1",params![text(&w,"workId")?,kind])?;
-                tx.execute("UPDATE collection_work_artworks SET selected=1 WHERE collection_id=?1 AND kind=?2 AND id=?3",params![text(&w,"workId")?,kind,sql_value(selected)?])?;
+                project_selection(tx, text(&w, "workId")?, slot, selected.as_str())?;
             }
         }
         tx.execute(
@@ -1121,6 +1399,9 @@ impl Library {
             self.flush_collection_outbox_with(
                 &status,
                 &|body| {
+                    if body["commandType"] == "addArtwork" {
+                        self.upload_collection_command_artwork(client, token, body)?;
+                    }
                     let credential = if publisher_command(text(body, "commandType")?) {
                         publisher.ok_or(LibraryError::CloudCredentialNotConfigured)?
                     } else {
@@ -1287,6 +1568,21 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
         let body: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
         match body["commandType"].as_str() {
+            Some("selectArtwork") => project_selection(
+                tx,
+                text(&body, "workId")?,
+                text(&body, "slot")?,
+                body["artworkId"].as_str(),
+            )?,
+            Some("setVolumeRange") => {
+                project_volume_range(tx, text(&body, "workId")?, &body, &created_at)?
+            }
+            Some("upsertVolume") => {
+                tx.execute("UPDATE collection_volumes SET cover_artwork_id=?2,source_provider=?3,source_cover_id=?4,sort_order=?5 WHERE id=?1",params![text(&body,"volumeId")?,sql_value(&body["coverArtworkId"])?,sql_value(&body["sourceProvider"])?,sql_value(&body["sourceCoverId"])?,integer(&body,"sortOrder")?])?;
+            }
+            Some("upsertVolumeSource") => {
+                tx.execute("UPDATE collection_volume_sources SET provider_item_id=?4,title=?5,author=?6,publisher=?7,isbn13=?8,publication_date=?9,item_url=?10,provider_data_json=?11 WHERE collection_id=?1 AND volume_number=?2 AND provider=?3",params![text(&body,"workId")?,integer(&body,"volumeNumber")?,text(&body,"provider")?,text(&body,"providerItemId")?,text(&body,"title")?,sql_value(&body["author"])?,sql_value(&body["publisher"])?,sql_value(&body["isbn13"])?,sql_value(&body["publicationDate"])?,sql_value(&body["itemUrl"])?,body["data"].to_string()])?;
+            }
             Some("updateWork") => {
                 if let Some(changes) = body["changes"].as_object() {
                     for (field, value) in changes {
@@ -1456,6 +1752,50 @@ fn drop_core_intent(
 }
 
 impl Library {
+    fn upload_collection_command_artwork(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        body: &Value,
+    ) -> Result<(), LibraryError> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let blob: crate::cloud::collections::ArtworkBlob =
+            serde_json::from_value(body["original"].clone())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if blob.size_bytes > 16 * 1024 * 1024 {
+            return Err(LibraryError::InvalidWorkArtwork);
+        }
+        let mut media = self.resolve_work_artwork(text(body, "artworkId")?)?;
+        let mut bytes = Vec::new();
+        media
+            .file
+            .by_ref()
+            .take(blob.size_bytes + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|source| LibraryError::ReadMedia {
+                path: self.root().to_path_buf(),
+                source,
+            })?;
+        if bytes.len() as u64 != blob.size_bytes
+            || Sha256::digest(&bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+                != blob.sha256
+        {
+            return Err(LibraryError::InvalidWorkArtwork);
+        }
+        client.upload_collection_artwork(&blob, &bytes, token)?;
+        if !client
+            .missing_collection_artworks(&[&blob], token)?
+            .is_empty()
+        {
+            return Err(LibraryError::CloudRequestUnavailable);
+        }
+        Ok(())
+    }
+
     fn observe_collection_authority(
         &self,
         status: &CollectionAuthorityStatus,

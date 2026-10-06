@@ -57,7 +57,11 @@ export function requestMissingGameSpine(gateway: LibraryGateway, scope: string, 
       }
       value.retryAfter.delete(collection.id);
       return outcome;
-    }).catch(() => {
+    }).catch(error => {
+      if (commandErrorMessage(error, "") === "서버 이전 후 다음 단계에서 다시 지원합니다.") {
+        // Keep the automatic attempt settled for this library session.
+        return { collectionId: collection.id, status: "skipped" as const, reason: "authority_fenced", artworkId: null, databaseId: null, platform: null, fileName: null, region: null, cached: false };
+      }
       value.attempts.delete(collection.id);
       value.retryAfter.set(collection.id, Date.now() + 30_000);
       return null;

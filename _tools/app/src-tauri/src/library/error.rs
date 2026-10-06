@@ -56,6 +56,8 @@ pub enum LibraryError {
     CollectionAuthorityMismatch,
     #[error("서버 관리 중에는 작품 유형을 변경할 수 없습니다. 새 작품으로 만들어 주세요.")]
     CollectionAuthorityTypeChangeUnavailable,
+    #[error("서버 이전 후 다음 단계에서 다시 지원합니다.")]
+    CollectionAuthorityOperationUnavailable,
     #[error("서버에 라이브러리 메타데이터 백업이 없습니다")]
     CloudMetadataBackupNotFound,
     #[error("서버 메타데이터 백업이 허용 크기를 초과합니다")]

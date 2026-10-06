@@ -54,6 +54,7 @@ pub(crate) fn materialize_mangadex_volumes(
     covers: &[MangaDexCoverCandidate],
     representative: Option<(&str, &str)>,
 ) -> Result<(), LibraryError> {
+    let authority = super::collection_authority::collection_write_status(transaction)?;
     let mut slots = BTreeMap::new();
     for cover in covers
         .iter()
@@ -67,6 +68,12 @@ pub(crate) fn materialize_mangadex_volumes(
 
     let now = chrono::Utc::now().to_rfc3339();
     for ((volume_number, edition_index), cover) in slots {
+        let before = super::collection_authority::volume_slot_state(
+            transaction,
+            collection_id,
+            volume_number,
+            edition_index,
+        )?;
         let cover_artwork_id = representative
             .filter(|(cover_id, _)| *cover_id == cover.cover_id)
             .map(|(_, artwork_id)| artwork_id);
@@ -96,6 +103,18 @@ pub(crate) fn materialize_mangadex_volumes(
                 now,
             ],
         )?;
+        let after = super::collection_authority::volume_slot_state(
+            transaction,
+            collection_id,
+            volume_number,
+            edition_index,
+        )?;
+        super::collection_authority::enqueue_volume_changes(
+            transaction,
+            &authority,
+            &before,
+            after,
+        )?;
     }
     Ok(())
 }
@@ -115,6 +134,7 @@ impl Library {
         collection_id: &str,
         mut on_progress: Option<&mut dyn FnMut(u32, u32)>,
     ) -> Result<Vec<CollectionVolume>, LibraryError> {
+        super::collection_authority::collection_write_status(&*self.connection()?)?;
         let (binding, volume_range) = {
             let connection = self.connection()?;
             let collection_type: Option<String> = connection
@@ -312,9 +332,9 @@ impl Library {
                     let volume_number = row.get(1)?;
                     let edition_index = row.get(2)?;
                     let local_release_date: Option<String> = row.get(4)?;
-                    let release_status = local_release_date.as_deref().and_then(|value| {
-                        release_status_at(value, chrono::Local::now())
-                    });
+                    let release_status = local_release_date
+                        .as_deref()
+                        .and_then(|value| release_status_at(value, chrono::Local::now()));
                     Ok(CollectionVolume {
                         id: row.get(0)?,
                         volume_number,
@@ -352,6 +372,7 @@ impl Library {
     where
         F: FnMut(&str, &str) -> Result<Vec<u8>, LibraryError>,
     {
+        super::collection_authority::collection_write_status(&*self.connection()?)?;
         let (collection_type, manga_id) = self
             .connection()?
             .query_row(
@@ -457,6 +478,10 @@ impl Library {
                 let attached = {
                     let mut connection = self.connection()?;
                     let transaction = connection.transaction()?;
+                    let authority =
+                        super::collection_authority::collection_write_status(&transaction)?;
+                    let before =
+                        super::collection_authority::volume_state(&transaction, &volume_id)?;
                     let artwork_id = Library::insert_volume_work_artwork_in_transaction(
                         &transaction,
                         collection_id,
@@ -472,6 +497,14 @@ impl Library {
                         params![artwork_id, chrono::Utc::now().to_rfc3339(), volume_id],
                     )? == 1;
                     if attached {
+                        let after =
+                            super::collection_authority::volume_state(&transaction, &volume_id)?;
+                        super::collection_authority::enqueue_volume_changes(
+                            &transaction,
+                            &authority,
+                            &before,
+                            after,
+                        )?;
                         transaction.commit()?;
                     } else {
                         transaction.rollback()?;
@@ -497,11 +530,19 @@ impl Library {
         volume_id: &str,
         artwork_id: &str,
     ) -> Result<bool, LibraryError> {
-        Ok(self.connection()?.execute(
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let authority = super::collection_authority::collection_write_status(&tx)?;
+        let before = super::collection_authority::volume_state(&tx, volume_id)?;
+        let changed = tx.execute(
             "UPDATE collection_volumes SET cover_artwork_id = ?1, updated_at = ?2
              WHERE id = ?3 AND cover_artwork_id IS NULL AND source_provider = 'mangadex'",
             params![artwork_id, chrono::Utc::now().to_rfc3339(), volume_id],
-        )? == 1)
+        )? == 1;
+        let after = super::collection_authority::volume_state(&tx, volume_id)?;
+        super::collection_authority::enqueue_volume_changes(&tx, &authority, &before, after)?;
+        tx.commit()?;
+        Ok(changed)
     }
 
     fn local_volume_artwork(
@@ -531,6 +572,13 @@ fn set_local_volume(
     file_name: &str,
     artwork_id: &str,
 ) -> Result<(), LibraryError> {
+    let authority = super::collection_authority::collection_write_status(transaction)?;
+    let before = super::collection_authority::volume_slot_state(
+        transaction,
+        collection_id,
+        volume_number,
+        edition_index,
+    )?;
     let now = chrono::Utc::now().to_rfc3339();
     transaction.execute(
         "INSERT INTO collection_volumes (
@@ -545,7 +593,9 @@ fn set_local_volume(
             source_file_name = excluded.source_file_name,
             updated_at = excluded.updated_at
          WHERE collection_volumes.source_provider IS NULL
-            OR collection_volumes.source_provider != 'local'",
+            OR collection_volumes.source_provider != 'local'
+            OR (?9 AND (collection_volumes.cover_artwork_id IS NOT excluded.cover_artwork_id
+                OR collection_volumes.source_file_name IS NOT excluded.source_file_name))",
         params![
             uuid::Uuid::new_v4().to_string(),
             collection_id,
@@ -555,8 +605,16 @@ fn set_local_volume(
             artwork_id,
             file_name,
             now,
+            authority.active,
         ],
     )?;
+    let after = super::collection_authority::volume_slot_state(
+        transaction,
+        collection_id,
+        volume_number,
+        edition_index,
+    )?;
+    super::collection_authority::enqueue_volume_changes(transaction, &authority, &before, after)?;
     Ok(())
 }
 

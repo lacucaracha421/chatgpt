@@ -219,6 +219,7 @@ impl Library {
         Ok(rows)
     }
     pub(crate) fn store_cover_focus(&self, focus: &CoverFocus) -> Result<bool, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         if focus
             .focus_x
             .is_some_and(|v| !v.is_finite() || !(0.0..=1.0).contains(&v))
@@ -239,6 +240,7 @@ impl Library {
         config: &RuntimeConfig,
         on_focus: &dyn Fn(CoverFocus),
     ) -> Result<FocusJobResult, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let _guard = match FOCUS_JOB.try_lock() {
             Ok(guard) => guard,
             Err(TryLockError::WouldBlock) => {

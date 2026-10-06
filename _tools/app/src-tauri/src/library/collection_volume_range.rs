@@ -71,6 +71,7 @@ impl Library {
     ) -> Result<CollectionSummary, LibraryError> {
         validate(min_volume, max_volume)?;
         let mut connection = self.connection()?;
+        let authority = super::collection_authority::collection_write_status(&connection)?;
         require_collection(&connection, collection_id)?;
         let collection_type: String = connection.query_row(
             "SELECT type FROM collections WHERE id = ?1",
@@ -97,6 +98,20 @@ impl Library {
         }
 
         let transaction = connection.transaction()?;
+        if authority.active {
+            if current != desired {
+                super::collection_authority::enqueue_collection_command(
+                    &transaction,
+                    &authority,
+                    "setVolumeRange",
+                    collection_id,
+                    serde_json::json!({
+                        "workId":collection_id,"minVolume":min_volume,"maxVolume":max_volume,"hideConnectionPrompt":hide_connection_prompt,
+                        "expectedRange":super::collection_authority::expected_volume_range(&transaction,collection_id)?,"expectedRevision":null
+                    }),
+                )?;
+            }
+        }
         if desired == CollectionVolumeRange::default() {
             transaction.execute(
                 "DELETE FROM collection_volume_ranges WHERE collection_id = ?1",
