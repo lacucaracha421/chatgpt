@@ -370,9 +370,10 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "authority_sync_health": return { albums: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null }, classifications: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null }, assets: { rejectedCount: 0, rejectedReason: null, stopped: false }, characterExclusions: { skippedCount: 0, lastSkipReason: null, lastSkippedAt: null }, authorityPassFailure: null, assetLaneFailure: null };
     case "encrypted_vault_status": return { state: "absent", vaultId: null, root: null, itemCount: null, trashedCount: null, remembered: false };
     case "exchange_snapshot": return { availability: { state: "ready", message: null, needsToken: false }, selfName: "Preview PC", devices: [{ deviceId: "tablet-preview", name: "Galaxy Tab Preview", kind: "tablet" }], outgoing: [], incoming: [], received: [], unseen: 0, folder: "/preview/exchange", tokenConfigured: true };
-    case "character_incremental_status": return { running: true, workActive: false, paused: false, automationEnabled: true, broadFolderEnabled: false, completed: 300, confirmed: 84, historyRefreshActive: false, persistentError: null, activeWork: null, historyRefreshes: [] };
+    case "character_incremental_status": return { running: true, workActive: false, paused: false, automationEnabled: true, broadFolderEnabled: false, completed: 300, confirmed: 84, definitionRevision: 0, seriesRevisions: {}, historyRefreshActive: false, persistentError: null, activeWork: null, historyRefreshes: [] };
     case "list_character_targets": return [];
     case "character_series":
+    case "all_character_groups":
     case "character_folder_exclusions": return [];
     case "character_shadow_review_summary": return { automatic: 0, recommended: 0, targets: [] };
     case "character_shadow_review_page": return { items: [], nextOffset: null, summary: { automatic: { pending: 0 }, recommended: { pending: 0 } } };

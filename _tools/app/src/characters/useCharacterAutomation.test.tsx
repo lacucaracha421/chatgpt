@@ -45,7 +45,8 @@ it.each([false, true])("keeps the focused cadence and slows on blur (work active
   completed = 1;
   await act(async () => { window.dispatchEvent(new Event("focus")); });
   expect(api.status).toHaveBeenCalledTimes(4);
-  expect(changed).toHaveBeenCalledWith(false);
+  // A status without the native revisions: every result may have changed anything (as before).
+  expect(changed).toHaveBeenCalledWith({ membershipChanged: false, definitionsChanged: true, series: null });
   await act(async () => { await vi.advanceTimersByTimeAsync(cadence); });
   expect(api.status).toHaveBeenCalledTimes(5);
   unmount();
@@ -111,7 +112,7 @@ it("publishes one revision per durable completion and does not cancel on navigat
     await vi.advanceTimersByTimeAsync(6000);
   });
 
-  expect(changed).toHaveBeenCalledWith(true);
+  expect(changed).toHaveBeenCalledWith({ membershipChanged: true, definitionsChanged: true, series: null });
   expect(result.current.revision).toBe(1);
   unmount();
   expect(api.pause).not.toHaveBeenCalled();
@@ -218,7 +219,7 @@ it("refreshes promptly on visibility and reports whether membership changed", as
     document.dispatchEvent(new Event("visibilitychange"));
   });
   expect(api.status).toHaveBeenCalledTimes(2);
-  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(changed).toHaveBeenLastCalledWith({ membershipChanged: false, definitionsChanged: true, series: null });
   visibility.mockRestore();
 });
 
@@ -247,4 +248,31 @@ it("keeps the same work objects while status polls return equal values, and repl
   expect(result.current.activeWork).toBe(firstWork);
   expect(result.current.historyRefreshes).not.toBe(firstRefreshes);
   expect(result.current.historyRefreshes?.[0]).toMatchObject({ processed: 33 });
+});
+
+it("reports only the analysed series for progress and the hub only for definition changes", async () => {
+  vi.useFakeTimers();
+  let state: IncrementalStatus = { ...idle, workActive: true, definitionRevision: 4, seriesRevisions: { a: 2 } };
+  const api: AutomaticCharacterApi = { status: vi.fn(async () => state), pause: vi.fn() };
+  const changed = vi.fn();
+  renderHook(() => useCharacterAutomation(changed, api));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(changed).not.toHaveBeenCalled();
+
+  state = { ...state, completed: 1, seriesRevisions: { a: 2, b: 1 } };
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(changed).toHaveBeenLastCalledWith({ membershipChanged: false, definitionsChanged: false, series: ["b"] });
+
+  state = { ...state, completed: 2, confirmed: 1, seriesRevisions: { a: 3, b: 1 } };
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(changed).toHaveBeenLastCalledWith({ membershipChanged: true, definitionsChanged: false, series: ["a"] });
+
+  // Nothing moved: no refresh at all.
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(changed).toHaveBeenCalledTimes(2);
+
+  state = { ...state, definitionRevision: 5 };
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(changed).toHaveBeenLastCalledWith({ membershipChanged: false, definitionsChanged: true, series: [] });
+  expect(changed).toHaveBeenCalledTimes(3);
 });

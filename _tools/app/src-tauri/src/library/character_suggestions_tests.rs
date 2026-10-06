@@ -433,3 +433,85 @@ fn suggestion_samples_carry_their_thumbnail_revisions() {
     let json = serde_json::to_value(row).unwrap();
     assert!(json["sampleThumbnailRevisions"].is_object());
 }
+
+#[test]
+fn suggestion_list_is_computed_once_per_input_change() {
+    let f = fixture();
+    let selects = || crate::library::PREPARED_SELECTS.with(|count| count.get());
+    let first = f.library.character_suggestions(None).unwrap();
+    assert_eq!(first.len(), 1);
+    let before = selects();
+    // Analysis progress and other unrelated writes leave the list's inputs alone.
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE character_autotag_control SET completed=completed+1",
+            [],
+        )
+        .unwrap();
+    let after_write = selects();
+    assert_eq!(f.library.character_suggestions(None).unwrap().len(), 1);
+    assert_eq!(
+        selects(),
+        after_write,
+        "a cached list prepares no statement"
+    );
+    assert!(after_write >= before);
+    // Ignoring (a WITHOUT ROWID table) and folder membership both reach the cache.
+    f.library
+        .set_character_suggestion_ignored("new_character", true)
+        .unwrap();
+    assert!(f.library.character_suggestions(None).unwrap().is_empty());
+    f.library
+        .set_character_suggestion_ignored("new_character", false)
+        .unwrap();
+    let inside = f.library.character_suggestions(None).unwrap()[0].inside_count;
+    assert!(inside > 0);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "DELETE FROM asset_classifications WHERE asset_id='asset-0'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        f.library.character_suggestions(None).unwrap()[0].inside_count,
+        inside - 1
+    );
+    // A different minimum is a different list.
+    assert!(f
+        .library
+        .character_suggestions(Some(50))
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn concurrent_suggestion_reads_share_one_computation() {
+    let f = fixture();
+    let library = f.library.clone();
+    let reads = (0..4)
+        .map(|_| {
+            let library = library.clone();
+            std::thread::spawn(move || {
+                crate::library::PREPARED_SELECTS.with(|count| count.set(0));
+                let rows = library.character_suggestions(None).unwrap();
+                (
+                    rows.len(),
+                    crate::library::PREPARED_SELECTS.with(|count| count.get()),
+                )
+            })
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|read| read.join().unwrap())
+        .collect::<Vec<_>>();
+    assert!(reads.iter().all(|(rows, _)| *rows == 1));
+    assert_eq!(
+        reads.iter().filter(|(_, selects)| *selects > 0).count(),
+        1,
+        "{reads:?}"
+    );
+}

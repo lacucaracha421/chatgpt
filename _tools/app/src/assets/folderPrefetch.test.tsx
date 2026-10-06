@@ -128,3 +128,21 @@ it("keys a read by its exact arguments and API object", async () => {
   await prefetchedRead(api, "browse", { after: null, limit: 100, seriesId: "s" }, () => api.read("s"));
   expect(api.read).toHaveBeenCalledTimes(2);
 });
+
+it("drops only the reads tagged with a folder whose members changed", async () => {
+  const listener = vi.fn();
+  const { onFolderPrefetchInvalidated } = await import("./folderPrefetch");
+  const stop = onFolderPrefetchInvalidated(listener);
+  prefetchRead(api, "read", "a", () => api.read("a"), "a");
+  prefetchRead(api, "read", "b", () => api.read("b"), "b");
+  prefetchRead(api, "read", "plain", () => api.read("plain"));
+  expect(api.read).toHaveBeenCalledTimes(3);
+  invalidateFolderPrefetch("a");
+  // The mount-wide revision caches (suggestions, counts) are not cleared for a member change.
+  expect(listener).not.toHaveBeenCalled();
+  await switchRead("a");
+  await switchRead("b");
+  await switchRead("plain");
+  expect(api.read.mock.calls.map(([id]) => id)).toEqual(["a", "b", "plain", "a"]);
+  stop();
+});

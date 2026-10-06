@@ -13,9 +13,11 @@ import type { AssetAspectFilter, AssetMediaFilter, AssetView } from "../library/
 export const FOLDER_PREFETCH_DWELL_MS = 150;
 export const FOLDER_PREFETCH_FRESH_MS = 5_000;
 
-type Entry = { at: number; epoch: number; promise: Promise<unknown> };
+type Entry = { at: number; epoch: number; folder?: { id: string; epoch: number }; promise: Promise<unknown> };
 const caches = new WeakMap<object, Map<string, Entry>>();
 let epoch = 0;
+/** Per-folder epochs: a change inside one folder drops only the reads tagged with it. */
+const folderEpochs = new Map<string, number>();
 const invalidationListeners = new Set<() => void>();
 /** Revision caches of mount-wide reads follow the App's existing library-change invalidation. */
 export function onFolderPrefetchInvalidated(listener: () => void) {
@@ -34,10 +36,14 @@ function stableJson(value: unknown): string {
   }
   return JSON.stringify(value) ?? "null";
 }
-const fresh = (entry: Entry) => entry.epoch === epoch && Date.now() - entry.at <= FOLDER_PREFETCH_FRESH_MS;
+const fresh = (entry: Entry) => entry.epoch === epoch && Date.now() - entry.at <= FOLDER_PREFETCH_FRESH_MS
+  && (!entry.folder || entry.folder.epoch === (folderEpochs.get(entry.folder.id) ?? 0));
 
-/** Start (or join) a prefetched read. Never call it for a write. */
-export function prefetchRead<T>(source: object, command: string, args: unknown, read: () => Promise<T>): Promise<T> {
+/**
+ * Start (or join) a prefetched read. Never call it for a write. `folder` tags a read whose result
+ * depends only on that folder, so `invalidateFolderPrefetch(folder)` can drop it alone.
+ */
+export function prefetchRead<T>(source: object, command: string, args: unknown, read: () => Promise<T>, folder?: string): Promise<T> {
   let cache = caches.get(source);
   if (!cache) caches.set(source, cache = new Map());
   for (const [key, entry] of cache) if (!fresh(entry)) cache.delete(key);
@@ -46,7 +52,7 @@ export function prefetchRead<T>(source: object, command: string, args: unknown, 
   if (existing) return existing.promise as Promise<T>;
   const promise = read();
   promise.catch(() => undefined);
-  cache.set(key, { at: Date.now(), epoch, promise });
+  cache.set(key, { at: Date.now(), epoch, ...(folder ? { folder: { id: folder, epoch: folderEpochs.get(folder) ?? 0 } } : {}), promise });
   return promise;
 }
 
@@ -65,8 +71,16 @@ export function prefetchedRead<T>(source: object, command: string, args: unknown
   return (entry.promise as Promise<T>).catch(() => read());
 }
 
-/** Drop every prefetched result (any library change). Reads still running are ignored when they land. */
-export function invalidateFolderPrefetch() {
+/**
+ * Drop every prefetched result (any library change), or with `folder` only the reads tagged with
+ * that folder (a change of its members alone; the mount-wide revision caches stay). Reads still
+ * running are ignored when they land.
+ */
+export function invalidateFolderPrefetch(folder?: string) {
+  if (folder !== undefined) {
+    folderEpochs.set(folder, (folderEpochs.get(folder) ?? 0) + 1);
+    return;
+  }
   epoch += 1;
   invalidationListeners.forEach(listener => listener());
 }

@@ -11,6 +11,7 @@ use super::{
 #[serde(rename_all = "camelCase")]
 pub struct Group {
     pub id: String,
+    pub series_id: String,
     pub name: String,
     pub revision: i64,
     pub target_ids: Vec<String>,
@@ -103,34 +104,52 @@ pub(super) fn save_character_group_in(
     Ok(id)
 }
 
+/// Groups of one series, or of all series when `series_id` is None, with their members:
+/// two statements whatever the group count.
+fn groups_in(connection: &Connection, series_id: Option<&str>) -> Result<Vec<Group>> {
+    let mut groups = connection
+        .prepare_cached(
+            "SELECT id,series_id,name,revision FROM character_groups
+             WHERE ?1 IS NULL OR series_id=?1 ORDER BY series_id,name,id",
+        )?
+        .query_map([series_id], |row| {
+            Ok(Group {
+                id: row.get(0)?,
+                series_id: row.get(1)?,
+                name: row.get(2)?,
+                revision: row.get(3)?,
+                target_ids: Vec::new(),
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut members = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for row in connection
+        .prepare_cached(
+            "SELECT m.group_id,m.target_id FROM character_group_members m
+             JOIN character_groups g ON g.id=m.group_id
+             WHERE ?1 IS NULL OR g.series_id=?1 ORDER BY m.group_id,m.target_id",
+        )?
+        .query_map([series_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+    {
+        let (group, target) = row?;
+        members.entry(group).or_default().push(target);
+    }
+    for group in &mut groups {
+        group.target_ids = members.remove(&group.id).unwrap_or_default();
+    }
+    Ok(groups)
+}
+
 impl Library {
     pub fn character_groups(&self, series_id: &str) -> Result<Vec<Group>> {
-        let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT id,name,revision FROM character_groups WHERE series_id=?1 ORDER BY name,id",
-        )?;
-        let groups = statement
-            .query_map([series_id], |row| {
-                Ok(Group {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    revision: row.get(2)?,
-                    target_ids: Vec::new(),
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        groups
-            .into_iter()
-            .map(|mut group| {
-                group.target_ids = connection
-                    .prepare(
-                        "SELECT target_id FROM character_group_members WHERE group_id=?1 ORDER BY target_id",
-                    )?
-                    .query_map([&group.id], |row| row.get(0))?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(group)
-            })
-            .collect()
+        groups_in(&*self.connection()?, Some(series_id))
+    }
+
+    /// Every series' groups in one read (by series, then name), for the character hub.
+    pub fn all_character_groups(&self) -> Result<Vec<Group>> {
+        groups_in(&*self.connection()?, None)
     }
 
     pub fn save_character_group(&self, draft: GroupDraft) -> Result<()> {
@@ -156,6 +175,54 @@ mod tests {
             target_ids: ids,
             delete: false,
         })
+    }
+
+    #[test]
+    fn all_groups_read_every_series_in_two_statements() {
+        let f = Fixture::new();
+        let a = f.ready("A");
+        let b = f.ready("B");
+        let d = f.ready("D");
+        let other = f.ready_in_series("C", &f.child);
+        for (series, name, targets) in [
+            (&f.series, "Duo", vec![a.id.clone(), b.id.clone()]),
+            (&f.series, "Alpha", vec![d.id.clone()]),
+            (&f.child, "Solo", vec![other.id.clone()]),
+        ] {
+            save_character_group_in(
+                &f.library.connection().unwrap(),
+                GroupDraft {
+                    id: None,
+                    series_id: series.clone(),
+                    expected_revision: None,
+                    name: name.into(),
+                    target_ids: targets,
+                    delete: false,
+                },
+            )
+            .unwrap();
+        }
+        crate::library::PREPARED_SELECTS.with(|count| count.set(0));
+        let all = f.library.all_character_groups().unwrap();
+        assert!(crate::library::PREPARED_SELECTS.with(|count| count.get()) <= 4);
+        let mut per_series = Vec::new();
+        for series in [&f.child, &f.series] {
+            per_series.extend(f.library.character_groups(series).unwrap());
+        }
+        per_series
+            .sort_by(|x, y| (&x.series_id, &x.name, &x.id).cmp(&(&y.series_id, &y.name, &y.id)));
+        let shape = |groups: &[Group]| {
+            groups
+                .iter()
+                .map(|g| (g.series_id.clone(), g.name.clone(), g.target_ids.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shape(&all), shape(&per_series));
+        let mut duo = vec![a.id.clone(), b.id.clone()];
+        duo.sort();
+        assert!(shape(&all).contains(&(f.series.clone(), "Duo".into(), duo)));
+        assert!(shape(&all).contains(&(f.series.clone(), "Alpha".into(), vec![d.id.clone()])));
+        assert_eq!(all.len(), 3);
     }
 
     #[test]

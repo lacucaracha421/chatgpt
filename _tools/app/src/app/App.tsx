@@ -8,7 +8,7 @@ import {useAlbumAuthoritySync} from './useAlbumAuthoritySync';
 import {
   useClassificationAuthoritySync,
 } from './useClassificationAuthoritySync';
-import { useCharacterAutomation } from "../characters/useCharacterAutomation";
+import { useCharacterAutomation, type AutomaticCharacterChange } from "../characters/useCharacterAutomation";
 import { useCharacterHub } from "../characters/useCharacterHub";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { HomeAssetDestination } from "../home/HomeAssetDestination";
@@ -265,7 +265,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     setMessage((current) => current ? `${current} ${next}` : next);
   }, []);
   const refreshClassifications = useCallback(async () => {
-    setEntries(await gateway.listClassifications());
+    const next = await gateway.listClassifications();
+    // An unchanged list keeps its identity: a new array would drop every folder prefetch and cache.
+    setEntries(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
   }, [gateway]);
   const refreshAlbums = useCallback(async () => {
     setAlbums(await gateway.listAlbums());
@@ -324,10 +326,16 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     characterHub.refresh();
     refreshMembershipCounts();
   }, [characterHub.refresh, refreshMembershipCounts]);
-  const refreshAutomaticCharacterViews = useCallback((membershipChanged: boolean) => {
-    characterHub.refresh();
-    if (membershipChanged) void refreshClassifications();
-  }, [characterHub.refresh, refreshClassifications]);
+  // Analysis progress changes members of the analysed series, not character definitions: only those
+  // series' galleries, counts and prefetched reads refresh. The hub re-reads when a definition changed.
+  const refreshAutomaticCharacterViews = useCallback((change: AutomaticCharacterChange) => {
+    if (change.definitionsChanged || change.series === null) characterHub.refresh();
+    else {
+      characterHub.seriesAnalysed(change.series);
+      change.series.forEach(id => invalidateFolderPrefetch(id));
+    }
+    if (change.membershipChanged) void refreshClassifications();
+  }, [characterHub.refresh, characterHub.seriesAnalysed, refreshClassifications]);
   const characterAutomation = useCharacterAutomation(refreshAutomaticCharacterViews);
   const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added" || (result.status === "exact_duplicate" && result.classificationChanged)) {

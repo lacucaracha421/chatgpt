@@ -86,6 +86,36 @@ fn merged_regions(requested: &[String], stored: RegionBindings, overrides: Optio
     Ok(merged)
 }
 
+/// [`read_regions`] for every target id in the JSON array `targets`, in one statement.
+pub(super) fn read_regions_of(
+    connection: &Connection,
+    targets: &str,
+) -> Result<BTreeMap<String, RegionBindings>> {
+    let mut statement = connection.prepare_cached("SELECT target_id,asset_id,asset_hash,baseline_fingerprint,bounds_json FROM character_reference_regions WHERE target_id IN (SELECT value FROM json_each(?1))")?;
+    let rows = statement.query_map([targets], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut result = BTreeMap::<String, RegionBindings>::new();
+    for row in rows {
+        let (target, id, content_hash, baseline_fingerprint, bounds) = row?;
+        result.entry(target).or_default().insert(
+            id,
+            RegionBinding {
+                content_hash,
+                baseline_fingerprint,
+                bounds: serde_json::from_str(&bounds)?,
+            },
+        );
+    }
+    Ok(result)
+}
+
 pub(super) fn read_regions(connection: &Connection, target: &str) -> Result<RegionBindings> {
     let mut statement = connection.prepare("SELECT asset_id,asset_hash,baseline_fingerprint,bounds_json FROM character_reference_regions WHERE target_id=?1")?;
     let rows = statement.query_map([target], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;

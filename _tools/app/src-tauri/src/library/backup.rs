@@ -269,6 +269,8 @@ impl Library {
     }
 
     fn restore_snapshot_locked(&self, selected_path: &Path) -> Result<(), LibraryError> {
+        // Callers hold the database lock, so no read can key a cache on the old file meanwhile.
+        self.character_changes.database_replaced();
         self.stop_character_scan();
         // The media protocol's idle read connections would keep the file being replaced
         // open; close them and hold off new ones until the swap is over.

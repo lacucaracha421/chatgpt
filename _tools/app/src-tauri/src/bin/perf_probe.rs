@@ -929,7 +929,7 @@ fn series_switch_paths(bench: &mut Bench, library: &Library, snapshot_root: &Pat
         ("series_switch/global/character_folder_exclusions", 5),
     ] {
         let value = bench.run("series_switch", label, || match call {
-            0 => to_value(library.character_suggestions(Some(5))),
+            0 => to_value(library.character_suggestions_uncached(Some(5))),
             1 => to_value(library.ignored_character_suggestions()),
             2 => to_value(library.character_sidebar_counts()),
             3 => to_value(library.list_character_targets()),
@@ -1261,7 +1261,7 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
         .run(
             "series_open",
             "series_open/global/character_suggestions_min5",
-            || to_value(library.character_suggestions(Some(5))),
+            || to_value(library.character_suggestions_uncached(Some(5))),
         )
         .unwrap_or(Value::Null);
     bench.run(
@@ -1462,7 +1462,7 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
                 (
                     "suggestions",
                     true,
-                    Box::new(|| to_value(library.character_suggestions(Some(5)))),
+                    Box::new(|| to_value(library.character_suggestions_uncached(Some(5)))),
                 ),
                 (
                     "ignored",

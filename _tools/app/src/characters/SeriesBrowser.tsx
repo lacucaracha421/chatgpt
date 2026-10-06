@@ -5,7 +5,7 @@ import { AssetImage } from "../privacy/AssetImage";
 import { folderPreviewCache, rememberFolderPreview } from "../assets/folderPreviewCache";
 import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { CharacterSuggestionTile, prefetchCharacterSuggestions, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
-import { readSeriesSidebarCounts, seriesDataScope, sidebarCountCache } from "./seriesMountCache";
+import { NO_SERIES_REVISIONS, readSeriesSidebarCounts, seriesDataScope, sidebarCountCache, type SeriesRevisions } from "./seriesMountCache";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactElement, type ReactNode } from "react";
@@ -69,6 +69,8 @@ type Props = {
   privacyMode: boolean; onPrivacyModeChange: (value: boolean) => void;
   metadataVisible: boolean; onMetadataVisibleChange: (value: boolean) => void;
   thumbnailRowHeight: number; onThumbnailRowHeightChange: (value: number) => void; refreshVersion: number;
+  /** Automatic analysis results per series: this series' entry refreshes its gallery and counts only. */
+  seriesRevisions?: SeriesRevisions;
   onNavigate: (view: AssetView) => void; onChanged: () => void;
   api?: CharacterApi; hubApi?: CharacterHubApi; shadowApi?: ShadowReviewApi;
   /** 선택한 영상 비교, as in plain folders. */
@@ -113,15 +115,16 @@ export function seriesFolderBrowseView(sort: AssetSort) {
  * Hover prefetch of a series overview: the reads its switch gates on (the first page in `load` and the
  * excluded-count, folder and candidate reads below), with the same arguments, so the switch takes them.
  */
-export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, shadowApi: Pick<ShadowReviewApi, "page"> = shadowReviewApi, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number }): Promise<unknown>[] {
+export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, shadowApi: Pick<ShadowReviewApi, "page"> = shadowReviewApi, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number; seriesRevisions?: SeriesRevisions }): Promise<unknown>[] {
   const query = { seriesId, targetId: null, groupId: null, seriesFilter: "unclassified" as const, all: false, after: null, limit: 100, ...(options?.view ? { view: options.view } : {}) };
   const candidates = { offset: 0, limit: 1, seriesId };
   return [
-    ...(options ? [prefetchCharacterSuggestions(options.version, options.scope), readSeriesSidebarCounts(options.gateway, options.scope, options.version)] : []),
-    prefetchRead(hubApi, "browse", query, () => hubApi.browse(query)),
-    prefetchRead(hubApi, "excludedAssets", [seriesId, null, 1], () => hubApi.excludedAssets(seriesId, null, 1)),
-    prefetchRead(hubApi, "seriesFolders", seriesId, () => hubApi.seriesFolders(seriesId)),
-    prefetchRead(shadowApi, "page", candidates, () => shadowApi.page(candidates)),
+    ...(options ? [prefetchCharacterSuggestions(options.version, options.scope), readSeriesSidebarCounts(options.gateway, options.scope, options.version, options.seriesRevisions && { id: seriesId, revisions: options.seriesRevisions })] : []),
+    // Tagged with the series: analysing it drops only these reads (invalidateFolderPrefetch(seriesId)).
+    prefetchRead(hubApi, "browse", query, () => hubApi.browse(query), seriesId),
+    prefetchRead(hubApi, "excludedAssets", [seriesId, null, 1], () => hubApi.excludedAssets(seriesId, null, 1), seriesId),
+    prefetchRead(hubApi, "seriesFolders", seriesId, () => hubApi.seriesFolders(seriesId), seriesId),
+    prefetchRead(shadowApi, "page", candidates, () => shadowApi.page(candidates), seriesId),
   ];
 }
 /** Status that used to sit under each character card; tiles now show only a warning mark when something is wrong. */
@@ -133,7 +136,7 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
   return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
 }
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, onReviewVideos, onMembershipChanged }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, onReviewVideos, onMembershipChanged }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
@@ -163,7 +166,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [folderLoading, setFolderLoading] = useState(true);
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
   const [all, setAll] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
-  const galleryRefreshVersion = useCoalescedRefreshVersion(refreshVersion, loading);
+  const analysisRevision = seriesRevisions[series.classificationId] ?? 0;
+  const galleryRefreshVersion = useCoalescedRefreshVersion(refreshVersion + analysisRevision, loading);
   const [error, setError] = useState<string | null>(null), [editorError, setEditorError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [reload, setReload] = useState(0), [selection, setSelection] = useState(emptySelection);
@@ -253,10 +257,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (!gateway.characterSidebarCounts) return;
     let active = true;
     const request = { gateway, scope: dataScope, version: refreshVersion, revision: countRevision };
-    void readSeriesSidebarCounts(gateway, dataScope, refreshVersion).then(result => { if (active && result) setSidebarCounts(result.targets); }, () => undefined)
+    void readSeriesSidebarCounts(gateway, dataScope, refreshVersion, { id: series.classificationId, revisions: seriesRevisions }).then(result => { if (active && result) setSidebarCounts(result.targets); }, () => undefined)
       .finally(() => { if (active) setSettledCounts(request); });
     return () => { active = false; };
-  }, [gateway, dataScope, refreshVersion, countRevision, reload]);
+  }, [gateway, dataScope, refreshVersion, countRevision, reload, series.classificationId, analysisRevision]);
   const characterCounts: Record<string, number> = Object.fromEntries(targets.flatMap(target => {
     const folder = target.linkedClassificationId ? classifications.find(entry => entry.id === target.linkedClassificationId) : undefined;
     const count = (cachedCounts?.targets ?? sidebarCounts)?.[target.id] ?? folder?.totalAssetCount ?? folder?.assetCount;

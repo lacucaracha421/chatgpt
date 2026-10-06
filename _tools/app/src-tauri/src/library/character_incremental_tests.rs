@@ -1724,6 +1724,7 @@ fn arbitration_keeps_weak_six_vote_companion_crop_for_review() {
             })),
         },
     };
+    let definitions = f.library.character_changes.definition_revision();
     f.library
         .finalize_incremental(
             &tx,
@@ -1736,6 +1737,10 @@ fn arbitration_keeps_weak_six_vote_companion_crop_for_review() {
         .unwrap();
     tx.commit().unwrap();
     drop(c);
+    // The UI refreshes this series' gallery for the result, but not the character hub.
+    let status = serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
+    assert_eq!(status["seriesRevisions"][&f.series], 1);
+    assert_eq!(status["definitionRevision"], definitions);
     let state: String = f
         .library
         .connection()

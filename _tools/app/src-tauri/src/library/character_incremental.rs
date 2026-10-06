@@ -237,6 +237,10 @@ pub struct Status {
     paused: bool,
     completed: i64,
     confirmed: i64,
+    /// Moves only when a character definition table changes (see `character_changes`).
+    definition_revision: u64,
+    /// Automatic analysis results per series id since launch (absent: none yet).
+    series_revisions: std::collections::BTreeMap<String, u64>,
     history_refresh_active: bool,
     active_work: ActiveWork,
     history_refreshes: Vec<super::character_reference_refresh::ReferenceRefreshProgress>,
@@ -406,6 +410,8 @@ impl Library {
             paused,
             completed,
             confirmed,
+            definition_revision: self.character_changes.definition_revision(),
+            series_revisions: self.character_changes.series_revisions(),
             history_refresh_active,
             active_work,
             history_refreshes,
@@ -1519,6 +1525,14 @@ impl Library {
         // Inference adds character membership, never changes the user's saved folder.
         self.complete_reference_refresh_item(tx, job, refresh_delta_targets, true, true)?;
         tx.execute("UPDATE character_autotag_control SET completed=completed+1,confirmed=confirmed+?1 WHERE singleton=1",[accepted.len() as i64])?;
+        // The UI refreshes only these series' galleries and counts for this result. Callers
+        // hold the database lock until commit, so a refresh started now reads the committed rows.
+        self.character_changes.series_analysed(
+            context
+                .targets
+                .iter()
+                .filter_map(|target| target.series_classification_id.as_deref()),
+        );
         Ok(())
     }
 }

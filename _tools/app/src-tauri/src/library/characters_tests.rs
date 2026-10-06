@@ -6,6 +6,78 @@ use crate::library::{
 use std::{fs, path::Path};
 
 #[test]
+fn listing_targets_prepares_the_same_statements_for_20_or_200_targets() {
+    let f = Fixture::new();
+    let mut created = Vec::new();
+    let mut counts = Vec::new();
+    for total in [20, 200] {
+        while created.len() < total {
+            let name = format!("Target {:03}", created.len());
+            // Every tenth target belongs to another series, where the copied references are
+            // out of scope (stored directly: the editor refuses them).
+            created.push(if created.len() % 10 == 9 {
+                let id = f
+                    .library
+                    .save_character_target(TargetDraft {
+                        id: None,
+                        expected_revision: None,
+                        series_classification_id: Some(f.outside.clone()),
+                        linked_classification_id: None,
+                        display_name: name,
+                        description: String::new(),
+                        thumbnail_asset_id: None,
+                        enabled: true,
+                    })
+                    .unwrap()
+                    .id;
+                f.library.connection().unwrap().execute(
+                    "INSERT INTO character_references SELECT ?1,slot,asset_id,asset_hash FROM character_references WHERE target_id=?2",
+                    params![id, created[0]],
+                ).unwrap();
+                id
+            } else {
+                f.ready(&name).id
+            });
+        }
+        let hash: String = f
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT content_hash FROM assets WHERE id='asset-5'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        f.library.connection().unwrap().execute(
+            "INSERT OR IGNORE INTO character_learned_references(target_id,asset_id,asset_hash,created_at) VALUES(?1,'asset-5',?2,'now')",
+            params![created[0], hash],
+        ).unwrap();
+        crate::library::PREPARED_SELECTS.with(|count| count.set(0));
+        let listed = f.library.list_character_targets().unwrap();
+        counts.push(crate::library::PREPARED_SELECTS.with(|count| count.get()));
+        assert_eq!(listed.len(), total);
+        for target in &listed {
+            let single = f.library.get_character_target(&target.id).unwrap();
+            assert_eq!(target.fingerprint, single.fingerprint);
+            let in_series = target.series_classification_id.as_deref() == Some(f.series.as_str());
+            assert_eq!(target.ready, in_series, "{}", target.display_name);
+            assert_eq!(target.references.len(), 5);
+            assert!(target
+                .references
+                .iter()
+                .all(|r| r.status == if in_series { "ready" } else { "ineligible" }));
+        }
+        let first = listed.iter().find(|t| t.id == created[0]).unwrap();
+        assert_eq!(first.learned_references.len(), 1);
+        assert_eq!(first.learned_references[0].status, "ready");
+    }
+    // One read per table for any number of targets (it was several per target).
+    assert_eq!(counts[0], counts[1], "{counts:?}");
+    assert!(counts[1] <= 40, "{counts:?}");
+}
+
+#[test]
 fn listed_character_targets_carry_thumbnail_revisions_outside_the_fingerprint() {
     let f = Fixture::new();
     let target = f.ready("Pilot");

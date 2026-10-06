@@ -108,6 +108,8 @@ impl Library {
         )?;
         tx.execute("INSERT OR IGNORE INTO character_target_tagger_tag_exclusions(target_id,tag,created_at) VALUES(?1,?2,?3)", params![target_id, tag, chrono::Utc::now().to_rfc3339()])?;
         tx.commit()?;
+        // WITHOUT ROWID: not reported by the update hook.
+        self.character_changes.suggestion_inputs_changed();
         Ok(())
     }
 
@@ -121,6 +123,7 @@ impl Library {
         }
         explicitly_link(&tx, target_id, tag)?;
         tx.commit()?;
+        self.character_changes.suggestion_inputs_changed();
         Ok(())
     }
 }

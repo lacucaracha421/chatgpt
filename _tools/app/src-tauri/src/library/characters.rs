@@ -53,6 +53,40 @@ WHERE a.id = ?2 AND a.status = 'normal' AND a.media_kind = 'image'
 AND EXISTS (SELECT 1 FROM asset_classifications ac
             WHERE ac.asset_id = a.id AND ac.classification_id IN (SELECT id FROM scope))";
 
+/// [`SCOPED_IMAGE`] for many (series, Asset) pairs in one statement: the content hash and
+/// relative path of each pair whose Asset is a normal image inside that series' folder tree.
+fn scoped_images(
+    connection: &Connection,
+    pairs: &BTreeSet<(&str, &str)>,
+) -> Result<BTreeMap<(String, String), (String, String)>> {
+    if pairs.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut statement = connection.prepare_cached(
+        "WITH RECURSIVE wanted(series, asset) AS (
+            SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?1)
+        ),
+        scope(series, id) AS (
+            SELECT id, id FROM classification_entries WHERE id IN (SELECT series FROM wanted)
+            UNION SELECT scope.series, child.id FROM classification_entries child
+            JOIN scope ON child.parent_id = scope.id
+        )
+        SELECT w.series, a.id, a.content_hash, a.relative_path FROM wanted w
+        JOIN assets a ON a.id = w.asset
+        WHERE a.status = 'normal' AND a.media_kind = 'image'
+        AND EXISTS (SELECT 1 FROM asset_classifications ac JOIN scope s
+                    ON s.id = ac.classification_id AND s.series = w.series
+                    WHERE ac.asset_id = a.id)",
+    )?;
+    let rows = statement.query_map([serde_json::to_string(pairs)?], |r| {
+        Ok((
+            (r.get::<_, String>(0)?, r.get::<_, String>(1)?),
+            (r.get::<_, String>(2)?, r.get::<_, String>(3)?),
+        ))
+    })?;
+    Ok(rows.collect::<std::result::Result<_, _>>()?)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetDraft {
@@ -286,10 +320,7 @@ impl Library {
             .prepare("SELECT t.id FROM character_targets t JOIN character_folder_order o ON o.target_id=t.id ORDER BY o.position, t.id")?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut targets = ids
-            .iter()
-            .map(|id| self.read_character_target(&connection, id))
-            .collect::<Result<Vec<_>>>()?;
+        let mut targets = self.read_character_targets(&connection, &ids)?;
         let revisions = thumbnail_revisions(
             &connection,
             targets.iter().flat_map(Target::shown_asset_ids),
@@ -1577,135 +1608,179 @@ impl Library {
         connection: &Connection,
         id: &str,
     ) -> Result<Target> {
-        let mut target = connection.query_row("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
+        self.read_character_targets(connection, &[id.to_owned()])?
+            .pop()
+            .ok_or(Error::NotFound)
+    }
+
+    /// The listed targets (missing ids are skipped) in the given order. Each table is read
+    /// once for all of them, so the statement count does not grow with the target count.
+    pub(super) fn read_character_targets(
+        &self,
+        connection: &Connection,
+        ids: &[String],
+    ) -> Result<Vec<Target>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids_json = serde_json::to_string(ids)?;
+        let mut rows = connection
+            .prepare_cached("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
             (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal'),manual_only,
             (SELECT position FROM character_folder_order WHERE target_id=character_targets.id AND legacy_sidebar=0)
-            FROM character_targets WHERE id=?1", [id], |r| Ok(Target {
+            FROM character_targets WHERE id IN (SELECT value FROM json_each(?1))")?
+            .query_map([&ids_json], |r| Ok(Target {
                 id:r.get(0)?,folder_order:r.get(9)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
                 enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new(),thumbnail_revisions:BTreeMap::new()
-            })).optional()?.ok_or(Error::NotFound)?;
-        let regions = super::character_reference_regions::read_regions(connection, id)?;
-        let mut statement = connection.prepare("SELECT slot,asset_id,asset_hash FROM character_references WHERE target_id=?1 ORDER BY slot")?;
-        let rows = statement.query_map([id], |r| {
-            Ok((
-                r.get::<_, u32>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        for row in rows {
-            let (slot, asset_id, asset_hash) = row?;
-            let status = match (
-                asset_id.as_deref(),
-                target.series_classification_id.as_deref(),
-            ) {
-                (None, _) => "missing_asset",
-                (Some(id), Some(series)) => {
-                    let eligible = connection
-                        .query_row(SCOPED_IMAGE, params![series, id], |r| {
-                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                        })
-                        .optional()?;
-                    match eligible {
+            }))?
+            .map(|row| row.map(|target| (target.id.clone(), target)))
+            .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
+        let mut regions =
+            super::character_reference_regions::read_regions_of(connection, &ids_json)?;
+        let mut references = BTreeMap::<String, Vec<(u32, Option<String>, String)>>::new();
+        for row in connection
+            .prepare_cached("SELECT target_id,slot,asset_id,asset_hash FROM character_references WHERE target_id IN (SELECT value FROM json_each(?1)) ORDER BY target_id,slot")?
+            .query_map([&ids_json], |r| {
+                Ok((r.get::<_, String>(0)?, (r.get::<_, u32>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, String>(3)?)))
+            })?
+        {
+            let (target, reference) = row?;
+            references.entry(target).or_default().push(reference);
+        }
+        type Learned = (String, String, String, String, String, String);
+        let mut learned = BTreeMap::<String, Vec<Learned>>::new();
+        for row in connection
+            .prepare_cached("SELECT l.target_id,l.asset_id,l.asset_hash,a.content_hash,a.relative_path,a.status,a.media_kind FROM character_learned_references l JOIN assets a ON a.id=l.asset_id WHERE l.target_id IN (SELECT value FROM json_each(?1)) ORDER BY l.target_id,l.created_at,l.asset_id")?
+            .query_map([&ids_json], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    (
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ),
+                ))
+            })?
+        {
+            let (target, reference) = row?;
+            learned.entry(target).or_default().push(reference);
+        }
+        // Every (series, Asset) pair any reference may check, resolved in one statement.
+        let mut pairs = BTreeSet::<(&str, &str)>::new();
+        for (id, target) in &rows {
+            let Some(series) = target.series_classification_id.as_deref() else {
+                continue;
+            };
+            for (_, asset_id, _) in references.get(id).into_iter().flatten() {
+                if let Some(asset_id) = asset_id {
+                    pairs.insert((series, asset_id));
+                }
+            }
+            for (asset_id, ..) in learned.get(id).into_iter().flatten() {
+                pairs.insert((series, asset_id));
+            }
+        }
+        let scoped = scoped_images(connection, &pairs)?;
+        let mut targets = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(mut target) = rows.remove(id) else {
+                continue;
+            };
+            let regions = regions.remove(id).unwrap_or_default();
+            let series = target.series_classification_id.clone();
+            let eligible = |asset_id: &str| {
+                series
+                    .as_deref()
+                    .and_then(|series| scoped.get(&(series.to_owned(), asset_id.to_owned())))
+            };
+            for (slot, asset_id, asset_hash) in references.remove(id).unwrap_or_default() {
+                let status = match (asset_id.as_deref(), series.as_deref()) {
+                    (None, _) => "missing_asset",
+                    (Some(id), Some(_)) => match eligible(id) {
                         None => "ineligible",
-                        Some((hash, _)) if hash != asset_hash => "changed_content",
+                        Some((hash, _)) if hash != &asset_hash => "changed_content",
                         Some((_, path))
-                            if !self.character_reference_available(&path, &asset_hash) =>
+                            if !self.character_reference_available(path, &asset_hash) =>
                         {
                             "missing_file"
                         }
                         Some(_) => "ready",
-                    }
-                }
-                _ => "ineligible",
-            };
-            target.references.push(Reference {
-                slot,
-                region: asset_id.as_ref().and_then(|id| regions.get(id)).cloned(),
-                asset_id,
-                asset_hash,
-                status,
-            });
-        }
-        // Keep unavailable links for restore; consumers compare only usable_references().
-        let mut seen = target
-            .references
-            .iter()
-            .filter(|r| r.status == "ready")
-            .map(|r| r.asset_hash.clone())
-            .collect::<BTreeSet<_>>();
-        let mut learned = connection.prepare("SELECT l.asset_id,l.asset_hash,a.content_hash,a.relative_path,a.status,a.media_kind FROM character_learned_references l JOIN assets a ON a.id=l.asset_id WHERE l.target_id=?1 ORDER BY l.created_at,l.asset_id")?;
-        let rows = learned.query_map([id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-            ))
-        })?;
-        for row in rows {
-            let (asset_id, asset_hash, current_hash, path, asset_status, media_kind) = row?;
-            let duplicate = seen.contains(&asset_hash);
-            let status = if duplicate {
-                "duplicate_content"
-            } else if asset_status != "normal" || media_kind != "image" {
-                "ineligible"
-            } else if asset_hash != current_hash {
-                "changed_content"
-            } else {
-                match target.series_classification_id.as_deref() {
-                    Some(series) => {
-                        let eligible = connection
-                            .query_row(SCOPED_IMAGE, params![series, asset_id], |r| {
-                                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                            })
-                            .optional()?;
-                        match eligible {
-                            None => "ineligible",
-                            Some((hash, _)) if hash != asset_hash => "changed_content",
-                            Some((_, scoped_path))
-                                if !self
-                                    .character_reference_available(&scoped_path, &asset_hash) =>
-                            {
-                                "missing_file"
-                            }
-                            Some(_) if !self.character_reference_available(&path, &asset_hash) => {
-                                "missing_file"
-                            }
-                            Some(_) => "ready",
-                        }
-                    }
-                    None => "ineligible",
-                }
-            };
-            if status == "ready" {
-                seen.insert(asset_hash.clone());
+                    },
+                    _ => "ineligible",
+                };
+                target.references.push(Reference {
+                    slot,
+                    region: asset_id.as_ref().and_then(|id| regions.get(id)).cloned(),
+                    asset_id,
+                    asset_hash,
+                    status,
+                });
             }
-            target.learned_references.push(Reference {
-                slot: target.learned_references.len() as u32,
-                region: regions.get(&asset_id).cloned(),
-                asset_id: Some(asset_id),
-                asset_hash,
-                status,
-            });
+            // Keep unavailable links for restore; consumers compare only usable_references().
+            let mut seen = target
+                .references
+                .iter()
+                .filter(|r| r.status == "ready")
+                .map(|r| r.asset_hash.clone())
+                .collect::<BTreeSet<_>>();
+            for (asset_id, asset_hash, current_hash, path, asset_status, media_kind) in
+                learned.remove(id).unwrap_or_default()
+            {
+                let duplicate = seen.contains(&asset_hash);
+                let status = if duplicate {
+                    "duplicate_content"
+                } else if asset_status != "normal" || media_kind != "image" {
+                    "ineligible"
+                } else if asset_hash != current_hash {
+                    "changed_content"
+                } else if series.is_none() {
+                    "ineligible"
+                } else {
+                    match eligible(&asset_id) {
+                        None => "ineligible",
+                        Some((hash, _)) if hash != &asset_hash => "changed_content",
+                        Some((_, scoped_path))
+                            if !self.character_reference_available(scoped_path, &asset_hash) =>
+                        {
+                            "missing_file"
+                        }
+                        Some(_) if !self.character_reference_available(&path, &asset_hash) => {
+                            "missing_file"
+                        }
+                        Some(_) => "ready",
+                    }
+                };
+                if status == "ready" {
+                    seen.insert(asset_hash.clone());
+                }
+                target.learned_references.push(Reference {
+                    slot: target.learned_references.len() as u32,
+                    region: regions.get(&asset_id).cloned(),
+                    asset_id: Some(asset_id),
+                    asset_hash,
+                    status,
+                });
+            }
+            target.ready = target.enabled
+                && !target.manual_only
+                && target.series_classification_id.is_some()
+                && (REFERENCE_COUNT..=MAX_REFERENCES).contains(&target.usable_references().count());
+            target.fingerprint = Sha256::digest(serde_json::to_vec(&(
+                &target.id,
+                &target.series_classification_id,
+                target.enabled,
+                target.manual_only,
+                &target.references,
+            ))?)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+            targets.push(target);
         }
-        target.ready = target.enabled
-            && !target.manual_only
-            && target.series_classification_id.is_some()
-            && (REFERENCE_COUNT..=MAX_REFERENCES).contains(&target.usable_references().count());
-        target.fingerprint = Sha256::digest(serde_json::to_vec(&(
-            &target.id,
-            &target.series_classification_id,
-            target.enabled,
-            target.manual_only,
-            &target.references,
-        ))?)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-        Ok(target)
+        Ok(targets)
     }
 }
 

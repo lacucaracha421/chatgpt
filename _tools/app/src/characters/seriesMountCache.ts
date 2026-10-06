@@ -34,6 +34,18 @@ export class RevisionReadCache<T> {
     });
     return entry.promise;
   }
+  /** Re-read one entry in place: peek() keeps answering with the value it replaces until the read lands. */
+  refresh(source: object, key: string, version: number, args: string, read: () => Promise<T>): Promise<T> {
+    const scope = this.scope(source, key);
+    const previous = scope.version === version ? scope.entries.get(args) : undefined;
+    if (!previous || previous.value === undefined) return this.read(source, key, version, args, read);
+    const entry: Entry<T> = { promise: read(), value: previous.value };
+    scope.entries.set(args, entry);
+    void entry.promise.then(value => { entry.value = value; }, () => {
+      if (scope.entries.get(args) === entry) scope.entries.set(args, previous);
+    });
+    return entry.promise;
+  }
   invalidate(source: object, key: string) {
     const scope = this.scope(source, key);
     scope.entries.clear(); scope.generation += 1;
@@ -54,18 +66,37 @@ export function seriesDataScope(gateway?: object, root?: string) {
   return JSON.stringify([id, root ?? null]);
 }
 
+/** Automatic analysis results per series id (useCharacterHub); they change members, not definitions. */
+export type SeriesRevisions = Readonly<Record<string, number>>;
+export const NO_SERIES_REVISIONS: SeriesRevisions = {};
+
 // The App planner cannot receive extra props: the already-mounted hub publishes its existing revision.
-const hubRevisions = new WeakMap<object, { scope: string; version: number }>();
-export function publishSeriesDataRevision(gateway: object, root: string | undefined, version: number) {
-  const revision = { scope: seriesDataScope(gateway, root), version };
+const hubRevisions = new WeakMap<object, { scope: string; version: number; seriesRevisions: SeriesRevisions }>();
+export function publishSeriesDataRevision(gateway: object, root: string | undefined, version: number, seriesRevisions: SeriesRevisions = NO_SERIES_REVISIONS) {
+  const revision = { scope: seriesDataScope(gateway, root), version, seriesRevisions };
   hubRevisions.set(gateway, revision);
   return () => { if (hubRevisions.get(gateway) === revision) hubRevisions.delete(gateway); };
 }
 export const seriesDataRevision = (gateway: object) => hubRevisions.get(gateway);
 export const sidebarCountCache = new RevisionReadCache<CharacterSidebarCounts>();
 onFolderPrefetchInvalidated(() => sidebarCountCache.clear());
-export function readSeriesSidebarCounts(gateway: LibraryGateway, scope: string, version: number) {
-  return gateway.characterSidebarCounts
-    ? sidebarCountCache.read(gateway, scope, version, "", () => gateway.characterSidebarCounts!())
-    : Promise.resolve(undefined);
+// The series revisions each cached count read started under. Counts are one read for every series,
+// but analysis changes one series at a time: only a series whose revision moved since re-reads them.
+const countRevisions = new WeakMap<object, Map<string, SeriesRevisions>>();
+/** Sidebar counts for `scope`; with `series`, re-read in place when that series was analysed since. */
+export function readSeriesSidebarCounts(gateway: LibraryGateway, scope: string, version: number, series?: { id: string; revisions: SeriesRevisions }) {
+  if (!gateway.characterSidebarCounts) return Promise.resolve(undefined);
+  let seen = countRevisions.get(gateway);
+  if (!seen) countRevisions.set(gateway, seen = new Map());
+  const started = seen;
+  const read = () => {
+    started.set(scope, series?.revisions ?? {});
+    return gateway.characterSidebarCounts!();
+  };
+  const previous = seen.get(scope);
+  const stale = series !== undefined && previous !== undefined
+    && (previous[series.id] ?? 0) !== (series.revisions[series.id] ?? 0);
+  return stale
+    ? sidebarCountCache.refresh(gateway, scope, version, "", read)
+    : sidebarCountCache.read(gateway, scope, version, "", read);
 }

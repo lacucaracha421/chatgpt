@@ -1036,6 +1036,18 @@ pub async fn character_groups(
         .map_err(|_| super::background_task_error())?
         .map_err(Into::into)
 }
+/// Every series' groups in one call (the hub used to read them series by series).
+#[tauri::command]
+pub async fn all_character_groups(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::character_groups::Group>, CommandError> {
+    let library = current_required(state)?;
+    crate::workload::after_launch_settled().await;
+    tauri::async_runtime::spawn_blocking(move || library.all_character_groups())
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
 #[tauri::command]
 pub async fn save_character_group(
     request: crate::library::character_groups::GroupDraft,

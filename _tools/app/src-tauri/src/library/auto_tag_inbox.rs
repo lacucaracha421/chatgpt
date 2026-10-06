@@ -206,6 +206,7 @@ impl Library {
                         &path,
                         &now.to_rfc3339(),
                     ).map_err(|e| e.to_string())?;
+                    self.character_changes.suggestion_inputs_changed();
                     last.imported = BTreeMap::from([
                         ("taggedAssets".into(), summary.tagged_assets),
                         ("tagRows".into(), summary.tag_rows),

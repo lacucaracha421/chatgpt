@@ -12,7 +12,7 @@ use super::{
 
 const LIST_SQL: &str = include_str!("character_suggestions_list.sql");
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Suggestion {
     pub tag: String,
@@ -248,9 +248,35 @@ fn queue_in(
 }
 
 impl Library {
+    /// Computed once per change of its inputs (see `character_changes`); concurrent calls
+    /// wait for the one computing instead of repeating the read under the library lock.
     pub fn character_suggestions(&self, minimum: Option<usize>) -> Result<Vec<Suggestion>> {
-        let c = self.connection()?;
-        list_in(&c, minimum.unwrap_or(5))
+        let minimum = minimum.unwrap_or(5);
+        let mut cached = self
+            .character_changes
+            .suggestions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Read the generation before the rows: a change committed meanwhile moves it past
+        // this key, so the next call recomputes.
+        let generation = self.character_changes.suggestion_generation();
+        if let Some((key, key_minimum, rows)) = cached.as_ref() {
+            if *key == generation && *key_minimum == minimum {
+                return Ok(rows.clone());
+            }
+        }
+        let rows = list_in(&*self.connection()?, minimum)?;
+        *cached = Some((generation, minimum, rows.clone()));
+        Ok(rows)
+    }
+
+    /// The uncached computation, for `perf_probe` measurements only.
+    #[doc(hidden)]
+    pub fn character_suggestions_uncached(
+        &self,
+        minimum: Option<usize>,
+    ) -> Result<Vec<Suggestion>> {
+        list_in(&*self.connection()?, minimum.unwrap_or(5))
     }
 
     pub fn character_suggestion_detail(
@@ -297,6 +323,8 @@ impl Library {
                 [tag],
             )?;
         }
+        // WITHOUT ROWID: not reported by the update hook.
+        self.character_changes.suggestion_inputs_changed();
         Ok(())
     }
 
@@ -420,6 +448,8 @@ impl Library {
             }
         }
         tx.commit()?;
+        // Tagger tag links are a WITHOUT ROWID table the update hook does not report.
+        self.character_changes.suggestion_inputs_changed();
         Ok(SuggestionResult {
             target,
             queued_count,
@@ -446,6 +476,8 @@ impl Library {
         }
         let queued_count = queue_in(&tx, &target, &detail.images, &BTreeSet::new())?;
         tx.commit()?;
+        // Tagger tag links are a WITHOUT ROWID table the update hook does not report.
+        self.character_changes.suggestion_inputs_changed();
         Ok(SuggestionResult {
             target,
             queued_count,

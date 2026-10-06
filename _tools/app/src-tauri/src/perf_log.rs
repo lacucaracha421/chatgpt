@@ -9,7 +9,9 @@ use std::{
 use tauri::Manager;
 
 const MAX_LINE: usize = 4096;
-const MAX_FILE: u64 = 5 * 1024 * 1024;
+/// Per daily file. Native startup records alone fill several MB, so 5 MB cut off the
+/// day's later timing; 32 MB keeps a full day of opt-in timing while staying bounded.
+const MAX_FILE: u64 = 32 * 1024 * 1024;
 struct Launch {
     enabled: bool,
     start: Instant,

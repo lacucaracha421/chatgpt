@@ -32,6 +32,20 @@ export type IncrementalStatus = {
   persistentError: string | null;
   activeWork?: CharacterActiveWork;
   historyRefreshes?: CharacterRefreshProgress[];
+  /** Moves only when a character definition (targets, references, series, groups, folder exclusions) changes. */
+  definitionRevision?: number;
+  /** Automatic analysis results per series id since launch. */
+  seriesRevisions?: Record<string, number>;
+};
+
+/** What one status poll found changed by the native owner. */
+export type AutomaticCharacterChange = {
+  /** New confirmed character memberships. */
+  membershipChanged: boolean;
+  /** Character definitions changed: the hub re-reads. */
+  definitionsChanged: boolean;
+  /** Series whose members or review state changed; null when the native status cannot tell. */
+  series: string[] | null;
 };
 
 export type AutomaticCharacterApi = {
@@ -73,7 +87,7 @@ function sameRefreshes(left: CharacterRefreshProgress[], right: CharacterRefresh
 
 /** Quiet status/control only. Native mutations and the native owner discover all work. */
 export function useCharacterAutomation(
-  onChanged: (membershipChanged: boolean) => void,
+  onChanged: (change: AutomaticCharacterChange) => void,
   api = defaultApi,
 ): QuietCharacterAutomationState {
   const [revision, setRevision] = useState(0);
@@ -90,6 +104,8 @@ export function useCharacterAutomation(
     let timer: ReturnType<typeof setTimeout>;
     let completed: number | null = null;
     let confirmed: number | null = null;
+    let definitions: number | undefined;
+    let seriesSeen: Record<string, number> = {};
     let interval = 5000;
     let polling = false;
     let noticedError = "";
@@ -124,10 +140,24 @@ export function useCharacterAutomation(
         const nextRefreshes = status.historyRefreshes ?? [];
         setHistoryRefreshes(current => sameRefreshes(current, nextRefreshes) ? current : nextRefreshes);
         interval = status.workActive ? 1000 : 5000;
-        if (completed !== null && completed !== status.completed) {
-          latest.current(confirmed !== status.confirmed);
-          setRevision((current) => current + 1);
+        // Per-image progress refreshes only the analysed series (their galleries and counts); the
+        // character definitions re-read only when the native definition revision moves.
+        const nextSeries = status.seriesRevisions;
+        const changedSeries = nextSeries
+          ? Object.keys(nextSeries).filter(id => nextSeries[id] !== (seriesSeen[id] ?? 0))
+          : null;
+        const definitionsChanged = completed !== null && definitions !== status.definitionRevision;
+        if (completed !== null && (completed !== status.completed || definitionsChanged || (changedSeries?.length ?? 0) > 0)) {
+          latest.current({
+            membershipChanged: confirmed !== status.confirmed,
+            // An older native status without the revision: every result may have changed anything.
+            definitionsChanged: definitionsChanged || status.definitionRevision === undefined,
+            series: changedSeries,
+          });
+          if (completed !== status.completed) setRevision((current) => current + 1);
         }
+        definitions = status.definitionRevision;
+        seriesSeen = nextSeries ?? {};
         publishError(
           status.persistentError
           ?? (!status.running ? "캐릭터 분석 환경 설정이 필요합니다." : null),

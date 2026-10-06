@@ -619,6 +619,8 @@ impl super::Library {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = import_file(&*self.connection()?, path, &now_utc())?;
         self.publication_inputs.signal(&[11]);
+        // Tagger scores, vocabulary and tag links are WITHOUT ROWID tables.
+        self.character_changes.suggestion_inputs_changed();
         Ok(result)
     }
 }

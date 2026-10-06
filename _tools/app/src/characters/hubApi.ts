@@ -35,6 +35,8 @@ export const characterHubApi = {
   setFolderExcluded: (classificationId: string, excluded: boolean): Promise<void> => invoke("set_character_folder_excluded", { request: { classificationId, excluded } }),
   series: (): Promise<CharacterSeries[]> => invoke("character_series"),
   groups: async (seriesId: string): Promise<CharacterGroup[]> => (await invoke<Omit<CharacterGroup, "seriesId">[]>("character_groups", { seriesId })).map(group => ({ ...group, seriesId })),
+  /** Every series' groups in one call, ordered by series, then name. */
+  allGroups: (): Promise<CharacterGroup[]> => invoke("all_character_groups"),
   saveSeries: (request: CharacterSeries): Promise<CharacterSeries> => invoke("save_character_series", { request }),
   browse: ({ view, ...query }: CharacterBrowseQuery): Promise<CharacterBrowsePage> => invoke("browse_character_assets", view ? { query, view } : { query }),
   createManualCharacter: (request: ManualCharacterRequest): Promise<import("./api").CharacterTarget> => invoke("create_manual_character", { request }),

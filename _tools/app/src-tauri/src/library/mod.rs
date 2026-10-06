@@ -51,6 +51,7 @@ pub(crate) mod catalog_update;
 mod catalog_visibility;
 mod character_augmentation;
 pub mod character_autotag;
+pub(crate) mod character_changes;
 pub mod character_conversion;
 pub(crate) mod character_exclusions;
 #[cfg(test)]
@@ -313,8 +314,16 @@ pub struct Library {
     pub(crate) replication_lock: Arc<Mutex<()>>,
     pub(crate) collection_publication_defer: Arc<Mutex<crate::cloud::auto_publication::Deferral>>,
     pub(crate) publication_inputs: Arc<crate::cloud::auto_publication::Inputs>,
+    pub(crate) character_changes: Arc<character_changes::CharacterChanges>,
     // Encrypted Private Vault (ADR-0039): lock state, decrypted index and write serialization.
     encrypted_vault: Arc<external_vault::EncryptedVaultRuntime>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// SELECTs (including subqueries) prepared on this thread's library connections, so
+    /// tests can bound a read's statement count.
+    pub(crate) static PREPARED_SELECTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The durable library identity read through a connection the caller already holds.
@@ -433,6 +442,7 @@ impl Library {
             replication_lock: Arc::default(),
             collection_publication_defer: Arc::default(),
             publication_inputs: Arc::default(),
+            character_changes: Arc::default(),
             encrypted_vault: Arc::default(),
         };
         library.backfill_legacy_collection_kinds()?;
@@ -570,9 +580,11 @@ impl Library {
         let character_queue_changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let changed = character_queue_changed.clone();
         let publication_inputs = self.publication_inputs.clone();
+        let character_changes = self.character_changes.clone();
         connection.update_hook(Some(
             move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
                 publication_inputs.changed_table(table);
+                character_changes.changed_table(table);
                 if character_incremental::is_queue_table(table) {
                     changed.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -593,6 +605,13 @@ impl Library {
                 }
             },
         ))?;
+        #[cfg(test)]
+        connection.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
+            if matches!(context.action, rusqlite::hooks::AuthAction::Select) {
+                PREPARED_SELECTS.with(|count| count.set(count.get() + 1));
+            }
+            rusqlite::hooks::Authorization::Allow
+        }))?;
         Ok(LockedConnection {
             connection,
             character_queue_changed,
