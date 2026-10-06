@@ -2950,6 +2950,28 @@ def verification_bindings(db, body):
 _ABSENT = object()
 
 
+def _slot_derived_flags(item):
+    """Read the published flags of slot kinds from the shown selection, as the PC exporter does.
+
+    A manga's shown work cover can be a fallback volume cover whose stored flag was false; the
+    staged baseline flags it from the slot. Both show the same image, so only the slot-derived
+    flags are compared. Other kinds keep their published flag.
+    """
+    slots = {"cover": item.get("selectedWorkArtworkId"),
+             "volume_cover": item.get("selectedWorkArtworkId"),
+             "hero": item.get("selectedHeroArtworkId"),
+             "backdrop": item.get("selectedBackdropArtworkId")}
+    artworks = item.get("artworks")
+    if not isinstance(artworks, list):
+        return item
+    item = dict(item)
+    item["artworks"] = [
+        {**art, "selected": art.get("id") == slots[art.get("kind")]}
+        if isinstance(art, dict) and art.get("kind") in slots and "selected" in art else art
+        for art in artworks]
+    return item
+
+
 def _value_diffs(live, projected, path=""):
     """Leaf differences, preserving array order and missing-versus-null semantics."""
     if isinstance(live, dict) and isinstance(projected, dict):
@@ -3061,7 +3083,7 @@ def verify_staging(db, body, now):
                 for view in ("list", "detail"):
                     projected = json.loads(encode(payload))
                     finalize_items(db, library_id, [projected], detail=view == "detail")
-                    left = mobile.public_item(live[work_id], detail=view == "detail")
+                    left = _slot_derived_flags(mobile.public_item(live[work_id], detail=view == "detail"))
                     right = mobile.public_item(projected, detail=view == "detail")
                     for path, before, after in _value_diffs(left, right):
                         diffs["total"] += 1

@@ -144,6 +144,19 @@ class CollectionAuthorityVerifyTests(unittest.TestCase):
         with api_app.get_db() as db:
             self.assertEqual(ca.work_projection(db, LIBRARY, 'av-work')['selection']['back'], 'av-back')
 
+    def test_shown_fallback_volume_cover_flag_is_not_a_difference(self):
+        # The published row shows manga-cover-1 as the work cover but carries its stored
+        # flag (false); the staged baseline flags it from the slot. Same image on screen.
+        legacy = copy.deepcopy(self.legacy)
+        work = next(c for c in legacy['collections'] if c['id'] == 'manga-work')
+        next(a for a in work['artworks'] if a['id'] == 'manga-cover-1')['selected'] = False
+        legacy['baseRevision'] = self.doc['legacyRevision']
+        self.doc['legacyRevision'] = self.ok(self.client.put(
+            '/v1/collections/replica', headers=self.publisher, json=legacy))['revision']
+        report = self.report()
+        self.assertEqual(report['diffs']['total'], 0, report['diffs'])
+        self.assertEqual(report['verdict'], 'lossless')
+
     def test_explicit_flags_must_agree_with_slots_before_staging_or_verification(self):
         for artwork_id, selected in [('av-cover', False), ('a-unused-spine', True),
                                      ('z-selected-spine', False), ('manga-cover-2', True)]:
