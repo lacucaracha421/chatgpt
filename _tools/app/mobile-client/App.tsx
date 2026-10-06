@@ -138,6 +138,7 @@ export function App() {
   const vaultBack=useRef<(()=>boolean)|null>(null);
   const viewerBack = useRef<(()=>boolean)|null>(null);
   const [status, setStatus] = useState<Status>(() => adoptConnection(readLocalStatus()));
+  const [connectionRevision,setConnectionRevision] = useState(0);
   // A saved native connection is enough to enter Home. The asynchronous status read below
   // remains authoritative and can still move the app back to the connection screen.
   const startedWithLocalConnection = useRef(status.configured);
@@ -255,7 +256,7 @@ export function App() {
   // Whether this server's pages carry their own list generation: `null` until a page
   // answers, so an older server keeps the generation-bracketed fetch it always had.
   const pageGenerations = useRef<boolean|null>(null);
-  useEffect(() => {pageGenerations.current = null;}, [status.endpoint]);
+  useEffect(() => {pageGenerations.current = null;}, [status.endpoint, connectionRevision]);
   const viewCache = useRef(new Map<string, Committed>());
   const homePageAt = useRef(0);
   const moreGate = useRef(new RequestGate());
@@ -291,7 +292,7 @@ export function App() {
     return promise;
   }, []);
 
-  const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS):Promise<boolean|void> => {
+  const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS, generationHint?: string):Promise<boolean|void> => {
     const visible = latest.current.page;
     const placeChanged=visible.version>0&&viewKey(visible.view,visible.filters)!==viewKey(view,nextFilters);
     if(placeChanged){clearSelection();if(latest.current.albumBatchOpen)closeAlbumBatch();}
@@ -340,7 +341,7 @@ export function App() {
       if (!response) {
         // `null` means this server predates the generation endpoint, so degrade to
         // always-fresh reads instead of failing the load that carries the actual list.
-        generation = await fetchListGeneration(request.signal);
+        generation = generationHint ?? await fetchListGeneration(request.signal);
         if (!gate.current.current(request.id)) return;
         if (generation !== null && generation !== observedGeneration.current) {viewCache.current.clear(); observedGeneration.current = generation;}
         const candidate = fresh ? undefined : viewCache.current.get(key);
@@ -407,6 +408,21 @@ export function App() {
     } }
     finally { if (gate.current.current(request.id)) { setBusy(false); loadInFlight.current = false; } }
   }, [cancelMore,clearSelection,closeAlbumBatch,recoverSearch]);
+  const refreshSecondary = useCallback(async (force = false) => {
+    if (!force && capturesRef.current !== null && Date.now() - secondaryAt.current < 60_000) return;
+    if (secondaryPending.current) {
+      if (!force) return;
+      secondaryGate.current.cancel(); secondaryPending.current = false;
+    }
+    secondaryPending.current = true;
+    const request = secondaryGate.current.begin(); setSecondaryError('');
+    try {
+      const result = await api<{captures: Asset[]}>('/v1/captures/pending?limit=40', request.signal);
+      if (secondaryGate.current.current(request.id)) { secondaryAt.current = Date.now(); setCaptures(result.captures.map(item => ({...item,pending:true})).reverse()); }
+    } catch {
+      if (secondaryGate.current.current(request.id) && !request.signal.aborted) setSecondaryError('처리 대기 목록을 갱신하지 못했습니다.');
+    } finally { if (secondaryGate.current.current(request.id)) secondaryPending.current = false; }
+  }, []);
   const sparse = useAssetToc(page,setPage,()=>{const current=latest.current.page;void load(current.view,null,[],0,true,current.filters);},setMoreError,async(reason,signal)=>{
     const current=latest.current.page,recovered=await recoverSearch(current.view,reason,signal);
     if(!recovered||signal.aborted||latest.current.page.version!==current.version)return false;
@@ -440,12 +456,22 @@ export function App() {
         // Without the endpoint there is no cheap change signal: leave the committed
         // view alone and let the foreground/resume refresh handle navigation.
         if (!generation) return;
+        // Native announces its first generation on every process start. With no
+        // committed Asset page yet, this establishes a baseline; the initial
+        // reads already fetch current data and must not be cancelled by it.
+        if (observedGeneration.current === null && !state.page.version) {
+          observedGeneration.current = generation;
+          if (!loadInFlight.current) void load(state.page.view, state.page.cursor, state.page.previous, scroll.current, false, state.page.filters, generation);
+          return;
+        }
         if (generation !== observedGeneration.current) {
           viewCache.current.clear(); cancelMore(); clearMediaCache();
+          homePageAt.current = 0; secondaryAt.current = 0;
+          if (state.page.view.tab === 'home') void refreshSecondary(true);
           // This device's own trash/restore moves the generation too; the viewer already
           // shows the result, so it stays open instead of closing under the user.
           const closeViewer = !trash.recent() && Date.now() - viewerEditAt.current > VIEWER_EDIT_GRACE_MS;
-          const committed = await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true,state.page.filters);
+          const committed = await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true,state.page.filters,generation);
           // Keep the viewer while the replacement list waits or fails, then swap together.
           if (active && committed && closeViewer) setViewer(current=>current===state.viewer?null:current);
           setIndexRevision(value=>value+1);
@@ -459,7 +485,7 @@ export function App() {
     window.addEventListener('lakomics-list-generation',generationEvent);
     window.addEventListener(ASSET_LIST_CHANGED_EVENT,changed);
     return()=>{active=false;controller.abort();removeVisible();window.removeEventListener('lakomics-list-generation',generationEvent);window.removeEventListener(ASSET_LIST_CHANGED_EVENT,changed);};
-  },[status.configured,status.endpoint,load,cancelMore]);
+  },[status.configured,status.endpoint,connectionRevision,load,cancelMore,refreshSecondary]);
   useLayoutEffect(() => {
     if (!page.version) return;
     const key = `${viewKey(page.view, page.filters)}:${page.cursor}`;
@@ -539,21 +565,6 @@ export function App() {
     const state = latest.current.page;
     void load(state.view, state.cursor, state.previous, scroll.current, true, state.filters);
   }, [load, cancelMore]);
-  const refreshSecondary = useCallback(async (force = false) => {
-    if (!force && capturesRef.current !== null && Date.now() - secondaryAt.current < 60_000) return;
-    if (secondaryPending.current) {
-      if (!force) return;
-      secondaryGate.current.cancel(); secondaryPending.current = false;
-    }
-    secondaryPending.current = true;
-    const request = secondaryGate.current.begin(); setSecondaryError('');
-    try {
-      const result = await api<{captures: Asset[]}>('/v1/captures/pending?limit=40', request.signal);
-      if (secondaryGate.current.current(request.id)) { secondaryAt.current = Date.now(); setCaptures(result.captures.map(item => ({...item,pending:true})).reverse()); }
-    } catch {
-      if (secondaryGate.current.current(request.id) && !request.signal.aborted) setSecondaryError('처리 대기 목록을 갱신하지 못했습니다.');
-    } finally { secondaryPending.current = false; }
-  }, []);
   // Warm every thumbnail into the native cache while the app is open on an unmetered link.
   useEffect(() => status.configured ? startThumbnailWarm(status.endpoint) : undefined, [status.configured, status.endpoint]);
   useEffect(() => status.configured ? startCollectionWarm(status.endpoint) : undefined, [status.configured, status.endpoint]);
@@ -569,16 +580,17 @@ export function App() {
   useEffect(() => {
     if (!status.configured) return;
     setRecentFolders(readRecentFolders(status.endpoint));
-    const controller = new AbortController(); setIndexError('');
-    void api<{items:Classification[]}>('/v1/library/classifications', controller.signal).then(result => {if(!controller.signal.aborted){setClassifications(result.items);setIndexReady(true);}}).catch(reason => {if (!controller.signal.aborted) setIndexError(errorText(reason));});
     // A root card can be tapped before this passive startup effect runs.
     // Do not overwrite that newer navigation with the initial root read.
     const interrupted = loadInterrupted.current; loadInterrupted.current = false;
     if(lastIntent.current.view.root && !startedWithLocalConnection.current) void load(LIBRARY);
     else if(interrupted) {const intent = lastIntent.current; void load(intent.view, intent.cursor, intent.previous, 0, false, intent.filters);}
-    return () => {loadInterrupted.current = loadInFlight.current; controller.abort(); gate.current.cancel(); secondaryGate.current.cancel(); moreGate.current.cancel(); prefetched.current?.controller.abort();};
-  }, [status, load]);
-  useEffect(() => { if (page.version && page.view.tab === 'home' && !page.cursor) void refreshSecondary(); return () => secondaryGate.current.cancel(); }, [page.version, page.view.tab, page.cursor, refreshSecondary]);
+    return () => {loadInterrupted.current = loadInFlight.current; gate.current.cancel(); secondaryGate.current.cancel(); secondaryPending.current = false; moreGate.current.cancel(); prefetched.current?.controller.abort();};
+  }, [status.configured, status.endpoint, connectionRevision, load]);
+  useEffect(() => {
+    if (status.configured && page.view.tab === 'home' && !page.cursor) void refreshSecondary();
+    return () => {secondaryGate.current.cancel(); secondaryPending.current = false;};
+  }, [status.configured, status.endpoint, connectionRevision, page.view.tab, page.cursor, refreshSecondary]);
   const refresh = useCallback(() => {
     const state = latest.current;
     if (!state.status.configured || state.viewer || state.settings) return;
@@ -634,7 +646,10 @@ export function App() {
   const exitCharacters=useCallback(()=>{if(!libraryHome())restoreBeforeCharacter();},[libraryHome,restoreBeforeCharacter]);
   useEffect(() => {
     const visible = () => {if (document.visibilityState === 'visible' && latest.current.status.configured && latest.current.page.view.tab === 'home') void refreshSecondary();};
-    const listChanged = () => {
+    const listChanged = (event:Event) => {
+      // Structured native reports are handled by the generation comparison above.
+      // Keep the legacy unstructured invalidation event for explicit refreshes.
+      if (typeof (event as CustomEvent<{generation?:string}>).detail?.generation === 'string') return;
       viewCache.current.delete(HOME_PAGE_KEY); homePageAt.current = 0; secondaryAt.current = 0;
       if (latest.current.status.configured && latest.current.page.view.tab === 'home') {
         void refreshSecondary(true);
@@ -802,18 +817,19 @@ export function App() {
     setHomeOrigin(null); homeRestore.current = null;
     setArea('assets'); setNotesVisited(false); setCollectionsVisited(false); setCatalogVisited(false); setCharactersVisited(false);
     setFindOpen(false);setSearchChips([]);setAssetSearchOpen(false);setSearchNotice('');setSearchListsRequested(false);
+    setConnectionRevision(value=>value+1);
     setStatus(adoptConnection(next));
   };
   usePublicationCheck(status.configured&&area==='assets'&&!settings&&!viewer,'/v1/library/characters/status',characterIndex?.revision,(_reply,changed)=>{if(changed)setIndexRevision(n=>n+1);});
   useEffect(()=>{
-    if(!status.configured)return;const controller=new AbortController();
+    if(!status.configured)return;const controller=new AbortController();setIndexError('');
     // Probed beside the existing index reads so a scope never has to discover the missing
     // contract from a failed page. A `null` result means "cannot filter", not "no error".
     void fetchAssetFilterVersion(controller.signal).then(value=>{if(!controller.signal.aborted)setFilterVersion(value);}).catch(()=>{if(!controller.signal.aborted)setFilterVersion(null);});
     void api<CharacterIndex>('/v1/library/characters',controller.signal).then(value=>{if(!controller.signal.aborted&&validCharacterIndex(value))setCharacterIndex(value);}).catch(()=>{});
-    void api<{items:Classification[]}>('/v1/library/classifications',controller.signal).then(value=>{if(!controller.signal.aborted)setClassifications(value.items);}).catch(()=>{});
+    void api<{items:Classification[]}>('/v1/library/classifications',controller.signal).then(value=>{if(!controller.signal.aborted){setClassifications(value.items);setIndexReady(true);}}).catch(reason=>{if(!controller.signal.aborted)setIndexError(errorText(reason));});
     return()=>controller.abort();
-  },[status.endpoint,status.configured,indexRevision]);
+  },[status.endpoint,status.configured,connectionRevision,indexRevision]);
   const filterable = area==='assets' && page.view.tab==='library' && !page.view.root && !page.view.characters && !page.view.revisit;
   // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
   const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia},{active:filterable&&!settings&&!viewer});

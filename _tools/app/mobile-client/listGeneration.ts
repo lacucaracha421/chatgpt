@@ -1,7 +1,42 @@
 import {api, ApiError} from './transport';
 import {filterVersionOf} from './assetFilters';
+import {outboxConnection} from './outboxConnection';
 
 const GENERATION_PATTERN = /^[a-f0-9]{64}$/;
+
+type Read = {controller: AbortController; promise: Promise<unknown>; users: number};
+const reads = new Map<string | null, Read>();
+
+/** Generation and filter support are fields of the same read, never a cached snapshot. */
+function readGeneration(signal?: AbortSignal): Promise<unknown> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Cancelled', 'AbortError'));
+  const scope = outboxConnection();
+  let entry = reads.get(scope);
+  if (!entry) {
+    const controller = new AbortController();
+    const promise = api<unknown>('/v1/library/list-generation', controller.signal, undefined, 'GET', false, scope ?? undefined);
+    entry = {controller, promise, users: 0};
+    reads.set(scope, entry);
+    const created = entry;
+    const clear = () => {if (reads.get(scope) === created) reads.delete(scope);};
+    void promise.then(clear, clear);
+  }
+  const shared = entry;
+  shared.users++;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const leave = (cancelled = false) => {
+      settled = true; signal?.removeEventListener('abort', abort); shared.users--;
+      if (!shared.users) {
+        if (reads.get(scope) === shared) reads.delete(scope);
+        if (cancelled) shared.controller.abort();
+      }
+    };
+    const abort = () => {if (!settled) {leave(true); reject(new DOMException('Cancelled', 'AbortError'));}};
+    signal?.addEventListener('abort', abort, {once: true});
+    void shared.promise.then(value => {if (!settled) {leave(); resolve(value);}}, reason => {if (!settled) {leave(); reject(reason);}});
+  });
+}
 
 /**
  * The library's list generation, or `null` when the server has no generation endpoint.
@@ -16,7 +51,7 @@ const GENERATION_PATTERN = /^[a-f0-9]{64}$/;
 export async function fetchListGeneration(signal?: AbortSignal): Promise<string | null> {
   let reply: unknown;
   try {
-    reply = await api<unknown>('/v1/library/list-generation', signal);
+    reply = await readGeneration(signal);
   } catch (reason) {
     if (reason instanceof ApiError && reason.status === 404) return null;
     throw reason;
@@ -55,7 +90,7 @@ and for an unreachable endpoint is deliberate: neither can support the query.
 export async function fetchAssetFilterVersion(signal?: AbortSignal): Promise<number | null> {
   let reply: unknown;
   try {
-    reply = await api<unknown>('/v1/library/list-generation', signal);
+    reply = await readGeneration(signal);
   } catch (reason) {
     if (reason instanceof ApiError && reason.status === 404) return null;
     throw reason;

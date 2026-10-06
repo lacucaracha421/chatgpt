@@ -62,6 +62,27 @@ beforeEach(() => {
 afterEach(() => {cleanup(); vi.useRealTimers(); setOutboxConnection(null); delete window.LakomicsNative;});
 
 describe('shared Home attention on tablet', () => {
+  it('waits for foreground Home reads before full paging and keeps an uncached Home covered until every page is ready', async () => {
+    const read=mocks.api.getMockImplementation()!;
+    let finishMemos!:(value:unknown)=>void;
+    const pages:{path:string;finish(value:unknown):void}[]=[];
+    mocks.native.mockImplementation(op=>op==='notesState'?new Promise(finish=>{finishMemos=finish;}):Promise.resolve({}));
+    mocks.api.mockImplementation((path,...args)=>path.startsWith('/v1/collections?')?new Promise(finish=>pages.push({path,finish})):read(path,...args));
+    const view=render(<Home {...props({captures:null})}/>);
+    await act(async()=>{});
+    expect(pages).toHaveLength(0);
+    await act(async()=>finishMemos({notes:[],revision:1}));
+    expect(pages).toHaveLength(0);
+    view.rerender(<Home {...props({captures:[]})}/>);
+    await waitFor(()=>expect(pages).toHaveLength(3));
+    expect(screen.getByRole('status',{name:'홈 미디어'})).toBeTruthy();
+    await act(async()=>pages.forEach(page=>page.finish({ready:true,revision:'r1',items:[],nextCursor:'next'})));
+    expect(pages).toHaveLength(6);
+    expect(screen.queryByRole('region',{name:/^2주 안에 발매/})).toBeNull();
+    await act(async()=>pages.slice(3).forEach(page=>page.finish({ready:true,revision:'r1',items:page.path.includes('type=manga')?works:[],nextCursor:null})));
+    await screen.findByRole('region',{name:/^2주 안에 발매/});
+    expect(readHomeShelf(props().scope)?.value.works).toEqual(works);
+  });
   it('shows the kept shelf before paging finishes and converges to the refreshed shelf', async () => {
     const oldGame: CollectionSummary = {id: 'old-game', name: 'Kept Game', type: 'game', showcase: false, releaseDate: '2026-10-02'};
     const newGame: CollectionSummary = {id: 'new-game', name: 'Refreshed Game', type: 'game', showcase: false, releaseDate: '2026-10-03'};
@@ -74,7 +95,7 @@ describe('shared Home attention on tablet', () => {
     render(<Home {...props()}/>);
     await screen.findByRole('region', {name: /^2주 안에 발매/});
     expect(screen.getByText('Kept Game')).toBeTruthy();
-    expect(pages).toHaveLength(3);
+    await waitFor(()=>expect(pages).toHaveLength(3));
     expect(readHomeShelf(props().scope)?.value.revision).toBe('r0');
     await act(async () => {
       pages.forEach(page => page.finish({ready: true, revision: 'r1', items: [], nextCursor: 'next'}));
@@ -92,7 +113,7 @@ describe('shared Home attention on tablet', () => {
     cleanup(); resetReleaseStore(); resetHomeSourceCache(); pages.length = 0;
     render(<Home {...props()}/>);
     await screen.findByText('Refreshed Game');
-    expect(pages).toHaveLength(3);
+    await waitFor(()=>expect(pages).toHaveLength(3));
   });
 
   it.each(['other-server', 'other-library', 'invalid'])('does not use a shelf belonging to %s', async kind => {
@@ -279,7 +300,8 @@ it('preserves the visit after a failed release read and advances after a success
   fireEvent.touchStart(home,{touches:[{clientX:0,clientY:0}]});
   fireEvent.touchMove(home,{touches:[{clientX:0,clientY:150}]});
   fireEvent.touchEnd(home);
-  await screen.findByRole('button',{name:/밤의 도서관/});
+  const releaseCards=await screen.findAllByRole('button',{name:/밤의 도서관/});
+  expect(releaseCards.some(card=>within(card).queryByText('NEW'))).toBe(true);
   await waitFor(()=>expect(JSON.parse(localStorage.getItem(key)!).lastVisit).not.toBe(previous));
 });
 

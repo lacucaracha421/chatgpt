@@ -322,11 +322,12 @@ export function homeReadProblem(reason: unknown): 'offline' | 'server' | null {
 
 export type HomeDashboardInput = {
   enabled: boolean; scope: string;
+  shelfEnabled?: boolean;
   pending: number | null;
   similarityKey: unknown;
   exchange: ExchangeSnapshot | null;
 };
-export function useHomeDashboard({enabled, scope, pending, similarityKey, exchange}: HomeDashboardInput) {
+export function useHomeDashboard({enabled, scope, pending, similarityKey, exchange, shelfEnabled = true}: HomeDashboardInput) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [problems, setProblems] = useState<Record<string, 'offline' | 'server'>>({});
   useEffect(() => setProblems({}), [scope]);
@@ -384,11 +385,11 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
 
   // The heavy shelf read: only when the shared store has nothing current for this epoch.
   useEffect(() => {
-    if (!enabled || currentShelf()) return;
+    if (!enabled || !shelfEnabled || currentShelf()) return;
     const controller = new AbortController();
     void loadShelf(controller.signal).then(() => { if (!controller.signal.aborted) result('shelf'); }, reason => { if (!controller.signal.aborted) result('shelf', reason); });
     return () => controller.abort();
-  }, [enabled, epoch]);
+  }, [enabled, shelfEnabled, epoch, scope]);
 
   const offline = !online || Object.values(problems).includes('offline');
   const serverProblem = Object.values(problems).includes('server');
@@ -408,6 +409,8 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
   const kept = Object.values(snapshot.counts).map(entry => entry?.at ?? 0);
   return {
     todos,
+    // A failed summary read must not hold the shelf back for the whole session.
+    shelfPrerequisitesReady: countsReady && collectionsReady && (summary !== undefined || Boolean(problems.summary)),
     /** Offline: when the kept to-do counts were last fresh. */
     todosAt: offline ? Math.max(0, ...TODO_ORDER.map(key => snapshot.counts[key]?.at ?? 0)) || null : null,
     applicable: TODO_ORDER.filter(key => key !== 'character'),

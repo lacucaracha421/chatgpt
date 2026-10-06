@@ -40,6 +40,64 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+it.each(['pending','settled'])('keeps startup reads through status confirmation and the native baseline with the probe %s',async(probe)=>{
+  const endpoint='https://example.invalid',generation='a'.repeat(64);
+  window.LakomicsNative={localStatus:()=>JSON.stringify({configured:true,endpoint}),request:vi.fn(),cancel:vi.fn()};
+  let confirm!:(value:unknown)=>void;
+  mocks.native.mockImplementation(op=>op==='status'?new Promise(resolve=>{confirm=resolve;}):Promise.resolve({}));
+  const reads:{path:string;signal:AbortSignal;finish(value:unknown):void}[]=[];
+  mocks.api.mockImplementation((path:string,signal:AbortSignal)=>new Promise(finish=>reads.push({path,signal,finish})));
+  render(<App/>);
+  if(probe==='settled')await act(async()=>reads.find(read=>read.path==='/v1/library/list-generation')!.finish({generation,filterVersion:1}));
+  await act(async()=>{
+    window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation}}));
+    confirm({configured:true,endpoint,battery:{percent:80}});
+  });
+  const count=(path:string)=>reads.filter(read=>read.path===path).length;
+  expect(count('/v1/library/list-generation')).toBe(1);
+  expect(count('/v1/library/classifications')).toBe(1);
+  expect(count('/v1/library/characters')).toBe(1);
+  expect(count('/v1/captures/pending?limit=40')).toBe(1);
+  expect(reads.every(read=>!read.signal.aborted)).toBe(true);
+  await act(async()=>{
+    reads.forEach(read=>read.finish(read.path.endsWith('list-generation')?{generation,filterVersion:1}:read.path.includes('captures')?{captures:[]}:read.path.includes('assets?')?{items:a,has_more:false,next_cursor:null,listGeneration:generation}:{items:[]}));
+  });
+  await act(async()=>reads.filter(read=>read.path.includes('assets?')).forEach(read=>read.finish({items:a,has_more:false,next_cursor:null,listGeneration:generation})));
+  // A genuine later generation still refreshes the committed page and indexes.
+  await act(async()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:'b'.repeat(64)}})));
+  await act(async()=>reads.filter(read=>read.path.includes('assets?')).forEach(read=>read.finish({items:a,has_more:false,next_cursor:null,listGeneration:'b'.repeat(64)})));
+  expect(count('/v1/library/classifications')).toBe(2);
+  expect(count('/v1/library/characters')).toBe(2);
+  expect(count('/v1/captures/pending?limit=40')).toBe(2);
+});
+it('drops startup reads when the authoritative status changes the connection',async()=>{
+  window.LakomicsNative={localStatus:()=>JSON.stringify({configured:true,endpoint:'https://old.example'}),request:vi.fn(),cancel:vi.fn()};
+  let confirm!:(value:unknown)=>void;
+  mocks.native.mockImplementation(op=>op==='status'?new Promise(resolve=>{confirm=resolve;}):Promise.resolve({}));
+  const reads:{path:string;signal:AbortSignal}[]=[];
+  mocks.api.mockImplementation((path:string,signal:AbortSignal)=>{reads.push({path,signal});return new Promise(()=>{});});
+  render(<App/>);
+  const old=reads.filter(read=>['/v1/library/list-generation','/v1/library/classifications','/v1/library/characters','/v1/captures/pending?limit=40'].includes(read.path));
+  expect(old).toHaveLength(4);
+  await act(async()=>confirm({configured:true,endpoint:'https://new.example'}));
+  expect(old.every(read=>read.signal.aborted)).toBe(true);
+  for(const read of old)expect(reads.filter(next=>next.path===read.path&&!next.signal.aborted)).toHaveLength(1);
+});
+it('drops old index reads on an explicit reconfiguration even when the endpoint stays the same',async()=>{
+  const status={configured:true,endpoint:'https://example.invalid'};
+  window.LakomicsNative={localStatus:()=>JSON.stringify(status),request:vi.fn(),cancel:vi.fn()};
+  const reads:{path:string;signal:AbortSignal}[]=[];
+  mocks.api.mockImplementation((path:string,signal:AbortSignal)=>{reads.push({path,signal});return new Promise(()=>{});});
+  render(<App/>);await act(async()=>{});
+  const paths=['/v1/library/list-generation','/v1/library/classifications','/v1/library/characters'];
+  const old=reads.filter(read=>paths.includes(read.path));expect(old).toHaveLength(3);
+  fireEvent.click(screen.getByRole('button',{name:'연결 및 설정'}));
+  fireEvent.click(screen.getByRole('button',{name:'연결 변경'}));
+  await act(async()=>fireEvent.submit(screen.getByRole('button',{name:'연결 확인하고 저장'}).closest('form')!));
+  expect(mocks.native.mock.calls.some(([op])=>op==='configure')).toBe(true);
+  expect(old.every(read=>read.signal.aborted)).toBe(true);
+  for(const path of paths)expect(reads.filter(read=>read.path===path&&!read.signal.aborted)).toHaveLength(1);
+});
 it('prewarms the two retained list areas only after startup paint and idle, without mounting Notes',async()=>{
   vi.useFakeTimers();
   let sequence=0,idle:IdleRequestCallback|undefined;
@@ -195,15 +253,15 @@ it('renders Home from a saved native connection while the async status read is p
   expect(await screen.findByRole('button',{name:'라이브러리 연결'})).toBeTruthy();
   expect(screen.queryByRole('button',{name:'전체 보기'})).toBeNull();
 });
-it('restarts a Home load cut off by the startup status check, so the bar does not stay (user 2026-10-06)', async()=>{
+it('finishes the same Home load through startup status confirmation without restarting the bar', async()=>{
   let resolveStatus!: (value: unknown) => void;
   window.LakomicsNative={localStatus:()=>JSON.stringify({configured:true,endpoint:'https://example.invalid'}),request:vi.fn(),cancel:vi.fn()};
   mocks.native.mockImplementation((op:string)=>op==='status' ? new Promise(resolve=>{resolveStatus=resolve;}) : Promise.resolve({configured:true,endpoint:'https://example.invalid'}));
   const original=mocks.api.getMockImplementation()!;
   const generations:AbortSignal[]=[];
-  let hold=true;
+  let finishGeneration!:(value:unknown)=>void;
   mocks.api.mockImplementation((path:string,signal:AbortSignal)=>{
-    if(path==='/v1/library/list-generation'){generations.push(signal);if(hold)return new Promise(()=>{});}
+    if(path==='/v1/library/list-generation'){generations.push(signal);if(generations.length===1)return new Promise(resolve=>{finishGeneration=resolve;});}
     return original(path,signal);
   });
   render(<App/>);
@@ -212,9 +270,9 @@ it('restarts a Home load cut off by the startup status check, so the bar does no
   await act(async()=>{window.dispatchEvent(new Event('lakomics-list-generation'));});
   await waitFor(()=>expect(generations.some(signal=>!signal.aborted)).toBe(true));
   const before=generations.length;
-  hold=false;
   await act(async()=>{resolveStatus({configured:true,endpoint:'https://example.invalid'});});
-  await waitFor(()=>expect(generations.length).toBeGreaterThan(before));
+  expect(generations).toHaveLength(before);expect(generations.every(signal=>!signal.aborted)).toBe(true);
+  await act(async()=>finishGeneration({generation:'a'.repeat(64),filterVersion:1}));
   await new Promise(resolve=>setTimeout(resolve,700));
   expect(screen.queryAllByLabelText('목록 불러오는 중')).toHaveLength(0);
 });
@@ -510,19 +568,23 @@ describe('committed view and browsing',()=>{
       await waitFor(()=>expect(screen.getAllByLabelText('자산 목록').find(element=>!element.closest('[style="display: none;"]'))?.getAttribute('data-restore-scroll')).toBe('420'));
     }
   });
-  it('does not restart initial navigation when the delayed filter capability arrives',async()=>{
-    const original=mocks.api.getMockImplementation()!; let probe=0,resolveCapability!:(value:unknown)=>void;
+  it('finishes the latest recent navigation when the shared generation and filter capability arrive',async()=>{
+    const original=mocks.api.getMockImplementation()!;
+    let resolveCapability!:(value:unknown)=>void;
     mocks.api.mockImplementation((path:string)=>{
-      if(path==='/v1/library/list-generation'&&++probe===2)return new Promise(resolve=>{resolveCapability=resolve;});
+      if(path==='/v1/library/list-generation'&&!resolveCapability)return new Promise(resolve=>{resolveCapability=resolve;});
       return original(path);
     });
-    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
-    await openFolder('분류 B, 2개'); await screen.findByText('tile-b1');
-    const reads=mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')).length;
-    await act(async()=>{resolveCapability({generation:'a'.repeat(64),filterVersion:1});});
-    expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
-    expect(screen.getByText('tile-b1')).toBeTruthy();
-    expect(mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?'))).toHaveLength(reads);
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'전체 보기'}));
+    expect(mocks.api.mock.calls.filter(([path])=>path==='/v1/library/list-generation')).toHaveLength(1);
+    await act(async()=>resolveCapability({generation:'a'.repeat(64),filterVersion:1}));
+    await screen.findByText('tile-a1');
+    expect(screen.getByRole('heading',{name:'최근 저장'})).toBeTruthy();
+    const pages=mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')&&!path.includes('toc=1'));
+    // This legacy fixture needs a fresh page after the optimistic TOC page;
+    // both belong to the same navigation rather than a restarted effect.
+    expect(pages).toHaveLength(2);expect(new Set(pages.map(([,signal])=>signal)).size).toBe(1);
+    expect(pages.every(([,signal])=>!signal.aborted)).toBe(true);
   });
   it('restores the last Library classification when switching tabs',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');

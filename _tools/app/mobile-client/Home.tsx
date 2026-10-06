@@ -138,7 +138,8 @@ export function Home(props: HomeProps) {
   const [privacy] = usePrivacyMode();
   const at = useLocalDayClock();
   const today = localToday(at);
-  const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending: captures?.length ?? null, similarityKey: props.similarityKey, exchange: props.exchange});
+  const [shelfScope, setShelfScope] = useState<string | null>(null);
+  const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending: captures?.length ?? null, similarityKey: props.similarityKey, exchange: props.exchange, shelfEnabled: shelfScope === props.scope});
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
   const upcoming = useHomeUpcoming(!paused, props.scope, d.refreshKey);
   const revisit = useHomeRevisit(!paused, props.scope, d.refreshKey);
@@ -211,6 +212,12 @@ export function Home(props: HomeProps) {
   const quiet = rows.length === 0 && !attentionPending;
   const daily = useTabletHomeDaily(!paused && revisit !== null && !dateGroup && quiet, props.scope, today, d.refreshKey);
   const dayPending = revisit === null || quiet && !dateGroup && !daily.value && !daily.failed;
+  // Full publication paging can occupy the bridge for many pages. Let the small
+  // first-screen reads finish first, while keeping the existing first-load and
+  // persisted-shelf display rules (including an uncached launch's complete shelf).
+  useEffect(() => {
+    if (!paused && !attentionPending && !dayPending && upcoming.ready && d.shelfPrerequisitesReady) setShelfScope(props.scope);
+  }, [paused, attentionPending, dayPending, upcoming.ready, d.shelfPrerequisitesReady, props.scope]);
   const layoutShown = useRef(false);
   if ((d.releasesReady && upcoming.ready || d.offline || d.serverProblem) && (!attentionPending || d.offline || d.serverProblem) && !dayPending) layoutShown.current = true;
   const firstLoad = !layoutShown.current;
