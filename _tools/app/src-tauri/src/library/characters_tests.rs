@@ -2332,3 +2332,41 @@ fn reference_region_settings_persist_and_reject_stale_content_atomically() {
         0
     );
 }
+
+#[test]
+fn duplicate_character_name_in_a_series_is_a_readable_error() {
+    let f = Fixture::new();
+    let first = f.target("Same name");
+    let draft = |id: Option<String>, revision: Option<i64>, name: &str| TargetDraft {
+        id,
+        expected_revision: revision,
+        series_classification_id: first.series_classification_id.clone(),
+        linked_classification_id: None,
+        display_name: name.into(),
+        description: String::new(),
+        thumbnail_asset_id: None,
+        enabled: true,
+    };
+    let created = f
+        .library
+        .save_character_target(draft(None, None, "Same name"));
+    assert!(matches!(created, Err(Error::Invalid(message)) if message.contains("같은 이름")));
+    let other = f
+        .library
+        .save_character_target(draft(None, None, "Other"))
+        .unwrap();
+    let renamed = f.library.save_character_target(draft(
+        Some(other.id.clone()),
+        Some(other.revision),
+        "Same name",
+    ));
+    assert!(matches!(renamed, Err(Error::Invalid(message)) if message.contains("같은 이름")));
+    // Saving a character under its own name stays allowed.
+    f.library
+        .save_character_target(draft(
+            Some(first.id.clone()),
+            Some(first.revision),
+            "Same name",
+        ))
+        .unwrap();
+}

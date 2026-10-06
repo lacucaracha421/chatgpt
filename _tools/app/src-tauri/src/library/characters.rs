@@ -648,6 +648,17 @@ impl Library {
                 [series],
             )?;
         }
+        // The (series, name) unique index would otherwise surface as a raw SQLite error.
+        if transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_targets
+                WHERE series_classification_id IS ?1 AND display_name=?2 AND id IS NOT ?3)",
+            params![draft.series_classification_id, name, draft.id],
+            |r| r.get::<_, bool>(0),
+        )? {
+            return Err(Error::Invalid(
+                "이 시리즈에 같은 이름의 캐릭터가 이미 있습니다. 다른 이름을 입력해 주세요.",
+            ));
+        }
         let now = chrono::Utc::now().to_rfc3339();
         let id = if let Some(id) = draft.id {
             let previous = self.read_character_target(transaction, &id)?;
