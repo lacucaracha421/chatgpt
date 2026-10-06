@@ -9,13 +9,21 @@ export const COMMAND_EVENT = 'lakomics-collection-commands';
 const KEY = connectionOutbox('lakomics.collections.commands.outbox.v1');
 export type AuthorityIdentity = {libraryId: string; epoch: number; contractVersion: 1};
 export type Fields = Record<string, string | number | boolean | null>;
+export type Provider = 'tmdb' | 'igdb';
+export type ProviderApply = {operation: 'create' | 'connect' | 'refresh'; provider: Provider; externalId: string; workId: string; type?: 'movie' | 'game'};
+export type BlobReceipt = {sha256: string; sizeBytes: number; contentType: string};
+export type ArtworkReceipt = {provider: Provider; providerImageId: string; original: BlobReceipt; width: number; height: number};
+export type CommandReceipt = AuthorityIdentity & {operationId: string; commandType: string; authorityCursor?: number};
 export type WorkCommand =
+  | ({commandType: 'providerApply'} & ProviderApply)
+  | ({commandType: 'addArtwork'; workId: string; artworkId: string; kind: string; language: null; thumbnail: null} & ArtworkReceipt)
+  | {commandType: 'selectArtwork'; workId: string; slot: 'work' | 'hero' | 'backdrop'; artworkId: string | null; expectedArtworkId: string | null}
   | {commandType: 'createWork'; workId: string; type: CollectionKind; name: string; legacyKind: null; fields: Fields; binding: null}
   | {commandType: 'updateWork'; workId: string; changes: Fields; expected: Fields; expectedRevision: number | null}
   | {commandType: 'setOwnershipTracking'; workId: string; editionIndex: number; count: number; expectedCount: number | null; expectedRevision: null}
   | {commandType: 'setReleaseSubscription'; workId: string; enabled: boolean; expectedEnabled: boolean; expectedRevision: null};
 export type Command = AuthorityIdentity & WorkCommand & {operationId: string};
-export type CommandIntent = {command: Command; createdAt: number; attempts: number; nextAttemptAt: number;
+export type CommandIntent = {command: Command; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
   state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: {name: string; fields: Fields}}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
   const value = reply as Partial<AuthorityIdentity> & {active?: boolean} | null;
@@ -44,6 +52,17 @@ export function enqueueCommand(identity: AuthorityIdentity, command: WorkCommand
   write([...readCommands(), intent]);
   return intent;
 }
+/** Persist related artwork commands together, before any network delivery can begin. */
+export function enqueueCommands(identity: AuthorityIdentity, commands: WorkCommand[]): CommandIntent[] {
+  const intents: CommandIntent[] = commands.map(command => ({command: {...identity, ...command, operationId: crypto.randomUUID()},
+    createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'}));
+  write([...readCommands(), ...intents]); return intents;
+}
+export function providerApplyBody(command: Command & {commandType: 'providerApply'}) {
+  const {libraryId, epoch, operation, provider, externalId, workId, type} = command;
+  return {commandId: command.operationId, libraryId, epoch, operation, provider, externalId, workId,
+    ...(operation === 'create' ? {type} : {})};
+}
 function changeIntent(connection: string, operationId: string, update: (row: CommandIntent) => void) {
   const rows = readCommands(connection), row = rows.find(value => value.command.operationId === operationId);
   if (!row) return;
@@ -56,7 +75,7 @@ export function dropWork(identity: AuthorityIdentity, workId: string, connection
 export function replaceCommand(operationId: string, command: WorkCommand | null) {
   const rows = readCommands(), index = rows.findIndex(row => row.command.operationId === operationId);
   if (index < 0 || rows[index].state !== 'conflict') return;
-  if (command) rows[index] = {...rows[index], command: {...rows[index].command, ...command, operationId: crypto.randomUUID()},
+  if (command) rows[index] = {...rows[index], command: {libraryId: rows[index].command.libraryId, epoch: rows[index].command.epoch, contractVersion: 1, ...command, operationId: crypto.randomUUID()},
     state: 'pending', conflict: undefined, attempts: 0, nextAttemptAt: 0};
   else rows.splice(index, 1);
   write(rows);
@@ -89,10 +108,21 @@ async function deliver(connection: string) {
     // FIFO per work: a create, a failed send, or an unresolved conflict blocks its later edits.
     if (rows.slice(0, index).some(earlier => sameAuthority(earlier.command, identity) && earlier.command.workId === row.command.workId && earlier.state !== 'accepted')) continue;
     try {
-      const receipt = await api<AuthorityIdentity & {operationId: string; commandType: string}>(COMMAND_PATH, undefined, row.command, 'PUT', false, connection);
+      if (row.command.commandType === 'providerApply') {
+        const reply = await api<{receipts: CommandReceipt[]}>('/v1/providers/apply', undefined, providerApplyBody(row.command), 'POST', false, connection);
+        const types = row.command.operation === 'connect' ? ['bindProvider', 'applyProviderSnapshot']
+          : [row.command.operation === 'create' ? 'createWork' : 'applyProviderSnapshot'];
+        if (!Array.isArray(reply?.receipts) || reply.receipts.length !== types.length || reply.receipts.some((receipt, index) =>
+          !sameAuthority(receipt, row.command) || typeof receipt.operationId !== 'string' || receipt.commandType !== types[index]))
+          throw new Error('서버 응답을 확인하지 못했습니다. 다시 전송합니다.');
+        // Retain the server's command receipts in their original order, just as ordinary acknowledgements.
+        changeIntent(connection, row.command.operationId, stored => { stored.receipts = reply.receipts; stored.acceptedAt = Date.now(); stored.state = 'accepted'; });
+        continue;
+      }
+      const receipt = await api<CommandReceipt>(COMMAND_PATH, undefined, row.command, 'PUT', false, connection);
       if (!receipt || !sameAuthority(receipt, row.command) || receipt.operationId !== row.command.operationId || receipt.commandType !== row.command.commandType)
         throw new Error('서버 응답을 확인하지 못했습니다. 다시 전송합니다.');
-      changeIntent(connection, row.command.operationId, stored => { stored.state = 'accepted'; });
+      changeIntent(connection, row.command.operationId, stored => { stored.receipts = [receipt]; stored.state = 'accepted'; });
     } catch (error) {
       const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: {name: string; fields: Fields}}}} | null)?.detail : null;
       const code = detail?.code;
@@ -114,11 +144,18 @@ function retryLater(connection: string, operationId: string) {
   });
 }
 /** Accepted overlays survive restart and remain until a read actually contains the desired fields. */
-export function reconcileCommands(identity: AuthorityIdentity, item: CollectionSummary, source: 'list' | 'detail' = 'list') {
+export function reconcileCommands(identity: AuthorityIdentity, item: CollectionSummary, source: 'list' | 'detail' = 'list', readStartedAt?: number) {
   const rows = readCommands();
   const next = rows.filter((row, index) => {
     if (!sameAuthority(row.command, identity) || row.command.workId !== item.id || row.state !== 'accepted') return true;
     const command = row.command;
+    if (command.commandType === 'providerApply') return command.operation === 'create' ? source !== 'list'
+      : source !== 'detail' || readStartedAt === undefined || readStartedAt < (row.acceptedAt ?? Infinity);
+    if (command.commandType === 'addArtwork') return !(item as CollectionDetail).artworks?.some(art => art.id === command.artworkId);
+    if (command.commandType === 'selectArtwork') {
+      const key = command.slot === 'work' ? 'selectedWorkArtworkId' : command.slot === 'hero' ? 'selectedHeroArtworkId' : 'selectedBackdropArtworkId';
+      return (item[key] ?? null) !== command.artworkId;
+    }
     // A detail response cannot retire the shelf's optimistic new tile before its list catches up.
     if (command.commandType === 'createWork') return source !== 'list';
     if (command.commandType === 'updateWork') return !Object.entries(command.changes).every(([key, value]) => {

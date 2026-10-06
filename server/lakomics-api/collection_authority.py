@@ -1384,6 +1384,45 @@ def _tombstone(ctx, row):
     _bump_work(ctx, state)
 
 
+def command_batch_receipt(db, *, library_id, epoch, operation_id, request_payload):
+    """Fence and replay a server-built command batch using the existing receipt store."""
+    row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
+    if row["epoch"] != epoch:
+        fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH,
+             "컬렉션 권위가 이 라이브러리와 일치하지 않습니다.", domain=DOMAIN)
+    payload_sha = payload_digest(library_id, epoch, CONTRACT_VERSION, "providerApply", request_payload)
+    receipt = db.execute(
+        "SELECT payload_digest,result_payload FROM collection_authority_receipts"
+        " WHERE library_id=? AND epoch=? AND operation_id=?",
+        [library_id, epoch, operation_id]).fetchone()
+    if receipt is not None and receipt["payload_digest"] != payload_sha:
+        fail(409, "operationConflict", "같은 작업 ID가 다른 내용으로 이미 사용되었습니다.")
+    return row, payload_sha, None if receipt is None else json.loads(receipt["result_payload"])
+
+
+def apply_command_batch(db, *, library_id, epoch, operation_id, request_payload, commands, now):
+    """Validate/execute commands and receipt their orchestration in the caller's transaction.
+
+    The batch receipt freezes the response across later provider changes. It does
+    not advance the feed; each ordinary command owns its normal receipt and delta.
+    """
+    row, payload_sha, cached = command_batch_receipt(
+        db, library_id=library_id, epoch=epoch, operation_id=operation_id,
+        request_payload=request_payload)
+    if cached is not None:
+        return cached
+    receipts = []
+    for command in commands:
+        lib, command_epoch, version, command_id, kind, entity = parse_command(command)
+        receipts.append(apply_command(db, library_id=lib, epoch=command_epoch,
+            contract_version=version, command_type=kind, operation_id=command_id,
+            entity=entity, now=now))
+    result = {"receipts": receipts}
+    ctx = Context(db, row, command_type="providerApply", operation_id=operation_id, now=now)
+    _receipt(db, ctx, payload_sha, request_payload["workId"], result)
+    return result
+
+
 def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
                   entity, now):
     """Execute one typed command inside the caller's ``BEGIN IMMEDIATE``."""

@@ -162,3 +162,121 @@ timeouts. Artwork request JSON is capped at 2 KiB. No background retry or jobs.
   dependencies were installed. Run `python -m unittest tests.test_work_providers`
   from `server/lakomics-api` in the controller's existing WSL environment.
   Live providers, R2, native clients and production remain unverified.
+
+## S3 — authenticated image proxy and server-built apply (2026-10-07)
+
+This section supersedes the earlier relay-only tablet refresh/rebinding limitation.
+Source implementation only; no deployment or production writes were performed.
+
+All provider routes use the existing `require_client` authentication (client or
+publisher). Errors use `{"detail":{"code":"...","message":"Korean message"}}`;
+authority rejections retain the existing command route's exact status/code and
+additional conflict fields.
+
+### Image previews
+
+`GET /v1/providers/image?provider=tmdb|igdb&path=<encoded provider path/id>&size=<size>`
+returns image bytes with the upstream image MIME and
+`Cache-Control: private, max-age=86400`. Exactly these three query parameters are
+accepted; duplicate parameters are rejected. Allowed sizes:
+
+| Provider | Image proxy sizes | Fixed upstream host |
+| --- | --- | --- |
+| TMDB | `w185`, `w342`, `w780` | `image.tmdb.org` |
+| IGDB | `t_cover_big`, `t_screenshot_med`, `t_720p` | `images.igdb.com` |
+
+IGDB proxy sizes map to the existing size validator by removing `t_`. URLs,
+host overrides, traversal and other sizes are rejected. Downloads use the existing
+no-redirect/no-environment-proxy transport, 25-second deadline, at most 5-second
+socket timeout, allowed image MIME set and 16 MiB size cap. Preview downloads do
+not store artwork or require provider API keys.
+
+Search/detail `previewUrl` fields now contain relative API paths, for example:
+
+```text
+/v1/providers/image?provider=tmdb&path=%2Fposter.jpg&size=w185
+/v1/providers/image?provider=igdb&path=co_99&size=t_cover_big
+```
+
+TMDB defaults to `w185`; IGDB covers use `t_cover_big`, other candidates use
+`t_screenshot_med`. The tablet must resolve these against its configured API base
+and supply its authorization header when fetching image bytes. It must not fetch
+provider-host images directly.
+
+### Apply request and response
+
+`POST /v1/providers/apply` accepts only:
+
+```json
+{
+  "commandId": "<canonical UUID v4>",
+  "libraryId": "<authority library id>",
+  "epoch": 1,
+  "operation": "create|connect|refresh",
+  "provider": "tmdb|igdb",
+  "externalId": "42",
+  "workId": "<canonical UUID>",
+  "type": "movie|game"
+}
+```
+
+`workId` is required for every operation: client-generated for create, existing
+for connect/refresh. `type` is required only for create (`tmdb` -> `movie`, `igdb`
+-> `game`) and must be omitted for connect/refresh, including null. TMDB TV uses
+`tv:42` with work type `movie`; other IDs are positive numeric strings. Extra
+fields, client-supplied snapshots and malformed identities are rejected with
+422 `providerApplyInvalid`. Request JSON is limited to 2 KiB.
+
+| Operation | Authority commands / returned receipt order |
+| --- | --- |
+| create | `createWork` with provider name, metadata, initial binding and snapshot |
+| connect | `bindProvider`, then `applyProviderSnapshot` |
+| refresh | `applyProviderSnapshot` for the work's existing binding |
+
+The server performs a fresh provider detail lookup, builds and validates ordinary
+authority commands, then executes the existing `apply_command` path. Connect's
+commands are atomic: rejection of either rolls back both, including receipts and
+feed changes. Provider merge rules remain unchanged; user titles, personal fields,
+artwork selections and explicit metadata edits survive. In particular, IGDB's
+existing fill-only merge can retain displayed metadata while updating the snapshot.
+Provider HTTP runs outside the write transaction; binding/snapshot CAS prevents
+stale lookup application. Refresh requires a live binding and matching request
+`externalId`, otherwise 409 `providerBindingRequired` / `providerBindingMismatch`.
+Stale library/epoch uses 409 `authorityLibraryMismatch`, as the commands route does.
+
+Success is exactly `{"receipts":[<ordinary authority command receipt>, ...]}`.
+Each entry has the same JSON as one accepted command on
+`PUT /v1/collections/authority/commands`, including `operationId`, `commandType`,
+`entities`, `authorityCursor`, and `changeSequence`. Derived command IDs are
+UUIDv5 with `commandId` as namespace and the command type as name. An internal
+UUIDv5(`commandId`, `providerApply`) receipt freezes the entire response and request
+fingerprint in the existing authority receipt store without advancing the feed.
+Completed identical retries replay those receipts without provider HTTP or a
+second mutation, even if the provider subsequently changes or keys are removed.
+Reusing the same key with a different request returns 409 `operationConflict`.
+The existing receipt retention window (180 days) also applies to this replay.
+The tablet must retain the original `commandId` and body for transport retries;
+a new intentional lookup/apply uses a new UUID v4.
+
+The public commands route's publisher restriction on `bindProvider` and
+`applyProviderSnapshot` is unchanged. No client snapshot permission is added.
+
+### Artwork and verification handoff
+
+Artwork remains `POST /v1/providers/artwork` -> blob receipt -> client outbox
+`addArtwork` -> `selectArtwork`. Its existing IGDB sizes remain **unprefixed**
+(`cover_big`, `screenshot_med`, `720p`, `original`, etc.); only the image proxy uses
+`t_` sizes. Apply neither downloads nor selects artwork automatically.
+
+Mock tests cover image bytes/cache/hosts/sizes, invalid paths/redirects/MIME/size,
+relative previews, client authentication, TMDB movie/TV and IGDB create, connect,
+refresh, preservation of personal fields, repeated request replay, key reuse,
+stale identity, missing/mismatched binding, lookup CAS, identity-taken rejections,
+atomic rollback and unchanged publisher-only commands.
+
+Windows AST syntax checks and diff whitespace review are the local evidence.
+The unittest suite was written but not run: the task environment lacks the
+server dependencies and cannot run WSL. Controller verification command, from
+`server/lakomics-api`: `python -m unittest tests.test_work_providers
+tests.test_collection_authority`. Live providers, R2, tablet image authentication,
+native behavior and production deployment remain unverified.

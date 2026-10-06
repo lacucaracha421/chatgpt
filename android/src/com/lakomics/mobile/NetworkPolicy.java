@@ -21,6 +21,10 @@ final class NetworkPolicy {
   boolean page=kind.equals("page") && (host.equals("siam-cdn.net") || host.endsWith(".siam-cdn.net"));
   if(!"https".equals(u.getScheme()) || u.getUserInfo()!=null || u.getFragment()!=null || (port!=-1 && port!=443) || !(cover||page))throw new IllegalArgumentException("Invalid catalog image");
  }
+ static void providerImage(String path)throws Exception{
+  api(path,"GET");
+  if(!path.startsWith("/v1/providers/image?"))throw new IllegalArgumentException("Invalid provider preview route");
+ }
  static void api(String path,String method) throws Exception {
   if(path.length()>(path.startsWith("/v1/mobile-catalog/")?16384:8192) || path.contains("\\") || path.contains("#") || path.contains("\r") || path.contains("\n"))throw new IllegalArgumentException("Unsupported API path");
   String p=path.split("\\?",2)[0];
@@ -41,6 +45,10 @@ final class NetworkPolicy {
   get=get || p.equals("/v1/assets/authority/status") || p.equals("/v1/assets/authority/baseline") || p.equals("/v1/assets/authority/changes");
   get=get || p.equals("/v1/collections/authority/status") || p.equals("/v1/collections/authority/baseline") || p.equals("/v1/collections/authority/changes");
   boolean collectionPut=p.equals("/v1/collections/authority/commands");
+  // Interactive provider reads and the two client write routes; no wildcard write access.
+  get=get || p.equals("/v1/providers/status") || p.equals("/v1/providers/image")
+   || p.equals("/v1/providers/tmdb/search") || p.equals("/v1/providers/igdb/search")
+   || p.matches("/v1/providers/tmdb/(movie|tv)/[1-9][0-9]{0,17}") || p.matches("/v1/providers/igdb/[1-9][0-9]{0,17}");
   // Album authority reads remain narrowly allowlisted. The one write route is added
   // separately below with its first durable-outbox consumer.
   get=get || p.equals("/v1/sync/status") || p.equals("/v1/albums/baseline") || p.equals("/v1/albums/changes");
@@ -55,6 +63,7 @@ final class NetworkPolicy {
   // structural mutation through this path. Activate stays absent from every allowlist.
   boolean classificationPut=p.equals("/v1/classifications/authority/commands");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
+  post=post || p.equals("/v1/providers/apply") || p.equals("/v1/providers/artwork");
   // Artist edit submission only; the ordered log GET remains publisher-only.
   post=post || p.equals("/v1/library/artists/intents");
   // HOME-DASH-001: the wishlist intent command and the Home cover ticket (see the Home GETs above).

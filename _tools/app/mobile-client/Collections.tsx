@@ -18,6 +18,7 @@ import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {AvPerformerScreen} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
 import {AuthorityQueue, AuthorityWorkActions, CollectionWorkForm, type WorkForm} from './CollectionAuthorityForms';
+import {CollectionProviderActions, ProviderAddAction, useProviderStatus} from './CollectionProviders';
 import {CollectionReleases} from './CollectionReleases';
 import {invalidateReleases, observePublication} from './releaseStore';
 import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
@@ -460,6 +461,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // An accepted personal edit changes what the server serves; re-read both views.
   const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
   const [workForm,setWorkForm]=useState<WorkForm|null>(null);
+  const providerStatus=useProviderStatus(active&&!paused,refresh);
   const localCreate=edits.authority.rows.find(row=>row.command.commandType==='createWork'&&row.command.workId===selected);
   const localCreateState=localCreate?.state;
   // Retire accepted overlays only against the raw server read, never the optimistic display.
@@ -482,9 +484,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       return;
     }
     const controller=new AbortController();setDetailError('');
+    const readStartedAt=Date.now();
     void api<{revision:string;item:CollectionDetail}>(`/v1/collections/${encodeURIComponent(selected)}`,controller.signal).then(result=>{
       if(controller.signal.aborted)return;
       committedDetail.current=detailKey;setDetail(result);
+      edits.authority.reconcile(result.item,'detail',readStartedAt);
       setEdition(current=>editions(result.item.volumes).includes(current)?current:editions(result.item.volumes)[0]??0);
     }).catch(reason=>{if(!controller.signal.aborted)setDetailError(errorText(reason));});
     return()=>controller.abort();
@@ -569,6 +573,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // Shortcuts and view controls share the section bar's right group on both surfaces.
   const shortcuts=<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
     {edits.authority.identity&&<Button variant="quiet" size="sm" onClick={()=>setWorkForm({mode:'create',type})}>새 작품</Button>}
+    <ProviderAddAction type={type} authority={edits.authority} status={providerStatus}/>
     <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}>{showcaseAll?<SparklesSolidIcon aria-hidden="true"/>:<SparklesIcon aria-hidden="true"/>}<span className="collection-shortcuts__label">쇼케이스</span></Button>
     {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
     {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
@@ -633,6 +638,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const visibleRecord=(work:CollectionDetail)=>workRecordFacts(work,edits);
   const workInfo=(work:CollectionDetail)=><>
     <AuthorityWorkActions item={work} authority={edits.authority} onForm={setWorkForm}/>
+    <CollectionProviderActions key={work.id} item={work} authority={edits.authority} status={providerStatus} active={active&&!paused}/>
     <PersonalRecord item={work} edits={edits} onSheet={setPersonalSheet}/>
     <CollectionPersonal item={work} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
     <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...workFacts(work,work.av??null),...moreWorkFacts(work,work.av??null,work.series?{status:work.series.status}:null)]}/></section>

@@ -273,6 +273,12 @@ public final class NetworkPolicyTest {
  // A query string grants no other target, and DELETE stays exchange-only.
  reject(()->NetworkPolicy.api("/v1/exchange/inbox?x=/v1/exchange/transfers/"+x,"DELETE"));
  reject(()->NetworkPolicy.api("/v1/notes/"+"a".repeat(64),"DELETE"));
+ for(String path:new String[]{"/v1/providers/status","/v1/providers/image?provider=tmdb&path=%2Fa.jpg&size=w342","/v1/providers/tmdb/search?query=a&kind=tv","/v1/providers/igdb/search?query=a","/v1/providers/tmdb/movie/42","/v1/providers/tmdb/tv/42","/v1/providers/igdb/99"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE"})reject(()->NetworkPolicy.api(path,method));}
+ for(String path:new String[]{"/v1/providers/apply","/v1/providers/artwork"}){pass(()->NetworkPolicy.api(path,"POST"));for(String method:new String[]{"GET","PUT","DELETE"})reject(()->NetworkPolicy.api(path,method));}
+ for(String path:new String[]{"/v1/providers/activate","/v1/providers/tmdb/movie/0","/v1/providers/tmdb/movie/42/extra","/v1/providers/igdb/../status","/v1/providers/status/","/v1/providers/image%2f.."})for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api(path,method));
+ pass(()->NetworkPolicy.providerImage("/v1/providers/image?provider=tmdb&path=%2Fa.jpg&size=w342"));
+ pass(()->NetworkPolicy.providerImage("/v1/providers/image?provider=igdb&path=a&size=t_cover_big"));
+ for(String path:new String[]{"https://evil.example/v1/providers/image?x=1","//evil.example/v1/providers/image?x=1","/v1/providers/status?x=1","/v1/providers/image","/v1/providers/image/?x=1","/v1/providers/image%3fx=1","/v1/providers/image?x=1#fragment","/v1/providers/image?x=1\\extra"})reject(()->NetworkPolicy.providerImage(path));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

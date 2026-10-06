@@ -3,7 +3,7 @@ import {visibleInterval} from './useVisibleInterval';
 import {usePendingRetry} from './useBookmarks';
 import {outboxConnection} from './outboxConnection';
 import {api, errorText} from './transport';
-import {AUTHORITY_STATUS_PATH, COMMAND_EVENT, authorityIdentity, confirmedWork, createdWork, dropWork, enqueueCommand, flushCommands,
+import {AUTHORITY_STATUS_PATH, COMMAND_EVENT, authorityIdentity, confirmedWork, createdWork, dropWork, enqueueCommand, enqueueCommands, flushCommands,
   optimisticWork, readCommands, reconcileCommands, replaceCommand, sameAuthority,
   type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
 import {normalizeCollectionEdit, sameEditValue, type CollectionEditField, type CollectionEditValue, type OwnedVolumesValue} from './collectionEditOutbox';
@@ -58,6 +58,10 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void) {
     if (!identity) throw new Error('작품을 편집할 수 없습니다. 연결을 확인해 주세요.');
     const result = enqueueCommand(identity, command); void flush(); return result;
   }, [identity?.libraryId, identity?.epoch, flush]);
+  const enqueueBatch = (commands: WorkCommand[]) => {
+    if (!identity) throw new Error('작품을 편집할 수 없습니다. 연결을 확인해 주세요.');
+    const result = enqueueCommands(identity, commands); void flush(); return result;
+  };
   const edit = (workId: string, field: CollectionEditField, value: CollectionEditValue, expected: CollectionEditValue) => {
     const normalized = normalizeCollectionEdit(field, value);
     if (field === 'ownedVolumes') {
@@ -107,10 +111,10 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void) {
     if (choice === 'overwrite') void flush();
     return true;
   };
-  return {identity, rows: scoped, failure, enqueue, edit, visible, resolveConflict, flush,
+  return {identity, rows: scoped, acknowledgements: settledRows, failure, enqueue, enqueueBatch, edit, visible, resolveConflict, flush,
     drop: (workId: string) => { if (identity) dropWork(identity, workId); },
     observeLibrary: setLibrary,
     work: <T extends CollectionSummary>(item: T) => optimisticWork(confirmedWork(item, settledRows), scoped.filter(row=>row.state!=='accepted')),
     creations: scoped.flatMap(row => { const item = createdWork(row); return item ? [optimisticWork(item, scoped)] : []; }),
-    reconcile: (item: CollectionSummary, source: 'list' | 'detail' = 'list') => { if (identity) reconcileCommands(identity, item, source); }};
+    reconcile: (item: CollectionSummary, source: 'list' | 'detail' = 'list', readStartedAt?: number) => { if (identity) reconcileCommands(identity, item, source, readStartedAt); }};
 }

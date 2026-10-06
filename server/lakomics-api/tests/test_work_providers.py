@@ -3,6 +3,7 @@ import io
 import json
 import os
 import unittest
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 from unittest import mock
@@ -87,12 +88,265 @@ class WorkProviderTests(unittest.TestCase):
         os.environ.update({wp.TMDB_KEY_ENV: "tmdb-fixture", wp.IGDB_ID_ENV: "client-fixture",
                            wp.IGDB_SECRET_ENV: "secret-fixture"})
 
+    def apply_body(self, operation="create", provider="tmdb", work_id=None, **changes):
+        body = {"commandId": str(uuid.uuid4()), "libraryId": fixtures.LIBRARY, "epoch": 1,
+                "operation": operation, "provider": provider,
+                "externalId": "42" if provider == "tmdb" else "99",
+                "workId": work_id or str(uuid.uuid4())}
+        if operation == "create":
+            body["type"] = "movie" if provider == "tmdb" else "game"
+        return {**body, **changes}
+
+    def apply(self, body, headers=None):
+        return self.client.post("/v1/providers/apply", headers=self.auth if headers is None else headers, json=body)
+
+    def feed(self):
+        return self.fixture.ok(self.fixture.client.get(fixtures.PREFIX + "/changes", headers=self.auth,
+            params={"libraryId": fixtures.LIBRARY, "epoch": 1, "after": 0}))
+
+    def test_image_proxy_allowed_sizes_fixed_hosts_cache_and_bytes(self):
+        for provider, path, sizes, origin in (
+            ("tmdb", "/poster.jpg", ("w185", "w342", "w780"), "https://image.tmdb.org/t/p/"),
+            ("igdb", "co_99", ("t_cover_big", "t_screenshot_med", "t_720p"),
+             "https://images.igdb.com/igdb/image/upload/")):
+            for size in sizes:
+                with self.subTest(provider=provider, size=size):
+                    data = png()
+                    self.responses(Response(data, "image/png"))
+                    reply = self.get("image", provider=provider, path=path, size=size)
+                    self.assertEqual(reply.status_code, 200, reply.text)
+                    self.assertEqual(reply.content, data)
+                    self.assertEqual(reply.headers["Content-Type"], "image/png")
+                    self.assertEqual(reply.headers["Cache-Control"], "private, max-age=86400")
+                    suffix = size + path if provider == "tmdb" else size + "/" + path + ".jpg"
+                    self.assertEqual(self.open.call_args.args[0].full_url, origin + suffix)
+
+    def test_image_proxy_refuses_sizes_urls_traversal_and_bad_queries(self):
+        for provider, path, size in (
+            ("tmdb", "/poster.jpg", "original"), ("tmdb", "/poster.jpg", "w500"),
+            ("igdb", "co_99", "cover_big"), ("igdb", "co_99", "t_thumb"),
+            ("tmdb", "https://evil.test/x.jpg", "w185"), ("tmdb", "//evil.test/x.jpg", "w185"),
+            ("tmdb", "/../x.jpg", "w185"), ("igdb", "https://evil.test/x", "t_720p"),
+            ("igdb", "../x", "t_720p")):
+            self.code(self.get("image", provider=provider, path=path, size=size), 422, "providerImagePathInvalid")
+        self.code(self.get("image", provider="evil", path="x", size="w185"), 422, "providerInvalid")
+        self.code(self.get("image", provider="tmdb", path="/x.jpg"), 422, "providerImagePathInvalid")
+        self.code(self.get("image", provider="tmdb", path="/x.jpg", size="w185", url="evil"),
+                  422, "providerImagePathInvalid")
+        self.open.assert_not_called()
+
+    def test_image_proxy_redirect_mime_and_size_refused(self):
+        params = {"provider": "tmdb", "path": "/poster.jpg", "size": "w185"}
+        for response, status, code in (
+            (HTTPError("https://ignored", 302, "redirect", {"Location": "https://evil.test"}, None),
+             502, "providerRedirectRefused"),
+            (Response(b"html", "text/html"), 422, "providerImageInvalid"),
+            (Response(b"x", "image/png", headers={"Content-Length": str(wp.MAX_ARTWORK_BYTES + 1)}),
+             413, "providerResponseTooLarge"),
+            (Response(b"x" * (wp.MAX_ARTWORK_BYTES + 1), "image/png"), 413, "providerResponseTooLarge")):
+            self.responses(response)
+            self.code(self.get("image", **params), status, code)
+        self.assertIsNone(wp.NoRedirect().redirect_request(None, None, 302, "", {}, "https://evil.test"))
+
+    def test_detail_and_search_previews_are_relative_api_paths(self):
+        self.keys()
+        self.responses(movie(), {"results": [movie()]}, {"access_token": "token", "expires_in": 3600},
+                       [game()], [game()])
+        film = self.ok(self.get("tmdb/movie/42"))
+        search = self.ok(self.get("tmdb/search", query="film", kind="movie"))
+        game_detail = self.ok(self.get("igdb/99"))
+        games = self.ok(self.get("igdb/search", query="game"))
+        previews = [a["previewUrl"] for d in (film, game_detail) for a in d["artwork"]]
+        previews += [search["items"][0]["previewUrl"], games["items"][0]["previewUrl"]]
+        for preview in previews:
+            self.assertEqual(urlsplit(preview).path, "/v1/providers/image")
+            self.assertEqual(urlsplit(preview).netloc, "")
+            query = {key: value[0] for key, value in parse_qs(urlsplit(preview).query).items()}
+            self.assertIn(query["size"], wp.PREVIEW_SIZES[query["provider"]])
+
+    def test_apply_create_client_receipt_shape_feed_and_retry_without_lookup(self):
+        self.keys()
+        body = self.apply_body()
+        self.responses(movie())
+        result = self.ok(self.apply(body))
+        self.assertEqual(len(result["receipts"]), 1)
+        receipt = result["receipts"][0]
+        self.assertEqual(set(receipt), {"libraryId", "epoch", "contractVersion", "commandType",
+            "operationId", "changed", "changeSequence", "authorityCursor", "entities", "updatedAt"})
+        self.assertEqual(receipt["commandType"], "createWork")
+        self.assertEqual(receipt["operationId"], str(uuid.uuid5(uuid.UUID(body["commandId"]), "createWork")))
+        state = self.fixture.work(body["workId"])
+        self.assertEqual(state["name"], "영화")
+        self.assertEqual(state["fields"]["runtimeMinutes"], 123)
+        self.assertEqual(receipt["entities"]["bindings"][0]["snapshot"]["id"], 42)
+        before = self.feed()
+        self.open.reset_mock(side_effect=True)
+        self.open.side_effect = AssertionError("A retry must not fetch provider data")
+        os.environ.pop(wp.TMDB_KEY_ENV)
+        self.assertEqual(self.ok(self.apply(body)), result)
+        self.assertEqual(self.feed(), before)
+        self.open.assert_not_called()
+        self.code(self.apply({**body, "externalId": "43"}), 409, "operationConflict")
+
+    def test_apply_igdb_create_and_refresh(self):
+        self.keys()
+        body = self.apply_body(provider="igdb")
+        self.responses({"access_token": "token", "expires_in": 3600}, [game()])
+        self.ok(self.apply(body))
+        state = self.fixture.work(body["workId"])
+        self.assertEqual(state["name"], "Game")
+        self.assertEqual(state["fields"]["developer"], "Dev")
+        self.fixture.ok(self.fixture.update(body["workId"], {"description": "My memo", "myScore": 4.5},
+                                            revision=state["entityRevision"]))
+        fresh = game()
+        fresh["summary"] = "Fresh game"
+        self.responses([fresh])
+        refresh = self.apply_body("refresh", provider="igdb", work_id=body["workId"])
+        result = self.ok(self.apply(refresh))
+        self.assertEqual(result["receipts"][0]["commandType"], "applyProviderSnapshot")
+        state = self.fixture.work(body["workId"])
+        # Preserve the existing IGDB fill-only merge rule while refreshing its snapshot.
+        self.assertEqual(state["fields"]["overview"], "A game.")
+        self.assertEqual(result["receipts"][0]["entities"]["bindings"][0]["snapshot"]["summary"], "Fresh game")
+        self.assertEqual(state["fields"]["description"], "My memo")
+        self.assertEqual(state["fields"]["myScore"], 4.5)
+        self.assertEqual(self.ok(self.apply(refresh)), result)
+
+    def test_apply_tmdb_tv_identity_uses_tv_lookup_and_movie_type(self):
+        self.keys()
+        raw = self.tv()
+        raw.update(overview="Series", seasons=[])
+        self.responses(raw)
+        body = self.apply_body(externalId="tv:42")
+        receipt = self.ok(self.apply(body))["receipts"][0]
+        self.assertIn("/tv/42?", self.open.call_args.args[0].full_url)
+        self.assertEqual(receipt["entities"]["works"][0]["type"], "movie")
+        self.assertEqual(receipt["entities"]["bindings"][0]["externalId"], "tv:42")
+
+    def test_apply_identity_taken_returns_command_rejection(self):
+        self.keys()
+        holder = self.apply_body()
+        self.responses(movie())
+        self.ok(self.apply(holder))
+        target = str(uuid.uuid4())
+        self.fixture.ok(self.fixture.create(target, "Target"))
+        args = dict(workId=target, provider="tmdb", externalId="42", config=None, expectedRevision=0)
+        rejection = self.fixture.command("bindProvider", headers=self.fixture.publisher, **args)
+        self.responses(movie())
+        reply = self.apply(self.apply_body("connect", work_id=target))
+        self.assertEqual(reply.status_code, rejection.status_code)
+        self.assertEqual(reply.json(), rejection.json())
+
+    def test_apply_refresh_cas_rejects_binding_changed_during_lookup(self):
+        self.keys()
+        body = self.apply_body()
+        self.responses(movie())
+        created = self.ok(self.apply(body))["receipts"][0]
+        existing = created["entities"]["bindings"][0]
+        args = {"workId": body["workId"], "provider": "tmdb", "externalId": "42",
+                "snapshot": existing["snapshot"], "values": existing["values"],
+                "details": wp.tmdb_normalize(movie(), "movie")["binding"]["details"],
+                "baseSnapshotDigest": existing["snapshotDigest"]}
+        def concurrent_refresh(request, **kwargs):
+            self.fixture.ok(self.fixture.command("applyProviderSnapshot", headers=self.fixture.publisher, **args))
+            return Response(movie())
+        before = self.feed()["cursor"]
+        self.open.side_effect = concurrent_refresh
+        self.code(self.apply(self.apply_body("refresh", work_id=body["workId"])), 409, "providerSnapshotStale")
+        self.assertEqual(self.feed()["cursor"], before + 1)
+
+    def test_apply_connect_refresh_preserve_user_fields_and_two_receipts(self):
+        self.keys()
+        work_id = str(uuid.uuid4())
+        self.fixture.ok(self.fixture.create(work_id, "My title", overview="My overview",
+                                            description="My memo", myScore=4.5, director="My director"))
+        connect = self.apply_body("connect", work_id=work_id)
+        self.responses(movie())
+        result = self.ok(self.apply(connect))
+        self.assertEqual([r["commandType"] for r in result["receipts"]],
+                         ["bindProvider", "applyProviderSnapshot"])
+        self.assertEqual(self.ok(self.apply(connect)), result)
+        state = self.fixture.work(work_id)
+        self.assertEqual(state["name"], "My title")
+        for field, value in (("description", "My memo"), ("myScore", 4.5),
+                             ("overview", "My overview"), ("director", "My director")):
+            self.assertEqual(state["fields"][field], value)
+        self.assertEqual(state["fields"]["runtimeMinutes"], 123)
+        fresh = movie()
+        fresh.update(runtime=150, overview="Fresh overview")
+        self.responses(fresh)
+        refresh = self.apply_body("refresh", work_id=work_id)
+        result = self.ok(self.apply(refresh))
+        state = self.fixture.work(work_id)
+        self.assertEqual(state["fields"]["runtimeMinutes"], 150)
+        self.assertEqual(state["fields"]["overview"], "My overview")
+        self.assertEqual(state["fields"]["description"], "My memo")
+        self.assertEqual(state["fields"]["myScore"], 4.5)
+        self.assertEqual(self.ok(self.apply(refresh)), result)
+
+    def test_apply_stale_epoch_library_missing_binding_and_identity(self):
+        for change in ({"epoch": 2}, {"libraryId": "f" * 32}):
+            self.code(self.apply(self.apply_body(**change)), 409, "authorityLibraryMismatch")
+        work_id = str(uuid.uuid4())
+        self.fixture.ok(self.fixture.create(work_id, "Unbound"))
+        self.code(self.apply(self.apply_body("refresh", work_id=work_id)), 409, "providerBindingRequired")
+        self.code(self.apply(self.apply_body("connect")), 404, "workNotFound")
+        self.open.assert_not_called()
+        self.keys()
+        self.responses(movie())
+        self.ok(self.apply(self.apply_body("connect", work_id=work_id)))
+        self.open.reset_mock()
+        self.code(self.apply(self.apply_body("refresh", work_id=work_id, externalId="43")),
+                  409, "providerBindingMismatch")
+        self.open.assert_not_called()
+
+    def test_apply_validation_and_auth(self):
+        body = self.apply_body()
+        for changes in ({"snapshot": {}}, {"type": "game"}, {"commandId": str(uuid.uuid5(uuid.NAMESPACE_URL, "x"))},
+                        {"workId": "not-uuid"}, {"externalId": "https://evil.test"}, {"epoch": True},
+                        {"provider": "steam"}, {"operation": "delete"}):
+            self.code(self.apply({**body, **changes}), 422, "providerApplyInvalid")
+        self.code(self.apply(self.apply_body("connect", type=None)), 422, "providerApplyInvalid")
+        for headers in ({}, {"Authorization": "Bearer invalid"}):
+            self.assertEqual(self.apply(body, headers=headers).status_code, 401)
+            self.assertEqual(self.client.get("/v1/providers/image", headers=headers,
+                params={"provider": "tmdb", "path": "/poster.jpg", "size": "w185"}).status_code, 401)
+        self.open.assert_not_called()
+
+    def test_apply_rejection_matches_commands_and_rolls_back_connect(self):
+        self.keys()
+        work_id = str(uuid.uuid4())
+        self.fixture.ok(self.fixture.create(work_id, "Existing"))
+        body = self.apply_body("connect", work_id=work_id)
+        detail = wp.tmdb_normalize(movie(), "movie")
+        args = {"workId": work_id, "provider": "tmdb", "externalId": "42",
+                "config": None, "expectedRevision": 0}
+        self.assertEqual(self.fixture.command("bindProvider", **args).status_code, 401)
+        self.assertEqual(self.fixture.command("applyProviderSnapshot", workId=work_id,
+            **{k: detail["binding"][k] for k in ("provider", "externalId", "snapshot", "values", "details")},
+            baseSnapshotDigest=None).status_code, 401)
+        # The second command rejects: neither the first binding nor its receipt/feed survives.
+        before = self.feed()
+        original = wp.ca.apply_command
+        def reject_snapshot(db, **kwargs):
+            if kwargs["command_type"] == wp.ca.APPLY_SNAPSHOT:
+                wp.ca.fail(409, "providerSnapshotStale", "작품 정보가 변경되었습니다.")
+            return original(db, **kwargs)
+        self.responses(movie())
+        with mock.patch.object(wp.ca, "apply_command", side_effect=reject_snapshot):
+            self.code(self.apply(body), 409, "providerSnapshotStale")
+        with fixtures.api_app.get_db() as db:
+            self.assertIsNone(wp.ca.binding_row(db, fixtures.LIBRARY, work_id, "tmdb"))
+        self.assertEqual(self.feed(), before)
+        self.responses(movie())
+        self.assertEqual(len(self.ok(self.apply(body))["receipts"]), 2)
+
     def responses(self, *values):
         self.open.side_effect = [value if isinstance(value, (Response, Exception)) else Response(value)
                                  for value in values]
 
-    def get(self, path, **params):
-        return self.client.get("/v1/providers/" + path, params=params, headers=self.auth)
+    def get(self, route, /, **params):
+        return self.client.get("/v1/providers/" + route, params=params, headers=self.auth)
 
     def artwork(self, path="/poster.jpg", provider="tmdb", size="original"):
         return self.client.post("/v1/providers/artwork", headers=self.auth,
@@ -149,7 +403,7 @@ class WorkProviderTests(unittest.TestCase):
         items = self.ok(self.get("tmdb/search", query=" 영화 ", kind="movie", year=2024))["items"]
         self.assertEqual(items[0], {"id": 42, "externalId": "42", "kind": "movie", "name": "영화",
             "originalTitle": "Original", "releaseDate": "2024-02-01", "year": 2024,
-            "path": "/poster.jpg", "previewUrl": "https://image.tmdb.org/t/p/w185/poster.jpg"})
+            "path": "/poster.jpg", "previewUrl": "/v1/providers/image?provider=tmdb&path=%2Fposter.jpg&size=w185"})
         request = self.open.call_args_list[0].args[0]
         params = parse_qs(urlsplit(request.full_url).query)
         self.assertEqual(params["language"], ["ko-KR"])
@@ -283,7 +537,8 @@ class WorkProviderTests(unittest.TestCase):
             "releaseDate": "2023-01-01", "platforms": "Windows", "genres": "RPG", "overview": "A game."})
         self.assertEqual(detail["metadata"]["platforms"], "Dreamcast · Windows")
         self.assertEqual([a["kind"] for a in detail["artwork"]], ["cover", "artwork", "screenshot"])
-        self.assertEqual(detail["artwork"][0]["previewUrl"], "https://images.igdb.com/igdb/image/upload/t_thumb/co_99.jpg")
+        self.assertEqual(detail["artwork"][0]["previewUrl"],
+                         "/v1/providers/image?provider=igdb&path=co_99&size=t_cover_big")
         self.create(detail, kind="game")
         self.assertEqual(sum(call.args[0].full_url == wp.TOKEN_URL for call in self.open.call_args_list), 1)
 

@@ -1152,7 +1152,9 @@ describe('collection shortcut overlays',()=>{
     serve();render(<Collections active paused={false} backRef={{current:null}}/>);
     pressTab(type);
     await within(shortcuts()).findByRole('button',{name:'쇼케이스'});
-    const buttons=within(shortcuts()).getAllByRole('button');expect(buttons).toHaveLength(other?2:1);
+    const providerLabel=type==='게임'?'IGDB에서 게임 추가':type==='영화'?'TMDB에서 영화 추가':null;
+    if(providerLabel)expect(within(shortcuts()).getByRole('button',{name:providerLabel}).hasAttribute('disabled')).toBe(true);
+    const buttons=within(shortcuts()).getAllByRole('button').filter(button=>button.textContent!==providerLabel);expect(buttons).toHaveLength(other?2:1);
     expect(shortcuts().closest('.ui-section-bar__trailing')).not.toBeNull();
     expect(document.querySelector('.section-shade-extra,.section-shade-rows--inline')).toBeNull();
     expect(shortcuts().nextElementSibling?.className).toBe('collection-shortcuts__divider');

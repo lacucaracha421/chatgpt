@@ -17,6 +17,32 @@ final class CloudClient {
   return authenticated(settings.read(),path,method,body,cancel);
  }
  JSONObject apiFor(JSONObject connection,String path,String method,JSONObject body,CancellationSignal cancel)throws Exception{return authenticated(connection,path,method,body,cancel);}
+ /** Authenticated provider previews have no media-ticket endpoint. Keep bytes off the JSON API. */
+ JSONObject providerImageFor(JSONObject connection,String path,CancellationSignal signal)throws Exception{
+  NetworkPolicy.providerImage(path);
+  if(!connection.has("token"))throw new IllegalStateException("Not configured");
+  HttpURLConnection c=(HttpURLConnection)new URL(connection.getString("endpoint")+path).openConnection();boolean reusable=false;
+  try{
+   prepare(c,signal);c.setRequestProperty("Authorization","Bearer "+connection.getString("token"));
+   c.setRequestProperty("Accept","image/jpeg, image/png, image/webp");c.setRequestProperty("Accept-Encoding","identity");
+   byte[] bytes=providerImageBytes(c,signal);reusable=true;
+   return new JSONObject().put("url","data:"+providerImageMime(c)+";base64,"+java.util.Base64.getEncoder().encodeToString(bytes));
+  }finally{if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
+ }
+ static String providerImageMime(HttpURLConnection c)throws IOException{
+  String type=c.getContentType();type=type==null?"":type.split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);
+  if(!type.equals("image/jpeg")&&!type.equals("image/png")&&!type.equals("image/webp"))throw new IOException("Unsupported preview image");
+  return type;
+ }
+ static byte[] providerImageBytes(HttpURLConnection c,CancellationSignal signal)throws Exception{
+  int status=c.getResponseCode();if(status!=200)throw new HttpFailure(status,null);
+  providerImageMime(c);
+  String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
+  long max=4*1024*1024,expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
+  ByteArrayOutputStream out=new ByteArrayOutputStream();
+  try(InputStream in=c.getInputStream()){MediaTransfer.copy(in,out,max,expected,System.nanoTime()+MediaTransfer.DEADLINE_NANOS,signal==null?null:signal::throwIfCanceled);}
+  return out.toByteArray();
+ }
  void validate(String endpoint,String token,CancellationSignal cancel)throws Exception{
   SecureSettings.validateToken(token);
   authenticated(new JSONObject().put("endpoint",endpoint).put("token",token),"/v1/library/classifications","GET",null,cancel).getJSONArray("items");

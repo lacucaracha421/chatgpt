@@ -1,4 +1,4 @@
-"""Interactive TMDB/IGDB relay; Collections mutations remain client commands."""
+"""Interactive TMDB/IGDB relay and server-built Collections authority commands."""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import warnings
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from http.client import HTTPException as HTTPClientError
 from urllib.error import HTTPError, URLError
@@ -17,7 +18,7 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request as HTTPRequest, build_opener
 
 from botocore.exceptions import ClientError
-from fastapi import Header, HTTPException, Query, Request
+from fastapi import Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -41,6 +42,8 @@ IGDB_FIELDS = ("id,name,summary,first_release_date,genres.name,platforms.name,"
 TMDB_SIZES = {"original", "w92", "w154", "w185", "w342", "w500", "w780", "w300", "w1280"}
 IGDB_SIZES = {"original", "cover_small", "cover_big", "thumb", "screenshot_med",
               "screenshot_big", "screenshot_huge", "720p", "1080p"}
+PREVIEW_SIZES = {"tmdb": {"w185", "w342", "w780"},
+                 "igdb": {"t_cover_big", "t_screenshot_med", "t_720p"}}
 
 
 def fail(status, code, message):
@@ -282,9 +285,23 @@ def image_url(provider, path, size):
     fail(422, "providerInvalid", "지원하지 않는 외부 서비스입니다.")
 
 
+def preview_url(provider, path, size):
+    preview_image_url(provider, path, size)
+    return "/v1/providers/image?" + urlencode({"provider": provider, "path": path, "size": size})
+
+
+def preview_image_url(provider, path, size):
+    if provider not in PREVIEW_SIZES:
+        fail(422, "providerInvalid", "지원하지 않는 외부 서비스입니다.")
+    if size not in PREVIEW_SIZES[provider] or not 1 <= len(path) <= 512:
+        fail(422, "providerImagePathInvalid", "미리보기 이미지 크기가 올바르지 않습니다.")
+    return image_url(provider, path, size[2:] if provider == "igdb" else size)
+
+
 def candidate(provider, kind, path, width=None, height=None, **extra):
     return {"kind": kind, "path": path,
-            "previewUrl": image_url(provider, path, "w185" if provider == "tmdb" else "thumb"),
+            "previewUrl": preview_url(provider, path, "w185" if provider == "tmdb" else
+                                      "t_cover_big" if kind == "cover" else "t_screenshot_med"),
             "width": positive(width), "height": positive(height), **extra}
 
 
@@ -536,6 +553,131 @@ class ArtworkRequest(BaseModel):
     size: str = Field(default="original", max_length=40)
 
 
+class ApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    commandId: str
+    libraryId: str = Field(pattern=ca.LIBRARY_ID_PATTERN.pattern)
+    epoch: int = Field(ge=1)
+    operation: str = Field(pattern=r"^(create|connect|refresh)$")
+    provider: str = Field(pattern=r"^(tmdb|igdb)$")
+    externalId: str = Field(max_length=200)
+    workId: str
+    type: str | None = None
+
+
+def parse_apply(data):
+    try:
+        body = ApplyRequest.model_validate_json(data)
+        command_id, work_id = uuid.UUID(body.commandId), uuid.UUID(body.workId)
+        if command_id.version != 4 or str(command_id) != body.commandId.lower() \
+                or str(work_id) != body.workId.lower():
+            raise ValueError("invalid UUID")
+        pattern = r"(?:tv:)?[1-9][0-9]{0,17}" if body.provider == "tmdb" else r"[1-9][0-9]{0,17}"
+        if not re.fullmatch(pattern, body.externalId):
+            raise ValueError("invalid provider identity")
+        if body.operation == "create":
+            if body.type != ca.PROVIDER_TYPES[body.provider]:
+                raise ValueError("invalid work type")
+        elif "type" in body.model_fields_set:
+            raise ValueError("type is create-only")
+        body.commandId, body.workId = str(command_id), str(work_id)
+        return body
+    except (ValidationError, ValueError, TypeError):
+        fail(422, "providerApplyInvalid", "작품 정보 적용 요청이 올바르지 않습니다.")
+
+
+def igdb_detail(relay, id_, deadline):
+    rows = relay.igdb(f"where id = {id_}; fields {IGDB_FIELDS}; limit 1;", deadline)
+    if not rows:
+        fail(404, "providerNotFound", "외부 서비스에서 작품을 찾을 수 없습니다.")
+    if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("id") != id_:
+        raise ValueError("identity mismatch")
+    return igdb_normalize(rows[0])
+
+
+def apply_provider(body, relay, get_db):
+    request_payload = body.model_dump(exclude_unset=True)
+    namespace = uuid.UUID(body.commandId)
+    batch_id = str(uuid.uuid5(namespace, "providerApply"))
+
+    def preflight(db):
+        row, _, cached = ca.command_batch_receipt(db, library_id=body.libraryId,
+            epoch=body.epoch, operation_id=batch_id, request_payload=request_payload)
+        if cached is not None:
+            return cached, None
+        binding = None
+        if body.operation != "create":
+            ctx = ca.Context(db, row, command_type="providerApply", operation_id=batch_id, now=ca.now_iso())
+            work = ca.require_work(ctx, body.workId)
+            if work["type"] != ca.PROVIDER_TYPES[body.provider]:
+                fail(422, "providerTypeMismatch", "이 작품 종류에 연결할 수 없는 작품 정보입니다.")
+            binding = ca.binding_row(db, body.libraryId, body.workId, body.provider)
+            if body.operation == "refresh":
+                if binding is None or not binding["bound"]:
+                    fail(409, "providerBindingRequired", "새로 고칠 외부 작품 연결이 없습니다.")
+                if binding["external_id"] != body.externalId:
+                    fail(409, "providerBindingMismatch", "현재 연결된 외부 작품 ID와 일치하지 않습니다.")
+        return None, None if binding is None else dict(binding)
+
+    # Read the merge base before lookup; the normal commands CAS against this
+    # version after lookup. Never hold a database write lock during provider HTTP.
+    with get_db() as db:
+        db.execute("BEGIN")
+        try:
+            cached, binding = preflight(db)
+        finally:
+            db.rollback()
+    if cached is not None:
+        return cached
+    require_keys(body.provider)
+    if body.provider == "tmdb":
+        kind = "tv" if body.externalId.startswith("tv:") else "movie"
+        id_ = int(body.externalId.split(":")[-1])
+        detail = relay.paced("tmdb", lambda deadline: tmdb_detail(relay, kind, id_, deadline))
+    else:
+        detail = relay.paced("igdb", lambda deadline: igdb_detail(relay, int(body.externalId), deadline))
+
+    def command(kind, **fields):
+        return {"libraryId": body.libraryId, "epoch": body.epoch, "contractVersion": ca.CONTRACT_VERSION,
+                "operationId": str(uuid.uuid5(namespace, kind)), "commandType": kind,
+                "workId": body.workId, **fields}
+
+    provider_binding = detail["binding"]
+    if body.operation == "create":
+        metadata = detail["metadata"]
+        commands = [command(ca.CREATE, type=body.type, name=metadata["name"], legacyKind=None,
+            fields={k: v for k, v in metadata.items() if k != "name"}, binding=provider_binding)]
+    else:
+        bound = binding is not None and binding["bound"]
+        commands = []
+        if body.operation == "connect":
+            commands.append(command(ca.BIND, provider=body.provider, externalId=body.externalId,
+                config=provider_binding["config"], expectedRevision=binding["entity_revision"] if bound else 0))
+        commands.append(command(ca.APPLY_SNAPSHOT,
+            **{k: provider_binding[k] for k in ("provider", "externalId", "snapshot", "values", "details")},
+            baseSnapshotDigest=binding["snapshot_digest"] if bound else None))
+    with get_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            cached, _ = preflight(db)
+            if cached is not None:
+                db.rollback()
+                return cached
+            if body.operation == "refresh":
+                current = ca.binding_row(db, body.libraryId, body.workId, body.provider)
+                if current["entity_revision"] != binding["entity_revision"]:
+                    ctx = ca.Context(db, ca.authority.active_domain(db, ca.DOMAIN),
+                        command_type=ca.APPLY_SNAPSHOT, operation_id=batch_id, now=ca.now_iso())
+                    ca.conflict(ctx, "binding", ca.binding_projection(current), code="providerSnapshotStale")
+            result = ca.apply_command_batch(db, library_id=body.libraryId, epoch=body.epoch,
+                operation_id=batch_id, request_payload=request_payload, commands=commands, now=ca.now_iso())
+            db.commit()
+            return result
+        except BaseException:
+            db.rollback()
+            raise
+
+
 def image_dimensions(data, mime):
     try:
         from PIL import Image
@@ -589,6 +731,31 @@ def store_artwork(body, deadline, get_db, storage, bucket):
 def register(app, get_db, require_client, storage, bucket):
     relay = Relay()
 
+    @app.get("/v1/providers/image")
+    def image(request: Request, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        params = dict(request.query_params)
+        if set(params) != {"provider", "path", "size"} or len(request.query_params.multi_items()) != 3:
+            fail(422, "providerImagePathInvalid", "이미지 요청 정보가 올바르지 않습니다.")
+        url = preview_image_url(params["provider"], params["path"], params["size"])
+        try:
+            data, mime = outbound(url, deadline=time.monotonic() + REQUEST_SECONDS,
+                                  limit=MAX_ARTWORK_BYTES, image=True)
+        except UpstreamStatus as exc:
+            status_error(exc.status)
+        return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
+
+    @app.post("/v1/providers/apply")
+    async def apply(request: Request, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        chunks = bytearray()
+        async for chunk in request.stream():
+            if len(chunks) + len(chunk) > 2048:
+                fail(413, "providerRequestTooLarge", "작품 정보 적용 요청 크기가 너무 큽니다.")
+            chunks.extend(chunk)
+        body = parse_apply(chunks)
+        return await run_in_threadpool(apply_provider, body, relay, get_db)
+
     @app.get("/v1/providers/status")
     def status(authorization: str | None = Header(default=None)):
         require_client(authorization)
@@ -622,7 +789,7 @@ def register(app, get_db, require_client, storage, bucket):
                 items.append({"id": id_, "externalId": f"tv:{id_}" if kind == "tv" else str(id_),
                               "kind": kind, "name": name, "originalTitle": original if original != name else None,
                               "releaseDate": release, "year": ca.year_from_date(release), "path": path,
-                              "previewUrl": image_url("tmdb", path, "w185") if path else None})
+                              "previewUrl": preview_url("tmdb", path, "w185") if path else None})
             return bounded_result({"items": items})
         return relay.paced("tmdb", fetch)
 
@@ -663,14 +830,7 @@ def register(app, get_db, require_client, storage, bucket):
         require_keys("igdb")
         if not 0 < id < 10**18:
             fail(422, "providerIdentityInvalid", "IGDB 작품 ID가 올바르지 않습니다.")
-        def fetch(deadline):
-            rows = relay.igdb(f"where id = {id}; fields {IGDB_FIELDS}; limit 1;", deadline)
-            if not rows:
-                fail(404, "providerNotFound", "외부 서비스에서 작품을 찾을 수 없습니다.")
-            if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("id") != id:
-                raise ValueError("identity mismatch")
-            return igdb_normalize(rows[0])
-        return relay.paced("igdb", fetch)
+        return relay.paced("igdb", lambda deadline: igdb_detail(relay, id, deadline))
 
     @app.post("/v1/providers/artwork")
     async def artwork(request: Request, authorization: str | None = Header(default=None)):

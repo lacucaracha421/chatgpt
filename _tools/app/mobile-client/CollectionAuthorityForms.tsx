@@ -90,9 +90,9 @@ export function AuthorityWorkActions({item, authority, onForm}: {item: Collectio
 }
 export function AuthorityQueue({authority, workId, item, onForm}: {authority: Authority; workId?: string; item?: CollectionDetail; onForm(form: WorkForm): void}) {
   if (!authority.identity) return null;
-  const rows = authority.rows.filter(row => row.state !== 'accepted' && (workId ? row.command.workId === workId : row.command.commandType === 'createWork'));
+  const rows = authority.rows.filter(row => row.state !== 'accepted' && (workId ? row.command.workId === workId : row.command.commandType === 'createWork' || row.command.commandType === 'providerApply' && row.command.operation === 'create'));
   return <>{rows.map(row => <div key={row.command.operationId} className="collection-authority-queue"><Badge>{row.state === 'conflict' ? '충돌' : '대기'}</Badge>
-    {!workId && <span>{row.command.commandType === 'createWork' ? row.command.name : ''}</span>}
+    {!workId && <span>{row.command.commandType === 'createWork' ? row.command.name : row.command.commandType === 'providerApply' ? `${row.command.provider.toUpperCase()}에서 추가` : ''}</span>}
     {row.state === 'conflict' && <>{(row.command.commandType==='createWork'||row.command.commandType==='updateWork'&&Object.keys(row.command.changes).some(key=>!['description','myScore','showcase','status','ownedPlatform'].includes(key)))&&<Button variant="ghost" onClick={() => {
       const created = createdWork(row);
       if (created) onForm({mode: 'create', type: created.type, item: created, retry: row});

@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
  private boolean batteryAllowsWarm(){try{JSONObject b=batteryState();return b.optBoolean("charging")||(b.optInt("level",-1)>=50&&!b.optBoolean("powerSave",true));}catch(Exception e){return false;}}
  private JSONObject connectionStatus()throws Exception{return settings.status().put("battery",batteryState());}
  private static JSONObject mediaBusy(){try{return new JSONObject().put("code","media_busy");}catch(JSONException e){return null;}}
- private static boolean optionalWork(String op){return Arrays.asList("thumbnail","media","collectionArtwork","homeCover","catalogImage","mediaTickets","pickerRefresh").contains(op);}
+ private static boolean optionalWork(String op){return Arrays.asList("thumbnail","media","collectionArtwork","homeCover","catalogImage","providerImage","mediaTickets","pickerRefresh").contains(op);}
  private void cancelOptional(String id,CancellationSignal signal){
   signal.cancel();nonEssential.remove(id,signal);
   try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",false).put("cancelled",true));}catch(JSONException ignored){}
@@ -305,11 +305,11 @@ public final class MainActivity extends Activity {
    boolean cover=false;
    if("catalogImage".equals(operation))try{cover="cover".equals(new JSONObject(payload).optString("kind"));}catch(JSONException ignored){}
    final boolean catalogCover=cover;
-   boolean small=operation.equals("thumbnail")||operation.equals("homeCover");
+   boolean small=operation.equals("thumbnail")||operation.equals("homeCover")||operation.equals("providerImage");
    if(operation.equals("collectionArtwork"))try{small="thumbnail".equals(new JSONObject(payload).optString("variant"));}catch(JSONException ignored){}
    final ThreadPoolExecutor mediaLane=catalogCover?catalogCoverWorkers:small?thumbnailWorkers:mediaWorkers;
    final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")||(catalogCover||operation.equals("collectionArtwork"))&&PerfLog.enabled()?perfPool.submit(catalogCover?"catalogCover":operation,mediaLane.getQueue().size()):null;
-   final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("homeCover") || operation.equals("catalogImage");
+   final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("homeCover") || operation.equals("catalogImage") || operation.equals("providerImage");
    final MediaRepository.PreparedThumbnail prepared;
    try{
     JSONObject p=operation.equals("thumbnail")&&media!=null?new JSONObject(payload):null;
@@ -349,6 +349,7 @@ public final class MainActivity extends Activity {
      case "collectionArtworksCached":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtworksCached(p.getJSONArray("items"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
      case "homeCover":data=media==null?client.api("/v1/home/covers/"+p.getString("sha256")+"/media-ticket","POST",new JSONObject(),signal):media.homeCover(p.getString("sha256"),signal);break;
+     case "providerImage":data=client.providerImageFor(connectionFor(p),p.getString("path"),signal);break;
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
      case "mediaTickets":data=media==null?new JSONObject().put("items",new JSONArray()):!ticketWarmAllowed()?new JSONObject().put("items",new JSONArray()).put("waiting","power"):media.prewarmTickets(p.getJSONArray("assetIds"),signal,MainActivity.this::ticketWarmAllowed);break;
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
