@@ -717,7 +717,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen}
       status={automationRecovery} actions={automationRecovery} ariaLabel="시리즈 도구"
       titleContent={focusedName ? <span className="series-breadcrumb"><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId })}>{name}</button><ChevronRightIcon aria-hidden="true" />{current && currentCharacterGroup && <><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterGroupId: currentCharacterGroup.id })}>{currentCharacterGroup.name}</button><ChevronRightIcon aria-hidden="true" /></>}<span>{focusedName}</span>{!current && <small className="series-header-count">{page.totalCount.toLocaleString()}장</small>}</span> : name}
-      titleAccessory={<div className="series-header-actions">
+      trailingAccessory={<div className="series-header-actions">
         {!picking && (!currentGroup || editor) && editorPanel}
         {!picking && current && <Menu label="캐릭터 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={characterMenuItems} />}
         {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={seriesMenuItems} />}
@@ -780,7 +780,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             })}</>}</CharacterGroups>
         </SeriesShelf>}
         {!current && suggestions.error && <p role="alert">{suggestions.error}<Button size="sm" onClick={suggestions.refresh}>다시 시도</Button></p>}
-        {!current && suggestions.message && <p role="status">{suggestions.message}</p>}
+        {!current && suggestions.message && <Toast onDismiss={suggestions.dismissMessage}>{suggestions.message}</Toast>}
         {folderError && <p className="character-message" role="alert">{folderError}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
         {!picking && currentStatus && currentStatus.detail.length > 0 && <p className={`series-character-status${currentStatus.warning ? " series-character-status--warning" : ""}`}>{currentStatus.detail.join(" · ")}</p>}
         {!picking && current?.description && <p className="series-description">{current.description}</p>}

@@ -37,7 +37,7 @@
 .folder-shelf .character-suggestion-tile__flag { top: 6px; left: 6px; padding: 0 var(--space-1); border: 0; border-radius: 2px; background: var(--color-surface-elevated); color: var(--color-text); font-size: var(--type-meta); line-height: 20px; }
 .folder-shelf .character-suggestion-tile b { width: 132px; margin-top: var(--space-1); color: var(--color-text); font-size: var(--type-body); font-weight: 500; }
 .folder-shelf .character-suggestion-tile small { width: 132px; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
-.folder-filter { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
+.folder-filter { display: flex; align-items: center; gap: var(--space-2); margin-block: var(--space-3) var(--space-4); }
 .folder-filter__explanation { display: grid; gap: var(--space-2); max-width: 360px; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-copy); }
 .folder-filter__explanation p { margin: 0; }
 .folder-filter__explanation strong { color: var(--color-text); font-weight: 600; }

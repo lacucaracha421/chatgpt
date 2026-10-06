@@ -9,6 +9,8 @@ import { commandErrorMessage } from "../../library/errorMessage";
 import { AnchoredPanel } from "../../shared/ui/AnchoredPanel";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
+import { Toast } from "../../shared/ui/Toast";
+import { useAutoDismiss } from "../../shared/ui/useAutoDismiss";
 import { SuggestionDialog } from "./SuggestionDialog";
 import { suggestionApi, suggestionName, type IgnoredTag, type Suggestion, type SuggestionApi, type SuggestionResult } from "./client";
 import "./CharacterSuggestions.css";
@@ -60,10 +62,14 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
     catch (reason) { setError(commandErrorMessage(reason, "무시 설정을 저장하지 못했습니다.")); }
     finally { setBusy(false); }
   };
-  const saved = (result: SuggestionResult) => { setMessage(`${result.target.displayName} · ${result.queuedCount}장을 태거 검토 후보로 넣었습니다.`); refresh(); };
+  useAutoDismiss(message, setMessage);
+  const saved = (result: SuggestionResult) => {
+    setMessage(result.queuedCount > 0 ? `${result.target.displayName} · ${result.queuedCount.toLocaleString("ko-KR")}장을 태거 검토 후보로 넣었습니다.` : `${result.target.displayName} · 저장했습니다.`);
+    refresh();
+  };
   return {
     rows: (cached?.rows ?? rows).filter(row => (!currentFilters.insideOnly || row.insideCount > 0) && !postponed.includes(row.tag)),
-    ignored: cached?.ignored ?? ignored, loading, busy, error, message, refresh, ignore, saved, api,
+    ignored: cached?.ignored ?? ignored, loading, busy, error, message, dismissMessage: () => setMessage(null), refresh, ignore, saved, api,
     filters: currentFilters, setFilters,
     postponed, postpone: (tag: string) => setPostponed(tags => [...tags, tag]), clearPostponed: () => setPostponed([]),
   };
@@ -107,7 +113,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
         </div>)}
       </section>)}
     </>}
-    {state.message && <p role="status">{state.message}</p>}
+    {state.message && <Toast onDismiss={() => state.dismissMessage()}>{state.message}</Toast>}
     {ignoredOpen && <Dialog open title="무시한 캐릭터 제안" onClose={() => setIgnoredOpen(false)}>
       <div className="character-suggestion-ignored">
         {!state.ignored.length && <p>무시한 제안이 없습니다.</p>}

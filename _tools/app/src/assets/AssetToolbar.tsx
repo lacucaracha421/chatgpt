@@ -38,6 +38,8 @@ type AssetToolbarProps = {
   title?: string;
   /** Extra header content after the title, e.g. artist actions. */
   titleAccessory?: ReactNode;
+  /** Screen-specific tools placed directly before 검색 and 보기. */
+  trailingAccessory?: ReactNode;
   /** Header content before the title, e.g. the 내용 검색 badge. */
   titleLeading?: ReactNode;
   /** Rendered in place of the plain title (a series breadcrumb); `title` still names the place. */
@@ -52,7 +54,7 @@ type AssetToolbarProps = {
 // 선택 작업은 SelectionBar(갤러리 위 고정 바)에서 수행한다.
 export function AssetToolbar({
   scopeControl, scopeHelp, galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, metadataVisible, privacyMode, thumbnailRowHeight,
-  onSortChange, onMediaFilterChange, onAspectFilterChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, inspectorOpen = false, inspectorAvailable = false, onInspectorOpenChange, title, titleAccessory, titleLeading, titleContent, status, actions, ariaLabel = "자산 도구",
+  onSortChange, onMediaFilterChange, onAspectFilterChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, inspectorOpen = false, inspectorAvailable = false, onInspectorOpenChange, title, titleAccessory, trailingAccessory, titleLeading, titleContent, status, actions, ariaLabel = "자산 도구",
 }: AssetToolbarProps) {
   const {nsfwFilter} = usePrivacy();
   void metadataVisible;
@@ -75,7 +77,7 @@ export function AssetToolbar({
       inspectorOpen={inspectorOpen} inspectorAvailable={inspectorAvailable} onInspectorOpenChange={onInspectorOpenChange} />;
 
   return <>
-    <ViewToolbar title={location} titleContent={titleContent} actions={actions} ariaLabel={ariaLabel} leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}</>} trailingAction={<div className="asset-toolbar__controls">{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
+    <ViewToolbar title={location} titleContent={titleContent} actions={actions} ariaLabel={ariaLabel} leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}</>} trailingAction={<div className="asset-toolbar__controls">{trailingAccessory}{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
       summary: [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all") ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all")}` : "", privacyMode ? "비공개" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · "),
       status: privacyMode || nsfwFilter || status ? <>{status}{(privacyMode || nsfwFilter) && <span>{[privacyMode ? "비공개 모드" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · ")}</span>}</> : undefined,
     }} />
