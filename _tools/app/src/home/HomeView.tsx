@@ -37,6 +37,7 @@ import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
 import { readDuplicateCount } from "./duplicateCount";
 import { shadowPageSource, type CharacterReviewSource } from "./characterReviewSource";
+import { pcStartupInput, pcStartupRead } from "../shared/pcPerfLog";
 import "./home.css";
 
 const ShadowReview = lazy(() => import("../characters/ShadowReview").then((module) => ({ default: module.ShadowReview })));
@@ -115,11 +116,11 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   useEffect(() => {
     if (!calendarApi || !active) return;
     let live = true;
-    const wishlistRead = calendarApi.wishlist().then((items) => {
+    const wishlistRead = pcStartupRead("home.wishlist", () => calendarApi.wishlist()).then((items) => {
       if (live) { setWishlist(items ?? []); setWishlistReady(true); setWishlistError(false); }
       return true;
     }, () => { if (live) setWishlistError(true); return false; });
-    const releaseRead = calendarApi.calendar().then(value => { if (live) setCalendarSnapshot(value); return true; }, () => false);
+    const releaseRead = pcStartupRead("home.calendar", () => calendarApi.calendar()).then(value => { if (live) setCalendarSnapshot(value); return true; }, () => false);
     void Promise.all([wishlistRead, releaseRead]).then(results => {
       if (live && results.every(Boolean)) setCalendarRead({ api: calendarApi, root, retry: shelfRetry, visit: visitNumber });
     });
@@ -135,7 +136,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     let live = true;
     setOverviewLoading(true);
     const { todayStart, weekStart } = localBoundaries(at);
-    void gateway.getHomeOverview(todayStart, weekStart, today).then((value) => {
+    void pcStartupRead("home.overview", () => gateway.getHomeOverview!(todayStart, weekStart, today)).then((value) => {
       if (!live) return;
       setOverview(previous => previous && value ? {
         ...value,
@@ -289,6 +290,15 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const retryShelf = () => { release.reload(); setShelfRetry(value => value + 1); };
   const attentionPending = (Boolean(gateway.getHomeOverview) && !overview && !overviewError)
     || Boolean(shadowQueueApi) && !restricted && characterQueue === null && !characterError || Boolean(store && !notesState.ready);
+  // Opt-in timing log: which first-load input arrives last (no effect when the log is off).
+  if (collectionsReady) pcStartupInput("home.collections");
+  if (media.data || media.failed) pcStartupInput("home.media");
+  if (!shelfLoading) pcStartupInput("home.shelf");
+  if (!(Boolean(gateway.getHomeOverview) && !overview && !overviewError)) pcStartupInput("home.overview");
+  if (!(Boolean(shadowQueueApi) && !restricted && characterQueue === null && !characterError)) pcStartupInput("home.characterQueue");
+  if (!(store && !notesState.ready)) pcStartupInput("home.notes");
+  if (!tracking || release.data || release.error) pcStartupInput("home.releases");
+  if (wishlistReady || wishlistError) pcStartupInput("home.wishlist");
   // Resolve the initial block arrangement together; subsequent reads leave it mounted.
   const layoutShown = useRef(false);
   if (collectionsReady && (media.data || media.failed) && !shelfLoading && !attentionPending) {

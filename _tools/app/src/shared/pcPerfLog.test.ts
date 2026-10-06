@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { invoke } from "@tauri-apps/api/core";
 import { beginNativePhase, nativePerfEnabled } from "./nativePerf";
-import { flushPcPerf, initPcPerfLog, pcFolderReady, pcFolderScope, pcHomeReady, pcNavigation, pcStartupMark, pcTabShown, resetPcPerfForTests } from "./pcPerfLog";
+import { flushPcPerf, initPcPerfLog, pcFolderReady, pcFolderScope, pcHomeReady, pcNavigation, pcStartupMark, pcStartupRead, pcTabShown, resetPcPerfForTests } from "./pcPerfLog";
 
 let observed: PerformanceObserverCallback;
 let frames: Map<number, FrameRequestCallback>;
@@ -36,6 +36,17 @@ it("disabled performs one startup IPC and never observes, times interactions or 
   vi.advanceTimersByTime(3000); window.dispatchEvent(new Event("pagehide"));
   expect(send).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledWith("perf_log_enabled");
   expect(mark).not.toHaveBeenCalled(); expect(nativePerfEnabled()).toBe(false);
+});
+it("startup read timing preserves replies and errors without recording their payloads", async () => {
+  const send = ipc(true); await init(send);
+  const value = { privatePath: "secret" };
+  expect(await pcStartupRead("home.media", async () => value)).toBe(value);
+  const error = new Error("private failure");
+  await expect(pcStartupRead("home.media", async () => { throw error; })).rejects.toBe(error);
+  flushPcPerf();
+  expect(rows(send).filter(row => row.name === "home.media.reply").map(row => row.status)).toEqual(["ok", "error"]);
+  expect(JSON.stringify(rows(send))).not.toContain("secret");
+  expect(JSON.stringify(rows(send))).not.toContain("private failure");
 });
 it("batches only w4 measures once a second and flushes on pagehide", async () => {
   const send = ipc(true); await init(send);

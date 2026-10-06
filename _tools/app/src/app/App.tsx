@@ -1,4 +1,4 @@
-import { pcPerfEnabled, pcNavigation, pcFolderScope, pcTabShown } from "../shared/pcPerfLog";
+import { pcPerfEnabled, pcNavigation, pcFolderScope, pcTabShown, pcStartupRead } from "../shared/pcPerfLog";
 import {listen} from "@tauri-apps/api/event";
 import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
@@ -277,25 +277,18 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useEffect(() => gateway.subscribeCollectionsChanged?.(() => { void refreshCollections(); }), [gateway, refreshCollections]);
   const refreshSidebar = useCallback(async () => {
     setCollectionsRead(null);
-    const classifications = gateway.listClassifications(), albums = gateway.listAlbums();
-    const collectionRead = gateway.listCollections();
-    try {
-      const [nextEntries, nextAlbums, nextCollections] = await Promise.all([
-        classifications, albums, collectionRead,
-      ]);
-      // Publish ready collections with the other sidebar data in one update turn.
-      setEntries(nextEntries);
-      setAlbums(nextAlbums);
-      setCollections(nextCollections);
+    const classifications = pcStartupRead("app.classifications", () => gateway.listClassifications());
+    const albums = pcStartupRead("app.albums", () => gateway.listAlbums());
+    const collectionRead = pcStartupRead("app.collections", () => gateway.listCollections()).then(next => {
+      setCollections(next);
       setCollectionsRead({ gateway, root: libraryRoot });
-    } catch (error) {
-      // Preserve the independent collection read if another sidebar source fails.
-      void collectionRead.then(next => {
-        setCollections(next);
-        setCollectionsRead({ gateway, root: libraryRoot });
-      }).catch(() => undefined);
-      throw error;
-    }
+      return next;
+    });
+    const [nextEntries, nextAlbums] = await Promise.all([
+      classifications, albums, collectionRead,
+    ]);
+    setEntries(nextEntries);
+    setAlbums(nextAlbums);
   }, [gateway, libraryRoot]);
   const refreshReviewCount = useCallback(async () => {
     const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });

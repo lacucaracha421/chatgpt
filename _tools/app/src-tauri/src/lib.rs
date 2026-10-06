@@ -195,6 +195,19 @@ pub fn run() {
                 .map(str::to_owned);
             let method = request.method().clone();
             let path = request.uri().path().to_string();
+            // Record only route classes, never media identities or URLs.
+            let route = path.trim_start_matches('/').split('/').next().unwrap_or("");
+            let startup_route = if perf_log::startup_enabled() {
+                match route {
+                    "thumbnail" | "work-artwork-thumbnail" | "collection-source-thumbnail"
+                    | "collection-cover-thumbnail" | "manga-cover" | "av-link-jacket"
+                    | "igdb-image-preview" | "tmdb-image-preview" => Some(route.to_string()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let startup_requested = std::time::Instant::now();
             let mut timing = media_protocol_timing::MediaTiming::start(&path);
             tauri::async_runtime::spawn(async move {
                 if let Some(timing) = timing.as_mut() {
@@ -203,10 +216,12 @@ pub fn run() {
                 // Wait without occupying a blocking worker. Keep the permit inside the
                 // blocking closure: dropping its JoinHandle cannot cancel a running read.
                 let permit = media_protocol_queue::acquire(&path).await;
+                let startup_permitted = std::time::Instant::now();
                 if let Some(timing) = timing.as_mut() {
                     timing.permit_acquired();
                 }
                 tauri::async_runtime::spawn_blocking(move || {
+                    let startup_worker = std::time::Instant::now();
                     let _permit = permit;
                     if let Some(timing) = timing.as_mut() {
                         timing.worker_started();
@@ -224,6 +239,15 @@ pub fn run() {
                         None => serve(),
                     };
                     collectible_cors::allow_cover_canvas(&mut response, origin.as_deref(), &path);
+                    if let Some(route) = startup_route {
+                        perf_log::startup_record("media.response", serde_json::json!({
+                            "route": route,
+                            "permitMs": startup_permitted.duration_since(startup_requested).as_secs_f64() * 1000.0,
+                            "workerQueueMs": startup_worker.duration_since(startup_permitted).as_secs_f64() * 1000.0,
+                            "serveMs": startup_worker.elapsed().as_secs_f64() * 1000.0,
+                            "status": response.status().as_u16(), "bytes": response.body().len(),
+                        }));
+                    }
                     if let Some(timing) = timing {
                         timing.finish(response.status().as_u16(), response.body().len());
                     }
@@ -231,7 +255,7 @@ pub fn run() {
                 });
             });
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
             perf_log::perf_log_enabled,
             perf_log::perf_log_append,
             media_protocol_queue::media_view_changed,
@@ -661,7 +685,7 @@ pub fn run() {
             commands::list_collection_cover_focus,
             commands::start_collection_cover_focus,
             commands::sync_mangadex_volume_covers,
-        ])
+        ]))
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {

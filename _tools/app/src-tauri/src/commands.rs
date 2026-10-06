@@ -739,7 +739,9 @@ pub async fn get_revisit_slate(
     state: State<'_, AppState>,
 ) -> Result<crate::library::models::RevisitSlate, CommandError> {
     let library = current_required(state)?;
+    let _total = crate::perf_log::StartupSpan::start("command.get_revisit_slate.total");
     tauri::async_runtime::spawn_blocking(move || {
+        let _work = crate::perf_log::StartupSpan::start("command.get_revisit_slate.work");
         library
             .get_or_create_revisit_slate(&local_date, &now_utc)
             .map_err(CommandError::from)
@@ -886,14 +888,17 @@ pub async fn run_image_similarity_scan_batch(
 }
 
 #[tauri::command]
-pub fn list_similarity_reviews(
+pub async fn list_similarity_reviews(
     after: Option<AssetCursor>,
     limit: u32,
     state: State<'_, AppState>,
 ) -> Result<SimilarityReviewPage, CommandError> {
-    current_required(state)?
-        .list_similarity_reviews(after, limit)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    let _queue = crate::perf_log::StartupSpan::start("command.list_similarity_reviews.total");
+    tauri::async_runtime::spawn_blocking(move || {
+        let _work = crate::perf_log::StartupSpan::start("command.list_similarity_reviews.work");
+        library.list_similarity_reviews(after, limit)
+    }).await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -1128,12 +1133,15 @@ pub fn patch_asset_albums(
 }
 
 #[tauri::command]
-pub fn list_collections(
+pub async fn list_collections(
     state: State<'_, AppState>,
 ) -> Result<Vec<CollectionSummary>, CommandError> {
-    current_required(state)?
-        .list_collections()
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    let _total = crate::perf_log::StartupSpan::start("command.list_collections.total");
+    tauri::async_runtime::spawn_blocking(move || {
+        let _work = crate::perf_log::StartupSpan::start("command.list_collections.work");
+        library.list_collections()
+    }).await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -1695,8 +1703,10 @@ pub fn set_volume_ownership(collection_id: String, edition_index: u8, volume_num
 }
 
 #[tauri::command]
-pub fn list_release_inbox(state: State<'_, AppState>) -> Result<Vec<crate::library::collection_tracking::ReleaseInboxItem>, CommandError> {
-    current_required(state)?.list_release_inbox().map_err(CommandError::from)
+pub async fn list_release_inbox(state: State<'_, AppState>) -> Result<Vec<crate::library::collection_tracking::ReleaseInboxItem>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_release_inbox()).await
+        .map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]

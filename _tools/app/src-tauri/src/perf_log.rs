@@ -18,6 +18,87 @@ struct Launch {
 }
 static LAUNCH: OnceLock<Launch> = OnceLock::new();
 static WRITER: Mutex<()> = Mutex::new(());
+static NATIVE_LINES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub(crate) fn startup_enabled() -> bool {
+    LAUNCH
+        .get()
+        .is_some_and(|launch| launch.enabled && launch.start.elapsed().as_secs() < 15)
+}
+
+/// Startup diagnostics are buffered in memory: never do log I/O under a library lock.
+pub(crate) fn startup_record(name: &str, fields: serde_json::Value) {
+    let Some(launch) = LAUNCH
+        .get()
+        .filter(|launch| launch.enabled && launch.start.elapsed().as_secs() < 15)
+    else {
+        return;
+    };
+    let line = serde_json::json!({
+        "event": "native-startup", "name": name,
+        "processMs": launch.start.elapsed().as_secs_f64() * 1000.0,
+        "fields": fields,
+    })
+    .to_string();
+    if let Ok(mut lines) = NATIVE_LINES.lock() {
+        if lines.len() < 2048 {
+            lines.push(line);
+        }
+    }
+}
+
+pub(crate) struct StartupSpan {
+    name: &'static str,
+    start: Instant,
+    caller: &'static std::panic::Location<'static>,
+}
+
+impl StartupSpan {
+    #[track_caller]
+    pub(crate) fn start(name: &'static str) -> Option<Self> {
+        let launch = LAUNCH.get()?;
+        let caller = std::panic::Location::caller();
+        (launch.enabled && launch.start.elapsed().as_secs() < 15).then(|| Self {
+            name,
+            start: Instant::now(),
+            caller,
+        })
+    }
+}
+
+impl Drop for StartupSpan {
+    fn drop(&mut self) {
+        startup_record(
+            self.name,
+            serde_json::json!({
+                "durationMs": self.start.elapsed().as_secs_f64() * 1000.0,
+                "source": self.caller.file(), "line": self.caller.line(),
+            }),
+        );
+    }
+}
+
+pub(crate) fn startup_handler(
+    handler: impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        let command = startup_enabled().then(|| invoke.message.command().to_string());
+        let started = Instant::now();
+        if let Some(command) = command.as_ref() {
+            startup_record("ipc.received", serde_json::json!({ "command": command }));
+        }
+        let handled = handler(invoke);
+        if let Some(command) = command {
+            startup_record(
+                "ipc.dispatch",
+                serde_json::json!({
+                    "command": command, "durationMs": started.elapsed().as_secs_f64() * 1000.0,
+                }),
+            );
+        }
+        handled
+    }
+}
 
 /// Called at the first statement of main; run also supports library entry points.
 pub fn init() {
@@ -82,10 +163,9 @@ fn append(path: &Path, lines: &[String], launch: &Launch) {
         let Ok(serde_json::Value::Object(mut object)) = serde_json::from_str(line) else {
             continue;
         };
-        object.insert(
-            "processMs".into(),
-            serde_json::json!(launch.start.elapsed().as_secs_f64() * 1000.0),
-        );
+        object
+            .entry("processMs")
+            .or_insert_with(|| serde_json::json!(launch.start.elapsed().as_secs_f64() * 1000.0));
         object.insert("launchId".into(), serde_json::json!(launch.id));
         let Ok(mut bytes) = serde_json::to_vec(&object) else {
             continue;
@@ -124,6 +204,28 @@ pub fn setup(app: &tauri::AppHandle) {
         tauri::async_runtime::spawn(async move {
             perf_log_append(handle, lines).await;
         });
+        let Ok(directory) = app.path().app_log_dir() else {
+            return;
+        };
+        let path = directory.join("perf").join(format!(
+            "pc-timing-{}.jsonl",
+            chrono::Local::now().format("%Y%m%d")
+        ));
+        // Independent of renderer IPC so a blocked UI cannot hide native timings.
+        let _ = std::thread::Builder::new()
+            .name("startup-perf-log".into())
+            .spawn(move || {
+                for _ in 0..16 {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let lines = NATIVE_LINES
+                        .lock()
+                        .map(|mut lines| std::mem::take(&mut *lines))
+                        .unwrap_or_default();
+                    for batch in lines.chunks(256) {
+                        append(&path, batch, launch);
+                    }
+                }
+            });
     }
 }
 #[cfg(test)]
@@ -176,5 +278,14 @@ mod tests {
     fn io_errors_are_ignored() {
         let dir = tempfile::tempdir().unwrap();
         append(dir.path(), &["{}".into()], &launch(true));
+    }
+    #[test]
+    fn buffered_native_time_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log.jsonl");
+        append(&path, &["{\"processMs\":123.5}".into()], &launch(true));
+        let value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(value["processMs"], 123.5);
     }
 }

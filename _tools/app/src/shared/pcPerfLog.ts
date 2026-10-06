@@ -25,6 +25,22 @@ const MAX_QUEUED = 4096;
 const safely = (task: () => void) => { try { task(); } catch { /* Measurement cannot fail application work. */ } };
 const enqueue = (value: object) => { if (enabled && queue.length < MAX_QUEUED) safely(() => queue.push(JSON.stringify(value))); };
 export const pcPerfEnabled = () => enabled;
+/** Aggregate startup reads only; never serialize arguments, results or media addresses. */
+export function pcStartupEvent(name: string, fields: Record<string, number | string | boolean> = {}) {
+  if (enabled && performance.now() < 15000) enqueue({ event: "startup-detail", name, startMs: performance.now(), ...fields });
+}
+export async function pcStartupRead<T>(name: string, read: () => Promise<T>): Promise<T> {
+  const startMs = performance.now();
+  pcStartupEvent(`${name}.issued`);
+  try {
+    const value = await read();
+    pcStartupEvent(`${name}.reply`, { durationMs: performance.now() - startMs, status: "ok" });
+    return value;
+  } catch (error) {
+    pcStartupEvent(`${name}.reply`, { durationMs: performance.now() - startMs, status: "error" });
+    throw error;
+  }
+}
 export function flushPcPerf() {
   if (!enabled) return;
   safely(() => {
@@ -163,6 +179,13 @@ function phaseCompleted(name: string, phase: string, phaseStartMs: number) {
 function finishCollection() {
   if (collection && !collection.done && collectionShown && coverReady) collection.stop = collection.phase?.afterPaint("ready");
 }
+/** First time a named startup input becomes ready (e.g. one Home gate). Opt-in log only. */
+const seenInputs = new Set<string>();
+export function pcStartupInput(name: string) {
+  if (!enabled || seenInputs.has(name)) return;
+  seenInputs.add(name);
+  enqueue({ event: "startup-input", name, startMs: performance.now() });
+}
 export function pcStartupMark(name: Milestone) {
   if ((!enabled && !pendingCheck) || milestones.has(name)) return;
   if (startupCancelled && (name === "homeViewportImagesReady" || name === "homeFullyShown")) return;
@@ -228,6 +251,6 @@ export function resetPcPerfForTests() {
   window.removeEventListener("pagehide", pagehide);
   end(tab, "cancelled"); end(folder, "cancelled"); end(collection, "cancelled"); startup?.cancel();
   enabled = false; initialized = false; pendingCheck = false; firstCollection = true;
-  queue = []; tab = folder = collection = undefined; observer = undefined; startupImagesStop = undefined; milestones.clear(); pendingHome = undefined; startupFinishing = false; startupCancelled = false;
+  queue = []; tab = folder = collection = undefined; observer = undefined; startupImagesStop = undefined; milestones.clear(); seenInputs.clear(); pendingHome = undefined; startupFinishing = false; startupCancelled = false;
   configurePcPerf(false);
 }

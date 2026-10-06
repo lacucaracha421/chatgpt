@@ -1,4 +1,4 @@
-import { pcHomeReady, pcStartupMark } from "../pcPerfLog";
+import { pcHomeReady, pcStartupMark, pcStartupEvent, pcPerfEnabled } from "../pcPerfLog";
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
 import { reducedMotion } from "../motion/curves";
 import { viewportImages, waitForViewportImages } from "../motion/viewportImages";
@@ -85,17 +85,29 @@ function whenImagesSettle(host: HTMLElement, done: () => void) {
   const deadline = Date.now() + LAUNCH_IMAGE_CAP_MS;
   let stop = () => undefined as void;
   let timer = 0;
+  const load = (event: Event) => {
+    if (event.target instanceof HTMLImageElement && viewportImages(host).includes(event.target)) {
+      pcStartupEvent("home.images.load");
+    }
+  };
+  if (pcPerfEnabled()) host.addEventListener("load", load, true);
   const round = () => {
+    pcStartupEvent("home.images.wait");
+    let capped = false;
     stop = waitForViewportImages(host, () => {
+      pcStartupEvent("home.images.settled", { capped });
       timer = window.setTimeout(() => {
         const late = viewportImages(host).some((image) => !image.complete);
         if (late && Date.now() < deadline) round();
-        else done();
+        else { host.removeEventListener("load", load, true); done(); }
       }, LAUNCH_SETTLE_MS);
-    }, Math.max(0, deadline - Date.now()));
+    }, Math.max(0, deadline - Date.now()), late => {
+      capped = true;
+      pcStartupEvent("home.images.cap", { pendingCount: late.length });
+    });
   };
   round();
-  return () => { stop(); window.clearTimeout(timer); };
+  return () => { stop(); window.clearTimeout(timer); host.removeEventListener("load", load, true); };
 }
 
 /** The Lakomics mark (src/brand/lakomics-mark.svg), cropped to its outline. */

@@ -4,6 +4,7 @@ import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DropSubscriber, NativeFileDropEvent } from "../ingestion/useFileDrop";
 import type {
+  AlbumEntry,
   AssetSummary,
   ClassificationEntry,
   LibraryGateway,
@@ -264,6 +265,18 @@ describe("App", () => {
     );
     expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
     expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Lakomics");
+  });
+
+  it("prepares Home collections while unrelated sidebar reads are pending", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    let releaseAlbums!: (value: AlbumEntry[]) => void;
+    libraryGateway.listAlbums = vi.fn(() => new Promise<AlbumEntry[]>(resolve => { releaseAlbums = resolve; }));
+    const { container } = render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+    await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalled());
+    // Home must finish its first arrangement without waiting for the Asset sidebar.
+    await waitFor(() => expect(container.querySelector('.home-pc-layout')).toHaveAttribute('aria-busy', 'false'));
+    await act(async () => { releaseAlbums([]); });
   });
 
   it("leaves bookmark receive and delivery to the native authority pass after opening a library", async () => {

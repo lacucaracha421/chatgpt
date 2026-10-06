@@ -334,6 +334,7 @@ pub(crate) struct LockedConnection<'a> {
     character_queue_changed: Arc<std::sync::atomic::AtomicBool>,
     character_wake: &'a character_incremental::Wake,
     _guard: MutexGuard<'a, ()>,
+    _startup_hold: Option<crate::perf_log::StartupSpan>,
 }
 
 impl Drop for LockedConnection<'_> {
@@ -542,7 +543,9 @@ impl Library {
         pass()
     }
 
+    #[track_caller]
     pub(crate) fn connection(&self) -> Result<LockedConnection<'_>, LibraryError> {
+        let startup_wait = crate::perf_log::StartupSpan::start("db.wait");
         let wait =
             crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::DatabaseWait);
         let guard = self
@@ -550,10 +553,14 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         drop(wait);
+        drop(startup_wait);
+        let startup_hold = crate::perf_log::StartupSpan::start("db.hold");
+        let startup_open = crate::perf_log::StartupSpan::start("db.open");
         let open =
             crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::DatabaseOpen);
         let connection = self.unlocked_connection()?;
         drop(open);
+        drop(startup_open);
         #[cfg(test)]
         self.character_wake.connection_opened();
         // Every writer of the character queue goes through here, so the idle native owner
@@ -589,6 +596,7 @@ impl Library {
             character_queue_changed,
             character_wake: &self.character_wake,
             _guard: guard,
+            _startup_hold: startup_hold,
         })
     }
 
