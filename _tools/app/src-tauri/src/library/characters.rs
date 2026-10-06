@@ -62,29 +62,69 @@ fn scoped_images(
     if pairs.is_empty() {
         return Ok(BTreeMap::new());
     }
+    // One recursive walk per distinct series and one read of the wanted Assets' folders,
+    // matched here. A single statement joining every (series, Asset) pair against the
+    // recursive scope re-walked the folder tree per pair (~4.9 s for 198 targets).
+    let series = pairs
+        .iter()
+        .map(|(series, _)| *series)
+        .collect::<BTreeSet<_>>();
+    let assets = pairs
+        .iter()
+        .map(|(_, asset)| *asset)
+        .collect::<BTreeSet<_>>();
+    let mut scope = BTreeMap::<String, BTreeSet<String>>::new();
     let mut statement = connection.prepare_cached(
-        "WITH RECURSIVE wanted(series, asset) AS (
-            SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?1)
-        ),
-        scope(series, id) AS (
-            SELECT id, id FROM classification_entries WHERE id IN (SELECT series FROM wanted)
+        "WITH RECURSIVE scope(series, id) AS (
+            SELECT id, id FROM classification_entries WHERE id IN (SELECT value FROM json_each(?1))
             UNION SELECT scope.series, child.id FROM classification_entries child
             JOIN scope ON child.parent_id = scope.id
         )
-        SELECT w.series, a.id, a.content_hash, a.relative_path FROM wanted w
-        JOIN assets a ON a.id = w.asset
-        WHERE a.status = 'normal' AND a.media_kind = 'image'
-        AND EXISTS (SELECT 1 FROM asset_classifications ac JOIN scope s
-                    ON s.id = ac.classification_id AND s.series = w.series
-                    WHERE ac.asset_id = a.id)",
+        SELECT series, id FROM scope",
     )?;
-    let rows = statement.query_map([serde_json::to_string(pairs)?], |r| {
+    for row in statement.query_map([serde_json::to_string(&series)?], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })? {
+        let (series, id) = row?;
+        scope.entry(series).or_default().insert(id);
+    }
+    let mut found = BTreeMap::<String, (String, String, Vec<String>)>::new();
+    let mut statement = connection.prepare_cached(
+        "SELECT a.id, a.content_hash, a.relative_path, ac.classification_id
+         FROM assets a JOIN asset_classifications ac ON ac.asset_id = a.id
+         WHERE a.id IN (SELECT value FROM json_each(?1))
+         AND a.status = 'normal' AND a.media_kind = 'image'",
+    )?;
+    for row in statement.query_map([serde_json::to_string(&assets)?], |r| {
         Ok((
-            (r.get::<_, String>(0)?, r.get::<_, String>(1)?),
-            (r.get::<_, String>(2)?, r.get::<_, String>(3)?),
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
         ))
-    })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    })? {
+        let (id, hash, path, folder) = row?;
+        found
+            .entry(id)
+            .or_insert_with(|| (hash, path, Vec::new()))
+            .2
+            .push(folder);
+    }
+    let mut scoped = BTreeMap::new();
+    for (series, asset) in pairs {
+        let (Some(folders), Some((hash, path, classified))) =
+            (scope.get(*series), found.get(*asset))
+        else {
+            continue;
+        };
+        if classified.iter().any(|folder| folders.contains(folder)) {
+            scoped.insert(
+                ((*series).to_owned(), (*asset).to_owned()),
+                (hash.clone(), path.clone()),
+            );
+        }
+    }
+    Ok(scoped)
 }
 
 /// The database rows behind [`Library::read_character_targets`]; turned into targets by
