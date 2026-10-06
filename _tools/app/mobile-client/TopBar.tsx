@@ -1,5 +1,5 @@
 import {FindButton} from './FindContext';
-import {ArrowLeftIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon,MagnifyingGlassIcon,PlusIcon} from '@heroicons/react/24/outline';
 import {useEffect,useRef,type ReactNode,type Ref} from 'react';
 import {IconButton,Mark} from './ui';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
@@ -63,4 +63,7 @@ export function TopBarSearch({title,onClose,children,loading}:{title:string;onCl
 }
 export function SearchButton({onClick}:{onClick():void}) {
   return <IconButton label="검색" icon={MagnifyingGlassIcon} onClick={onClick}/>;
+}
+export function CreateWorkButton({onClick}:{onClick():void}) {
+  return <IconButton label="새 작품" icon={PlusIcon} onClick={onClick}/>;
 }

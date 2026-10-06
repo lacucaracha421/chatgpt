@@ -10,7 +10,6 @@ export type ProviderDetail = {binding: {provider: Provider; externalId: string};
 export type ArtworkChoice = 'keep' | 'clear' | ArtworkCandidate;
 export const providerName = (provider: Provider) => provider.toUpperCase();
 export const providerFor = (type: string): Provider | null => type === 'movie' ? 'tmdb' : type === 'game' ? 'igdb' : null;
-export const providerAddLabel = (provider: Provider) => provider === 'tmdb' ? 'TMDB에서 영화 추가' : 'IGDB에서 게임 추가';
 export const artworkLabel = (provider: Provider) => provider === 'tmdb' ? '포스터·배경 변경' : '표지·hero 변경';
 export function providerSearchPath(provider: Provider, query: string, kind: 'movie' | 'tv') {
   const params = new URLSearchParams({query}); if (provider === 'tmdb') params.set('kind', kind);

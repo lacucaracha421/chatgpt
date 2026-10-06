@@ -783,16 +783,16 @@ describe("CollectionBrowser", () => {
     expect(screen.queryByRole("heading", { name: "IGDB에서 게임 추가" })).not.toBeInTheDocument();
   });
 
-  it("prefers stored WorkArtwork over other card covers", () => {
+  it.each(["artwork-1", `source-${"e5".repeat(32)}`])("prefers stored WorkArtwork %s over other card covers", (artworkId) => {
     renderBrowser({
-      collections: [{ ...sample, selectedWorkArtworkId: "artwork-1", coverAssetId: "asset-1", sourcePath: "games/astral-chain" }],
+      collections: [{ ...sample, selectedWorkArtworkId: artworkId, coverAssetId: "asset-1", sourcePath: "games/astral-chain" }],
       typeFilter: "game",
       showcase: false,
     });
 
     expect(screen.getByAltText("Astral Chain")).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork-thumbnail/artwork-1",
+      `http://lakomics.localhost/work-artwork-thumbnail/${artworkId}`,
     );
   });
 });

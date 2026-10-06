@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
-import {Badge, Button, Dialog, DialogDescription, Field, TextInput} from './ui';
+import {Badge, Button, Dialog, DialogDescription, Field, SegmentedControl, TextInput} from './ui';
+import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import type {CollectionDetail, CollectionKind} from './collectionModel';
 import {createdWork, replaceCommand, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
@@ -16,10 +17,12 @@ const fields: Record<CollectionKind, [string, string, 'text' | 'number' | 'date'
   movie: [['originalTitle', '원제', 'text', 2000], ['runtimeMinutes', '상영 시간(분)', 'number', 0], ['productionCompany', '제작사', 'text', 2000], ['director', '감독', 'text', 2000], ['year', '개봉 연도', 'number', 0]],
   av: [['originalTitle', '원제', 'text', 2000], ['productionCompany', '제작사', 'text', 2000], ['releaseDate', '출시일', 'date', 100], ['runtimeMinutes', '상영 시간(분)', 'number', 0]],
 };
-export function CollectionWorkForm({form, authority, onClose}: {form: WorkForm; authority: Authority; onClose(): void}) {
-  const [type, setType] = useState(form.type);
+// createWork accepts these four types; TV series are movie works with a TMDB binding.
+const createTypes = (['game', 'manga', 'movie', 'av'] as const).map(value => ({value, label: KIND_LABEL[value]}));
+export function CollectionWorkForm({form, authority, onClose, onCreated}: {form: WorkForm; authority: Authority; onClose(): void; onCreated?(id: string, type: CollectionKind): void}) {
+  const [type, setType] = useState(form.type ?? 'game');
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries([
-    ['name', form.item?.name ?? ''], ...Object.keys(fields).flatMap(kind => fields[kind as CollectionKind].map(([key]) => [key, String((form.item as unknown as Fields | undefined)?.[key] ?? '')])),
+    ['name', form.item?.name ?? ''], ['description', form.item?.description ?? ''], ...Object.keys(fields).flatMap(kind => fields[kind as CollectionKind].map(([key]) => [key, String((form.item as unknown as Fields | undefined)?.[key] ?? '')])),
   ]));
   const [error, setError] = useState('');
   const [operation, setOperation] = useState<string | null>(form.retry?.command.operationId ?? null);
@@ -27,7 +30,7 @@ export function CollectionWorkForm({form, authority, onClose}: {form: WorkForm; 
   const pending = intent?.state === 'pending';
   useEffect(() => { if (intent?.state === 'accepted') onClose(); }, [intent?.state, onClose]);
   const nameConflict = intent?.conflict?.code === 'nameConflict';
-  const title = form.mode === 'create' ? '새 작품' : form.mode === 'rename' ? '이름 바꾸기' : '기본 정보 편집';
+  const title = form.mode === 'create' ? '새 컬렉션' : form.mode === 'rename' ? '이름 바꾸기' : '기본 정보 편집';
   const change = (key: string, value: string) => { setDraft(current => ({...current, [key]: value})); setError(''); };
   const save = () => {
     try {
@@ -37,7 +40,12 @@ export function CollectionWorkForm({form, authority, onClose}: {form: WorkForm; 
         if (!values.name) throw new Error('이름을 입력해 주세요.');
         if ([...values.name].length > 120) throw new Error('이름은 120자까지 쓸 수 있습니다.');
       }
-      if (form.mode !== 'rename') for (const [key, label, input, limit] of fields[type]) {
+      if (form.mode === 'create') {
+        const description = draft.description.trim();
+        if ([...description].length > 2000) throw new Error('설명은 2,000자까지 쓸 수 있습니다.');
+        values.description = description || null;
+      }
+      if (form.mode === 'info') for (const [key, label, input, limit] of fields[type]) {
         const value = draft[key]?.trim() ?? '';
         if (input === 'number') {
           const number = value ? Number(value) : null;
@@ -70,16 +78,18 @@ export function CollectionWorkForm({form, authority, onClose}: {form: WorkForm; 
       if (intent?.state === 'conflict') {
         const replacement = replaceCommand(intent.command.operationId, command); setOperation(replacement?.command.operationId ?? null); void authority.flush();
       } else setOperation(authority.enqueue(command).command.operationId);
+      if (form.mode === 'create') { onClose(); onCreated?.(command.workId, type); }
     } catch (reason) { setError(errorText(reason)); }
   };
   return <Dialog open title={title} onClose={onClose}><DialogDescription className="sr-only">작품 정보를 저장합니다.</DialogDescription>
-    <form className="library-sheet collection-authority-form" onSubmit={event => { event.preventDefault(); save(); }}>
-      {form.mode === 'create' && <div role="group" aria-label="유형" className="collection-authority-types">{(['game', 'manga', 'movie', 'av'] as const).map(kind => <Button key={kind} type="button" aria-pressed={kind === type} disabled={pending} onClick={() => setType(kind)}>{KIND_LABEL[kind]}</Button>)}</div>}
+    <form className={`library-sheet collection-authority-form${form.mode === 'create' ? ' collection-create-form' : ''}`} onSubmit={event => { event.preventDefault(); if (!pending) save(); }}>
       {form.mode !== 'info' && <Field label="이름" error={nameConflict ? '같은 종류에 같은 이름의 작품이 있습니다.' : undefined}><TextInput value={draft.name} maxLength={120} disabled={pending} onChange={event => change('name', event.target.value)}/></Field>}
-      {form.mode !== 'rename' && fields[type].map(([key, label, input, limit]) => <Field key={key} label={label}><TextInput type={input} value={draft[key] ?? ''} maxLength={limit || undefined} min={input === 'number' ? key === 'runtimeMinutes' ? 1 : 0 : undefined} step={input === 'number' ? 1 : undefined} disabled={pending} onChange={event => change(key, event.target.value)}/></Field>)}
+      {form.mode === 'create' && <><Field label="설명"><TextInput value={draft.description} maxLength={2000} disabled={pending} onChange={event => change('description', event.target.value)}/></Field>
+        <SegmentedControl label="유형" fullWidth options={createTypes} value={type} onChange={setType}/></>}
+      {form.mode === 'info' && fields[type].map(([key, label, input, limit]) => <Field key={key} label={label}><TextInput type={input} value={draft[key] ?? ''} maxLength={limit || undefined} min={input === 'number' ? key === 'runtimeMinutes' ? 1 : 0 : undefined} step={input === 'number' ? 1 : undefined} disabled={pending} onChange={event => change(key, event.target.value)}/></Field>)}
       {intent?.state === 'conflict' && !nameConflict && <p role="alert">다른 기기에서 작품 정보가 바뀌었거나 변경을 받지 못했습니다. 내용을 확인해 주세요.</p>}
-      {pending && <Badge>대기</Badge>}{error && <p role="alert">{error}</p>}
-      <div className="ui-dialog__actions"><Button type="button" onClick={onClose}>닫기</Button><Button type="submit" variant="primary" disabled={pending}>저장</Button></div>
+      <BusyLabel busy={pending} idle=""><Badge>대기</Badge></BusyLabel>{error && <p role="alert">{error}</p>}
+      <div className="ui-dialog__actions"><Button type="button" variant={form.mode === 'create' ? 'quiet' : 'secondary'} onClick={onClose}>{form.mode === 'create' ? '취소' : '닫기'}</Button><Button type="submit" variant="primary" disabled={pending || form.mode === 'create' && !draft.name.trim()}>저장</Button></div>
     </form>
   </Dialog>;
 }

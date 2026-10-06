@@ -5,7 +5,7 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {setOutboxConnection} from './outboxConnection';
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), ...mocks}));
-import {CollectionProviderActions, ProviderAddAction, ProviderArtworkSheet, ProviderSearchSheet, ProviderThumb, useProviderStatus} from './CollectionProviders';
+import {CollectionProviderActions, ProviderArtworkSheet, ProviderSearchSheet, ProviderThumb, useProviderStatus} from './CollectionProviders';
 import {AUTHORITY_STATUS_PATH, COMMAND_PATH, readCommands} from './collectionCommandOutbox';
 import {useCollectionAuthority} from './useCollectionAuthority';
 import type {CollectionDetail} from './collectionModel';
@@ -38,60 +38,22 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-function Harness({mode = 'add', type = 'movie', onClose = () => {}}: {mode?: 'add' | 'connect' | 'actions' | 'artwork'; type?: 'movie' | 'game'; onClose?: () => void}) {
+function Harness({mode = 'actions', onClose = () => {}}: {mode?: 'connect' | 'actions' | 'artwork'; onClose?: () => void}) {
   const authority = useCollectionAuthority(true, () => {}), status = useProviderStatus(true);
   useEffect(() => authority.observeLibrary(identity.libraryId), []);
   if (!authority.identity) return null;
-  return mode === 'add' ? <ProviderAddAction type={type} authority={authority} status={status}/>
-    : mode === 'connect' ? <ProviderSearchSheet item={item} provider="tmdb" authority={authority} onClose={onClose}/>
+  return mode === 'connect' ? <ProviderSearchSheet item={item} provider="tmdb" authority={authority} onClose={onClose}/>
     : mode === 'actions' ? <CollectionProviderActions item={item} authority={authority} status={status} active/>
     : <ProviderArtworkSheet item={item} provider="tmdb" externalId="tv:42" authority={authority} onClose={onClose}/>;
 }
 
-it('gates add and detail actions on the server provider configuration', async () => {
+it('gates detail actions on the server provider configuration', async () => {
   configured = false; render(<Harness/>);
-  expect(await screen.findByRole('button', {name: 'TMDB에서 영화 추가'})).toBeDisabled();
-  expect(screen.getByText('서버에 TMDB 키가 설정되지 않았습니다')).toBeTruthy();
-  cleanup(); render(<Harness mode="actions"/>);
   fireEvent.click(await screen.findByRole('button', {name: '연결 · TMDB'}));
+  await screen.findByText('서버에 TMDB 키가 설정되지 않았습니다');
   expect(screen.getByRole('button', {name: 'TMDB에 연결'})).toBeDisabled();
   expect(screen.getByRole('button', {name: 'TMDB 새로고침'})).toBeDisabled();
   expect(screen.getByRole('button', {name: '포스터·배경 변경'})).toBeDisabled();
-});
-
-it('adds an IGDB game with a numeric external ID and the game create type', async () => {
-  const previous = mocks.api.getMockImplementation()!;
-  mocks.api.mockImplementation(async (...args) => args[0].includes('/igdb/search?')
-    ? {items: [{externalId: '99', name: '검색한 게임', year: 2025, previewUrl: null}]} : previous(...args));
-  render(<Harness type="game"/>);
-  const add = await screen.findByRole('button', {name: 'IGDB에서 게임 추가'});
-  await waitFor(() => expect(add).not.toBeDisabled()); fireEvent.click(add);
-  expect(screen.queryByRole('radio', {name: 'TV 시리즈'})).toBeNull();
-  fireEvent.change(screen.getByLabelText('검색어'), {target: {value: '게임'}});
-  fireEvent.click(screen.getByRole('button', {name: '검색'}));
-  fireEvent.click(await screen.findByRole('button', {name: /검색한 게임/}));
-  await screen.findByText('줄거리'); fireEvent.click(screen.getByRole('button', {name: '추가'}));
-  await waitFor(() => expect(readCommands()).toHaveLength(1));
-  expect(readCommands()[0].command).toMatchObject({operation: 'create', provider: 'igdb', externalId: '99', type: 'game'});
-});
-
-it('searches TV, previews metadata, and queues create with a stable UUID and the exact S3 body', async () => {
-  render(<Harness/>);
-  const add = await screen.findByRole('button', {name: 'TMDB에서 영화 추가'});
-  await waitFor(() => expect(add).not.toBeDisabled()); fireEvent.click(add);
-  fireEvent.change(screen.getByLabelText('검색어'), {target: {value: '검색'}});
-  fireEvent.click(screen.getByRole('radio', {name: 'TV 시리즈'}));
-  fireEvent.click(await screen.findByRole('button', {name: /검색한 영화/}));
-  await screen.findByText('줄거리'); fireEvent.click(screen.getByRole('button', {name: '추가'}));
-  await waitFor(() => expect(readCommands()).toHaveLength(1));
-  const row = readCommands()[0], id = row.command.operationId;
-  expect(row.command).toMatchObject({commandType: 'providerApply', operation: 'create', provider: 'tmdb', externalId: 'tv:42', type: 'movie'});
-  expect(id).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
-  await waitFor(() => expect(mocks.api.mock.calls.some(([path]) => path === '/v1/providers/apply')).toBe(true));
-  expect(mocks.api.mock.calls.find(([path]) => path === '/v1/providers/apply')![2]).toEqual({commandId: id, libraryId: identity.libraryId, epoch: 7, operation: 'create', provider: 'tmdb', externalId: 'tv:42', type: 'movie', workId: row.command.workId});
-  expect(screen.getByText('대기')).toBeTruthy();
-  expect(screen.getByRole('button', {name: '추가'})).toBeDisabled();
-  expect(mocks.native).toHaveBeenCalledWith('providerImage', {path: poster.previewUrl, connection: 'https://test.example'}, expect.any(AbortSignal));
 });
 
 it('prefills connect from the work name and queues a connect without a create type', async () => {

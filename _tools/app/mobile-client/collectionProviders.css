@@ -1,5 +1,3 @@
-.collection-provider-add{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
-.collection-provider-add .collection-bindings-note{max-width:240px;white-space:normal}
 .collection-provider-actions .collection-binding-row{flex-wrap:wrap}
 .collection-provider-search{display:flex;align-items:flex-end;gap:8px}
 .collection-provider-search>.ui-field{flex:1;min-width:0}

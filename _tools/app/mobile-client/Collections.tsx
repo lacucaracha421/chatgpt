@@ -18,7 +18,7 @@ import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {AvPerformerScreen} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
 import {AuthorityQueue, AuthorityWorkActions, CollectionWorkForm, type WorkForm} from './CollectionAuthorityForms';
-import {CollectionProviderActions, ProviderAddAction, useProviderStatus} from './CollectionProviders';
+import {CollectionProviderActions, useProviderStatus} from './CollectionProviders';
 import {CollectionReleases} from './CollectionReleases';
 import {invalidateReleases, observePublication} from './releaseStore';
 import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
@@ -37,7 +37,7 @@ import {BottomSheet} from './BottomSheet';
 import {Overlay} from './Overlay';
 import {SegmentedControl} from '../src/shared/ui/SegmentedControl';
 import {ReleaseCalendar} from './ReleaseCalendar';
-import {SearchButton,TopBar,TopBarSearch} from './TopBar';
+import {CreateWorkButton,SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSectionShade} from './SectionShade';
@@ -516,6 +516,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const closePerformer=useCallback(()=>{if(performer?.from)setSelected(performer.from);setPerformer(null);},[performer]);
   const closeInbox=useCallback(()=>{setInboxOpen(false);onReturnHome?.();},[onReturnHome]);
   const back=useCallback(()=>{
+    if(workForm){setWorkForm(null);return true;}
     if(coverIndex!==null){setCoverIndex(null);return true;}
     if(sheet){setSheet(null);return true;}
     if(personalSheet){setPersonalSheet(null);return true;}
@@ -526,7 +527,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     if(showcaseAll){setShowcaseAll(false);return true;}
     if(calendarOpen){setCalendarOpen(false);return true;}
     return false;
-  },[coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,closeWork,closePerformer,closeInbox]);
+  },[workForm,coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,closeWork,closePerformer,closeInbox]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
   useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
@@ -572,8 +573,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
   // Shortcuts and view controls share the section bar's right group on both surfaces.
   const shortcuts=<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    {edits.authority.identity&&<Button variant="quiet" size="sm" onClick={()=>setWorkForm({mode:'create',type})}>새 작품</Button>}
-    <ProviderAddAction type={type} authority={edits.authority} status={providerStatus}/>
     <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}>{showcaseAll?<SparklesSolidIcon aria-hidden="true"/>:<SparklesIcon aria-hidden="true"/>}<span className="collection-shortcuts__label">쇼케이스</span></Button>
     {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
     {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
@@ -591,7 +590,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
-        :<TopBar find={tab==='av'} barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'?<SearchButton onClick={()=>setSearchOpen(true)}/>:undefined}/>;
+        :<TopBar find={tab==='av'} barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>}/>;
   const showAvLoading=useDelayedBusy(main.busy&&!main.committed);
   const showDetailLoading=useDelayedBusy(!!selected&&!item&&!detailError);
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
@@ -668,7 +667,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
         :<CaseWork item={item} portraitSources={main.items} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} record={visibleRecord} onStep={stepWork} info={workInfo}/>}</>}</div>
     </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
-    {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)}/>}
+    {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)} onCreated={(id,kind)=>{chooseTab(kind);closeSearch();openWork(id);}}/>}
     {directWork ? workView : <AreaSwitch activeKey={selected?'work':'shelf'} retained={['shelf','work']} waitForReady crossFade={false} views={{shelf: <>
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>
     {!selected&&!overlayOpen&&!performer&&!searching&&sections.shade}

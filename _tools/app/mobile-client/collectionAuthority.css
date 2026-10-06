@@ -1,3 +1,5 @@
 .collection-authority-form { display: flex; flex-direction: column; gap: var(--space-4); }
 .collection-authority-types, .collection-authority-actions, .collection-authority-queue { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .collection-authority-queue { padding: var(--space-2) 0; }
+.collection-create-form .ui-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-4); }
+.collection-create-form .ui-dialog__actions .ui-button { min-height: var(--touch-target); }

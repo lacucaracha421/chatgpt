@@ -534,7 +534,9 @@ impl Library {
         &self,
         artwork_id: &str,
     ) -> Result<MediaResponse, LibraryError> {
-        uuid::Uuid::parse_str(artwork_id).map_err(|_| LibraryError::MediaNotFound)?;
+        if uuid::Uuid::parse_str(artwork_id).is_err() && !is_authority_source_artwork_id(artwork_id) {
+            return Err(LibraryError::MediaNotFound);
+        }
         let (collection_id, relative_path) = self
             .connection()?
             .query_row(
@@ -1620,4 +1622,11 @@ mod tests {
         assert!(stored_thumbnail.is_file());
         assert!(!orphan_thumbnail.exists());
     }
+}
+
+/// Collections authority materializes artworks under `source-<sha256>` ids besides UUIDs.
+pub(crate) fn is_authority_source_artwork_id(id: &str) -> bool {
+    id.strip_prefix("source-").is_some_and(|hex| {
+        hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }

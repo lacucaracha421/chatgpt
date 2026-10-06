@@ -870,7 +870,10 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
     let mut segments = path.strip_prefix('/')?.split('/');
     let route = segments.next()?;
     let asset_id = percent_decode(segments.next()?)?;
-    if uuid::Uuid::parse_str(&asset_id).is_err() {
+    // Collections authority also materializes artworks under `source-<sha256>` ids.
+    let authority_artwork = matches!(route, "work-artwork" | "work-artwork-thumbnail")
+        && crate::library::work_artwork::is_authority_source_artwork_id(&asset_id);
+    if uuid::Uuid::parse_str(&asset_id).is_err() && !authority_artwork {
         return None;
     }
     let (variant, file_name) = match route {
@@ -1477,6 +1480,52 @@ mod tests {
             .status(),
             StatusCode::BAD_REQUEST,
         );
+    }
+
+    #[test]
+    fn authority_work_artwork_cover_is_listed_and_served() {
+        // Authority preserves imported UUIDs and also creates source-<sha> IDs.
+        for artwork_id in [ARTWORK_ID.to_string(), format!("source-{}", "e5".repeat(32))] {
+            let (_temp, library) = collection_source_library(false);
+            let relative_path = format!(
+                "work-artwork/authority/{COLLECTION_ID}/{artwork_id}-{}.webp",
+                "2f".repeat(32)
+            );
+            let path = library.root().join(&relative_path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let mut bytes = Cursor::new(Vec::new());
+            DynamicImage::new_rgb8(300, 450)
+                .write_to(&mut bytes, ImageFormat::WebP)
+                .unwrap();
+            std::fs::write(&path, bytes.get_ref()).unwrap();
+            library.connection().unwrap().execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, selected, created_at, updated_at
+                 ) VALUES (?1, ?2, 'authority', ?1, 'cover', ?3,
+                    'image/webp', 300, 450, 1, 't', 't')",
+                params![artwork_id, COLLECTION_ID, relative_path],
+            ).unwrap();
+            let summary = library.list_collections().unwrap().into_iter()
+                .find(|work| work.id == COLLECTION_ID).unwrap();
+            assert_eq!(summary.selected_work_artwork_id.as_deref(), Some(artwork_id.as_str()));
+            let original = media_response(Some(&library), &Method::GET,
+                &format!("/work-artwork/{artwork_id}"));
+            assert_eq!(original.status(), StatusCode::OK, "{artwork_id}");
+            assert_eq!(original.body(), bytes.get_ref());
+            let thumbnail = media_response(Some(&library), &Method::GET,
+                &format!("/work-artwork-thumbnail/{artwork_id}"));
+            assert_eq!(thumbnail.status(), StatusCode::OK, "{artwork_id}");
+            assert_eq!(thumbnail.headers()[CONTENT_TYPE], "image/webp");
+            let image = image::load_from_memory(thumbnail.body()).unwrap();
+            assert_eq!((image.width(), image.height()), (240, 360));
+            // The existing materialized thumbnail is served without opening the original.
+            std::fs::remove_file(&path).unwrap();
+            let warm = media_response(Some(&library), &Method::GET,
+                &format!("/work-artwork-thumbnail/{artwork_id}"));
+            assert_eq!(warm.status(), StatusCode::OK);
+            assert_eq!(warm.body(), thumbnail.body());
+        }
     }
 
     #[test]

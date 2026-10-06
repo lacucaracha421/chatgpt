@@ -6,8 +6,8 @@ import {api, errorText} from './transport';
 import {outboxConnection} from './outboxConnection';
 import {replaceCommand, sameAuthority, type Provider} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
-import type {CollectionDetail, CollectionKind} from './collectionModel';
-import {artworkCommands, artworkLabel, providerAddLabel, providerDetailPath, providerFor, providerName, providerPreview,
+import type {CollectionDetail} from './collectionModel';
+import {artworkCommands, artworkLabel, providerDetailPath, providerFor, providerName, providerPreview,
   providerSearchPath, readProviderBinding, type ArtworkChoice, type ProviderCandidate, type ProviderDetail, type ProviderStatus} from './collectionProviderModel';
 import {usePrivacyMode} from './privacyMode';
 import './collectionBindings.css';
@@ -37,15 +37,6 @@ type Status = ReturnType<typeof useProviderStatus>;
 function ProviderUnavailable({provider, status}: {provider: Provider; status: Status}) {
   return <p className="collection-bindings-note">{status.status?.[provider] === false ? `서버에 ${providerName(provider)} 키가 설정되지 않았습니다`
     : status.failure ? <>{status.failure}<Button variant="ghost" onClick={status.retry}>다시 시도</Button></> : '서버 연결을 확인해 주세요.'}</p>;
-}
-
-export function ProviderAddAction({type, authority, status}: {type: CollectionKind; authority: Authority; status: Status}) {
-  const provider = providerFor(type), [open, setOpen] = useState(false);
-  if (!provider) return null;
-  const available = status.status?.[provider] === true;
-  return <div className="collection-provider-add"><Button variant="quiet" size="sm" disabled={!available || !authority.identity} onClick={() => setOpen(true)}>{providerAddLabel(provider)}</Button>
-    {!available && <ProviderUnavailable provider={provider} status={status}/>}
-    {open && available && <ProviderSearchSheet key={provider} provider={provider} authority={authority} onClose={() => setOpen(false)}/>}</div>;
 }
 
 export function CollectionProviderActions({item, authority, status, active}: {item: CollectionDetail; authority: Authority; status: Status; active: boolean}) {
@@ -108,9 +99,9 @@ export function ProviderThumb({url}: {url: string | null}) {
         onLoad={() => setLoaded(source)} onError={() => setFailed(source)}/>}</>}</span>;
 }
 
-export function ProviderSearchSheet({provider, item, authority, onClose}: {provider: Provider; item?: CollectionDetail; authority: Authority; onClose(): void}) {
+export function ProviderSearchSheet({provider, item, authority, onClose}: {provider: Provider; item: CollectionDetail; authority: Authority; onClose(): void}) {
   const [scope] = useState(() => ({connection: outboxConnection(), identity: authority.identity}));
-  const [query, setQuery] = useState(item?.name ?? ''), [kind, setKind] = useState<'movie' | 'tv'>('movie');
+  const [query, setQuery] = useState(item.name), [kind, setKind] = useState<'movie' | 'tv'>('movie');
   const [results, setResults] = useState<ProviderCandidate[] | null>(null), [picked, setPicked] = useState<ProviderDetail | null>(null);
   const [busy, setBusy] = useState(false), [failure, setFailure] = useState(''), [operation, setOperation] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -124,7 +115,7 @@ export function ProviderSearchSheet({provider, item, authority, onClose}: {provi
       if (!request.signal.aborted) { setResults(reply.items); setPicked(null); setBusy(false); }
     }, reason => { if (!request.signal.aborted) { setFailure(errorText(reason)); setBusy(false); } });
   };
-  useEffect(() => { if (item?.name) search(item.name); }, []);
+  useEffect(() => { if (item.name) search(item.name); }, []);
   const pick = (candidate: ProviderCandidate) => {
     controller.current?.abort(); const request = controller.current = new AbortController(); setBusy(true); setFailure('');
     void api<ProviderDetail>(providerDetailPath(provider, candidate.externalId), request.signal).then(reply => {
@@ -136,12 +127,11 @@ export function ProviderSearchSheet({provider, item, authority, onClose}: {provi
     try {
       if (!scope.identity || !authority.identity || !sameAuthority(scope.identity, authority.identity) || scope.connection !== outboxConnection()) throw new Error('라이브러리가 변경되었습니다. 다시 열어 주세요.');
       const command = {commandType: 'providerApply' as const, provider, externalId: picked.binding.externalId,
-        workId: item?.id ?? crypto.randomUUID(), operation: item ? 'connect' as const : 'create' as const,
-        ...(!item ? {type: provider === 'tmdb' ? 'movie' as const : 'game' as const} : {})};
+        workId: item.id, operation: 'connect' as const};
       setOperation(authority.enqueue(command).command.operationId);
     } catch (reason) { setFailure(errorText(reason)); }
   };
-  return <Dialog open title={item ? `${providerName(provider)}에 연결` : providerAddLabel(provider)} onClose={onClose}>
+  return <Dialog open title={`${providerName(provider)}에 연결`} onClose={onClose}>
     <DialogDescription className="sr-only">검색 결과를 고른 뒤 작품 정보를 확인해 주세요.</DialogDescription>
     <div className="library-sheet bind-sheet">
       {!operation && <>
@@ -161,7 +151,7 @@ export function ProviderSearchSheet({provider, item, authority, onClose}: {provi
         {pending && <Badge>대기</Badge>}
         {intent?.state === 'conflict' && <p role="alert">변경을 받지 못했습니다. 연결과 작품 정보를 확인한 뒤 다시 시도해 주세요.</p>}
         <div className="bind-actions"><Button disabled={pending || busy} onClick={() => { if (intent?.state === 'conflict') replaceCommand(intent.command.operationId, null); setOperation(null); setPicked(null); }}>다시 선택</Button>
-          <Button variant="primary" disabled={pending || busy || !!operation} onClick={confirm}>{item ? '연결' : '추가'}</Button></div>
+          <Button variant="primary" disabled={pending || busy || !!operation} onClick={confirm}>연결</Button></div>
       </div> : results && <ul className="bind-results">{results.map(candidate => <li key={candidate.externalId}><button className="bind-result" disabled={busy} onClick={() => pick(candidate)}>
         <ProviderThumb url={candidate.previewUrl}/><span className="bind-result-text"><strong>{candidate.name}</strong><small>{candidate.originalTitle}</small><small>{candidate.year}</small></span>
       </button></li>)}{results.length === 0 && <li className="bind-empty">검색 결과가 없습니다.</li>}</ul>}

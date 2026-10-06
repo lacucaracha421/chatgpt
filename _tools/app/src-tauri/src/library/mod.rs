@@ -181,7 +181,7 @@ mod tmdb_flow;
 mod trash;
 mod video_media;
 pub(crate) mod video_similarity;
-mod work_artwork;
+pub(crate) mod work_artwork;
 
 use std::{
     collections::{BTreeSet, HashMap},
