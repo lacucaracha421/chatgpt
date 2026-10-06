@@ -46,6 +46,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `agents/implementation.md` — implementation/shared-UI rules, review scope, and verification evidence.
 - `agents/cloud-capture.md` — Cloud Capture / sync architecture and known gaps.
 - `agents/mobile.md` — Mobile direction and current checkpoint.
+- `agents/user-preferences.md` — the user's portable working preferences (Korean messages, no flash/pop-in, test cadence, Codex quota rule) for any agent or machine.
 - `agents/pc-required-features.md` — source-audited list of what only the PC can do, which tablet actions wait for the PC, and what works with the PC off.
 - `agents/mobile-character-contract.md` — implemented character read publication/API/mobile navigation, authority limits and verification evidence.
 - `research/server-authority-model-audit-20260913.md` — current PC/server/mobile data mapping, character and Collection gaps, and server-authority transition design inputs; execution status lives in CLOUD-AUTH-001.

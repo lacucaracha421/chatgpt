@@ -72,6 +72,7 @@
 
 ## References and records
 
+- Always apply the user's portable working preferences in `docs/agents/user-preferences.md` (Korean messages, no flash/pop-in, test cadence, Codex quota rule).
 - Start at `docs/README.md` and read only what is relevant: product terms `CONTEXT.md`; UI `DESIGN.md` and `docs/agents/pc-design-reference.md`; architecture, the relevant Accepted ADRs in `docs/adr/`; implementation/review/performance `docs/agents/implementation.md`.
 - Before substantial Works/Collection work, read `docs/agents/lakomics-works-handoff-v2.md`, `docs/agents/pc-design-reference.md`, and `docs/agents/works-viewer-design.md`. Historical prototypes are references, not code to copy.
 - Current sources, migrations, and contracts define implementation; the backlog defines intended work. Stale memory and historical plans are not instructions; do not resurrect retired plans.
