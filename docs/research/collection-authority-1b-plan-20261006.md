@@ -1,0 +1,49 @@
+# Collections authority slice 1B — implementation plan
+
+Status: accepted 2026-10-06 with the §4 split (user chose "temporarily fence the rarer PC-only operations"). Builds on the [design](collection-authority-design-20260924.md) (§7 revised slices, §8 decisions) and the [1B survey](collection-authority-1b-survey-20261004.md) (write inventory at `d207ebf4`). Nothing here activates the authority; activation is slice 1C and needs its own approval.
+
+## 1. What 1B delivers
+
+- Every PC write to shared Collection data goes through a local replica + durable outbox when the authority is active, and keeps today's behaviour while it is inactive.
+- Server commands, change feed and the personal-edit shim cover the fields the tablet and PC use today.
+- The tablet gains create, rename, basic info and record editing, shown only when the server reports an active epoch.
+- **User-visible result before 1C: none.** The work is dormant until activation; that is intended (a partial cutover is unsafe, design §7).
+
+## 2. Delta since the survey (`d207ebf4` → `ce8a7c58`+)
+
+Re-check these before batch 2/4 because they add or change write paths:
+- `9d55123e` MangaDex refresh replaces stale provider fields — the server-side provider merge must match the new "replace stale" rule, not only "fill blank".
+- `53846561` connect a hand-made game to IGDB — a new bind path on an existing work (`bindProvider` + `applyProviderSnapshot`).
+- `adbdcb8c` StashDB default performer photo — AV portrait selection (AV batch).
+- Migrations `0119`–`0121` do not touch Collection tables (manga index pins, auto-tag publication, likes album).
+
+## 3. Batches
+
+Each batch: worker implementation (Codex Sol, medium → high on failure), controller review, targeted tests, commit. Server changes are additive and inactive; each server deploy needs approval. No batch enables a second writer.
+
+| # | Batch | Contents | Size / risk | Server deploy |
+|---|---|---|---|---|
+| 1 | Dormant PC replica | Migration for sync identity, cursors, entity revisions, outbox, artwork materialization queue; `library/collection_authority.rs` apply from baseline/changes; writer guard test that fails on any Collection-table write outside apply/outbox/legacy-inactive paths (starts with an allowlist of today's writers, shrinks per batch). | L / high | no |
+| 2 | Core commands end to end | Server: `status`/`ownedPlatform`/records in `updateWork`, v3 shim for tracking and records, `selectArtwork` updates per-artwork `selected` atomically, client-role auth on the Collection command/upload routes (part of `SEC-TOKEN-001`). PC: CRUD, records, score/memo, showcase order, membership, cover asset through the outbox. Tablet: generalized connection/library-scoped command outbox (create→edit ordering, conflicts), create/rename/basic info/record forms gated on active epoch; `NetworkPolicy` allowlist for authority reads + commands. | L / high | yes |
+| 3 | Artwork and volumes | `addArtwork`/`selectArtwork` incl. spine/back, local source imports on detail open, volume materialization on viewing, volume ranges; fence LaunchBox fetch and cover-focus recomputation (§4). | L / high | yes |
+| 4 | Providers, tracking, workers | MangaDex/Kakao/Aladin apply+refresh with server merge parity (incl. `9d55123e`), fence TMDB/IGDB apply/refresh/artwork replacement and IGDB connect (§4), ownership count replacement + explicit-zero tracking, release subscriptions and read acknowledgements, refresh workers submitting fenced commands, inbound replay lanes routed or fenced after activation. | L / high | yes |
+| 5 | AV | AV works stay readable from the feed; fence AV detail/people/portrait editing and StashDB refresh (§4); AV inbox/candidates stay local. | M / high | yes |
+| 6 | Fences and verification | Migration/startup normalization and cascade exemptions (asset retirement/purge, similarity replacement), type change hidden under authority, full guard with an inactive/active fixture matrix, staging verify against a production dry run. | M / high | dry run needs deploy approval |
+
+Then **1C** (separate approval): final drain, digest-bound epoch, legacy PUT fence, PC collections lane off.
+
+## 4. Decision (user 2026-10-06): what may be temporarily unavailable after activation
+
+Design §8.1 allows fencing operations without authority commands. Proposed split (keeps everything used daily, fences rarer PC-only operations with a clear message until a later slice):
+
+- **Keep working after 1C:** create/rename/delete (to trash), basic info, records (status, owned platform, score, memo), showcase and order, membership, cover choice among existing artwork, local source artwork import on opening, volume viewing and ranges, ownership counts, release subscriptions and acknowledgements, MangaDex/Kakao refresh and new-volume detection.
+- **Temporarily fenced (message: "서버 이전 후 다음 단계에서 다시 지원"):** TMDB/IGDB apply/refresh/artwork replacement and IGDB connect, LaunchBox spine fetch, AV detail/people/portrait editing and StashDB refresh, book import and legacy package migration, cover-focus recomputation.
+
+Fencing the second list shrinks batches 3–5 by roughly half and brings 1C forward; those operations return with slice 2 (server provider jobs) and an AV follow-up.
+
+## 5. Approvals and checkpoints
+
+- Server deploys for batches 2–5 (additive, inactive) and the production dry run: separate approval each time.
+- Tablet APK installs: per build as usual.
+- 1C activation: separate approval after the dry run reports no loss.
+- Rollback before 1C: discard staging; nothing to undo on the PC because the replica is dormant.

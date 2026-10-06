@@ -75,6 +75,7 @@ Status: `HOLD` — after change contracts stabilize, persist browse metadata, cu
 
 Status: `TODO` — only inactive server slice 0 (`c38a2bc`) exists. Implement slice 1 using [Collection authority design](../research/collection-authority-design-20260924.md); performance requests from this batch are consolidated in `PERF-ALL-001`.
 - **1A (2026-10-04, `883a36a6`):** verify-only route `POST /v1/collections/authority/staging/verify` (staging v2, TEMP-table projection, digest-only report) and the PC Settings row "컬렉션 서버 이전 점검" with a PC-generated interop fixture. 1B inventory and user decisions (fence unsupported provider/import operations after activation, no type change under authority, tablet covers only from provider candidates via slice 2) are in the design doc §8. Open for 1B: `selectArtwork` updates selection slots but not the new per-artwork `selected` flag; a production dry run needs a server deploy (separate approval).
+- **1B plan (2026-10-06):** [collection-authority-1b-plan-20261006.md](../research/collection-authority-1b-plan-20261006.md) — six batches (dormant replica → core commands + tablet forms → artwork/volumes → providers/tracking → AV reads → fences + dry run); user chose to fence TMDB/IGDB, LaunchBox, AV editing and book import after 1C until slice 2.
 
 <a id="user-req-20260926b--user-requests-2026-09-26-second-batch"></a>
 ## USER-REQ-20260926B — Tablet Collection creation
