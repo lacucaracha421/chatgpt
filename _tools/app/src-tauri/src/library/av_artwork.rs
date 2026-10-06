@@ -41,6 +41,8 @@ impl Library {
     }
     pub fn get_av_cover_set(&self,id: &str) -> Result<AvCoverSet,AvError> { cover_set(&*self.connection()?,id) }
     pub fn apply_av_artwork(&self,id: &str,input: ApplyAvArtwork) -> Result<AvCoverSet,AvError> {
+        // Fenced before reading local files; the transaction re-checks below.
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         if self.get_av_cover_set(id)?.revision != input.expected_revision { return Err(AvError::Stale); }
         let decisions = [(CoverSurface::Front,input.front),(CoverSurface::Spine,input.spine),(CoverSurface::Back,input.back)];
         let mut prepared: Vec<Option<PreparedWorkArtwork>> = Vec::new();
@@ -54,6 +56,7 @@ impl Library {
         }
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        super::collection_authority::fence_collection_operation(&transaction)?;
         if cover_set(&transaction,id)?.revision != input.expected_revision { return Err(AvError::Stale); }
         let mut committed = [false;3];
         for (index,(surface,decision)) in decisions.iter().enumerate() {

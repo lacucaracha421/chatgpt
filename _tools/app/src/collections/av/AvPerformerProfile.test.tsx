@@ -100,6 +100,13 @@ it("retains cached text when background refresh fails", async () => {
   render(panel(gateway({ refreshPerformerProfile: vi.fn().mockRejectedValue(new Error("offline")) })));
   expect(await screen.findByText(/StashDB 정보를 확인하지 못했습니다/)).toBeVisible(); expect(screen.getByText("156 cm")).toBeVisible();
 });
+it("shows the server-transfer fence message for an explicit refresh", async () => {
+  const fenced = { code: "collection_authority_operation_unavailable", message: "서버 이전 후 다음 단계에서 다시 지원합니다." };
+  const refresh = vi.fn().mockResolvedValueOnce(profile()).mockRejectedValueOnce(fenced);
+  render(panel(gateway({ refreshPerformerProfile: refresh })));
+  await waitFor(() => expect(screen.getByRole("button", { name: "StashDB 새로고침" })).toBeEnabled()); fireEvent.click(screen.getByRole("button", { name: "StashDB 새로고침" }));
+  expect(await screen.findByText(/서버 이전 후 다음 단계에서 다시 지원합니다/)).toBeVisible(); expect(screen.getByText("156 cm")).toBeVisible();
+});
 
 it("keeps a stored StashDB portrait visible on the performer page", async () => {
   const api = gateway();

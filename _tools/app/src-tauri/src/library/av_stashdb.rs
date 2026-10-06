@@ -329,6 +329,8 @@ fn json_text(value: &impl Serialize) -> Result<String, AvError> {
     serde_json::to_string(value).map_err(|_| AvError::Invalid)
 }
 fn save(c: &Connection, p: &AvPerformerProfile) -> Result<(), AvError> {
+    // Profiles are shared person data without an authority command yet (1B §4).
+    super::collection_authority::fence_collection_operation(c)?;
     require_person(c, &p.person_id)?;
     c.execute("INSERT OR REPLACE INTO collection_person_profiles
         (person_id,source,status,stashdb_id,name,aliases_json,birth_date,height_cm,band_in,waist_in,hip_in,cup,breast_type,career_start,career_end,urls_json,images_json,candidates_json,fetched_at)
@@ -370,6 +372,17 @@ impl Library {
         let Some(key) = key else {
             return Ok(old);
         };
+        {
+            let c = self.connection()?;
+            if super::collection_authority::collection_authority_active(&c)? {
+                // Opening a performer page refreshes automatically: keep the stored
+                // profile quietly. Only an explicit refresh reports the fence.
+                if !force {
+                    return Ok(old);
+                }
+                super::collection_authority::fence_collection_operation(&c)?;
+            }
+        }
         if !force
             && old.as_ref().is_some_and(|p| {
                 DateTime::parse_from_rfc3339(&p.fetched_at).is_ok_and(|d| {
@@ -433,6 +446,8 @@ impl Library {
         http: &impl HttpClient,
         key: Option<&str>,
     ) -> Result<AvPerformerProfile, AvError> {
+        // The chooser leads only to a fenced save; report it before contacting StashDB.
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         self.search_stashdb(person, http, key.ok_or(AvError::Invalid)?, true)
     }
     pub(crate) fn choose_av_performer_profile_with(
@@ -444,6 +459,7 @@ impl Library {
         key: Option<&str>,
     ) -> Result<AvPerformerProfile, AvError> {
         let generation = state.begin(self, person);
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         require_person(&*self.connection()?, person)?;
         if id.is_empty() || id.len() > 128 {
             return Err(AvError::Invalid);
@@ -473,6 +489,7 @@ impl Library {
         state: &AvProfileState,
     ) -> Result<AvPerformerProfile, AvError> {
         let generation = state.begin(self, person);
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let profile = empty(person, "none");
         generation.apply(|| {
             save(&*self.connection()?, &profile)?;
@@ -487,6 +504,7 @@ impl Library {
         let generation = state.begin(self, person);
         generation.apply(|| {
             let c = self.connection()?;
+            super::collection_authority::fence_collection_operation(&c)?;
             require_person(&c, person)?;
             c.execute(
                 "DELETE FROM collection_person_profiles WHERE person_id=?1",

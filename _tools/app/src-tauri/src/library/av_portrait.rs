@@ -150,6 +150,8 @@ impl Library {
         }
         let mut c = self.connection()?;
         let tx = c.transaction()?;
+        // Portraits have no authority command yet (1B §4).
+        super::collection_authority::fence_collection_operation(&tx)?;
         require_person(&tx, person)?;
         let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_work_artworks a JOIN collections c ON c.id=a.collection_id AND c.type='av' WHERE a.id=?1 AND a.kind='cover' AND a.selected=1 AND EXISTS(SELECT 1 FROM collection_person_relations r WHERE r.collection_id=c.id AND r.person_id=?2))",params![artwork,person],|r|r.get(0))?;
         if !valid {
@@ -167,6 +169,7 @@ impl Library {
     }
     pub fn clear_av_portrait(&self, person: &str) -> Result<(), AvError> {
         let c = self.connection()?;
+        super::collection_authority::fence_collection_operation(&c)?;
         require_person(&c, person)?;
         c.execute(
             "DELETE FROM collection_person_portraits WHERE person_id=?1",
@@ -183,6 +186,7 @@ impl Library {
     ) -> Result<Option<AvCommonsPreview>, AvError> {
         let qid: Option<String> = {
             let c = self.connection()?;
+            super::collection_authority::fence_collection_operation(&c)?;
             require_person(&c, person)?;
             c.query_row(
                 "SELECT wikidata_id FROM collection_people WHERE id=?1",
@@ -243,6 +247,7 @@ impl Library {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut c = self.connection()?;
         let tx = c.transaction()?;
+        super::collection_authority::fence_collection_operation(&tx)?;
         require_person(&tx, person)?;
         let key = (self.root().to_path_buf(), person.to_owned());
         let Some(PendingImage::Commons(image)) = pending.get(&key).and_then(|p| p.image.as_ref())
@@ -271,6 +276,7 @@ impl Library {
         state: &AvPortraitState,
         http: &impl HttpClient,
     ) -> Result<AvStashdbPreview, AvError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let key = (self.root().to_path_buf(), person.to_owned());
         let generation = uuid::Uuid::new_v4();
         state
@@ -373,6 +379,7 @@ impl Library {
         person: &str,
         state: &AvPortraitState,
     ) -> Result<AvPortrait, AvError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let mut pending = state
             .0
             .lock()
@@ -395,6 +402,7 @@ impl Library {
         }
         let mut c = self.connection()?;
         let tx = c.transaction()?;
+        super::collection_authority::fence_collection_operation(&tx)?;
         require_person(&tx, person)?;
         tx.execute(
             "DELETE FROM collection_person_portraits WHERE person_id=?1",

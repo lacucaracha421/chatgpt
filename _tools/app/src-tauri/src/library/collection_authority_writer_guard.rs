@@ -7,16 +7,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "library/collection_authority.rs",
         "batch 1: confirmed replica/outbox apply",
     ),
-    (
-        "library/av_collection.rs",
-        "batch 5: AV details and credits",
-    ),
-    ("library/av_artwork.rs", "batch 5: AV artwork fence"),
-    ("library/av_link/apply.rs", "batch 5: AV link apply fence"),
-    ("library/av_detail.rs", "batch 5: people memo fence"),
-    ("library/av_portrait.rs", "batch 5: portrait fence"),
-    ("library/av_stashdb.rs", "batch 5: profile fence"),
-    ("library/home_data.rs", "batch 5: favorites"),
     ("library/mod.rs", "batch 6: startup normalization"),
     (
         "library/db.rs",
@@ -255,6 +245,20 @@ const FENCED_FUNCTIONS: &[(&str, &str)] = &[
     ("library/launchbox.rs", "store_spine"),
     ("library/launchbox.rs", "fill_launchbox_platforms"),
     ("library/collection_pc.rs", "store_cover_focus"),
+    // Batch 5: AV details, people, portraits, profiles and favorites have no
+    // authority command yet. AV inbox/candidates/name cache/poll state stay local.
+    ("library/av_collection.rs", "save_av_details"),
+    ("library/av_artwork.rs", "apply_av_artwork"),
+    ("library/av_link/apply.rs", "apply_people"),
+    ("library/av_link/apply.rs", "apply_av_link"),
+    ("library/av_detail.rs", "save_av_person_memo"),
+    ("library/av_portrait.rs", "set_av_portrait_crop"),
+    ("library/av_portrait.rs", "clear_av_portrait"),
+    ("library/av_portrait.rs", "use_av_commons_portrait"),
+    ("library/av_portrait.rs", "use_av_stashdb_portrait"),
+    ("library/av_stashdb.rs", "save"),
+    ("library/av_stashdb.rs", "clear_av_performer_profile"),
+    ("library/home_data.rs", "set_av_favorite"),
 ];
 
 // Functions in these two files use a standalone closing brace at their declaration
@@ -535,6 +539,13 @@ fn collection_authority_writer_guard_rejects_new_writers_in_routed_files() {
         "library/collection_release_sync.rs",
         "library/book_migration.rs",
         "library/legacy_package_migration.rs",
+        "library/av_collection.rs",
+        "library/av_artwork.rs",
+        "library/av_link/apply.rs",
+        "library/av_detail.rs",
+        "library/av_portrait.rs",
+        "library/av_stashdb.rs",
+        "library/home_data.rs",
     ] {
         let mut source = std::fs::read_to_string(root.join(file)).unwrap();
         source.push_str("\nfn unreviewed_writer() { db.execute(\"UPDATE collections SET name='lost'\", []); }\n");

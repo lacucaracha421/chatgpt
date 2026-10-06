@@ -39,6 +39,8 @@ impl Library {
         favorite: bool,
     ) -> Result<(), HomeDataError> {
         let connection = self.connection()?;
+        // Favorites are shared person data without an authority command yet (1B §4).
+        super::collection_authority::fence_collection_operation(&connection)?;
         if favorite {
             let performer: bool = connection.query_row(
                 "SELECT EXISTS(

@@ -9,6 +9,11 @@ import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
 import type { AvGateway, AvPerformerProfile as Profile, AvProfileCandidate } from "../avTypes";
 
+/** While the Collections server authority is active the backend fences StashDB edits with its own message. */
+function failure(reason: unknown, fallback: string): string {
+  return reason && typeof reason === "object" && "code" in reason && reason.code === "collection_authority_operation_unavailable" && "message" in reason && typeof reason.message === "string" ? reason.message : fallback;
+}
+
 export function safeProfileUrl(value: string): boolean {
   try { const url = new URL(value); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password; } catch { return false; }
 }
@@ -93,7 +98,7 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
       const next = chooser ? await api.searchPerformerProfile(personId) : await api.refreshPerformerProfile(personId, true);
       if (current !== request.current) return;
       if (chooser) setCandidates(next?.candidates ?? []); else setProfile(next);
-    } catch { if (current === request.current) setError("StashDB 정보를 확인하지 못했습니다. 다시 시도해 주세요."); }
+    } catch (reason) { if (current === request.current) setError(failure(reason, "StashDB 정보를 확인하지 못했습니다. 다시 시도해 주세요.")); }
     finally { if (current === request.current) setBusy(false); }
   }
   async function choose(id: string | null) {
@@ -103,7 +108,7 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
     try {
       const next = id ? await api.choosePerformerProfile(personId, id) : await api.dismissPerformerProfile(personId);
       if (current === request.current) { setProfile(next); setCandidates(null); }
-    } catch { if (current === request.current) setError("StashDB 연결을 저장하지 못했습니다."); }
+    } catch (reason) { if (current === request.current) setError(failure(reason, "StashDB 연결을 저장하지 못했습니다.")); }
     finally { if (current === request.current) setBusy(false); }
   }
   if (configured === false) return <p className="av-profile__quiet">StashDB 키가 없어요 · <button type="button" onClick={onOpenSettings}>설정</button></p>;

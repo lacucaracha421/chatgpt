@@ -112,6 +112,7 @@ impl Library {
         let memo = text(memo, 2000)?;
         let mut c = self.connection()?;
         let tx = c.transaction()?;
+        super::collection_authority::fence_collection_operation(&tx)?;
         require_person(&tx, id)?;
         tx.execute(
             "UPDATE collection_people SET memo=?2,updated_at=?3 WHERE id=?1",

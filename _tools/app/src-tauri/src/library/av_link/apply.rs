@@ -61,6 +61,7 @@ fn apply_people(
             .map(String::as_str)
             .collect()
     };
+    crate::library::collection_authority::fence_collection_operation(tx)?;
     let mut seen = BTreeSet::new();
     let mut seen_people = BTreeSet::new();
     let mut order:i64=tx.query_row("SELECT COALESCE(MAX(sort_order)+1,0) FROM collection_person_relations WHERE collection_id=?1 AND role=?2",params![collection,role],|r|r.get(0))?;
@@ -116,6 +117,9 @@ fn apply_people(
 }
 impl Library {
     pub fn apply_av_link(&self, id: &str, request: ApplyRequest) -> Result<ApplyResult, AvError> {
+        // Creating AV Collections/people/credits has no authority command yet (1B §4).
+        // The inbox item stays `found`, so it can be applied after the follow-up.
+        crate::library::collection_authority::fence_collection_operation(&*self.connection()?)?;
         validate_fields(&request.fields)?;
         if request.performers.len() + request.directors.len() > 100
             || request.collection_id.is_some() == request.new_collection_name.is_some()
@@ -198,6 +202,7 @@ impl Library {
         }
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        crate::library::collection_authority::fence_collection_operation(&tx)?;
         let still_current:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM av_link_inbox i JOIN av_link_candidates c ON c.inbox_id=i.id WHERE i.id=?1 AND i.status='found' AND i.generation=?2 AND c.jacket_path=?3 AND c.snapshot_json=?4)",params![id,generation,candidate.path,candidate.snapshot],|r|r.get(0))?;
         if !still_current {
             return Err(AvError::Stale);

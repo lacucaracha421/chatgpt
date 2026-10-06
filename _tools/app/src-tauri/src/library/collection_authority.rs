@@ -1230,15 +1230,28 @@ fn apply_av(tx: &Transaction<'_>, v: &Value, now: &str) -> Result<(), LibraryErr
     // The feed has credits but no people section. Preserve existing person-local
     // metadata and retain every received credit in the raw work projection.
     if let Some(credits) = v["avCredits"].as_array() {
+        let work = text(v, "workId")?;
+        // A credit's `name` is the person's display name, not the per-work credit
+        // name. AV editing is fenced while active, so the local credit name is still
+        // the confirmed one; new credits have none.
+        let credit_names: std::collections::HashMap<(String, String), Option<String>> = tx
+            .prepare("SELECT person_id,role,credit_name FROM collection_person_relations WHERE collection_id=?1")?
+            .query_map([work], |r| Ok(((r.get(0)?, r.get(1)?), r.get(2)?)))?
+            .collect::<Result<_, _>>()?;
         tx.execute(
             "DELETE FROM collection_person_relations WHERE collection_id=?1",
-            [text(v, "workId")?],
+            [work],
         )?;
         for c in credits {
+            let (person, role) = (text(c, "personId")?, text(c, "role")?);
             tx.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,name_ja=excluded.name_ja",
-                params![text(c,"personId")?,text(c,"name")?,sql_value(&c["nameJa"])?,now])?;
+                params![person,text(c,"name")?,sql_value(&c["nameJa"])?,now])?;
+            let credit_name = credit_names
+                .get(&(person.to_owned(), role.to_owned()))
+                .cloned()
+                .flatten();
             tx.execute("INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order,credit_name) VALUES(?1,?2,?3,?4,?5)",
-                params![text(v,"workId")?,text(c,"personId")?,text(c,"role")?,integer(c,"order")?,text(c,"name")?])?;
+                params![work,person,role,integer(c,"order")?,credit_name])?;
         }
     }
     Ok(())

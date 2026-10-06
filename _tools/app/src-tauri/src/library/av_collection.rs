@@ -191,6 +191,8 @@ impl Library {
         let series = text(input.series, 240)?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        // AV details/people have no authority command yet (1B §4).
+        super::collection_authority::fence_collection_operation(&transaction)?;
         let previous = details(&transaction, id)?;
         if previous.revision != input.expected_revision {
             return Err(AvError::Stale);

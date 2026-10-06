@@ -1871,3 +1871,191 @@ fn collection_authority_range_expectation_uses_confirmed_and_pending_state() {
         json!({"minVolume":2,"maxVolume":8,"hideConnectionPrompt":true})
     );
 }
+
+// Batch 5: AV reading stays local/feed-owned while AV editing is fenced (1B §4).
+struct NoNetwork;
+impl super::super::av_link::provider::HttpClient for NoNetwork {
+    fn get(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: usize,
+    ) -> Result<super::super::av_link::provider::HttpResponse, LibraryError> {
+        panic!("a fenced AV operation contacted the network")
+    }
+    fn post_json(
+        &self,
+        _: &str,
+        _: &str,
+        _: &[u8],
+        _: usize,
+    ) -> Result<super::super::av_link::provider::HttpResponse, LibraryError> {
+        panic!("a fenced AV operation contacted StashDB")
+    }
+}
+
+fn seed_av(l: &Library) {
+    l.connection().unwrap().execute_batch("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('av','AV Work','av','old','old');
+        INSERT INTO collection_av_details(collection_id,product_code,title_ja,label,revision) VALUES('av','ABC-001','原題','Label',3);
+        INSERT INTO collection_people(id,display_name,name_ja,memo,created_at,updated_at) VALUES('p','Display','表示','local memo','old','old');
+        INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order,credit_name) VALUES('av','p','performer',0,'Alias');
+        INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('art','av','local','art','cover','local/av.png','image/png',10,20,1,'old','old');
+        INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at) VALUES('p','commons',X'01','image/png',1,1,'p.png','https://commons.wikimedia.org/p','old');
+        INSERT INTO collection_person_profiles(person_id,source,status,stashdb_id,name,fetched_at) VALUES('p','stashdb','matched','stash-p','Display','2000-01-01T00:00:00Z');
+        INSERT INTO av_favorite_performers(person_id,created_at) VALUES('p','old');").unwrap();
+}
+
+fn av_local_state(l: &Library) -> Value {
+    let db = l.connection().unwrap();
+    db.query_row("SELECT json_array((SELECT memo FROM collection_people WHERE id='p'),(SELECT credit_name FROM collection_person_relations WHERE person_id='p'),(SELECT kind FROM collection_person_portraits WHERE person_id='p'),(SELECT status||':'||fetched_at FROM collection_person_profiles WHERE person_id='p'),(SELECT count(*) FROM av_favorite_performers),(SELECT label||':'||revision FROM collection_av_details WHERE collection_id='av'),(SELECT count(*) FROM collections WHERE type='av'))",[],|r|r.get::<_,String>(0)).map(|s| serde_json::from_str(&s).unwrap()).unwrap()
+}
+
+fn assert_fenced<T: std::fmt::Debug>(result: Result<T, super::super::av_models::AvError>) {
+    assert!(
+        matches!(
+            result,
+            Err(super::super::av_models::AvError::Library(
+                LibraryError::CollectionAuthorityOperationUnavailable
+            ))
+        ),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn collection_authority_batch5_av_edits_are_fenced_and_automatic_profile_refresh_is_quiet() {
+    use super::super::{
+        av_link::models::ApplyRequest, av_models::*, av_portrait::AvPortraitState,
+        av_stashdb::AvProfileState, home_data::HomeDataError,
+    };
+    let (_temp, l, s) = fixture();
+    seed_av(&l);
+    let before = av_local_state(&l);
+    l.observe_collection_authority(&s).unwrap();
+    let details: SaveAvDetails = serde_json::from_value(json!({"expectedRevision":3,"productCode":"NEW-1","label":null,"series":null,"people":[{"person":{"kind":"new","displayName":"New"},"role":"performer","creditName":null}]})).unwrap();
+    assert_fenced(l.save_av_details("av", details));
+    let artwork: ApplyAvArtwork = serde_json::from_value(json!({"expectedRevision":"any","front":{"kind":"clear"},"spine":{"kind":"keep"},"back":{"kind":"keep"}})).unwrap();
+    assert_fenced(l.apply_av_artwork("av", artwork));
+    let link: ApplyRequest = serde_json::from_value(json!({"collectionId":null,"newCollectionName":"New AV","expectedRevision":null,"split":{"x1":0,"x2":0},"surfaces":{"front":"keep","spine":"keep","back":"keep"},"fields":{},"performers":[],"directors":[]})).unwrap();
+    assert_fenced(l.apply_av_link("inbox", link));
+    assert_fenced(l.save_av_person_memo("p", Some("new memo".into())));
+    let rect = AvPortraitRect {
+        x: 0.0,
+        y: 0.0,
+        w: 0.5,
+        h: 0.5,
+    };
+    assert_fenced(l.set_av_portrait_crop("p", "art", rect));
+    assert_fenced(l.clear_av_portrait("p"));
+    let portraits = AvPortraitState::default();
+    assert_fenced(l.preview_av_commons_portrait_with("p", &portraits, &NoNetwork));
+    assert_fenced(l.use_av_commons_portrait("p", &portraits));
+    assert_fenced(l.preview_av_stashdb_portrait_with("p", "image", &portraits, &NoNetwork));
+    assert_fenced(l.use_av_stashdb_portrait("p", &portraits));
+    let profiles = AvProfileState::default();
+    // Opening a performer page (force=false) keeps the stored stale profile quietly.
+    let quiet = l
+        .refresh_av_performer_profile_with("p", false, &profiles, &NoNetwork, Some("key"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (quiet.status.as_str(), quiet.fetched_at.as_str()),
+        ("matched", "2000-01-01T00:00:00Z")
+    );
+    assert_fenced(l.refresh_av_performer_profile_with(
+        "p",
+        true,
+        &profiles,
+        &NoNetwork,
+        Some("key"),
+    ));
+    assert_fenced(l.search_av_performer_profile_with("p", &NoNetwork, Some("key")));
+    assert_fenced(l.choose_av_performer_profile_with(
+        "p",
+        "stash-q",
+        &profiles,
+        &NoNetwork,
+        Some("key"),
+    ));
+    assert_fenced(l.dismiss_av_performer_profile("p", &profiles));
+    assert_fenced(l.clear_av_performer_profile("p", &profiles));
+    for favorite in [true, false] {
+        assert!(matches!(
+            l.set_av_favorite("p", favorite),
+            Err(HomeDataError::Library(
+                LibraryError::CollectionAuthorityOperationUnavailable
+            ))
+        ));
+    }
+    assert_eq!(av_local_state(&l), before);
+    assert_eq!(count(&l, "collection_authority_outbox"), 0);
+    // Reads stay available.
+    assert_eq!(l.get_av_details("av").unwrap().people.len(), 1);
+    assert_eq!(
+        l.get_av_performer("p").unwrap().person.memo.as_deref(),
+        Some("local memo")
+    );
+}
+
+#[test]
+fn collection_authority_batch5_adoption_keeps_av_details_people_portraits_and_credit_names() {
+    let (_temp, l, s) = fixture();
+    seed_av(&l);
+    let mut av = work("av", 1);
+    av["type"] = json!("av");
+    av["name"] = json!("AV Work");
+    av["selection"]["work"] = json!("art");
+    av["details"]["av"] = json!({"productCode":"ABC-001","titleJa":"原題","maker":"Maker","label":"Label","series":null,"genres":["g"],"releaseDate":"2026-01-02"});
+    av["avCredits"] = json!([
+        {"personId":"p","name":"Display","nameJa":"表示","role":"performer","order":0,"portraitCrop":null},
+        {"personId":"d","name":"Director","nameJa":null,"role":"director","order":0,"portraitCrop":null}
+    ]);
+    let mut artwork = art();
+    artwork["workId"] = json!("av");
+    adopt(&l, &s, json!({"works":[av],"artworks":[artwork]}));
+    let details = l.get_av_details("av").unwrap();
+    assert_eq!(
+        (
+            details.revision,
+            details.product_code.as_deref(),
+            details.maker.as_deref(),
+            details.genres.clone()
+        ),
+        (3, Some("ABC-001"), Some("Maker"), vec!["g".to_owned()])
+    );
+    let credits: Vec<_> = details
+        .people
+        .iter()
+        .map(|p| {
+            (
+                p.id.as_str(),
+                p.display_name.as_str(),
+                p.credit_name.as_deref(),
+            )
+        })
+        .collect();
+    // The local per-work credit name survives; a new credit has none (not its display name).
+    assert_eq!(
+        credits,
+        vec![("p", "Display", Some("Alias")), ("d", "Director", None)]
+    );
+    let page = l.get_av_performer("p").unwrap();
+    assert_eq!(page.person.memo.as_deref(), Some("local memo"));
+    assert!(matches!(
+        page.person.portrait,
+        Some(super::super::av_models::AvPortrait::Commons { .. })
+    ));
+    assert_eq!(page.works.len(), 1);
+    assert_eq!(
+        l.get_av_performer_profile("p")
+            .unwrap()
+            .unwrap()
+            .stashdb_id
+            .as_deref(),
+        Some("stash-p")
+    );
+    assert_eq!(l.list_av_favorites().unwrap().len(), 1);
+    // Adopted: editing stays fenced and nothing is queued.
+    assert_fenced(l.save_av_person_memo("p", None));
+    assert_eq!(count(&l, "collection_authority_outbox"), 0);
+}
