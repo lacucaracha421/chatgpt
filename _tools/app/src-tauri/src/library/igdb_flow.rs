@@ -31,6 +31,14 @@ impl<'a> GameImportFlow<'a> {
         }
     }
 
+    fn download_original(&self, identity: &str) -> Result<Vec<u8>, LibraryError> {
+        if super::collection_authority::collection_authority_active(&*self.library.connection()?)? {
+            self.client.download_original_for_authority(identity)
+        } else {
+            self.client.download_original(identity)
+        }
+    }
+
     fn search(&self, query: &str) -> Result<Vec<IgdbSearchResult>, LibraryError> {
         let credentials = credential::read_igdb_credentials_os()?;
         self.client
@@ -45,15 +53,15 @@ impl<'a> GameImportFlow<'a> {
     }
 
     fn apply_new(&self, request: IgdbApplyRequest) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
+        super::collection_authority::collection_write_status(&*self.library.connection()?)?;
         let credentials = credential::read_igdb_credentials_os()?;
         let fetched = self.client.game(&credentials, request.game_id)?;
         let (cover, hero) = validated_selection(&request, &fetched)?;
         let cover_bytes = cover
-            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .map(|candidate| self.download_original(&candidate.image_id))
             .transpose()?;
         let hero_bytes = hero
-            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .map(|candidate| self.download_original(&candidate.image_id))
             .transpose()?;
         // 대표 이미지로 고른 스크린샷은 hero 행이 갤러리에도 나오므로 다시 받지 않는다.
         // 스크린샷 하나가 실패해도 가져오기 전체를 중단하지 않고 그 장만 건너뛴다.
@@ -65,7 +73,7 @@ impl<'a> GameImportFlow<'a> {
                 if Some(shot.image_id.as_str()) == hero_image_id {
                     return None;
                 }
-                self.client
+                self
                     .download_original(&shot.image_id)
                     .map_err(|error| {
                         eprintln!("igdb screenshot {} skipped: {error}", shot.image_id)
@@ -83,7 +91,7 @@ impl<'a> GameImportFlow<'a> {
     }
 
     fn refresh(&self, collection_id: &str) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
+        super::collection_authority::collection_write_status(&*self.library.connection()?)?;
         let game_id = self
             .library
             .get_igdb_connection(collection_id)?
@@ -99,7 +107,7 @@ impl<'a> GameImportFlow<'a> {
         &self,
         request: IgdbArtworkReplaceRequest,
     ) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
+        super::collection_authority::collection_write_status(&*self.library.connection()?)?;
         let game_id = self
             .library
             .get_igdb_connection(&request.collection_id)?
@@ -110,10 +118,10 @@ impl<'a> GameImportFlow<'a> {
         validate_game_identity(game_id, &fetched)?;
         let (cover, hero) = validated_artwork_decisions(&request, &fetched)?;
         let cover_bytes = cover
-            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .map(|candidate| self.download_original(&candidate.image_id))
             .transpose()?;
         let hero_bytes = hero
-            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .map(|candidate| self.download_original(&candidate.image_id))
             .transpose()?;
         self.library.replace_fetched_igdb_game_artwork(
             request,
@@ -160,17 +168,13 @@ impl Library {
     ) -> Result<Option<IgdbConnection>, LibraryError> {
         let connection = self.connection()?;
         require_collection(&connection, collection_id)?;
-        let binding: Option<(String, Option<String>)> = connection
-            .query_row(
-                "SELECT external_id, last_synced_at
-                 FROM collection_external_bindings
-                 WHERE collection_id = ?1 AND provider = ?2",
-                params![collection_id, PROVIDER],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
+        let binding = super::collection_authority::provider_binding_state(
+            &connection,
+            collection_id,
+            PROVIDER,
+        )?;
         binding
-            .map(|(external_id, last_synced_at)| {
+            .map(|(external_id, last_synced_at, _)| {
                 let game_id = external_id
                     .parse::<i64>()
                     .ok()
@@ -213,12 +217,12 @@ impl Library {
         query: &mut dyn FnMut(&str) -> Result<String, LibraryError>,
         report: &dyn Fn(&str, Result<bool, LibraryError>),
     ) -> Result<(), LibraryError> {
-        if super::collection_authority::collection_authority_active(&*self.connection()?)? { return Ok(()); }
+        super::collection_authority::collection_write_status(&*self.connection()?)?;
         use std::sync::atomic::Ordering;
         let mut bound = Vec::new();
         for id in ids {
             if let Some(binding) = self.get_igdb_connection(id)? {
-                let snapshot: Option<String> = self.connection()?.query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb'", [id], |r| r.get(0))?;
+                let snapshot: Option<String> = self.connection()?.query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb'", [id], |r| r.get::<_,Option<String>>(0)).optional()?.flatten();
                 let has_name = snapshot
                     .as_deref()
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
@@ -282,7 +286,8 @@ impl Library {
         id: &str,
         value: &serde_json::Value,
     ) -> Result<bool, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
+        let authority =
+            super::collection_authority::collection_write_status(&*self.connection()?)?.active;
         let game_id = value
             .get("id")
             .and_then(|v| v.as_i64())
@@ -293,7 +298,7 @@ impl Library {
             .filter(|s| !s.trim().is_empty())
             .ok_or(LibraryError::IgdbInvalidResponse)?;
         let previous: Option<String> = self.connection()?.query_row(
-            "SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb'", [id], |r| r.get(0))?;
+            "SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb'", [id], |r| r.get::<_,Option<String>>(0)).optional()?.flatten();
         let mut snapshot: serde_json::Value = previous
             .as_deref()
             .map(serde_json::from_str)
@@ -311,7 +316,12 @@ impl Library {
         let snapshot_json = snapshot.to_string();
         let data = provider_snapshot(Some(&snapshot_json))?;
         let platforms = ordered_igdb_platforms(&snapshot_json, &[])?;
+        let platforms_empty = platforms.is_empty();
         let before = self.get_collection(id)?.platforms;
+        let platforms_can_fill = may_fill_from_provider(
+            before.as_deref(),
+            provider_snapshot(previous.as_deref())?.platforms.as_deref(),
+        );
         let updated = self.refresh_fetched_igdb_game(
             id,
             IgdbRemoteGame {
@@ -332,7 +342,11 @@ impl Library {
                 snapshot_json,
             },
         )?;
-        Ok(before != updated.platforms)
+        Ok(if authority {
+            platforms_can_fill && !platforms_empty
+        } else {
+            before != updated.platforms
+        })
     }
 
     pub(crate) fn apply_fetched_igdb_game(
@@ -343,7 +357,29 @@ impl Library {
         hero_bytes: Option<&[u8]>,
         screenshot_bytes: &[Option<Vec<u8>>],
     ) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
+        if super::collection_authority::collection_write_status(&*self.connection()?)?.active {
+            let (cover, hero) = validated_selection(&request, &fetched)?;
+            let id = uuid::Uuid::new_v4().to_string();
+            let mut art = Vec::new();
+            igdb_authority_art(&mut art, cover, cover_bytes, "cover", true)?;
+            igdb_authority_art(&mut art, hero, hero_bytes, "hero", true)?;
+            for (shot, bytes) in fetched.screenshots.iter().zip(screenshot_bytes) {
+                if hero.is_some_and(|h| h.image_id == shot.image_id) {
+                    continue;
+                }
+                if let Some(bytes) = bytes {
+                    igdb_authority_art(&mut art, Some(shot), Some(bytes), "screenshot", false)?;
+                }
+            }
+            return self.queue_provider_operation(
+                &id,
+                Some(&fetched.name),
+                "game",
+                Some(igdb_authority_input(&fetched)?),
+                &art,
+                &[],
+            );
+        }
         let (cover, hero) = validated_selection(&request, &fetched)?;
         let hero_image_id = hero.map(|candidate| candidate.image_id.as_str());
         let collection_id = uuid::Uuid::new_v4().to_string();
@@ -490,7 +526,20 @@ impl Library {
         collection_id: &str,
         fetched: IgdbRemoteGame,
     ) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
+        if super::collection_authority::collection_write_status(&*self.connection()?)?.active {
+            let binding = self
+                .get_igdb_connection(collection_id)?
+                .ok_or(LibraryError::InvalidIgdbIdentity)?;
+            validate_game_identity(binding.game_id, &fetched)?;
+            return self.queue_provider_operation(
+                collection_id,
+                None,
+                "game",
+                Some(igdb_authority_input(&fetched)?),
+                &[],
+                &[],
+            );
+        }
         let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
@@ -610,7 +659,31 @@ impl Library {
         cover_bytes: Option<&[u8]>,
         hero_bytes: Option<&[u8]>,
     ) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
+        if super::collection_authority::collection_write_status(&*self.connection()?)?.active {
+            let (cover, hero) = validated_artwork_decisions(&request, &fetched)?;
+            let binding = self
+                .get_igdb_connection(&request.collection_id)?
+                .ok_or(LibraryError::InvalidIgdbIdentity)?;
+            validate_game_identity(binding.game_id, &fetched)?;
+            let mut art = Vec::new();
+            igdb_authority_art(&mut art, cover, cover_bytes, "cover", true)?;
+            igdb_authority_art(&mut art, hero, hero_bytes, "hero", true)?;
+            let mut clears = Vec::new();
+            if matches!(request.cover, IgdbArtworkDecision::Clear) {
+                clears.push("cover");
+            }
+            if matches!(request.hero, IgdbArtworkDecision::Clear) {
+                clears.push("hero");
+            }
+            return self.queue_provider_operation(
+                &request.collection_id,
+                None,
+                "game",
+                None,
+                &art,
+                &clears,
+            );
+        }
         let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
         let (cover_candidate, hero_candidate) = validated_artwork_decisions(&request, &fetched)?;
         let game_id = {
@@ -774,6 +847,39 @@ fn artwork_decision_candidate<'a>(
                 .map(Some)
         }
     }
+}
+
+pub(crate) fn igdb_authority_input(
+    fetched: &IgdbRemoteGame,
+) -> Result<ExternalBindingInput, LibraryError> {
+    validate_game_identity(fetched.id, fetched)?;
+    Ok(ExternalBindingInput {
+        provider: PROVIDER.into(),
+        external_id: fetched.id.to_string(),
+        provider_config_json: None,
+        provider_data_json: Some(normalized_snapshot(&fetched.snapshot_json)?),
+        last_synced_at: None,
+    })
+}
+fn igdb_authority_art<'a>(
+    art: &mut Vec<super::collection_authority::ProviderArtwork<'a>>,
+    candidate: Option<&'a IgdbImageRef>,
+    bytes: Option<&'a [u8]>,
+    kind: &'a str,
+    select: bool,
+) -> Result<(), LibraryError> {
+    match (candidate, bytes) {
+        (Some(candidate), Some(bytes)) => art.push(super::collection_authority::ProviderArtwork {
+            image: &candidate.image_id,
+            kind,
+            bytes,
+            select,
+            season: None,
+        }),
+        (None, None) => {}
+        _ => return Err(LibraryError::InvalidIgdbIdentity),
+    }
+    Ok(())
 }
 
 fn prepare_selected_artwork(
@@ -1010,7 +1116,10 @@ fn platform_priority(name: &str) -> u8 {
         6
     }
 }
-fn ordered_igdb_platforms(json: &str, fallback: &[String]) -> Result<Vec<String>, LibraryError> {
+pub(crate) fn ordered_igdb_platforms(
+    json: &str,
+    fallback: &[String],
+) -> Result<Vec<String>, LibraryError> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|_| LibraryError::IgdbInvalidResponse)?;
     let mut values = fallback
@@ -1121,6 +1230,187 @@ fn normalized_snapshot(snapshot_json: &str) -> Result<String, LibraryError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::library::collection_authority::tests::{
+        provider_commands, provider_fixture, provider_png,
+    };
+
+    #[test]
+    fn igdb_flow_authority_invalid_screenshot_keeps_import_successful() {
+        let (_temp, library, _) = provider_fixture("game", None, "42", serde_json::json!({}));
+        let result = library
+            .apply_fetched_igdb_game(
+                request(None, None),
+                remote(),
+                None,
+                None,
+                &[Some(vec![0, 1, 2])],
+            )
+            .unwrap();
+        assert_eq!(result.skipped_provider_artwork, ["screenshot-1"]);
+        let commands = provider_commands(&library);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0]["commandType"], "createWork");
+    }
+
+    #[test]
+    fn igdb_flow_authority_new_queues_binding_and_all_artwork() {
+        let (_temp, library, _) = provider_fixture("game", None, "42", serde_json::json!({}));
+        let png = provider_png();
+        let mut fetched = remote();
+        fetched.snapshot_json = serde_json::json!({"id":42,"name":fetched.name,"developer":fetched.developer,"publisher":fetched.publisher,"release_date":fetched.release_date,"platforms":fetched.platforms,"genres":fetched.genres,"summary":fetched.summary}).to_string();
+        let summary = library
+            .apply_fetched_igdb_game(
+                request(Some("cover-1"), Some("artwork-1")),
+                fetched,
+                Some(&png),
+                Some(&png),
+                &[Some(png.clone())],
+            )
+            .unwrap();
+        let commands = provider_commands(&library);
+        assert_eq!(
+            commands
+                .iter()
+                .map(|v| v["commandType"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "createWork",
+                "addArtwork",
+                "selectArtwork",
+                "addArtwork",
+                "selectArtwork",
+                "addArtwork"
+            ]
+        );
+        assert_eq!(commands[0]["binding"]["provider"], "igdb");
+        assert_eq!(commands[0]["binding"]["values"]["developer"], "Smilebit");
+        assert!(commands[0]["binding"]["details"].is_null());
+        assert_eq!(commands[2]["slot"], "work");
+        assert_eq!(commands[4]["slot"], "hero");
+        assert_eq!(commands[5]["kind"], "screenshot");
+        assert_eq!(
+            library
+                .get_igdb_connection(&summary.id)
+                .unwrap()
+                .unwrap()
+                .game_id,
+            42
+        );
+        library
+            .replace_fetched_igdb_game_artwork(
+                IgdbArtworkReplaceRequest {
+                    collection_id: summary.id,
+                    cover: IgdbArtworkDecision::Keep,
+                    hero: IgdbArtworkDecision::Select {
+                        image_id: "screenshot-1".into(),
+                    },
+                },
+                remote(),
+                None,
+                Some(&png),
+            )
+            .unwrap();
+        let commands = provider_commands(&library);
+        assert_eq!(commands[6]["commandType"], "addArtwork");
+        assert_eq!(commands[6]["kind"], "hero");
+        assert_ne!(commands[6]["artworkId"], commands[5]["artworkId"]);
+        assert_eq!(commands[7]["slot"], "hero");
+    }
+
+    #[test]
+    fn igdb_flow_authority_refresh_and_information_only_queue_snapshots() {
+        let (_temp, library, id) =
+            provider_fixture("game", Some("igdb"), "42", serde_json::json!({"id":42}));
+        let mut fetched = remote();
+        fetched.snapshot_json =
+            serde_json::json!({"id":42,"name":"Jet Set Radio","developer":"Smilebit"}).to_string();
+        library.refresh_fetched_igdb_game(&id, fetched).unwrap();
+        let commands = provider_commands(&library);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0]["commandType"], "applyProviderSnapshot");
+        assert_eq!(commands[0]["values"]["developer"], "Smilebit");
+        assert!(commands[0]["details"].is_null());
+        let query_count = std::cell::Cell::new(0);
+        let outcomes = std::cell::RefCell::new(Vec::new());
+        library.fill_bound_igdb_games_with(&[id.clone()],&std::sync::atomic::AtomicBool::new(false),&mut |body| {
+            assert!(body.contains("where id = (42)"));
+            query_count.set(query_count.get()+1);
+            Ok(serde_json::json!([{"id":42,"name":"Jet Set Radio","platforms":[{"name":"Dreamcast"}],"release_dates":[]}]).to_string())
+        },&|_,result| outcomes.borrow_mut().push(result.unwrap())).unwrap();
+        assert_eq!(query_count.get(), 1);
+        assert_eq!(*outcomes.borrow(), [true]);
+        let commands = provider_commands(&library);
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[1]["commandType"], "applyProviderSnapshot");
+        assert_eq!(commands[1]["values"]["platforms"], "Dreamcast");
+        assert_eq!(
+            library.get_collection(&id).unwrap().platforms.as_deref(),
+            Some("Dreamcast")
+        );
+    }
+
+    #[test]
+    fn igdb_flow_authority_artwork_keep_clear_select_and_oversize() {
+        let (_temp, library, id) =
+            provider_fixture("game", Some("igdb"), "42", serde_json::json!({"id":42}));
+        let png = provider_png();
+        let oversized = vec![0; 16 * 1024 * 1024 + 1];
+        let result = library
+            .replace_fetched_igdb_game_artwork(
+                IgdbArtworkReplaceRequest {
+                    collection_id: id.clone(),
+                    cover: IgdbArtworkDecision::Select {
+                        image_id: "cover-1".into(),
+                    },
+                    hero: IgdbArtworkDecision::Select {
+                        image_id: "artwork-1".into(),
+                    },
+                },
+                remote(),
+                Some(&oversized),
+                Some(&png),
+            )
+            .unwrap();
+        assert_eq!(result.skipped_provider_artwork, ["cover-1"]);
+        let commands = provider_commands(&library);
+        assert_eq!(
+            commands
+                .iter()
+                .map(|v| v["commandType"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["addArtwork", "selectArtwork"]
+        );
+        assert_eq!(commands[1]["slot"], "hero");
+        // Reusing immutable bytes must not queue a duplicate.
+        library
+            .replace_fetched_igdb_game_artwork(
+                IgdbArtworkReplaceRequest {
+                    collection_id: id.clone(),
+                    cover: IgdbArtworkDecision::Keep,
+                    hero: IgdbArtworkDecision::Select {
+                        image_id: "artwork-1".into(),
+                    },
+                },
+                remote(),
+                None,
+                Some(&png),
+            )
+            .unwrap();
+        assert_eq!(provider_commands(&library).len(), 2);
+        library
+            .replace_fetched_igdb_game_artwork(
+                IgdbArtworkReplaceRequest {
+                    collection_id: id,
+                    cover: IgdbArtworkDecision::Keep,
+                    hero: IgdbArtworkDecision::Clear,
+                },
+                remote(),
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(provider_commands(&library).last().unwrap()["artworkId"].is_null());
+    }
     use super::{ordered_igdb_platforms, ordered_platforms};
     use rusqlite::params;
     use std::io::Cursor;

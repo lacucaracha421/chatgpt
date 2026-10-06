@@ -1,4 +1,40 @@
 use super::*;
+
+#[test]
+fn launchbox_authority_information_runs_igdb_only_and_leaves_spine_fenced() {
+    use crate::library::collection_authority::tests::{provider_commands, provider_fixture};
+    let (temp, library, id) = provider_fixture("game", None, "42", serde_json::json!({}));
+    let io = FakeHttp::new("<LaunchBox></LaunchBox>");
+    let calls = std::cell::Cell::new(0);
+    let cache = temp.path().join("cache");
+    let result = FetchState::default()
+        .information_with(
+            &library,
+            &cache,
+            "job",
+            10,
+            None,
+            &io,
+            &AtomicBool::new(false),
+            &mut |ids, _, _| {
+                assert_eq!(ids, [id.clone()]);
+                calls.set(calls.get() + 1);
+                Ok(())
+            },
+            &|_| {},
+        )
+        .unwrap();
+    assert_eq!(calls.get(), 1);
+    assert_eq!(result.platforms_filled, 0);
+    assert!(io.requests.borrow().is_empty());
+    assert!(provider_commands(&library).is_empty());
+    assert!(matches!(
+        FetchState::default().fetch_one(&library, &cache, &id, &AtomicBool::new(false)),
+        Err(Error::Library(
+            crate::library::error::LibraryError::CollectionAuthorityOperationUnavailable
+        ))
+    ));
+}
 use std::{
     cell::{Cell, RefCell},
     io::Cursor,

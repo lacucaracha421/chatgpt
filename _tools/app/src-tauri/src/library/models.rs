@@ -862,6 +862,8 @@ pub enum CollectionType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSummary {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_provider_artwork: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub season_date_range: Option<[String; 2]>,
     pub id: String,
@@ -1708,6 +1710,7 @@ mod tests {
     #[test]
     fn collection_summary_omits_legacy_provider_identity() {
         let value = serde_json::to_value(CollectionSummary {
+            skipped_provider_artwork: vec![],
             season_date_range: None,
             id: "work-1".into(),
             name: "Dungeon Meshi".into(),

@@ -132,7 +132,7 @@ impl Library {
         collection_id: &str,
         game_id: i64,
     ) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
+        super::collection_authority::collection_write_status(&*self.connection()?)?;
         let credentials = super::credential::read_igdb_credentials_os()?;
         let game = self.igdb_client().game(&credentials, game_id)?;
         if game.id != game_id {
@@ -146,7 +146,19 @@ impl Library {
         collection_id: &str,
         game: super::models::IgdbRemoteGame,
     ) -> Result<CollectionSummary, LibraryError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
+        if super::collection_authority::collection_write_status(&*self.connection()?)?.active {
+            if self.get_igdb_connection(collection_id)?.is_some() {
+                return Err(LibraryError::DuplicateProviderBinding);
+            }
+            return self.queue_provider_operation(
+                collection_id,
+                None,
+                "game",
+                Some(super::igdb_flow::igdb_authority_input(&game)?),
+                &[],
+                &[],
+            );
+        }
         if game.id <= 0 {
             return Err(LibraryError::InvalidIgdbIdentity);
         }
@@ -784,6 +796,7 @@ pub(crate) fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<C
     };
     let showcase_int: i64 = row.get(23)?;
     Ok(CollectionSummary {
+        skipped_provider_artwork: vec![],
         season_date_range: season_date_range(&row.get::<_, String>(29)?),
         id: row.get(0)?,
         name: row.get(1)?,
@@ -853,6 +866,48 @@ pub(crate) fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn collection_authority_igdb_connect_queues_binding_then_snapshot() {
+        use super::super::collection_authority::tests::{provider_commands, provider_fixture};
+        let (_temp, library, id) = provider_fixture("game", None, "42", serde_json::json!({}));
+        let mut game: crate::library::models::IgdbRemoteGame = serde_json::from_value(serde_json::json!({"id":42,"name":"Game","summary":null,"releaseDate":null,"genres":[],"platforms":[],"developer":null,"publisher":null,"cover":null,"artworks":[],"screenshots":[],"snapshotJson":"{\"id\":42,\"developer\":\"Studio\"}"})).unwrap();
+        library
+            .connect_fetched_igdb_game(&id, game.clone())
+            .unwrap();
+        let commands = provider_commands(&library);
+        assert_eq!(
+            commands
+                .iter()
+                .map(|v| v["commandType"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["bindProvider", "applyProviderSnapshot"]
+        );
+        assert_eq!(commands[1]["values"]["developer"], "Studio");
+        assert_eq!(library.get_collection(&id).unwrap().developer.as_deref(), Some("Studio"));
+        // The existing dialog immediately requests artwork before a bind receipt.
+        game.cover = Some(crate::library::models::IgdbImageRef {
+            image_id: "cover".into(),
+            width: None,
+            height: None,
+        });
+        library
+            .replace_fetched_igdb_game_artwork(
+                crate::library::models::IgdbArtworkReplaceRequest {
+                    collection_id: id,
+                    cover: crate::library::models::IgdbArtworkDecision::Select {
+                        image_id: "cover".into(),
+                    },
+                    hero: crate::library::models::IgdbArtworkDecision::Keep,
+                },
+                game,
+                Some(&super::super::collection_authority::tests::provider_png()),
+                None,
+            )
+            .unwrap();
+        let commands = provider_commands(&library);
+        assert_eq!(commands[2]["commandType"], "addArtwork");
+        assert_eq!(commands[3]["commandType"], "selectArtwork");
+    }
     fn igdb_game(id: i64) -> crate::library::models::IgdbRemoteGame {
         crate::library::models::IgdbRemoteGame {
             id,

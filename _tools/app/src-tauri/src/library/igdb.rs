@@ -180,6 +180,16 @@ impl IgdbClient {
         let mut response = self.agent.get(&url).call().map_err(map_ureq_error)?;
         read_bytes(&mut response, MAX_WORK_ARTWORK_BYTES)
     }
+
+    pub(crate) fn download_original_for_authority(
+        &self,
+        image_id: &str,
+    ) -> Result<Vec<u8>, LibraryError> {
+        let url = Self::image_url(image_id, IgdbImageSize::Original)?;
+        let mut response = self.agent.get(&url).call().map_err(map_ureq_error)?;
+        super::collection_authority::read_provider_artwork(response.body_mut().as_reader())
+            .map_err(|_| LibraryError::IgdbUnavailable)
+    }
     fn request_games(
         &self,
         credentials: &IgdbCredentials,

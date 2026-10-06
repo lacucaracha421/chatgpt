@@ -1336,7 +1336,7 @@ impl FetchState {
         after: Option<String>,
         report: &dyn Fn(SpineProgress),
     ) -> Result<SpineBatchResult> {
-        super::collection_authority::fence_collection_operation(&*library.connection()?)?;
+        super::collection_authority::collection_write_status(&*library.connection()?)?;
         self.information_with(
             library,
             cache,
@@ -1434,7 +1434,8 @@ impl FetchState {
                     }
                 }
             }
-            if library.get_igdb_connection(&id)?.is_none()
+            if !super::collection_authority::collection_authority_active(&*library.connection()?)?
+                && library.get_igdb_connection(&id)?.is_none()
                 && load_game(library, &id)?
                     .platforms
                     .as_deref()

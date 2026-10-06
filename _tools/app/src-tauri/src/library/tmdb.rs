@@ -186,6 +186,38 @@ impl TmdbClient {
         read_bytes(&mut response, MAX_WORK_ARTWORK_BYTES)
     }
 
+    pub(crate) fn download_original_for_authority(
+        &self,
+        file_path: &str,
+    ) -> Result<Vec<u8>, LibraryError> {
+        self.download_image_for_authority(file_path, TmdbImageSize::Original)
+    }
+
+    pub(crate) fn download_season_poster_for_authority(
+        &self,
+        file_path: &str,
+    ) -> Result<Vec<u8>, LibraryError> {
+        self.download_image_for_authority(file_path, TmdbImageSize::W342)
+    }
+
+    fn download_image_for_authority(
+        &self,
+        file_path: &str,
+        size: TmdbImageSize,
+    ) -> Result<Vec<u8>, LibraryError> {
+        let url = Self::image_url(file_path, size)?;
+        let mut response = self.agent.get(&url).call().map_err(map_ureq_error)?;
+        super::collection_authority::read_provider_artwork(response.body_mut().as_reader()).map_err(
+            |error| {
+                if error.kind() == std::io::ErrorKind::TimedOut {
+                    LibraryError::TmdbTimedOut
+                } else {
+                    LibraryError::TmdbUnavailable
+                }
+            },
+        )
+    }
+
     pub fn image_url(file_path: &str, size: TmdbImageSize) -> Result<String, LibraryError> {
         image_url(file_path, size)
     }

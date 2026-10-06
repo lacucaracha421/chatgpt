@@ -9,6 +9,13 @@ pub(crate) enum CollectionDelivery {
     Retry,
 }
 
+fn definitive_refusal(status: u16, value: Option<Value>) -> Value {
+    value.as_ref().map(|v| &v["detail"])
+        .filter(|v| v["code"].is_string()).cloned().unwrap_or_else(|| {
+            serde_json::json!({"code": if status == 413 { "collectionCommandTooLarge" } else { "invalidCollectionCommand" }})
+        })
+}
+
 impl CloudClient {
     pub(crate) fn collection_authority_read(
         &self,
@@ -52,7 +59,15 @@ impl CloudClient {
                 4 * 1024 * 1024,
             )?));
         }
-        if matches!(status, 404 | 409 | 422) {
+        // A proxy may reject the body before the API can return coded JSON.
+        // These structural refusals are definitive even without that envelope.
+        if matches!(status, 413 | 422) {
+            let value: Option<Value> = read_json_bounded(&mut response, 64 * 1024).ok();
+            return Ok(CollectionDelivery::Dropped(definitive_refusal(
+                status, value,
+            )));
+        }
+        if matches!(status, 404 | 409) {
             let value: Value = read_json_bounded(&mut response, 64 * 1024)?;
             let code = value["detail"]["code"]
                 .as_str()
@@ -105,5 +120,36 @@ impl CloudClient {
             destination,
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collection_authority_structural_refusals_keep_codes_and_handle_proxy_bodies() {
+        for status in [413, 422] {
+            assert_eq!(
+                definitive_refusal(
+                    status,
+                    Some(serde_json::json!({"detail":{"code":"invalidCollectionCommand"}}))
+                )["code"],
+                "invalidCollectionCommand"
+            );
+            assert_eq!(
+                definitive_refusal(status, None)["code"],
+                if status == 413 {
+                    "collectionCommandTooLarge"
+                } else {
+                    "invalidCollectionCommand"
+                }
+            );
+            assert!(definitive_refusal(
+                status,
+                Some(serde_json::json!({"detail":"Unprocessable entity"}))
+            )["code"]
+                .is_string());
+        }
     }
 }

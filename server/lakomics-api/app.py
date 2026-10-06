@@ -912,6 +912,12 @@ startup_mobile_collections = register_collections(
     require_publisher=require_publisher,
 )
 
+import work_providers
+
+work_providers.register(
+    app, get_db, _home_client, lambda: _s3, lambda: R2_BUCKET,
+)
+
 from mobile_characters import register_characters
 
 startup_mobile_characters = register_characters(

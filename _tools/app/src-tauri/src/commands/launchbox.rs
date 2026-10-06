@@ -86,7 +86,11 @@ pub async fn fetch_launchbox_spines(
         return Err(Error::InvalidRequest.into());
     }
     let library = current_required(state)?;
-    crate::library::collection_authority::fence_collection_operation(&*library.connection()?)?;
+    if !information_only {
+        crate::library::collection_authority::fence_collection_operation(&*library.connection()?)?;
+    } else {
+        crate::library::collection_authority::collection_write_status(&*library.connection()?)?;
+    }
     let cache = app
         .path()
         .app_cache_dir()

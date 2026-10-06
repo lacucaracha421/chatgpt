@@ -39,7 +39,7 @@ impl Library {
             super::collection::require_collection(&tx, collection_id)?;
             if !matches!(
                 input.provider.trim().to_ascii_lowercase().as_str(),
-                "mangadex" | "kakao" | "aladin"
+                "mangadex" | "kakao" | "aladin" | "tmdb" | "igdb"
             ) {
                 return Err(LibraryError::CollectionAuthorityOperationUnavailable);
             }
@@ -134,6 +134,40 @@ fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExternalBinding
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn external_binding_authority_accepts_tmdb_and_igdb_without_local_binding_writes() {
+        use crate::library::collection_authority::tests::{provider_commands, provider_fixture};
+        for (kind, provider, external) in [("movie", "tmdb", "tv:42"), ("game", "igdb", "42")] {
+            let (_temp, library, id) =
+                provider_fixture(kind, None, external, serde_json::json!({}));
+            library
+                .upsert_collection_external_binding(
+                    &id,
+                    crate::library::models::ExternalBindingInput {
+                        provider: provider.into(),
+                        external_id: external.into(),
+                        provider_config_json: None,
+                        provider_data_json: Some("{\"id\":42}".into()),
+                        last_synced_at: None,
+                    },
+                )
+                .unwrap();
+            let commands = provider_commands(&library);
+            assert_eq!(
+                commands
+                    .iter()
+                    .map(|v| v["commandType"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                ["bindProvider", "applyProviderSnapshot"]
+            );
+            assert!(commands[1]["snapshot"].is_object());
+            assert_eq!(commands[1]["details"].is_object(), provider == "tmdb");
+            assert!(library
+                .list_collection_external_bindings(&id)
+                .unwrap()
+                .is_empty());
+        }
+    }
     use crate::library::{
         error::LibraryError,
         models::{CollectionType, CreateCollection, ExternalBindingInput},

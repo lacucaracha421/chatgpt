@@ -244,7 +244,7 @@ pub(crate) fn collection_authority_active(db: &Connection) -> Result<bool, Libra
     Ok(local(db)?.is_some())
 }
 
-/// Provider metadata is never optimistically merged. Only receipts/feed materialize it.
+/// Queue provider metadata and project its FIFO merge without changing confirmed revisions.
 pub(crate) fn enqueue_provider_snapshot(
     tx: &Transaction<'_>,
     status: &CollectionAuthorityStatus,
@@ -265,8 +265,10 @@ pub(crate) fn enqueue_provider_snapshot(
     };
     let config = parse(&input.provider_config_json)?;
     let snapshot = parse(&input.provider_data_json)?;
-    if !matches!(provider.as_str(), "mangadex" | "kakao" | "aladin")
-        || input.external_id.trim().is_empty()
+    if !matches!(
+        provider.as_str(),
+        "mangadex" | "kakao" | "aladin" | "tmdb" | "igdb"
+    ) || input.external_id.trim().is_empty()
         || (!config.is_null() && !config.is_object())
         || (!snapshot.is_null() && !snapshot.is_object())
     {
@@ -277,12 +279,18 @@ pub(crate) fn enqueue_provider_snapshot(
         .map(|raw| serde_json::from_str(&raw)).transpose().map_err(|_| LibraryError::InvalidCloudResponse)?.unwrap_or(Value::Null);
     let mut revision = base["entityRevision"].as_i64().unwrap_or(0);
     // Earlier intents are immutable. Predict only their binding state/digest for FIFO CAS.
-    let pending = tx.prepare("SELECT payload FROM collection_authority_outbox WHERE entity_key=?1 AND state IN ('pending','blocked') ORDER BY seq")?
-        .query_map([&entity_key], |r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    let pending = tx.prepare("SELECT payload FROM collection_authority_outbox WHERE (entity_key=?1 OR (command_type='createWork' AND json_extract(payload,'$.workId')=?2)) AND state IN ('pending','blocked') ORDER BY seq")?
+        .query_map(params![entity_key,work], |r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
     for raw in pending {
         let body: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
         match body["commandType"].as_str() {
+            Some("createWork") if body["binding"]["provider"] == provider => {
+                base = body["binding"].clone();
+                base["bound"] = json!(true);
+                base["snapshotDigest"] = snapshot_digest(&base["snapshot"]);
+                revision = 1;
+            }
             Some("bindProvider") => {
                 if base["bound"] != true
                     || base["externalId"] != body["externalId"]
@@ -326,8 +334,8 @@ pub(crate) fn enqueue_provider_snapshot(
         )?;
     }
     if !snapshot.is_null() {
-        let values =
-            crate::cloud::collections::collection_baseline::provider_values(&provider, &snapshot)?;
+        let values = provider_snapshot_values(&provider, &snapshot)?;
+        let details = provider_details(&provider, &snapshot);
         if base["externalId"] != external
             || base["snapshot"] != snapshot
             || base["values"] != values
@@ -337,7 +345,7 @@ pub(crate) fn enqueue_provider_snapshot(
                 status,
                 "applyProviderSnapshot",
                 &entity_key,
-                json!({"workId":work,"provider":provider,"externalId":external,"snapshot":snapshot,"values":values,"details":null,"baseSnapshotDigest":base["snapshotDigest"]}),
+                json!({"workId":work,"provider":provider,"externalId":external,"snapshot":snapshot,"values":values,"details":details,"baseSnapshotDigest":base["snapshotDigest"]}),
             )?;
             let retry_key = format!("collectionProviderRetry:{entity_key}");
             if tx.query_row(
@@ -350,7 +358,246 @@ pub(crate) fn enqueue_provider_snapshot(
             }
         }
     }
+    reapply_pending_core_edits(tx)?;
     Ok(())
+}
+
+fn snapshot_digest(snapshot: &Value) -> Value {
+    use sha2::{Digest, Sha256};
+    json!(Sha256::digest(snapshot.to_string().as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>())
+}
+
+fn provider_snapshot_values(provider: &str, snapshot: &Value) -> Result<Value, LibraryError> {
+    let mut values =
+        crate::cloud::collections::collection_baseline::provider_values(provider, snapshot)?;
+    if provider == "igdb" {
+        let fallback = values["platforms"]
+            .as_str()
+            .map(|v| v.split(" · ").map(str::to_owned).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let platforms = super::igdb_flow::ordered_igdb_platforms(&snapshot.to_string(), &fallback)?;
+        values["platforms"] = if platforms.is_empty() {
+            Value::Null
+        } else {
+            json!(platforms.join(" · "))
+        };
+    }
+    Ok(values)
+}
+
+pub(crate) fn provider_details(provider: &str, snapshot: &Value) -> Value {
+    if provider != "tmdb" {
+        return Value::Null;
+    }
+    let series = snapshot.get("series").filter(|v| v.is_object()).and_then(|series| {
+    let seasons = series.get("seasons").and_then(|s| s.as_array()).into_iter().flatten().map(|s| {
+        let episodes: Vec<_> = s.get("episodes").and_then(|v| v.as_array()).into_iter().flatten().map(|e| serde_json::json!({"id":e["id"],"episodeNumber":e["episodeNumber"],"name":e["name"],"airDate":e["airDate"],"runtimeMinutes":e["runtimeMinutes"]})).collect();
+        serde_json::json!({"id":s["id"],"seasonNumber":s["seasonNumber"],"name":s["name"],"airDate":s["airDate"],"posterArtworkId":s["posterArtworkId"],"episodes":episodes})
+    }).collect::<Vec<_>>();
+    Some(serde_json::json!({"status":series["status"],"cast":series.get("cast").cloned().unwrap_or(serde_json::json!([])),"seasons":seasons}))
+    });
+    let film = snapshot.get("film").filter(|v| v.is_object()).and_then(|film| {
+    let rows = |key: &str, limit: usize| film.get(key).and_then(Value::as_array).into_iter().flatten().filter(|v| v.is_object()).take(limit).cloned().collect::<Vec<_>>();
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let cast: Vec<_> = rows("cast", 200).iter().filter(|c| c["name"].is_string()).map(|c| json!({"name":c["name"],"character":text(c,"character")})).collect();
+    let releases: Vec<_> = rows("releases", 500).iter()
+        .filter(|r| r["country"].is_string() && r["date"].is_string() && r["releaseType"].as_u64().is_some_and(|t| (1..=6).contains(&t)))
+        .map(|r| json!({"country":r["country"],"releaseType":r["releaseType"],"date":r["date"],"certification":text(r,"certification")})).collect();
+    let related = film.get("related").filter(|r| r.is_object() && r["collectionName"].is_string()).map(|related| {
+        let parts: Vec<_> = related.get("parts").and_then(Value::as_array).into_iter().flatten()
+            .filter(|p| p["movieId"].is_i64() && p["title"].is_string()).take(200)
+            .map(|p| json!({"movieId":p["movieId"],"title":p["title"],"releaseDate":p["releaseDate"].as_str()})).collect();
+        json!({"collectionName":related["collectionName"],"parts":parts})
+    });
+    Some(json!({"cast":cast,"releases":releases,"related":related}))
+    });
+    json!({"series":series,"film":film})
+}
+
+pub(crate) struct ProviderArtwork<'a> {
+    pub image: &'a str,
+    pub kind: &'a str,
+    pub bytes: &'a [u8],
+    pub select: bool,
+    pub season: Option<i64>,
+}
+
+/// The extra byte signals an oversized image to the operation's skip/report path.
+/// Stop reading there even if the provider serves an arbitrarily large body.
+pub(crate) fn read_provider_artwork(reader: impl std::io::Read) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    reader.take(16 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// Pending identities are visible to follow-up actions (connect then artwork in
+/// the existing IGDB dialog). Binding snapshots remain confirmed only.
+pub(crate) fn provider_binding_state(
+    db: &Connection,
+    work: &str,
+    provider: &str,
+) -> Result<Option<(String, Option<String>, Option<String>)>, LibraryError> {
+    let mut binding = db.query_row("SELECT external_id,last_synced_at,provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider=?2",params![work,provider],|r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?))).optional()?;
+    if !collection_authority_active(db)? {
+        return Ok(binding);
+    }
+    let pending = db.prepare("SELECT payload FROM collection_authority_outbox WHERE state IN ('pending','blocked') AND json_extract(payload,'$.workId')=?1 ORDER BY seq")?.query_map([work], |r| r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    for raw in pending {
+        let body: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let candidate = if body["commandType"] == "createWork" {
+            &body["binding"]
+        } else {
+            &body
+        };
+        if candidate["provider"] != provider {
+            continue;
+        }
+        match body["commandType"].as_str() {
+            Some("unbindProvider") => binding = None,
+            Some("createWork" | "bindProvider" | "applyProviderSnapshot") => {
+                let previous = binding.take();
+                binding = Some((
+                    text(candidate, "externalId")?.to_owned(),
+                    previous.as_ref().and_then(|b| b.1.clone()),
+                    previous.and_then(|b| b.2),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(binding)
+}
+
+impl Library {
+    /// Staging files and immutable commands commit as one durable operation.
+    /// addArtwork delivery uses the existing upload and confirmation path.
+    pub(crate) fn queue_provider_operation(
+        &self,
+        work: &str,
+        new_name: Option<&str>,
+        work_type: &str,
+        input: Option<super::models::ExternalBindingInput>,
+        artworks: &[ProviderArtwork<'_>],
+        clears: &[&str],
+    ) -> Result<super::models::CollectionSummary, LibraryError> {
+        let provider_name = input
+            .as_ref()
+            .map(|v| v.provider.clone())
+            .unwrap_or_else(|| {
+                if work_type == "movie" {
+                    "tmdb".into()
+                } else {
+                    "igdb".into()
+                }
+            });
+        let provider = provider_name.as_str();
+        let mut skipped = Vec::new();
+        let mut prepared = Vec::new();
+        for art in artworks {
+            if art.bytes.len() > 16 * 1024 * 1024 {
+                skipped.push(art.image.to_owned());
+                continue;
+            }
+            match self.prepare_work_artwork(work, art.bytes) {
+                Ok(image) => prepared.push((art, image)),
+                // The legacy IGDB gallery import skips a broken screenshot while
+                // selected cover/hero preparation errors still abort atomically.
+                Err(_) if art.kind == "screenshot" && !art.select => {
+                    skipped.push(art.image.to_owned())
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let status = collection_write_status(&tx)?;
+        if !status.active {
+            return Err(LibraryError::CollectionAuthorityMismatch);
+        }
+        let mut input = input;
+        if let Some(name) = new_name {
+            let name = super::collection::normalized_name(name.to_owned())?;
+            let binding = input.as_ref().ok_or(LibraryError::InvalidExternalBinding)?;
+            let snapshot: Value = serde_json::from_str(
+                binding
+                    .provider_data_json
+                    .as_deref()
+                    .ok_or(LibraryError::InvalidExternalBinding)?,
+            )
+            .map_err(|_| LibraryError::InvalidExternalBinding)?;
+            let values = provider_snapshot_values(provider, &snapshot)?;
+            let mut fields = values.clone();
+            fields["year"] = json!(values["releaseDate"]
+                .as_str()
+                .and_then(|v| v.get(..4))
+                .and_then(|v| v.parse::<i64>().ok()));
+            let now = chrono::Utc::now().to_rfc3339();
+            // Pending shell, as in normal authority-backed work creation.
+            tx.execute("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES(?1,?2,?3,?4,?4)",params![work,name,work_type,now]).map_err(super::collection::map_duplicate_name)?;
+            let mut create = json!({"workId":work,"type":work_type,"name":name,"legacyKind":null,"fields":fields,"binding":{"provider":provider,"externalId":binding.external_id,"config":null,"snapshot":snapshot,"values":values,"details":provider_details(provider,&snapshot)}});
+            // Leave envelope room and use the normal bind/snapshot commands below
+            // for large imports. Even without a publisher, the shell can be created.
+            if create.to_string().len() + 512 > COMMAND_BYTES_CLIENT {
+                create["binding"] = Value::Null;
+                create["fields"] = json!({});
+            }
+            enqueue_collection_command(&tx, &status, "createWork", work, create)?;
+        } else {
+            let collection = super::collection::collection_by_id(&tx, work)?;
+            if (work_type == "movie"
+                && collection.collection_type != super::models::CollectionType::Movie)
+                || (work_type == "game"
+                    && collection.collection_type != super::models::CollectionType::Game)
+            {
+                return Err(LibraryError::InvalidCollectionType);
+            }
+        }
+        let mut retained = std::collections::BTreeSet::new();
+        for (art, image) in &prepared {
+            let id = enqueue_artwork(
+                &tx, &status, work, provider, art.image, art.kind, None, image,
+            )?;
+            if id == image.id {
+                retained.insert(id.clone());
+            }
+            if art.select {
+                enqueue_artwork_selection(&tx, &status, work, art.kind, Some(&id))?;
+            }
+            if let (Some(season), Some(binding)) = (art.season, input.as_mut()) {
+                let mut snapshot: Value =
+                    serde_json::from_str(binding.provider_data_json.as_deref().unwrap())
+                        .map_err(|_| LibraryError::InvalidExternalBinding)?;
+                if let Some(seasons) = snapshot["series"]["seasons"].as_array_mut() {
+                    for row in seasons {
+                        if row["id"] == season {
+                            row["posterArtworkId"] = json!(id);
+                        }
+                    }
+                }
+                binding.provider_data_json = Some(snapshot.to_string());
+            }
+        }
+        for kind in clears {
+            enqueue_artwork_selection(&tx, &status, work, kind, None)?;
+        }
+        if let Some(input) = &input {
+            enqueue_provider_snapshot(&tx, &status, work, input)?;
+        }
+        let mut result = super::collection::collection_by_id(&tx, work)?;
+        result.skipped_provider_artwork = skipped;
+        tx.commit()?;
+        for (_, image) in prepared {
+            if retained.contains(&image.id) {
+                image.commit();
+            }
+        }
+        Ok(result)
+    }
 }
 
 pub(crate) fn enqueue_release_event(
@@ -481,6 +728,10 @@ pub(crate) fn editable_work(db: &Connection, work: &str) -> Result<Value, Librar
 pub(crate) fn artwork_identity(provider: &str, kind: &str, image: &str, sha: &str) -> String {
     if provider == "local" {
         format!("sha256:{kind}:{sha}")
+    } else if matches!(provider, "tmdb" | "igdb") {
+        // A screenshot promoted to hero, or new bytes at the same provider path,
+        // need another immutable record rather than changing the old kind/blob.
+        format!("{image}:{kind}:{sha}")
     } else {
         image.to_owned()
     }
@@ -1686,11 +1937,12 @@ impl Library {
                     if body["commandType"] == "addArtwork" {
                         self.upload_collection_command_artwork(client, token, body)?;
                     }
-                    let credential = if publisher_command(text(body, "commandType")?) {
-                        publisher.ok_or(LibraryError::CloudCredentialNotConfigured)?
-                    } else {
-                        token
-                    };
+                    let credential = command_credential(body, token, publisher)?;
+                    if body.to_string().len() > command_byte_limit(body, publisher.is_some()) {
+                        return Ok(CollectionDelivery::Dropped(
+                            json!({"code":"collectionCommandTooLarge"}),
+                        ));
+                    }
                     client.collection_authority_send(body, credential)
                 },
                 chrono::Utc::now().timestamp(),
@@ -1740,18 +1992,30 @@ impl Library {
             selections(&tx)?;
             tx.commit()?;
         }
-        // Skeleton is deliberately bounded to two originals per cadence.
-        changed |= self.materialize_collection_artwork_with(
-            &status,
-            &|w, a, sha, size, mime, path| {
-                client.download_collection_artwork(w, a, sha, size, mime, path, token)
-            },
-            chrono::Utc::now().timestamp(),
-            2,
-        )? > 0;
+        // Drain originals in small batches within a bounded time per cadence, so a
+        // fresh adoption (hundreds of covers) fills in within minutes, not hours.
+        let deadline = std::time::Instant::now() + MATERIALIZE_BUDGET;
+        loop {
+            let done = self.materialize_collection_artwork_until(
+                &status,
+                &|w, a, sha, size, mime, path| {
+                    client.download_collection_artwork(w, a, sha, size, mime, path, token)
+                },
+                chrono::Utc::now().timestamp(),
+                MATERIALIZE_BATCH,
+                Some(deadline),
+            )?;
+            changed |= done > 0;
+            if done < MATERIALIZE_BATCH || std::time::Instant::now() >= deadline {
+                break;
+            }
+        }
         Ok((changed, sent))
     }
 }
+
+const MATERIALIZE_BATCH: usize = 8;
+const MATERIALIZE_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 
 fn apply_entities(
     tx: &Transaction<'_>,
@@ -1800,6 +2064,44 @@ fn publisher_command(command: &str) -> bool {
     )
 }
 
+// Keep these in sync with collection_authority.py's role and JSON limits.
+const COMMAND_BYTES_CLIENT: usize = 64 * 1024;
+const COMMAND_BYTES_PUBLISHER: usize = 8 * 1024 * 1024;
+const SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
+const DETAIL_BYTES: usize = 3 * 1024 * 1024;
+const CONFIG_BYTES: usize = 64 * 1024;
+
+fn provider_command(body: &Value) -> bool {
+    matches!(
+        body["commandType"].as_str(),
+        Some("bindProvider" | "applyProviderSnapshot")
+    ) || (body["commandType"] == "createWork" && body["binding"].is_object())
+}
+
+fn command_credential<'a>(
+    body: &Value,
+    client: &'a str,
+    publisher: Option<&'a str>,
+) -> Result<&'a str, LibraryError> {
+    if publisher_command(text(body, "commandType")?) {
+        publisher.ok_or(LibraryError::CloudCredentialNotConfigured)
+    } else if provider_command(body) {
+        Ok(publisher.unwrap_or(client))
+    } else {
+        Ok(client)
+    }
+}
+
+fn command_byte_limit(body: &Value, publisher_available: bool) -> usize {
+    if publisher_command(body["commandType"].as_str().unwrap_or_default())
+        || (publisher_available && provider_command(body))
+    {
+        COMMAND_BYTES_PUBLISHER
+    } else {
+        COMMAND_BYTES_CLIENT
+    }
+}
+
 /// Enqueue inside the optimistic-write transaction. Retries keep the stored payload and ID.
 pub(crate) fn enqueue_collection_command(
     tx: &Transaction<'_>,
@@ -1828,8 +2130,51 @@ pub(crate) fn enqueue_collection_command(
             return Err(LibraryError::InvalidCloudResponse);
         }
     }
+    let mut payload = Value::Object(body);
+    let mut omission = None;
+    let provider = if command == "createWork" {
+        &mut payload["binding"]
+    } else {
+        &mut payload
+    };
+    if matches!(command, "createWork" | "applyProviderSnapshot") && provider.is_object() {
+        if provider["details"].to_string().len() > DETAIL_BYTES {
+            provider["details"] = Value::Null;
+            omission = Some("providerDetailsTooLarge");
+        }
+        if provider["snapshot"].to_string().len() > SNAPSHOT_BYTES {
+            if let Some(snapshot) = provider["snapshot"].as_object_mut() {
+                snapshot.remove("series");
+                snapshot.remove("film");
+            }
+            omission = Some("providerSnapshotDetailsTooLarge");
+        }
+        if provider["snapshot"].to_string().len() > SNAPSHOT_BYTES {
+            return Err(LibraryError::InvalidExternalBinding);
+        }
+    }
+    let config = if command == "createWork" {
+        &payload["binding"]["config"]
+    } else {
+        &payload["config"]
+    };
+    if matches!(command, "createWork" | "bindProvider") && config.to_string().len() > CONFIG_BYTES {
+        return Err(LibraryError::InvalidExternalBinding);
+    }
+    // Provider creates fit the publisher envelope. Client-only delivery is checked
+    // again against its smaller limit before sending an immutable queued command.
+    let limit = command_byte_limit(&payload, true);
+    if payload.to_string().len() > limit {
+        return Err(LibraryError::InvalidExternalBinding);
+    }
     let now = chrono::Utc::now().to_rfc3339();
-    tx.execute("INSERT INTO collection_authority_outbox(operation_id,library_id,epoch,contract_version,command_type,entity_key,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8)",params![operation,id.library,id.epoch,id.version,command,entity_key,Value::Object(body).to_string(),now])?;
+    tx.execute("INSERT INTO collection_authority_outbox(operation_id,library_id,epoch,contract_version,command_type,entity_key,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8)",params![operation,id.library,id.epoch,id.version,command,entity_key,payload.to_string(),now])?;
+    if let Some(reason) = omission {
+        tx.execute(
+            "UPDATE collection_authority_outbox SET conflict_detail=?2 WHERE operation_id=?1",
+            params![operation, json!({"code":reason}).to_string()],
+        )?;
+    }
     super::authority_pass::note_local_work();
     Ok(operation)
 }
@@ -1955,6 +2300,147 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
             _ => {}
         }
     }
+    project_pending_provider_fields(tx)?;
+    Ok(())
+}
+
+/// Rebuild provider effects from confirmed rows, then replay every pending field
+/// change in FIFO order. Replaying against the already optimistic SQL rows would
+/// mistake our own previous projection for a user override on the next refresh.
+fn project_pending_provider_fields(tx: &Transaction<'_>) -> Result<(), LibraryError> {
+    let works = tx.prepare("SELECT DISTINCT json_extract(payload,'$.workId') FROM collection_authority_outbox WHERE state='pending' AND (command_type='applyProviderSnapshot' OR (command_type='createWork' AND json_type(payload,'$.binding')='object'))")?
+        .query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    for work in works {
+        let confirmed: Option<String> = tx.query_row("SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id=?1", [&work], |r| r.get(0)).optional()?;
+        let mut fields = confirmed
+            .map(|raw| serde_json::from_str::<Value>(&raw))
+            .transpose()
+            .map_err(|_| LibraryError::InvalidCloudResponse)?
+            .map(|v| v["fields"].clone())
+            .unwrap_or(json!({}));
+        let bindings = tx.prepare("SELECT payload FROM collection_authority_revisions WHERE section='bindings' AND work_id=?1")?
+            .query_map([&work], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        let mut bases = std::collections::BTreeMap::new();
+        for raw in bindings {
+            let binding: Value =
+                serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+            if binding["bound"] == true {
+                bases.insert(text(&binding, "provider")?.to_owned(), binding);
+            }
+        }
+        let pending = tx.prepare("SELECT payload FROM collection_authority_outbox WHERE state='pending' AND json_extract(payload,'$.workId')=?1 ORDER BY seq")?
+            .query_map([&work], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        let mut projected = std::collections::BTreeSet::new();
+        for raw in pending {
+            let body: Value =
+                serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let snapshot = match body["commandType"].as_str() {
+                Some("createWork") => {
+                    fields = body["fields"].clone();
+                    body["binding"].as_object().map(|_| &body["binding"])
+                }
+                Some("updateWork") => {
+                    for (field, value) in body["changes"]
+                        .as_object()
+                        .ok_or(LibraryError::InvalidCloudResponse)?
+                    {
+                        fields[field] = value.clone();
+                    }
+                    None
+                }
+                Some("unbindProvider") => {
+                    bases.remove(text(&body, "provider")?);
+                    None
+                }
+                Some("applyProviderSnapshot") => Some(&body),
+                _ => None,
+            };
+            if let Some(snapshot) = snapshot {
+                let provider = text(snapshot, "provider")?;
+                let base = bases.get(provider).cloned().unwrap_or(Value::Null);
+                let connect = base["snapshotExternalId"] != snapshot["externalId"];
+                let previous = &base["values"];
+                let values = &snapshot["values"];
+                let blank = |value: &Value| {
+                    value.is_null() || value.as_str().is_some_and(|v| v.trim().is_empty())
+                };
+                let normalized = |value: &Value| {
+                    value
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_owned)
+                };
+                for (field, value) in values
+                    .as_object()
+                    .ok_or(LibraryError::InvalidCloudResponse)?
+                {
+                    let allowed = match provider {
+                        "tmdb" => {
+                            if value.is_string()
+                                || fields[field].is_string()
+                                || previous[field].is_string()
+                            {
+                                normalized(&fields[field]) == normalized(&previous[field])
+                            } else {
+                                fields[field] == previous[field]
+                            }
+                        }
+                        "igdb" => blank(&fields[field]) && blank(&previous[field]),
+                        "mangadex" if field == "year" => {
+                            fields[field].is_null() || fields[field] == previous[field]
+                        }
+                        "mangadex" => blank(&fields[field]) || fields[field] == previous[field],
+                        _ => false,
+                    };
+                    if allowed {
+                        fields[field] = value.clone();
+                    }
+                    projected.insert(field.clone());
+                }
+                let year = |value: &Value| {
+                    value
+                        .as_str()
+                        .and_then(|v| v.get(..4))
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .map_or(Value::Null, |v| json!(v))
+                };
+                if connect
+                    && ((provider == "tmdb" && fields["year"] == year(&previous["releaseDate"]))
+                        || (provider == "igdb" && fields["year"].is_null()))
+                {
+                    fields["year"] = year(&values["releaseDate"]);
+                    projected.insert("year".into());
+                }
+                bases.insert(
+                    provider.to_owned(),
+                    json!({"values":values,"snapshotExternalId":snapshot["externalId"]}),
+                );
+            }
+        }
+        for field in projected {
+            let column = match field.as_str() {
+                "year" => "year",
+                "originalTitle" => "original_title",
+                "runtimeMinutes" => "runtime_minutes",
+                "author" => "author",
+                "director" => "director",
+                "developer" => "developer",
+                "publisher" => "publisher",
+                "platforms" => "platforms",
+                "productionCompany" => "production_company",
+                "releaseDate" => "release_date",
+                "externalScore" => "external_score",
+                "genres" => "genres",
+                "overview" => "overview",
+                _ => return Err(LibraryError::InvalidCloudResponse),
+            };
+            tx.execute(
+                &format!("UPDATE collections SET {column}=?2 WHERE id=?1"),
+                params![work, sql_value(&fields[&field])?],
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -2043,6 +2529,27 @@ impl Library {
         token: &str,
         body: &Value,
     ) -> Result<(), LibraryError> {
+        self.upload_collection_command_artwork_with(
+            body,
+            &|blob, bytes| {
+                client
+                    .upload_collection_artwork(blob, bytes, token)
+                    .map(|_| ())
+            },
+            &|blob| {
+                client
+                    .missing_collection_artworks(&[blob], token)
+                    .map(|missing| missing.is_empty())
+            },
+        )
+    }
+
+    fn upload_collection_command_artwork_with(
+        &self,
+        body: &Value,
+        upload: &dyn Fn(&crate::cloud::collections::ArtworkBlob, &[u8]) -> Result<(), LibraryError>,
+        confirmed: &dyn Fn(&crate::cloud::collections::ArtworkBlob) -> Result<bool, LibraryError>,
+    ) -> Result<(), LibraryError> {
         use sha2::{Digest, Sha256};
         use std::io::Read;
         let blob: crate::cloud::collections::ArtworkBlob =
@@ -2071,11 +2578,8 @@ impl Library {
         {
             return Err(LibraryError::InvalidWorkArtwork);
         }
-        client.upload_collection_artwork(&blob, &bytes, token)?;
-        if !client
-            .missing_collection_artworks(&[&blob], token)?
-            .is_empty()
-        {
+        upload(&blob, &bytes)?;
+        if !confirmed(&blob)? {
             return Err(LibraryError::CloudRequestUnavailable);
         }
         Ok(())
@@ -2115,6 +2619,8 @@ impl Library {
         self.flush_collection_outbox_with_refresh(status, send, now, &|body| {
             let work = text(body, "workId")?;
             match text(body, "provider")? {
+                "tmdb" => self.refresh_tmdb_movie(work).map(|_| ()),
+                "igdb" => self.refresh_igdb_game(work).map(|_| ()),
                 "mangadex" => self.refresh_mangadex(work).map(|_| ()),
                 "kakao" => super::credential::read_kakao_key()
                     .and_then(|key| self.refresh_kakao(&key, work).map(|_| ())),
@@ -2253,6 +2759,7 @@ impl Library {
         Ok(sent)
     }
 
+    #[cfg(test)]
     fn materialize_collection_artwork_with(
         &self,
         status: &CollectionAuthorityStatus,
@@ -2260,14 +2767,28 @@ impl Library {
         now: i64,
         limit: usize,
     ) -> Result<usize, LibraryError> {
+        self.materialize_collection_artwork_until(status, download, now, limit, None)
+    }
+
+    fn materialize_collection_artwork_until(
+        &self,
+        status: &CollectionAuthorityStatus,
+        download: &dyn Fn(&str, &str, &str, u64, &str, &Path) -> Result<(), LibraryError>,
+        now: i64,
+        limit: usize,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<usize, LibraryError> {
         if !status.active {
             return Ok(0);
         }
         ensure_collection_write_ready(&*self.connection()?, status)?;
         let rows=self.connection()?.prepare("SELECT q.artwork_id,q.work_id,q.blob_sha256,q.size_bytes,q.mime_type,q.target_path,q.attempts FROM collection_authority_materialization q WHERE q.state='pending' AND q.retry_at<=?1 AND NOT EXISTS(SELECT 1 FROM collection_authority_trash t WHERE t.work_id=q.work_id) ORDER BY q.created_at,q.artwork_id LIMIT ?2")?
-            .query_map(params![now,limit.min(2) as i64],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)? as u64,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?)))?.collect::<Result<Vec<_>,_>>()?;
+            .query_map(params![now,limit as i64],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)? as u64,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?)))?.collect::<Result<Vec<_>,_>>()?;
         let mut count = 0;
         for (art, work, sha, size, mime, target, attempts) in rows {
+            if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                break;
+            }
             // Target is generated by apply, never a source path. Check canonical
             // ancestors too, so a symlink cannot redirect the worker outside root.
             let result = (|| {
@@ -2365,4 +2886,4 @@ fn verify_blob(path: &Path, sha: &str, size: u64) -> Result<(), LibraryError> {
 
 #[cfg(test)]
 #[path = "collection_authority_tests.rs"]
-mod tests;
+pub(crate) mod tests;

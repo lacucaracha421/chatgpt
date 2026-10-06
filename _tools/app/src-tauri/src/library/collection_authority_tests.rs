@@ -3,6 +3,513 @@ use std::cell::{Cell, RefCell};
 
 const NOW: &str = "2026-10-06T00:00:00Z";
 
+fn provider_edit_before_delivery(new_import: bool) {
+    let (_temp, library, status) = fixture();
+    let mut confirmed = work("w", 1);
+    confirmed["type"] = json!("movie");
+    confirmed["fields"]["status"] = Value::Null;
+    confirmed["fields"]["overview"] = json!("A");
+    let mut base = binding();
+    base["provider"] = json!("tmdb");
+    base["externalId"] = json!("42");
+    base["snapshotExternalId"] = json!("42");
+    base["config"] = Value::Null;
+    base["snapshot"] = json!({"id":42,"overview":"A"});
+    base["values"] = provider_snapshot_values("tmdb", &base["snapshot"]).unwrap();
+    base["snapshotDigest"] = snapshot_digest(&base["snapshot"]);
+    adopt(
+        &library,
+        &status,
+        if new_import {
+            json!({})
+        } else {
+            json!({"works":[confirmed.clone()],"bindings":[base.clone()]})
+        },
+    );
+    let input = super::super::models::ExternalBindingInput {
+        provider: "tmdb".into(),
+        external_id: "42".into(),
+        provider_config_json: None,
+        provider_data_json: Some(json!({"id":42,"overview":"B"}).to_string()),
+        last_synced_at: None,
+    };
+    library
+        .queue_provider_operation(
+            "w",
+            new_import.then_some("Imported"),
+            "movie",
+            Some(input),
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        library.get_collection("w").unwrap().overview.as_deref(),
+        Some("B")
+    );
+    // Use the same optimistic-write transaction and expectation builder as core edits.
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    let before = editable_work(&tx, "w").unwrap();
+    tx.execute(
+        "UPDATE collections SET overview=NULL,description='my memo' WHERE id='w'",
+        [],
+    )
+    .unwrap();
+    enqueue_work_changes(&tx, &status, "w", &before).unwrap();
+    tx.commit().unwrap();
+    drop(db);
+    let commands = provider_commands(&library);
+    let edit = commands.last().unwrap();
+    assert_eq!(edit["expected"]["overview"], "B");
+    assert_eq!(edit["changes"]["overview"], Value::Null);
+    assert_eq!(edit["changes"]["description"], "my memo");
+    let server = RefCell::new(confirmed);
+    let deliveries = Cell::new(0);
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                let mut server = server.borrow_mut();
+                deliveries.set(deliveries.get() + 1);
+                server["entityRevision"] = json!(deliveries.get() + 1);
+                let entities = match body["commandType"].as_str().unwrap() {
+                    "createWork" | "applyProviderSnapshot" => {
+                        server["fields"]["overview"] = json!("B");
+                        if new_import {
+                            server["name"] = json!("Imported");
+                            server["fields"]["description"] = Value::Null;
+                        }
+                        let mut base = base.clone();
+                        base["values"] =
+                            provider_snapshot_values("tmdb", &json!({"id":42,"overview":"B"}))?;
+                        base["snapshot"] = json!({"id":42,"overview":"B"});
+                        base["snapshotDigest"] = snapshot_digest(&base["snapshot"]);
+                        base["entityRevision"] = json!(2);
+                        json!({"works":[server.clone()],"bindings":[base.clone()]})
+                    }
+                    "updateWork" => {
+                        // Exercise the server's field CAS: mismatches must fail the test.
+                        for (field, value) in body["changes"].as_object().unwrap() {
+                            assert_eq!(body["expected"][field], server["fields"][field]);
+                            server["fields"][field] = value.clone();
+                        }
+                        json!({"works":[server.clone()]})
+                    }
+                    other => panic!("unexpected command: {other}"),
+                };
+                let mut receipt = envelope(&status);
+                receipt["operationId"] = body["operationId"].clone();
+                receipt["commandType"] = body["commandType"].clone();
+                receipt["changed"] = json!(true);
+                receipt["authorityCursor"] = json!(deliveries.get());
+                receipt["entities"] = entities;
+                Ok(CollectionDelivery::Accepted(receipt))
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(deliveries.get(), 2);
+    let final_work = library.get_collection("w").unwrap();
+    assert_eq!(final_work.overview, None);
+    assert_eq!(final_work.description.as_deref(), Some("my memo"));
+    assert_eq!(server.borrow()["fields"]["overview"], Value::Null);
+    assert_eq!(server.borrow()["fields"]["description"], "my memo");
+    assert_eq!(
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM collection_authority_outbox WHERE state='accepted'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        2
+    );
+}
+
+#[test]
+fn collection_authority_refresh_then_clear_and_memo_before_delivery_survive() {
+    provider_edit_before_delivery(false);
+}
+
+#[test]
+fn collection_authority_new_import_then_immediate_clear_and_memo_survive() {
+    provider_edit_before_delivery(true);
+}
+
+#[test]
+fn collection_authority_provider_credentials_follow_role_and_body_limits() {
+    for command in ["createWork", "bindProvider", "applyProviderSnapshot"] {
+        let body = json!({"commandType":command,"binding":{"provider":"tmdb"}});
+        assert_eq!(
+            command_credential(&body, "client", Some("publisher")).unwrap(),
+            "publisher"
+        );
+        assert_eq!(command_byte_limit(&body, true), COMMAND_BYTES_PUBLISHER);
+        if command == "createWork" {
+            assert_eq!(command_credential(&body, "client", None).unwrap(), "client");
+            assert_eq!(command_byte_limit(&body, false), COMMAND_BYTES_CLIENT);
+        } else {
+            assert!(matches!(
+                command_credential(&body, "client", None),
+                Err(LibraryError::CloudCredentialNotConfigured)
+            ));
+        }
+    }
+    assert_eq!(
+        command_credential(
+            &json!({"commandType":"updateWork"}),
+            "client",
+            Some("publisher")
+        )
+        .unwrap(),
+        "client"
+    );
+}
+
+#[test]
+fn collection_authority_definitive_provider_refusal_does_not_stall_unrelated_edits() {
+    let (_temp, library, status) = fixture();
+    adopt(&library, &status, json!({"works":[work("w",1)]}));
+    let refused = enqueue(&library, &status, "bindProvider");
+    let next = enqueue(&library, &status, "addArtwork");
+    let calls = Cell::new(0);
+    assert!(library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                calls.set(calls.get() + 1);
+                if body["operationId"] == refused {
+                    Ok(CollectionDelivery::Dropped(
+                        json!({"code":"invalidCollectionCommand"}),
+                    ))
+                } else {
+                    assert_eq!(body["operationId"], next);
+                    let mut receipt = envelope(&status);
+                    receipt["operationId"] = body["operationId"].clone();
+                    receipt["commandType"] = body["commandType"].clone();
+                    receipt["changed"] = json!(false);
+                    receipt["authorityCursor"] = json!(0);
+                    receipt["entities"] = json!({});
+                    Ok(CollectionDelivery::Accepted(receipt))
+                }
+            },
+            0
+        )
+        .unwrap());
+    assert_eq!(calls.get(), 2);
+    assert_eq!(
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT state FROM collection_authority_outbox WHERE operation_id=?1",
+                [&refused],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "dropped"
+    );
+    assert_eq!(
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT drop_reason FROM collection_authority_outbox WHERE operation_id=?1",
+                [&refused],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "invalidCollectionCommand"
+    );
+}
+
+#[test]
+fn collection_authority_large_import_splits_and_records_omitted_details() {
+    let (_temp, library, status) = fixture();
+    adopt(&library, &status, json!({}));
+    let input = super::super::models::ExternalBindingInput {
+        provider: "tmdb".into(), external_id: "42".into(), provider_config_json: None,
+        provider_data_json: Some(json!({"id":42,"overview":"B","film":{"cast":[{"name":"n".repeat(DETAIL_BYTES+1),"character":""}],"releases":[],"related":null}}).to_string()),
+        last_synced_at: None,
+    };
+    library
+        .queue_provider_operation("w", Some("Imported"), "movie", Some(input), &[], &[])
+        .unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(
+        commands
+            .iter()
+            .map(|v| v["commandType"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["createWork", "bindProvider", "applyProviderSnapshot"]
+    );
+    assert!(commands[0].to_string().len() < COMMAND_BYTES_CLIENT);
+    assert_eq!(commands[0]["binding"], Value::Null);
+    assert!(commands[2]["snapshot"].to_string().len() <= SNAPSHOT_BYTES);
+    assert_eq!(commands[2]["details"], Value::Null);
+    assert_eq!(commands[2]["values"]["overview"], "B");
+    assert!(library.connection().unwrap().query_row("SELECT conflict_detail FROM collection_authority_outbox WHERE command_type='applyProviderSnapshot'", [], |r| r.get::<_, String>(0)).unwrap().contains("TooLarge"));
+}
+
+#[test]
+fn collection_authority_materialization_deadline_stops_between_items_and_keeps_count_cap() {
+    let (_temp, library, status) = fixture();
+    let mut second = art();
+    second["artworkId"] = json!("art2");
+    adopt(
+        &library,
+        &status,
+        json!({"works":[work("w",1)],"artworks":[art(),second]}),
+    );
+    let calls = Cell::new(0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+    let slow = |_: &str, _: &str, _: &str, _: u64, _: &str, path: &Path| {
+        calls.set(calls.get() + 1);
+        std::fs::write(path, b"image").unwrap();
+        std::thread::sleep(
+            deadline.saturating_duration_since(std::time::Instant::now())
+                + std::time::Duration::from_millis(5),
+        );
+        Ok(())
+    };
+    assert_eq!(
+        library
+            .materialize_collection_artwork_until(&status, &slow, 0, 8, Some(deadline))
+            .unwrap(),
+        1
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        library
+            .materialize_collection_artwork_until(
+                &status,
+                &|_, _, _, _, _, _| panic!("expired deadline"),
+                0,
+                8,
+                Some(deadline)
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        library
+            .materialize_collection_artwork_with(
+                &status,
+                &|_, _, _, _, _, path| {
+                    std::fs::write(path, b"image").unwrap();
+                    Ok(())
+                },
+                0,
+                0
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        library
+            .materialize_collection_artwork_with(
+                &status,
+                &|_, _, _, _, _, path| {
+                    std::fs::write(path, b"image").unwrap();
+                    Ok(())
+                },
+                0,
+                1
+            )
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn collection_authority_provider_download_limit_skips_even_above_legacy_maximum() {
+    let bytes = vec![1; 32 * 1024 * 1024 + 1];
+    let mut reader = std::io::Cursor::new(&bytes);
+    let downloaded = read_provider_artwork(&mut reader).unwrap();
+    assert_eq!(downloaded.len(), 16 * 1024 * 1024 + 1);
+    assert_eq!(reader.position(), downloaded.len() as u64);
+    let (_temp, library, id) = provider_fixture("game", None, "42", json!({}));
+    let result = library
+        .queue_provider_operation(
+            &id,
+            None,
+            "game",
+            None,
+            &[ProviderArtwork {
+                image: "oversized",
+                kind: "hero",
+                bytes: &downloaded,
+                select: true,
+                season: None,
+            }],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.skipped_provider_artwork, ["oversized"]);
+    assert_eq!(
+        serde_json::to_value(&result).unwrap()["skippedProviderArtwork"],
+        json!(["oversized"])
+    );
+    assert!(provider_commands(&library).is_empty());
+}
+
+pub(crate) fn provider_fixture(
+    kind: &str,
+    provider: Option<&str>,
+    external: &str,
+    snapshot: Value,
+) -> (tempfile::TempDir, Library, String) {
+    let (temp, library, status) = fixture();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut initial = work(&id, 1);
+    initial["type"] = json!(kind);
+    initial["fields"]["status"] = json!(if kind == "game" {
+        "unplayed"
+    } else {
+        "unwatched"
+    });
+    let bindings = provider
+        .map(|provider| {
+            let mut binding = binding();
+            binding["workId"] = json!(id);
+            binding["provider"] = json!(provider);
+            binding["externalId"] = json!(external);
+            binding["snapshotExternalId"] = json!(external);
+            binding["config"] = Value::Null;
+            binding["snapshot"] = snapshot.clone();
+            binding["values"] = crate::cloud::collections::collection_baseline::provider_values(
+                provider, &snapshot,
+            )
+            .unwrap();
+            binding["snapshotDigest"] = snapshot_digest(&snapshot);
+            vec![binding]
+        })
+        .unwrap_or_default();
+    adopt(
+        &library,
+        &status,
+        json!({"works":[initial],"bindings":bindings}),
+    );
+    // Bindings stay confirmed; optimistic metadata is owned by the outbox projector.
+    library.connection().unwrap().execute_batch("CREATE TRIGGER reject_provider_binding_insert BEFORE INSERT ON collection_external_bindings BEGIN SELECT RAISE(ABORT,'legacy binding insert'); END;
+        CREATE TRIGGER reject_provider_binding_update BEFORE UPDATE ON collection_external_bindings BEGIN SELECT RAISE(ABORT,'legacy binding update'); END;
+        CREATE TRIGGER reject_provider_binding_delete BEFORE DELETE ON collection_external_bindings BEGIN SELECT RAISE(ABORT,'legacy binding delete'); END;
+        CREATE TRIGGER reject_provider_art_delete BEFORE DELETE ON collection_work_artworks BEGIN SELECT RAISE(ABORT,'legacy artwork delete'); END;
+        CREATE TRIGGER reject_provider_art_kind BEFORE UPDATE OF kind ON collection_work_artworks BEGIN SELECT RAISE(ABORT,'legacy artwork mutation'); END;").unwrap();
+    (temp, library, id)
+}
+
+pub(crate) fn provider_commands(library: &Library) -> Vec<Value> {
+    library
+        .connection()
+        .unwrap()
+        .prepare("SELECT payload FROM collection_authority_outbox ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|r| serde_json::from_str(&r.unwrap()).unwrap())
+        .collect()
+}
+
+pub(crate) fn provider_png() -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(4, 4)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+#[test]
+fn collection_authority_provider_artwork_upload_confirm_add_select_are_fifo_and_retryable() {
+    let (temp, library, id) = provider_fixture("game", None, "42", json!({}));
+    let png = provider_png();
+    library
+        .queue_provider_operation(
+            &id,
+            None,
+            "game",
+            None,
+            &[ProviderArtwork {
+                image: "image",
+                kind: "hero",
+                bytes: &png,
+                select: true,
+                season: None,
+            }],
+            &[],
+        )
+        .unwrap();
+    let trace = RefCell::new(Vec::new());
+    let status = collection_write_status(&*library.connection().unwrap()).unwrap();
+    let upload = |_: &crate::cloud::collections::ArtworkBlob, bytes: &[u8]| {
+        assert_eq!(bytes, png);
+        trace.borrow_mut().push("upload");
+        Ok(())
+    };
+    let missing = |_: &crate::cloud::collections::ArtworkBlob| {
+        trace.borrow_mut().push("confirm");
+        Ok(false)
+    };
+    // No confirmation means no add command reaches the server; retry stays pending.
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                library.upload_collection_command_artwork_with(body, &upload, &missing)?;
+                panic!("must not send unconfirmed artwork");
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(*trace.borrow(), ["upload", "confirm"]);
+    drop(library);
+    let library = Library::open(temp.path()).unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(commands.len(), 2);
+    assert_eq!(commands[0]["commandType"], "addArtwork");
+    assert_eq!(commands[1]["commandType"], "selectArtwork");
+    let trace = RefCell::new(Vec::new());
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                if body["commandType"] == "addArtwork" {
+                    library.upload_collection_command_artwork_with(
+                        body,
+                        &|_, bytes| {
+                            assert_eq!(bytes, png);
+                            trace.borrow_mut().push("upload");
+                            Ok(())
+                        },
+                        &|_| {
+                            trace.borrow_mut().push("confirm");
+                            Ok(true)
+                        },
+                    )?;
+                    trace.borrow_mut().push("addArtwork");
+                } else {
+                    trace.borrow_mut().push("selectArtwork");
+                }
+                let mut receipt = envelope(&status);
+                receipt["operationId"] = body["operationId"].clone();
+                receipt["commandType"] = body["commandType"].clone();
+                receipt["changed"] = json!(true);
+                receipt["authorityCursor"] = json!(1);
+                receipt["entities"] = json!({});
+                Ok(CollectionDelivery::Accepted(receipt))
+            },
+            100,
+        )
+        .unwrap();
+    assert_eq!(
+        *trace.borrow(),
+        ["upload", "confirm", "addArtwork", "selectArtwork"]
+    );
+}
+
 #[test]
 fn collection_authority_steam_binding_survives_baseline_and_changes() {
     let (_temp, library, status) = fixture();
@@ -249,19 +756,22 @@ fn collection_authority_batch4_operations_fence_unadopted_and_rare_imports() {
     ));
     assert!(matches!(
         l.connect_igdb_game("missing", 42),
-        Err(LibraryError::CollectionAuthorityOperationUnavailable)
+        Err(LibraryError::CollectionAuthorityNotAdopted)
     ));
 }
 
 #[test]
 fn collection_authority_provider_stale_refetches_once_then_records_drop() {
+    for (kind,provider,external) in [("manga","kakao","book-1"),("movie","tmdb","42"),("game","igdb","42")] {
     let (_temp, l, s) = fixture();
-    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    let mut initial = work("w",1);
+    initial["type"] = json!(kind);
+    adopt(&l, &s, json!({"works":[initial]}));
     let input = super::super::models::ExternalBindingInput {
-        provider: "kakao".into(),
-        external_id: "book-1".into(),
+        provider: provider.into(),
+        external_id: external.into(),
         provider_config_json: Some("{}".into()),
-        provider_data_json: Some("{\"title\":\"old\"}".into()),
+        provider_data_json: Some(json!({"id":42,"title":"old","film":{"cast":[],"releases":[],"related":null}}).to_string()),
         last_synced_at: None,
     };
     {
@@ -272,7 +782,9 @@ fn collection_authority_provider_stale_refetches_once_then_records_drop() {
         tx.commit().unwrap();
     }
     let refetches = Cell::new(0);
-    let send = |_body: &Value| {
+    let send = |body: &Value| {
+        assert_eq!(body["details"].is_object(),provider=="tmdb");
+        if provider == "tmdb" { assert!(body["details"]["film"].is_object()); }
         Ok(CollectionDelivery::Conflict(
             json!({"code":"providerSnapshotStale","current":{"binding":null}}),
         ))
@@ -280,7 +792,9 @@ fn collection_authority_provider_stale_refetches_once_then_records_drop() {
     let refresh = |_body: &Value| {
         refetches.set(refetches.get() + 1);
         let mut input = input.clone();
-        input.provider_data_json = Some("{\"title\":\"fresh\"}".into());
+        let mut snapshot: Value = serde_json::from_str(input.provider_data_json.as_deref().unwrap()).unwrap();
+        snapshot["title"] = json!("fresh");
+        input.provider_data_json = Some(snapshot.to_string());
         let mut c = l.connection()?;
         let tx = c.transaction()?;
         enqueue_provider_snapshot(&tx, &s, "w", &input)?;
@@ -296,6 +810,7 @@ fn collection_authority_provider_stale_refetches_once_then_records_drop() {
     assert!(!l
         .flush_collection_outbox_with_refresh(&s, &send, 0, &refresh)
         .unwrap());
+    }
 }
 
 #[test]
@@ -417,7 +932,7 @@ fn collection_authority_release_read_replay_keeps_feed_owned_state_and_local_cur
     let state: Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(state["readCursor"], 1);
 }
-fn fixture() -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
+pub(crate) fn fixture() -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
     let status = CollectionAuthorityStatus {
@@ -429,7 +944,7 @@ fn fixture() -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
     };
     (temp, library, status)
 }
-fn work(id: &str, rev: i64) -> Value {
+pub(crate) fn work(id: &str, rev: i64) -> Value {
     json!({"workId":id,"type":"manga","legacyKind":null,"name":format!("Work {id}"),"fields":{"description":"server memo","coverAssetId":null,"year":2026,"myScore":4.5,"status":"collecting","ownedPlatform":null},"showcase":false,"showcaseOrder":null,"selection":{"work":null,"hero":null,"backdrop":null,"spine":null},"details":{"series":null,"film":null,"av":null},"derived":{"unreadReleaseCount":99},"avCredits":[],"lifecycle":"live","trashedAt":null,"entityRevision":rev,"createdAt":NOW,"updatedAt":NOW})
 }
 fn art() -> Value {
@@ -439,7 +954,7 @@ fn art() -> Value {
 fn volume() -> Value {
     json!({"volumeId":"v","workId":"w","volumeNumber":1,"editionIndex":0,"sortOrder":3,"displayLabel":"1","coverArtworkId":"art","sourceProvider":null,"sourceCoverId":null,"deleted":false,"entityRevision":1})
 }
-fn binding() -> Value {
+pub(crate) fn binding() -> Value {
     json!({"workId":"w","provider":"mangadex","externalId":"provider-work","config":{"language":"ja"},"snapshot":{"title":"server"},"values":{},"snapshotDigest":"digest","snapshotExternalId":"provider-work","lastSyncedAt":NOW,"bound":true,"entityRevision":1})
 }
 fn source() -> Value {
@@ -474,7 +989,7 @@ fn page(status: &CollectionAuthorityStatus, section: usize, items: Value) -> Val
     v["nextSection"] = json!(SECTIONS.get(section + 1));
     v
 }
-fn adopt(l: &Library, s: &CollectionAuthorityStatus, entities: Value) {
+pub(crate) fn adopt(l: &Library, s: &CollectionAuthorityStatus, entities: Value) {
     l.begin_collection_baseline(s, &manifest(s, &entities))
         .unwrap();
     for (i, section) in SECTIONS.iter().enumerate() {

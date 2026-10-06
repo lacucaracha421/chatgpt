@@ -35,6 +35,10 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "local-only (stays): scanner fixtures",
     ),
     (
+        "library/restore_guard.rs",
+        "local-only (stays): marker fixture; the guard itself only reads",
+    ),
+    (
         "cloud/collection_baseline_tests.rs",
         "local-only (stays): baseline fixtures",
     ),
@@ -147,6 +151,13 @@ const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
     ),
 ];
 const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
+    ("library/collection.rs", "connect_fetched_igdb_game"),
+    ("library/tmdb_flow.rs", "apply_fetched_tmdb_title"),
+    ("library/tmdb_flow.rs", "refresh_fetched_tmdb_title"),
+    ("library/tmdb_flow.rs", "replace_fetched_tmdb_movie_artwork"),
+    ("library/igdb_flow.rs", "apply_fetched_igdb_game"),
+    ("library/igdb_flow.rs", "refresh_fetched_igdb_game"),
+    ("library/igdb_flow.rs", "replace_fetched_igdb_game_artwork"),
     ("library/collection_tracking.rs", "set_owned_volume_count"),
     ("library/collection_tracking.rs", "set_volume_ownership"),
     (
@@ -210,7 +221,6 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
 ];
 
 const FENCED_FUNCTIONS: &[(&str, &str)] = &[
-    ("library/collection.rs", "connect_fetched_igdb_game"),
     ("library/mangadex_flow.rs", "refresh_provider_fields"),
     ("library/external_binding.rs", "upsert_external_binding"),
     ("library/collection_tracking.rs", "write_owned_volume_count"),
@@ -225,15 +235,9 @@ const FENCED_FUNCTIONS: &[(&str, &str)] = &[
         "library/legacy_package_migration.rs",
         "execute_legacy_package_migration",
     ),
-    ("library/tmdb_flow.rs", "apply_fetched_tmdb_title"),
-    ("library/tmdb_flow.rs", "refresh_fetched_tmdb_title"),
-    ("library/tmdb_flow.rs", "replace_fetched_tmdb_movie_artwork"),
     ("library/tmdb_flow.rs", "insert_season_artwork"),
     ("library/tmdb_flow.rs", "apply_artwork_decision"),
     ("library/tmdb_flow.rs", "update_provider_metadata"),
-    ("library/igdb_flow.rs", "apply_fetched_igdb_game"),
-    ("library/igdb_flow.rs", "refresh_fetched_igdb_game"),
-    ("library/igdb_flow.rs", "replace_fetched_igdb_game_artwork"),
     ("library/igdb_flow.rs", "apply_artwork_decision"),
     ("library/igdb_flow.rs", "demote_unselected_screenshots"),
     ("library/launchbox.rs", "store_spine"),
@@ -296,7 +300,9 @@ fn remaining_source(file: &str, source: &str) -> String {
             "{f}::{name} lost adoption fence"
         );
         assert!(
-            body.contains("enqueue_work_changes(")
+            body.contains("queue_provider_operation(")
+                || body.contains("queue_tmdb_metadata(")
+                || body.contains("enqueue_work_changes(")
                 || body.contains("enqueue_collection_command(")
                 || body.contains("enqueue_artwork(")
                 || body.contains("enqueue_artwork_selection(")
