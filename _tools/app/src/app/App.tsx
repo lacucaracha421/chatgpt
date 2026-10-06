@@ -1,3 +1,4 @@
+import { pcPerfEnabled, pcNavigation, pcFolderScope, pcTabShown } from "../shared/pcPerfLog";
 import {listen} from "@tauri-apps/api/event";
 import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
@@ -79,23 +80,36 @@ import { nativeDropClientPoint, outsideViewport, sameAssetIds, sidebarTargetAt, 
 import { subscribeToExtensionIngest, useExtensionIngest, useNativeDragEnd, useWorkspaceAuthorityEvents, useWorkspaceShortcuts, type ExtensionIngestListener } from "./useWorkspaceEvents";
 import { useMetadataImport } from "./useMetadataImport";
 import { useDailyLibraryMaintenance } from "./useDailyLibraryMaintenance";
+import { preloadableTab, preloadTabsWhenIdle } from "./preloadTabs";
+import { afterLaunchSettled } from "../shared/launch/LaunchSplash";
+import { viewportImages, viewportImageDecoded } from "../shared/motion/viewportImages";
 
 export { subscribeToExtensionIngest, type ExtensionIngestListener } from "./useWorkspaceEvents";
 
-const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
+const collectionTab = preloadableTab(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
+const CollectionBrowser = collectionTab.View;
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
 const ArtistHub = lazy(() => import("../artists/ArtistHub").then((module) => ({ default: module.ArtistHub })));
 const AlbumOverview = lazy(() => import("../albums/AlbumOverview").then((module) => ({ default: module.AlbumOverview })));
-const ExchangeView = lazy(() => import("../exchange/ExchangeView").then((module) => ({ default: module.ExchangeView })));
+const exchangeTab = preloadableTab(() => import("../exchange/ExchangeView").then((module) => ({ default: module.ExchangeView })));
+const ExchangeView = exchangeTab.View;
 const HomeView = lazy(() => import("../home/HomeView").then((module) => ({ default: module.HomeView })));
-const NotesView = lazy(() => import("../notes/NotesView").then((module) => ({default:module.NotesView})));
-const SettingsView = lazy(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
-const StatisticsPanel = lazy(() => import("../statistics/StatisticsPanel").then((module) => ({ default: module.StatisticsPanel })));
-const TrashBrowser = lazy(() => import("../safety/TrashBrowser").then((module) => ({ default: module.TrashBrowser })));
-const SimilarityReviewBrowser = lazy(() => import("../similarity/SimilarityReviewBrowser").then((module) => ({ default: module.SimilarityReviewBrowser })));
-const MangaBrowser = lazy(() => import("../manga/MangaBrowser").then((module) => ({ default: module.MangaBrowser })));
+const notesTab = preloadableTab(() => import("../notes/NotesView").then((module) => ({default:module.NotesView})));
+const NotesView = notesTab.View;
+const settingsTab = preloadableTab(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
+const SettingsView = settingsTab.View;
+const statisticsTab = preloadableTab(() => import("../statistics/StatisticsPanel").then((module) => ({ default: module.StatisticsPanel })));
+const StatisticsPanel = statisticsTab.View;
+const trashTab = preloadableTab(() => import("../safety/TrashBrowser").then((module) => ({ default: module.TrashBrowser })));
+const TrashBrowser = trashTab.View;
+const similarityTab = preloadableTab(() => import("../similarity/SimilarityReviewBrowser").then((module) => ({ default: module.SimilarityReviewBrowser })));
+const SimilarityReviewBrowser = similarityTab.View;
+const mangaTab = preloadableTab(() => import("../manga/MangaBrowser").then((module) => ({ default: module.MangaBrowser })));
+const MangaBrowser = mangaTab.View;
 const MangaViewer = lazy(() => import("../manga/MangaViewer").then((module) => ({ default: module.MangaViewer })));
 const ExternalVaultBrowser = lazy(() => import("../external-vault/ExternalVaultBrowser").then((module) => ({ default: module.ExternalVaultBrowser })));
+const tabPreloads = [notesTab.preload, exchangeTab.preload, settingsTab.preload, collectionTab.preload, mangaTab.preload,
+  statisticsTab.preload, trashTab.preload, similarityTab.preload];
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -150,6 +164,17 @@ function LibraryScreen({
 }
 
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
+  useEffect(() => {
+    let stopPreloads: (() => void) | undefined;
+    const stopLaunch = afterLaunchSettled(() => {
+      stopPreloads = preloadTabsWhenIdle(tabPreloads, () => {
+        const home = document.querySelector<HTMLElement>(".home-view");
+        return !!home && !document.querySelector(".launch-splash") && viewReady(home)
+          && viewportImages(home).every(image => image.complete || viewportImageDecoded(image));
+      });
+    });
+    return () => { stopLaunch(); stopPreloads?.(); };
+  }, []);
   const { gateway } = useLibrary();
   const workload = useWorkloadProfile();
   useOnlineCatalogUpdate(gateway, libraryRoot);
@@ -441,6 +466,13 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   /** Set when Home opened another tab: back (mouse, Escape) from that tab's first screen returns to Home. */
   const homeReturnRef = useRef(false);
   const assetOpenRequest = useRef(0);
+  function measureNavigation(next: AssetView) {
+    if (!pcPerfEnabled()) return;
+    const folderKind = next.kind === "classification"
+      ? next.characterId || next.characterGroupId ? "character" : characterHub.series.some(series => series.classificationId === next.classificationId) ? "series" : "plain"
+      : next.kind === "album" ? "album" : workspaceArea(next) === "assets" ? "other" : undefined;
+    pcNavigation(workspaceArea(view), workspaceArea(next), folderKind, pcFolderScope(next), next.kind === "collections" && view.kind !== "collections");
+  }
   function navigateView(next: AssetView, options: { fromHome?: boolean } = {}) {
     setHomeAssetLeaving(false);
     // A vault recovery key shown once in Settings is lost if Settings closes (asks first).
@@ -452,6 +484,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     if (JSON.stringify(next) === JSON.stringify(view)) return;
+    measureNavigation(next);
     // A new 내용 검색 (or 그래도 보기) replaces the current one, so searches never stack in history.
     if (view.kind === "description_search" && next.kind === "description_search") { /* replace */ }
     else if (backNavigationTab(next) === backNavigationTab(view)) viewHistoryRef.current.push(view);
@@ -468,9 +501,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (!previous || backNavigationTab(previous) !== backNavigationTab(view)) {
       if (!homeReturnRef.current || view.kind === "home") return false;
       homeReturnRef.current = false;
+      measureNavigation({ kind: "home" });
       setView({ kind: "home" });
       return true;
     }
+    measureNavigation(previous);
     setView(previous);
     return true;
   }
@@ -745,7 +780,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 <WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={setShownArea} onSettlingChange={setAreaSettling} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && (area !== "assets" || !homeAsset || !requestedAsset || Boolean(host.querySelector(".asset-viewer"))) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
+                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={(destination) => { setShownArea(destination); pcTabShown(destination); }} onSettlingChange={setAreaSettling} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && (area !== "assets" || !homeAsset || !requestedAsset || Boolean(host.querySelector(".asset-viewer"))) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "private_vault" ? (
                   privateVaultVisible && privateVaultStatus
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}

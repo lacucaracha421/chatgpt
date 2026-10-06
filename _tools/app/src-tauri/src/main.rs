@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    app_lib::perf_log::init();
     // GTK3 IBus defaults to asynchronous commits. Finish pending composition
     // before WebKit changes the focused field, so its last syllable cannot
     // arrive in the next input. Set this before GTK or worker threads start,

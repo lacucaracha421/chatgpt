@@ -1,4 +1,5 @@
 import React from "react";
+import { initPcPerfLog } from "./shared/pcPerfLog";
 import ReactDOM from "react-dom/client";
 import { App } from "./app/App";
 import { WindowResizeHandles } from "./layout/WindowResizeHandles";
@@ -7,6 +8,8 @@ import { LaunchSplash, releaseLaunchSplash } from "./shared/launch/LaunchSplash"
 import "./styles/tokens.css";
 import "./styles/global.css";
 import "./styles/controls.css";
+
+void initPcPerfLog();
 
 // The app opens on Home, which ends the launch splash when it is ready; only a design preview
 // can open elsewhere, and it has no Home to wait for.

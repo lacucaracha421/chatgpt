@@ -1,3 +1,4 @@
+import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { SeriesShelf } from "./SeriesShelf";
 import { AssetImage } from "../privacy/AssetImage";
@@ -666,6 +667,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const shelfShown = !picking && !excludedOnly && !current;
   // The first page alone is not ready: the shelf and its count/header reads also change layout.
   const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.loading || candidateLoading || excludedLoading || (!s36Settings && !s36Error))));
+  useEffect(() => {
+    if (!pcPerfEnabled() || loading || shelfLoading || pageScope !== scope || error) return;
+    return pcFolderReady(pcFolderScope({ kind: "classification", classificationId: series.classificationId, characterId: targetId, characterGroupId: groupId }), host.current,
+      () => galleryFirstScreen(host.current, page.items, { layout: galleryLayout, groupDates: !shelfShown }).length, targetId || groupId ? "character" : "series");
+  }, [loading, shelfLoading, pageScope, scope, error, series.classificationId, targetId, groupId, page.items, galleryLayout, shelfShown]);
   useEffect(() => {
     if (!preparedPage || preparedPage.scope !== scope || preparedPage.token !== generation.current || shelfLoading) return;
     let active = true;

@@ -1,3 +1,4 @@
+import { pcHomeReady, pcStartupMark } from "../pcPerfLog";
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
 import { reducedMotion } from "../motion/curves";
 import { viewportImages, waitForViewportImages } from "../motion/viewportImages";
@@ -30,6 +31,7 @@ const pageClock = () => performance.now();
 /** Ends the launch splash; once per app start, later calls do nothing. */
 export function releaseLaunchSplash() {
   if (phase !== "waiting") return;
+  pcStartupMark("splashLeaving");
   phase = "leaving";
   emit();
 }
@@ -71,6 +73,7 @@ export function resetLaunchSplashForTests() {
  */
 export function useLaunchReady(ready: boolean, host?: RefObject<HTMLElement | null>) {
   useEffect(() => {
+    if (ready && host?.current) pcHomeReady(host.current);
     if (!ready || !launchSplashWaiting()) return;
     const element = host?.current;
     if (!element) { releaseLaunchSplash(); return; }
@@ -118,12 +121,14 @@ export function LaunchSplash({ elapsed = pageClock, capMs = LAUNCH_CAP_MS }: Lau
   // Continue the static cover's hint timing instead of restarting it at mount.
   const [hintDelay] = useState(() => Math.round(LAUNCH_HINT_MS - elapsed()));
   useLayoutEffect(() => {
+    pcStartupMark("firstReactRender");
     present = true;
     document.getElementById(LAUNCH_COVER_ID)?.remove();
     const timer = window.setTimeout(releaseLaunchSplash, Math.max(0, capMs - elapsed()));
     return () => { window.clearTimeout(timer); present = false; };
   }, [capMs, elapsed]);
   useEffect(() => {
+    if (current === "done") { pcStartupMark("splashEnd"); return; }
     if (current !== "leaving") return;
     const timer = window.setTimeout(() => {
       phase = "done";

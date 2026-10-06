@@ -1,3 +1,4 @@
+import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { libraryContextItems } from "./libraryContextItems";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +23,7 @@ import { faultSelectionItem, useFaultGame } from "../games/FaultGame";
 import { AutoTagFilterBadges } from "../autotags/AutoTagFilterBadges";
 import { clearAutoTagFilter, hasAutoTagFilter, useAutoTagFilter } from "../autotags/autoTagFilter";
 import { useInfoPanelPreference } from "./useInfoPanelPreference";
-import { AssetGallery, tileThumbnailUrl } from "./AssetGallery";
+import { galleryFirstScreen, AssetGallery, tileThumbnailUrl } from "./AssetGallery";
 import { folderMoveScope } from "./FolderWave";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
@@ -223,6 +224,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const shownPageRef = useRef(page);
   shownPageRef.current = page;
   const resultsRef = useRef<HTMLDivElement>(null);
+  const perfHostRef = useRef<HTMLElement>(null);
   const searchSwapOwner = useRef({}).current;
   const privacyModeRef = useRef(privacyMode); privacyModeRef.current = privacyMode;
   useEffect(() => () => cancelSegmentSwap(searchSwapOwner), [searchSwapOwner]);
@@ -649,6 +651,13 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   // The gate turned the painted query away: offer the nearest images anyway (a forced view, so back returns here).
   const noMatchQuery = visiblePage?.noMatchQuery;
   const directOnlyEmpty = plainFolderId !== null && folderChildren.length > 0 && directOnly;
+  const perfGroupDates = descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest");
+  useEffect(() => {
+    if (!pcPerfEnabled() || !activePage || firstLoading) return;
+    return pcFolderReady(pcFolderScope(view), perfHostRef.current, () => galleryFirstScreen(perfHostRef.current, visibleItems, {
+      layout: galleryLayout, groupDates: perfGroupDates,
+    }).length, view.kind === "classification" ? "plain" : view.kind === "album" ? "album" : "other");
+  }, [view, activePage, firstLoading, galleryLayout, visibleItems, perfGroupDates]);
   const assetResults = (firstLoading && visibleItems.length === 0 && !visiblePage) || (!visiblePage && !currentFirstError)
     ? <>{folderHead}<Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /></>
     : currentFirstError && !activePage
@@ -667,7 +676,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
           if (!target || (batchPending && !selection.ids.has(target.id))) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }} ref={resultsRef} data-search-results="" className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
-  return <section className="asset-browser" aria-label="저장소" onKeyDown={event => {
+  return <section ref={perfHostRef} className="asset-browser" aria-label="저장소" onKeyDown={event => {
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
   }}>

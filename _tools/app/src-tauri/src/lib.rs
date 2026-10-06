@@ -7,9 +7,10 @@ mod exchange;
 mod extension_api;
 mod http_agent;
 pub mod library;
+pub mod perf_log;
+mod performance;
 mod window_size;
 mod workload;
-mod performance;
 pub use cloud::backfill::BackfillControlState;
 pub use cloud::thumbnail_refresh::{
     refresh_cloud_thumbnails, CloudThumbnailRefreshOptions, CloudThumbnailRefreshReport,
@@ -27,6 +28,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    perf_log::init();
     let app_state = commands::AppState::default();
     let extension_runtime = extension_api::ExtensionRuntime::default();
     tauri::Builder::default()
@@ -40,6 +42,7 @@ pub fn run() {
         .manage(catalog_transport::CatalogTransport::default())
         .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
+            perf_log::setup(app.handle());
             workload::setup(app.handle())?;
             if let Some(window) = app.get_webview_window("main") {
                 window_size::restore(&window);
@@ -229,6 +232,8 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
+            perf_log::perf_log_enabled,
+            perf_log::perf_log_append,
             media_protocol_queue::media_view_changed,
             workload::workload_profile,
             performance::performance_profile,
