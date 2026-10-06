@@ -176,6 +176,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudRequestUnavailable => "cloud_request_unavailable",
             LibraryError::CloudSyncHeld => "cloud_sync_held",
             LibraryError::InvalidCloudResponse => "invalid_cloud_response",
+            LibraryError::CollectionAuthorityNotAdopted => "collection_authority_not_adopted",
+            LibraryError::CollectionAuthorityMismatch => "collection_authority_mismatch",
             LibraryError::CloudMetadataBackupNotFound => "cloud_metadata_backup_not_found",
             LibraryError::CloudMetadataBackupTooLarge => "cloud_metadata_backup_too_large",
             LibraryError::RestoreAuthorityActive { .. } => "restore_authority_active",

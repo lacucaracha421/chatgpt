@@ -2,6 +2,7 @@ pub(crate) mod aladin;
 mod aladin_flow;
 pub(crate) mod album;
 pub(crate) mod album_authority;
+pub(crate) mod collection_authority;
 #[cfg(test)]
 #[path = "album_authority_tests.rs"]
 mod album_authority_tests;
@@ -160,6 +161,7 @@ pub(crate) mod release_calendar;
 mod release_watch;
 pub(crate) mod release_wishlist;
 pub(crate) mod tagger_review;
+pub(crate) mod character_tagger_tags;
 pub(crate) use release_watch::release_status_at;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;

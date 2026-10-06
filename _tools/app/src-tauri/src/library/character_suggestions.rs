@@ -395,10 +395,7 @@ impl Library {
             )?;
         }
         if request.link_tag {
-            tx.execute(
-                "INSERT INTO character_target_tagger_tags VALUES(?1,?2)",
-                params![target.id, request.tag],
-            )?;
+            super::character_tagger_tags::explicitly_link(&tx, &target.id, &request.tag)?;
         }
         let queued_count = queue_in(&tx, &target, &detail.images, &excluded)?;
         // A new target needs fresh inference even for already-completed series jobs.
@@ -445,10 +442,7 @@ impl Library {
             return Err(Error::Stale);
         }
         if request.link_tag {
-            tx.execute(
-                "INSERT INTO character_target_tagger_tags VALUES(?1,?2)",
-                params![target.id, request.tag],
-            )?;
+            super::character_tagger_tags::explicitly_link(&tx, &target.id, &request.tag)?;
         }
         let queued_count = queue_in(&tx, &target, &detail.images, &BTreeSet::new())?;
         tx.commit()?;

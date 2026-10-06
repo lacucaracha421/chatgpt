@@ -1,5 +1,48 @@
 use tauri::State;
 
+#[tauri::command]
+pub async fn character_tagger_tags(
+    target_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_tagger_tags::TagLinks, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_tagger_tags(&target_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn unlink_character_tagger_tag(
+    target_id: String,
+    tag: String,
+    expected_pending: u64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.unlink_character_tagger_tag(&target_id, &tag, expected_pending)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn relink_character_tagger_tag(
+    target_id: String,
+    tag: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.relink_character_tagger_tag(&target_id, &tag)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
 use super::{current_required, AppState, CommandError};
 use crate::library::character_reference_regions::{ReferenceInspection, RegionBindings};
 use crate::library::characters::{

@@ -4,13 +4,19 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 121;
+pub(crate) const SCHEMA_VERSION: i64 = 123;
 
-/// Test helper: undoes migrations 0103 through 0121 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0123 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE character_target_tagger_tag_exclusions;
+    DROP TABLE collection_authority_trash;
+    DROP TABLE collection_authority_materialization;
+    DROP TABLE collection_authority_outbox;
+    DROP TABLE collection_authority_revisions;
+    DROP TABLE collection_authority_sync;
     DROP TABLE auto_tag_publication_state;
     DROP TABLE auto_tag_publication_digests;
     DROP TABLE manga_index_pin_outbox;
@@ -724,6 +730,12 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 120 {
             transaction.execute_batch(include_str!("../../migrations/0121_likes_album.sql"))?;
+        }
+        if version <= 121 {
+            transaction.execute_batch(include_str!("../../migrations/0122_collection_authority.sql"))?;
+        }
+        if version <= 122 {
+            transaction.execute_batch(include_str!("../../migrations/0123_character_tagger_tag_exclusions.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

@@ -50,6 +50,10 @@ pub enum LibraryError {
     CloudReplicationUpgradeRequired,
     #[error("클라우드 API 응답이 올바르지 않습니다")]
     InvalidCloudResponse,
+    #[error("컬렉션 서버 기준선을 받는 중입니다. 동기화가 끝난 뒤 다시 편집해 주세요.")]
+    CollectionAuthorityNotAdopted,
+    #[error("컬렉션 서버 권위가 일치하지 않습니다. 동기화 상태를 확인해 주세요.")]
+    CollectionAuthorityMismatch,
     #[error("서버에 라이브러리 메타데이터 백업이 없습니다")]
     CloudMetadataBackupNotFound,
     #[error("서버 메타데이터 백업이 허용 크기를 초과합니다")]

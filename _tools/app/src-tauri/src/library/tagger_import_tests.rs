@@ -90,12 +90,60 @@ fn tagger_import_replaces_both_sources_keeps_edits_and_rolls_back_invalid_extens
         .unwrap();
     assert!(f.library.import_auto_tags(&path).is_err());
     assert_eq!(f.library.connection().unwrap().query_row("SELECT score FROM asset_tagger_character_scores WHERE asset_id='asset-5' AND source='canary'",[],|r|r.get::<_,f64>(0)).unwrap(),0.9);
+    // User unlinks are target-scoped and survive repeated machine replacements.
+    let other = f.ready("B");
+    c.execute("INSERT INTO target_tags VALUES(?1,'alice')", [&other.id])
+        .unwrap();
+    f.library
+        .unlink_character_tagger_tag(&t.id, "alice", 0)
+        .unwrap();
+    c.execute(
+        "INSERT INTO tagger_assets VALUES('asset-5','canary'),('asset-6','canary')",
+        [],
+    )
+    .unwrap();
+    for _ in 0..2 {
+        f.library.import_auto_tags(&path).unwrap();
+        assert!(f
+            .library
+            .character_tagger_tags(&t.id)
+            .unwrap()
+            .linked
+            .is_empty());
+        assert_eq!(
+            f.library.character_tagger_tags(&t.id).unwrap().excluded,
+            ["alice"]
+        );
+        assert_eq!(
+            f.library
+                .character_tagger_tags(&other.id)
+                .unwrap()
+                .linked
+                .len(),
+            1
+        );
+    }
+    f.library
+        .relink_character_tagger_tag(&t.id, "alice")
+        .unwrap();
+    f.library.import_auto_tags(&path).unwrap();
+    assert_eq!(
+        f.library.character_tagger_tags(&t.id).unwrap().linked.len(),
+        1
+    );
+    f.library
+        .unlink_character_tagger_tag(&t.id, "alice", 0)
+        .unwrap();
     // A v0.9 import replaces raw review evidence as well, with no stale canary left.
     c.execute("DELETE FROM meta WHERE key='tagger_review_version'", [])
         .unwrap();
     c.execute("UPDATE meta SET value='pixai-v0.9' WHERE key='model'", [])
         .unwrap();
     f.library.import_auto_tags(&path).unwrap();
+    assert_eq!(
+        f.library.character_tagger_tags(&t.id).unwrap().excluded,
+        ["alice"]
+    );
     assert_eq!(
         f.library
             .connection()

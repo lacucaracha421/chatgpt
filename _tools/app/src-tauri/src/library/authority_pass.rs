@@ -144,6 +144,8 @@ pub(crate) struct AuthorityPassOutcome {
     pub albums: bool,
     /// The Classification replica visibly changed.
     pub classifications: bool,
+    /// The dormant Collections replica changed after a confirmed active epoch.
+    pub collections: bool,
     /// Catalog bookmarks visibly changed.
     pub bookmarks: bool,
     /// The Asset replica was re-baselined ahead of the relation lanes.
@@ -185,7 +187,12 @@ pub(crate) struct AssetLaneOutcome {
 
 impl AuthorityPassOutcome {
     pub(crate) fn changed(&self) -> bool {
-        self.albums || self.classifications || self.bookmarks || self.assets || self.sent
+        self.albums
+            || self.classifications
+            || self.collections
+            || self.bookmarks
+            || self.assets
+            || self.sent
     }
 }
 
@@ -433,6 +440,18 @@ impl Library {
                 None
             }
         };
+        if let Some(status) = &status {
+            if status.domains.iter().any(|domain| domain.domain == "collections") {
+                let publisher = credentials.publisher().ok();
+                match self.sync_collection_authority(client, token, publisher.as_deref(), status, held) {
+                    Ok((changed, sent)) => {
+                        outcome.collections = changed;
+                        outcome.sent |= sent;
+                    }
+                    Err(error) => outcome.failed(&error),
+                }
+            }
+        }
         // A deferred relation lane keeps the ordinary backoff rather than the live rest.
         outcome.live = relations_ready && status_watch::is_live(client.base());
         (outcome, status)

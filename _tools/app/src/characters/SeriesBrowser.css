@@ -5,6 +5,10 @@
 .series-header-actions, .series-breadcrumb { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .series-header-actions { flex-shrink: 0; }
 .character-info-trigger { position: relative; }
+.character-tagger-tags { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
+.character-tagger-tags__row { display: flex; align-items: center; gap: var(--space-2); }
+.character-tagger-tags__row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.character-tagger-tags__row > .ui-button { flex-shrink: 0; }
 .character-info-attention { position: absolute; top: -2px; right: -2px; display: grid; place-items: center; width: 14px; height: 14px; border: 1px solid var(--color-bg); border-radius: var(--radius-sm); background: var(--color-danger); color: var(--color-bg); font-size: 11px; font-weight: 700; line-height: 1; pointer-events: none; }
 .series-header-count { color: var(--color-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .series-breadcrumb > button { padding: 0; border: 0; background: none; color: var(--color-muted); font: inherit; cursor: pointer; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

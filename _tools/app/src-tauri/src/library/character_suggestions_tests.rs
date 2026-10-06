@@ -252,6 +252,14 @@ fn suggestion_registration_checks_changed_evidence_and_missing_reference_file() 
 fn suggestion_merge_links_without_overwriting_existing_references_or_decisions() {
     let f = fixture();
     let target = f.ready("Existing");
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_target_tagger_tag_exclusions VALUES(?1,'new_character','now')",
+            [&target.id],
+        )
+        .unwrap();
     let detail = f
         .library
         .character_suggestion_detail("new_character", Some(&f.series))
@@ -267,6 +275,9 @@ fn suggestion_merge_links_without_overwriting_existing_references_or_decisions()
         })
         .unwrap();
     assert_eq!(result.queued_count, 2);
+    let links = f.library.character_tagger_tags(&target.id).unwrap();
+    assert!(links.excluded.is_empty());
+    assert_eq!(links.linked[0].tag, "new_character");
     assert_eq!(result.target.fingerprint, target.fingerprint);
     assert!(f.library.character_suggestions(None).unwrap().is_empty());
     assert_eq!(

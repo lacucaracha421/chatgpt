@@ -780,6 +780,7 @@ fn start_timers(app: tauri::AppHandle) {
                     finish.live = outcome.live && outcome.failure.is_none();
                     for (changed, event) in [
                         (outcome.albums, "library://album-authority-changed"),
+                        (outcome.collections, "library://collections-changed"),
                         (
                             outcome.classifications,
                             "library://classification-authority-changed",

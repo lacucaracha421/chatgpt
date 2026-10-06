@@ -7,6 +7,10 @@ use super::models::{
 };
 use crate::library::error::LibraryError;
 
+#[path = "collection_authority_transport.rs"]
+mod collection_authority_transport;
+pub(crate) use collection_authority_transport::CollectionDelivery;
+
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const METADATA_BACKUP_OBJECT_KEY: &str = "backups/library-metadata.sqlite";
 const MAX_METADATA_BACKUP_BYTES: u64 = 512 * 1024 * 1024;

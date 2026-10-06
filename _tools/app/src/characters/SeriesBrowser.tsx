@@ -40,6 +40,7 @@ import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { collectPages, faultAssets, faultSelectionItem, useFaultGame, type FaultScope } from "../games/FaultGame";
 import { CharacterRegistry, characterDraft, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
+import { CharacterTaggerTags } from "./CharacterTaggerTags";
 import { needsReferenceConfirmation, useReferenceRegionInspection } from "./ReferenceRegionChoices";
 import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
@@ -517,6 +518,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       onChange={draft => setEditor({ ...editor, draft })} onPick={beginPick}
       onRecommendReferences={editor.target ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined}
       />}
+    {editor?.target && <CharacterTaggerTags key={editor.target.id} targetId={editor.target.id} disabled={busy} />}
   </AnchoredPanel>;
   // Asset edits (heart, trash, 정보) change only the affected tiles, as in plain folders: the sidebar
   // counts, suggestions, page and hub are not reloaded for them.

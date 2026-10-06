@@ -1592,12 +1592,9 @@ mod integration {
         let following = create_root(&library, name);
         let server = Server::http("127.0.0.1:0").unwrap();
         let client = CloudClient::new(&format!("http://{}/v1", server.server_addr())).unwrap();
-        let handle = thread::spawn(move || {
+        let handle = TestServer::spawn(server, move |server| {
             let mut seen = Vec::new();
-            while let Some(mut request) = server
-                .recv_timeout(std::time::Duration::from_millis(300))
-                .unwrap()
-            {
+            while let Ok(mut request) = server.recv() {
                 let body = read_body(&mut request);
                 let response = if body["commandType"] == "deleteClassification" {
                     json_response(serde_json::json!({"detail": {"code": "classificationNotFound"}}))
@@ -1797,21 +1794,54 @@ mod integration {
         })
     }
 
+    // An idle gap cannot distinguish a drained queue from a client delayed by parallel
+    // fixture migrations. Keep each server alive until its caller finishes the flush;
+    // also unblock and join it during unwinding so a failed assertion leaks no worker.
+    struct TestServer<T> {
+        server: std::sync::Arc<Server>,
+        worker: Option<thread::JoinHandle<T>>,
+    }
+
+    impl<T: Send + 'static> TestServer<T> {
+        fn spawn(
+            server: Server,
+            serve: impl FnOnce(std::sync::Arc<Server>) -> T + Send + 'static,
+        ) -> Self {
+            let server = std::sync::Arc::new(server);
+            let worker_server = std::sync::Arc::clone(&server);
+            Self {
+                server,
+                worker: Some(thread::spawn(move || serve(worker_server))),
+            }
+        }
+
+        fn join(mut self) -> thread::Result<T> {
+            self.server.unblock();
+            self.worker.take().unwrap().join()
+        }
+    }
+
+    impl<T> Drop for TestServer<T> {
+        fn drop(&mut self) {
+            self.server.unblock();
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+
     /// A server that accepts every command, recording the body and credential it saw.
     ///
     /// Requests are reported over a channel rather than a shared lock: the fixture needs
     /// an ordered log owned by the server thread and read by the test, which a channel
     /// expresses directly.
-    fn accepting_server(library_id: String) -> (String, mpsc::Receiver<Received>, thread::JoinHandle<()>) {
+    fn accepting_server(library_id: String) -> (String, mpsc::Receiver<Received>, TestServer<()>) {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base = format!("http://{}/v1", server.server_addr());
         let (sender, receiver) = mpsc::channel();
-        let handle = thread::spawn(move || {
+        let handle = TestServer::spawn(server, move |server| {
             for revision in 1..=8i64 {
-                // Serving stops on an idle gap, because the flush legitimately stops early
-                // when the queue is blocked or drained before this bound.
-                let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_millis(500))
-                else {
+                let Ok(mut request) = server.recv() else {
                     return;
                 };
                 assert_eq!(request.method(), &Method::Put);
@@ -1840,20 +1870,18 @@ mod integration {
 
     /// A server that answers every command with one specific coded rejection.
     ///
-    /// Serving stops on an idle gap: every caller of this fixture sends exactly one
-    /// command, because a rejection ends the pass.
+    /// The caller stops serving after the pass, including rejections that let it continue.
     fn coded_rejection_server(
         code: &'static str,
         status: u16,
         current: Option<serde_json::Value>,
-    ) -> (String, mpsc::Receiver<Received>, thread::JoinHandle<()>) {
+    ) -> (String, mpsc::Receiver<Received>, TestServer<()>) {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base = format!("http://{}/v1", server.server_addr());
         let (sender, receiver) = mpsc::channel();
-        let handle = thread::spawn(move || {
+        let handle = TestServer::spawn(server, move |server| {
             loop {
-                let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_millis(300))
-                else {
+                let Ok(mut request) = server.recv() else {
                     return;
                 };
                 let body = read_body(&mut request);
@@ -3360,11 +3388,9 @@ mod integration {
         let deliveries = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let count = Arc::clone(&deliveries);
         let (release_tx, release_rx) = mpsc::channel::<()>();
-        let handle = thread::spawn(move || {
+        let handle = TestServer::spawn(server, move |server| {
             loop {
-                let Ok(Some(mut request)) =
-                    server.recv_timeout(std::time::Duration::from_millis(600))
-                else {
+                let Ok(mut request) = server.recv() else {
                     return;
                 };
                 count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -3722,14 +3748,13 @@ mod integration {
         database: std::path::PathBuf,
         trigger_asset: &'static str,
         commit_asset: &'static str,
-    ) -> (String, mpsc::Receiver<Received>, thread::JoinHandle<()>) {
+    ) -> (String, mpsc::Receiver<Received>, TestServer<()>) {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base = format!("http://{}/v1", server.server_addr());
         let (sender, receiver) = mpsc::channel();
-        let handle = thread::spawn(move || {
+        let handle = TestServer::spawn(server, move |server| {
             for revision in 1..=8i64 {
-                let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_millis(500))
-                else {
+                let Ok(mut request) = server.recv() else {
                     return;
                 };
                 let body = read_body(&mut request);
