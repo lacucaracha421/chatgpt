@@ -264,10 +264,22 @@ pub(super) fn from_snapshot(
             "derived":{"unreadReleaseCount":work["unreadReleaseCount"], "releaseWatch":work["releaseWatch"],
                 "ownedVolumes":work["ownedVolumes"], "releaseSchedule":work["releaseSchedule"]},
             "createdAt":work["createdAt"], "updatedAt":work["updatedAt"]}));
+        // The selection slots are what the screens show (the published selected ids, which
+        // may be a fallback volume cover). Export the slot kinds' flags from those slots so
+        // flags and slots always agree; other kinds keep their stored flag.
+        let slot_flag = |a: &Value| -> Value {
+            let id = &a["id"];
+            match a["kind"].as_str() {
+                Some("cover" | "volume_cover") => json!(*id == work["selectedWorkArtworkId"]),
+                Some("hero") => json!(*id == work["selectedHeroArtworkId"]),
+                Some("backdrop") => json!(*id == work["selectedBackdropArtworkId"]),
+                _ => a["selected"].clone(),
+            }
+        };
         for (order, a) in art.iter().enumerate() {
             let aid = a["id"].as_str().ok_or(LibraryError::InvalidCloudResponse)?;
             let metadata = rows(tx, "SELECT json_object('provider',provider,'providerImageId',provider_image_id,'width',width,'height',height,'language',language,'createdAt',created_at) FROM collection_work_artworks WHERE id=?1", aid)?.pop().unwrap_or_else(|| json!({"createdAt":work["createdAt"]}));
-            artworks.push(json!({"artworkId":aid,"workId":id,"kind":a["kind"],"selected":a["selected"],"order":order,
+            artworks.push(json!({"artworkId":aid,"workId":id,"kind":a["kind"],"selected":slot_flag(a),"order":order,
                 "provider":metadata["provider"],"providerImageId":metadata["providerImageId"],
                 "width":metadata["width"],"height":metadata["height"],"language":metadata["language"],
                 "createdAt":metadata["createdAt"],"original":a["original"],"thumbnail":a["thumbnail"]}));

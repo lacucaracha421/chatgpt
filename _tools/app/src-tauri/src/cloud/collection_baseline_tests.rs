@@ -291,9 +291,20 @@ fn collection_baseline_maps_every_replica_field_and_exact_section_keys() {
         for (order, a) in live["artworks"].as_array().unwrap().iter().enumerate() {
             assert_eq!(staged_art[order]["artworkId"], a["id"]);
             assert_eq!(staged_art[order]["order"], order);
-            for key in ["kind", "selected", "original", "thumbnail"] {
+            for key in ["kind", "original", "thumbnail"] {
                 assert_eq!(staged_art[order][key], a[key]);
             }
+            // Slot kinds export their flag from the shown selection; other kinds keep it.
+            let slot = match a["kind"].as_str() {
+                Some("cover" | "volume_cover") => Some("selectedWorkArtworkId"),
+                Some("hero") => Some("selectedHeroArtworkId"),
+                Some("backdrop") => Some("selectedBackdropArtworkId"),
+                _ => None,
+            };
+            let expected = slot.map_or(a["selected"].clone(), |slot| {
+                serde_json::json!(a["id"] == live[slot])
+            });
+            assert_eq!(staged_art[order]["selected"], expected);
         }
         for (order, v) in live["volumes"].as_array().unwrap().iter().enumerate() {
             let staged = item(&doc, "volumes", "volumeId", v["id"].as_str().unwrap());
@@ -427,9 +438,11 @@ fn collection_baseline_maps_every_replica_field_and_exact_section_keys() {
         item(&doc, "artworks", "artworkId", "back")["selected"],
         true
     );
+    // The manga's shown work cover is this volume cover: its flag follows the slot so
+    // the server's flag/slot agreement check accepts it.
     assert_eq!(
         item(&doc, "artworks", "artworkId", "cover")["selected"],
-        false
+        true
     );
     assert!(av["selection"]
         .as_object()
