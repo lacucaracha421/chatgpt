@@ -1,6 +1,6 @@
 //! Dormant Collections authority replica. Confirmed revisions are never optimistic.
-//! Every page and its checkpoint commit together. Legacy writers remain untouched
-//! in this batch; batches 2-6 consume the fence and transactional enqueue API.
+//! Every page and its checkpoint commit together. Core PC writes use the outbox;
+//! later batches route or fence the remaining writers before activation.
 use super::{error::LibraryError, Library};
 use crate::cloud::client::{CloudClient, CollectionDelivery, SyncStatus};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -34,6 +34,8 @@ const COMMANDS: &[&str] = &[
     "upsertVolumeSource",
     "setVolumeOwnership",
     "setMembership",
+    "setOwnershipTracking",
+    "setReleaseSubscription",
 ];
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
@@ -210,6 +212,227 @@ pub(crate) fn ensure_collection_write_ready(
         Some(l) if l.adopted && same(&id, &l.id) => Ok(true),
         _ => Err(LibraryError::CollectionAuthorityNotAdopted),
     }
+}
+
+/// The durable activation marker also fences edits while baseline adoption is pending.
+pub(crate) fn collection_write_status(
+    db: &Connection,
+) -> Result<CollectionAuthorityStatus, LibraryError> {
+    let state = local(db)?;
+    let status = CollectionAuthorityStatus {
+        active: state.is_some(),
+        library_id: state.as_ref().map(|s| s.id.library.clone()),
+        epoch: state.as_ref().map(|s| s.id.epoch),
+        contract_version: state.as_ref().map(|s| s.id.version),
+        cursor: state.as_ref().map(|s| s.id.cursor),
+    };
+    ensure_collection_write_ready(db, &status)?;
+    Ok(status)
+}
+
+/// Read stored values, not summary fallback covers, for field-level compare-and-set.
+pub(crate) fn editable_work(db: &Connection, work: &str) -> Result<Value, LibraryError> {
+    db.query_row("SELECT name,description,cover_asset_id,year,original_title,runtime_minutes,author,director,developer,publisher,platforms,production_company,release_date,external_score,my_score,genres,overview,showcase,p.status,p.owned_platform FROM collections c LEFT JOIN collection_pc_records p ON p.collection_id=c.id WHERE c.id=?1", [work], |r| {
+        Ok(json!({"name":r.get::<_,String>(0)?,"description":r.get::<_,Option<String>>(1)?,"coverAssetId":r.get::<_,Option<String>>(2)?,"year":r.get::<_,Option<i64>>(3)?,"originalTitle":r.get::<_,Option<String>>(4)?,"runtimeMinutes":r.get::<_,Option<i64>>(5)?,"author":r.get::<_,Option<String>>(6)?,"director":r.get::<_,Option<String>>(7)?,"developer":r.get::<_,Option<String>>(8)?,"publisher":r.get::<_,Option<String>>(9)?,"platforms":r.get::<_,Option<String>>(10)?,"productionCompany":r.get::<_,Option<String>>(11)?,"releaseDate":r.get::<_,Option<String>>(12)?,"externalScore":r.get::<_,Option<i64>>(13)?,"myScore":r.get::<_,Option<f64>>(14)?,"genres":r.get::<_,Option<String>>(15)?,"overview":r.get::<_,Option<String>>(16)?,"showcase":r.get::<_,bool>(17)?,"status":r.get::<_,Option<String>>(18)?,"ownedPlatform":r.get::<_,Option<String>>(19)?}))
+    }).optional()?.ok_or(LibraryError::CollectionNotFound)
+}
+
+pub(crate) fn enqueue_work_changes(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    before: &Value,
+) -> Result<(), LibraryError> {
+    if !status.active {
+        return Ok(());
+    }
+    let after = editable_work(tx, work)?;
+    let mut changes = serde_json::Map::new();
+    let mut expected = serde_json::Map::new();
+    for (field, value) in after.as_object().unwrap() {
+        if before[field] != *value {
+            changes.insert(field.clone(), value.clone());
+            expected.insert(field.clone(), before[field].clone());
+        }
+    }
+    if !changes.is_empty() {
+        enqueue_collection_command(
+            tx,
+            status,
+            "updateWork",
+            work,
+            json!({"workId":work,"changes":changes,"expected":expected,"expectedRevision":null}),
+        )?;
+    }
+    Ok(())
+}
+
+/// Predict only revision-CAS commands; field updates use expected values instead.
+pub(crate) fn predicted_collection_revision(
+    db: &Connection,
+    section: &str,
+    entity_key: &str,
+) -> Result<i64, LibraryError> {
+    let revision: i64 = db.query_row("SELECT entity_revision FROM collection_authority_revisions WHERE section=?1 AND entity_key=?2", params![section,entity_key], |r| r.get(0)).optional()?.unwrap_or(0);
+    let pending = db
+        .prepare(
+            "SELECT payload FROM collection_authority_outbox WHERE state='pending' ORDER BY seq",
+        )?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let confirmed: Option<String> = db
+        .query_row(
+            "SELECT payload FROM collection_authority_revisions WHERE section=?1 AND entity_key=?2",
+            params![section, entity_key],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let mut state: Value = confirmed
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| LibraryError::InvalidCloudResponse)?
+        .unwrap_or(Value::Null);
+    let work: Option<String> = serde_json::from_str::<Vec<String>>(entity_key)
+        .ok()
+        .and_then(|v| v.first().cloned());
+    let mut predicted = revision;
+    let mut orders = std::collections::BTreeMap::<String, Value>::new();
+    if section == "works" {
+        let rows = db.prepare("SELECT payload FROM collection_authority_revisions WHERE section='works' AND deleted=0")?.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        for raw in rows {
+            let value: Value =
+                serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+            orders.insert(text(&value, "workId")?.to_owned(), value);
+        }
+    }
+    for raw in pending {
+        let body: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let command = body["commandType"].as_str().unwrap_or("");
+        if section == "works" {
+            if command == "createWork" {
+                orders.insert(
+                    text(&body, "workId")?.to_owned(),
+                    json!({"type":body["type"],"showcase":false,"showcaseOrder":null}),
+                );
+            } else if command == "updateWork" {
+                if let (Some(desired), Some(current)) = (
+                    body["changes"]["showcase"].as_bool(),
+                    orders.get(text(&body, "workId")?).cloned(),
+                ) {
+                    let order = if !desired {
+                        Value::Null
+                    } else if current["showcase"] == true {
+                        current["showcaseOrder"].clone()
+                    } else {
+                        json!(orders
+                            .values()
+                            .filter(|v| v["type"] == current["type"])
+                            .filter_map(|v| v["showcaseOrder"].as_i64())
+                            .max()
+                            .map_or(0, |n| n + 1))
+                    };
+                    let target = orders.get_mut(text(&body, "workId")?).unwrap();
+                    target["showcase"] = json!(desired);
+                    target["showcaseOrder"] = order;
+                }
+            } else if command == "deleteWork" {
+                orders.remove(text(&body, "workId")?);
+            }
+        }
+        if section == "works" && command == "setShowcaseOrder" {
+            if let Some(order) = body["workIds"]
+                .as_array()
+                .and_then(|ids| ids.iter().position(|id| id.as_str() == work.as_deref()))
+            {
+                if state["showcaseOrder"] != json!(order) {
+                    predicted += 1;
+                    state["showcaseOrder"] = json!(order);
+                }
+            }
+            for (order, id) in body["workIds"]
+                .as_array()
+                .ok_or(LibraryError::InvalidCloudResponse)?
+                .iter()
+                .enumerate()
+            {
+                if let Some(target) = id.as_str().and_then(|id| orders.get_mut(id)) {
+                    target["showcaseOrder"] = json!(order);
+                }
+            }
+        } else if section == "works"
+            && matches!(command, "createWork" | "updateWork" | "deleteWork")
+            && key("works", &body)? == entity_key
+        {
+            match command {
+                "createWork" => {
+                    predicted += 1;
+                    state = json!({"fields":body["fields"],"name":body["name"],"showcase":false,"showcaseOrder":null,"lifecycle":"live"});
+                }
+                "updateWork" => {
+                    let mut changed = false;
+                    for (field, value) in body["changes"]
+                        .as_object()
+                        .ok_or(LibraryError::InvalidCloudResponse)?
+                    {
+                        let target = if matches!(field.as_str(), "name" | "showcase") {
+                            &mut state[field]
+                        } else {
+                            &mut state["fields"][field]
+                        };
+                        changed |= *target != *value;
+                        *target = value.clone();
+                    }
+                    if changed {
+                        predicted += 1;
+                    }
+                    if body["changes"].get("showcase").is_some() {
+                        state["showcaseOrder"] = orders
+                            .get(text(&body, "workId")?)
+                            .map_or(Value::Null, |v| v["showcaseOrder"].clone());
+                    }
+                }
+                "deleteWork" => {
+                    if state["lifecycle"] != "trashed" {
+                        predicted += 1;
+                        state["lifecycle"] = json!("trashed");
+                    }
+                }
+                _ => {}
+            }
+        } else if section == "memberships"
+            && command == "setMembership"
+            && key("memberships", &body)? == entity_key
+        {
+            if state["desiredState"].as_bool().unwrap_or(false)
+                != body["desiredState"]
+                    .as_bool()
+                    .ok_or(LibraryError::InvalidCloudResponse)?
+            {
+                predicted += 1;
+            }
+            state = json!({"desiredState":body["desiredState"]});
+        }
+    }
+    Ok(predicted)
+}
+
+pub(crate) fn optimistic_collection_trash(
+    tx: &Transaction<'_>,
+    work: &str,
+) -> Result<(), LibraryError> {
+    let payload: Option<String> = tx.query_row("SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id=?1",[work],|r|r.get(0)).optional()?;
+    let mut value: Value = payload
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| LibraryError::InvalidCloudResponse)?
+        .unwrap_or(json!({"workId":work}));
+    let now = chrono::Utc::now().to_rfc3339();
+    value["trashedAt"] = json!(now);
+    value["lifecycle"] = json!("trashed");
+    mark_trash(tx, &value, "trashed", &now)
 }
 
 fn mark_trash(
@@ -852,10 +1075,12 @@ impl Library {
         let Some(id) = status.identity(&*self.connection()?)? else {
             return Ok((false, false));
         };
+        // Fence immediately after observing activation, even if fetching the baseline fails.
+        self.observe_collection_authority(&status)?;
         let initial = local(&*self.connection()?)?;
         let needs_baseline = initial
             .as_ref()
-            .is_none_or(|l| !same(&l.id, &id) || l.id.cursor > id.cursor);
+            .is_none_or(|l| !same(&l.id, &id) || l.id.cursor > id.cursor || l.manifest.is_null());
         if needs_baseline {
             let manifest =
                 client.collection_authority_read(&url_path("baseline", &id, &[]), token)?;
@@ -906,6 +1131,9 @@ impl Library {
                 chrono::Utc::now().timestamp(),
             )?
         };
+        // A receipt or settled refusal can change the local projection even when
+        // the subsequent feed only repeats revisions already received here.
+        changed |= sent;
         // Flush-first: unresolved optimistic effects must not be overwritten.
         if self.connection()?.query_row(
             "SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE state='pending')",
@@ -1006,9 +1234,7 @@ fn publisher_command(command: &str) -> bool {
     )
 }
 
-/// Enqueue inside the caller's optimistic-write transaction. No optimistic writer
-/// is routed here yet. Retries keep the stored envelope/payload and operation ID.
-#[allow(dead_code)]
+/// Enqueue inside the optimistic-write transaction. Retries keep the stored payload and ID.
 pub(crate) fn enqueue_collection_command(
     tx: &Transaction<'_>,
     status: &CollectionAuthorityStatus,
@@ -1046,7 +1272,215 @@ fn backoff(attempts: i64) -> i64 {
     (5_i64.saturating_mul(1_i64 << attempts.clamp(0, 10))).min(3600)
 }
 
+fn core_command(command: &str) -> bool {
+    matches!(
+        command,
+        "createWork" | "updateWork" | "deleteWork" | "setShowcaseOrder" | "setMembership"
+    )
+}
+
+/// A receipt confirms earlier commands, but must not erase newer optimistic core
+/// edits while their immutable payloads wait for delivery. Never change revision caches.
+fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> {
+    let rows=tx.prepare("SELECT payload,created_at FROM collection_authority_outbox WHERE state='pending' ORDER BY seq")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
+    for (raw, created_at) in rows {
+        let body: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        match body["commandType"].as_str() {
+            Some("updateWork") => {
+                if let Some(changes) = body["changes"].as_object() {
+                    for (field, value) in changes {
+                        let work = text(&body, "workId")?;
+                        match field.as_str() {
+                            "status" | "ownedPlatform" => {
+                                let column = if field == "status" {
+                                    "status"
+                                } else {
+                                    "owned_platform"
+                                };
+                                tx.execute(&format!("INSERT INTO collection_pc_records(collection_id,{column}) SELECT id,?2 FROM collections WHERE id=?1 ON CONFLICT(collection_id) DO UPDATE SET {column}=excluded.{column}"),params![work,sql_value(value)?])?;
+                            }
+                            "showcase" => {
+                                tx.execute("UPDATE collections SET showcase=?2,showcase_order=CASE WHEN ?2=0 THEN NULL WHEN showcase=1 AND showcase_order IS NOT NULL THEN showcase_order ELSE (SELECT COALESCE(MAX(showcase_order)+1,0) FROM collections other WHERE other.type=collections.type AND other.id<>collections.id AND (other.legacy_kind IS NULL OR other.legacy_kind<>'gacha')) END WHERE id=?1",params![work,sql_value(value)?])?;
+                            }
+                            "coverAssetId" => {
+                                tx.execute("UPDATE collections SET cover_asset_id=(SELECT id FROM assets WHERE id=?2) WHERE id=?1",params![work,sql_value(value)?])?;
+                            }
+                            _ => {
+                                let column = match field.as_str() {
+                                    "name" => "name",
+                                    "description" => "description",
+                                    "year" => "year",
+                                    "originalTitle" => "original_title",
+                                    "runtimeMinutes" => "runtime_minutes",
+                                    "author" => "author",
+                                    "director" => "director",
+                                    "developer" => "developer",
+                                    "publisher" => "publisher",
+                                    "platforms" => "platforms",
+                                    "productionCompany" => "production_company",
+                                    "releaseDate" => "release_date",
+                                    "externalScore" => "external_score",
+                                    "myScore" => "my_score",
+                                    "genres" => "genres",
+                                    "overview" => "overview",
+                                    _ => return Err(LibraryError::InvalidCloudResponse),
+                                };
+                                tx.execute(
+                                    &format!("UPDATE collections SET {column}=?2 WHERE id=?1"),
+                                    params![work, sql_value(value)?],
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+            Some("setMembership") => {
+                if boolean(&body, "desiredState")? {
+                    tx.execute("INSERT INTO collection_assets(collection_id,asset_id,added_at) SELECT c.id,a.id,?3 FROM collections c,assets a WHERE c.id=?1 AND a.id=?2 ON CONFLICT(collection_id,asset_id) DO NOTHING",params![text(&body,"workId")?,text(&body,"assetId")?,created_at])?;
+                } else {
+                    tx.execute(
+                        "DELETE FROM collection_assets WHERE collection_id=?1 AND asset_id=?2",
+                        params![text(&body, "workId")?, text(&body, "assetId")?],
+                    )?;
+                }
+            }
+            Some("setShowcaseOrder") => {
+                for (order, work) in body["workIds"]
+                    .as_array()
+                    .ok_or(LibraryError::InvalidCloudResponse)?
+                    .iter()
+                    .enumerate()
+                {
+                    tx.execute(
+                        "UPDATE collections SET showcase_order=?2 WHERE id=?1",
+                        params![
+                            work.as_str().ok_or(LibraryError::InvalidCloudResponse)?,
+                            order as i64
+                        ],
+                    )?;
+                }
+            }
+            Some("deleteWork") => {
+                let work = text(&body, "workId")?;
+                if tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM collections WHERE id=?1)",
+                    [work],
+                    |r| r.get::<_, bool>(0),
+                )? {
+                    optimistic_collection_trash(tx, work)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Settle refused core edits without blocking unrelated writes. Reproject confirmed
+/// feed rows even at the same revision: optimistic state never increments that cache.
+fn drop_core_intent(
+    tx: &Transaction<'_>,
+    seq: i64,
+    body: &Value,
+    detail: &Value,
+    now: &str,
+) -> Result<(), LibraryError> {
+    let reason = text(detail, "code")?;
+    tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason=?2,conflict_code=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,reason,detail.to_string(),now])?;
+    let works: Vec<String> = if let Some(work) = body["workId"].as_str() {
+        vec![work.to_owned()]
+    } else {
+        body["workIds"]
+            .as_array()
+            .ok_or(LibraryError::InvalidCloudResponse)?
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_owned)
+                    .ok_or(LibraryError::InvalidCloudResponse)
+            })
+            .collect::<Result<_, _>>()?
+    };
+    let generation = local(tx)?
+        .ok_or(LibraryError::CollectionAuthorityNotAdopted)?
+        .generation;
+    for work in &works {
+        // Later edits composed against this optimistic state cannot be sent safely.
+        tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='dependencyDropped',updated_at=?2 WHERE state='pending' AND seq>?3 AND (json_extract(payload,'$.workId')=?1 OR (command_type='setShowcaseOrder' AND EXISTS(SELECT 1 FROM json_each(payload,'$.workIds') WHERE value=?1)))",params![work,now,seq])?;
+        let rows = tx.prepare("SELECT section,entity_key,payload FROM collection_authority_revisions WHERE work_id=?1 AND section IN ('works','memberships') ORDER BY CASE section WHEN 'works' THEN 0 ELSE 1 END")?.query_map([work],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<Result<Vec<_>,_>>()?;
+        if !rows.iter().any(|r| r.0 == "works") {
+            // A refused optimistic create has no server work to restore. Archive its
+            // local subtree without deleting any files or Library Assets.
+            optimistic_collection_trash(tx, work)?;
+            tx.execute(
+                "UPDATE collection_authority_trash SET lifecycle='absent' WHERE work_id=?1",
+                [work],
+            )?;
+        }
+        for (section, entity_key, raw) in rows {
+            let value: Value =
+                serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+            tx.execute(
+                "DELETE FROM collection_authority_revisions WHERE section=?1 AND entity_key=?2",
+                params![section, entity_key],
+            )?;
+            apply_entity(tx, &section, &value, &generation, now)?;
+        }
+        // Remove optimistic new memberships that have no confirmed feed row.
+        tx.execute("DELETE FROM collection_assets WHERE collection_id=?1 AND NOT EXISTS(SELECT 1 FROM collection_authority_revisions r WHERE r.section='memberships' AND r.work_id=?1 AND json_extract(r.payload,'$.assetId')=collection_assets.asset_id AND r.deleted=0)",[work])?;
+    }
+    // Revision conflicts carry a full current entity; receive it through batch-1
+    // apply, then the regular changes feed catches up without advancing its cursor here.
+    let current = &detail["current"];
+    if let Some(work) = current.get("work") {
+        apply_entity(tx, "works", work, &generation, now)?;
+    }
+    if let Some(membership) = current
+        .get("membership")
+        .filter(|v| v["entityRevision"].as_i64().is_some_and(|r| r > 0))
+    {
+        apply_entity(tx, "memberships", membership, &generation, now)?;
+    }
+    if matches!(reason, "workDeleted" | "workNotFound") {
+        for work in &works {
+            optimistic_collection_trash(tx, work)?;
+            tx.execute(
+                "UPDATE collection_authority_trash SET lifecycle='absent' WHERE work_id=?1",
+                [work],
+            )?;
+        }
+    }
+    selections(tx)?;
+    Ok(())
+}
+
 impl Library {
+    fn observe_collection_authority(
+        &self,
+        status: &CollectionAuthorityStatus,
+    ) -> Result<(), LibraryError> {
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let id = status
+            .identity(&tx)?
+            .ok_or(LibraryError::CollectionAuthorityMismatch)?;
+        match local(&tx)? {
+            None => {
+                tx.execute("INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,generation,updated_at) VALUES(1,?1,?2,?3,?4,?5)",params![id.library,id.epoch,id.version,uuid::Uuid::new_v4().to_string(),chrono::Utc::now().to_rfc3339()])?;
+            }
+            Some(l) if !same(&l.id, &id) => {
+                tx.execute(
+                    "UPDATE collection_authority_sync SET adopted=0 WHERE singleton=1",
+                    [],
+                )?;
+            }
+            _ => {}
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     fn flush_collection_outbox_with(
         &self,
         status: &CollectionAuthorityStatus,
@@ -1095,10 +1529,20 @@ impl Library {
                     sent = true;
                 }
                 Ok(CollectionDelivery::Conflict(detail)) => {
-                    tx.execute("UPDATE collection_authority_outbox SET state='blocked',conflict_code=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,text(&detail,"code")?,detail.to_string(),timestamp])?;
+                    if core_command(text(&body, "commandType")?) {
+                        drop_core_intent(&tx, seq, &body, &detail, &timestamp)?;
+                        sent = true;
+                    } else {
+                        tx.execute("UPDATE collection_authority_outbox SET state='blocked',conflict_code=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,text(&detail,"code")?,detail.to_string(),timestamp])?;
+                    }
                 }
                 Ok(CollectionDelivery::Dropped(detail)) => {
-                    tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,text(&detail,"code")?,detail.to_string(),timestamp])?;
+                    if core_command(text(&body, "commandType")?) {
+                        drop_core_intent(&tx, seq, &body, &detail, &timestamp)?;
+                        sent = true;
+                    } else {
+                        tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,text(&detail,"code")?,detail.to_string(),timestamp])?;
+                    }
                 }
                 Ok(CollectionDelivery::Retry)
                 | Err(LibraryError::CloudRequestUnavailable)
@@ -1109,6 +1553,7 @@ impl Library {
                 }
                 Err(error) => return Err(error),
             }
+            reapply_pending_core_edits(&tx)?;
             tx.commit()?;
         }
         Ok(sent)

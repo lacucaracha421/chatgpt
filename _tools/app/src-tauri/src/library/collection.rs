@@ -3,6 +3,10 @@ use std::collections::BTreeSet;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
+    collection_authority::{
+        collection_write_status, editable_work, enqueue_collection_command, enqueue_work_changes,
+        optimistic_collection_trash, predicted_collection_revision,
+    },
     error::LibraryError,
     models::{
         AssetCollectionPatch, CollectionSummary, CollectionType, CreateCollection, UpdateCollection,
@@ -225,8 +229,10 @@ impl Library {
         let type_str = collection_type_str(request.collection_type);
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let connection = self.connection()?;
-        connection
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let authority = collection_write_status(&transaction)?;
+        transaction
             .execute(
                 "INSERT INTO collections (
                     id, name, description, type, cover_asset_id,
@@ -239,8 +245,21 @@ impl Library {
                 params![id, name, description, type_str, now],
             )
             .map_err(map_duplicate_name)?;
-        self.publication_inputs.signal(&[9]);
-        collection_by_id(&connection, &id)
+        if authority.active {
+            enqueue_collection_command(
+                &transaction,
+                &authority,
+                "createWork",
+                &id,
+                serde_json::json!({"workId":id,"type":type_str,"name":name,"legacyKind":null,"fields":{"description":description},"binding":null}),
+            )?;
+        }
+        let summary = collection_by_id(&transaction, &id)?;
+        transaction.commit()?;
+        if !authority.active {
+            self.publication_inputs.signal(&[9]);
+        }
+        Ok(summary)
     }
 
     pub fn update_collection(
@@ -263,17 +282,45 @@ impl Library {
         // field keeps the stored value, which a mobile edit may have changed meanwhile.
         let (write_description, write_score) = match &request.personal_base {
             Some(base) => (
-                description != base.description.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned),
+                description
+                    != base
+                        .description
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned),
                 my_score != base.my_score,
             ),
             None => (true, true),
         };
-        let connection = self.connection()?;
-        let current_type: Option<String> = connection.query_row("SELECT type FROM collections WHERE id=?1", [id], |r| r.get(0)).optional()?;
-        if current_type.as_deref().is_some_and(|current| (current == "av") != (type_str == "av")) {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let authority = collection_write_status(&transaction)?;
+        let mut before = editable_work(&transaction, id)?;
+        let current_type: Option<String> = transaction
+            .query_row("SELECT type FROM collections WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if authority.active && current_type.as_deref() != Some(type_str) {
+            return Err(LibraryError::CollectionAuthorityTypeChangeUnavailable);
+        }
+        if let Some(base) = request.personal_base.as_ref().filter(|_| authority.active) {
+            if write_description {
+                before["description"] =
+                    serde_json::json!(normalized_description(base.description.clone())?);
+            }
+            if write_score {
+                before["myScore"] = serde_json::json!(base.my_score);
+            }
+        }
+        if current_type
+            .as_deref()
+            .is_some_and(|current| (current == "av") != (type_str == "av"))
+        {
             return Err(LibraryError::InvalidCollectionType);
         }
-        let changed = connection
+        let changed = transaction
             .execute(
                 "UPDATE collections
                  SET name = ?1, description = CASE WHEN ?18 THEN ?2 ELSE description END, type = ?3,
@@ -320,17 +367,43 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::CollectionNotFound);
         }
-        self.publication_inputs.signal(&[9]);
-        collection_by_id(&connection, id)
+        enqueue_work_changes(&transaction, &authority, id, &before)?;
+        let summary = collection_by_id(&transaction, id)?;
+        transaction.commit()?;
+        if !authority.active {
+            self.publication_inputs.signal(&[9]);
+        }
+        Ok(summary)
     }
 
     pub fn delete_collection(&self, id: &str) -> Result<(), LibraryError> {
-        let changed = self
-            .connection()?
-            .execute("DELETE FROM collections WHERE id = ?1", [id])?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let authority = collection_write_status(&transaction)?;
+        require_collection(&transaction, id)?;
+        if authority.active {
+            let revision = predicted_collection_revision(
+                &transaction,
+                "works",
+                &serde_json::json!([id]).to_string(),
+            )?;
+            enqueue_collection_command(
+                &transaction,
+                &authority,
+                "deleteWork",
+                id,
+                serde_json::json!({"workId":id,"expectedRevision":revision}),
+            )?;
+            optimistic_collection_trash(&transaction, id)?;
+            transaction.commit()?;
+            return Ok(());
+        }
+        let changed = transaction.execute("DELETE FROM collections WHERE id = ?1", [id])?;
         if changed == 0 {
             return Err(LibraryError::CollectionNotFound);
         }
+        transaction.commit()?;
+        drop(connection);
         self.publication_inputs.signal(&[9]);
         self.cleanup_collection_thumbnail_cache(id)?;
         // The delete is committed; a file that cannot be removed now is retried on the
@@ -358,10 +431,13 @@ impl Library {
         collection_id: &str,
         asset_id: Option<&str>,
     ) -> Result<CollectionSummary, LibraryError> {
-        let connection = self.connection()?;
-        require_collection(&connection, collection_id)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let authority = collection_write_status(&transaction)?;
+        let before = editable_work(&transaction, collection_id)?;
+        require_collection(&transaction, collection_id)?;
         if let Some(asset_id) = asset_id {
-            let valid: bool = connection.query_row(
+            let valid: bool = transaction.query_row(
                 "SELECT EXISTS (
                     SELECT 1 FROM collection_assets AS link
                     JOIN assets AS asset ON asset.id = link.asset_id
@@ -375,11 +451,14 @@ impl Library {
                 return Err(LibraryError::CollectionCoverNotMember);
             }
         }
-        connection.execute(
+        transaction.execute(
             "UPDATE collections SET cover_asset_id = ?1, updated_at = ?2 WHERE id = ?3",
             params![asset_id, chrono::Utc::now().to_rfc3339(), collection_id],
         )?;
-        collection_by_id(&connection, collection_id)
+        enqueue_work_changes(&transaction, &authority, collection_id, &before)?;
+        let summary = collection_by_id(&transaction, collection_id)?;
+        transaction.commit()?;
+        Ok(summary)
     }
 
     pub fn set_collection_showcase(
@@ -387,9 +466,12 @@ impl Library {
         collection_id: &str,
         showcase: bool,
     ) -> Result<CollectionSummary, LibraryError> {
-        let connection = self.connection()?;
-        require_collection(&connection, collection_id)?;
-        let changed = connection.execute(
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let authority = collection_write_status(&transaction)?;
+        let before = editable_work(&transaction, collection_id)?;
+        require_collection(&transaction, collection_id)?;
+        let changed = transaction.execute(
             "UPDATE collections
              SET showcase = ?1,
                  showcase_order = CASE
@@ -414,12 +496,51 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::CollectionNotFound);
         }
-        collection_by_id(&connection, collection_id)
+        enqueue_work_changes(&transaction, &authority, collection_id, &before)?;
+        let summary = collection_by_id(&transaction, collection_id)?;
+        transaction.commit()?;
+        Ok(summary)
+    }
+
+    pub fn set_collection_showcase_order(
+        &self,
+        collection_type: CollectionType,
+        work_ids: Vec<String>,
+    ) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let authority = collection_write_status(&transaction)?;
+        let kind = collection_type_str(collection_type);
+        let current = transaction.prepare("SELECT id FROM collections WHERE type=?1 AND showcase=1 AND (legacy_kind IS NULL OR legacy_kind<>'gacha') ORDER BY showcase_order IS NULL,showcase_order,name COLLATE NOCASE,id")?.query_map([kind],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        let desired: BTreeSet<_> = work_ids.iter().collect();
+        if desired.len() != work_ids.len() || desired != current.iter().collect() {
+            return Err(LibraryError::InvalidCollectionMetadata);
+        }
+        if current != work_ids {
+            for (order, work) in work_ids.iter().enumerate() {
+                transaction.execute(
+                    "UPDATE collections SET showcase_order=?2,updated_at=?3 WHERE id=?1",
+                    params![work, order as i64, chrono::Utc::now().to_rfc3339()],
+                )?;
+            }
+            if authority.active {
+                enqueue_collection_command(
+                    &transaction,
+                    &authority,
+                    "setShowcaseOrder",
+                    kind,
+                    serde_json::json!({"type":kind,"workIds":work_ids}),
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn patch_asset_collections(&self, patch: AssetCollectionPatch) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        let authority = collection_write_status(&transaction)?;
         let asset_ids = validated_asset_ids(&transaction, &patch.asset_ids)?;
         let add_ids: BTreeSet<_> = patch
             .add_collection_ids
@@ -437,6 +558,8 @@ impl Library {
         let now = chrono::Utc::now().to_rfc3339();
         for asset_id in asset_ids {
             for collection_id in &remove_ids {
+                let before = editable_work(&transaction, collection_id)?;
+                let member: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM collection_assets WHERE collection_id=?1 AND asset_id=?2)",params![collection_id,asset_id],|r|r.get(0))?;
                 transaction.execute(
                     "UPDATE collections
                      SET cover_asset_id = NULL, updated_at = ?1
@@ -448,13 +571,38 @@ impl Library {
                      WHERE asset_id = ?1 AND collection_id = ?2",
                     params![asset_id, collection_id],
                 )?;
+                enqueue_work_changes(&transaction, &authority, collection_id, &before)?;
+                if authority.active && member {
+                    let entity_key = serde_json::json!([collection_id, asset_id]).to_string();
+                    let revision =
+                        predicted_collection_revision(&transaction, "memberships", &entity_key)?;
+                    enqueue_collection_command(
+                        &transaction,
+                        &authority,
+                        "setMembership",
+                        &entity_key,
+                        serde_json::json!({"workId":collection_id,"assetId":asset_id,"desiredState":false,"expectedRevision":revision}),
+                    )?;
+                }
             }
             for collection_id in &add_ids {
-                transaction.execute(
+                let changed = transaction.execute(
                     "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
                      VALUES (?1, ?2, ?3)",
                     params![collection_id, asset_id, now],
                 )?;
+                if authority.active && changed > 0 {
+                    let entity_key = serde_json::json!([collection_id, asset_id]).to_string();
+                    let revision =
+                        predicted_collection_revision(&transaction, "memberships", &entity_key)?;
+                    enqueue_collection_command(
+                        &transaction,
+                        &authority,
+                        "setMembership",
+                        &entity_key,
+                        serde_json::json!({"workId":collection_id,"assetId":asset_id,"desiredState":true,"expectedRevision":revision}),
+                    )?;
+                }
             }
         }
         for collection_id in add_ids.iter().chain(remove_ids.iter()) {

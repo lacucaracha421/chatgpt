@@ -518,6 +518,7 @@ pub(crate) struct LaneFailure {
 pub(crate) struct AuthoritySyncHealth {
     pub albums: DomainSyncHealth,
     pub classifications: DomainSyncHealth,
+    pub collections: DomainSyncHealth,
     pub assets: AssetSyncHealth,
     pub character_exclusions: CharacterExclusionHealth,
     pub authority_pass_failure: Option<LaneFailure>,
@@ -554,6 +555,14 @@ impl Library {
             ..Default::default()
         };
         let connection = self.connection()?;
+        health.collections.blocked_count = connection.query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE state='blocked'",[],|r|r.get(0))?;
+        // Batch 1 keeps Collection drop evidence in its durable outbox; the shared
+        // intent-drop table intentionally only accepts Albums and Classifications.
+        health.collections.dropped_count = connection.query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE state='dropped'",[],|r|r.get(0))?;
+        if let Some((reason, at)) = connection.query_row("SELECT drop_reason,updated_at FROM collection_authority_outbox WHERE state='dropped' ORDER BY updated_at DESC,seq DESC LIMIT 1",[],|r|Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<String>>(1)?))).optional()? {
+            health.collections.last_drop_reason = reason;
+            health.collections.last_dropped_at = at;
+        }
         let mut drops = connection.prepare(
             "SELECT domain, dropped_count, last_reason, last_dropped_at FROM authority_intent_drops",
         )?;

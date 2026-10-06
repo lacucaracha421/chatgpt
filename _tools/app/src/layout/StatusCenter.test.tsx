@@ -232,6 +232,14 @@ it("shows a running Private Vault export in the status panel", async () => {
 });
 
 const domain = { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null };
+it("shows Collection authority conflicts as a non-blocking server-state note", () => {
+  const summary = authoritySyncSummary({
+    ...healthy,
+    collections: { ...domain, droppedCount: 1, lastDropReason: "revisionConflict", lastDroppedAt: "2026-10-06T00:00:00Z" },
+  });
+  expect(summary.problemCount).toBe(0);
+  expect(summary.notes).toContain("서버가 받지 않은 변경 1개 · 최근: 서버 상태가 우선함");
+});
 const healthy: AuthoritySyncHealth = {
   albums: domain, classifications: domain,
   assets: { rejectedCount: 0, rejectedReason: null, stopped: false },

@@ -417,6 +417,7 @@ pub fn run() {
             commands::get_asset_collections,
             commands::patch_asset_collections,
             commands::set_collection_showcase,
+            commands::set_collection_showcase_order,
             commands::set_collection_volume_range,
             commands::get_asset_classifications,
             commands::list_assets,

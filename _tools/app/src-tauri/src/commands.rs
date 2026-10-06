@@ -178,6 +178,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidCloudResponse => "invalid_cloud_response",
             LibraryError::CollectionAuthorityNotAdopted => "collection_authority_not_adopted",
             LibraryError::CollectionAuthorityMismatch => "collection_authority_mismatch",
+            LibraryError::CollectionAuthorityTypeChangeUnavailable => "collection_authority_type_change_unavailable",
             LibraryError::CloudMetadataBackupNotFound => "cloud_metadata_backup_not_found",
             LibraryError::CloudMetadataBackupTooLarge => "cloud_metadata_backup_too_large",
             LibraryError::RestoreAuthorityActive { .. } => "restore_authority_active",
@@ -1846,6 +1847,17 @@ pub fn set_collection_showcase(
 ) -> Result<CollectionSummary, CommandError> {
     current_required(state)?
         .set_collection_showcase(&collection_id, showcase)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_collection_showcase_order(
+    collection_type: crate::library::models::CollectionType,
+    work_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_collection_showcase_order(collection_type, work_ids)
         .map_err(CommandError::from)
 }
 

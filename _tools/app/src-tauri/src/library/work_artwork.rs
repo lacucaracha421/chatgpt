@@ -590,10 +590,20 @@ impl Library {
     }
 
     pub(crate) fn cleanup_unreferenced_work_artwork(&self) -> Result<(), LibraryError> {
+        let connection = self.connection()?;
+        // Authority trash archives artwork references outside the live tables.
+        // Keep their originals until a separately supported physical purge can
+        // inspect those snapshots; library-open cleanup must not bypass retention.
+        if connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM collection_authority_trash)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )? {
+            return Ok(());
+        }
         // Lock order: database -> pending. Registration/drop may already hold the
         // database. Pending paths protect registrations newer than the DB snapshot;
         // hold their gate through unlink, without holding the DB during disk traversal.
-        let connection = self.connection()?;
         let pending = self
             .pending_work_artwork
             .lock()

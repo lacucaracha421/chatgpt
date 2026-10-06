@@ -164,6 +164,8 @@ impl Library {
     ) -> Result<WorkRecord, LibraryError> {
         let mut c = self.connection()?;
         let tx = c.transaction()?;
+        let authority = super::collection_authority::collection_write_status(&tx)?;
+        let before = super::collection_authority::editable_work(&tx, id)?;
         let kind: String = tx
             .query_row("SELECT type FROM collections WHERE id=?1", [id], |r| {
                 r.get(0)
@@ -180,7 +182,7 @@ impl Library {
             WorkRecordEdit::OwnedPlatform { value } => {
                 write_record_platform(&tx, id, &kind, value)?;
             }
-            // Existing personal fields keep their existing sync handshake and triggers.
+            // Inactive personal fields retain the legacy handshake and triggers.
             WorkRecordEdit::MyScore { value } => {
                 let value = validated_personal_rating(value)?;
                 tx.execute(
@@ -196,6 +198,7 @@ impl Library {
                 )?;
             }
         }
+        super::collection_authority::enqueue_work_changes(&tx, &authority, id, &before)?;
         tx.commit()?;
         drop(c);
         self.collection_work_record(id)

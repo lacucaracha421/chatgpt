@@ -98,6 +98,496 @@ fn count(l: &Library, table: &str) -> i64 {
         .unwrap()
 }
 
+fn core_bodies(l: &Library) -> Vec<Value> {
+    l.connection()
+        .unwrap()
+        .prepare("SELECT payload FROM collection_authority_outbox ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|raw| serde_json::from_str(&raw.unwrap()).unwrap())
+        .collect()
+}
+fn core_create(l: &Library, name: &str) -> super::super::models::CollectionSummary {
+    l.create_collection(super::super::models::CreateCollection {
+        name: name.into(),
+        description: Some("memo".into()),
+        collection_type: super::super::models::CollectionType::Game,
+    })
+    .unwrap()
+}
+fn core_edit(kind: &str, name: &str) -> super::super::models::UpdateCollection {
+    serde_json::from_value(json!({"type":kind,"name":name,"description":"new memo","year":2025,"originalTitle":"Original","runtimeMinutes":null,"author":null,"director":null,"developer":"Developer","publisher":"Publisher","platforms":"PC","productionCompany":null,"releaseDate":"2025-01-01","externalScore":80,"myScore":4.0})).unwrap()
+}
+
+#[test]
+fn collection_authority_core_crud_and_records_use_exact_commands_and_atomic_local_state() {
+    use super::super::collection_pc::WorkRecordEdit;
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({}));
+    let created = core_create(&l, "Game");
+    let body = core_bodies(&l).remove(0);
+    assert_eq!(
+        body,
+        json!({"libraryId":s.library_id,"epoch":1,"contractVersion":1,"operationId":body["operationId"],"commandType":"createWork","workId":created.id,"type":"game","name":"Game","legacyKind":null,"fields":{"description":"memo"},"binding":null})
+    );
+    assert_eq!(
+        uuid::Uuid::parse_str(body["operationId"].as_str().unwrap())
+            .unwrap()
+            .to_string(),
+        body["operationId"]
+    );
+    l.update_collection(&created.id, core_edit("game", "Renamed"))
+        .unwrap();
+    let update = core_bodies(&l).remove(1);
+    assert_eq!(update["commandType"], "updateWork");
+    assert_eq!(update["expectedRevision"], Value::Null);
+    assert_eq!(update["changes"]["name"], "Renamed");
+    assert_eq!(update["expected"]["name"], "Game");
+    assert_eq!(update["expected"]["description"], "memo");
+    assert_eq!(update.as_object().unwrap().len(), 9);
+    assert_eq!(
+        update["changes"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        update["expected"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>()
+    );
+    for edit in [
+        WorkRecordEdit::Status {
+            value: Some("playing".into()),
+        },
+        WorkRecordEdit::OwnedPlatform {
+            value: Some("  Switch  ".into()),
+        },
+        WorkRecordEdit::MyScore { value: Some(4.5) },
+        WorkRecordEdit::Memo {
+            value: Some("  personal  ".into()),
+        },
+    ] {
+        l.save_collection_work_record(&created.id, edit).unwrap();
+    }
+    let record = l.collection_work_record(&created.id).unwrap();
+    assert_eq!(record.status.as_deref(), Some("playing"));
+    assert_eq!(record.owned_platform.as_deref(), Some("Switch"));
+    assert_eq!(record.my_score, Some(4.5));
+    assert_eq!(record.memo.as_deref(), Some("personal"));
+    for (body, field, value, expected) in core_bodies(&l)[2..]
+        .iter()
+        .zip([
+            ("status", json!("playing"), Value::Null),
+            ("ownedPlatform", json!("Switch"), Value::Null),
+            ("myScore", json!(4.5), json!(4.0)),
+            ("description", json!("personal"), json!("new memo")),
+        ])
+        .map(|(body, (field, value, expected))| (body, field, value, expected))
+    {
+        assert_eq!(body["changes"], json!({field:value}));
+        assert_eq!(body["expected"], json!({field:expected}));
+    }
+    l.save_collection_work_record(
+        &created.id,
+        WorkRecordEdit::Status {
+            value: Some("playing".into()),
+        },
+    )
+    .unwrap();
+    assert_eq!(core_bodies(&l).len(), 6);
+    l.delete_collection(&created.id).unwrap();
+    assert!(matches!(
+        l.get_collection(&created.id),
+        Err(LibraryError::CollectionNotFound)
+    ));
+    assert_eq!(count(&l, "collection_authority_trash"), 1);
+    let deleted = core_bodies(&l).pop().unwrap();
+    assert_eq!(deleted["commandType"], "deleteWork");
+    assert_eq!(deleted["expectedRevision"], 6);
+    let db = l.connection().unwrap();
+    let snapshot: String = db
+        .query_row(
+            "SELECT local_snapshot FROM collection_authority_trash",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+    assert_eq!(snapshot["collections"][0]["name"], "Renamed");
+    assert_eq!(
+        snapshot["collection_pc_records"][0]["owned_platform"],
+        "Switch"
+    );
+}
+
+#[test]
+fn collection_authority_core_membership_cover_showcase_and_order_commands() {
+    use super::super::models::{AssetCollectionPatch, CollectionType};
+    let (_temp, l, s) = fixture();
+    let mut game = work("g", 3);
+    game["type"] = json!("game");
+    game["fields"]["status"] = Value::Null;
+    let mut second = game.clone();
+    second["workId"] = json!("h");
+    second["name"] = json!("Other");
+    adopt(&l, &s, json!({"works":[game,second]}));
+    asset(&l, "a");
+    let patch = |add: bool| AssetCollectionPatch {
+        asset_ids: vec!["a".into()],
+        add_collection_ids: if add { vec!["g".into()] } else { vec![] },
+        remove_collection_ids: if add { vec![] } else { vec!["g".into()] },
+    };
+    l.patch_asset_collections(patch(true)).unwrap();
+    l.patch_asset_collections(patch(true)).unwrap();
+    l.set_collection_cover("g", Some("a")).unwrap();
+    l.set_collection_showcase("g", true).unwrap();
+    l.set_collection_showcase("h", true).unwrap();
+    l.set_collection_showcase_order(CollectionType::Game, vec!["h".into(), "g".into()])
+        .unwrap();
+    assert_eq!(l.get_collection("g").unwrap().showcase_order, Some(1));
+    assert_eq!(l.get_collection("h").unwrap().showcase_order, Some(0));
+    let bodies = core_bodies(&l);
+    assert_eq!(bodies[0]["commandType"], "setMembership");
+    assert_eq!(bodies[0]["desiredState"], true);
+    assert_eq!(bodies[0]["expectedRevision"], 0);
+    assert_eq!(bodies[0].as_object().unwrap().len(), 9);
+    assert_eq!(bodies[1]["changes"], json!({"coverAssetId":"a"}));
+    assert_eq!(bodies[1]["expected"], json!({"coverAssetId":null}));
+    assert_eq!(bodies[2]["changes"], json!({"showcase":true}));
+    assert_eq!(bodies[4]["commandType"], "setShowcaseOrder");
+    assert_eq!(bodies[4]["type"], "game");
+    assert_eq!(bodies[4]["workIds"], json!(["h", "g"]));
+    assert_eq!(bodies[4].as_object().unwrap().len(), 7);
+    l.patch_asset_collections(patch(false)).unwrap();
+    let bodies = core_bodies(&l);
+    assert_eq!(bodies[5]["changes"], json!({"coverAssetId":null}));
+    assert_eq!(bodies[6]["desiredState"], false);
+    assert_eq!(bodies[6]["expectedRevision"], 1);
+    assert_eq!(count(&l, "collection_assets"), 0);
+    assert_eq!(l.get_collection("g").unwrap().cover_asset_id, None);
+}
+
+#[test]
+fn collection_authority_core_fences_every_unadopted_write_and_active_type_change() {
+    use super::super::{
+        collection_pc::WorkRecordEdit,
+        models::{AssetCollectionPatch, CollectionType},
+    };
+    let (_temp, l, s) = fixture();
+    let created = core_create(&l, "Legacy");
+    l.observe_collection_authority(&s).unwrap();
+    let refused = vec![
+        l.create_collection(super::super::models::CreateCollection {
+            name: "new".into(),
+            description: None,
+            collection_type: CollectionType::Game,
+        })
+        .map(|_| ()),
+        l.update_collection(&created.id, core_edit("game", "rename"))
+            .map(|_| ()),
+        l.delete_collection(&created.id),
+        l.set_collection_cover(&created.id, None).map(|_| ()),
+        l.set_collection_showcase(&created.id, true).map(|_| ()),
+        l.set_collection_showcase_order(CollectionType::Game, vec![]),
+        l.patch_asset_collections(AssetCollectionPatch {
+            asset_ids: vec![],
+            add_collection_ids: vec![],
+            remove_collection_ids: vec![],
+        }),
+        l.save_collection_work_record(&created.id, WorkRecordEdit::Memo { value: None })
+            .map(|_| ()),
+    ];
+    for result in refused {
+        assert!(matches!(
+            result,
+            Err(LibraryError::CollectionAuthorityNotAdopted)
+        ));
+    }
+    assert_eq!(l.get_collection(&created.id).unwrap().name, "Legacy");
+    assert!(core_bodies(&l).is_empty());
+    let mut game = work(&created.id, 1);
+    game["type"] = json!("game");
+    game["fields"]["status"] = Value::Null;
+    adopt(&l, &s, json!({"works":[game]}));
+    assert!(matches!(
+        l.update_collection(&created.id, core_edit("movie", "rename")),
+        Err(LibraryError::CollectionAuthorityTypeChangeUnavailable)
+    ));
+    assert!(core_bodies(&l).is_empty());
+}
+
+#[test]
+fn collection_authority_core_conflict_restores_feed_state_and_records_nonblocking_drop() {
+    use super::super::collection_pc::WorkRecordEdit;
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    l.save_collection_work_record(
+        "w",
+        WorkRecordEdit::Memo {
+            value: Some("optimistic".into()),
+        },
+    )
+    .unwrap();
+    l.save_collection_work_record("w", WorkRecordEdit::MyScore { value: Some(3.0) })
+        .unwrap();
+    // Equal-revision confirmed rows must also replace an optimistic projection.
+    assert!(l
+        .flush_collection_outbox_with(
+            &s,
+            &|_| Ok(CollectionDelivery::Conflict(
+                json!({"code":"revisionConflict","current":{"work":work("w",1)}})
+            )),
+            0
+        )
+        .unwrap());
+    assert_eq!(
+        l.collection_work_record("w").unwrap().memo.as_deref(),
+        Some("server memo")
+    );
+    assert_eq!(l.collection_work_record("w").unwrap().my_score, Some(4.5));
+    let mut remote = work("w", 2);
+    remote["fields"]["description"] = json!("remote wins");
+    l.apply_collection_changes(&changes(
+        &s,
+        1,
+        json!([change(1, json!({"works":[remote]}))]),
+    ))
+    .unwrap();
+    assert_eq!(
+        l.collection_work_record("w").unwrap().memo.as_deref(),
+        Some("remote wins")
+    );
+    let health = l.authority_sync_health().unwrap();
+    assert_eq!(health.collections.dropped_count, 2);
+    assert_eq!(health.collections.blocked_count, 0);
+    assert!(matches!(
+        health.collections.last_drop_reason.as_deref(),
+        Some("dependencyDropped" | "revisionConflict")
+    ));
+    assert!(!l
+        .flush_collection_outbox_with(&s, &|_| panic!("settled conflict retried"), 100)
+        .unwrap());
+}
+
+#[test]
+fn collection_authority_core_delete_conflict_restores_archived_children_without_file_cleanup() {
+    let (temp, l, s) = fixture();
+    asset(&l, "asset");
+    adopt(
+        &l,
+        &s,
+        json!({"works":[work("w",1)],"memberships":[membership("asset",1,true)]}),
+    );
+    let path = temp.path().join("collection-thumbnails/w");
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(path.join("keep"), b"image").unwrap();
+    l.delete_collection("w").unwrap();
+    assert!(path.join("keep").exists());
+    l.flush_collection_outbox_with(
+        &s,
+        &|_| {
+            Ok(CollectionDelivery::Conflict(
+                json!({"code":"revisionConflict","current":{"work":work("w",2)}}),
+            ))
+        },
+        0,
+    )
+    .unwrap();
+    assert!(l.get_collection("w").is_ok());
+    assert_eq!(l.get_asset_collections("asset").unwrap(), vec!["w"]);
+    assert_eq!(count(&l, "collection_authority_trash"), 0);
+    assert!(path.join("keep").exists());
+}
+
+#[test]
+fn collection_authority_core_delete_retains_archived_artwork_on_cleanup_and_reopen() {
+    let (temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)],"artworks":[art()]}));
+    let relative: String = l
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT relative_path FROM collection_work_artworks WHERE id='art'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let original = temp.path().join(relative);
+    std::fs::create_dir_all(original.parent().unwrap()).unwrap();
+    std::fs::write(&original, b"image").unwrap();
+    l.delete_collection("w").unwrap();
+    l.cleanup_unreferenced_work_artwork().unwrap();
+    assert!(original.exists());
+    drop(l);
+    let reopened = Library::open(temp.path()).unwrap();
+    assert!(original.exists());
+    assert_eq!(count(&reopened, "collection_authority_trash"), 1);
+}
+
+#[test]
+fn collection_authority_core_outbox_failure_rolls_back_local_writes() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    l.connection().unwrap().execute_batch("CREATE TRIGGER refuse_collection_outbox BEFORE INSERT ON collection_authority_outbox BEGIN SELECT RAISE(ABORT,'fixture outbox failure'); END").unwrap();
+    assert!(l
+        .update_collection("w", core_edit("manga", "must roll back"))
+        .is_err());
+    assert_eq!(l.get_collection("w").unwrap().name, "Work w");
+    assert_eq!(
+        l.collection_work_record("w").unwrap().memo.as_deref(),
+        Some("server memo")
+    );
+    assert!(l
+        .create_collection(super::super::models::CreateCollection {
+            name: "new".into(),
+            description: None,
+            collection_type: super::super::models::CollectionType::Game
+        })
+        .is_err());
+    assert_eq!(count(&l, "collections"), 1);
+    assert_eq!(count(&l, "collection_authority_outbox"), 0);
+}
+
+#[test]
+fn collection_authority_core_dropped_receipt_hides_deleted_work_then_applies_feed() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    l.save_collection_work_record(
+        "w",
+        super::super::collection_pc::WorkRecordEdit::Memo {
+            value: Some("optimistic".into()),
+        },
+    )
+    .unwrap();
+    l.flush_collection_outbox_with(
+        &s,
+        &|_| Ok(CollectionDelivery::Dropped(json!({"code":"workDeleted"}))),
+        0,
+    )
+    .unwrap();
+    assert!(matches!(
+        l.get_collection("w"),
+        Err(LibraryError::CollectionNotFound)
+    ));
+    let mut deleted = work("w", 2);
+    deleted["lifecycle"] = json!("tombstoned");
+    deleted["trashedAt"] = json!(NOW);
+    l.apply_collection_changes(&changes(
+        &s,
+        1,
+        json!([change(1, json!({"works":[deleted]}))]),
+    ))
+    .unwrap();
+    assert_eq!(
+        l.authority_sync_health().unwrap().collections.dropped_count,
+        1
+    );
+    assert_eq!(
+        l.connection()
+            .unwrap()
+            .query_row(
+                "SELECT lifecycle FROM collection_authority_trash WHERE work_id='w'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "tombstoned"
+    );
+}
+
+#[test]
+fn collection_authority_core_receipt_keeps_newer_optimistic_record_pending_on_retry() {
+    use super::super::collection_pc::WorkRecordEdit;
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    l.save_collection_work_record(
+        "w",
+        WorkRecordEdit::Memo {
+            value: Some("first".into()),
+        },
+    )
+    .unwrap();
+    l.save_collection_work_record(
+        "w",
+        WorkRecordEdit::Memo {
+            value: Some("second".into()),
+        },
+    )
+    .unwrap();
+    let calls = Cell::new(0);
+    l.flush_collection_outbox_with(
+        &s,
+        &|body| {
+            calls.set(calls.get() + 1);
+            if calls.get() > 1 {
+                return Ok(CollectionDelivery::Retry);
+            }
+            let mut receipt = envelope(&s);
+            receipt["operationId"] = body["operationId"].clone();
+            receipt["commandType"] = body["commandType"].clone();
+            receipt["changed"] = json!(true);
+            receipt["authorityCursor"] = json!(1);
+            let mut confirmed = work("w", 2);
+            confirmed["fields"]["description"] = json!("first");
+            receipt["entities"] = json!({"works":[confirmed]});
+            Ok(CollectionDelivery::Accepted(receipt))
+        },
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        l.collection_work_record("w").unwrap().memo.as_deref(),
+        Some("second")
+    );
+    let db = l.connection().unwrap();
+    let cached: String = db
+        .query_row(
+            "SELECT payload FROM collection_authority_revisions WHERE section='works'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&cached).unwrap()["fields"]["description"],
+        "first"
+    );
+    drop(db);
+    assert_eq!(
+        core_bodies(&l)[1]["expected"],
+        json!({"description":"first"})
+    );
+}
+
+#[test]
+fn collection_authority_core_delete_revision_tracks_showcase_append_and_unchanged_reorder_rank() {
+    use super::super::models::CollectionType;
+    let (_temp, l, s) = fixture();
+    let mut g = work("g", 3);
+    let mut h = work("h", 3);
+    h["showcase"] = json!(true);
+    h["showcaseOrder"] = json!(0);
+    let mut x = work("x", 3);
+    x["showcase"] = json!(true);
+    x["showcaseOrder"] = json!(1);
+    for value in [&mut g, &mut h, &mut x] {
+        value["type"] = json!("game");
+        value["fields"]["status"] = Value::Null;
+    }
+    adopt(&l, &s, json!({"works":[g,h,x]}));
+    l.set_collection_showcase("g", true).unwrap();
+    l.set_collection_showcase_order(
+        CollectionType::Game,
+        vec!["x".into(), "h".into(), "g".into()],
+    )
+    .unwrap();
+    l.delete_collection("g").unwrap();
+    // g was appended at rank 2; the reorder only changes the other two ranks.
+    assert_eq!(core_bodies(&l).last().unwrap()["expectedRevision"], 4);
+}
+
 #[test]
 fn collection_authority_empty_adoption_projects_all_seven_sections() {
     let (_temp, l, s) = fixture();
@@ -428,7 +918,12 @@ fn enqueue(l: &Library, s: &CollectionAuthorityStatus, command: &str) -> String 
 fn collection_authority_outbox_fifo_receipts_conflicts_drops_and_backoff() {
     let (_temp, l, s) = fixture();
     adopt(&l, &s, json!({"works":[work("w",1)]}));
-    let ids: Vec<_> = (0..4).map(|_| enqueue(&l, &s, "updateWork")).collect();
+    // Later-batch commands keep the explicit blocked-head behavior; core writes
+    // instead settle conflicts non-blockingly (covered below).
+    let ids: Vec<_> = ["updateWork", "bindProvider", "addArtwork", "updateWork"]
+        .iter()
+        .map(|command| enqueue(&l, &s, command))
+        .collect();
     let calls = RefCell::new(Vec::new());
     let retry = Cell::new(true);
     let send = |body: &Value| -> Result<CollectionDelivery, LibraryError> {

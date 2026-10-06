@@ -264,7 +264,7 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
   if (!health) return { problemCount: 0, problems: [], notes: [] };
   const problems: string[] = [];
   let problemCount = 0;
-  const blocked = health.albums.blockedCount + health.classifications.blockedCount;
+  const blocked = health.albums.blockedCount + health.classifications.blockedCount + (health.collections?.blockedCount ?? 0);
   if (blocked > 0) {
     problemCount += blocked;
     problems.push(`서버에서 막힌 변경 ${blocked.toLocaleString()}개`);
@@ -285,9 +285,9 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
   if (tabletWait && tabletWait.count > 0) notes.push(`태블릿 변경 ${tabletWait.count.toLocaleString()}개가 누락된 항목을 기다립니다 · ${tabletWait.targetIds.join(", ")}`);
   const waiting = health.albums.waitingCount + health.classifications.waitingCount;
   if (waiting > 0) notes.push(`업로드를 기다리는 변경 ${waiting.toLocaleString()}개`);
-  const dropped = health.albums.droppedCount + health.classifications.droppedCount + health.assets.rejectedCount;
+  const dropped = health.albums.droppedCount + health.classifications.droppedCount + health.assets.rejectedCount + (health.collections?.droppedCount ?? 0);
   if (dropped > 0) {
-    const latest = [health.albums, health.classifications]
+    const latest = [health.albums, health.classifications, ...(health.collections ? [health.collections] : [])]
       .filter((domain) => domain.droppedCount > 0 && domain.lastDropReason)
       .sort((a, b) => (b.lastDroppedAt ?? "").localeCompare(a.lastDroppedAt ?? ""))[0]?.lastDropReason
       ?? health.assets.rejectedReason;

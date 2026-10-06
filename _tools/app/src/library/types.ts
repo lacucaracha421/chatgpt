@@ -222,7 +222,7 @@ export type AlbumSyncStatus = {
   waitingCount: number; droppedCount: number; lastDropReason: string | null;
   oldestPendingOperationId: string | null;
 };
-/** One Album or Classification domain's delivery health (local counts only). */
+/** One Album, Classification or Collection domain's delivery health (local counts only). */
 export type AuthorityDomainHealth = {
   blockedCount: number; waitingCount: number; droppedCount: number;
   lastDropReason: string | null; lastDroppedAt: string | null;
@@ -235,6 +235,7 @@ export type AuthoritySyncHealth = {
   authorityHeld?: boolean;
   albums: AuthorityDomainHealth;
   classifications: AuthorityDomainHealth;
+  collections?: AuthorityDomainHealth;
   assets: { rejectedCount: number; rejectedReason: string | null; stopped: boolean; held?: boolean };
   /** Mobile character exclusions this PC could never apply (e.g. the character was deleted). */
   characterExclusions: { skippedCount: number; lastSkipReason: string | null; lastSkippedAt: string | null };

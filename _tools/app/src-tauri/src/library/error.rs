@@ -54,6 +54,8 @@ pub enum LibraryError {
     CollectionAuthorityNotAdopted,
     #[error("컬렉션 서버 권위가 일치하지 않습니다. 동기화 상태를 확인해 주세요.")]
     CollectionAuthorityMismatch,
+    #[error("서버 관리 중에는 작품 유형을 변경할 수 없습니다. 새 작품으로 만들어 주세요.")]
+    CollectionAuthorityTypeChangeUnavailable,
     #[error("서버에 라이브러리 메타데이터 백업이 없습니다")]
     CloudMetadataBackupNotFound,
     #[error("서버 메타데이터 백업이 허용 크기를 초과합니다")]

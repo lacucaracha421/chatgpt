@@ -8,14 +8,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "batch 1: confirmed replica/outbox apply",
     ),
     (
-        "library/collection.rs",
-        "batch 2: CRUD, cover, showcase, membership; batch 6: startup normalization",
-    ),
-    (
-        "library/collection_pc.rs",
-        "batch 2: records; batch 3: focus fence",
-    ),
-    (
         "library/collection_source.rs",
         "batch 3: source artwork; local-only (stays): source paths",
     ),
@@ -204,6 +196,102 @@ const ALLOWLIST: &[(&str, &str)] = &[
     ),
 ];
 
+// These files no longer have blanket writer exemptions. Only the named remaining
+// legacy functions and their existing embedded fixtures are exempt; a new writer
+// elsewhere in either file must fail the ordinary SQL scan.
+const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
+    (
+        "library/collection.rs",
+        "connect_fetched_igdb_game",
+        "batch 4: IGDB provider fence",
+    ),
+    (
+        "library/collection.rs",
+        "normalize_showcase_orders",
+        "batch 6: startup normalization",
+    ),
+    (
+        "library/collection_pc.rs",
+        "write_record_status",
+        "batch 4: inbound personal replay helper",
+    ),
+    (
+        "library/collection_pc.rs",
+        "write_record_platform",
+        "batch 4: inbound personal replay helper",
+    ),
+    (
+        "library/collection_pc.rs",
+        "store_cover_focus",
+        "batch 3: focus fence",
+    ),
+];
+const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
+    ("library/collection.rs", "create_collection"),
+    ("library/collection.rs", "update_collection"),
+    ("library/collection.rs", "delete_collection"),
+    ("library/collection.rs", "set_collection_cover"),
+    ("library/collection.rs", "set_collection_showcase"),
+    ("library/collection.rs", "set_collection_showcase_order"),
+    ("library/collection.rs", "patch_asset_collections"),
+    ("library/collection_pc.rs", "save_collection_work_record"),
+];
+
+// Functions in these two files use a standalone closing brace at their declaration
+// indentation. Bound exemptions to that brace, never to the next function or EOF.
+fn function_range(source: &str, name: &str) -> std::ops::Range<usize> {
+    let declaration = regex::Regex::new(&format!(
+        r"(?m)^(    )?(?:pub(?:\([^)]*\))? )?fn {}\(",
+        regex::escape(name)
+    ))
+    .unwrap();
+    let matched = declaration
+        .captures(source)
+        .unwrap_or_else(|| panic!("missing writer {name}"));
+    let start = matched.get(0).unwrap().start();
+    let indent = matched.get(1).map_or("", |m| m.as_str());
+    let closing = format!("\n{indent}}}");
+    let end = source[start..].find(&closing).unwrap() + start + closing.len();
+    start..end
+}
+
+fn remaining_source(file: &str, source: &str) -> String {
+    if !ROUTED_FUNCTIONS.iter().any(|(f, _)| *f == file) {
+        return source.to_owned();
+    }
+    let mut remaining = source.to_owned();
+    let mut ranges = Vec::new();
+    for (f, name) in ROUTED_FUNCTIONS.iter().filter(|(f, _)| *f == file) {
+        let range = function_range(source, name);
+        let body = &source[range.clone()];
+        assert!(
+            body.contains("collection_write_status("),
+            "{f}::{name} lost adoption fence"
+        );
+        assert!(
+            body.contains("enqueue_work_changes(") || body.contains("enqueue_collection_command("),
+            "{f}::{name} lost transactional outbox"
+        );
+        ranges.push(range);
+    }
+    for (_, name, reason) in REMAINING_FUNCTIONS.iter().filter(|(f, _, _)| *f == file) {
+        assert!(reason.starts_with("batch "));
+        ranges.push(function_range(source, name));
+    }
+    // Explicit local-only embedded fixtures in the two formerly exempt files.
+    for marker in ["#[cfg(test)]\nmod tests {", "#[cfg(test)]\r\nmod tests {"] {
+        if let Some(start) = source.find(marker) {
+            let end = source[start..].find("\n}").unwrap() + start + 2;
+            ranges.push(start..end);
+        }
+    }
+    ranges.sort_by_key(|r| std::cmp::Reverse(r.start));
+    for range in ranges {
+        remaining.replace_range(range, "");
+    }
+    remaining
+}
+
 fn walk(path: &Path, files: &mut Vec<std::path::PathBuf>) {
     for entry in std::fs::read_dir(path).unwrap() {
         let p = entry.unwrap().path();
@@ -334,7 +422,8 @@ fn collection_authority_writer_guard_scans_schema_tables_and_requires_annotated_
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        let found = writers(&std::fs::read_to_string(&file).unwrap(), &tables);
+        let source = std::fs::read_to_string(&file).unwrap();
+        let found = writers(&remaining_source(&relative, &source), &tables);
         if !found.is_empty() && !allow.contains_key(relative.as_str()) {
             unexpected.push(format!(
                 "{relative}: {}",
@@ -369,4 +458,15 @@ fn collection_authority_writer_guard_covers_sql_forms_split_literals_and_ignores
         &tables
     )
     .is_empty());
+}
+
+#[test]
+fn collection_authority_writer_guard_rejects_new_writers_in_routed_files() {
+    let tables = ["collections".to_owned()].into_iter().collect();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for file in ["library/collection.rs", "library/collection_pc.rs"] {
+        let mut source = std::fs::read_to_string(root.join(file)).unwrap();
+        source.push_str("\nfn unreviewed_writer() { db.execute(\"UPDATE collections SET name='lost'\", []); }\n");
+        assert_eq!(writers(&remaining_source(file, &source), &tables).len(), 1);
+    }
 }
