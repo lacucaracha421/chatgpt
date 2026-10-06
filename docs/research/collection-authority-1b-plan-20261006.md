@@ -51,3 +51,7 @@ Fencing the second list shrinks batches 3–5 by roughly half and brings 1C forw
 ## 6. Progress (2026-10-06)
 
 Committed on `main`: batch 1 `a54ea974`, 2a `544e3ace`, 2b `16b8d491`, 2c `1bf9ef40`, 3 `9d6c14e5`, 4 `ca2da8b0`, 5 `53f2142f`, 6 (code) — see the commit after `db50cba9`. Batch 6 routed the similarity replace-existing membership/cover rewrite through the outbox, skips the legacy startup normalizers (legacy kind backfill, showcase order) while active, and leaves no `batch N` entries in the writer guard. Server changes from 2a/3/4 are **not deployed**. Remaining before 1C: deploy the server (approval), run the PC "컬렉션 서버 이전 점검" verify-only dry run against production, then the separately approved activation.
+
+### Production dry run (2026-10-06 ~22:20 KST)
+
+`verdict: lossless` against production after two server deploys (`b28d25dd`, then `c80351cd`): works 346 matched (0 missing/unknown/type mismatch), 0 payload diffs, 0 people diffs, artworks 2,995 with 0 missing originals and 0 unconfirmed blobs, bindings 470, all drain barriers ok. Fixes found on the way: Steam identifier bindings (`237e6437`), slot-derived artwork flags in the exporter (`5a665353`) and in the verify diff (`c80351cd`), and user-approved data cleanup (Chainsaw Man part 1 unlinked from MangaDex, part 2 shows from volume 12; English Digimon Story duplicate removed; backup `backups/pre-collection-dups-20261006-215400`). Offline harness: `collection_baseline_export` + `server/lakomics-api/tools/collection_baseline_dry_run.py`. Next: 1C activation, separately approved.
