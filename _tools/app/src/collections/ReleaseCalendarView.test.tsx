@@ -63,7 +63,7 @@ describe("release calendar wording", () => {
       title("igdb:expired", "August", "2026-08-01", "month"),
     ], now);
     expect(groups.map(group => group.label)).toEqual(["지난 7일", "2026년 9월", "2026년 10월"]);
-    expect(groupReleaseDays(groups[0]!.items, true).flat().map(item => item.id)).toEqual(["igdb:yesterday", "igdb:week"]);
+    expect(groupReleaseDays(groups[0]!.items).flat().map(item => item.id)).toEqual(["igdb:week", "igdb:yesterday"]);
     expect(groups.flatMap(group => group.items).map(item => item.id)).not.toContain("igdb:old");
   });
   it("states each precision the way it is known", () => {
@@ -93,7 +93,7 @@ describe("release calendar wording", () => {
 });
 
 describe("ReleaseCalendarView", () => {
-  it("shows the past week first, newest first, and keeps its wishlist controls working", async () => {
+  it("shows the past week first, folded and oldest first, and keeps its wishlist controls working", async () => {
     vi.setSystemTime(new Date(2026, 9, 3, 0, 30));
     const entries = [
       title("igdb:old", "8일 전", "2026-09-25", "exact"),
@@ -105,7 +105,9 @@ describe("ReleaseCalendarView", () => {
     mount(api);
     const recent = await screen.findByRole("region", { name: "지난 7일" });
     expect(recent).toHaveClass("is-recent");
-    expect(within(recent).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("어제 작품"), expect.stringContaining("7일 전")]);
+    expect(within(recent).queryAllByRole("listitem")).toHaveLength(0);
+    await userEvent.click(within(recent).getByRole("button", { name: "펼치기" }));
+    expect(within(recent).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("7일 전"), expect.stringContaining("어제 작품")]);
     expect(screen.queryByText("8일 전")).not.toBeInTheDocument();
     expect(within(recent).queryByText(/D-|오늘/)).not.toBeInTheDocument();
     expect(screen.getByText("오늘")).toBeInTheDocument();

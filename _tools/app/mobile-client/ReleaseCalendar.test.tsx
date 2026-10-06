@@ -54,7 +54,7 @@ describe('release calendar model', () => {
     expect(visible.map(item => item.id)).toEqual(['week', 'yesterday', 'today']);
     const groups = groupReleaseEntries(visible, now);
     expect(groups[0]?.label).toBe('지난 7일');
-    expect(groups[0]?.days.flatMap(day => day.items.map(item => item.id))).toEqual(['yesterday', 'week']);
+    expect(groups[0]?.days.flatMap(day => day.items.map(item => item.id))).toEqual(['week', 'yesterday']);
     expect(groups[1]?.days.flatMap(day => day.items.map(item => item.id))).toEqual(['today']);
   });
   it('keeps PC precision wording and groups exact dates inside month sections', () => {
@@ -83,7 +83,9 @@ describe('ReleaseCalendar', () => {
     render(<ReleaseCalendar embedded initialKind="game" onClose={vi.fn()} />);
     const recent = await screen.findByRole('region', {name: '지난 7일'});
     expect(recent.classList.contains('is-recent')).toBe(true);
-    expect(within(recent).getAllByRole('listitem').map(item => item.querySelector('strong')?.textContent)).toEqual(['yesterday', 'week']);
+    expect(within(recent).queryAllByRole('listitem')).toHaveLength(0);
+    fireEvent.click(within(recent).getByRole('button', {name: '펼치기'}));
+    expect(within(recent).getAllByRole('listitem').map(item => item.querySelector('strong')?.textContent)).toEqual(['week', 'yesterday']);
     expect(screen.queryByText('old')).toBeNull();
     expect(within(recent).queryByText(/D-|오늘/)).toBeNull();
     expect(screen.getByText('오늘')).toBeTruthy();

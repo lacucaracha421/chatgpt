@@ -69,7 +69,7 @@ export function isVisibleCalendarRelease(item: Pick<ReleaseTitle, "date" | "prec
   return localDay(until) > start;
 }
 
-/** Keep one heading per date/precision, reversing only the recent section. */
+/** One heading per date/precision, oldest first (the past week too, user 2026-10-06). */
 export function groupReleaseDays<T extends Pick<ReleaseTitle, "date" | "precision">>(items: T[], newestFirst = false): T[][] {
   const days = new Map<string, T[]>();
   for (const item of items) {

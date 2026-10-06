@@ -126,6 +126,8 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
     ? (wishlist ?? []).filter(matches).map(item => ({ ...item, watched: true }))
     : (calendar?.entries ?? []).filter(matches).map(entry => ({ ...entry, watched: wishById.has(entry.id), unread: wishById.get(entry.id)?.unread ?? [] }));
   const groups = groupReleases(tiles);
+  // The past week starts folded each visit (user 2026-10-06).
+  const [recentOpen, setRecentOpen] = useState(false);
   const unreadTotal = (wishlist ?? []).reduce((sum, item) => sum + item.unread.length, 0);
 
   async function toggle(tile: Tile) {
@@ -189,10 +191,11 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
       {calendar && groups.length === 0 && (watchOnly
         ? <EmptyCalendarState title="관심 목록 비어 있음" icon={BookmarkOutlineIcon} />
         : needle ? <EmptyCalendarState title="검색 결과 없음" icon={MagnifyingGlassIcon} /> : <EmptyCalendarState title="6개월 안의 발매 정보 없음" icon={CalendarDaysIcon} />)}
-      {groups.map(group => <section key={group.key} className={`release-calendar__month${group.key === "recent" ? " is-recent" : ""}`} aria-label={group.label}>
-        <SectionLabel as="h3" title={releaseGroupHeading(group.label, referenceYear)} count={group.items.length} />
-        <div className="release-calendar__days">
-          {groupReleaseDays(group.items, group.key === "recent").map(day => {
+      {groups.map(group => { const folded = group.key === "recent" && !recentOpen; return <section key={group.key} className={`release-calendar__month${group.key === "recent" ? " is-recent" : ""}`} aria-label={group.label}>
+        <SectionLabel as="h3" title={releaseGroupHeading(group.label, referenceYear)} count={group.items.length}
+          actions={group.key === "recent" ? <Button size="sm" variant="ghost" aria-expanded={recentOpen} onClick={() => setRecentOpen(open => !open)}>{recentOpen ? "접기" : "펼치기"}</Button> : undefined} />
+        {!folded && <div className="release-calendar__days">
+          {groupReleaseDays(group.items).map(day => {
             // One heading per release day; the day's covers sit side by side under it (up to four).
             const first = day[0]!;
             const dDay = first.released === true || first.precision !== "exact" ? null : daysUntil(first.date);
@@ -226,8 +229,8 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
               </ul>
             </section>;
           })}
-        </div>
-      </section>)}
+        </div>}
+      </section>; })}
       <p className="release-calendar__attribution">게임 정보 IGDB · 영화·애니 정보 TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
     </div>
   </section>;

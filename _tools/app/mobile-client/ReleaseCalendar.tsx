@@ -116,11 +116,14 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
   const wishlistById = new Map(reply.wishlist.map(entry => [entry.id, entry]));
   const entries = filterReleaseEntries(source, kind, wishlistOnly, visibleIds).map(entry => ({...entry, unread: wishlistById.get(entry.id)?.unread ?? entry.unread}));
   const groups = groupReleaseEntries(entries);
+  // The past week starts folded each visit (user 2026-10-06).
+  const [recentOpen, setRecentOpen] = useState(false);
   if (!entries.length) return <EmptyCalendar wishlistOnly={wishlistOnly} />;
   return <div className="release-calendar-groups">
     {groups.map(month => <section key={month.key} className={`release-calendar-month${month.key === 'recent' ? ' is-recent' : ''}`} aria-label={month.label}>
-      <SectionLabel as="h2" className="release-calendar-month-heading" title={releaseGroupHeading(month.label, referenceYear)} count={month.items} />
-      <div className="release-calendar-days">
+      <SectionLabel as="h2" className="release-calendar-month-heading" title={releaseGroupHeading(month.label, referenceYear)} count={month.items}
+        actions={month.key === 'recent' ? <Button type="button" size="sm" variant="ghost" aria-expanded={recentOpen} onClick={() => setRecentOpen(open => !open)}>{recentOpen ? '접기' : '펼치기'}</Button> : undefined} />
+      {(month.key !== 'recent' || recentOpen) && <div className="release-calendar-days">
         {month.days.map(day => {
           // One heading per release day; the day's covers sit side by side under it (up to a row).
           const first = day.items[0]!;
@@ -139,7 +142,7 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
             </ul>
           </section>;
         })}
-      </div>
+      </div>}
     </section>)}
   </div>;
 }

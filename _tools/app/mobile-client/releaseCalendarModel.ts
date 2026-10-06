@@ -159,7 +159,7 @@ export function groupReleaseEntries(items: ReleaseCalendarEntry[], now = new Dat
     key: group.key,
     label: group.label,
     items: group.items.length,
-    days: groupReleaseDays(group.items, group.key === 'recent').map(day => {
+    days: groupReleaseDays(group.items).map(day => {
       const first = day[0]!;
       return {
         key: `${group.key}:${first.date ?? 'tbd'}:${first.precision}`,
