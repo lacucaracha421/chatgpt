@@ -55,3 +55,53 @@ Committed on `main`: batch 1 `a54ea974`, 2a `544e3ace`, 2b `16b8d491`, 2c `1bf9e
 ### Production dry run (2026-10-06 ~22:20 KST)
 
 `verdict: lossless` against production after two server deploys (`b28d25dd`, then `c80351cd`): works 346 matched (0 missing/unknown/type mismatch), 0 payload diffs, 0 people diffs, artworks 2,995 with 0 missing originals and 0 unconfirmed blobs, bindings 470, all drain barriers ok. Fixes found on the way: Steam identifier bindings (`237e6437`), slot-derived artwork flags in the exporter (`5a665353`) and in the verify diff (`c80351cd`), and user-approved data cleanup (Chainsaw Man part 1 unlinked from MangaDex, part 2 shows from volume 12; English Digimon Story duplicate removed; backup `backups/pre-collection-dups-20261006-215400`). Offline harness: `collection_baseline_export` + `server/lakomics-api/tools/collection_baseline_dry_run.py`. Next: 1C activation, separately approved.
+
+## 7. 1C activation runbook and rollback
+
+Activation and recovery require separate operator approval. Pause Collection writes,
+drain pending edits, and keep the PC legacy publication lane held during the cutover.
+Before activation, take an online SQLite backup of `<server-dir>/data/lakomics.sqlite3`
+with Python's backup API (includes committed WAL data); use a new backup filename:
+
+```python
+import sqlite3
+from pathlib import Path
+
+source = Path("<server-dir>/data/lakomics.sqlite3")
+backup = Path("<backup-dir>/pre-collections-1c.sqlite3")
+assert not backup.exists()
+with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as src:
+    with sqlite3.connect(backup) as dst:
+        src.backup(dst)
+        assert dst.execute("PRAGMA quick_check").fetchall() == [("ok",)]
+```
+
+Using publisher authentication, `PUT /v1/collections/authority/staging` with the
+final PC export, then `POST /v1/collections/authority/staging/verify` with that
+same complete export body. Require `verdict: lossless` and unchanged drain barriers.
+Record the staging response's `stagedDigest`; activate with
+`POST /v1/collections/authority/activate` and
+`{"libraryId": "<library-id>", "expectedStagedDigest": "<stagedDigest>"}`.
+If verification or digest/drain checks fail, stop and repeat the final drain/export.
+After activation, verify that server status advertises `collections`, the PC adopts
+the baseline, and legacy publication stays quiet before reopening writes.
+
+- **Before activation:** `DELETE /v1/collections/authority/staging`; the PC replica
+  remains dormant and the live authority has not changed.
+- **After activation:** pause all writes and client sync, stop the server, and
+  restore the verified server DB backup with its WAL/SHM handled as part of the
+  stopped SQLite restore. Check `PRAGMA quick_check` before restarting the server.
+  With the PC stopped, back up its configured library's `library.sqlite` and retain
+  pending intent evidence, then clear the Collections replica state in a transaction:
+  `collection_authority_sync WHERE singleton=1` is **both** the durable activation
+  marker (even `adopted=0`) and adoption marker (`adopted=1`); its `cursor` is the
+  change-feed cursor and `snapshot_cursor`, `baseline_section`, `baseline_after`,
+  and `baseline_count` track baseline progress. Also clear rows in
+  `collection_authority_revisions`, `collection_authority_outbox`,
+  `collection_authority_materialization`, and `collection_authority_trash` after
+  archiving undelivered intents. Reconcile the separate legacy cursor in
+  `mobile_collection_personal_edit_sync` (`endpoint` row, `received_cursor`) and
+  its `mobile_collection_personal_edit_poll` endpoint row with the restored server.
+  Keep PC sync/publication held until recovery is validated: clearing the marker
+  re-enables legacy paths. Never republish a PC snapshot as rollback; the restored
+  server DB is the recovery source.

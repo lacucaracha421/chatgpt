@@ -351,6 +351,7 @@ impl Library {
         &self,
         progress: Reporter<'_>,
     ) -> Result<CloudCollectionsPublishResult, LibraryError> {
+        crate::library::collection_authority::fence_collection_operation(&*self.connection()?)?;
         self.ensure_cloud_send()?;
         report(progress, "connecting", 0, None, "items");
         let config = self.cloud_sync_config()?;
@@ -383,6 +384,7 @@ impl Library {
         publisher: Option<&str>,
         progress: Reporter<'_>,
     ) -> Result<CloudCollectionsPublishResult, LibraryError> {
+        crate::library::collection_authority::fence_collection_operation(&*self.connection()?)?;
         self.ensure_send_to(client.base())?;
         client.ensure_send()?;
         let status = client.collections_status(token)?;

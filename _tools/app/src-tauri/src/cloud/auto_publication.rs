@@ -301,6 +301,15 @@ impl Library {
         endpoint: &str,
         receive: impl FnOnce() -> Result<(), LibraryError>,
     ) -> Result<(), LibraryError> {
+        if kind == "collections" {
+            let connection = self.connection()?;
+            if crate::library::collection_authority::collection_authority_active(&connection)? {
+                // The durable activation marker retires this snapshot lane, including
+                // generations waiting on debounce, a retry, or a sync hold.
+                connection.execute("UPDATE mobile_publication_state SET published_generation=generation,retry_after=0,first_dirty=0,last_dirty=0 WHERE kind='collections' AND endpoint=?1 AND (generation<>published_generation OR retry_after<>0 OR first_dirty<>0 OR last_dirty<>0)", [endpoint])?;
+                return Ok(());
+            }
+        }
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
             return Ok(());
@@ -372,6 +381,58 @@ mod tests {
         library.run_mobile_publication_lane("releases","https://fixture.invalid").unwrap();
     }
     use crate::library::Library;
+    #[test]
+    fn auto_publication_collection_authority_skips_and_consumes_dirty_generations() {
+        for adopted in [0, 1] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            let endpoint = "https://fixture.invalid";
+            let id = library.library_id().unwrap();
+            {
+                let db = library.connection().unwrap();
+                Library::update_publication_endpoint_on(&db, endpoint).unwrap();
+                db.execute("INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,adopted,generation,updated_at) VALUES(1,?1,1,1,?2,'fixture','t')", rusqlite::params![id, adopted]).unwrap();
+                db.execute("UPDATE mobile_publication_state SET generation=published_generation+1,retry_after=unixepoch()+3600,first_dirty=unixepoch(),last_dirty=unixepoch()", []).unwrap();
+            }
+            // No cloud configuration or credentials: activation must stop the lane first.
+            library.publish_due_mobile_kind_with_receive("collections", endpoint, || {
+                panic!("active Collections must not receive legacy personal edits")
+            }).unwrap();
+            library.run_mobile_publication_lane("collections", endpoint).unwrap();
+            let db = library.connection().unwrap();
+            let state: (bool, i64, i64, i64) = db.query_row("SELECT generation=published_generation,retry_after,first_dirty,last_dirty FROM mobile_publication_state WHERE kind='collections'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+            assert_eq!(state, (true, 0, 0, 0));
+            let other_dirty: bool = db.query_row("SELECT generation<>published_generation AND retry_after>0 FROM mobile_publication_state WHERE kind='characters'", [], |r| r.get(0)).unwrap();
+            assert!(other_dirty, "other publication lanes must stay untouched");
+            drop(db);
+            assert!(matches!(library.push_cloud_collections(&|_| {}), Err(crate::library::error::LibraryError::CollectionAuthorityOperationUnavailable)));
+            let (client, requests) = crate::cloud::client::CloudClient::home_test_client(vec![]);
+            assert!(matches!(library.push_cloud_collections_with(&client, endpoint, "fixture", None, &|_| {}), Err(crate::library::error::LibraryError::CollectionAuthorityOperationUnavailable)));
+            assert!(requests.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn auto_publication_inactive_collections_still_receive_and_preserve_dirty_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library.use_machine_settings(temp.path().join("machine.json"));
+        let endpoint = "http://127.0.0.1";
+        library.set_cloud_sync_config(crate::cloud::models::CloudSyncConfig {
+            enabled: true,
+            api_base_url: Some(endpoint.into()),
+        }).unwrap();
+        Library::update_publication_endpoint_on(&library.connection().unwrap(), endpoint).unwrap();
+        let error = library.publish_due_mobile_kind_with_receive("collections", endpoint, || {
+            Err(crate::library::error::LibraryError::InvalidCloudResponse)
+        }).unwrap_err();
+        assert!(matches!(error, crate::library::error::LibraryError::InvalidCloudResponse));
+        let db = library.connection().unwrap();
+        let dirty: bool = db.query_row("SELECT generation<>published_generation FROM mobile_publication_state WHERE kind='collections'", [], |r| r.get(0)).unwrap();
+        assert!(dirty);
+        crate::library::collection_authority::fence_collection_operation(&db).unwrap();
+    }
+
     #[test]
     fn unchanged_publication_endpoint_tick_is_read_only() {
         let temp = tempfile::tempdir().unwrap();

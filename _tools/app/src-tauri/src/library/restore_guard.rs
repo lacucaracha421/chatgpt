@@ -17,6 +17,8 @@
 //! * `asset_authority` / `asset_authority_state` / `asset_lifecycle_outbox` /
 //!   `asset_purge_pending` — the Asset lifecycle domain's adopted identity, cursor,
 //!   confirmed lifecycle and durable trash/restore/purge intents (ADR-0038);
+//! * `collection_authority_sync` / `collection_authority_outbox` — the Collections
+//!   domain's durable activation/adoption marker, cursor and pending intents;
 //! * `library_settings.library_id` — the logical library this replica belongs to.
 //!
 //! Restoring an older snapshot of that file can therefore silently roll the replica
@@ -75,7 +77,24 @@ pub(crate) const PROBES: &[Probe] = &[
         domain: "assets",
         adopted: assets_adopted,
     },
+    Probe {
+        domain: "collections",
+        adopted: collections_adopted,
+    },
 ];
+
+/// Both pending activation and completed adoption must survive a database swap.
+fn collections_adopted(connection: &Connection) -> Result<bool, LibraryError> {
+    let exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='collection_authority_sync')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(false);
+    }
+    super::collection_authority::collection_authority_active(connection)
+}
 
 fn manga_index_pins_adopted(connection: &Connection) -> Result<bool, LibraryError> {
     let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='manga_index_pin_sync')", [], |row| row.get(0))?;
@@ -254,6 +273,19 @@ mod tests {
     }
 
     #[test]
+    fn collection_activation_and_adoption_markers_block_restore() {
+        for adopted in [0, 1] {
+            let (_temp, library) = open();
+            let id = library.library_id().unwrap();
+            let db = library.connection().unwrap();
+            db.execute("INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,adopted,generation,updated_at) VALUES(1,?1,1,1,?2,'fixture','t')", rusqlite::params![id, adopted]).unwrap();
+            assert_eq!(adopted_domains(&db).unwrap(), ["collections"]);
+        }
+        let old = rusqlite::Connection::open_in_memory().unwrap();
+        assert!(!super::collections_adopted(&old).unwrap());
+    }
+
+    #[test]
     fn probes_cover_every_shipped_adoption_marker_once() {
         let mut names: Vec<_> = PROBES.iter().map(|probe| probe.domain).collect();
         names.sort_unstable();
@@ -264,6 +296,7 @@ mod tests {
         assert!(names.contains(&"albums"));
         assert!(names.contains(&"classifications"));
         assert!(names.contains(&"assets"));
+        assert!(names.contains(&"collections"));
     }
 
     #[test]

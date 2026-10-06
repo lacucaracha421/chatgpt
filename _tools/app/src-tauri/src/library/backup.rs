@@ -1811,6 +1811,22 @@ mod tests {
             .any(|entry| entry.file_name().to_string_lossy().starts_with("library.sqlite.restore-old-")));
     }
 
+    #[test]
+    fn collection_authority_refuses_local_restore_and_preserves_marker() {
+        for adopted in [0, 1] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            let backup = library.ensure_daily_backup(Utc.with_ymd_and_hms(2026, 9, 1, 12, 0, 0).unwrap()).unwrap().unwrap();
+            let id = library.library_id().unwrap();
+            library.connection().unwrap().execute("INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,cursor,adopted,generation,updated_at) VALUES(1,?1,1,1,7,?2,'fixture','t')", rusqlite::params![id, adopted]).unwrap();
+            let error = library.restore_backup(&backup.id).unwrap_err();
+            assert!(matches!(error, LibraryError::RestoreAuthorityActive { domains } if domains == "collections"));
+            let state: (i64, i64) = library.connection().unwrap().query_row("SELECT cursor,adopted FROM collection_authority_sync WHERE singleton=1", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+            assert_eq!(state, (7, adopted));
+            assert!(!library.root().join(super::RESTORE_INTENT).exists());
+        }
+    }
+
     /// The server-driven restore uses the same shared swap, so the guard covers it.
     #[test]
     fn an_adopted_bookmark_authority_refuses_a_cloud_snapshot_restore() {
