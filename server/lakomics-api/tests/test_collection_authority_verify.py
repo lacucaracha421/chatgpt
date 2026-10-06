@@ -79,17 +79,15 @@ class CollectionAuthorityVerifyTests(unittest.TestCase):
             stored = dict(db.execute('SELECT artwork_id,selected FROM collection_authority_artworks'))
         self.assertEqual(stored, {art['artworkId']: int(art['selected']) for art in self.doc['artworks']})
 
-    def test_selected_back_cover_and_explicit_false_survive_verify_and_activation(self):
+    def test_selected_back_cover_is_inferred_and_survives_verify_and_activation(self):
         front = self.doc['artworks'][0]
         self.assertEqual(front['artworkId'], 'av-cover')
-        front['selected'] = False  # Explicit false wins even when the work slot points here.
         back = {**copy.deepcopy(front), 'artworkId': 'av-back', 'kind': 'back',
                 'providerImageId': 'av-back', 'selected': True, 'order': 1}
         self.doc['artworks'].append(back)
         legacy = copy.deepcopy(self.legacy)
         legacy['baseRevision'] = self.doc['legacyRevision']
         av = next(work for work in legacy['collections'] if work['id'] == 'av-work')
-        av['artworks'][0]['selected'] = False
         av['artworks'].append({**copy.deepcopy(av['artworks'][0]), 'id': 'av-back',
                                'kind': 'back', 'selected': True})
         self.doc['legacyRevision'] = self.ok(self.client.put(
@@ -101,11 +99,27 @@ class CollectionAuthorityVerifyTests(unittest.TestCase):
         item = self.client.get('/v1/collections/av-work', headers=AUTH).json()['item']
         self.assertEqual(item['selectedWorkArtworkId'], 'av-cover')
         self.assertEqual({art['id']: art['selected'] for art in item['artworks']},
-                         {'av-cover': False, 'av-back': True})
+                         {'av-cover': True, 'av-back': True})
         with api_app.get_db() as db:
             stored = dict(db.execute('SELECT artwork_id,selected FROM collection_authority_artworks'
                                      " WHERE work_id='av-work'"))
-        self.assertEqual(stored, {'av-cover': 0, 'av-back': 1})
+        self.assertEqual(stored, {'av-cover': 1, 'av-back': 1})
+        with api_app.get_db() as db:
+            self.assertEqual(ca.work_projection(db, LIBRARY, 'av-work')['selection']['back'], 'av-back')
+
+    def test_explicit_flags_must_agree_with_slots_before_staging_or_verification(self):
+        for artwork_id, selected in [('av-cover', False), ('a-unused-spine', True),
+                                     ('z-selected-spine', False), ('manga-cover-2', True)]:
+            with self.subTest(artwork=artwork_id):
+                doc = copy.deepcopy(self.doc)
+                next(a for a in doc['artworks'] if a['artworkId'] == artwork_id)['selected'] = selected
+                report = self.report(doc)
+                self.assertEqual(report['verdict'], 'blocked')
+                self.assertEqual(report['validation']['detail']['reason'], 'artworkSelection')
+                staged = self.client.put(PREFIX + '/staging', headers=self.publisher, json=doc)
+                self.assertEqual(staged.status_code, 409)
+                self.assertEqual(staged.json()['detail']['reason'], 'artworkSelection')
+        self.assertFalse(self.client.get(PREFIX + '/status', headers=self.auth).json()['active'])
 
     def test_selected_is_required_boolean_in_v2_and_forbidden_in_v1(self):
         for verify in (False, True):
@@ -485,7 +499,8 @@ class CollectionAuthorityInteropTests(unittest.TestCase):
                             self.assertEqual(set(row), expected, section)
                     for work in value['works']:
                         self.assertEqual(set(work['fields']), fields)
-                        self.assertEqual(set(work['selection']), {'work', 'hero', 'backdrop', 'spine'})
+                        self.assertEqual(set(work['selection']), {'work', 'hero', 'backdrop', 'spine'} |
+                                         ({'back'} if value is parsed else set()))
                         self.assertEqual(set(work['details']), {'series', 'film', 'av'})
                         self.assertEqual(set(work['derived']), {
                             'unreadReleaseCount', 'releaseWatch', 'ownedVolumes', 'releaseSchedule'})
@@ -522,7 +537,7 @@ class CollectionAuthorityInteropTests(unittest.TestCase):
                 self.assertIsNotNone(next(p for p in parsed['people'] if p['personId'] == 'portrait')['portraitImage'])
                 back = next(art for art in parsed['artworks'] if art['artworkId'] == 'back')
                 self.assertEqual((back['kind'], back['selected']), ('back', True))
-                self.assertNotIn('back', works['av']['selection'].values())
+                self.assertEqual(works['av']['selection']['back'], 'back')
                 self.assertEqual({a['artworkId']: a['selected'] for a in parsed['artworks']},
                                  {a['artworkId']: a['selected'] for a in doc['artworks']})
 

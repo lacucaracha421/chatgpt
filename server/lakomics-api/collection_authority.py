@@ -79,6 +79,8 @@ PROVIDER_TYPES = {"tmdb": "movie", "igdb": "game", "mangadex": "manga",
                   "aladin": "manga", "kakao": "manga"}
 SOURCE_PROVIDERS = ("kakao", "aladin")
 SLOTS = ("work", "hero", "backdrop")
+SELECTION_KINDS = {"work": "cover", "hero": "hero", "backdrop": "backdrop",
+                   "spine": "spine", "back": "back"}
 LIFECYCLES = ("live", "trashed", "tombstoned")
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -106,11 +108,14 @@ UPSERT_VOLUME = "upsertVolume"
 UPSERT_VOLUME_SOURCE = "upsertVolumeSource"
 OWNERSHIP = "setVolumeOwnership"
 MEMBERSHIP = "setMembership"
+TRACK_OWNERSHIP = "setOwnershipTracking"
+RELEASE_SUBSCRIPTION = "setReleaseSubscription"
 
-#: An ordinary client credential may send these. Provider, volume, ownership and purge
+#: An ordinary client credential may send these, including count tracking/subscriptions.
+#: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
-                        SELECT_ARTWORK, MEMBERSHIP)
+                        SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -140,6 +145,8 @@ COMMAND_KEYS = {
     OWNERSHIP: {"workId", "volumeNumber", "editionIndex", "physical", "digital",
                 "expectedRevision"},
     MEMBERSHIP: {"workId", "assetId", "desiredState", "expectedRevision"},
+    TRACK_OWNERSHIP: {"workId", "editionIndex", "count", "expectedCount", "expectedRevision"},
+    RELEASE_SUBSCRIPTION: {"workId", "enabled", "expectedEnabled", "expectedRevision"},
 }
 
 #: Editable work fields. Limits mirror the shipped mobile replica model so every
@@ -155,7 +162,15 @@ WORK_FIELDS = ("description", "coverAssetId", "year", "originalTitle", "runtimeM
                "author", "director", "developer", "publisher", "platforms",
                "productionCompany", "releaseDate", "externalScore", "myScore", "genres",
                "overview")
-UPDATABLE = ("name", "showcase") + WORK_FIELDS
+RECORD_FIELDS = ("status", "ownedPlatform")
+COMMAND_WORK_FIELDS = WORK_FIELDS + RECORD_FIELDS
+UPDATABLE = ("name", "showcase") + COMMAND_WORK_FIELDS
+# Discrete personal choices rebase automatically; editable text keeps field-level CAS.
+REBASE_FIELDS = ("myScore", "showcase", "status", "ownedPlatform")
+ITEM_STATUSES = {"game": ("done", "playing", "unplayed"),
+                 "manga": ("collecting", "complete"),
+                 "movie": ("watched", "watching", "unwatched"),
+                 "av": ("watched", "unwatched")}
 MAX_COMMAND_NAME = 120
 MAX_STAGED_NAME = 2000
 
@@ -168,7 +183,8 @@ PROVIDER_VALUE_FIELDS = {
              "overview": "text", "externalScore": "int"},
     "igdb": {"developer": "text", "publisher": "text", "releaseDate": "text",
              "platforms": "text", "genres": "text", "overview": "text"},
-    "mangadex": {"year": "int", "author": "text", "genres": "text", "overview": "text"},
+    "mangadex": {"year": "int", "author": "text", "genres": "text", "overview": "text",
+                 "originalTitle": "text"},
     "aladin": {},
     "kakao": {},
 }
@@ -516,7 +532,9 @@ def merge_provider(provider, mode, current, previous, fetched):
       moves ``year`` when it still equals the year of the previous release date.
     * IGDB (``may_fill_from_provider``): a field fills only when it is blank *and* the
       previous provider value was blank. ``connect`` fills a missing ``year``.
-    * MangaDex (``fill_blank_provider_fields``): blank text fields and a null year fill.
+    * MangaDex (``refresh_provider_fields``): blanks fill and stale provider values
+      are replaced, including clears; differing user values survive. Text equality
+      is exact, matching the PC SQL, rather than whitespace-normalized equality.
     * Aladin/Kakao never write work fields; their data lives in volume sources.
     """
     previous = previous or {}
@@ -539,10 +557,10 @@ def merge_provider(provider, mode, current, previous, fetched):
         if mode == "connect" and current.get("year") is None:
             updates["year"] = year_from_date(fetched.get("releaseDate"))
     elif provider == "mangadex":
-        if current.get("year") is None:
+        if current.get("year") is None or current.get("year") == previous.get("year"):
             updates["year"] = fetched.get("year")
-        for field in ("author", "genres", "overview"):
-            if _blank(current.get(field)):
+        for field in ("author", "genres", "overview", "originalTitle"):
+            if _blank(current.get(field)) or current.get(field) == previous.get(field):
                 updates[field] = fetched.get(field)
     return updates
 
@@ -627,6 +645,13 @@ def normalize_field(field, value, *, staged=False, code="invalidCollectionComman
     """
     if field == "coverAssetId":
         return require_id(value, code, nullable=True)
+    if field in RECORD_FIELDS:
+        if field == "status":
+            # Status identifiers are exact, unlike free-text platform labels.
+            return _text(value, 40, code=code)
+        if value is not None and not isinstance(value, str):
+            fail(422, code, "Invalid owned platform.")
+        return _text(value if staged else normalized_optional(value), 200, code=code)
     if field == "myScore":
         if staged and value is not None:
             # The replica accepts any finite stored f64. The editing command has
@@ -662,9 +687,16 @@ def comparable(field, value):
         return None if value is None else float(value)
     if field == "name":
         return value.strip() if isinstance(value, str) else value
-    if field in TEXT_FIELDS:
+    if field in TEXT_FIELDS or field == "ownedPlatform":
         return normalized_optional(value) if isinstance(value, str) else value
     return value
+
+
+def validate_record_fields(kind, fields):
+    if fields.get("status") is not None and fields["status"] not in ITEM_STATUSES[kind]:
+        fail(422, "invalidCollectionCommand", "Invalid work status.")
+    if "ownedPlatform" in fields and kind != "game" and fields["ownedPlatform"] is not None:
+        fail(409, "collectionRecordUnavailable", "Only games have an owned platform.")
 
 
 def normalize_name(value, *, limit=MAX_COMMAND_NAME, code="invalidCollectionCommand"):
@@ -838,7 +870,9 @@ def artwork_projection(row):
             "width": row["width"], "height": row["height"], "language": row["language"],
             "original": json.loads(row["original"]),
             "thumbnail": None if row["thumbnail"] is None else json.loads(row["thumbnail"]),
-            "createdAt": row["created_at"], "entityRevision": row["entity_revision"]}
+            "createdAt": row["created_at"], "entityRevision": row["entity_revision"],
+            "order": row["published_order"],
+            "selected": (bool(row["selected"]) if row["selected"] is not None else None)}
 
 
 def artwork_row(db, library_id, artwork_id):
@@ -1218,6 +1252,11 @@ def _require_owned_artwork(ctx, work_id, artwork_id, code="artworkNotInWork"):
     return art
 
 
+def selection_kinds(slot):
+    # Manga work covers can be selected volume artwork (the 1A exporter contract).
+    return ("cover", "volume_cover") if slot == "work" else (SELECTION_KINDS[slot],)
+
+
 def _require_confirmed_blob(db, blob):
     """The existing prepare/check receipts: exact storage HEAD confirmations."""
     row = db.execute("SELECT size_bytes,content_type FROM mobile_collection_artwork WHERE sha256=?",
@@ -1304,6 +1343,8 @@ def _apply_snapshot(ctx, state, *, provider, external_id, snapshot, values, deta
     _write_binding(ctx, work_id=state["workId"], provider=provider, external_id=external_id,
                    config=config, snapshot=snapshot, values=values, snapshot_external_id=external_id,
                    last_synced_at=ctx.now, bound=True, existing=existing)
+    if provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state):
+        changed = True
     return changed, mode
 
 
@@ -1352,15 +1393,20 @@ def _create(ctx, entity, payload_sha):
     if work_row(ctx.db, ctx.library_id, work_id) is not None:
         # A tombstoned id is never reused: reviving it would resurrect children.
         fail(409, "workExists", "같은 ID의 작품이 이미 있습니다.", workId=work_id)
-    fields = {field: None for field in WORK_FIELDS}
+    fields = {field: None for field in COMMAND_WORK_FIELDS}
     fields.update(entity["fields"])
+    validate_record_fields(entity["type"], fields)
     if fields["coverAssetId"] is not None:
         asset_authority.require_linkable(ctx.db, fields["coverAssetId"], adding=True,
                                          missing_code="invalidCollectionCover")
     state = {"workId": work_id, "type": entity["type"], "legacyKind": entity["legacyKind"],
              "name": entity["name"], "fields": fields, "showcase": False, "showcaseOrder": None,
-             "selection": {slot: None for slot in SLOTS},
-             "details": {"series": None, "film": None}, "derived": {"unreadReleaseCount": 0},
+             "selection": {slot: None for slot in SELECTION_KINDS},
+             "details": {"series": None, "film": None},
+             "derived": {"unreadReleaseCount": 0,
+                         "releaseWatch": {"enabled": False, "available": False} if entity["type"] == "manga" else None,
+                         "ownedVolumes": [] if entity["type"] == "manga" else None,
+                         "releaseSchedule": None},
              "lifecycle": "live", "trashedAt": None, "entityRevision": 1,
              "createdAt": ctx.now, "updatedAt": ctx.now}
     write_work(ctx.db, ctx.library_id, state, insert=True)
@@ -1382,15 +1428,19 @@ def _update(ctx, entity, payload_sha):
     work_id = entity["workId"]
     row = require_work(ctx, work_id)
     state = work_state(row)
-    current = {"name": state["name"], "showcase": state["showcase"], **state["fields"]}
+    current = {**dict.fromkeys(RECORD_FIELDS), "name": state["name"],
+               "showcase": state["showcase"], **state["fields"]}
     changes, expected = entity["changes"], entity["expected"]
+    validate_record_fields(state["type"], changes)
+    if "ownedPlatform" in changes and state["type"] != "game":
+        fail(409, "collectionRecordUnavailable", "Only games have an owned platform.")
     if all(comparable(field, current[field]) == comparable(field, value)
            for field, value in changes.items()):
         # Desired state already holds: accepted, receipted, no change row.
         return _finish(ctx, payload_sha, work_id)
     revision_ok = entity["expectedRevision"] == state["entityRevision"]
-    fields_ok = all(field in expected and
-                    comparable(field, current[field]) == comparable(field, expected[field])
+    fields_ok = all(field in REBASE_FIELDS or
+                    (field in expected and comparable(field, current[field]) == comparable(field, expected[field]))
                     for field in changes)
     if not revision_ok and not fields_ok:
         conflict(ctx, "work", state)
@@ -1510,12 +1560,15 @@ def _bind(ctx, entity, payload_sha):
                    snapshot_external_id=existing["snapshot_external_id"] if keep else None,
                    last_synced_at=existing["last_synced_at"] if keep else None,
                    bound=True, existing=existing)
+    state = work_state(row)
+    if provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state):
+        _bump_work(ctx, state)
     return _finish(ctx, payload_sha, f"{work_id}:{provider}")
 
 
 def _unbind(ctx, entity, payload_sha):
     work_id, provider = entity["workId"], entity["provider"]
-    require_work(ctx, work_id)
+    state = work_state(require_work(ctx, work_id))
     existing = binding_row(ctx.db, ctx.library_id, work_id, provider)
     if existing is None or not existing["bound"]:
         return _finish(ctx, payload_sha, f"{work_id}:{provider}")
@@ -1525,6 +1578,8 @@ def _unbind(ctx, entity, payload_sha):
     _write_binding(ctx, work_id=work_id, provider=provider, external_id=existing["external_id"],
                    config=None, snapshot=None, values=None, snapshot_external_id=None,
                    last_synced_at=None, bound=False, existing=existing)
+    if provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state):
+        _bump_work(ctx, state)
     return _finish(ctx, payload_sha, f"{work_id}:{provider}")
 
 
@@ -1582,17 +1637,126 @@ def _select_artwork(ctx, entity, payload_sha):
     work_id, slot, artwork_id = entity["workId"], entity["slot"], entity["artworkId"]
     state = work_state(require_work(ctx, work_id))
     current = state["selection"].get(slot)
-    if current == artwork_id:
-        return _finish(ctx, payload_sha, work_id)
-    if current != entity["expectedArtworkId"]:
+    if current != artwork_id and current != entity["expectedArtworkId"]:
         conflict(ctx, "work", state)
-    _require_owned_artwork(ctx, work_id, artwork_id)
+    art = _require_owned_artwork(ctx, work_id, artwork_id)
+    kinds = selection_kinds(slot)
+    if art is not None and art["kind"] not in kinds:
+        fail(422, "invalidArtworkKind", "Artwork kind does not match the selection slot.")
+    # Update flags and revisions in the same transaction as the slot. Include full
+    # artwork rows so replicas and installed APK projections see the same choice.
+    rows = ctx.db.execute("SELECT * FROM collection_authority_artworks WHERE library_id=?"
+                          " AND work_id=? AND kind IN (" + ",".join("?" for _ in kinds) + ")",
+                          [ctx.library_id, work_id, *kinds]).fetchall()
+    for row in rows:
+        selected = row["artwork_id"] == artwork_id
+        old = bool(row["selected"]) if row["selected"] is not None else row["artwork_id"] == current
+        if old == selected and row["selected"] is not None:
+            continue
+        ctx.db.execute("UPDATE collection_authority_artworks SET selected=?,"
+                       " entity_revision=entity_revision+1 WHERE library_id=? AND artwork_id=?",
+                       [int(selected), ctx.library_id, row["artwork_id"]])
+        ctx.add("artworks", artwork_projection(artwork_row(ctx.db, ctx.library_id, row["artwork_id"])), work_id)
+    if current == artwork_id and not ctx.entities:
+        return _finish(ctx, payload_sha, work_id)
     state["selection"][slot] = artwork_id
     _bump_work(ctx, state)
     return _finish(ctx, payload_sha, work_id)
 
 
 # --- volume, ownership and membership commands --------------------------------
+
+def _owned_count(state, edition):
+    entries = state["derived"].get("ownedVolumes") or []
+    return next((entry["count"] for entry in entries if entry["editionIndex"] == edition), None)
+
+
+def _set_owned_count(state, edition, count):
+    entries = [entry for entry in state["derived"].get("ownedVolumes") or []
+               if entry["editionIndex"] != edition]
+    entries.append({"editionIndex": edition, "count": count})
+    state["derived"]["ownedVolumes"] = sorted(entries, key=lambda entry: entry["editionIndex"])
+
+
+def _tracking_work(ctx, work_id):
+    state = work_state(require_work(ctx, work_id))
+    if state["type"] != "manga":
+        fail(409, "collectionTrackingUnavailable", "Only manga support ownership tracking and subscriptions.")
+    return state
+
+
+def _tracking_cas(ctx, state, entity, current, desired, expected):
+    if current != desired and entity["expectedRevision"] != state["entityRevision"] and current != expected:
+        conflict(ctx, "work", state)
+
+
+def _release_available(ctx, work_id):
+    return ctx.db.execute("SELECT 1 FROM collection_authority_bindings WHERE library_id=?"
+                          " AND work_id=? AND provider IN ('kakao','aladin') AND bound=1",
+                          [ctx.library_id, work_id]).fetchone() is not None
+
+
+def _sync_release_availability(ctx, state):
+    if state["type"] != "manga":
+        return False
+    watch = state["derived"].get("releaseWatch") or {"enabled": False}
+    available = _release_available(ctx, state["workId"])
+    desired = {"enabled": bool(watch["enabled"] and available), "available": available}
+    if state["derived"].get("releaseWatch") == desired:
+        return False
+    state["derived"]["releaseWatch"] = desired
+    return True
+
+
+def _track_ownership(ctx, entity, payload_sha):
+    work_id, edition, count = entity["workId"], entity["editionIndex"], entity["count"]
+    state = _tracking_work(ctx, work_id)
+    current = _owned_count(state, edition)
+    _tracking_cas(ctx, state, entity, current, count, entity["expectedCount"])
+    # Count replacement clears digital/detail holdings for this edition, including
+    # rows above the requested count. False rows remain as revisioned feed state.
+    existing = {row["volume_number"]: row for row in ctx.db.execute(
+        "SELECT * FROM collection_authority_ownership WHERE library_id=? AND work_id=? AND edition_index=?",
+        [ctx.library_id, work_id, edition])}
+    for number in sorted(set(existing) | set(range(1, count + 1))):
+        row = existing.get(number)
+        physical = int(number <= count)
+        if row is not None and row["physical"] == physical and not row["digital"]:
+            continue
+        revision = (row["entity_revision"] if row is not None else 0) + 1
+        ctx.db.execute(
+            "INSERT INTO collection_authority_ownership VALUES(?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(library_id,work_id,volume_number,edition_index) DO UPDATE SET"
+            " physical=excluded.physical,digital=excluded.digital,entity_revision=excluded.entity_revision,"
+            " updated_at=excluded.updated_at",
+            [ctx.library_id, work_id, number, edition, physical, 0, revision, ctx.now])
+        updated = ctx.db.execute("SELECT * FROM collection_authority_ownership WHERE library_id=?"
+                                 " AND work_id=? AND volume_number=? AND edition_index=?",
+                                 [ctx.library_id, work_id, number, edition]).fetchone()
+        ctx.add("ownership", ownership_projection(updated), work_id)
+    if current == count and not ctx.entities:
+        return _finish(ctx, payload_sha, work_id)
+    _set_owned_count(state, edition, count)
+    _bump_work(ctx, state)
+    return _finish(ctx, payload_sha, work_id)
+
+
+def _release_subscription(ctx, entity, payload_sha):
+    work_id, enabled = entity["workId"], entity["enabled"]
+    state = _tracking_work(ctx, work_id)
+    watch = state["derived"].get("releaseWatch") or {"enabled": False, "available": False}
+    current = watch["enabled"]
+    _tracking_cas(ctx, state, entity, current, enabled, entity["expectedEnabled"])
+    available = _release_available(ctx, work_id)
+    if enabled and not available:
+        fail(409, "releaseWatchUnavailable", "A Kakao or Aladin binding is required.")
+    desired = {"enabled": enabled, "available": available}
+    if watch == desired and state["derived"].get("releaseWatch") is not None:
+        return _finish(ctx, payload_sha, work_id)
+    state["derived"]["releaseWatch"] = desired
+    _bump_work(ctx, state)
+    return _finish(ctx, payload_sha, work_id)
+
 
 def _upsert_volume(ctx, entity, payload_sha):
     work_id, volume_id = entity["workId"], entity["volumeId"]
@@ -1690,7 +1854,7 @@ def _upsert_source(ctx, entity, payload_sha):
 
 def _ownership(ctx, entity, payload_sha):
     work_id, number, edition = entity["workId"], entity["volumeNumber"], entity["editionIndex"]
-    require_work(ctx, work_id)
+    state = work_state(require_work(ctx, work_id))
     key = f"{work_id}:{number}:{edition}"
     existing = ctx.db.execute(
         "SELECT * FROM collection_authority_ownership WHERE library_id=? AND work_id=?"
@@ -1713,6 +1877,12 @@ def _ownership(ctx, entity, payload_sha):
         "SELECT * FROM collection_authority_ownership WHERE library_id=? AND work_id=?"
         " AND volume_number=? AND edition_index=?", [ctx.library_id, work_id, number, edition]).fetchone()
     ctx.add("ownership", ownership_projection(row), work_id)
+    if state["type"] == "manga" and edition <= 3:
+        count = ctx.db.execute("SELECT COUNT(*) FROM collection_authority_ownership WHERE library_id=?"
+                               " AND work_id=? AND edition_index=? AND (physical=1 OR digital=1)",
+                               [ctx.library_id, work_id, edition]).fetchone()[0]
+        _set_owned_count(state, edition, count)
+        _bump_work(ctx, state)
     return _finish(ctx, payload_sha, key)
 
 
@@ -1758,6 +1928,7 @@ HANDLERS = {
     UNBIND: _unbind, APPLY_SNAPSHOT: _apply_provider, ADD_ARTWORK: _add_artwork,
     SELECT_ARTWORK: _select_artwork, UPSERT_VOLUME: _upsert_volume,
     UPSERT_VOLUME_SOURCE: _upsert_source, OWNERSHIP: _ownership, MEMBERSHIP: _membership,
+    TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
 }
 
 
@@ -1863,7 +2034,8 @@ def parse_command(body):
         legacy = body["legacyKind"]
         if legacy is not None and legacy not in LEGACY_KINDS:
             fail()
-        fields = _fields(body["fields"], WORK_FIELDS)
+        fields = _fields(body["fields"], COMMAND_WORK_FIELDS)
+        validate_record_fields(type_, fields)
         binding = body["binding"]
         entity.update(type=type_, name=normalize_name(body["name"]), legacyKind=legacy,
                       fields=fields,
@@ -1923,7 +2095,7 @@ def parse_command(body):
                       thumbnail=None if body["thumbnail"] is None
                       else blob_manifest(body["thumbnail"], thumbnail=True))
     elif command_type == SELECT_ARTWORK:
-        if body["slot"] not in SLOTS:
+        if not isinstance(body["slot"], str) or body["slot"] not in SELECTION_KINDS:
             fail()
         entity.update(slot=body["slot"], artworkId=require_id(body["artworkId"], nullable=True),
                       expectedArtworkId=require_id(body["expectedArtworkId"], nullable=True))
@@ -1961,6 +2133,15 @@ def parse_command(body):
                       editionIndex=_int(body["editionIndex"], low=0, high=255, nullable=False),
                       physical=_bool(body["physical"]), digital=_bool(body["digital"]),
                       expectedRevision=_revision(body["expectedRevision"]))
+    elif command_type in (TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION):
+        revision = body["expectedRevision"]
+        entity["expectedRevision"] = None if revision is None else _revision(revision, minimum=1)
+        if command_type == TRACK_OWNERSHIP:
+            entity.update(editionIndex=_int(body["editionIndex"], low=0, high=3, nullable=False),
+                          count=_int(body["count"], low=0, high=2000, nullable=False),
+                          expectedCount=_int(body["expectedCount"], low=0, high=2000))
+        else:
+            entity.update(enabled=_bool(body["enabled"]), expectedEnabled=_bool(body["expectedEnabled"]))
     elif command_type == MEMBERSHIP:
         entity.update(assetId=require_id(body["assetId"]), desiredState=_bool(body["desiredState"]),
                       expectedRevision=_revision(body["expectedRevision"]))
@@ -2141,8 +2322,8 @@ def parse_staging(body, *, verify=False):
     """Accept the original exact v1 document, or the complete v2 publication contract.
 
     V2 artwork rows require the exact v1 keys plus ``order`` (nonnegative integer)
-    and ``selected`` (boolean). The latter preserves the replica's selection for
-    every kind, including back covers outside the work/hero/backdrop/spine slots.
+    and ``selected`` (boolean). Explicit flags must agree with work slots. The old
+    exporter omits the back slot, which is inferred from its selected back artwork.
     V1 rejects both keys; its stored NULL selection retains the slot fallback.
     """
     import mobile_collections as mobile
@@ -2168,7 +2349,10 @@ def parse_staging(body, *, verify=False):
         _exact(work, work_keys, "works")
         work_id = require_id(work["workId"], code)
         fields = _exact(work["fields"], set(WORK_FIELDS) | {"status", "ownedPlatform"}, "fields")
-        selection = _exact(work["selection"], set(SLOTS) | {"spine"}, "selection")
+        selection = work["selection"]
+        if not isinstance(selection, dict):
+            fail(422, code, "Invalid work selection.")
+        _exact(selection, set(SLOTS) | {"spine"} | ({"back"} if "back" in selection else set()), "selection")
         details = _exact(work["details"], {"series", "film", "av"}, "details")
         derived = _exact(work["derived"], {"unreadReleaseCount", *TRACKING_FIELDS}, "derived")
         kind = require_type(work["type"], code)
@@ -2208,6 +2392,8 @@ def parse_staging(body, *, verify=False):
                 fail(422, code, "Duplicate owned-volume editions.")
         work_extras[work_id] = {"status": status, "ownedPlatform": platform,
                                "spine": require_id(selection["spine"], code, nullable=True),
+                               **({"back": require_id(selection["back"], code, nullable=True)}
+                                  if "back" in selection else {}),
                                "av": av, "avCredits": parsed_credits,
                                "tracking": {key: derived[key] for key in TRACKING_FIELDS}}
         base["works"].append({**{k: v for k, v in work.items() if k != "avCredits"},
@@ -2258,11 +2444,22 @@ def parse_staging(body, *, verify=False):
         additions = work_extras[work["workId"]]
         work["fields"].update({k: additions[k] for k in ("status", "ownedPlatform")})
         work["selection"]["spine"] = additions["spine"]
+        if "back" in additions:
+            work["selection"]["back"] = additions["back"]
         work["details"]["av"] = additions["av"]
         work["derived"].update(additions["tracking"])
         work["avCredits"] = additions["avCredits"]
     for art in doc["artworks"]:
         art.update(art_extras[art["artworkId"]])
+    selected_backs = {}
+    for art in doc["artworks"]:
+        if art["kind"] == "back" and art["selected"]:
+            if art["workId"] in selected_backs:
+                fail(422, code, "Multiple selected back artworks.")
+            selected_backs[art["workId"]] = art["artworkId"]
+    for work in doc["works"]:
+        if "back" not in work["selection"]:
+            work["selection"]["back"] = selected_backs.get(work["workId"])
     for volume in doc["volumes"]:
         volume.update(volume_extras[volume["volumeId"]])
     return {**doc, **extra, "people": sorted(people, key=lambda p: p["personId"])}
@@ -2313,6 +2510,7 @@ def validate_staging(db, doc, *, verify=False):
         if not work["showcase"] and work["showcaseOrder"] is not None:
             _baseline_fail("Showcase 순서가 올바르지 않습니다.", workId=work["workId"])
     artworks = {}
+    work_artworks = {}
     confirmed = {row[0]: (row[1], row[2]) for row in db.execute(
         "SELECT sha256,size_bytes,content_type FROM mobile_collection_artwork")}
     for art in doc["artworks"]:
@@ -2325,6 +2523,7 @@ def validate_staging(db, doc, *, verify=False):
                 _baseline_fail("업로드가 확인되지 않은 이미지가 있습니다.", reason="artworkBlob",
                                sha256=blob["sha256"])
         artworks[art["artworkId"]] = art["workId"]
+        work_artworks.setdefault(art["workId"], []).append(art)
     per_work = {}
     for art in doc["artworks"]:
         per_work[art["workId"]] = per_work.get(art["workId"], 0) + 1
@@ -2339,6 +2538,24 @@ def validate_staging(db, doc, *, verify=False):
     for work in doc["works"]:
         for artwork_id in work["selection"].values():
             owned(work["workId"], artwork_id)
+        for slot in SELECTION_KINDS:
+            if slot not in work["selection"]:
+                # An older persistent v2 staging row may predate back-slot inference.
+                # Require restaging rather than activating a digest with disagreeing flags.
+                if any(art.get("selected") and art["kind"] in selection_kinds(slot)
+                       for art in work_artworks.get(work["workId"], [])):
+                    _baseline_fail("Selected artwork has no selection slot; restage the baseline.",
+                                   reason="artworkSelection", workId=work["workId"])
+                continue
+            selected = work["selection"][slot]
+            kinds = selection_kinds(slot)
+            for art in work_artworks.get(work["workId"], []):
+                if art["artworkId"] == selected and art["kind"] not in kinds:
+                    _baseline_fail("Artwork kind does not match its slot.", reason="artworkSelection",
+                                   artworkId=art["artworkId"])
+                if art["kind"] in kinds and "selected" in art and art["selected"] != (art["artworkId"] == selected):
+                    _baseline_fail("Artwork flags disagree with selection slots.", reason="artworkSelection",
+                                   artworkId=art["artworkId"])
         for artwork_id in detail_artwork_references(work["details"]):
             owned(work["workId"], artwork_id)
     people = {person["personId"]: person for person in doc.get("people", [])}
@@ -2780,11 +2997,12 @@ def activate(db, *, library_id, expected_digest, now):
 # Personal-edit compatibility shim (installed APKs keep working after activation)
 # ---------------------------------------------------------------------------
 
-SHIM_FIELDS = {"myScore": "myScore", "showcase": "showcase", "memo": "description"}
+SHIM_FIELDS = {"myScore": "myScore", "showcase": "showcase", "memo": "description",
+               "status": "status", "ownedPlatform": "ownedPlatform"}
 
 
 def personal_edit(db, row, command, value, expected, now):
-    """Translate one legacy personal edit into ``updateWork`` with field-level CAS.
+    """Translate one legacy personal edit into a revisioned authority command.
 
     Response and error codes stay exactly what the shipped APK understands:
     ``collectionPersonalConflict`` with ``current``, ``collectionNotFound`` (the intent is
@@ -2793,22 +3011,41 @@ def personal_edit(db, row, command, value, expected, now):
     """
     if command.libraryId != row["libraryId"]:
         fail(409, "libraryMismatch", "다른 라이브러리의 컬렉션 편집 요청입니다.")
-    field = SHIM_FIELDS[command.field]
-    entity = {"workId": command.collectionId, "changes": {field: value},
-              "expected": {field: expected}, "expectedRevision": None}
+    field = command.field
+    if field == "ownedVolumes":
+        command_type = TRACK_OWNERSHIP
+        entity = {"workId": command.collectionId, **value, "expectedCount": expected["count"],
+                  "expectedRevision": None}
+    elif field == "releaseWatch":
+        command_type = RELEASE_SUBSCRIPTION
+        entity = {"workId": command.collectionId, "enabled": value, "expectedEnabled": expected,
+                  "expectedRevision": None}
+    else:
+        command_type = UPDATE
+        field = SHIM_FIELDS[field]
+        entity = {"workId": command.collectionId, "changes": {field: value},
+                  "expected": {field: expected}, "expectedRevision": None}
     try:
         result = apply_command(db, library_id=row["libraryId"], epoch=row["epoch"],
-                               contract_version=CONTRACT_VERSION, command_type=UPDATE,
+                               contract_version=CONTRACT_VERSION, command_type=command_type,
                                operation_id=command.operationId, entity=entity, now=now)
     except HTTPException as error:
         code = error.detail.get("code") if isinstance(error.detail, dict) else None
         if code == "revisionConflict":
             current = error.detail["current"]["work"]
-            present = current["showcase"] if field == "showcase" else current["fields"].get(field)
+            if field == "ownedVolumes":
+                present = {"editionIndex": value["editionIndex"],
+                           "count": _owned_count(current, value["editionIndex"])}
+            elif field == "releaseWatch":
+                present = bool((current["derived"].get("releaseWatch") or {}).get("enabled"))
+            else:
+                present = current["showcase"] if field == "showcase" else current["fields"].get(field)
             fail(409, "collectionPersonalConflict", "다른 기기에서 값이 바뀌었습니다.",
                  current=comparable(field, present))
         if code in ("workNotFound", "workDeleted", "workTrashed"):
             fail(404, "collectionNotFound", "삭제되었거나 게시되지 않은 작품입니다.")
+        if code == "invalidCollectionCommand":
+            fail(422, "invalidCollectionPersonalEdit", "Invalid personal edit.")
         raise
     return {"version": 1, "operationId": command.operationId, "collectionId": command.collectionId,
             "field": command.field, "value": value, "sequence": result["changeSequence"],

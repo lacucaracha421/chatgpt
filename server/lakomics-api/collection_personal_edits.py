@@ -50,8 +50,8 @@ collectionPersonalEditUnsupported`` / ``409 collectionTrackingUnavailable`` othe
 without ``editVersion=2`` whose page would contain a tracking entry is refused with ``409
 collectionPersonalEditUpgradeRequired``, so a version-1 PC fails closed instead of
 skipping an entry. Do not downgrade the PC to a version-1 build once tracking edits exist:
-it stops at that error until it is upgraded again. Once Collections authority is active, tracking fields are refused
-(``409 collectionPersonalEditUnsupported``); authority clients use its own commands.
+it stops at that error until it is upgraded again. Once Collections authority is active,
+tracking fields map onto authority commands without writing the PC bridge log.
 
 Work record fields (personal-edit version 3, 2026-10-01)
 --------------------------------------------------------
@@ -77,8 +77,8 @@ with a lower ``editVersion`` whose page would contain a version-3 entry is refus
 ``capabilities.collectionRecordEdit`` only while the latest handshake publication had
 version 3, and record edits are refused (``409 collectionPersonalEditUnsupported``) until
 then. The PC sends the ``editVersion`` it negotiated from the capabilities, so an older
-server (whose ``editVersion`` bound is lower) keeps working. Under Collections authority the
-record fields are refused like the tracking fields.
+server (whose ``editVersion`` bound is lower) keeps working. Under Collections authority
+record fields map onto ``updateWork``; the request version remains 1.
 """
 import hashlib
 import json
@@ -371,7 +371,13 @@ status_head = last_sequence
 
 
 def advertisement(db):
+    active = authority.active_domain(db, collection_authority.DOMAIN)
     current = state(db)
+    if active is not None:
+        return {"capabilities": {"collectionPersonalEdit": True, "collectionTrackingEdit": True,
+                                 "collectionRecordEdit": True}, "libraryId": active["libraryId"],
+                **({"personalEditCursor": current["last_sequence"],
+                    "appliedPersonalEditCursor": current["applied_cursor"]} if current is not None else {})}
     if current is None:
         return {"capabilities": {"collectionPersonalEdit": False, "collectionTrackingEdit": False,
                                  "collectionRecordEdit": False}}
@@ -418,8 +424,6 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
                         fail(409, "operationConflict", "다른 내용으로 편집 요청을 재사용할 수 없습니다.")
                     return json.loads(receipt["result_json"])
             if active is not None:
-                if command.field in TRACKING_FIELDS or command.field in RECORD_FIELDS:
-                    fail(409, "collectionPersonalEditUnsupported", "이 편집은 지금 지원되지 않습니다.")
                 result = collection_authority.personal_edit(
                     db, active, command, value, expected, collection_authority.now_iso())
                 db.commit()

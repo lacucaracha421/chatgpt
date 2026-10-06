@@ -569,7 +569,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
 
     @app.post("/v1/collections/artworks/prepare")
     def prepare_artwork(body: ArtworkUpload, authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         key = artwork_key(body.sha256)
         exists = head(body)
         with get_db() as db:
@@ -583,7 +583,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
 
     @app.post("/v1/collections/artworks/check")
     def check_artworks(body: ArtworkCheck, authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         # These are receipts of exact storage HEAD checks, also trusted by commit_snapshot.
         # Unknown files still go through prepare/upload/confirmation before publication.
         manifests = {item.sha256: item for item in body.items}
@@ -816,13 +816,6 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             active = served(db)
             revision, published = state(db, active)
             advertisement = personal_edits.advertisement(db)
-            if active is not None:
-                # Installed APKs keep sending personal edits; the server translates them
-                # into `updateWork`, so the capability no longer depends on the PC.
-                advertisement = {**advertisement, "capabilities": {"collectionPersonalEdit": True,
-                                                                     "collectionTrackingEdit": False,
-                                                                     "collectionRecordEdit": False},
-                                 "libraryId": active["libraryId"]}
         return {"revision": revision, "publishedAt": published, **advertisement,
                 "collectionTypes": COLLECTION_TYPES,
                 "replicaFeatures": REPLICA_FEATURES,

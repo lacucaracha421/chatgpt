@@ -350,10 +350,10 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.ok(self.create('av', 'x', type_='av'))
         # Revision CAS.
         self.ok(self.update('w1', {'overview': 'Mine'}, revision=1))
-        stale = self.update('w1', {'myScore': 4.5}, revision=1)
+        stale = self.update('w1', {'overview': 'Other'}, revision=1)
         self.assertEqual((stale.status_code, self.code(stale)), (409, 'revisionConflict'))
         self.assertEqual(stale.json()['detail']['current']['work']['fields']['overview'], 'Mine')
-        # Field-level CAS succeeds on a stale revision when the touched field is untouched.
+        # Personal choices rebase even on a stale revision; text still uses CAS.
         self.ok(self.update('w1', {'myScore': 4.5}, {'myScore': None}, revision=1))
         memo = self.update('w1', {'overview': 'Other'}, {'overview': 'Old'})
         self.assertEqual(self.code(memo), 'revisionConflict')
@@ -563,8 +563,8 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.ok(self.activate(digest))
         status = self.status()
         self.assertEqual((status['capabilities'], status['libraryId']),
-                         ({'collectionPersonalEdit': True, 'collectionTrackingEdit': False,
-                           'collectionRecordEdit': False}, LIBRARY))
+                         ({'collectionPersonalEdit': True, 'collectionTrackingEdit': True,
+                           'collectionRecordEdit': True}, LIBRARY))
         self.assertEqual(self.ok(edit(before)), legacy)  # pre-activation receipt replays
         operation = str(uuid.uuid4())
         accepted = self.ok(edit(operation, value=5.0, expected=4.0))
@@ -573,9 +573,10 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.assertEqual(self.ok(edit(operation, value=5.0, expected=4.0)), accepted)
         self.assertEqual(self.code(edit(operation, value=1.0, expected=4.0)), 'operationConflict')
         self.assertEqual(self.work('a')['fields']['myScore'], 5.0)
-        conflict = edit(str(uuid.uuid4()), value=1.0, expected=2.0)
+        self.ok(edit(str(uuid.uuid4()), value=1.0, expected=2.0))  # score rebases
+        conflict = edit(str(uuid.uuid4()), field='memo', value='Other', expected='Old')
         self.assertEqual((conflict.status_code, self.code(conflict)), (409, 'collectionPersonalConflict'))
-        self.assertEqual(conflict.json()['detail']['current'], 5.0)
+        self.assertEqual(conflict.json()['detail']['current'], 'PC 메모')
         memo = self.ok(edit(str(uuid.uuid4()), field='memo', value=' 새 메모 ', expected='PC 메모'))
         self.assertEqual(self.detail('a').json()['item']['description'], '새 메모')
         self.assertTrue(memo['changed'])
@@ -586,6 +587,219 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.assertEqual(self.code(edit(str(uuid.uuid4()), libraryId='f' * 32)), 'libraryMismatch')
 
     # --- feeds ---------------------------------------------------------------------
+    def test_record_fields_validation_rebase_projection_and_feed(self):
+        self.ready()
+        created = self.ok(self.create('g', 'Game', type_='game', status='playing', ownedPlatform=' PC '))
+        fields = created['entities']['works'][0]['fields']
+        self.assertEqual((fields['status'], fields['ownedPlatform']), ('playing', 'PC'))
+        operation = str(uuid.uuid4())
+        changed = self.ok(self.update('g', {'status': 'done', 'ownedPlatform': 'Switch'},
+                                     {'status': None, 'ownedPlatform': None}, revision=99,
+                                     operation_id=operation))
+        self.ok(self.update('g', {'status': 'unplayed'}, {'status': 'playing'}))
+        self.assertEqual(self.ok(self.update('g', {'status': 'done', 'ownedPlatform': 'Switch'},
+                                            {'status': None, 'ownedPlatform': None}, revision=99,
+                                            operation_id=operation)), changed)
+        item = self.detail('g').json()['item']
+        self.assertEqual((item['status'], item['ownedPlatform']), ('unplayed', 'Switch'))
+        listed = next(w for w in self.listing()['items'] if w['id'] == 'g')
+        self.assertEqual((listed['status'], listed['ownedPlatform']), ('unplayed', 'Switch'))
+        changes = self.client.get(PREFIX + '/changes', headers=self.auth,
+                                  params={'libraryId': LIBRARY, 'epoch': 1}).json()['items']
+        self.assertEqual(changes[1]['entities']['works'][0]['fields']['ownedPlatform'], 'Switch')
+        mixed = self.update('g', {'status': 'done', 'description': 'new'},
+                            {'status': None, 'description': 'stale'})
+        self.assertEqual(self.code(mixed), 'revisionConflict')
+        self.assertEqual(self.work('g')['fields']['status'], 'unplayed')
+        for type_, good, bad in [('game', 'done', 'watched'), ('manga', 'complete', 'done'),
+                                 ('movie', 'watching', 'complete'), ('av', 'watched', 'playing')]:
+            with self.subTest(type=type_):
+                self.ok(self.create('record-' + type_, 'Record ' + type_, type_=type_, status=good))
+                self.assertEqual(self.update('record-' + type_, {'status': bad}, {'status': good}).status_code, 422)
+                self.assertEqual(self.create('bad-' + type_, 'Bad', type_=type_, status=bad).status_code, 422)
+        self.assertEqual(self.code(self.update('a', {'ownedPlatform': None}, {'ownedPlatform': None})),
+                         'collectionRecordUnavailable')
+        self.assertEqual(self.update('g', {'ownedPlatform': 'x' * 201}, revision=1).status_code, 422)
+        self.ok(self.update('g', {'status': None, 'ownedPlatform': ' '}, revision=1))
+        self.assertNotIn('status', self.detail('g').json()['item'])
+        self.assertNotIn('ownedPlatform', self.detail('g').json()['item'])
+
+    def test_new_commands_are_inactive_and_v3_edits_keep_the_legacy_log(self):
+        items = copy.deepcopy(self.items)
+        items[0].update(status='collecting', releaseWatch={'enabled': False, 'available': True},
+                        ownedVolumes=[{'editionIndex': 0, 'count': 0}])
+        game = work('g', 'Game', 'game')
+        game.update(status='unplayed', ownedPlatform='PC')
+        items.append(game)
+        self.ok(self.client.put('/v1/collections/replica', headers=self.publisher, json={
+            'version': 1, 'baseRevision': self.status()['revision'], 'collections': items,
+            'personalEditVersion': 3, 'libraryId': LIBRARY, 'personalEditCursor': 0}))
+        for command, fields in [('setOwnershipTracking', {'editionIndex': 0, 'count': 1, 'expectedCount': 0}),
+                                ('setReleaseSubscription', {'enabled': True, 'expectedEnabled': False})]:
+            self.assertEqual(self.code(self.command(command, workId='a', expectedRevision=None, **fields)), 'authorityInactive')
+        self.assertEqual(self.code(self.create('new', 'New', type_='game', status='playing', ownedPlatform='PC')), 'authorityInactive')
+        edits = [('status', 'complete', 'collecting', 'a'), ('ownedPlatform', 'Switch', 'PC', 'g'),
+                 ('ownedVolumes', {'editionIndex': 0, 'count': 2}, {'editionIndex': 0, 'count': 0}, 'a'),
+                 ('releaseWatch', True, False, 'a')]
+        for field, value, expected, work_id in edits:
+            body = {'version': 1, 'libraryId': LIBRARY, 'operationId': str(uuid.uuid4()),
+                    'collectionId': work_id, 'field': field, 'value': value, 'expected': expected}
+            accepted = self.ok(self.client.post('/v1/collections/personal-edits', headers=self.auth, json=body))
+            self.assertTrue(accepted['changed'])
+            self.assertEqual(self.ok(self.client.post('/v1/collections/personal-edits', headers=self.auth, json=body)), accepted)
+        self.assertEqual(self.detail('a').json()['item']['status'], 'complete')
+        self.assertEqual(self.detail('a').json()['item']['ownedVolumes'], [{'editionIndex': 0, 'count': 2}])
+        with api_app.get_db() as db:
+            self.assertIsNone(authority.active_domain(db, 'collections'))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM mobile_collection_edits').fetchone()[0], 4)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM collection_authority_receipts').fetchone()[0], 0)
+
+    def test_mangadex_snapshot_replaces_stale_values_and_preserves_user_text(self):
+        self.ready()
+        self.ok(self.create('md', 'MangaDex', type_='manga'))
+        provider_id = '11111111-1111-4111-8111-111111111111'
+        def snapshot(values, base, revision):
+            return self.command('applyProviderSnapshot', headers=self.publisher, workId='md',
+                                provider='mangadex', externalId=provider_id, snapshot={'revision': revision},
+                                values=values, details=None, baseSnapshotDigest=base)
+        old = {'year': 2000, 'author': 'Old', 'genres': 'Fantasy', 'overview': 'Old text', 'originalTitle': '古い'}
+        first = self.ok(snapshot(old, None, 1))
+        self.ok(self.update('md', {'author': 'Mine'}, {'author': 'Old'}))
+        new = {'year': 2001, 'author': 'New', 'genres': None, 'overview': 'New text', 'originalTitle': '新しい'}
+        changed = self.ok(snapshot(new, first['entities']['bindings'][0]['snapshotDigest'], 2))
+        fields = changed['entities']['works'][0]['fields']
+        self.assertEqual({k: fields[k] for k in new}, {**new, 'author': 'Mine'})
+        self.assertEqual(self.detail('md').json()['item']['originalTitle'], '新しい')
+        self.assertEqual(changed['entities']['bindings'][0]['values']['originalTitle'], '新しい')
+
+    def test_tracking_count_replacement_zero_conflict_receipt_and_subscription(self):
+        self.ready()
+        def count(value, expected, edition=0, **kw):
+            return self.command('setOwnershipTracking', workId='a', editionIndex=edition,
+                                count=value, expectedCount=expected, expectedRevision=None, **kw)
+        zero = self.ok(count(0, None))
+        self.assertEqual(zero['entities']['works'][0]['derived']['ownedVolumes'], [{'editionIndex': 0, 'count': 0}])
+        self.assertFalse(self.ok(count(0, 99))['changed'])
+        self.ok(self.command('setVolumeOwnership', headers=self.publisher, workId='a', volumeNumber=7,
+                             editionIndex=0, physical=False, digital=True, expectedRevision=0))
+        self.assertEqual(self.detail('a').json()['item']['ownedVolumes'], [{'editionIndex': 0, 'count': 1}])
+        self.ok(count(2, 1))
+        with api_app.get_db() as db:
+            rows = [tuple(r) for r in db.execute('SELECT volume_number,physical,digital FROM collection_authority_ownership'
+                                                 " WHERE work_id='a' ORDER BY volume_number")]
+        self.assertEqual(rows, [(1, 1, 0), (2, 1, 0), (7, 0, 0)])
+        op = str(uuid.uuid4())
+        cleared = self.ok(count(0, 2, operation_id=op))
+        self.assertTrue(all(not r['physical'] and not r['digital'] for r in cleared['entities']['ownership']))
+        self.ok(count(3, None, edition=1))
+        self.assertEqual(self.ok(count(0, 2, operation_id=op)), cleared)
+        self.assertEqual(self.code(count(1, 2, operation_id=op)), 'operationConflict')
+        self.assertEqual(self.code(count(1, 2)), 'revisionConflict')
+        self.assertEqual(self.detail('a').json()['item']['ownedVolumes'],
+                         [{'editionIndex': 0, 'count': 0}, {'editionIndex': 1, 'count': 3}])
+        for value, edition in [(2001, 0), (-1, 0), (True, 0), (1, 4)]:
+            self.assertEqual(count(value, None, edition).status_code, 422)
+        def watch(enabled, expected, **kw):
+            return self.command('setReleaseSubscription', workId='a', enabled=enabled,
+                                expectedEnabled=expected, expectedRevision=None, **kw)
+        self.assertEqual(self.code(watch(True, False)), 'releaseWatchUnavailable')
+        self.ok(self.command('bindProvider', headers=self.publisher, workId='a', provider='kakao',
+                             externalId='book', config=None, expectedRevision=0))
+        self.assertEqual(self.detail('a').json()['item']['releaseWatch'], {'enabled': False, 'available': True})
+        operation = str(uuid.uuid4())
+        enabled = self.ok(watch(True, False, operation_id=operation))
+        self.assertEqual(enabled['entities']['works'][0]['derived']['releaseWatch'], {'enabled': True, 'available': True})
+        self.assertEqual(self.code(watch(False, False)), 'revisionConflict')
+        self.ok(watch(False, True))
+        self.assertEqual(self.ok(watch(True, False, operation_id=operation)), enabled)
+        self.assertEqual(self.detail('a').json()['item']['releaseWatch'], {'enabled': False, 'available': True})
+        self.ok(watch(True, False))
+        self.ok(self.command('unbindProvider', headers=self.publisher, workId='a', provider='kakao', expectedRevision=1))
+        self.assertEqual(self.detail('a').json()['item']['releaseWatch'], {'enabled': False, 'available': False})
+        for command, fields in [('setOwnershipTracking', {'editionIndex': 0, 'count': 0, 'expectedCount': None}),
+                                ('setReleaseSubscription', {'enabled': False, 'expectedEnabled': False})]:
+            self.assertEqual(self.code(self.command(command, workId='m', expectedRevision=None, **fields)),
+                             'collectionTrackingUnavailable')
+
+    def test_active_v2_v3_personal_edits_map_without_bridge_log(self):
+        self.ready()  # Legacy handshake v1 must not suppress active capabilities.
+        self.ok(self.create('g', 'Game', type_='game'))
+        def edit(field, value, expected, work_id='a', operation=None, version=1):
+            return self.client.post('/v1/collections/personal-edits', headers=self.auth, json={
+                'version': version, 'libraryId': LIBRARY, 'operationId': operation or str(uuid.uuid4()),
+                'collectionId': work_id, 'field': field, 'value': value, 'expected': expected})
+        for field, value, expected, work_id in [('status', 'collecting', None, 'a'),
+                                               ('ownedPlatform', ' PC ', None, 'g'),
+                                               ('ownedVolumes', {'editionIndex': 2, 'count': 0},
+                                                {'editionIndex': 2, 'count': None}, 'a')]:
+            operation = str(uuid.uuid4())
+            accepted = self.ok(edit(field, value, expected, work_id, operation))
+            self.assertEqual(accepted['version'], 1)
+            self.assertTrue(accepted['changed'])
+            self.assertEqual(self.ok(edit(field, value, expected, work_id, operation)), accepted)
+        self.assertEqual(self.detail('g').json()['item']['ownedPlatform'], 'PC')
+        stale = edit('ownedVolumes', {'editionIndex': 2, 'count': 2}, {'editionIndex': 2, 'count': None})
+        self.assertEqual(self.code(stale), 'collectionPersonalConflict')
+        self.assertEqual(stale.json()['detail']['current'], {'editionIndex': 2, 'count': 0})
+        self.assertEqual(self.code(edit('releaseWatch', True, False)), 'releaseWatchUnavailable')
+        self.ok(self.command('bindProvider', headers=self.publisher, workId='a', provider='kakao',
+                             externalId='book', config=None, expectedRevision=0))
+        self.ok(edit('releaseWatch', True, False))
+        stale = edit('releaseWatch', False, False)
+        self.assertEqual(self.code(stale), 'collectionPersonalConflict')
+        self.assertIs(stale.json()['detail']['current'], True)
+        self.assertEqual(self.code(edit('status', 'done', None)), 'invalidCollectionPersonalEdit')
+        self.assertEqual(self.code(edit('ownedPlatform', None, None)), 'collectionRecordUnavailable')
+        self.assertEqual(edit('status', 'collecting', None, version=3).status_code, 422)
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM mobile_collection_edits').fetchone()[0], 0)
+
+    def test_selected_flags_spine_back_and_transactional_conflicts(self):
+        self.ready()
+        for kind, slot in [('cover', 'work'), ('spine', 'spine'), ('back', 'back')]:
+            for suffix in ('1', '2'):
+                self.ok(self.command('addArtwork', workId='m', artworkId=kind + suffix, kind=kind,
+                                     provider=None, providerImageId=None, width=10, height=20,
+                                     language=None, original=self.cover, thumbnail=None))
+            first, second = kind + '1', kind + '2'
+            self.ok(self.command('selectArtwork', workId='m', slot=slot, artworkId=first, expectedArtworkId=None))
+            changed = self.ok(self.command('selectArtwork', workId='m', slot=slot, artworkId=second, expectedArtworkId=first))
+            flags = {a['artworkId']: a['selected'] for a in changed['entities']['artworks']}
+            self.assertEqual(flags, {first: False, second: True})
+            self.assertEqual(changed['entities']['works'][0]['selection'][slot], second)
+            stale = self.command('selectArtwork', workId='m', slot=slot, artworkId=first, expectedArtworkId=None)
+            self.assertEqual(self.code(stale), 'revisionConflict')
+            detail_flags = {a['id']: a['selected'] for a in self.detail('m').json()['item']['artworks']}
+            self.assertFalse(detail_flags[first])
+            self.assertTrue(detail_flags[second])
+            with api_app.get_db() as db:
+                self.assertEqual(dict(db.execute('SELECT artwork_id,selected FROM collection_authority_artworks'
+                                                 ' WHERE work_id=? AND kind=?', ['m', kind])), {first: 0, second: 1})
+            self.ok(self.command('selectArtwork', workId='m', slot=slot, artworkId=None, expectedArtworkId=second))
+            self.assertFalse(any(a['selected'] for a in self.detail('m').json()['item']['artworks'] if a['kind'] == kind))
+        self.assertEqual(self.code(self.command('selectArtwork', workId='m', slot='spine',
+                                                artworkId='cover1', expectedArtworkId=None)), 'invalidArtworkKind')
+        self.ok(self.command('addArtwork', workId='m', artworkId='volume-cover', kind='volume_cover',
+                             provider=None, providerImageId=None, width=10, height=20,
+                             language=None, original=self.cover, thumbnail=None))
+        selected = self.ok(self.command('selectArtwork', workId='m', slot='work', artworkId='volume-cover', expectedArtworkId=None))
+        self.assertEqual(selected['entities']['works'][0]['selection']['work'], 'volume-cover')
+        self.assertTrue(next(a for a in selected['entities']['artworks'] if a['artworkId'] == 'volume-cover')['selected'])
+        self.assertEqual(self.detail('m').json()['item']['selectedWorkArtworkId'], 'volume-cover')
+
+    def test_artwork_upload_role_auth_and_publisher_command_refusal(self):
+        for headers in (self.auth, self.publisher, AUTH):
+            self.assertEqual(self.client.post('/v1/collections/artworks/prepare', headers=headers, json=self.cover).status_code, 200)
+            self.assertEqual(self.client.post('/v1/collections/artworks/check', headers=headers,
+                                              json={'items': [self.cover]}).status_code, 200)
+            for command in ca.PUBLISHER_COMMAND_TYPES:
+                if headers != self.publisher:
+                    # Role refusal precedes even command payload validation.
+                    self.assertEqual(self.command(command, headers=headers).status_code, 401)
+        for headers in ({}, {'Authorization': 'Bearer invalid'}):
+            self.assertEqual(self.client.post('/v1/collections/artworks/prepare', headers=headers, json=self.cover).status_code, 401)
+            self.assertEqual(self.client.post('/v1/collections/artworks/check', headers=headers, json={'items': []}).status_code, 401)
+
     def test_changes_and_baseline_feeds(self):
         self.ready()
         self.ok(self.create('w1', 'Film'))
@@ -626,11 +840,25 @@ class CollectionAuthorityTests(unittest.TestCase):
 
 
 class ProviderMergeFixtureTests(unittest.TestCase):
+    def test_mangadex_replaces_previous_fields_including_clears_and_original_title(self):
+        previous = {'year': 2000, 'author': 'Old', 'genres': 'Fantasy', 'overview': 'Old text', 'originalTitle': '古い'}
+        fetched = {'year': None, 'author': 'New', 'genres': None, 'overview': 'New text', 'originalTitle': '新しい'}
+        self.assertEqual(ca.merge_provider('mangadex', 'refresh', previous, previous, fetched), fetched)
+        # SQL equality is exact; whitespace around a user value preserves precedence.
+        current = {'year': 1990, 'author': ' Old ', 'genres': '', 'overview': 'Mine', 'originalTitle': 'My title'}
+        for mode in ('connect', 'refresh'):
+            self.assertEqual(ca.merge_provider('mangadex', mode, current, previous, fetched), {'genres': None})
+        self.assertEqual(ca.merge_provider('mangadex', 'refresh', current, None, fetched), {'genres': None})
+
     def test_merge_cases(self):
         for case in MERGE_FIXTURE['cases']:
             with self.subTest(case['name']):
                 updates = ca.merge_provider(case['provider'], case['mode'], case['current'],
                                             case['previous'], case['fetched'])
+                # The shared slice-0 fixture predates originalTitle; keep its Rust
+                # consumer unchanged and cover the added field explicitly below.
+                if case['provider'] == 'mangadex':
+                    self.assertIsNone(updates.pop('originalTitle'))
                 self.assertEqual(updates, case['expectedUpdates'])
 
     def test_year_from_date(self):
@@ -641,5 +869,7 @@ class ProviderMergeFixtureTests(unittest.TestCase):
     def test_values_normalization(self):
         for case in MERGE_FIXTURE['valuesNormalization']:
             with self.subTest(case['provider']):
-                self.assertEqual(ca.normalize_provider_values(case['provider'], case['input']),
-                                 case['expected'])
+                expected = dict(case['expected'])
+                if case['provider'] == 'mangadex':
+                    expected['originalTitle'] = None
+                self.assertEqual(ca.normalize_provider_values(case['provider'], case['input']), expected)
