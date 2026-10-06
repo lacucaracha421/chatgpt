@@ -21,6 +21,7 @@ import {AuthorityQueue, CollectionWorkForm, type WorkForm} from './CollectionAut
 import {useProviderStatus} from './CollectionProviders';
 import {WorkManage, WorkManageButton, type ManageSheet} from './CollectionWorkManage';
 import {CollectionTrashSheet, lifecycleIntents, useCollectionTrash} from './CollectionTrash';
+import {lifecycleInFlight} from './collectionCommandOutbox';
 import {CollectionReleases} from './CollectionReleases';
 import {invalidateReleases, observePublication} from './releaseStore';
 import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
@@ -569,12 +570,13 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const calendarInterestCount=calendarReply?.wishlist.filter(entry=>entry.kind===tab).reduce((sum,entry)=>sum+entry.unread.length,0)??0;
   const showcaseCount=showcasePage?.totalCount??(showcase.committed?showcaseItems.length:undefined);
   const trashCount=trash.items.filter(work=>!privacyMode||work.type!=='av').length;
-  // A deleted work leaves the shelves at once: while its delete is queued, and once confirmed
-  // until the list is read again (a read after the confirmation is the server's word).
+  // A deleted work leaves the shelves at once: while its delete is on its way, and once confirmed
+  // until the list is read again (a read after the confirmation is the server's word). A delete
+  // that could not be sent shows its work again, with the shelf queue's 대기 row.
   const listSeenAt=useRef(new Map<string,number>());
   useEffect(()=>{const value=main.page?.revision;if(value&&!listSeenAt.current.has(value))listSeenAt.current.set(value,Date.now());},[main.page?.revision]);
-  const deletedWorks=new Set([...lifecycleIntents(edits.authority).values()].filter(row=>row.command.commandType==='deleteWork'&&(row.state==='pending'
-    ||(listSeenAt.current.get(main.page?.revision??'')??Infinity)<(row.acceptedAt??0))).map(row=>row.command.workId));
+  const deletedWorks=new Set([...lifecycleIntents(edits.authority).values()].filter(row=>row.command.commandType==='deleteWork'&&(lifecycleInFlight(row)
+    ||(row.state==='accepted'&&(listSeenAt.current.get(main.page?.revision??'')??Infinity)<(row.acceptedAt??0)))).map(row=>row.command.workId));
   const onDeleted=(id:string)=>{setOrder(current=>current.filter(value=>value!==id));closeWork();};
 
   const item=detail?.item?edits.authority.work(detail.item):undefined, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];

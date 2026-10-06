@@ -1,5 +1,5 @@
 import {api,native} from './transport';
-import {collectionCover,collectionPath,type CollectionKind,type CollectionPage,type CollectionSummary} from './collectionModel';
+import {artworkVariant,collectionCover,collectionPath,type CollectionKind,type CollectionPage,type CollectionSummary} from './collectionModel';
 import {batteryAllowsWarm,warmEnabled,type BatteryState} from './thumbnailWarm';
 import {scheduleWarm} from './warmScheduler';
 import {SHELF_ACTIVITY,shelfForegroundBusy} from './shelfWarmActivity';
@@ -8,7 +8,7 @@ import {SIGNAL_FALLBACK_MS,subscribeSyncSignals,syncSignal} from './syncSignals'
 const KEY='lakomics.mobile.collectionWarm', EVENT='lakomics-collection-warm';
 const KINDS:CollectionKind[]=['game','manga','movie','av'];
 const SWEEP_AFTER=24*60*60_000;
-type Artwork={collectionId:string;artworkId:string;variant:'thumbnail';revision:string;digest:string}|{assetId:string};
+type Artwork={collectionId:string;artworkId:string;variant:'thumbnail'|'original';revision:string;digest:string}|{assetId:string};
 type Probe={generation:string;cachedIndices:number[]};
 type Progress={scope:string;generation:string;revision:string;kind:number;cursor:string|null;warmed:number;completedAt:number|null};
 function fresh(scope:string,generation='',revision=''):Progress{return {scope,generation,revision,kind:0,cursor:null,warmed:0,completedAt:null};}
@@ -23,7 +23,7 @@ function save(value:Progress){try{localStorage.setItem(KEY,JSON.stringify(value)
 function artworks(items:CollectionSummary[],revision:string):Artwork[] {
   const requests=items.flatMap(item=>{
     const ids=new Set([collectionCover(item),item.spineArtworkId,...(item.volumes??[]).map(volume=>volume.coverArtworkId)].filter((id):id is string=>!!id));
-    const result:Artwork[]=[...ids].map(artworkId=>({collectionId:item.id,artworkId,variant:'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.thumbnail??''}));
+    const result:Artwork[]=[...ids].map(artworkId=>{const variant=artworkVariant(item,artworkId);return {collectionId:item.id,artworkId,variant,revision,digest:item.artworkVersions?.[artworkId]?.[variant]??''};});
     if(!collectionCover(item)&&item.coverAssetId)result.push({assetId:item.coverAssetId});
     return result;
   });

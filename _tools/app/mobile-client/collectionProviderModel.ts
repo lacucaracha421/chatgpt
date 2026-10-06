@@ -1,6 +1,6 @@
 import {api, native} from './transport';
 import {outboxConnection} from './outboxConnection';
-import {sameAuthority, type AuthorityIdentity, type ArtworkReceipt, type Fields, type Provider, type WorkCommand} from './collectionCommandOutbox';
+import {sameAuthority, type AuthorityIdentity, type ArtworkReply, type BlobReceipt, type Fields, type Provider, type WorkCommand} from './collectionCommandOutbox';
 import type {CollectionDetail} from './collectionModel';
 
 export type ProviderStatus = Record<Provider, boolean>;
@@ -54,6 +54,11 @@ export async function readProviderBinding(identity: AuthorityIdentity, workId: s
   } while (after);
   return null;
 }
+/** The relay's thumbnail when it is a well-formed WebP receipt; the shelf falls back to the original otherwise. */
+function validThumbnail(blob: BlobReceipt | null | undefined): BlobReceipt | null {
+  return blob && /^[a-f0-9]{64}$/.test(blob.sha256) && Number.isSafeInteger(blob.sizeBytes) && blob.sizeBytes > 0 && blob.contentType === 'image/webp'
+    ? {sha256: blob.sha256, sizeBytes: blob.sizeBytes, contentType: blob.contentType} : null;
+}
 export async function artworkCommands(item: CollectionDetail, provider: Provider, choices: Record<string, ArtworkChoice>, signal?: AbortSignal): Promise<WorkCommand[]> {
   const connection = outboxConnection();
   if (!connection) throw new Error('서버 연결을 확인해 주세요.');
@@ -63,7 +68,7 @@ export async function artworkCommands(item: CollectionDetail, provider: Provider
     const expectedArtworkId = (slot === 'work' ? item.selectedWorkArtworkId : slot === 'hero' ? item.selectedHeroArtworkId : item.selectedBackdropArtworkId) ?? null;
     let artworkId: string | null = null;
     if (choice !== 'clear') {
-      const receipt = await api<ArtworkReceipt>('/v1/providers/artwork', signal, {provider, path: choice.path, size: 'original'}, 'POST', false, connection);
+      const receipt = await api<ArtworkReply>('/v1/providers/artwork', signal, {provider, path: choice.path, size: 'original'}, 'POST', false, connection);
       if (connection !== outboxConnection() || receipt.provider !== provider || receipt.providerImageId !== choice.path
         || !/^[a-f0-9]{64}$/.test(receipt.original?.sha256 ?? '') || !Number.isSafeInteger(receipt.original.sizeBytes)
         || receipt.original.sizeBytes <= 0 || !Number.isSafeInteger(receipt.width) || receipt.width <= 0 || !Number.isSafeInteger(receipt.height) || receipt.height <= 0)
@@ -71,7 +76,7 @@ export async function artworkCommands(item: CollectionDetail, provider: Provider
       artworkId = crypto.randomUUID();
       commands.push({commandType: 'addArtwork', workId: item.id, artworkId, kind: slot === 'work' ? 'cover' : slot,
         provider: receipt.provider, providerImageId: receipt.providerImageId, original: receipt.original,
-        width: receipt.width, height: receipt.height, language: null, thumbnail: null});
+        width: receipt.width, height: receipt.height, language: null, thumbnail: validThumbnail(receipt.thumbnail)});
     }
     commands.push({commandType: 'selectArtwork', workId: item.id, slot, artworkId, expectedArtworkId});
   }

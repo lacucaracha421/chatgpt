@@ -4,7 +4,7 @@ import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_MAX, COLLECTION_NAME_REQUIRED, collectionCreateLabel,
   collectionEditDraft, collectionEditError, collectionEditValue} from '../src/collections/collectionEditFields';
 import type {CollectionDetail, CollectionKind} from './collectionModel';
-import {createdWork, replaceCommand, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
+import {createdWork, discardLifecycle, isLifecycle, lifecycleInFlight, replaceCommand, retryCommandNow, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {errorText} from './transport';
 import './collectionAuthority.css';
@@ -96,5 +96,10 @@ export function AuthorityQueue({authority, workId, item, onForm}: {authority: Au
       if (row.command.commandType === 'createWork') authority.drop(row.command.workId);
       else replaceCommand(row.command.operationId, null);
     }}>버리기</Button></>}
+    {/* A delete or restore that is not on its way says why and can be sent again or dropped. */}
+    {row.state === 'pending' && isLifecycle(row.command) && !lifecycleInFlight(row) && <>
+      {row.lastError && <small className="collection-authority-queue__reason">{row.lastError}</small>}
+      <Button variant="ghost" onClick={() => { retryCommandNow(row.command.operationId); void authority.flush(); }}>다시 시도</Button>
+      <Button variant="ghost" onClick={() => discardLifecycle(row.command.operationId)}>버리기</Button></>}
   </div>)}</>;
 }

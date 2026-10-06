@@ -3,7 +3,7 @@ import {setOutboxConnection} from './outboxConnection';
 const mocks = vi.hoisted(() => ({api: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), api: mocks.api}));
 import {ApiError} from './transport';
-import {AUTHORITY_STATUS_PATH, COMMAND_PATH, authorityIdentity, createdWork, enqueueCommand, flushCommands,
+import {AUTHORITY_STATUS_PATH, COMMAND_PATH, authorityIdentity, createdWork, discardLifecycle, enqueueCommand, flushCommands, lifecycleInFlight, retryCommandNow,
   optimisticWork, readCommands, reconcileCommands, replaceCommand, type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
 
 const identity: AuthorityIdentity = {libraryId: 'e'.repeat(32), epoch: 7, contractVersion: 1};
@@ -20,6 +20,25 @@ function server(command: (body: WorkCommand) => unknown = () => ({}), status: un
 const sent = () => mocks.api.mock.calls.filter(([path]) => path === COMMAND_PATH).map(([, , body]) => body);
 beforeEach(() => { localStorage.clear(); setOutboxConnection(connection); mocks.api.mockReset(); vi.restoreAllMocks(); });
 describe('durable Collection commands', () => {
+  it('keeps a delete visible as undelivered: why it waits, then sent again on 다시 시도, or dropped', async () => {
+    const remove: WorkCommand = {commandType: 'deleteWork', workId: 'gone', expectedRevision: 3};
+    const row = enqueueCommand(identity, remove, '지울 작품');
+    expect(lifecycleInFlight(readCommands()[0])).toBe(true);
+    server(() => new Error('연결 실패')); await flushCommands();
+    expect(readCommands()[0]).toMatchObject({state: 'pending', attempts: 1, lastError: '연결 실패', label: '지울 작품'});
+    expect(lifecycleInFlight(readCommands()[0])).toBe(false);
+    server(); await flushCommands(); expect(sent()).toHaveLength(1);  // still backing off
+    retryCommandNow(row.command.operationId); await flushCommands();
+    expect(sent().at(-1)).toEqual(row.command);
+    expect(readCommands()).toEqual([]);  // a confirmed delete leaves the queue
+    // A delete waiting behind an earlier change of its work says so; 버리기 drops it.
+    enqueueCommand(identity, {...update(), workId: 'held'});
+    const blocked = enqueueCommand(identity, {...remove, workId: 'held'});
+    server(body => body.commandType === 'updateWork' ? new ApiError('충돌', 409, {detail: {code: 'revisionConflict'}}) : ({})); await flushCommands();
+    expect(readCommands()[1]).toMatchObject({state: 'pending', attempts: 0, lastError: '이 작품의 앞선 변경을 먼저 보내야 합니다.'});
+    discardLifecycle(blocked.command.operationId);
+    expect(readCommands().map(value => value.command.commandType)).toEqual(['updateWork']);
+  });
   it('persists immutable envelopes, scopes connection/library/epoch and gates inactive status', async () => {
     const row = enqueueCommand(identity, create);
     expect(readCommands()[0]).toEqual(JSON.parse(JSON.stringify(row)));

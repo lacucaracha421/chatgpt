@@ -24,7 +24,7 @@ from starlette.concurrency import run_in_threadpool
 
 import collection_authority as ca
 import head_cache
-from mobile_collections import MAX_ARTWORK_BYTES, artwork_key
+from mobile_collections import MAX_ARTWORK_BYTES, MAX_THUMBNAIL_BYTES, artwork_key
 
 TMDB_KEY_ENV = "LAKOMICS_TMDB_API_KEY"
 IGDB_ID_ENV = "LAKOMICS_IGDB_CLIENT_ID"
@@ -696,36 +696,75 @@ def image_dimensions(data, mime):
         fail(422, "providerImageInvalid", "이미지 데이터나 형식이 올바르지 않습니다.")
 
 
+#: The PC's work-artwork thumbnail (``WORK_ARTWORK_THUMBNAIL_BOUND`` in work_artwork.rs): the
+#: image fitted inside 360x360, as WebP. Shelves read this variant; details read the original.
+ARTWORK_THUMBNAIL_BOUND = 360
+ARTWORK_THUMBNAIL_MIME = "image/webp"
+
+
+def artwork_thumbnail(data):
+    """The thumbnail bytes of an already verified provider image, or None if it cannot be made.
+
+    A missing thumbnail only costs the shelf a larger download, so a failure here never
+    fails the artwork itself.
+    """
+    try:
+        from PIL import Image
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as image:
+                image.draft("RGB", (ARTWORK_THUMBNAIL_BOUND * 2, ARTWORK_THUMBNAIL_BOUND * 2))
+                image.seek(0)
+                frame = image.convert("RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB")
+        frame.thumbnail((ARTWORK_THUMBNAIL_BOUND, ARTWORK_THUMBNAIL_BOUND), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        frame.save(output, format="WEBP", quality=80, method=4)
+        thumbnail = output.getvalue()
+        return thumbnail if 0 < len(thumbnail) <= MAX_THUMBNAIL_BYTES else None
+    except Exception:
+        return None
+
+
+def _stored_blob(client, storage_bucket, data, mime):
+    """Put one content-addressed blob (once) and confirm its storage receipt."""
+    sha = hashlib.sha256(data).hexdigest()
+    key = artwork_key(sha)
+    try:
+        metadata = client.head_object(Bucket=storage_bucket, Key=key)
+    except ClientError as exc:
+        if str(exc.response.get("Error", {}).get("Code")) not in ("404", "NoSuchKey", "NotFound"):
+            raise
+        head_cache.ticket_heads.invalidate(client, storage_bucket, key)
+        client.put_object(Bucket=storage_bucket, Key=key, Body=io.BytesIO(data), ContentType=mime)
+        metadata = client.head_object(Bucket=storage_bucket, Key=key)
+    if metadata.get("ContentLength") != len(data) or metadata.get("ContentType") != mime:
+        fail(409, "providerArtworkMismatch", "저장된 이미지가 확인 정보와 일치하지 않습니다.")
+    return {"sha256": sha, "sizeBytes": len(data), "contentType": mime}
+
+
 def store_artwork(body, deadline, get_db, storage, bucket):
     url = image_url(body.provider, body.path, body.size)
     data, mime = outbound(url, deadline=deadline, limit=MAX_ARTWORK_BYTES, image=True)
     width, height = image_dimensions(data, mime)
-    sha = hashlib.sha256(data).hexdigest()
-    key = artwork_key(sha)
-    blob = {"sha256": sha, "sizeBytes": len(data), "contentType": mime}
+    thumbnail_data = artwork_thumbnail(data)
     try:
         client, storage_bucket = storage(), bucket()
-        try:
-            metadata = client.head_object(Bucket=storage_bucket, Key=key)
-        except ClientError as exc:
-            if str(exc.response.get("Error", {}).get("Code")) not in ("404", "NoSuchKey", "NotFound"):
-                raise
-            head_cache.ticket_heads.invalidate(client, storage_bucket, key)
-            client.put_object(Bucket=storage_bucket, Key=key, Body=io.BytesIO(data), ContentType=mime)
-            metadata = client.head_object(Bucket=storage_bucket, Key=key)
-        if metadata.get("ContentLength") != len(data) or metadata.get("ContentType") != mime:
-            fail(409, "providerArtworkMismatch", "저장된 이미지가 확인 정보와 일치하지 않습니다.")
+        blob = _stored_blob(client, storage_bucket, data, mime)
+        thumbnail = None if thumbnail_data is None else _stored_blob(
+            client, storage_bucket, thumbnail_data, ARTWORK_THUMBNAIL_MIME)
         with get_db() as db:
-            db.execute("INSERT INTO mobile_collection_artwork VALUES (?,?,?) ON CONFLICT(sha256) "
-                       "DO UPDATE SET size_bytes=excluded.size_bytes,content_type=excluded.content_type",
-                       (sha, len(data), mime))
+            for receipt in (blob, thumbnail):
+                if receipt is not None:
+                    db.execute("INSERT INTO mobile_collection_artwork VALUES (?,?,?) ON CONFLICT(sha256) "
+                               "DO UPDATE SET size_bytes=excluded.size_bytes,content_type=excluded.content_type",
+                               (receipt["sha256"], receipt["sizeBytes"], receipt["contentType"]))
             db.commit()
     except HTTPException:
         raise
     except Exception:
         fail(502, "providerArtworkStorageUnavailable", "이미지를 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.")
     return {"provider": body.provider, "providerImageId": body.path, "original": blob,
-            "width": width, "height": height}
+            "thumbnail": thumbnail, "width": width, "height": height}
 
 
 def register(app, get_db, require_client, storage, bucket):

@@ -4,7 +4,7 @@ import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import {BottomSheet} from './BottomSheet';
 import {Button, EmptyState} from './ui';
-import {isLifecycle, sameAuthority, type AuthorityIdentity, type CommandIntent} from './collectionCommandOutbox';
+import {isLifecycle, lifecycleInFlight, sameAuthority, type AuthorityIdentity, type CommandIntent} from './collectionCommandOutbox';
 import type {CollectionKind} from './collectionModel';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {outboxConnection} from './outboxConnection';
@@ -52,10 +52,11 @@ export function useCollectionTrash(authority: Authority, active: boolean, refres
   }, [active, identity?.libraryId, identity?.epoch, connection, refreshKey, retry]);
   const current = reply && identity && sameAuthority(reply.identity, identity) && reply.connection === connection ? reply : null;
   const intents = lifecycleIntents(authority);
-  // A restore leaves the list at once; a later read (after it is confirmed) is the server's word.
+  // A restore leaves the list while on its way; a later read (after it is confirmed) is the
+  // server's word, and a restore that could not be sent comes back with its 대기 row.
   const items = current?.items.filter(item => {
     const intent = intents.get(item.workId);
-    return !(intent?.command.commandType === 'restoreWork' && (intent.state === 'pending' || (intent.acceptedAt ?? 0) > current.readAt));
+    return !(intent?.command.commandType === 'restoreWork' && (lifecycleInFlight(intent) || intent.state === 'accepted' && (intent.acceptedAt ?? 0) > current.readAt));
   }) ?? [];
   return {available: !!current, items, failure, retry: () => setRetry(value => value + 1)};
 }

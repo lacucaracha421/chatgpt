@@ -277,12 +277,15 @@ describe('record routing', () => {
 });
 describe('delete and 휴지통', () => {
   const DAY = 86_400_000;
-  let trashItems: unknown[] | Error;
+  let trashItems: unknown[] | Error, hold: boolean, held: (() => void)[] = [];
+  // A held send settles after its test, so the shared delivery pass never outlives it.
+  afterEach(async () => { held.splice(0).forEach(release => release()); await act(async () => {}); });
   beforeEach(() => {
     localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));
-    trashItems = [];
+    trashItems = []; hold = false;
     const previous = mocks.api.getMockImplementation()!;
     mocks.api.mockImplementation(async (path: string, ...args: unknown[]) => {
+      if (path === COMMAND_PATH && hold) return new Promise((_, reject) => { held.push(() => reject(new Error('released'))); });
       if (path.startsWith('/v1/collections/authority/trash?')) { if (trashItems instanceof Error) throw trashItems; return {...identity, retentionDays: 30, items: trashItems, hasMore: false}; }
       if (path === `/v1/collections/${item.id}`) return {revision: 'r1', item, entityRevision: 4};
       return previous(path, ...args);
@@ -296,8 +299,8 @@ describe('delete and 휴지통', () => {
     await waitFor(() => expect(remove).toBeEnabled()); fireEvent.click(remove);
     return screen.findByRole('dialog', {name: '컬렉션 삭제'});
   };
-  it('confirms with the PC wording, queues deleteWork at the shown revision, closes the detail and hides the work', async () => {
-    command = () => new Error('offline');
+  it('confirms with the PC wording, queues deleteWork at the shown revision, closes the detail and hides the work while it is sent', async () => {
+    hold = true;
     render(<Collections active paused={false} backRef={{current: null}}/>);
     const dialog = await openDelete();
     expect(within(dialog).getByText(`${item.name} 컬렉션을 삭제하시겠습니까? 원본 에셋은 삭제하지 않습니다. 30일 동안 휴지통에서 되살릴 수 있어요.`)).toBeTruthy();
@@ -307,9 +310,46 @@ describe('delete and 휴지통', () => {
     expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'deleteWork', workId: item.id, expectedRevision: 4});
     await waitFor(() => expect(screen.queryByRole('button', {name: '작품 관리'})).toBeNull());
     expect(screen.queryByRole('dialog')).toBeNull();
-    // Off the shelf at once; the shelf's queue names the pending delete.
+    // Off the shelf at once; the shelf's queue names the delete on its way.
     expect(screen.queryByRole('button', {name: new RegExp(item.name)})).toBeNull();
     expect(screen.getByText(`${item.name} 삭제`)).toBeTruthy();
+    expect(screen.queryByRole('button', {name: '다시 시도'})).toBeNull();
+  });
+  it('never hides a delete that could not be sent: the work returns with the reason, 다시 시도 delivers it', async () => {
+    command = () => new Error('서버에 연결하지 못했습니다.');
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(within(await openDelete()).getByRole('button', {name: '삭제'}));
+    await screen.findByText('서버에 연결하지 못했습니다.');
+    expect(readCommands()[0]).toMatchObject({state: 'pending', attempts: 1, label: item.name});
+    expect(screen.getByRole('button', {name: new RegExp(item.name)})).toBeTruthy();
+    expect(screen.getByText(`${item.name} 삭제`)).toBeTruthy();
+    command = () => ({});
+    fireEvent.click(screen.getByRole('button', {name: '다시 시도'}));
+    await waitFor(() => expect(readCommands()).toHaveLength(0));
+    expect(sent().filter(body => body.commandType === 'deleteWork')).toHaveLength(2);
+    await waitFor(() => expect(screen.queryByRole('button', {name: new RegExp(item.name)})).toBeNull());
+  });
+  it.each([['delivers', false], ['shows and lets go of', true]] as const)('%s a delete left queued by 0.9.34', async (_, offline) => {
+    // 0.9.34 hid a queued delete for good; a row from an earlier run is shown until it is confirmed.
+    const stuck = {command: {...identity, operationId: 'old-delete', commandType: 'deleteWork', workId: item.id, expectedRevision: 1},
+      label: item.name, createdAt: Date.now() - 3_600_000, attempts: 0, nextAttemptAt: Date.now() + 60_000, state: 'pending'};
+    localStorage.setItem(`lakomics.collections.commands.outbox.v1.${encodeURIComponent('https://test.example')}`, JSON.stringify([stuck]));
+    hold = true;
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    expect(await screen.findByRole('button', {name: new RegExp(item.name)})).toBeTruthy();
+    expect(screen.getByText(`${item.name} 삭제`)).toBeTruthy();
+    hold = false; command = () => offline ? new Error('오프라인') : {};
+    fireEvent.click(screen.getByRole('button', {name: '다시 시도'}));
+    if (!offline) {
+      await waitFor(() => expect(readCommands()).toHaveLength(0));
+      expect(sent().at(-1)).toMatchObject({operationId: 'old-delete', commandType: 'deleteWork'});
+      await waitFor(() => expect(screen.queryByRole('button', {name: new RegExp(item.name)})).toBeNull());
+    } else {
+      await screen.findByText('오프라인');
+      fireEvent.click(screen.getByRole('button', {name: '버리기'}));
+      await waitFor(() => expect(readCommands()).toHaveLength(0));
+      expect(screen.getByRole('button', {name: new RegExp(item.name)})).toBeTruthy();
+    }
   });
   it('keeps a confirmed delete off the shelf and lets the queue go', async () => {
     render(<Collections active paused={false} backRef={{current: null}}/>);
@@ -338,7 +378,7 @@ describe('delete and 휴지통', () => {
     await waitFor(() => expect(readCommands()).toHaveLength(0));
   });
   it('lists trashed works newest first with their purge day and restores one optimistically', async () => {
-    command = () => new Error('offline');
+    hold = true;
     trashItems = [
       {workId: 'old-2', type: 'movie', name: '지운 영화', trashedAt: '2026-10-05T00:00:00Z', purgeAt: new Date(Date.now() + 10 * DAY - 60_000).toISOString(), entityRevision: 7},
       {workId: 'old-1', type: 'manga', name: '지운 만화', trashedAt: '2026-10-01T00:00:00Z', purgeAt: new Date(Date.now() + 2 * DAY - 60_000).toISOString(), entityRevision: 3},
@@ -358,6 +398,16 @@ describe('delete and 휴지통', () => {
     expect(within(sheet).queryByText('지운 영화')).toBeNull();
     // The sheet hides the screen behind it from assistive tech; the count under it has moved on.
     expect(within(screen.getByRole('group', {name: '컬렉션 바로가기', hidden: true})).getByRole('button', {name: '휴지통 1', hidden: true})).toBeTruthy();
+  });
+  it('brings a restore that could not be sent back to the list', async () => {
+    command = () => new Error('오프라인');
+    trashItems = [{workId: 'old-2', type: 'movie', name: '지운 영화', trashedAt: '2026-10-05T00:00:00Z', purgeAt: new Date(Date.now() + 10 * DAY).toISOString(), entityRevision: 7}];
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(await within(await screen.findByRole('group', {name: '컬렉션 바로가기'})).findByRole('button', {name: '휴지통 1'}));
+    const sheet = await screen.findByRole('dialog', {name: '휴지통'});
+    fireEvent.click(within(sheet).getByRole('button', {name: '지운 영화 되살리기'}));
+    await waitFor(() => expect(readCommands()[0]).toMatchObject({state: 'pending', attempts: 1, lastError: '오프라인'}));
+    expect(within(sheet).getByText('지운 영화')).toBeTruthy();
   });
   it('shows the empty state and no count when the trash is empty', async () => {
     render(<Collections active paused={false} backRef={{current: null}}/>);

@@ -21,3 +21,4 @@
 .collection-trash-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .collection-trash-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collection-trash-text small { font-size: var(--type-meta); color: var(--color-muted); }
+.collection-authority-queue__reason { font-size: var(--type-meta); color: var(--color-muted); }

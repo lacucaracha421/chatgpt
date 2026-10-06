@@ -1,5 +1,5 @@
 import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection';
-import {api, ApiError} from './transport';
+import {api, ApiError, errorText} from './transport';
 import type {CollectionDetail, CollectionKind, CollectionSummary} from './collectionModel';
 import {SAVE_FAILED} from './collectionEditOutbox';
 
@@ -13,10 +13,12 @@ export type Provider = 'tmdb' | 'igdb';
 export type ProviderApply = {operation: 'create' | 'connect' | 'refresh'; provider: Provider; externalId: string; workId: string; type?: 'movie' | 'game'};
 export type BlobReceipt = {sha256: string; sizeBytes: number; contentType: string};
 export type ArtworkReceipt = {provider: Provider; providerImageId: string; original: BlobReceipt; width: number; height: number};
+/** The relay's reply: an older server sends no thumbnail. */
+export type ArtworkReply = ArtworkReceipt & {thumbnail?: BlobReceipt | null};
 export type CommandReceipt = AuthorityIdentity & {operationId: string; commandType: string; authorityCursor?: number};
 export type WorkCommand =
   | ({commandType: 'providerApply'} & ProviderApply)
-  | ({commandType: 'addArtwork'; workId: string; artworkId: string; kind: string; language: null; thumbnail: null} & ArtworkReceipt)
+  | ({commandType: 'addArtwork'; workId: string; artworkId: string; kind: string; language: null; thumbnail: BlobReceipt | null} & ArtworkReceipt)
   | {commandType: 'selectArtwork'; workId: string; slot: 'work' | 'hero' | 'backdrop'; artworkId: string | null; expectedArtworkId: string | null}
   | {commandType: 'createWork'; workId: string; type: CollectionKind; name: string; legacyKind: null; fields: Fields; binding: null}
   | {commandType: 'updateWork'; workId: string; changes: Fields; expected: Fields; expectedRevision: number | null}
@@ -24,8 +26,11 @@ export type WorkCommand =
   | {commandType: 'setOwnershipTracking'; workId: string; editionIndex: number; count: number; expectedCount: number | null; expectedRevision: null}
   | {commandType: 'setReleaseSubscription'; workId: string; enabled: boolean; expectedEnabled: boolean; expectedRevision: null};
 export type Command = AuthorityIdentity & WorkCommand & {operationId: string};
-/** `label` names the work for queue rows whose work is not on screen (a delete or restore). */
-export type CommandIntent = {command: Command; label?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
+/**
+ * `label` names the work for queue rows whose work is not on screen (a delete or restore);
+ * `lastError` is why the last delivery attempt did not reach the server.
+ */
+export type CommandIntent = {command: Command; label?: string; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
   state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: {name: string; fields: Fields}}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
   const value = reply as Partial<AuthorityIdentity> & {active?: boolean} | null;
@@ -49,6 +54,14 @@ function write(rows: CommandIntent[], connection = outboxConnection()) {
   if (connection === outboxConnection()) window.dispatchEvent(new Event(COMMAND_EVENT));
 }
 export const isLifecycle = (command: WorkCommand) => command.commandType === 'deleteWork' || command.commandType === 'restoreWork';
+/** When this app run began: a queued row from an earlier run is not "being sent right now". */
+export const SESSION_STARTED_AT = Date.now();
+/**
+ * A delete or restore that may still be on its way: queued in this run and not yet failed.
+ * Only such a row (or a confirmed one) may hide a work; anything else shows its work again with
+ * the queue's 대기 row, so an undelivered delete is never silent.
+ */
+export const lifecycleInFlight = (row: CommandIntent) => row.state === 'pending' && row.attempts === 0 && !row.lastError && row.createdAt >= SESSION_STARTED_AT;
 export function enqueueCommand(identity: AuthorityIdentity, command: WorkCommand, label?: string): CommandIntent {
   const intent: CommandIntent = {command: {...identity, ...command, operationId: crypto.randomUUID()},
     ...(label ? {label} : {}), createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'};
@@ -70,6 +83,17 @@ function changeIntent(connection: string, operationId: string, update: (row: Com
   const rows = readCommands(connection), row = rows.find(value => value.command.operationId === operationId);
   if (!row) return;
   update(row); write(rows, connection);
+}
+/** 다시 시도: a queued row is due now (its backoff is cleared). */
+export function retryCommandNow(operationId: string) {
+  const connection = outboxConnection();
+  if (connection) changeIntent(connection, operationId, stored => { if (stored.state === 'pending') stored.nextAttemptAt = 0; });
+}
+/** 버리기 for a delete or restore that has not been confirmed: the work stays where the server has it. */
+export function discardLifecycle(operationId: string) {
+  const rows = readCommands(), row = rows.find(value => value.command.operationId === operationId);
+  if (!row || row.state === 'accepted' || !isLifecycle(row.command)) return;
+  write(rows.filter(value => value !== row));
 }
 export function dropWork(identity: AuthorityIdentity, workId: string, connection = outboxConnection()) {
   write(readCommands(connection).filter(row => !sameAuthority(row.command, identity) || row.command.workId !== workId), connection);
@@ -99,7 +123,7 @@ async function deliver(connection: string) {
   let identity: AuthorityIdentity | null;
   try { identity = authorityIdentity(await api(AUTHORITY_STATUS_PATH, undefined, undefined, 'GET', false, connection)); }
   catch (error) {
-    for (const row of due) retryLater(connection, row.command.operationId);
+    for (const row of due) retryLater(connection, row.command.operationId, errorText(error));
     throw error;
   }
   if (!identity || connection !== outboxConnection()) return;
@@ -109,7 +133,11 @@ async function deliver(connection: string) {
     const row = rows[index];
     if (!row || !sameAuthority(row.command, identity) || row.state !== 'pending' || row.nextAttemptAt > Date.now()) continue;
     // FIFO per work: a create, a failed send, or an unresolved conflict blocks its later edits.
-    if (rows.slice(0, index).some(earlier => sameAuthority(earlier.command, identity) && earlier.command.workId === row.command.workId && earlier.state !== 'accepted')) continue;
+    if (rows.slice(0, index).some(earlier => sameAuthority(earlier.command, identity) && earlier.command.workId === row.command.workId && earlier.state !== 'accepted')) {
+      // A waiting delete or restore says why, so its work is shown again instead of hidden.
+      if (isLifecycle(row.command) && !row.lastError) changeIntent(connection, row.command.operationId, stored => { stored.lastError = '이 작품의 앞선 변경을 먼저 보내야 합니다.'; });
+      continue;
+    }
     try {
       if (row.command.commandType === 'providerApply') {
         const reply = await api<{receipts: CommandReceipt[]}>('/v1/providers/apply', undefined, providerApplyBody(row.command), 'POST', false, connection);
@@ -139,14 +167,14 @@ async function deliver(connection: string) {
         });
         continue;
       }
-      retryLater(connection, row.command.operationId);
+      retryLater(connection, row.command.operationId, errorText(error));
       return;
     }
   }
 }
-function retryLater(connection: string, operationId: string) {
+function retryLater(connection: string, operationId: string, reason: string) {
   changeIntent(connection, operationId, stored => {
-    stored.attempts++; stored.nextAttemptAt = Date.now() + Math.min(300_000, 5000 * 2 ** Math.min(stored.attempts - 1, 6));
+    stored.attempts++; stored.lastError = reason; stored.nextAttemptAt = Date.now() + Math.min(300_000, 5000 * 2 ** Math.min(stored.attempts - 1, 6));
   });
 }
 /** Accepted overlays survive restart and remain until a read actually contains the desired fields. */

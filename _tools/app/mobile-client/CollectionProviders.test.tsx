@@ -33,7 +33,8 @@ beforeEach(() => {
       return {receipts: (body?.operation === 'connect' ? ['bindProvider', 'applyProviderSnapshot'] : [body?.operation === 'create' ? 'createWork' : 'applyProviderSnapshot'])
         .map((commandType, index) => ({...identity, commandType, operationId: `derived-${index}`}))};
     }
-    if (path === '/v1/providers/artwork') return {provider: 'tmdb', providerImageId: body?.path, original: {sha256: 'a'.repeat(64), sizeBytes: 123, contentType: 'image/jpeg'}, width: 500, height: 750};
+    if (path === '/v1/providers/artwork') return {provider: 'tmdb', providerImageId: body?.path, original: {sha256: 'a'.repeat(64), sizeBytes: 123, contentType: 'image/jpeg'},
+      thumbnail: {sha256: 'b'.repeat(64), sizeBytes: 45, contentType: 'image/webp'}, width: 500, height: 750};
     if (path === COMMAND_PATH) return body;
     throw new Error(`Unexpected ${path}`);
   });
@@ -135,6 +136,8 @@ it('uploads the selected poster, then queues add/select plus a clear for the bac
   const writes = mocks.api.mock.calls.filter(([path]) => path === '/v1/providers/artwork' || path === COMMAND_PATH);
   expect(writes.map(([path, , body]) => path === COMMAND_PATH ? body.commandType : 'upload')).toEqual(['upload', 'addArtwork', 'selectArtwork', 'selectArtwork']);
   expect(writes.at(-1)![2]).toMatchObject({slot: 'backdrop', artworkId: null});
+  // The relay's thumbnail travels with the artwork, so shelves have their small variant.
+  expect(writes[1][2]).toMatchObject({thumbnail: {sha256: 'b'.repeat(64), sizeBytes: 45, contentType: 'image/webp'}});
   await act(async () => {});
 });
 

@@ -689,18 +689,37 @@ class WorkProviderTests(unittest.TestCase):
         with mock.patch.object(fake_s3, "put_object", wraps=fake_s3.put_object) as put:
             first = self.ok(self.artwork())
             self.assertEqual(self.ok(self.artwork()), first)
-            self.assertEqual(put.call_count, 1)
+            self.assertEqual(put.call_count, 2)  # the original and its thumbnail, once
         self.assertEqual((first["width"], first["height"]), (2, 3))
         self.assertEqual(set(first["original"]), {"sha256", "sizeBytes", "contentType"})
-        blob = first["original"]
+        blob, thumb = first["original"], first["thumbnail"]
         self.assertEqual(fake_s3.objects[wp.artwork_key(blob["sha256"])]["body"], png())
+        self.assertEqual(thumb["contentType"], "image/webp")
+        self.assertEqual(fake_s3.objects[wp.artwork_key(thumb["sha256"])]["body"][8:12], b"WEBP")
         self.fixture.ok(self.fixture.create("artwork-work", "Artwork"))
         self.fixture.ok(self.fixture.command("addArtwork", workId="artwork-work", artworkId="art1",
-            kind="poster", language=None, thumbnail=None, **first))
+            kind="poster", language=None, **first))
         with fixtures.api_app.get_db() as db:
-            row = db.execute("SELECT size_bytes,content_type FROM mobile_collection_artwork WHERE sha256=?",
-                             [blob["sha256"]]).fetchone()
-        self.assertEqual(tuple(row), (blob["sizeBytes"], "image/png"))
+            rows = {row[0]: tuple(row[1:]) for row in db.execute(
+                "SELECT sha256,size_bytes,content_type FROM mobile_collection_artwork WHERE sha256 IN (?,?)",
+                [blob["sha256"], thumb["sha256"]])}
+            stored = json.loads(db.execute("SELECT thumbnail FROM collection_authority_artworks"
+                                           " WHERE artwork_id='art1'").fetchone()[0])
+        self.assertEqual(rows, {blob["sha256"]: (blob["sizeBytes"], "image/png"),
+                                thumb["sha256"]: (thumb["sizeBytes"], "image/webp")})
+        self.assertEqual(stored["sha256"], thumb["sha256"])
+
+    def test_artwork_thumbnail_follows_the_pc_bound_and_never_fails_the_artwork(self):
+        from PIL import Image
+        output = io.BytesIO()
+        Image.new("RGB", (1000, 1500), "blue").save(output, format="JPEG")
+        with Image.open(io.BytesIO(wp.artwork_thumbnail(output.getvalue()))) as image:
+            self.assertEqual((image.format, image.size), ("WEBP", (240, 360)))
+        self.assertIsNone(wp.artwork_thumbnail(b"not an image"))
+        self.responses(Response(png(), "image/png"))
+        with mock.patch.object(wp, "artwork_thumbnail", return_value=None):
+            reply = self.ok(self.artwork())
+        self.assertIsNone(reply["thumbnail"])
 
     def test_storage_failure_or_mismatch_never_confirms_receipt(self):
         self.responses(Response(png(), "image/png"), Response(png(), "image/png"))

@@ -1,7 +1,7 @@
 import {startupMark} from './startupPerf';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {RectangleStackIcon} from '@heroicons/react/24/outline';
-import {collectionCover, type CollectionSummary} from './collectionModel';
+import {artworkVariant, collectionCover, type CollectionSummary} from './collectionModel';
 import {localToday} from './collectionReleasesModel';
 import {Cover} from './CoverGroup';
 import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type UpcomingHomeEntry} from './homeDashboard';
@@ -82,8 +82,9 @@ async function decodeHomeArtwork(url: string) {
 }
 
 function useHomeArtwork(item: CollectionSummary, revision: string, active: boolean, artworkId = collectionCover(item), assetId = item.coverAssetId) {
-  const digest = artworkId ? item.artworkVersions?.[artworkId]?.thumbnail ?? revision : item.coverAssetId ?? revision;
-  const source = JSON.stringify([item.id, artworkId ?? null, assetId ?? null, digest]);
+  const variant = artworkVariant(item, artworkId);
+  const digest = artworkId ? item.artworkVersions?.[artworkId]?.[variant] ?? revision : item.coverAssetId ?? revision;
+  const source = JSON.stringify([item.id, artworkId ?? null, assetId ?? null, variant, digest]);
   const [url, setUrl] = useState(() => {
     const hit = homeArtworkCache.get(source);
     return hit && hit.until > Date.now() ? hit.url : '';
@@ -97,7 +98,7 @@ function useHomeArtwork(item: CollectionSummary, revision: string, active: boole
     if (!load) {
       const controller = new AbortController();
       const request = artworkId
-        ? native<Ticket>('collectionArtwork', {collectionId: item.id, artworkId, variant: 'thumbnail', revision, digest: item.artworkVersions?.[artworkId]?.thumbnail ?? ''}, controller.signal)
+        ? native<Ticket>('collectionArtwork', {collectionId: item.id, artworkId, variant, revision, digest: item.artworkVersions?.[artworkId]?.[variant] ?? ''}, controller.signal)
         : mediaTicket({id: assetId!, kind: 'image'}, 'thumbnail', controller.signal);
       load = request.then(async ticket => {
         if (!ticket?.url || !homeArtworkUrl(ticket.url)) throw new Error('Invalid artwork');

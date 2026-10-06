@@ -86,6 +86,15 @@ export function coverFocuses(volumes:CollectionVolume[]):CollectionCoverFocus[] 
     ?[{volumeId:volume.id,coverArtworkId:volume.coverArtworkId,focusX:volume.coverFocusX,method:'head' as const}]:[]);
 }
 export function editions(volumes:CollectionVolume[]) { return [...new Set(volumes.map(v=>v.editionIndex))].sort((a,b)=>a-b); }
+/**
+ * The artwork variant a surface asks for. A thumbnail-less artwork (one added through the
+ * provider relay before it made thumbnails) is served from its original, so a shelf shows it too.
+ */
+export function artworkVariant(item:CollectionSummary,artworkId:string|null|undefined,original=false):'original'|'thumbnail' {
+  const versions=artworkId?item.artworkVersions?.[artworkId]:undefined;
+  // Only a published `null` digest says there is no thumbnail; an absent one says nothing.
+  return original||(versions?.thumbnail===null&&!!versions.original)?'original':'thumbnail';
+}
 export function collectionCover(item:CollectionSummary) { return item.selectedWorkArtworkId ?? [...(item.volumes ?? [])].sort((a,b)=>a.editionIndex-b.editionIndex || a.volumeNumber-b.volumeNumber).find(v=>v.coverArtworkId)?.coverArtworkId; }
 
 export {volumeLabel} from '../src/collections/collectionFormat';

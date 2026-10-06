@@ -7,7 +7,7 @@
 import {createContext, useContext, useEffect, useRef, useState, type RefObject} from 'react';
 import {native} from './transport';
 import {mediaTicket} from './media';
-import {collectionCover, type CollectionSummary} from './collectionModel';
+import {artworkVariant, collectionCover, type CollectionSummary} from './collectionModel';
 import type {Ticket} from './types';
 import {beginShelfForeground} from './shelfWarmActivity';
 
@@ -28,7 +28,8 @@ function queued(run:()=>Promise<Ticket>,signal:AbortSignal,queue=artworkQueue):P
   }).finally(finish);
 }
 export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
-  const read=()=>artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant:original?'original':'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.[original?'original':'thumbnail']??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal);
+  const variant=artworkVariant(item,artworkId,original);
+  const read=()=>artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant,revision,digest:item.artworkVersions?.[artworkId]?.[variant]??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal);
   if(original){const finish=beginShelfForeground();return read().finally(finish);}
   return queued(read,signal);
 }
@@ -38,10 +39,10 @@ export function artworkTicket(item:CollectionSummary, artworkId:string|undefined
  * is not a new image. Without a digest the revision is the only version there is.
  */
 export function artworkVersion(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
-  return id?item.artworkVersions?.[id]?.[original?'original':'thumbnail']||revision:'';
+  return id?item.artworkVersions?.[id]?.[artworkVariant(item,id,original)]||revision:'';
 }
 export function artworkSource(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
-  return JSON.stringify([item.id,id??null,item.coverAssetId??null,original?'original':'thumbnail',artworkVersion(item,id,revision,original)]);
+  return JSON.stringify([item.id,id??null,item.coverAssetId??null,artworkVariant(item,id,original),artworkVersion(item,id,revision,original)]);
 }
 /** Resolves once `url` is decoded (or cannot be), so a replacement never blanks the old image. */
 export async function decoded(url:string) {
