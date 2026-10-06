@@ -20,10 +20,12 @@ export type WorkCommand =
   | {commandType: 'selectArtwork'; workId: string; slot: 'work' | 'hero' | 'backdrop'; artworkId: string | null; expectedArtworkId: string | null}
   | {commandType: 'createWork'; workId: string; type: CollectionKind; name: string; legacyKind: null; fields: Fields; binding: null}
   | {commandType: 'updateWork'; workId: string; changes: Fields; expected: Fields; expectedRevision: number | null}
+  | {commandType: 'deleteWork' | 'restoreWork'; workId: string; expectedRevision: number}
   | {commandType: 'setOwnershipTracking'; workId: string; editionIndex: number; count: number; expectedCount: number | null; expectedRevision: null}
   | {commandType: 'setReleaseSubscription'; workId: string; enabled: boolean; expectedEnabled: boolean; expectedRevision: null};
 export type Command = AuthorityIdentity & WorkCommand & {operationId: string};
-export type CommandIntent = {command: Command; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
+/** `label` names the work for queue rows whose work is not on screen (a delete or restore). */
+export type CommandIntent = {command: Command; label?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
   state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: {name: string; fields: Fields}}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
   const value = reply as Partial<AuthorityIdentity> & {active?: boolean} | null;
@@ -46,9 +48,10 @@ function write(rows: CommandIntent[], connection = outboxConnection()) {
   try { localStorage.setItem(key, JSON.stringify(rows)); } catch { throw new Error(SAVE_FAILED); }
   if (connection === outboxConnection()) window.dispatchEvent(new Event(COMMAND_EVENT));
 }
-export function enqueueCommand(identity: AuthorityIdentity, command: WorkCommand): CommandIntent {
+export const isLifecycle = (command: WorkCommand) => command.commandType === 'deleteWork' || command.commandType === 'restoreWork';
+export function enqueueCommand(identity: AuthorityIdentity, command: WorkCommand, label?: string): CommandIntent {
   const intent: CommandIntent = {command: {...identity, ...command, operationId: crypto.randomUUID()},
-    createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'};
+    ...(label ? {label} : {}), createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'};
   write([...readCommands(), intent]);
   return intent;
 }
@@ -122,7 +125,10 @@ async function deliver(connection: string) {
       const receipt = await api<CommandReceipt>(COMMAND_PATH, undefined, row.command, 'PUT', false, connection);
       if (!receipt || !sameAuthority(receipt, row.command) || receipt.operationId !== row.command.operationId || receipt.commandType !== row.command.commandType)
         throw new Error('서버 응답을 확인하지 못했습니다. 다시 전송합니다.');
-      changeIntent(connection, row.command.operationId, stored => { stored.receipts = [receipt]; stored.state = 'accepted'; });
+      changeIntent(connection, row.command.operationId, stored => { stored.receipts = [receipt]; stored.acceptedAt = Date.now(); stored.state = 'accepted'; });
+      // No read ever shows a trashed work, so nothing would reconcile it: screens keep the
+      // acknowledgement they just observed, and the queue lets it go.
+      if (isLifecycle(row.command)) write(readCommands(connection).filter(stored => stored.command.operationId !== row.command.operationId), connection);
     } catch (error) {
       const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: {name: string; fields: Fields}}}} | null)?.detail : null;
       const code = detail?.code;
@@ -171,6 +177,7 @@ export function reconcileCommands(identity: AuthorityIdentity, item: CollectionS
       return latest.state !== 'accepted' || latest.command.commandType !== 'setOwnershipTracking'
         || item.ownedVolumes?.find(entry => entry.editionIndex === command.editionIndex)?.count !== latest.command.count;
     }
+    if (isLifecycle(command)) return false;
     const latest = [...rows.slice(index)].reverse().find(later => sameAuthority(later.command, identity) && later.command.workId === item.id && later.command.commandType === 'setReleaseSubscription')!;
     return latest.state !== 'accepted' || latest.command.commandType !== 'setReleaseSubscription' || item.releaseWatch?.enabled !== latest.command.enabled;
   });

@@ -70,6 +70,8 @@ RECEIPT_RETENTION_DAYS = 180
 #: §6.2: a deleted work stays restorable this long before the sweep tombstones it.
 TRASH_RETENTION_DAYS = 30
 PURGE_BATCH = 100
+#: The tablet 휴지통 list is one bounded read; the 30-day sweep keeps it short.
+TRASH_PAGE = 500
 
 TYPES = ("game", "manga", "movie", "av")
 LEGACY_KINDS = ("game", "manga", "movie", "gacha", "av")
@@ -1566,6 +1568,23 @@ def trash_cutoff(now):
     moment = datetime.datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(
         tzinfo=datetime.timezone.utc)
     return now_iso(moment - datetime.timedelta(days=TRASH_RETENTION_DAYS))
+
+
+def trash_items(db, library_id, limit=TRASH_PAGE):
+    """The tablet's 휴지통: trashed works newest first, with the revision a restore expects."""
+    rows = db.execute(
+        "SELECT work_id,type,name,trashed_at,entity_revision FROM collection_authority_works"
+        " WHERE library_id=? AND lifecycle='trashed' AND COALESCE(legacy_kind,'')<>'gacha'"
+        " ORDER BY trashed_at DESC, work_id LIMIT ?", [library_id, limit + 1]).fetchall()
+    items = []
+    for row in rows[:limit]:
+        trashed = datetime.datetime.strptime(row["trashed_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=datetime.timezone.utc)
+        items.append({"workId": row["work_id"], "type": row["type"], "name": row["name"],
+                      "trashedAt": row["trashed_at"],
+                      "purgeAt": now_iso(trashed + datetime.timedelta(days=TRASH_RETENTION_DAYS)),
+                      "entityRevision": row["entity_revision"]})
+    return items, len(rows) > limit
 
 
 def _purge_expired(ctx, entity, payload_sha):
@@ -3563,6 +3582,24 @@ def register(app, get_db, require_client, require_publisher):
             return {"libraryId": row["libraryId"], "epoch": row["epoch"],
                     "contractVersion": row["contractVersion"], "cursor": cursor,
                     "items": items, "nextAfter": next_after, "hasMore": next_after < cursor}
+        return await transaction(read, write=False)
+
+    @app.get(PREFIX + "/trash")
+    async def collection_authority_trash(request: Request, libraryId: str, epoch: int,
+                                         authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        if not set(request.query_params) <= {"libraryId", "epoch"} \
+                or not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1:
+            fail(422, "invalidCollectionTrash", "휴지통 요청이 올바르지 않습니다.")
+
+        def read(db):
+            row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+            if row["epoch"] != epoch:
+                fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH, "epoch가 일치하지 않습니다.")
+            items, has_more = trash_items(db, libraryId)
+            return {"libraryId": row["libraryId"], "epoch": row["epoch"],
+                    "contractVersion": row["contractVersion"],
+                    "retentionDays": TRASH_RETENTION_DAYS, "items": items, "hasMore": has_more}
         return await transaction(read, write=False)
 
     @app.put(PREFIX + "/commands")

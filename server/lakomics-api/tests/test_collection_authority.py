@@ -566,6 +566,41 @@ class CollectionAuthorityTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM collection_authority_members"
                                         " WHERE work_id='w1'").fetchone()[0], 0)
 
+    def test_tablet_trash_list_and_detail_revision(self):
+        trash = lambda **params: self.client.get(PREFIX + '/trash', headers=self.auth,
+                                                 params={'libraryId': LIBRARY, 'epoch': 1, **params})
+        self.assertEqual(self.publish_legacy().status_code, 200)
+        self.assertNotIn('entityRevision', self.ok(self.detail('a')))  # PC replica: no authority revision
+        self.assertEqual(self.code(trash()), 'authorityInactive')
+        self.ready()
+        self.ok(self.create('w1', 'Film'))
+        self.ok(self.create('w2', 'Other'))
+        self.ok(self.update('w2', {'overview': 'x'}, revision=1))
+        self.assertEqual(self.detail('w2').json()['entityRevision'], 2)
+        self.assertEqual(self.ok(trash())['items'], [])
+        self.ok(self.command('deleteWork', workId='w1', expectedRevision=1))
+        self.ok(self.command('deleteWork', workId='w2', expectedRevision=2))
+        with api_app.get_db() as db:  # w1 trashed earlier than w2
+            db.execute("UPDATE collection_authority_works SET trashed_at='2026-10-01T00:00:00Z' WHERE work_id='w1'")
+            db.commit()
+        reply = self.ok(trash())
+        self.assertEqual((reply['libraryId'], reply['epoch'], reply['retentionDays'], reply['hasMore']),
+                         (LIBRARY, 1, 30, False))
+        self.assertEqual([item['workId'] for item in reply['items']], ['w2', 'w1'])
+        self.assertEqual(reply['items'][1], {'workId': 'w1', 'type': 'movie', 'name': 'Film',
+                                             'trashedAt': '2026-10-01T00:00:00Z',
+                                             'purgeAt': '2026-10-31T00:00:00Z', 'entityRevision': 2})
+        self.ok(self.command('restoreWork', workId='w1', expectedRevision=2))
+        self.assertEqual([item['workId'] for item in self.ok(trash())['items']], ['w2'])
+        self.assertEqual(self.detail('w1').json()['entityRevision'], 3)
+        self.assertEqual(self.client.get(PREFIX + '/trash', params={'libraryId': LIBRARY, 'epoch': 1}).status_code, 401)
+        self.assertEqual(self.code(trash(extra='1')), 'invalidCollectionTrash')
+        self.assertEqual(self.code(trash(epoch=2)), authority.CODE_AUTHORITY_LIBRARY_MISMATCH)
+        self.assertEqual(self.client.get(PREFIX + '/trash', headers=self.auth,
+                                         params={'libraryId': 'bad', 'epoch': 1}).status_code, 422)
+        with api_app.get_db() as db:
+            self.assertEqual(ca.trash_items(db, LIBRARY, limit=0), ([], True))
+
     def test_trash_expires_after_thirty_days(self):
         self.ready()
         self.ok(self.create('w1', 'Film'))

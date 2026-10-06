@@ -5,13 +5,13 @@ public final class NetworkPolicyTest {
  static void pass(Attempt a)throws Exception{a.run();checks++;}
  static void reject(Attempt a)throws Exception{try{a.run();}catch(Exception e){checks++;return;}throw new AssertionError("Unsafe input accepted");}
  public static void main(String[] args)throws Exception{
- for(String path:new String[]{"/v1/collections/authority/status","/v1/collections/authority/baseline?libraryId=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&epoch=2","/v1/collections/authority/changes?after=10"}){
+ for(String path:new String[]{"/v1/collections/authority/status","/v1/collections/authority/baseline?libraryId=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&epoch=2","/v1/collections/authority/changes?after=10","/v1/collections/authority/trash?libraryId=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&epoch=2"}){
   pass(()->NetworkPolicy.api(path,"GET"));
   for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  }
  pass(()->NetworkPolicy.api("/v1/collections/authority/commands","PUT"));
  for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/authority/commands",method));
- for(String path:new String[]{"/v1/collections/authority/activate","/v1/collections/authority/staging","/v1/collections/authority/verify","/v1/collections/authority/status/","/v1/collections/authority/baseline/extra","/v1/collections/authority/commands/","/v1/collections/authority/commands%2f..","/v1/collections/authority/../commands"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ for(String path:new String[]{"/v1/collections/authority/activate","/v1/collections/authority/staging","/v1/collections/authority/verify","/v1/collections/authority/status/","/v1/collections/authority/baseline/extra","/v1/collections/authority/commands/","/v1/collections/authority/trash/","/v1/collections/authority/trash/x","/v1/collections/authority/commands%2f..","/v1/collections/authority/../commands"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  String contains="/v1/library/classifications/class_1/contains/asset-2";
  pass(()->NetworkPolicy.api(contains,"GET"));
  for(String method:new String[]{"POST","PUT","DELETE","PATCH","HEAD"})reject(()->NetworkPolicy.api(contains,method));

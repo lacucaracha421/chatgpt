@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom/vitest';
 import {act, cleanup, fireEvent, render, renderHook, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {setOutboxConnection} from './outboxConnection';
@@ -29,14 +30,22 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sent = () => mocks.api.mock.calls.filter(([path]) => path === COMMAND_PATH).map(([, , body]) => body);
+/** Opens 컬렉션 편집 from the work detail's 작품 관리 menu. */
+const openEdit = async () => {
+  fireEvent.click(await screen.findByRole('button', {name: '작품 관리'}));
+  fireEvent.click(within(screen.getByRole('dialog', {name: '작품 관리'})).getByRole('button', {name: '컬렉션 편집'}));
+  return screen.findByRole('dialog', {name: '컬렉션 편집'});
+};
 describe('activation-gated tablet forms', () => {
   it('keeps create and work management hidden while inactive', async () => {
     active = false;
+    localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));
     render(<Collections active paused={false} backRef={{current: null}}/>);
     await screen.findByText(item.name); await act(async () => {});
     expect(screen.queryByRole('button', {name: '새 작품'})).toBeNull();
-    expect(screen.queryByRole('button', {name: '이름 바꾸기'})).toBeNull();
-    expect(screen.queryByRole('button', {name: '기본 정보 편집'})).toBeNull();
+    fireEvent.click(screen.getByText(item.name)); await screen.findByRole('group', {name: '작품 동작'});
+    expect(screen.queryByRole('button', {name: '작품 관리'})).toBeNull();
+    expect(screen.queryByRole('button', {name: '휴지통'})).toBeNull();
   });
   it.each([['게임', 'game'], ['만화', 'manga'], ['영화', 'movie'], ['AV', 'av']] as const)('shows the top-bar plus on %s and defaults to its type', async (label, kind) => {
     render(<Collections active paused={false} backRef={{current: null}}/>);
@@ -88,7 +97,7 @@ describe('activation-gated tablet forms', () => {
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0]).toMatchObject({...identity, commandType: 'createWork', type: 'movie', name: '새 영화', fields: {description: '영화 설명'}, legacyKind: null, binding: null});
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await screen.findByRole('button', {name: '기본 정보 편집'});
+    await screen.findByRole('button', {name: '작품 관리'});
     expect(screen.getByRole('heading', {name: '새 영화'})).toBeTruthy();
     expect(screen.getAllByText('컬렉션 › 영화').length).toBeGreaterThan(0);
     expect(readCommands()[0].state).toBe('pending');
@@ -133,21 +142,44 @@ describe('activation-gated tablet forms', () => {
     await waitFor(() => expect(sent()).toHaveLength(2));
     expect(sent()[1].name).toBe('다른 이름'); expect(sent()[1].operationId).not.toBe(first);
   });
-  it('shows rename and basic info on an active work, with no type-change control', async () => {
+  it('edits the name and basic info in one 컬렉션 편집 form, sending only changed fields in one updateWork', async () => {
     localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));
     render(<Collections active paused={false} backRef={{current: null}}/>);
     fireEvent.click(await screen.findByText(item.name));
-    fireEvent.click(await screen.findByRole('button', {name: '이름 바꾸기'}));
-    expect(screen.queryByRole('group', {name: '유형'})).toBeNull();
-    fireEvent.change(screen.getByLabelText('이름'), {target: {value: '바꾼 이름'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    const form = await openEdit();
+    expect(screen.queryByRole('dialog', {name: '작품 관리'})).toBeNull();
+    expect(within(form).queryByRole('group', {name: '유형'})).toBeNull();
+    expect(within(form).queryByLabelText('설명')).toBeNull();
+    // The PC dialog's game fields, in its order.
+    expect([...form.querySelectorAll('label')].map(label => label.textContent)).toEqual(['이름', '개발사', '퍼블리셔', '플랫폼', '출시일', '외부 점수']);
+    expect((within(form).getByLabelText('이름') as HTMLInputElement).value).toBe(item.name);
+    fireEvent.change(within(form).getByLabelText('이름'), {target: {value: '바꾼 이름'}});
+    fireEvent.change(within(form).getByLabelText('개발사'), {target: {value: '새 개발사'}});
+    fireEvent.click(within(form).getByRole('button', {name: '저장'}));
     await waitFor(() => expect(sent()).toHaveLength(1));
-    expect(sent()[0]).toMatchObject({commandType: 'updateWork', changes: {name: '바꾼 이름'}, expected: {name: item.name}});
+    expect(sent()[0]).toMatchObject({commandType: 'updateWork', changes: {name: '바꾼 이름', developer: '새 개발사'}, expected: {name: item.name, developer: '개발사'}, expectedRevision: null});
+    expect(Object.keys(sent()[0].changes).sort()).toEqual(['developer', 'name']);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    fireEvent.click(screen.getByRole('button', {name: '기본 정보 편집'}));
-    fireEvent.change(screen.getByLabelText('개발사'), {target: {value: '새 개발사'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    const again = await openEdit();
+    fireEvent.change(within(again).getByLabelText('퍼블리셔'), {target: {value: '퍼블리셔'}}); fireEvent.click(within(again).getByRole('button', {name: '저장'}));
     await waitFor(() => expect(sent()).toHaveLength(2));
-    expect(sent()[1]).toMatchObject({changes: {developer: '새 개발사'}, expected: {developer: '개발사'}});
+    expect(sent()[1]).toMatchObject({changes: {publisher: '퍼블리셔'}, expected: {publisher: null}});
     expect(sent()[1].changes).not.toHaveProperty('type');
+  });
+  it('validates the shared fields with the PC wording before queueing', async () => {
+    mocks.api.mockImplementation(async (path: string) => path === AUTHORITY_STATUS_PATH ? {...identity, active: true} : path === '/v1/collections/status' ? status
+      : path.startsWith('/v1/collections?') ? {ready: true, filterVersion: 1, revision: 'r1', items: [{...item, type: 'movie', id: 'movie-1'}], nextCursor: null}
+      : {revision: 'r1', item: {...item, type: 'movie', id: 'movie-1'}});
+    localStorage.setItem('lakomics.mobile.collectionView.movie.v1', JSON.stringify({layout: 'grid', perRow: 4}));
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click((await screen.findAllByRole('radio', {name: '영화'}))[0]);
+    fireEvent.click(await screen.findByText(item.name));
+    const form = await openEdit();
+    expect([...form.querySelectorAll('label')].map(label => label.textContent)).toEqual(['이름', '원제', '상영 시간(분)', '제작사', '감독', '개봉 연도']);
+    fireEvent.change(within(form).getByLabelText('상영 시간(분)'), {target: {value: '0'}});
+    fireEvent.submit(form.querySelector('form')!);
+    expect(within(form).getByRole('alert').textContent).toBe('상영 시간은 1분 이상이어야 합니다.');
+    expect(readCommands()).toHaveLength(0);
   });
   it('automatically opens an offline create, retains it on the shelf, and can reopen it without a detail read', async () => {
     command = () => new Error('offline');
@@ -158,18 +190,18 @@ describe('activation-gated tablet forms', () => {
     fireEvent.change(screen.getByLabelText('이름'), {target: {value: '오프라인 작품'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
     await waitFor(() => expect(readCommands()[0]?.attempts).toBe(1));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await screen.findByRole('button', {name: '기본 정보 편집'});
+    await screen.findByRole('button', {name: '작품 관리'});
     expect(screen.getByRole('heading', {name: '오프라인 작품'})).toBeTruthy();
     act(() => { backRef.current?.(); });
     const tile = screen.getByRole('button', {name: /오프라인 작품/}); fireEvent.click(tile);
-    await screen.findByRole('button', {name: '기본 정보 편집'});
+    await screen.findByRole('button', {name: '작품 관리'});
     expect(mocks.api.mock.calls.some(([path]) => path === `/v1/collections/${readCommands()[0].command.workId}`)).toBe(false);
   });
   it('retains the original name expectation when correcting a rename nameConflict', async () => {
     localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));
     command = () => new ApiError('중복', 409, {detail: {code: 'nameConflict'}});
     render(<Collections active paused={false} backRef={{current: null}}/>);
-    fireEvent.click(await screen.findByText(item.name)); fireEvent.click(await screen.findByRole('button', {name: '이름 바꾸기'}));
+    fireEvent.click(await screen.findByText(item.name)); await openEdit();
     fireEvent.change(screen.getByLabelText('이름'), {target: {value: '겹친 이름'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
     await screen.findByText('같은 종류에 같은 이름의 작품이 있습니다.'); command = () => ({});
     fireEvent.change(screen.getByRole('textbox', {name: /^이름/}), {target: {value: '다른 이름'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
@@ -181,10 +213,18 @@ describe('activation-gated tablet forms', () => {
     localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));
     command = () => new ApiError('충돌', 409, {detail: {code: 'revisionConflict', current: {work: {name: item.name, fields: {developer: '다른 개발사', publisher: '다른 퍼블리셔'}}}}});
     render(<Collections active paused={false} backRef={{current: null}}/>);
-    fireEvent.click(await screen.findByText(item.name)); fireEvent.click(await screen.findByRole('button', {name: '기본 정보 편집'}));
+    fireEvent.click(await screen.findByText(item.name)); await openEdit();
     fireEvent.change(screen.getByLabelText('개발사'), {target: {value: '내 개발사'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
     await screen.findByText('다른 기기에서 작품 정보가 바뀌었거나 변경을 받지 못했습니다. 내용을 확인해 주세요.');
-    command = () => ({}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    // Closing keeps the conflict in the detail's queue; 확인 reopens the same merged form.
+    fireEvent.click(screen.getByRole('button', {name: '닫기'}));
+    await waitFor(() => expect(screen.queryByRole('dialog', {name: '컬렉션 편집'})).toBeNull());
+    expect(screen.getByText('충돌')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', {name: '확인'}));
+    const form = await screen.findByRole('dialog', {name: '컬렉션 편집'});
+    expect((within(form).getByLabelText('이름') as HTMLInputElement).value).toBe(item.name);
+    expect((within(form).getByLabelText('개발사') as HTMLInputElement).value).toBe('내 개발사');
+    command = () => ({}); fireEvent.click(within(form).getByRole('button', {name: '저장'}));
     await waitFor(() => expect(sent()).toHaveLength(2));
     expect(sent()[1].changes).toEqual({developer: '내 개발사'});
     expect(sent()[1].expected).toEqual({developer: '다른 개발사'});
@@ -233,5 +273,103 @@ describe('record routing', () => {
     } else {
       expect(Object.keys(readCollectionEdits())).toHaveLength(4); expect(readCommands()).toHaveLength(0); expect(sent()).toHaveLength(0);
     }
+  });
+});
+describe('delete and 휴지통', () => {
+  const DAY = 86_400_000;
+  let trashItems: unknown[] | Error;
+  beforeEach(() => {
+    localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));
+    trashItems = [];
+    const previous = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path: string, ...args: unknown[]) => {
+      if (path.startsWith('/v1/collections/authority/trash?')) { if (trashItems instanceof Error) throw trashItems; return {...identity, retentionDays: 30, items: trashItems, hasMore: false}; }
+      if (path === `/v1/collections/${item.id}`) return {revision: 'r1', item, entityRevision: 4};
+      return previous(path, ...args);
+    });
+  });
+  const shortcuts = () => screen.getByRole('group', {name: '컬렉션 바로가기'});
+  const openDelete = async () => {
+    fireEvent.click(await screen.findByText(item.name));
+    fireEvent.click(await screen.findByRole('button', {name: '작품 관리'}));
+    const remove = within(screen.getByRole('dialog', {name: '작품 관리'})).getByRole('button', {name: /^컬렉션 삭제/});
+    await waitFor(() => expect(remove).toBeEnabled()); fireEvent.click(remove);
+    return screen.findByRole('dialog', {name: '컬렉션 삭제'});
+  };
+  it('confirms with the PC wording, queues deleteWork at the shown revision, closes the detail and hides the work', async () => {
+    command = () => new Error('offline');
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    const dialog = await openDelete();
+    expect(within(dialog).getByText(`${item.name} 컬렉션을 삭제하시겠습니까? 원본 에셋은 삭제하지 않습니다. 30일 동안 휴지통에서 되살릴 수 있어요.`)).toBeTruthy();
+    expect(within(dialog).getByRole('button', {name: '삭제'})).toHaveClass('ui-button--danger');
+    fireEvent.click(within(dialog).getByRole('button', {name: '삭제'}));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'deleteWork', workId: item.id, expectedRevision: 4});
+    await waitFor(() => expect(screen.queryByRole('button', {name: '작품 관리'})).toBeNull());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Off the shelf at once; the shelf's queue names the pending delete.
+    expect(screen.queryByRole('button', {name: new RegExp(item.name)})).toBeNull();
+    expect(screen.getByText(`${item.name} 삭제`)).toBeTruthy();
+  });
+  it('keeps a confirmed delete off the shelf and lets the queue go', async () => {
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(within(await openDelete()).getByRole('button', {name: '삭제'}));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    await waitFor(() => expect(readCommands()).toHaveLength(0));
+    await act(async () => {});
+    expect(screen.queryByRole('button', {name: new RegExp(item.name)})).toBeNull();
+    expect(screen.queryByText(`${item.name} 삭제`)).toBeNull();
+  });
+  it('does nothing when cancelled', async () => {
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(within(await openDelete()).getByRole('button', {name: '취소'}));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(readCommands()).toHaveLength(0); expect(sent()).toHaveLength(0);
+    expect(screen.getByRole('button', {name: '작품 관리'})).toBeTruthy();
+  });
+  it('brings a rejected delete back to the shelf with its conflict in the queue', async () => {
+    command = body => body.commandType === 'deleteWork' ? new ApiError('충돌', 409, {detail: {code: 'revisionConflict'}}) : {};
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(within(await openDelete()).getByRole('button', {name: '삭제'}));
+    await screen.findByText('충돌');
+    expect(screen.getByText(`${item.name} 삭제`)).toBeTruthy();
+    expect(screen.getByRole('button', {name: new RegExp(item.name)})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', {name: '버리기'}));
+    await waitFor(() => expect(readCommands()).toHaveLength(0));
+  });
+  it('lists trashed works newest first with their purge day and restores one optimistically', async () => {
+    command = () => new Error('offline');
+    trashItems = [
+      {workId: 'old-2', type: 'movie', name: '지운 영화', trashedAt: '2026-10-05T00:00:00Z', purgeAt: new Date(Date.now() + 10 * DAY - 60_000).toISOString(), entityRevision: 7},
+      {workId: 'old-1', type: 'manga', name: '지운 만화', trashedAt: '2026-10-01T00:00:00Z', purgeAt: new Date(Date.now() + 2 * DAY - 60_000).toISOString(), entityRevision: 3},
+    ];
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    const shortcut = await within(await screen.findByRole('group', {name: '컬렉션 바로가기'})).findByRole('button', {name: '휴지통 2'});
+    expect(shortcut.querySelector('.collection-shortcuts__count')?.textContent).toBe('2');
+    fireEvent.click(shortcut);
+    const sheet = await screen.findByRole('dialog', {name: '휴지통'});
+    const rows = within(sheet).getAllByRole('listitem');
+    expect(rows.map(row => row.querySelector('strong')!.textContent)).toEqual(['지운 영화', '지운 만화']);
+    expect(rows[0].textContent).toContain('영화 · 10일 후 영구 삭제');
+    expect(rows[1].textContent).toContain('만화 · 2일 후 영구 삭제');
+    fireEvent.click(within(rows[0]).getByRole('button', {name: '지운 영화 되살리기'}));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'restoreWork', workId: 'old-2', expectedRevision: 7});
+    expect(within(sheet).queryByText('지운 영화')).toBeNull();
+    // The sheet hides the screen behind it from assistive tech; the count under it has moved on.
+    expect(within(screen.getByRole('group', {name: '컬렉션 바로가기', hidden: true})).getByRole('button', {name: '휴지통 1', hidden: true})).toBeTruthy();
+  });
+  it('shows the empty state and no count when the trash is empty', async () => {
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    const shortcut = await within(await screen.findByRole('group', {name: '컬렉션 바로가기'})).findByRole('button', {name: '휴지통'});
+    expect(shortcut.querySelector('.collection-shortcuts__count')).toBeNull();
+    fireEvent.click(shortcut);
+    expect(await within(await screen.findByRole('dialog', {name: '휴지통'})).findByText('휴지통이 비어 있어요')).toBeTruthy();
+  });
+  it('shows no shortcut while the server has no 휴지통 route', async () => {
+    trashItems = new ApiError('Not Found', 404, null);
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    await screen.findByText(item.name); await act(async () => {});
+    expect(within(shortcuts()).queryByRole('button', {name: /휴지통/})).toBeNull();
   });
 });

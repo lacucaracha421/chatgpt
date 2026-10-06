@@ -43,7 +43,7 @@ final class NetworkPolicy {
   // (`/` as %2F); a segment of dots only is refused. The snapshot PUT is publisher-only.
   get=get || p.equals("/v1/library/artists") || (p.matches("/v1/library/artists/[A-Za-z0-9_%.~:-]{1,3072}") && !p.matches("/v1/library/artists/\\.+") && !new URI(p).getPath().equals("/v1/library/artists/intents"));
   get=get || p.equals("/v1/assets/authority/status") || p.equals("/v1/assets/authority/baseline") || p.equals("/v1/assets/authority/changes");
-  get=get || p.equals("/v1/collections/authority/status") || p.equals("/v1/collections/authority/baseline") || p.equals("/v1/collections/authority/changes");
+  get=get || p.equals("/v1/collections/authority/status") || p.equals("/v1/collections/authority/baseline") || p.equals("/v1/collections/authority/changes") || p.equals("/v1/collections/authority/trash");
   boolean collectionPut=p.equals("/v1/collections/authority/commands");
   // Interactive provider reads and the two client write routes; no wildcard write access.
   get=get || p.equals("/v1/providers/status") || p.equals("/v1/providers/image")

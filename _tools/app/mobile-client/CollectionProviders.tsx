@@ -1,7 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {Badge, Button, Dialog, DialogDescription, Field, SegmentedControl, TextInput} from './ui';
-import {Fold} from './Fold';
 import {api, errorText} from './transport';
 import {outboxConnection} from './outboxConnection';
 import {replaceCommand, sameAuthority, type Provider} from './collectionCommandOutbox';
@@ -33,15 +32,19 @@ export function useProviderStatus(active: boolean, refreshKey?: unknown) {
   }, [active, connection, retry, refreshKey]);
   return {status: reply?.connection === connection ? reply.value : null, failure, retry: () => setRetry(value => value + 1)};
 }
-type Status = ReturnType<typeof useProviderStatus>;
-function ProviderUnavailable({provider, status}: {provider: Provider; status: Status}) {
-  return <p className="collection-bindings-note">{status.status?.[provider] === false ? `서버에 ${providerName(provider)} 키가 설정되지 않았습니다`
-    : status.failure ? <>{status.failure}<Button variant="ghost" onClick={status.retry}>다시 시도</Button></> : '서버 연결을 확인해 주세요.'}</p>;
+export type ProviderStatusState = ReturnType<typeof useProviderStatus>;
+/** Why a provider's rows cannot be used right now, or null when they can. */
+export function providerUnavailable(provider: Provider, status: ProviderStatusState) {
+  return status.status?.[provider] === true ? null : status.status?.[provider] === false ? `서버에 ${providerName(provider)} 키가 설정되지 않았습니다`
+    : status.failure || '서버 연결을 확인해 주세요.';
 }
 
-export function CollectionProviderActions({item, authority, status, active}: {item: CollectionDetail; authority: Authority; status: Status; active: boolean}) {
+/**
+ * The work's stored provider binding, read while the work is open, and what its 작품 관리 rows
+ * need: connect when unbound, otherwise refresh and change artwork.
+ */
+export function useProviderBinding(item: CollectionDetail, authority: Authority, status: ProviderStatusState, active: boolean) {
   const provider = providerFor(item.type), identity = authority.identity;
-  const [open, setOpen] = useState(false), [sheet, setSheet] = useState<'search' | 'artwork' | null>(null);
   const [binding, setBinding] = useState<{workId: string; provider: Provider; externalId: string | null} | null>(null);
   const [busy, setBusy] = useState(false), [failure, setFailure] = useState(''), [retry, setRetry] = useState(0);
   const accepted = authority.acknowledgements.filter(row => row.command.workId === item.id && row.command.commandType === 'providerApply').map(row => row.command.operationId).join(':');
@@ -53,27 +56,15 @@ export function CollectionProviderActions({item, authority, status, active}: {it
     }, reason => { if (!controller.signal.aborted) { setBusy(false); setFailure(errorText(reason)); } });
     return () => controller.abort();
   }, [active, item.id, provider, identity?.libraryId, identity?.epoch, status.status?.[provider!], accepted, retry]);
-  if (!provider) return null;
-  const name = providerName(provider), available = status.status?.[provider] === true;
-  const externalId = binding?.workId === item.id && binding.provider === provider ? binding.externalId : null;
+  const externalId = provider && binding?.workId === item.id && binding.provider === provider ? binding.externalId : null;
   const waiting = authority.rows.some(row => row.command.workId === item.id && row.state === 'pending');
-  return <section className="collection-bindings collection-provider-actions" aria-label={`${name} 연결`}>
-    <Button variant="ghost" aria-expanded={open} onClick={() => setOpen(value => !value)}>연결 · {name}{waiting && <Badge>대기</Badge>}</Button>
-    <Fold open={open}><div className="collection-bindings-rows">
-      <div className="collection-binding-row"><Button disabled={!available || !identity || waiting} onClick={() => setSheet('search')}>{name}에 연결</Button>
-        <Button disabled={!available || !identity || !externalId || busy || waiting} onClick={() => {
-          try { authority.enqueue({commandType: 'providerApply', workId: item.id, operation: 'refresh', provider, externalId: externalId!}); setFailure(''); }
-          catch (reason) { setFailure(errorText(reason)); }
-        }}>{name} 새로고침</Button></div>
-      <div className="collection-binding-row"><Button disabled={!available || !identity || !externalId || busy || waiting} onClick={() => setSheet('artwork')}>{artworkLabel(provider)}</Button></div>
-      {!available && <ProviderUnavailable provider={provider} status={status}/>}
-      {available && !externalId && !busy && !failure && <p className="collection-bindings-note">{name}에 연결하면 이미지를 고를 수 있습니다.</p>}
-      <BusyLabel busy={busy} idle="">연결 확인 중…</BusyLabel>
-      {failure && <p role="alert" className="bind-message is-error">{failure}<Button variant="ghost" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></p>}
-    </div></Fold>
-    {sheet === 'search' && <ProviderSearchSheet key={item.id} item={item} provider={provider} authority={authority} onClose={() => setSheet(null)}/>}
-    {sheet === 'artwork' && externalId && <ProviderArtworkSheet key={item.id} item={item} provider={provider} externalId={externalId} authority={authority} onClose={() => setSheet(null)}/>}
-  </section>;
+  const refresh = () => {
+    if (!provider || !externalId) return;
+    authority.enqueue({commandType: 'providerApply', workId: item.id, operation: 'refresh', provider, externalId});
+  };
+  return {provider, externalId, busy, failure, waiting, refresh, retry: () => setRetry(value => value + 1),
+    /** Why the rows are disabled, or null: the server, then the binding read, then queued changes. */
+    blocked: !provider ? null : providerUnavailable(provider, status) ?? (!identity ? '서버 연결을 확인해 주세요.' : busy ? '연결 확인 중…' : failure || (waiting ? '보내는 중인 변경이 있습니다' : null))};
 }
 
 export function ProviderThumb({url}: {url: string | null}) {

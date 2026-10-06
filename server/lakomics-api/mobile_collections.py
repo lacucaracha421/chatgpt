@@ -853,9 +853,16 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             revision, _ = state(db, active)
             row = db.execute(f"SELECT payload FROM {read_table(active)} WHERE id=?", (collection_id,)).fetchone()
             payload = None if row is None else finalize(db, active, json.loads(row["payload"]))
+            # The work's authority revision: what a client's deleteWork expects (CAS on what it showed).
+            entity = None if payload is None or active is None else db.execute(
+                "SELECT entity_revision FROM collection_authority_works WHERE library_id=? AND work_id=?",
+                (active["libraryId"], collection_id)).fetchone()
         if payload is None:
             raise HTTPException(404, "Collection is not published")
-        return {"revision": revision, "item": public_item(payload, True)}
+        reply = {"revision": revision, "item": public_item(payload, True)}
+        if entity is not None:
+            reply["entityRevision"] = entity[0]
+        return reply
 
     @app.post("/v1/collections/{collection_id}/artworks/{artwork_id}/media-ticket")
     def artwork_ticket(collection_id: ID, artwork_id: ID, body: TicketRequest,

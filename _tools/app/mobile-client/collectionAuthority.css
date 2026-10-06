@@ -1,5 +1,23 @@
 .collection-authority-form { display: flex; flex-direction: column; gap: var(--space-4); }
-.collection-authority-types, .collection-authority-actions, .collection-authority-queue { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.collection-authority-types, .collection-authority-queue { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .collection-authority-queue { padding: var(--space-2) 0; }
 .collection-create-form .ui-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-4); }
 .collection-create-form .ui-dialog__actions .ui-button { min-height: var(--touch-target); }
+/* 작품 관리: the shared 52px sheet rows, icon first, grouped by one hairline. */
+.collection-manage-group { display: flex; flex-direction: column; }
+.collection-manage-group + .collection-manage-group { border-top: 1px solid var(--color-border); }
+.collection-manage-row { justify-content: flex-start; gap: 12px; border-bottom: 0; color: var(--color-text); cursor: pointer; }
+.collection-manage-row > svg { flex: none; width: 20px; height: 20px; }
+.collection-manage-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.collection-manage-row__text small { font-size: var(--type-meta); color: var(--color-muted); }
+.collection-manage-row.is-danger { color: var(--color-danger); }
+.collection-manage-row:disabled { opacity: .4; cursor: default; }
+.collection-manage-failure { margin: var(--space-2) 0; font-size: var(--type-meta); color: var(--color-danger); }
+.collection-delete .ui-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.collection-delete .ui-dialog__actions .ui-button, .collection-trash-row .ui-button { min-height: var(--touch-target); }
+.collection-trash { list-style: none; margin: 0; padding: 0; }
+.collection-trash-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+.collection-trash-row .collection-trash-thumb { width: 40px; }
+.collection-trash-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.collection-trash-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-trash-text small { font-size: var(--type-meta); color: var(--color-muted); }

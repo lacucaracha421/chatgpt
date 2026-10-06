@@ -54,9 +54,9 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void) {
   const pending = scoped.some(row => row.state === 'pending');
   usePendingRetry(active, pending, flush);
   useEffect(() => { if (active && pending) void flush(); }, [active, pending, flush, identity?.epoch]);
-  const enqueue = useCallback((command: WorkCommand) => {
+  const enqueue = useCallback((command: WorkCommand, label?: string) => {
     if (!identity) throw new Error('작품을 편집할 수 없습니다. 연결을 확인해 주세요.');
-    const result = enqueueCommand(identity, command); void flush(); return result;
+    const result = enqueueCommand(identity, command, label); void flush(); return result;
   }, [identity?.libraryId, identity?.epoch, flush]);
   const enqueueBatch = (commands: WorkCommand[]) => {
     if (!identity) throw new Error('작품을 편집할 수 없습니다. 연결을 확인해 주세요.');

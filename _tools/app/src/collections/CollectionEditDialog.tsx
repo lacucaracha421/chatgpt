@@ -4,7 +4,8 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
-import { KIND_LABEL } from "./collectionFormat";
+import { COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_REQUIRED, collectionCreateLabel, collectionEditDraft,
+  collectionEditError, collectionEditField, collectionEditValues, type CollectionEditFieldKey } from "./collectionEditFields";
 
 export type CollectionEditMode =
   | { kind: "create"; type: CollectionType }
@@ -28,17 +29,7 @@ export function CollectionEditDialog({
   const [description, setDescription] = useState(existing?.description ?? "");
   const [type, setType] = useState<CollectionType>(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
   const [series, setSeries] = useState(false);
-  const [year, setYear] = useState<number | null>(existing?.year ?? null);
-  const [originalTitle, setOriginalTitle] = useState(existing?.originalTitle ?? "");
-  const [runtimeMinutes, setRuntimeMinutes] = useState<number | null>(existing?.runtimeMinutes ?? null);
-  const [author, setAuthor] = useState(existing?.author ?? "");
-  const [developer, setDeveloper] = useState(existing?.developer ?? "");
-  const [publisher, setPublisher] = useState(existing?.publisher ?? "");
-  const [platforms, setPlatforms] = useState(existing?.platforms ?? "");
-  const [productionCompany, setProductionCompany] = useState(existing?.productionCompany ?? "");
-  const [releaseDate, setReleaseDate] = useState<string | null>(existing?.releaseDate ?? null);
-  const [director, setDirector] = useState(existing?.director ?? "");
-  const [externalScore, setExternalScore] = useState<number | null>(existing?.externalScore ?? null);
+  const [fields, setFields] = useState(() => collectionEditDraft(existing));
   const [myScore, setMyScore] = useState<number | null>(existing?.myScore ?? null);
   const [minVolume, setMinVolume] = useState<number | null>(existing?.minVolume ?? null);
   const [maxVolume, setMaxVolume] = useState<number | null>(existing?.maxVolume ?? null);
@@ -51,17 +42,7 @@ export function CollectionEditDialog({
     setDescription(existing?.description ?? "");
     setType(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
     setSeries(false);
-    setYear(existing?.year ?? null);
-    setOriginalTitle(existing?.originalTitle ?? "");
-    setRuntimeMinutes(existing?.runtimeMinutes ?? null);
-    setAuthor(existing?.author ?? "");
-    setDeveloper(existing?.developer ?? "");
-    setPublisher(existing?.publisher ?? "");
-    setPlatforms(existing?.platforms ?? "");
-    setProductionCompany(existing?.productionCompany ?? "");
-    setReleaseDate(existing?.releaseDate ?? null);
-    setDirector(existing?.director ?? "");
-    setExternalScore(existing?.externalScore ?? null);
+    setFields(collectionEditDraft(existing));
     setMyScore(existing?.myScore ?? null);
     setMinVolume(existing?.minVolume ?? null);
     setMaxVolume(existing?.maxVolume ?? null);
@@ -73,11 +54,12 @@ export function CollectionEditDialog({
   async function handleSubmit() {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setError("이름을 입력해 주세요.");
+      setError(COLLECTION_NAME_REQUIRED);
       return;
     }
-    if (runtimeMinutes !== null && (!Number.isInteger(runtimeMinutes) || runtimeMinutes <= 0)) {
-      setError("상영 시간은 1분 이상이어야 합니다.");
+    const runtimeError = collectionEditError(collectionEditField("runtimeMinutes"), fields.runtimeMinutes);
+    if (runtimeError) {
+      setError(runtimeError);
       return;
     }
     if (type === "manga" && (
@@ -95,17 +77,7 @@ export function CollectionEditDialog({
       name: trimmedName,
       description: description.trim() || null,
       type,
-      year,
-      originalTitle: originalTitle.trim() || null,
-      runtimeMinutes,
-      author: author.trim() || null,
-      developer: developer.trim() || null,
-      publisher: publisher.trim() || null,
-      platforms: platforms.trim() || null,
-      productionCompany: productionCompany.trim() || null,
-      releaseDate,
-      director: director.trim() || null,
-      externalScore,
+      ...collectionEditValues(fields) as Pick<UpdateCollection, CollectionEditFieldKey>,
       myScore,
       // Only fields changed from what the dialog loaded are written (mobile edits may
       // have changed the others meanwhile).
@@ -137,11 +109,11 @@ export function CollectionEditDialog({
         <TextField label="이름" value={name} onChange={(event) => { setName(event.target.value); setError(null); }} />
         <TextField label="설명" value={description} onChange={(event) => setDescription(event.target.value)} />
         {mode.kind === "create" ? <div role="group" aria-label="유형" className="collection-edit-dialog__types">
-          {(["game", "manga", "movie", "tv", "av"] as const).map(value => (
+          {COLLECTION_CREATE_TYPES.map(value => (
             <Button key={value} type="button" aria-pressed={value === "tv" ? type === "movie" && series : type === value && !series}
               variant={(value === "tv" ? type === "movie" && series : type === value && !series) ? "primary" : "secondary"}
               disabled={saving} onClick={() => { setType(value === "tv" ? "movie" : value); setSeries(value === "tv"); }}>
-              {value === "tv" ? "시리즈" : KIND_LABEL[value]}
+              {collectionCreateLabel(value)}
             </Button>
           ))}
         </div> : <Select label="유형" value={type} disabled={existing?.type === "av"} onChange={(event) => setType(event.target.value as CollectionType)}>
@@ -150,50 +122,26 @@ export function CollectionEditDialog({
           <option value="movie">영화</option>
           {existing?.type === "av" && <option value="av">AV</option>}
         </Select>}
+        {mode.kind === "edit" && COLLECTION_EDIT_FIELDS[type].map(field => (
+          <TextField key={field.key} label={field.label} {...COLLECTION_EDIT_INPUT[field.control]} value={fields[field.key]}
+            onChange={(event) => { const value = event.target.value; setFields(current => ({ ...current, [field.key]: value })); if (field.control === "minutes") setError(null); }} />
+        ))}
         {mode.kind === "edit" && type === "manga" && (
-          <>
-            <TextField label="작가" value={author} onChange={(event) => setAuthor(event.target.value)} />
-            <TextField label="출간 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
-            <fieldset className="collection-edit-dialog__volume-range">
-              <legend>권 범위</legend>
-              <div className="collection-edit-dialog__volume-range-fields">
-                <TextField label="처음 권" type="number" min="0" max="9999" step="1" placeholder="처음" value={minVolume?.toString() ?? ""}
-                  onChange={(event) => { setMinVolume(event.target.value === "" ? null : Number(event.target.value)); setError(null); }} />
-                <TextField label="마지막 권" type="number" min="0" max="9999" step="1" placeholder="끝" value={maxVolume?.toString() ?? ""}
-                  onChange={(event) => { setMaxVolume(event.target.value === "" ? null : Number(event.target.value)); setError(null); }} />
-              </div>
-              <p className="collection-edit-dialog__volume-range-help">이 범위 밖의 권은 PC와 태블릿에서 모두 숨겨요. 같은 시리즈를 1부·2부로 나눠 둘 때 써요.</p>
-              <label className="collection-edit-dialog__volume-range-check">
-                <input type="checkbox" checked={hideConnectionPrompt} onChange={(event) => setHideConnectionPrompt(event.target.checked)} />
-                카카오 연결 안내 숨기기
-              </label>
-            </fieldset>
-          </>
+          <fieldset className="collection-edit-dialog__volume-range">
+            <legend>권 범위</legend>
+            <div className="collection-edit-dialog__volume-range-fields">
+              <TextField label="처음 권" type="number" min="0" max="9999" step="1" placeholder="처음" value={minVolume?.toString() ?? ""}
+                onChange={(event) => { setMinVolume(event.target.value === "" ? null : Number(event.target.value)); setError(null); }} />
+              <TextField label="마지막 권" type="number" min="0" max="9999" step="1" placeholder="끝" value={maxVolume?.toString() ?? ""}
+                onChange={(event) => { setMaxVolume(event.target.value === "" ? null : Number(event.target.value)); setError(null); }} />
+            </div>
+            <p className="collection-edit-dialog__volume-range-help">이 범위 밖의 권은 PC와 태블릿에서 모두 숨겨요. 같은 시리즈를 1부·2부로 나눠 둘 때 써요.</p>
+            <label className="collection-edit-dialog__volume-range-check">
+              <input type="checkbox" checked={hideConnectionPrompt} onChange={(event) => setHideConnectionPrompt(event.target.checked)} />
+              카카오 연결 안내 숨기기
+            </label>
+          </fieldset>
         )}
-        {mode.kind === "edit" && type === "game" && (
-          <>
-            {mode.kind === "edit" && <TextField label="개발사" value={developer} onChange={(event) => setDeveloper(event.target.value)} />}
-            <TextField label="퍼블리셔" value={publisher} onChange={(event) => setPublisher(event.target.value)} />
-            <TextField label="플랫폼" value={platforms} onChange={(event) => setPlatforms(event.target.value)} />
-            <TextField label="출시일" type="date" value={releaseDate ?? ""} onChange={(event) => setReleaseDate(event.target.value || null)} />
-            <TextField label="외부 점수" inputMode="numeric" value={externalScore?.toString() ?? ""} onChange={(event) => setExternalScore(event.target.value ? Number(event.target.value) : null)} />
-          </>
-        )}
-        {mode.kind === "edit" && type === "movie" && (
-          <>
-            <TextField label="원제" value={originalTitle} onChange={(event) => setOriginalTitle(event.target.value)} />
-            <TextField label="상영 시간(분)" type="number" min="1" step="1" value={runtimeMinutes?.toString() ?? ""} onChange={(event) => { setRuntimeMinutes(event.target.value ? Number(event.target.value) : null); setError(null); }} />
-            {mode.kind === "edit" && <TextField label="제작사" value={productionCompany} onChange={(event) => setProductionCompany(event.target.value)} />}
-            <TextField label="감독" value={director} onChange={(event) => setDirector(event.target.value)} />
-            <TextField label="개봉 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
-          </>
-        )}
-        {mode.kind === "edit" && type === "av" && <>
-          <TextField label="원제" value={originalTitle} onChange={event => setOriginalTitle(event.target.value)} />
-          <TextField label="제작사" value={productionCompany} onChange={event => setProductionCompany(event.target.value)} />
-          <TextField label="출시일" type="date" value={releaseDate ?? ""} onChange={event => setReleaseDate(event.target.value || null)} />
-          <TextField label="상영 시간(분)" type="number" min="1" step="1" value={runtimeMinutes?.toString() ?? ""} onChange={event => setRuntimeMinutes(event.target.value ? Number(event.target.value) : null)} />
-        </>}
         {mode.kind === "edit" && (
           <Select label="내 별점" value={myScore?.toString() ?? ""} onChange={(event) => setMyScore(event.target.value === "" ? null : Number(event.target.value))}>
             <option value="">미평가</option>
