@@ -43,6 +43,9 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loading = !cached && (!settledRequest || settledRequest.api !== api || settledRequest.scope !== dataScope || settledRequest.minimum !== currentFilters.minimum || settledRequest.version !== version || settledRequest.revision !== revision);
+  // Only the first read for this scope locks the rows; a later refresh (analysis keeps changing the
+  // library) keeps the shown rows and their actions usable instead of flickering.
+  const firstLoad = loading && !(settledRequest && settledRequest.api === api && settledRequest.scope === dataScope && settledRequest.minimum === currentFilters.minimum);
   const [message, setMessage] = useState<string | null>(null);
   const [postponed, setPostponed] = useState<string[]>([]);
   const refresh = useCallback(() => suggestionCache.invalidate(api, dataScope), [api, dataScope]);
@@ -69,7 +72,7 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
   };
   return {
     rows: (cached?.rows ?? rows).filter(row => (!currentFilters.insideOnly || row.insideCount > 0) && !postponed.includes(row.tag)),
-    ignored: cached?.ignored ?? ignored, loading, busy, error, message, dismissMessage: () => setMessage(null), refresh, ignore, saved, api,
+    ignored: cached?.ignored ?? ignored, loading, firstLoad, busy, error, message, dismissMessage: () => setMessage(null), refresh, ignore, saved, api,
     filters: currentFilters, setFilters,
     postponed, postpone: (tag: string) => setPostponed(tags => [...tags, tag]), clearPostponed: () => setPostponed([]),
   };
@@ -99,7 +102,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
         {state.postponed.length > 0 && <Button size="sm" variant="ghost" onClick={state.clearPostponed}>나중에 {state.postponed.length} · 다시 보기</Button>}
         <Button size="sm" variant="ghost" onClick={() => setIgnoredOpen(true)}>무시 목록 {state.ignored.length}</Button>
       </div>
-      <BusyLabel busy={!!(state.loading)}><p role="status">제안 불러오는 중…</p></BusyLabel>
+      <BusyLabel busy={!!(state.firstLoad)}><p role="status">제안 불러오는 중…</p></BusyLabel>
       {state.error && <p role="alert">{state.error} <Button size="sm" onClick={state.refresh}>다시 시도</Button></p>}
       {!state.loading && !state.error && state.rows.length === 0 && <p>조건에 맞는 새 캐릭터 제안이 없습니다.</p>}
       {[...groups].map(([key, rows]) => <section key={key} aria-label={rows[0].seriesName ?? "시리즈 폴더 없음"}>
@@ -109,7 +112,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
           <SuggestionCounts suggestion={row} />
           <Samples suggestion={row} privacyMode={privacyMode} />
           <Location suggestion={row} />
-          <SuggestionActions disabled={state.busy || state.loading} onRegister={() => setEditor({ suggestion: row, mode: "register" })} onMerge={() => setEditor({ suggestion: row, mode: "merge" })} onIgnore={() => void state.ignore(row.tag, true)} onPostpone={() => state.postpone(row.tag)} />
+          <SuggestionActions disabled={state.busy || state.firstLoad} onRegister={() => setEditor({ suggestion: row, mode: "register" })} onMerge={() => setEditor({ suggestion: row, mode: "merge" })} onIgnore={() => void state.ignore(row.tag, true)} onPostpone={() => state.postpone(row.tag)} />
         </div>)}
       </section>)}
     </>}
