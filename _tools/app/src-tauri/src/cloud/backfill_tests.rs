@@ -333,6 +333,103 @@ fn progress_redacts_queue_errors_and_hides_resolved_failures() {
 }
 
 #[test]
+fn progress_counts_confirmed_server_assets_without_hiding_local_gaps() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let mut ids = Vec::new();
+    for seed in 40..44 {
+        let source = temp.path().join(format!("server-progress-{seed}.png"));
+        fs::write(&source, png_bytes(seed)).unwrap();
+        ids.push(ingest_png(&library, &source, "2026-10-06T00:00:00Z"));
+    }
+    let connection = library.connection().unwrap();
+    connection
+        .execute("DELETE FROM cloud_sync_queue", [])
+        .unwrap();
+    // A downloaded server-born Asset and a PC Asset confirmed by the server baseline.
+    for (id, server_created) in [(&ids[0], 1), (&ids[1], 0)] {
+        connection
+            .execute(
+                "INSERT INTO asset_authority_state
+             (asset_id,lifecycle,entity_revision,projection,materialization,server_created)
+             VALUES (?1,'normal',1,'{}','complete',?2)",
+                rusqlite::params![id, server_created],
+            )
+            .unwrap();
+    }
+    // Import provenance alone does not prove that the server holds the Asset.
+    connection
+        .execute(
+            "UPDATE assets SET import_source='browser_extension' WHERE id IN (?1,?2)",
+            [&ids[0], &ids[2]],
+        )
+        .unwrap();
+    drop(connection);
+    let progress = library.cloud_backfill_progress().unwrap();
+    assert_eq!(progress.total_assets, 4);
+    assert_eq!(progress.completed, 2);
+    assert_eq!(progress.queued + progress.failed, 0);
+
+    // Queue history must neither double-count completion nor hide a newer pending revision.
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO cloud_sync_queue
+         (id,entity_type,entity_id,operation,status,revision,updated_at)
+         VALUES ('server-synced','asset',?1,'upsert','synced',1,'2026-10-06')",
+            [&ids[0]],
+        )
+        .unwrap();
+    assert_eq!(library.cloud_backfill_progress().unwrap().completed, 2);
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO cloud_sync_queue
+         (id,entity_type,entity_id,operation,status,revision,updated_at)
+         VALUES ('server-pending','asset',?1,'upsert','pending',2,'2026-10-06')",
+            [&ids[0]],
+        )
+        .unwrap();
+    let pending = library.cloud_backfill_progress().unwrap();
+    assert_eq!(pending.completed, 1);
+    assert_eq!(pending.queued, 1);
+
+    // A bounded run counts only its selected Assets, including confirmed server presence.
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO cloud_backfill_scope(asset_id) VALUES (?1),(?2)",
+            [&ids[1], &ids[3]],
+        )
+        .unwrap();
+    let scoped = library.cloud_backfill_progress().unwrap();
+    assert_eq!(scoped.total_assets, 2);
+    assert_eq!(scoped.completed, 1);
+    assert_eq!(scoped.queued, 0);
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "DELETE FROM cloud_backfill_scope WHERE asset_id=?1",
+            [&ids[3]],
+        )
+        .unwrap();
+    let complete = library.cloud_backfill_progress().unwrap();
+    assert_eq!(complete.total_assets, 1);
+    assert_eq!(complete.completed, complete.total_assets);
+
+    library
+        .connection()
+        .unwrap()
+        .execute("UPDATE assets SET status='trash' WHERE id=?1", [&ids[1]])
+        .unwrap();
+    assert_eq!(library.cloud_backfill_progress().unwrap().completed, 0);
+}
+
+#[test]
 fn progress_uses_only_the_latest_revision_for_each_asset() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();

@@ -459,6 +459,24 @@ impl Library {
             [],
             |row| row.get::<_, i64>(0),
         )? as u64;
+        // Authority projections confirm server presence independently of PC uploads.
+        // Only add Assets without upsert history: existing queue revisions still decide
+        // completion, so a newer pending/failed revision stays visible and synced rows
+        // are never counted twice. Import source alone is not evidence of server presence.
+        let server_present_without_upsert = connection.query_row(
+            "SELECT COUNT(*) FROM assets AS asset
+             JOIN asset_authority_state AS authority ON authority.asset_id = asset.id
+             WHERE asset.status = 'normal' AND authority.lifecycle = 'normal'
+               AND NOT EXISTS (
+                 SELECT 1 FROM cloud_sync_queue AS queue
+                 WHERE queue.entity_type = 'asset' AND queue.entity_id = asset.id
+                   AND queue.operation = 'upsert'
+               )
+               AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                    OR asset.id IN (SELECT asset_id FROM cloud_backfill_scope))",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
         let control_value = connection.query_row(
             "SELECT state FROM cloud_backfill_control WHERE singleton = 1",
             [],
@@ -513,7 +531,7 @@ impl Library {
             preparing,
             uploading,
             committing,
-            completed: count("synced")?,
+            completed: count("synced")? + server_present_without_upsert,
             failed,
             active_workers: preparing + uploading + committing,
             last_error,
