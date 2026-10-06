@@ -22,10 +22,13 @@ import {
   sameEditValue,
 } from './collectionEditOutbox';
 import {errorText} from './transport';
+import {useCollectionAuthority} from './useCollectionAuthority';
+import {COMMAND_EVENT, flushCommands, readCommands} from './collectionCommandOutbox';
 
 const NOTICE_MS = 5000;
 
 export function useCollectionEdits({active, onSettled}: {active: boolean; onSettled(): void}) {
+  const authority = useCollectionAuthority(active, onSettled);
   const [intents, setIntents] = useState(readCollectionEdits);
   const [supported, setSupported] = useState(false);
   /** 신간 알림 / owned volumes: the server advertises `collectionTrackingEdit` (a version-2 PC). */
@@ -96,6 +99,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
 
   /** Take the capability from the Collection `/status` check the screen already runs. */
   const observeStatus = useCallback((reply: unknown) => {
+    authority.observeLibrary((reply as CollectionEditStatus)?.libraryId ?? null);
     library.current = personalEditLibrary(reply as CollectionEditStatus);
     setSupported(library.current !== null);
     setTrackingSupported(trackingEditAllowed(reply as CollectionEditStatus));
@@ -104,6 +108,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
 
   const edit = useCallback((collectionId: string, field: CollectionEditField, value: CollectionEditValue, authoritative: CollectionEditValue) => {
     try {
+      if (authority.identity) { authority.edit(collectionId, field, value, authoritative); setNotice(''); return; }
       if (!library.current) throw new Error(SAVE_FAILED);
       commitCollectionEdit(collectionId, field, value, authoritative, library.current);
     } catch (error) {
@@ -116,15 +121,18 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
     setFailure('');
     setNotice('');
     void flush();
-  }, [flush]);
+  }, [flush, authority.identity, authority.enqueue]);
 
   const resolveConflict = useCallback((collectionId: string, field: CollectionEditField, choice: 'overwrite' | 'discard') => {
+    if (authority.identity && authority.resolveConflict(collectionId, field, choice)) return;
     resolveCollectionEditConflict(collectionId, field, choice);
     setIntents(readCollectionEdits());
     if (choice === 'overwrite') void flush();
-  }, [flush]);
+  }, [flush, authority.identity, authority.rows]);
 
   const visible = useCallback(<T extends CollectionEditValue>(collectionId: string, field: CollectionEditField, authoritative: T) => {
+    const command = authority.visible(collectionId, field, authoritative);
+    if (command) return command;
     const key = collectionEditKey(collectionId, field, authoritative);
     const intent = intents[key];
     if (intent) return {value: intent.value as T, pending: true, conflict: intent.conflict ? {current: intent.conflict.current} : null};
@@ -135,21 +143,31 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
     if (settledValue && sameEditValue(authoritative, settledValue.expected) && !sameEditValue(authoritative, settledValue.value))
       return {value: settledValue.value as T, pending: false, conflict: null};
     return {value: authoritative, pending: false, conflict: null};
-  }, [intents, confirmed]);
+  }, [intents, confirmed, authority.identity, authority.rows]);
 
   const pending = Object.values(intents).some(intent => !intent.conflict);
   usePendingRetry(active, pending, flush);
 
-  return {supported, trackingSupported, recordSupported, failure, notice, edit, resolveConflict, visible, observeStatus, flush};
+  return {supported: supported || !!authority.identity, trackingSupported: trackingSupported || !!authority.identity,
+    recordSupported: recordSupported || !!authority.identity, failure: failure || authority.failure, notice, edit, resolveConflict, visible, observeStatus, flush, authority};
 }
 
 /** App-level delivery: on start and on returning to the foreground, whatever screen is open. */
 export function useCollectionEditBackgroundFlush(enabled: boolean) {
+  const [commandsPending, setCommandsPending] = useState(() => readCommands().some(row => row.state === 'pending'));
+  useEffect(() => {
+    const read = () => setCommandsPending(readCommands().some(row => row.state === 'pending'));
+    read(); window.addEventListener(COMMAND_EVENT, read);
+    return () => window.removeEventListener(COMMAND_EVENT, read);
+  }, [enabled]);
+  const sendCommands = useCallback(async () => { try { await flushCommands(); } catch { /* Keep durable commands for the next retry. */ } }, []);
+  usePendingRetry(enabled, commandsPending, sendCommands);
   useEffect(() => {
     if (!enabled) return;
     const send = () => {
       if (document.visibilityState === 'hidden') return;
       if (Object.values(readCollectionEdits()).some(intent => !intent.conflict)) void flushCollectionEdits().catch(() => {});
+      if (readCommands().some(row => row.state === 'pending')) void sendCommands();
     };
     send();
     const removeVisible=onVisible(send);

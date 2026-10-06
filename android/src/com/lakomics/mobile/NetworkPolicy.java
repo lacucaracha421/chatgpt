@@ -39,6 +39,8 @@ final class NetworkPolicy {
   // (`/` as %2F); a segment of dots only is refused. The snapshot PUT is publisher-only.
   get=get || p.equals("/v1/library/artists") || (p.matches("/v1/library/artists/[A-Za-z0-9_%.~:-]{1,3072}") && !p.matches("/v1/library/artists/\\.+") && !new URI(p).getPath().equals("/v1/library/artists/intents"));
   get=get || p.equals("/v1/assets/authority/status") || p.equals("/v1/assets/authority/baseline") || p.equals("/v1/assets/authority/changes");
+  get=get || p.equals("/v1/collections/authority/status") || p.equals("/v1/collections/authority/baseline") || p.equals("/v1/collections/authority/changes");
+  boolean collectionPut=p.equals("/v1/collections/authority/commands");
   // Album authority reads remain narrowly allowlisted. The one write route is added
   // separately below with its first durable-outbox consumer.
   get=get || p.equals("/v1/sync/status") || p.equals("/v1/albums/baseline") || p.equals("/v1/albums/changes");
@@ -126,7 +128,7 @@ final class NetworkPolicy {
   post=post || p.equals("/v1/exchange/transfers") || p.matches("/v1/exchange/transfers/"+exchangeId+"/(complete|ticket|ack)");
   boolean exchangePut=p.matches("/v1/exchange/devices/"+exchangeId);
   boolean delete=p.matches("/v1/exchange/transfers/"+exchangeId);
-  boolean put=pinPut || bookmarkPut || albumPut || classificationPut || lifecyclePut || exchangePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
+  boolean put=pinPut || bookmarkPut || albumPut || classificationPut || collectionPut || lifecyclePut || exchangePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
   if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post) && !(method.equals("DELETE") && delete))throw new IllegalArgumentException("Unsupported read operation");
  }
 }

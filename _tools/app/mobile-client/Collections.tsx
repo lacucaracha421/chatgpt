@@ -17,6 +17,7 @@ import {TabletMangaShelf} from './CollectionMangaShelf';
 import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {AvPerformerScreen} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
+import {AuthorityQueue, AuthorityWorkActions, CollectionWorkForm, type WorkForm} from './CollectionAuthorityForms';
 import {CollectionReleases} from './CollectionReleases';
 import {invalidateReleases, observePublication} from './releaseStore';
 import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
@@ -458,6 +459,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
   // An accepted personal edit changes what the server serves; re-read both views.
   const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
+  const [workForm,setWorkForm]=useState<WorkForm|null>(null);
+  const localCreate=edits.authority.rows.find(row=>row.command.commandType==='createWork'&&row.command.workId===selected);
+  const localCreateState=localCreate?.state;
+  // Retire accepted overlays only against the raw server read, never the optimistic display.
+  useEffect(()=>{main.items.forEach(work=>edits.authority.reconcile(work));if(detail&&detail.revision!=='local-create')edits.authority.reconcile(detail.item,'detail');},[main.items,detail,edits.authority.identity?.libraryId,edits.authority.identity?.epoch,edits.authority.rows]);
 
   const detailKey=JSON.stringify([selected,detailRefresh]);
   const committedDetail=useRef('');
@@ -470,6 +476,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   },[selected]);
   useEffect(()=>{
     if(!active||paused||!selected||committedDetail.current===detailKey)return;
+    if(localCreateState&&localCreateState!=='accepted'){
+      const created=edits.authority.creations.find(work=>work.id===selected);
+      if(created)setDetail({revision:'local-create',item:created});
+      return;
+    }
     const controller=new AbortController();setDetailError('');
     void api<{revision:string;item:CollectionDetail}>(`/v1/collections/${encodeURIComponent(selected)}`,controller.signal).then(result=>{
       if(controller.signal.aborted)return;
@@ -477,7 +488,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       setEdition(current=>editions(result.item.volumes).includes(current)?current:editions(result.item.volumes)[0]??0);
     }).catch(reason=>{if(!controller.signal.aborted)setDetailError(errorText(reason));});
     return()=>controller.abort();
-  },[active,paused,selected,detailKey]);
+  },[active,paused,selected,detailKey,localCreateState]);
   // The shared conditional poll (60 s while visible) keeps the chip and badges current; a pull re-reads at once.
   usePublicationCheck(active&&!paused,RELEASE_COUNTS_PATH,undefined,takeReleaseCounts);
   useEffect(()=>{if(!refresh||!active||paused)return;const controller=new AbortController();void api(RELEASE_COUNTS_PATH,controller.signal,undefined,'GET',true).then(reply=>{if(!controller.signal.aborted)takeReleaseCounts(reply);},()=>{});return()=>controller.abort();},[refresh]);
@@ -546,17 +557,18 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const calendarInterestCount=calendarReply?.wishlist.filter(entry=>entry.kind===tab).reduce((sum,entry)=>sum+entry.unread.length,0)??0;
   const showcaseCount=showcasePage?.totalCount??(showcase.committed?showcaseItems.length:undefined);
 
-  const item=detail?.item, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];
+  const item=detail?.item?edits.authority.work(detail.item):undefined, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];
   const covers=item?[{id:collectionCover(item),label:item.name},...volumes.map(v=>({id:v.coverArtworkId,label:[volumeLabel(v),volumeReleaseLabel(v)].filter(Boolean).join(' · ')}))]:[];
   const physical=item?.type==='manga';
   const revision=main.page?.revision??'';
   // A queued rating shows on the cards too, until the list re-reads the server.
-  const card=(work:CollectionSummary)=>{const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
+  const card=(published:CollectionSummary)=>{const work=edits.authority.work(published);const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
   // The type switch is the list's first row; scrolled away, the top bar pulls it down as a shade.
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
   // Shortcuts and view controls share the section bar's right group on both surfaces.
   const shortcuts=<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
+    {edits.authority.identity&&<Button variant="quiet" size="sm" onClick={()=>setWorkForm({mode:'create',type})}>새 작품</Button>}
     <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}>{showcaseAll?<SparklesSolidIcon aria-hidden="true"/>:<SparklesIcon aria-hidden="true"/>}<span className="collection-shortcuts__label">쇼케이스</span></Button>
     {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
     {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
@@ -614,11 +626,13 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
   const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}</div></div>;
   const mainOrder=main.items.map(work=>work.id);
-  const worksView=workList(main.items,shownType,`${labels[listTab]} 작품 목록`,revision,listActive,mainArrivals);
+  const localWorks=edits.authority.creations.filter(work=>work.type===shownType&&!main.items.some(published=>published.id===work.id)&&(!search||work.name.includes(search))&&filters.rating==='all');
+  const worksView=workList([...localWorks,...main.items],shownType,`${labels[listTab]} 작품 목록`,revision,listActive,mainArrivals);
   // The opened work as the shared work screen, its information as the section below the stage.
   const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
   const visibleRecord=(work:CollectionDetail)=>workRecordFacts(work,edits);
   const workInfo=(work:CollectionDetail)=><>
+    <AuthorityWorkActions item={work} authority={edits.authority} onForm={setWorkForm}/>
     <PersonalRecord item={work} edits={edits} onSheet={setPersonalSheet}/>
     <CollectionPersonal item={work} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
     <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...workFacts(work,work.av??null),...moreWorkFacts(work,work.av??null,work.series?{status:work.series.status}:null)]}/></section>
@@ -630,6 +644,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const editionVolumesShared=item?.type==='manga'?volumes.map(volume=>sharedVolume(volume,today)):[];
   const mangaInfo=item?.type==='manga'&&<>
     <header className="tablet-work__identity"><h1>{item.name}</h1>{originalTitle(item)&&<small>{originalTitle(item)}</small>}</header>
+    <AuthorityWorkActions item={item} authority={edits.authority} onForm={setWorkForm}/>
     {(item.ownedVolumes!=null||item.releaseWatch!=null||editionOptions.length>1)&&<section className="collection-personal" aria-label="소장"><SectionLabel title="소장"/><TrackingRows item={item} edits={edits} onOwned={edition=>setPersonalSheet(`owned-${edition}`)}/>{editionOptions.length>1&&<div ref={filterWheel} className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}</section>}
     <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet} includeTracking={false}/>
     <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
@@ -647,12 +662,14 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
         :<CaseWork item={item} portraitSources={main.items} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} record={visibleRecord} onStep={stepWork} info={workInfo}/>}</>}</div>
     </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
+    {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)}/>}
     {directWork ? workView : <AreaSwitch activeKey={selected?'work':'shelf'} retained={['shelf','work']} waitForReady crossFade={false} views={{shelf: <>
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>
     {!selected&&!overlayOpen&&!performer&&!searching&&sections.shade}
     <div ref={listRef} className="collection-scroll" {...shelfPutDown} inert={overlayOpen||undefined} aria-hidden={overlayOpen||undefined} style={{display:performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
       {sections.inline}
+      <AuthorityQueue authority={edits.authority} onForm={setWorkForm}/>
       {listTab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
