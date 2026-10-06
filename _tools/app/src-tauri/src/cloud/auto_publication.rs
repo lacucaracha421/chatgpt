@@ -213,6 +213,10 @@ impl Library {
     }
 
     fn run_mobile_publication_lane(&self, kind: &str, endpoint: &str) -> Result<(), LibraryError> {
+        if matches!(kind, "bindings" | "releases")
+            && crate::library::collection_authority::collection_authority_active(&*self.connection()?)? {
+            return Ok(());
+        }
         match kind {
             "upcoming" | "avPick" | "artists" => self
                 .run_due_home_publication(kind, endpoint)
@@ -283,7 +287,9 @@ impl Library {
                 // Same for mobile personal edits (at most once a minute, durably throttled).
                 // An applied edit dirties the lane through the 0074 triggers; the publication
                 // itself receives again before it reads the snapshot.
-                self.run_due_collection_personal_edits(endpoint)?;
+                if !crate::library::collection_authority::collection_authority_active(&*self.connection()?)? {
+                    self.run_due_collection_personal_edits(endpoint)?;
+                }
             }
             Ok(())
         })
@@ -356,6 +362,15 @@ impl Library {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn auto_publication_active_collection_replays_are_quiet_before_credentials_or_network() {
+        let temp=tempfile::tempdir().unwrap();
+        let library=crate::library::Library::open(temp.path()).unwrap();
+        let id=library.library_id().unwrap();
+        library.connection().unwrap().execute("INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,generation,updated_at) VALUES(1,?1,1,1,'fixture','t')",[id]).unwrap();
+        library.run_mobile_publication_lane("bindings","https://fixture.invalid").unwrap();
+        library.run_mobile_publication_lane("releases","https://fixture.invalid").unwrap();
+    }
     use crate::library::Library;
     #[test]
     fn unchanged_publication_endpoint_tick_is_read_only() {

@@ -42,6 +42,7 @@ impl<'a> MovieImportFlow<'a> {
     }
 
     fn apply(&self, request: TmdbApplyRequest) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
         let credentials = credential::read_tmdb_token_os()?;
         let fetched = self.client.title(&credentials, request.movie_id, request.media_type.as_deref())?;
         let (poster, backdrop) = validated_selection(&request, &fetched)?;
@@ -62,6 +63,7 @@ impl<'a> MovieImportFlow<'a> {
     }
 
     fn refresh(&self, collection_id: &str) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
         let binding = self
             .library
             .get_tmdb_connection(collection_id)?
@@ -89,6 +91,7 @@ impl<'a> MovieImportFlow<'a> {
         &self,
         request: TmdbArtworkReplaceRequest,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
         let binding = self
             .library
             .get_tmdb_connection(&request.collection_id)?
@@ -217,6 +220,7 @@ impl Library {
         backdrop_bytes: Option<&[u8]>,
         season_bytes: &[(i64, Vec<u8>)],
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let (poster_candidate, backdrop_candidate) = validated_selection(&request, &fetched)?;
         let name = normalized_name(fetched.title.clone())?;
         let original_title = normalized_optional(fetched.original_title.as_deref());
@@ -385,6 +389,7 @@ impl Library {
         mut fetched: TmdbRemoteMovie,
         season_bytes: &[(i64, Vec<u8>)],
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let season_artwork = prepare_season_artwork(self, collection_id, &mut fetched, season_bytes)?;
         let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
         let mut connection = self.connection()?;
@@ -431,6 +436,7 @@ impl Library {
         poster_bytes: Option<&[u8]>,
         backdrop_bytes: Option<&[u8]>,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let (poster_candidate, backdrop_candidate) =
             validated_artwork_decisions(&request, &fetched)?;
         let movie_id = self.tmdb_binding_id(&request.collection_id)?;
@@ -532,6 +538,7 @@ fn insert_season_artwork(
     artworks: &[(String, PreparedWorkArtwork)],
     now: &str,
 ) -> Result<(), LibraryError> {
+    super::collection_authority::fence_collection_operation(transaction)?;
     for (identity, artwork) in artworks {
         // Season posters are cached presentation images, never the selected work cover.
         transaction.execute(
@@ -651,6 +658,7 @@ fn apply_artwork_decision(
     kind: WorkArtworkKind,
     prepared: Option<&(String, PreparedWorkArtwork)>,
 ) -> Result<(), LibraryError> {
+    super::collection_authority::fence_collection_operation(transaction)?;
     match decision {
         TmdbArtworkDecision::Keep => Ok(()),
         TmdbArtworkDecision::Clear => {
@@ -838,6 +846,7 @@ fn update_provider_metadata(
     fetched: &TmdbRemoteMovie,
     previous: &ProviderSnapshot,
 ) -> Result<(), LibraryError> {
+    super::collection_authority::fence_collection_operation(transaction)?;
         let (
             current_original_title,
             current_director,

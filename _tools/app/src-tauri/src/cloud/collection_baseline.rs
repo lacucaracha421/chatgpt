@@ -219,7 +219,7 @@ fn list(value: &Value, objects: bool) -> Option<String> {
     })
 }
 // These are the PC provider snapshot projections, not the user's merged work fields.
-fn provider_values(provider: &str, v: &Value) -> Result<Value, LibraryError> {
+pub(crate) fn provider_values(provider: &str, v: &Value) -> Result<Value, LibraryError> {
     if v.is_null() {
         return Ok(Value::Null);
     }
@@ -268,7 +268,7 @@ fn provider_values(provider: &str, v: &Value) -> Result<Value, LibraryError> {
                 &v["detail"].to_string(),
                 &v["covers"].to_string(),
             )?;
-            json!({"year":p.year,"author":p.author,"genres":p.genres,"overview":p.overview})
+            json!({"year":p.year,"author":p.author,"genres":p.genres,"overview":p.overview,"originalTitle":p.japanese_title})
         }
         // Bindings with no work-field merge still retain their complete raw snapshot.
         _ => json!({}),

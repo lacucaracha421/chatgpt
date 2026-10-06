@@ -341,7 +341,8 @@ impl Library {
         }
         let now = chrono::Utc::now().to_rfc3339();
         let mut changed = 0;
-        for item in items {
+        let authority_active = super::collection_authority::collection_authority_active(&tx)?;
+        for item in items.iter().filter(|_| !authority_active) {
             changed += super::collection_tracking::acknowledge_release_events_in(
                 &tx,
                 &item.collection_id,
@@ -364,6 +365,7 @@ impl Library {
         publisher_token: &str,
         endpoint: &str,
     ) -> Result<(), LibraryError> {
+        if super::collection_authority::collection_authority_active(&*self.connection()?)? { return Ok(()); }
         self.ensure_send_to(client.base())?;
         client.ensure_send()?;
         let now = unix_now();

@@ -132,6 +132,7 @@ impl Library {
         collection_id: &str,
         game_id: i64,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let credentials = super::credential::read_igdb_credentials_os()?;
         let game = self.igdb_client().game(&credentials, game_id)?;
         if game.id != game_id {
@@ -145,6 +146,7 @@ impl Library {
         collection_id: &str,
         game: super::models::IgdbRemoteGame,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         if game.id <= 0 {
             return Err(LibraryError::InvalidIgdbIdentity);
         }

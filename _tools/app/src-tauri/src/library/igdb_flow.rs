@@ -45,6 +45,7 @@ impl<'a> GameImportFlow<'a> {
     }
 
     fn apply_new(&self, request: IgdbApplyRequest) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
         let credentials = credential::read_igdb_credentials_os()?;
         let fetched = self.client.game(&credentials, request.game_id)?;
         let (cover, hero) = validated_selection(&request, &fetched)?;
@@ -82,6 +83,7 @@ impl<'a> GameImportFlow<'a> {
     }
 
     fn refresh(&self, collection_id: &str) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
         let game_id = self
             .library
             .get_igdb_connection(collection_id)?
@@ -97,6 +99,7 @@ impl<'a> GameImportFlow<'a> {
         &self,
         request: IgdbArtworkReplaceRequest,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.library.connection()?)?;
         let game_id = self
             .library
             .get_igdb_connection(&request.collection_id)?
@@ -210,6 +213,7 @@ impl Library {
         query: &mut dyn FnMut(&str) -> Result<String, LibraryError>,
         report: &dyn Fn(&str, Result<bool, LibraryError>),
     ) -> Result<(), LibraryError> {
+        if super::collection_authority::collection_authority_active(&*self.connection()?)? { return Ok(()); }
         use std::sync::atomic::Ordering;
         let mut bound = Vec::new();
         for id in ids {
@@ -278,6 +282,7 @@ impl Library {
         id: &str,
         value: &serde_json::Value,
     ) -> Result<bool, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let game_id = value
             .get("id")
             .and_then(|v| v.as_i64())
@@ -338,6 +343,7 @@ impl Library {
         hero_bytes: Option<&[u8]>,
         screenshot_bytes: &[Option<Vec<u8>>],
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let (cover, hero) = validated_selection(&request, &fetched)?;
         let hero_image_id = hero.map(|candidate| candidate.image_id.as_str());
         let collection_id = uuid::Uuid::new_v4().to_string();
@@ -484,6 +490,7 @@ impl Library {
         collection_id: &str,
         fetched: IgdbRemoteGame,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
@@ -603,6 +610,7 @@ impl Library {
         cover_bytes: Option<&[u8]>,
         hero_bytes: Option<&[u8]>,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
         let (cover_candidate, hero_candidate) = validated_artwork_decisions(&request, &fetched)?;
         let game_id = {
@@ -793,6 +801,7 @@ fn apply_artwork_decision(
     prepared: Option<&(String, PreparedWorkArtwork)>,
     screenshots: &[IgdbImageRef],
 ) -> Result<(), LibraryError> {
+    super::collection_authority::fence_collection_operation(transaction)?;
     match decision {
         IgdbArtworkDecision::Keep => Ok(()),
         IgdbArtworkDecision::Clear => {
@@ -836,6 +845,7 @@ fn demote_unselected_screenshots(
     kind: WorkArtworkKind,
     screenshots: &[IgdbImageRef],
 ) -> Result<(), LibraryError> {
+    super::collection_authority::fence_collection_operation(transaction)?;
     let now = chrono::Utc::now().to_rfc3339();
     for shot in screenshots {
         transaction.execute(

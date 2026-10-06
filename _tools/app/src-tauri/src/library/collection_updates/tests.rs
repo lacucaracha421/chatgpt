@@ -427,6 +427,56 @@ fn failed_new_mangadex_cover_does_not_fail_update_or_lose_event() {
 }
 
 #[test]
+fn active_mangadex_worker_detects_queued_events_downloads_cover_and_does_not_spin() {
+    let (_temp, library) = library();
+    let library_id = library.library_id().unwrap();
+    binding(&library, TEST_MANGA_ID, "mangadex");
+    {
+        let mut connection = library.connection().unwrap();
+        let tx = connection.transaction().unwrap();
+        reconcile_mangadex_volumes(&tx, TEST_MANGA_ID, TEST_MANGA_ID, &[cover("1")]).unwrap();
+        tx.commit().unwrap();
+        connection.execute("INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,cursor,adopted,generation,updated_at) VALUES(1,?1,1,1,0,1,'fixture','t')", [library_id]).unwrap();
+    }
+    let mut calls = Vec::new();
+    let status = library
+        .run_collection_updates_with_cover_downloader(
+            "mangadex",
+            |id| {
+                let mut connection = library.connection()?;
+                let tx = connection.transaction()?;
+                reconcile_mangadex_volumes(&tx, id, TEST_MANGA_ID, &[cover("1"), cover("2")])?;
+                tx.commit()?;
+                Ok(())
+            },
+            |manga_id, file| {
+                calls.push((manga_id.to_owned(), file.to_owned()));
+                Ok(cover_bytes())
+            },
+        )
+        .unwrap();
+    assert_eq!(status.changed_collections, 1);
+    assert_eq!(status.failed, 0);
+    assert_eq!(calls, vec![(TEST_MANGA_ID.into(), "2.jpg".into())]);
+    library
+        .run_collection_updates_with("mangadex", |_| panic!("daily cooldown must hold"))
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(
+        worker_event_count(&connection, TEST_MANGA_ID, "mangadex").unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM release_watch_events", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert!(connection.query_row("SELECT cover_artwork_id FROM collection_volumes WHERE collection_id=?1 AND volume_number=2", [TEST_MANGA_ID], |r| r.get::<_, Option<String>>(0)).unwrap().is_some());
+}
+
+#[test]
 fn explicit_zero_is_distinct_from_never_entered() {
     let (_temp, library) = library();
     binding(&library, "m", "kakao");

@@ -1,6 +1,9 @@
+use super::{
+    error::LibraryError, models::ReleaseWatchEvent, release_watch::release_watch_event_from_row,
+    Library,
+};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use super::{Library, error::LibraryError, models::ReleaseWatchEvent, release_watch::release_watch_event_from_row};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,13 +24,52 @@ pub struct ReleaseInboxItem {
 }
 
 impl Library {
-    pub fn set_owned_volume_count(&self, collection_id: &str, edition_index: u8, count: i64) -> Result<Vec<VolumeOwnership>, LibraryError> {
-        if edition_index > 3 || !(0..=2000).contains(&count) { return Err(LibraryError::InvalidCollectionMetadata); }
+    pub fn set_owned_volume_count(
+        &self,
+        collection_id: &str,
+        edition_index: u8,
+        count: i64,
+    ) -> Result<Vec<VolumeOwnership>, LibraryError> {
+        if edition_index > 3 || !(0..=2000).contains(&count) {
+            return Err(LibraryError::InvalidCollectionMetadata);
+        }
         {
             let mut connection = self.connection()?;
             super::collection::require_collection(&connection, collection_id)?;
             let transaction = connection.transaction()?;
-            if write_owned_volume_count(&transaction, collection_id, edition_index, count)? {
+            let authority = super::collection_authority::collection_write_status(&transaction)?;
+            if authority.active {
+                let kind: String = transaction.query_row(
+                    "SELECT type FROM collections WHERE id=?1",
+                    [collection_id],
+                    |r| r.get(0),
+                )?;
+                if kind != "manga" {
+                    return Err(LibraryError::InvalidCollectionType);
+                }
+                let (tracked, rows) = super::collection_authority::pending_ownership(
+                    &transaction,
+                    collection_id,
+                    edition_index,
+                )?;
+                let held: Vec<_> = rows.iter().filter(|(_, row)| row.0 || row.1).collect();
+                let expected = tracked.then_some(held.len() as i64);
+                let same = expected == Some(count)
+                    && held
+                        .iter()
+                        .zip(1..)
+                        .all(|((v, row), n)| **v == n && row.0 && !row.1);
+                if !same {
+                    let key = serde_json::json!([collection_id, edition_index]).to_string();
+                    super::collection_authority::enqueue_collection_command(
+                        &transaction,
+                        &authority,
+                        "setOwnershipTracking",
+                        &key,
+                        serde_json::json!({"workId":collection_id,"editionIndex":edition_index,"count":count,"expectedCount":expected,"expectedRevision":null}),
+                    )?;
+                }
+            } else if write_owned_volume_count(&transaction, collection_id, edition_index, count)? {
                 // Ownership has no 0074 trigger; the Collection publication carries the counts.
                 super::collection_personal_edits::bump_collections_generation(&transaction)?;
             }
@@ -68,16 +110,73 @@ impl Library {
         Ok(result)
     }
 
-    pub fn set_volume_ownership(&self, collection_id: &str, edition_index: u8, volume_numbers: Vec<i64>, format: &str, owned: bool) -> Result<Vec<VolumeOwnership>, LibraryError> {
-        if edition_index > 3 || volume_numbers.is_empty() || volume_numbers.len() > 2000 || volume_numbers.iter().any(|v| *v <= 0 || *v > 10000) || !matches!(format, "physical" | "digital") {
+    pub fn set_volume_ownership(
+        &self,
+        collection_id: &str,
+        edition_index: u8,
+        volume_numbers: Vec<i64>,
+        format: &str,
+        owned: bool,
+    ) -> Result<Vec<VolumeOwnership>, LibraryError> {
+        if edition_index > 3
+            || volume_numbers.is_empty()
+            || volume_numbers.len() > 2000
+            || volume_numbers.iter().any(|v| *v <= 0 || *v > 10000)
+            || !matches!(format, "physical" | "digital")
+        {
             return Err(LibraryError::InvalidCollectionMetadata);
         }
         {
             let mut connection = self.connection()?;
             super::collection::require_collection(&connection, collection_id)?;
-            let kind: String = connection.query_row("SELECT type FROM collections WHERE id=?1", [collection_id], |row| row.get(0))?;
-            if kind != "manga" { return Err(LibraryError::InvalidCollectionMetadata); }
+            let kind: String = connection.query_row(
+                "SELECT type FROM collections WHERE id=?1",
+                [collection_id],
+                |row| row.get(0),
+            )?;
+            if kind != "manga" {
+                return Err(LibraryError::InvalidCollectionMetadata);
+            }
             let transaction = connection.transaction()?;
+            let authority = super::collection_authority::collection_write_status(&transaction)?;
+            if authority.active {
+                let (_, rows) = super::collection_authority::pending_ownership(
+                    &transaction,
+                    collection_id,
+                    edition_index,
+                )?;
+                for volume in volume_numbers
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                {
+                    let key = serde_json::json!([collection_id, volume, edition_index]).to_string();
+                    let (mut physical, mut digital, revision) =
+                        rows.get(&volume).copied().unwrap_or((false, false, 0));
+                    if (if format == "physical" {
+                        physical
+                    } else {
+                        digital
+                    }) == owned
+                    {
+                        continue;
+                    }
+                    if format == "physical" {
+                        physical = owned;
+                    } else {
+                        digital = owned;
+                    }
+                    super::collection_authority::enqueue_collection_command(
+                        &transaction,
+                        &authority,
+                        "setVolumeOwnership",
+                        &key,
+                        serde_json::json!({"workId":collection_id,"volumeNumber":volume,"editionIndex":edition_index,"physical":physical,"digital":digital,"expectedRevision":revision}),
+                    )?;
+                }
+                transaction.commit()?;
+                drop(connection);
+                return self.list_volume_ownership(collection_id);
+            }
             // The column name is a closed, validated format, never user SQL.
             let sql = format!("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,{format}) VALUES(?1,?2,?3,?4) ON CONFLICT(collection_id,volume_number,edition_index) DO UPDATE SET {format}=excluded.{format}");
             transaction.execute("INSERT OR IGNORE INTO collection_ownership_tracking(collection_id,edition_index) VALUES(?1,?2)", params![collection_id, edition_index])?;
@@ -107,12 +206,33 @@ impl Library {
         crate::cloud::collections::release_board(&connection)
     }
 
-    pub fn acknowledge_release_events(&self, collection_id: &str, event_ids: Vec<String>) -> Result<(), LibraryError> {
-        if event_ids.len() > 2000 { return Err(LibraryError::InvalidCollectionMetadata); }
+    pub fn acknowledge_release_events(
+        &self,
+        collection_id: &str,
+        event_ids: Vec<String>,
+    ) -> Result<(), LibraryError> {
+        if event_ids.len() > 2000 {
+            return Err(LibraryError::InvalidCollectionMetadata);
+        }
         let mut connection = self.connection()?;
         super::collection::require_collection(&connection, collection_id)?;
         let transaction = connection.transaction()?;
-        acknowledge_release_events_in(&transaction, collection_id, &event_ids, &chrono::Utc::now().to_rfc3339())?;
+        let authority = super::collection_authority::collection_write_status(&transaction)?;
+        if authority.active {
+            super::collection_authority::enqueue_release_ack(
+                &transaction,
+                &authority,
+                collection_id,
+                &event_ids,
+            )?;
+        } else {
+            acknowledge_release_events_in(
+                &transaction,
+                collection_id,
+                &event_ids,
+                &chrono::Utc::now().to_rfc3339(),
+            )?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -120,7 +240,13 @@ impl Library {
 
 /// Mark exactly these unread events of one Collection read; unknown or already read ids are
 /// no-ops. Returns how many events changed. Shared by the PC inbox and the mobile read log.
-pub(super) fn acknowledge_release_events_in(connection: &rusqlite::Connection, collection_id: &str, event_ids: &[String], now: &str) -> Result<usize, LibraryError> {
+pub(super) fn acknowledge_release_events_in(
+    connection: &rusqlite::Connection,
+    collection_id: &str,
+    event_ids: &[String],
+    now: &str,
+) -> Result<usize, LibraryError> {
+    super::collection_authority::fence_collection_operation(connection)?;
     let mut changed = 0;
     for id in event_ids {
         changed += connection.execute("UPDATE release_watch_events SET read_at=?1 WHERE collection_id=?2 AND id=?3 AND read_at IS NULL", params![now,collection_id,id])?;
@@ -131,18 +257,43 @@ pub(super) fn acknowledge_release_events_in(connection: &rusqlite::Connection, c
 /// Own volumes 1..=count of one edition as physical, replacing that edition's per-volume
 /// detail and marking it tracked (the PC count control). Returns whether anything changed;
 /// an edition already in exactly that state is left alone. Non-manga is `InvalidCollectionType`.
-pub(super) fn write_owned_volume_count(connection: &rusqlite::Connection, collection_id: &str, edition_index: u8, count: i64) -> Result<bool, LibraryError> {
-    if edition_index > 3 || !(0..=2000).contains(&count) { return Err(LibraryError::InvalidCollectionMetadata); }
-    let kind: String = connection.query_row("SELECT type FROM collections WHERE id=?1", [collection_id], |row| row.get(0))?;
-    if kind != "manga" { return Err(LibraryError::InvalidCollectionType); }
+pub(super) fn write_owned_volume_count(
+    connection: &rusqlite::Connection,
+    collection_id: &str,
+    edition_index: u8,
+    count: i64,
+) -> Result<bool, LibraryError> {
+    super::collection_authority::fence_collection_operation(connection)?;
+    if edition_index > 3 || !(0..=2000).contains(&count) {
+        return Err(LibraryError::InvalidCollectionMetadata);
+    }
+    let kind: String = connection.query_row(
+        "SELECT type FROM collections WHERE id=?1",
+        [collection_id],
+        |row| row.get(0),
+    )?;
+    if kind != "manga" {
+        return Err(LibraryError::InvalidCollectionType);
+    }
     let tracked: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1 AND edition_index=?2)", params![collection_id, edition_index], |row| row.get(0))?;
     let rows = connection.prepare("SELECT volume_number, physical, digital FROM collection_volume_ownership WHERE collection_id=?1 AND edition_index=?2 ORDER BY volume_number")?
         .query_map(params![collection_id, edition_index], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)))?
         .collect::<Result<Vec<_>, _>>()?;
-    let same = tracked && rows.len() as i64 == count
-        && rows.iter().zip(1..).all(|(&(volume, physical, digital), expected)| volume == expected && physical && !digital);
-    if same { return Ok(false); }
-    connection.execute("DELETE FROM collection_volume_ownership WHERE collection_id=?1 AND edition_index=?2", params![collection_id, edition_index])?;
+    let same = tracked
+        && rows.len() as i64 == count
+        && rows
+            .iter()
+            .zip(1..)
+            .all(|(&(volume, physical, digital), expected)| {
+                volume == expected && physical && !digital
+            });
+    if same {
+        return Ok(false);
+    }
+    connection.execute(
+        "DELETE FROM collection_volume_ownership WHERE collection_id=?1 AND edition_index=?2",
+        params![collection_id, edition_index],
+    )?;
     connection.execute("INSERT OR IGNORE INTO collection_ownership_tracking(collection_id,edition_index) VALUES(?1,?2)", params![collection_id, edition_index])?;
     for volume in 1..=count {
         connection.execute("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES(?1,?2,?3,1,0)", params![collection_id,volume,edition_index])?;

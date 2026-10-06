@@ -247,6 +247,7 @@ fn write_field(
     value: &EditValue,
     now: &str,
 ) -> Result<bool, LibraryError> {
+        super::collection_authority::fence_collection_operation(connection)?;
     let changed = match value {
         EditValue::Score(score) => connection.execute(
             "UPDATE collections SET my_score = ?1, updated_at = ?2
@@ -565,7 +566,8 @@ impl Library {
         if !super::is_valid_library_id(library_id) || self.library_id()? != library_id {
             return Err(LibraryError::CollectionPersonalEditCursorRejected);
         }
-        let held = self.sync_held(endpoint);
+        let authority_active = super::collection_authority::collection_authority_active(&*self.connection()?)?;
+        let held = self.sync_held(endpoint) && !authority_active;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let (before_generation, published_generation): (i64, i64) = transaction.query_row(
@@ -628,7 +630,7 @@ impl Library {
                     )
                     .optional()?
                     .unwrap_or(false);
-                let result = if publishable {
+                let result = if publishable && !authority_active {
                     if write_field(&transaction, &item.collection_id, &value, &now)? {
                         outcome.changed += 1;
                     }
@@ -672,7 +674,7 @@ impl Library {
             )?;
             // Even a skipped/no-op entry needs a publication so the server can acknowledge
             // the new cursor; a changed row is also dirtied by the 0074 triggers.
-            bump_collections_generation(&transaction)?;
+            if !authority_active { bump_collections_generation(&transaction)?; }
         }
         let after_generation: i64 = transaction.query_row("SELECT generation FROM mobile_publication_state WHERE kind='collections'", [], |row| row.get(0))?;
         super::sync_hold::record_tablet_wait_on(&transaction, endpoint, "personalEdits", &waiting)?;

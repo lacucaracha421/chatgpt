@@ -52,6 +52,25 @@ fn valid_provider(provider: &str) -> Result<&'static str, LibraryError> {
         _ => Err(LibraryError::InvalidCollectionMetadata),
     }
 }
+fn worker_event_count(
+    connection: &rusqlite::Connection,
+    id: &str,
+    provider: &str,
+) -> Result<i64, LibraryError> {
+    if super::collection_authority::collection_authority_active(connection)? {
+        Ok(connection.query_row(
+            "SELECT COUNT(*) FROM collection_authority_outbox WHERE command_type='recordReleaseEvent' AND entity_key=?1 AND json_extract(payload,'$.provider')=?2 AND state<>'dropped'",
+            params![id, provider],
+            |row| row.get(0),
+        )?)
+    } else {
+        Ok(connection.query_row(
+            "SELECT COUNT(*) FROM release_watch_events WHERE collection_id=?1 AND provider=?2",
+            params![id, provider],
+            |row| row.get(0),
+        )?)
+    }
+}
 fn due(
     connection: &rusqlite::Connection,
     provider: &str,
@@ -167,6 +186,12 @@ impl Library {
                 })
             }
         };
+        if matches!(
+            super::collection_authority::collection_write_status(&*self.connection()?),
+            Err(LibraryError::CollectionAuthorityNotAdopted)
+        ) {
+            return self.collection_update_status(provider);
+        }
         let now = chrono::Utc::now();
         let now_text = now.to_rfc3339();
         let mut status = self.collection_update_status(provider)?;
@@ -206,11 +231,7 @@ impl Library {
             } else {
                 None
             };
-            let before = self.connection()?.query_row(
-                "SELECT COUNT(*) FROM release_watch_events WHERE collection_id=?1 AND provider=?2",
-                params![id, provider],
-                |row| row.get::<_, i64>(0),
-            )?;
+            let before = worker_event_count(&*self.connection()?, id, provider)?;
             provider_requests::take_failure();
             match refresh(id) {
                 Ok(()) => {
@@ -225,8 +246,14 @@ impl Library {
                     status.checked += 1;
                     let after = {
                         let connection = self.connection()?;
-                        connection.execute("DELETE FROM collection_update_attempts WHERE collection_id=?1 AND provider=?2",params![id,provider])?;
-                        connection.query_row("SELECT COUNT(*) FROM release_watch_events WHERE collection_id=?1 AND provider=?2",params![id,provider],|row|row.get::<_,i64>(0))?
+                        if super::collection_authority::collection_authority_active(&connection)? {
+                            let retry =
+                                (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+                            connection.execute("INSERT INTO collection_update_attempts(collection_id,provider,retry_at) VALUES(?1,?2,?3) ON CONFLICT(collection_id,provider) DO UPDATE SET retry_at=excluded.retry_at",params![id,provider,retry])?;
+                        } else {
+                            connection.execute("DELETE FROM collection_update_attempts WHERE collection_id=?1 AND provider=?2",params![id,provider])?;
+                        }
+                        worker_event_count(&connection, id, provider)?
                     };
                     if let Some(previous) = previous_mangadex_slots {
                         if after > before {
@@ -375,6 +402,7 @@ pub(super) fn reconcile_mangadex_volumes(
     manga_id: &str,
     covers: &[MangaDexCoverCandidate],
 ) -> Result<BTreeSet<(i64, u8)>, LibraryError> {
+    let authority = super::collection_authority::collection_write_status(transaction)?;
     let previous = transaction
         .query_row(
             "SELECT manga_id FROM collection_mangadex_baselines WHERE collection_id=?1",
@@ -407,7 +435,21 @@ pub(super) fn reconcile_mangadex_volumes(
     for (volume, edition) in slots {
         let inserted=transaction.execute("INSERT OR IGNORE INTO collection_mangadex_seen_volumes(collection_id,volume_number,edition_index) VALUES(?1,?2,?3)",params![id,volume,edition])?;
         if initialized && inserted > 0 && volume <= 999 && volume_range.contains(volume) {
-            transaction.execute("INSERT INTO release_watch_events(id,collection_id,event_kind,volume_number,detected_at,provider) VALUES(?1,?2,'new_volume',?3,?4,'mangadex')",params![uuid::Uuid::new_v4().to_string(),id,volume,chrono::Utc::now().to_rfc3339()])?;
+            if authority.active {
+                super::collection_authority::enqueue_release_event(
+                    transaction,
+                    &authority,
+                    id,
+                    "mangadex",
+                    "new_volume",
+                    volume,
+                    None,
+                    None,
+                    &chrono::Utc::now().to_rfc3339(),
+                )?;
+            } else {
+                transaction.execute("INSERT INTO release_watch_events(id,collection_id,event_kind,volume_number,detected_at,provider) VALUES(?1,?2,'new_volume',?3,?4,'mangadex')",params![uuid::Uuid::new_v4().to_string(),id,volume,chrono::Utc::now().to_rfc3339()])?;
+            }
             newly_detected.insert((volume, edition));
         }
     }

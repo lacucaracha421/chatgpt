@@ -37,6 +37,8 @@ const COMMANDS: &[&str] = &[
     "setOwnershipTracking",
     "setReleaseSubscription",
     "setVolumeRange",
+    "recordReleaseEvent",
+    "acknowledgeReleaseEvents",
 ];
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
@@ -234,6 +236,237 @@ pub(crate) fn collection_write_status(
 pub(crate) fn fence_collection_operation(db: &Connection) -> Result<(), LibraryError> {
     if local(db)?.is_some() {
         return Err(LibraryError::CollectionAuthorityOperationUnavailable);
+    }
+    Ok(())
+}
+
+pub(crate) fn collection_authority_active(db: &Connection) -> Result<bool, LibraryError> {
+    Ok(local(db)?.is_some())
+}
+
+/// Provider metadata is never optimistically merged. Only receipts/feed materialize it.
+pub(crate) fn enqueue_provider_snapshot(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    input: &super::models::ExternalBindingInput,
+) -> Result<(), LibraryError> {
+    use sha2::{Digest, Sha256};
+    if !status.active {
+        return Ok(());
+    }
+    let provider = input.provider.trim().to_ascii_lowercase();
+    let parse = |raw: &Option<String>| -> Result<Value, LibraryError> {
+        raw.as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| LibraryError::InvalidExternalBinding)
+            .map(|v| v.unwrap_or(Value::Null))
+    };
+    let config = parse(&input.provider_config_json)?;
+    let snapshot = parse(&input.provider_data_json)?;
+    if !matches!(provider.as_str(), "mangadex" | "kakao" | "aladin")
+        || input.external_id.trim().is_empty()
+        || (!config.is_null() && !config.is_object())
+        || (!snapshot.is_null() && !snapshot.is_object())
+    {
+        return Err(LibraryError::InvalidExternalBinding);
+    }
+    let entity_key = json!([work, provider]).to_string();
+    let mut base: Value = tx.query_row("SELECT payload FROM collection_authority_revisions WHERE section='bindings' AND entity_key=?1", [&entity_key], |r| r.get::<_,String>(0)).optional()?
+        .map(|raw| serde_json::from_str(&raw)).transpose().map_err(|_| LibraryError::InvalidCloudResponse)?.unwrap_or(Value::Null);
+    let mut revision = base["entityRevision"].as_i64().unwrap_or(0);
+    // Earlier intents are immutable. Predict only their binding state/digest for FIFO CAS.
+    let pending = tx.prepare("SELECT payload FROM collection_authority_outbox WHERE entity_key=?1 AND state IN ('pending','blocked') ORDER BY seq")?
+        .query_map([&entity_key], |r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    for raw in pending {
+        let body: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        match body["commandType"].as_str() {
+            Some("bindProvider") => {
+                if base["bound"] != true
+                    || base["externalId"] != body["externalId"]
+                    || base["config"] != body["config"]
+                {
+                    revision += 1;
+                }
+                if !base.is_object() {
+                    base = json!({});
+                }
+                base["externalId"] = body["externalId"].clone();
+                base["config"] = body["config"].clone();
+                base["bound"] = json!(true);
+            }
+            Some("applyProviderSnapshot") => {
+                revision += 1;
+                if !base.is_object() {
+                    base = json!({});
+                }
+                base["externalId"] = body["externalId"].clone();
+                base["snapshot"] = body["snapshot"].clone();
+                base["values"] = body["values"].clone();
+                base["snapshotDigest"] =
+                    json!(Sha256::digest(body["snapshot"].to_string().as_bytes())
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<String>());
+            }
+            _ => {}
+        }
+    }
+    let external = input.external_id.trim();
+    if base["bound"] != true || base["externalId"] != external || base["config"] != config {
+        let expected_revision = if base["bound"] == true { revision } else { 0 };
+        enqueue_collection_command(
+            tx,
+            status,
+            "bindProvider",
+            &entity_key,
+            json!({"workId":work,"provider":provider,"externalId":external,"config":config,"expectedRevision":expected_revision}),
+        )?;
+    }
+    if !snapshot.is_null() {
+        let values =
+            crate::cloud::collections::collection_baseline::provider_values(&provider, &snapshot)?;
+        if base["externalId"] != external
+            || base["snapshot"] != snapshot
+            || base["values"] != values
+        {
+            let operation = enqueue_collection_command(
+                tx,
+                status,
+                "applyProviderSnapshot",
+                &entity_key,
+                json!({"workId":work,"provider":provider,"externalId":external,"snapshot":snapshot,"values":values,"details":null,"baseSnapshotDigest":base["snapshotDigest"]}),
+            )?;
+            let retry_key = format!("collectionProviderRetry:{entity_key}");
+            if tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?1)",
+                [&retry_key],
+                |r| r.get::<_, bool>(0),
+            )? {
+                tx.execute("UPDATE collection_authority_outbox SET conflict_code='providerSnapshotRetry' WHERE operation_id=?1",[operation])?;
+                tx.execute("DELETE FROM notes_state WHERE key=?1", [retry_key])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn enqueue_release_event(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    provider: &str,
+    kind: &str,
+    volume: i64,
+    previous: Option<&str>,
+    current: Option<&str>,
+    detected: &str,
+) -> Result<(), LibraryError> {
+    let duplicate:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE command_type='recordReleaseEvent' AND entity_key=?1 AND state IN ('pending','blocked') AND json_extract(payload,'$.provider')=?2 AND json_extract(payload,'$.kind')=?3 AND json_extract(payload,'$.volumeNumber')=?4 AND json_extract(payload,'$.previousValue') IS ?5 AND json_extract(payload,'$.currentValue') IS ?6)",params![work,provider,kind,volume,previous,current],|r|r.get(0))?;
+    if duplicate {
+        return Ok(());
+    }
+    enqueue_collection_command(
+        tx,
+        status,
+        "recordReleaseEvent",
+        work,
+        json!({"workId":work,"eventId":uuid::Uuid::new_v4().to_string(),"provider":provider,"kind":kind,"volumeNumber":volume,"previousValue":previous,"currentValue":current,"detectedAt":detected}),
+    )?;
+    Ok(())
+}
+
+/// FIFO projection for ownership CAS, including count replacement before individual edits.
+pub(crate) fn pending_ownership(
+    db: &Connection,
+    work: &str,
+    edition: u8,
+) -> Result<(bool, std::collections::BTreeMap<i64, (bool, bool, i64)>), LibraryError> {
+    let mut tracked: bool=db.query_row("SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1 AND edition_index=?2)",params![work,edition],|r|r.get(0))?;
+    let mut rows = std::collections::BTreeMap::new();
+    let confirmed=db.prepare("SELECT payload FROM collection_authority_revisions WHERE section='ownership' AND work_id=?1")?.query_map([work],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    for raw in confirmed {
+        let v: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if v["editionIndex"] == edition {
+            rows.insert(
+                integer(&v, "volumeNumber")?,
+                (
+                    boolean(&v, "physical")?,
+                    boolean(&v, "digital")?,
+                    integer(&v, "entityRevision")?,
+                ),
+            );
+        }
+    }
+    let pending=db.prepare("SELECT payload FROM collection_authority_outbox WHERE command_type IN ('setOwnershipTracking','setVolumeOwnership') AND state IN ('pending','blocked') ORDER BY seq")?.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    for raw in pending {
+        let v: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if v["workId"] != work || v["editionIndex"] != edition {
+            continue;
+        }
+        tracked = true;
+        if v["commandType"] == "setOwnershipTracking" {
+            let count = integer(&v, "count")?;
+            for n in 1..=count {
+                rows.entry(n).or_insert((false, false, 0));
+            }
+            for (&n, row) in rows.iter_mut() {
+                let p = n <= count;
+                if row.0 != p || row.1 {
+                    row.2 += 1;
+                }
+                row.0 = p;
+                row.1 = false;
+            }
+        } else {
+            let row = rows
+                .entry(integer(&v, "volumeNumber")?)
+                .or_insert((false, false, 0));
+            let p = boolean(&v, "physical")?;
+            let d = boolean(&v, "digital")?;
+            if (row.0, row.1) != (p, d) {
+                row.2 += 1;
+            }
+            row.0 = p;
+            row.1 = d;
+        }
+    }
+    Ok((tracked, rows))
+}
+
+pub(crate) fn enqueue_release_ack(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    ids: &[String],
+) -> Result<(), LibraryError> {
+    let mut desired: std::collections::BTreeSet<_> = ids.iter().cloned().collect();
+    let pending=tx.prepare("SELECT payload FROM collection_authority_outbox WHERE command_type='acknowledgeReleaseEvents' AND entity_key=?1 AND state IN ('pending','blocked')")?.query_map([work],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    for raw in pending {
+        let v: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        for id in v["eventIds"]
+            .as_array()
+            .ok_or(LibraryError::InvalidCloudResponse)?
+        {
+            if let Some(id) = id.as_str() {
+                desired.remove(id);
+            }
+        }
+    }
+    let ids: Vec<_> = desired.into_iter().collect();
+    for ids in ids.chunks(500) {
+        enqueue_collection_command(
+            tx,
+            status,
+            "acknowledgeReleaseEvents",
+            work,
+            json!({"workId":work,"eventIds":ids}),
+        )?;
     }
     Ok(())
 }
@@ -955,6 +1188,35 @@ fn apply_work(tx: &Transaction<'_>, v: &Value, now: &str) -> Result<(), LibraryE
     if let Some(range) = v["derived"].get("volumeRange") {
         project_volume_range(tx, id, range, now)?;
     }
+    if let Some(counts) = v["derived"]["ownedVolumes"].as_array() {
+        tx.execute(
+            "DELETE FROM collection_ownership_tracking WHERE collection_id=?1",
+            [id],
+        )?;
+        for count in counts {
+            tx.execute("INSERT INTO collection_ownership_tracking(collection_id,edition_index) VALUES(?1,?2)",params![id,integer(count,"editionIndex")?])?;
+        }
+    }
+    if let Some(watch) = v["derived"]["releaseWatch"].as_object() {
+        if watch.get("enabled").and_then(Value::as_bool) == Some(false) {
+            tx.execute(
+                "DELETE FROM release_watch_subscriptions WHERE collection_id=?1",
+                [id],
+            )?;
+        } else if watch.get("enabled").and_then(Value::as_bool) == Some(true) {
+            // Preserve local check time. Binding receipt/feed chooses Kakao over Aladin.
+            tx.execute("INSERT OR IGNORE INTO release_watch_subscriptions(collection_id,provider) SELECT ?1,provider FROM collection_external_bindings WHERE collection_id=?1 AND provider IN ('kakao','aladin') ORDER BY CASE provider WHEN 'kakao' THEN 0 ELSE 1 END LIMIT 1",[id])?;
+        }
+    }
+    if let Some(events) = v["derived"]["releaseEvents"].as_array() {
+        tx.execute(
+            "DELETE FROM release_watch_events WHERE collection_id=?1",
+            [id],
+        )?;
+        for event in events {
+            tx.execute("INSERT INTO release_watch_events(id,collection_id,provider,event_kind,volume_number,previous_value,current_value,detected_at,read_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![text(event,"eventId")?,id,text(event,"provider")?,text(event,"kind")?,integer(event,"volumeNumber")?,sql_value(&event["previousValue"])?,sql_value(&event["currentValue"])?,text(event,"detectedAt")?,sql_value(&event["readAt"]) ?])?;
+        }
+    }
     Ok(())
 }
 
@@ -1132,6 +1394,15 @@ fn selections(tx: &Transaction<'_>) -> Result<(), LibraryError> {
     for raw in works {
         let w: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if w["derived"]["releaseWatch"]["enabled"] == true && w["lifecycle"] == "live" {
+            let work = text(&w, "workId")?;
+            let provider:Option<String>=tx.query_row("SELECT provider FROM collection_external_bindings WHERE collection_id=?1 AND provider IN ('kakao','aladin') ORDER BY CASE provider WHEN 'kakao' THEN 0 ELSE 1 END LIMIT 1",[work],|r|r.get(0)).optional()?;
+            if let Some(provider) = provider {
+                let checked:Option<String>=tx.query_row("SELECT last_checked_at FROM release_watch_subscriptions WHERE collection_id=?1 ORDER BY last_checked_at DESC LIMIT 1",[work],|r|r.get(0)).optional()?.flatten();
+                tx.execute("INSERT OR IGNORE INTO release_watch_subscriptions(collection_id,provider,last_checked_at) VALUES(?1,?2,?3)",params![work,provider,checked])?;
+                tx.execute("DELETE FROM release_watch_subscriptions WHERE collection_id=?1 AND provider<>?2",params![work,provider])?;
+            }
+        }
         for slot in ["work", "hero", "backdrop", "spine", "back"] {
             if let Some(selected) = w["selection"].get(slot) {
                 project_selection(tx, text(&w, "workId")?, slot, selected.as_str())?;
@@ -1512,6 +1783,7 @@ fn publisher_command(command: &str) -> bool {
             | "upsertVolume"
             | "upsertVolumeSource"
             | "setVolumeOwnership"
+            | "recordReleaseEvent"
     )
 }
 
@@ -1827,6 +2099,26 @@ impl Library {
         send: &dyn Fn(&Value) -> Result<CollectionDelivery, LibraryError>,
         now: i64,
     ) -> Result<bool, LibraryError> {
+        self.flush_collection_outbox_with_refresh(status, send, now, &|body| {
+            let work = text(body, "workId")?;
+            match text(body, "provider")? {
+                "mangadex" => self.refresh_mangadex(work).map(|_| ()),
+                "kakao" => super::credential::read_kakao_key()
+                    .and_then(|key| self.refresh_kakao(&key, work).map(|_| ())),
+                "aladin" => super::credential::read_aladin_key()
+                    .and_then(|key| self.refresh_aladin(&key, work).map(|_| ())),
+                _ => Err(LibraryError::InvalidExternalBinding),
+            }
+        })
+    }
+
+    fn flush_collection_outbox_with_refresh(
+        &self,
+        status: &CollectionAuthorityStatus,
+        send: &dyn Fn(&Value) -> Result<CollectionDelivery, LibraryError>,
+        now: i64,
+        refresh: &dyn Fn(&Value) -> Result<(), LibraryError>,
+    ) -> Result<bool, LibraryError> {
         if !status.active {
             return Ok(false);
         }
@@ -1847,6 +2139,55 @@ impl Library {
             // Count the attempt durably before leaving the DB for transport.
             self.connection()?.execute("UPDATE collection_authority_outbox SET attempts=attempts+1,updated_at=?2 WHERE seq=?1",params![seq,chrono::Utc::now().to_rfc3339()])?;
             let result = send(&body);
+            if let Ok(CollectionDelivery::Conflict(detail)) = &result {
+                if body["commandType"] == "applyProviderSnapshot"
+                    && detail["code"] == "providerSnapshotStale"
+                {
+                    let already_retried: bool = self.connection()?.query_row("SELECT conflict_code='providerSnapshotRetry' FROM collection_authority_outbox WHERE seq=?1",[seq],|r|Ok(r.get::<_,Option<bool>>(0)?.unwrap_or(false)))?;
+                    {
+                        let mut db = self.connection()?;
+                        let tx = db.transaction()?;
+                        let timestamp = chrono::Utc::now().to_rfc3339();
+                        let l = local(&tx)?.unwrap();
+                        if !detail["current"]["binding"].is_null() {
+                            apply_entity(
+                                &tx,
+                                "bindings",
+                                &detail["current"]["binding"],
+                                &l.generation,
+                                &timestamp,
+                            )?;
+                        }
+                        tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='providerSnapshotStale',conflict_detail=?2,updated_at=?3 WHERE seq=?1",params![seq,detail.to_string(),timestamp])?;
+                        if !already_retried {
+                            let retry_key = format!(
+                                "collectionProviderRetry:{}",
+                                json!([body["workId"], body["provider"]])
+                            );
+                            tx.execute("INSERT INTO notes_state(key,value) VALUES(?1,'1') ON CONFLICT(key) DO UPDATE SET value='1'",[retry_key])?;
+                        }
+                        tx.commit()?;
+                    }
+                    if !already_retried {
+                        // Refetch outside the library lock. The retry is a new immutable operation,
+                        // bound to the newly received merge base, and gets exactly one attempt.
+                        let work = text(&body, "workId")?;
+                        let refetched = refresh(&body);
+                        self.connection()?.execute(
+                            "DELETE FROM notes_state WHERE key=?1",
+                            [format!(
+                                "collectionProviderRetry:{}",
+                                json!([work, body["provider"]])
+                            )],
+                        )?;
+                        if refetched.is_err() {
+                            self.connection()?.execute("UPDATE collection_authority_outbox SET last_error='providerSnapshotRefetchFailed' WHERE seq=?1",[seq])?;
+                        }
+                    }
+                    sent = true;
+                    continue;
+                }
+            }
             let mut db = self.connection()?;
             let tx = db.transaction()?;
             let timestamp = chrono::Utc::now().to_rfc3339();

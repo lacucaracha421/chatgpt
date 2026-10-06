@@ -111,15 +111,17 @@ MEMBERSHIP = "setMembership"
 TRACK_OWNERSHIP = "setOwnershipTracking"
 RELEASE_SUBSCRIPTION = "setReleaseSubscription"
 VOLUME_RANGE = "setVolumeRange"
+RECORD_RELEASE = "recordReleaseEvent"
+ACK_RELEASE = "acknowledgeReleaseEvents"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                        VOLUME_RANGE)
+                        VOLUME_RANGE, ACK_RELEASE)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
-                           UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP)
+                           UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
 
 ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
@@ -149,6 +151,8 @@ COMMAND_KEYS = {
     MEMBERSHIP: {"workId", "assetId", "desiredState", "expectedRevision"},
     TRACK_OWNERSHIP: {"workId", "editionIndex", "count", "expectedCount", "expectedRevision"},
     RELEASE_SUBSCRIPTION: {"workId", "enabled", "expectedEnabled", "expectedRevision"},
+    ACK_RELEASE: {"workId", "eventIds"},
+    RECORD_RELEASE: {"workId", "eventId", "provider", "kind", "volumeNumber", "previousValue", "currentValue", "detectedAt"},
     VOLUME_RANGE: {"workId", "minVolume", "maxVolume", "hideConnectionPrompt",
                    "expectedRange", "expectedRevision"},
 }
@@ -1360,6 +1364,8 @@ def _apply_snapshot(ctx, state, *, provider, external_id, snapshot, values, deta
                    last_synced_at=ctx.now, bound=True, existing=existing)
     if provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state):
         changed = True
+    if _refresh_release_schedule(ctx, state):
+        changed = True
     return changed, mode
 
 
@@ -1576,7 +1582,9 @@ def _bind(ctx, entity, payload_sha):
                    last_synced_at=existing["last_synced_at"] if keep else None,
                    bound=True, existing=existing)
     state = work_state(row)
-    if provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state):
+    availability_changed = provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state)
+    schedule_changed = _refresh_release_schedule(ctx, state)
+    if availability_changed or schedule_changed:
         _bump_work(ctx, state)
     return _finish(ctx, payload_sha, f"{work_id}:{provider}")
 
@@ -1593,7 +1601,9 @@ def _unbind(ctx, entity, payload_sha):
     _write_binding(ctx, work_id=work_id, provider=provider, external_id=existing["external_id"],
                    config=None, snapshot=None, values=None, snapshot_external_id=None,
                    last_synced_at=None, bound=False, existing=existing)
-    if provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state):
+    availability_changed = provider in SOURCE_PROVIDERS and _sync_release_availability(ctx, state)
+    schedule_changed = _refresh_release_schedule(ctx, state)
+    if availability_changed or schedule_changed:
         _bump_work(ctx, state)
     return _finish(ctx, payload_sha, f"{work_id}:{provider}")
 
@@ -1847,6 +1857,9 @@ def _upsert_volume(ctx, entity, payload_sha):
     row = ctx.db.execute("SELECT * FROM collection_authority_volumes WHERE library_id=? AND volume_id=?",
                          [ctx.library_id, volume_id]).fetchone()
     ctx.add("volumes", volume_projection(row), work_id)
+    state = work_state(require_work(ctx, work_id))
+    if _refresh_release_schedule(ctx, state):
+        _bump_work(ctx, state)
     return _finish(ctx, payload_sha, volume_id)
 
 
@@ -1889,6 +1902,9 @@ def _upsert_source(ctx, entity, payload_sha):
         "SELECT * FROM collection_authority_volume_sources WHERE library_id=? AND work_id=?"
         " AND volume_number=? AND provider=?", [ctx.library_id, work_id, number, provider]).fetchone()
     ctx.add("volumeSources", source_projection(row), work_id)
+    state = work_state(require_work(ctx, work_id))
+    if _refresh_release_schedule(ctx, state):
+        _bump_work(ctx, state)
     return _finish(ctx, payload_sha, key)
 
 
@@ -1962,6 +1978,128 @@ def _membership(ctx, entity, payload_sha):
     return _finish(ctx, payload_sha, key)
 
 
+def _refresh_release_schedule(ctx, state):
+    if state["type"] != "manga":
+        return False
+    schedule = {"kakao": None, "mangadex": None}
+    bounds = state["derived"].get("volumeRange") or {}
+    inside = lambda number: (1 <= number <= 999
+        and (bounds.get("minVolume") is None or number >= bounds["minVolume"])
+        and (bounds.get("maxVolume") is None or number <= bounds["maxVolume"]))
+    for provider in schedule:
+        binding = binding_row(ctx.db, ctx.library_id, state["workId"], provider)
+        if binding is None or not binding["bound"]:
+            continue
+        checked = binding["last_synced_at"]
+        if provider == "kakao":
+            volumes = []
+            for row in ctx.db.execute("SELECT volume_number,publication_date FROM collection_authority_volume_sources"
+                                      " WHERE library_id=? AND work_id=? AND provider='kakao' AND deleted=0 ORDER BY volume_number",
+                                      [ctx.library_id, state["workId"]]):
+                if not inside(row[0]):
+                    continue
+                date, status = None, None
+                try:
+                    date = datetime.datetime.strptime(row[1], "%Y-%m-%d").date().isoformat()
+                    if checked:
+                        today = datetime.datetime.fromisoformat(checked.replace("Z", "+00:00")).date().isoformat()
+                        status = "upcoming" if date > today else "released"
+                except (ValueError, TypeError):
+                    pass
+                volumes.append({"volumeNumber": row[0], "date": date, "status": status})
+            schedule[provider] = {"editionIndex": 0, "checkedAt": checked, "volumes": volumes}
+        else:
+            # Retain staged/previous monotonic seen slots, including temporary cover removal.
+            previous = (state["derived"].get("releaseSchedule") or {}).get("mangadex") or {}
+            slots = {(v["volumeNumber"], v.get("editionIndex", 0)) for v in previous.get("volumes", [])}
+            slots.update((row[0], row[1]) for row in ctx.db.execute(
+                "SELECT volume_number,edition_index FROM collection_authority_volumes"
+                " WHERE library_id=? AND work_id=? AND source_provider='mangadex' AND deleted=0",
+                [ctx.library_id, state["workId"]]))
+            volumes = [{"volumeNumber": n, "editionIndex": e} for n, e in sorted(slots) if inside(n) and 0 <= e <= 3][:999]
+            schedule[provider] = {"checkedAt": checked, "latestVolume": volumes[-1]["volumeNumber"] if volumes else None,
+                                  "volumes": volumes}
+    if state["derived"].get("releaseSchedule") == schedule:
+        return False
+    state["derived"]["releaseSchedule"] = schedule
+    return True
+
+
+def _release_state(ctx, state):
+    """The existing release store serves the shipped tablet; the work feed serves PC."""
+    import collection_releases as releases
+    rows = ctx.db.execute("SELECT * FROM collection_release_events WHERE collection_id=? ORDER BY id",
+                          [state["workId"]]).fetchall()
+    events = [{key: value for key, value in releases._item(row).items()
+               if key not in ("collectionId", "collectionName", "read")} for row in rows]
+    unread = sum(event["readAt"] is None for event in events)
+    if (state["derived"].get("releaseEvents") != events
+            or state["derived"].get("unreadReleaseCount") != unread):
+        state["derived"]["releaseEvents"] = events
+        state["derived"]["unreadReleaseCount"] = unread
+        _bump_work(ctx, state)
+
+
+def _record_release(ctx, entity, payload_sha):
+    import collection_releases as releases
+    state = work_state(require_work(ctx, entity["workId"]))
+    if state["type"] != "manga":
+        fail(422, "collectionTrackingUnavailable", "만화 작품에서만 신간 알림을 사용할 수 있습니다.")
+    releases._retain(ctx.db, releases.parse_instant(ctx.now))
+    existing = ctx.db.execute("SELECT * FROM collection_release_events WHERE event_id=?",
+                              [entity["eventId"]]).fetchone()
+    values = (state["workId"], state["name"], entity["provider"], entity["kind"], entity["volumeNumber"],
+              entity["previousValue"], entity["currentValue"], entity["detectedAt"])
+    if existing is not None and tuple(existing[key] for key in releases.CONTENT) != values:
+        fail(409, "releaseEventExists", "같은 ID의 다른 신간 알림이 이미 있습니다.")
+    if existing is None:
+        if ctx.db.execute("SELECT COUNT(*) FROM collection_release_events").fetchone()[0] >= releases.MAX_EVENTS:
+            fail(409, "releaseEventLimit", "신간 알림이 너무 많습니다.")
+        generation = releases._state(ctx.db)["generation"] or 1
+        ctx.db.execute("INSERT INTO collection_release_events(event_id,collection_id,collection_name,provider,kind,"
+                       "volume_number,previous_value,current_value,detected_at,detected_ms,generation,read_at,updated_at)"
+                       " VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,?)",
+                       [entity["eventId"], *values, int(releases.parse_instant(entity["detectedAt"]).timestamp()*1000), generation, ctx.now])
+        releases._bump(ctx.db)
+    _release_state(ctx, state)
+    return _finish(ctx, payload_sha, state["workId"])
+
+
+def _ack_release(ctx, entity, payload_sha):
+    import collection_releases as releases
+    state = work_state(require_work(ctx, entity["workId"]))
+    if state["type"] != "manga":
+        fail(422, "collectionTrackingUnavailable", "만화 작품에서만 신간 알림을 사용할 수 있습니다.")
+    sequence = releases._state(ctx.db)["read_sequence"]
+    changed = False
+    for event_id in entity["eventIds"]:
+        hit = ctx.db.execute("UPDATE collection_release_events SET read_at=?,updated_at=?"
+                             " WHERE event_id=? AND collection_id=? AND read_at IS NULL",
+                             [ctx.now, ctx.now, event_id, state["workId"]]).rowcount
+        if hit:
+            changed = True
+            sequence += 1
+            ctx.db.execute("INSERT INTO collection_release_reads VALUES(?,?,?,?,?)",
+                           [sequence, ctx.operation_id, event_id, state["workId"], ctx.now])
+    if changed:
+        ctx.db.execute("UPDATE collection_release_state SET read_sequence=? WHERE singleton=1", [sequence])
+        releases._bump(ctx.db)
+    releases._retain(ctx.db, releases.parse_instant(ctx.now))
+    _release_state(ctx, state)
+    return _finish(ctx, payload_sha, state["workId"])
+
+
+def acknowledge_release_shim(db, domain, operation_id, grouped, now):
+    """Preserve the tablet ACK envelope while atomically revisioning each affected work."""
+    from uuid import UUID, uuid5
+    for work_id, ids in sorted(grouped.items()):
+        for start in range(0, len(ids), 500):
+            apply_command(db, library_id=domain["libraryId"], epoch=domain["epoch"],
+                          contract_version=CONTRACT_VERSION, command_type=ACK_RELEASE,
+                          operation_id=str(uuid5(UUID(operation_id), f"{work_id}:{start}")),
+                          entity={"workId": work_id, "eventIds": ids[start:start + 500]}, now=now)
+
+
 HANDLERS = {
     CREATE: _create, UPDATE: _update, DELETE: _delete, RESTORE: _restore, PURGE: _purge,
     PURGE_EXPIRED: _purge_expired, SHOWCASE_ORDER: _showcase_order, BIND: _bind,
@@ -1969,7 +2107,7 @@ HANDLERS = {
     SELECT_ARTWORK: _select_artwork, UPSERT_VOLUME: _upsert_volume,
     UPSERT_VOLUME_SOURCE: _upsert_source, OWNERSHIP: _ownership, MEMBERSHIP: _membership,
     TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
-    VOLUME_RANGE: _volume_range,
+    VOLUME_RANGE: _volume_range, RECORD_RELEASE: _record_release, ACK_RELEASE: _ack_release,
 }
 
 
@@ -2189,6 +2327,25 @@ def parse_command(body):
                           expectedCount=_int(body["expectedCount"], low=0, high=2000))
         else:
             entity.update(enabled=_bool(body["enabled"]), expectedEnabled=_bool(body["expectedEnabled"]))
+    elif command_type == RECORD_RELEASE:
+        import collection_releases as releases
+        from pydantic import ValidationError
+        try:
+            item = releases.Event.model_validate({"eventId": body["eventId"], "collectionId": entity["workId"],
+                  "collectionName": "authority", **{key: body[key] for key in
+                  ("provider", "kind", "volumeNumber", "previousValue", "currentValue", "detectedAt")}})
+        except (ValidationError, ValueError):
+            fail()
+        entity.update({key: value for key, value in item.model_dump().items()
+                       if key not in ("collectionId", "collectionName")})
+    elif command_type == ACK_RELEASE:
+        import collection_releases as releases
+        ids = body["eventIds"]
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 500
+                or any(not isinstance(i, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", i) for i in ids)
+                or len(set(ids)) != len(ids)):
+            fail()
+        entity["eventIds"] = ids
     elif command_type == MEMBERSHIP:
         entity.update(assetId=require_id(body["assetId"]), desiredState=_bool(body["desiredState"]),
                       expectedRevision=_revision(body["expectedRevision"]))

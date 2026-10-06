@@ -364,6 +364,8 @@ def register(app, get_db, require_client, require_publisher, collection_source=N
             replay = _receipt(db, publication.operationId, digest, "게시")
             if replay is not None:
                 return replay
+            import authority
+            authority.fence_legacy_write(db, "collections")
             completed = _state(db)["generation"]
             if completed is not None and generation < completed:
                 fail(409, "releaseGenerationStale", "더 새로운 신간 알림 목록이 이미 게시되었습니다.")
@@ -508,14 +510,22 @@ def register(app, get_db, require_client, require_publisher, collection_source=N
                     AND {eligible}
                     ORDER BY detected_ms DESC, id DESC""", (command.collectionId, *kinds)).fetchall()
                 already, missing = [], []
+            import authority
+            active = authority.active_domain(db, "collections")
+            if active is not None:
+                import collection_authority
+                grouped = {}
+                for row in targets:
+                    grouped.setdefault(row["collection_id"], []).append(row["event_id"])
+                collection_authority.acknowledge_release_shim(db, active, command.operationId, grouped, now)
             sequence = _state(db)["read_sequence"]
-            for row in targets:
+            for row in ([] if active is not None else targets):
                 sequence += 1
                 db.execute("UPDATE collection_release_events SET read_at=?,updated_at=? WHERE event_id=?",
                            (now, now, row["event_id"]))
                 db.execute("INSERT INTO collection_release_reads VALUES(?,?,?,?,?)",
                            (sequence, command.operationId, row["event_id"], row["collection_id"], now))
-            if targets:
+            if targets and active is None:
                 db.execute("UPDATE collection_release_state SET read_sequence=? WHERE singleton=1", (sequence,))
                 _bump(db)
             _retain(db, moment)

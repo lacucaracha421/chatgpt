@@ -32,8 +32,39 @@ impl Library {
         input: ExternalBindingInput,
     ) -> Result<ExternalBinding, LibraryError> {
         let now = chrono::Utc::now().to_rfc3339();
-        let connection = self.connection()?;
-        upsert_external_binding(&connection, collection_id, input, &now)
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let authority = super::collection_authority::collection_write_status(&tx)?;
+        if authority.active {
+            super::collection::require_collection(&tx, collection_id)?;
+            if !matches!(
+                input.provider.trim().to_ascii_lowercase().as_str(),
+                "mangadex" | "kakao" | "aladin"
+            ) {
+                return Err(LibraryError::CollectionAuthorityOperationUnavailable);
+            }
+            super::collection_authority::enqueue_provider_snapshot(
+                &tx,
+                &authority,
+                collection_id,
+                &input,
+            )?;
+            let result = ExternalBinding {
+                provider: input.provider.trim().to_ascii_lowercase(),
+                external_id: input.external_id.trim().to_owned(),
+                provider_config_json: input.provider_config_json,
+                provider_data_json: input.provider_data_json,
+                last_synced_at: input.last_synced_at,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            tx.commit()?;
+            Ok(result)
+        } else {
+            let result = upsert_external_binding(&tx, collection_id, input, &now)?;
+            tx.commit()?;
+            Ok(result)
+        }
     }
 }
 
@@ -43,6 +74,7 @@ pub(crate) fn upsert_external_binding(
     input: ExternalBindingInput,
     now: &str,
 ) -> Result<ExternalBinding, LibraryError> {
+    super::collection_authority::fence_collection_operation(connection)?;
     super::collection::require_collection(connection, collection_id)?;
     let provider = input.provider.trim().to_ascii_lowercase();
     let external_id = input.external_id.trim().to_owned();

@@ -8,41 +8,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "batch 1: confirmed replica/outbox apply",
     ),
     (
-        "library/collection_tracking.rs",
-        "batch 4: ownership/tracking/acknowledgement",
-    ),
-    (
-        "library/release_watch.rs",
-        "batch 4: subscriptions and release events",
-    ),
-    ("library/mangadex_flow.rs", "batch 4: provider merge"),
-    ("library/tmdb_flow.rs", "batch 4: provider fence"),
-    ("library/igdb_flow.rs", "batch 4: provider fence"),
-    (
-        "library/aladin_flow.rs",
-        "batch 4: book providers and releases",
-    ),
-    (
-        "library/external_binding.rs",
-        "batch 4: shared binding helper",
-    ),
-    (
-        "library/collection_updates.rs",
-        "batch 4: provider workers; local-only (stays): checkpoints",
-    ),
-    (
-        "library/collection_personal_edits.rs",
-        "batch 4: inbound personal replay",
-    ),
-    (
-        "library/collection_binding_sync.rs",
-        "batch 4: inbound binding replay",
-    ),
-    (
-        "library/collection_release_sync.rs",
-        "batch 4: inbound acknowledgements",
-    ),
-    (
         "library/av_collection.rs",
         "batch 5: AV details and credits",
     ),
@@ -52,14 +17,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
     ("library/av_portrait.rs", "batch 5: portrait fence"),
     ("library/av_stashdb.rs", "batch 5: profile fence"),
     ("library/home_data.rs", "batch 5: favorites"),
-    (
-        "library/book_migration.rs",
-        "batch 4: import fence; batch 6: startup migration",
-    ),
-    (
-        "library/legacy_package_migration.rs",
-        "batch 4: import fence",
-    ),
     ("library/mod.rs", "batch 6: startup normalization"),
     (
         "library/db.rs",
@@ -181,9 +138,14 @@ const ALLOWLIST: &[(&str, &str)] = &[
 // elsewhere in either file must fail the ordinary SQL scan.
 const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
     (
-        "library/collection.rs",
-        "connect_fetched_igdb_game",
-        "batch 4: IGDB provider fence",
+        "library/book_migration.rs",
+        "backfill_legacy_collection_kinds",
+        "batch 6: startup migration",
+    ),
+    (
+        "library/collection_updates.rs",
+        "run_collection_updates_with_cover_downloader",
+        "local-only (stays): worker cooldown/status",
     ),
     (
         "library/collection.rs",
@@ -193,15 +155,34 @@ const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
     (
         "library/collection_pc.rs",
         "write_record_status",
-        "batch 4: inbound personal replay helper",
+        "batch 2: guarded core-record optimistic helper; inbound replay fenced",
     ),
     (
         "library/collection_pc.rs",
         "write_record_platform",
-        "batch 4: inbound personal replay helper",
+        "batch 2: guarded core-record optimistic helper; inbound replay fenced",
     ),
 ];
 const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
+    ("library/collection_tracking.rs", "set_owned_volume_count"),
+    ("library/collection_tracking.rs", "set_volume_ownership"),
+    (
+        "library/collection_tracking.rs",
+        "acknowledge_release_events",
+    ),
+    ("library/release_watch.rs", "set_release_watch_enabled"),
+    ("library/release_watch.rs", "take_unread_release_changes"),
+    ("library/mangadex_flow.rs", "apply_fetched_mangadex_checked"),
+    ("library/mangadex_flow.rs", "refresh_fetched_mangadex"),
+    ("library/aladin_flow.rs", "reconcile_aladin_at"),
+    (
+        "library/external_binding.rs",
+        "upsert_collection_external_binding",
+    ),
+    (
+        "library/collection_updates.rs",
+        "reconcile_mangadex_volumes",
+    ),
     ("library/collection.rs", "create_collection"),
     ("library/collection.rs", "update_collection"),
     ("library/collection.rs", "delete_collection"),
@@ -245,6 +226,32 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
 ];
 
 const FENCED_FUNCTIONS: &[(&str, &str)] = &[
+    ("library/collection.rs", "connect_fetched_igdb_game"),
+    ("library/mangadex_flow.rs", "refresh_provider_fields"),
+    ("library/external_binding.rs", "upsert_external_binding"),
+    ("library/collection_tracking.rs", "write_owned_volume_count"),
+    (
+        "library/collection_tracking.rs",
+        "acknowledge_release_events_in",
+    ),
+    ("library/release_watch.rs", "write_release_watch"),
+    ("library/collection_personal_edits.rs", "write_field"),
+    ("library/book_migration.rs", "upsert_collection"),
+    (
+        "library/legacy_package_migration.rs",
+        "execute_legacy_package_migration",
+    ),
+    ("library/tmdb_flow.rs", "apply_fetched_tmdb_title"),
+    ("library/tmdb_flow.rs", "refresh_fetched_tmdb_title"),
+    ("library/tmdb_flow.rs", "replace_fetched_tmdb_movie_artwork"),
+    ("library/tmdb_flow.rs", "insert_season_artwork"),
+    ("library/tmdb_flow.rs", "apply_artwork_decision"),
+    ("library/tmdb_flow.rs", "update_provider_metadata"),
+    ("library/igdb_flow.rs", "apply_fetched_igdb_game"),
+    ("library/igdb_flow.rs", "refresh_fetched_igdb_game"),
+    ("library/igdb_flow.rs", "replace_fetched_igdb_game_artwork"),
+    ("library/igdb_flow.rs", "apply_artwork_decision"),
+    ("library/igdb_flow.rs", "demote_unselected_screenshots"),
     ("library/launchbox.rs", "store_spine"),
     ("library/launchbox.rs", "fill_launchbox_platforms"),
     ("library/collection_pc.rs", "store_cover_focus"),
@@ -269,10 +276,15 @@ fn function_range(source: &str, name: &str) -> std::ops::Range<usize> {
 }
 
 fn remaining_source(file: &str, source: &str) -> String {
-    if !ROUTED_FUNCTIONS
-        .iter()
-        .chain(FENCED_FUNCTIONS)
-        .any(|(f, _)| *f == file)
+    if ![
+        "library/collection_binding_sync.rs",
+        "library/collection_release_sync.rs",
+    ]
+    .contains(&file)
+        && !ROUTED_FUNCTIONS
+            .iter()
+            .chain(FENCED_FUNCTIONS)
+            .any(|(f, _)| *f == file)
     {
         return source.to_owned();
     }
@@ -291,7 +303,10 @@ fn remaining_source(file: &str, source: &str) -> String {
                 || body.contains("enqueue_artwork(")
                 || body.contains("enqueue_artwork_selection(")
                 || body.contains("enqueue_volume_changes(")
-                || body.contains("import_authority_artwork_files("),
+                || body.contains("import_authority_artwork_files(")
+                || body.contains("enqueue_provider_snapshot(")
+                || body.contains("enqueue_release_event(")
+                || body.contains("enqueue_release_ack("),
             "{f}::{name} lost transactional outbox"
         );
         ranges.push(range);
@@ -305,11 +320,16 @@ fn remaining_source(file: &str, source: &str) -> String {
         ranges.push(range);
     }
     for (_, name, reason) in REMAINING_FUNCTIONS.iter().filter(|(f, _, _)| *f == file) {
-        assert!(reason.starts_with("batch "));
+        assert!(reason.starts_with("batch ") || reason.starts_with("local-only (stays)"));
         ranges.push(function_range(source, name));
     }
     // Explicit local-only embedded fixtures in the two formerly exempt files.
-    for marker in ["#[cfg(test)]\nmod tests {", "#[cfg(test)]\r\nmod tests {"] {
+    for marker in [
+        "#[cfg(test)]\nmod tests {",
+        "#[cfg(test)]\r\nmod tests {",
+        "#[cfg(test)]\npub(crate) mod tests {",
+        "#[cfg(test)]\r\npub(crate) mod tests {",
+    ] {
         if let Some(start) = source.find(marker) {
             let end = source[start..].find("\n}").unwrap() + start + 2;
             ranges.push(start..end);
@@ -502,6 +522,19 @@ fn collection_authority_writer_guard_rejects_new_writers_in_routed_files() {
         "library/collection_volume.rs",
         "library/collection_volume_range.rs",
         "library/launchbox.rs",
+        "library/mangadex_flow.rs",
+        "library/tmdb_flow.rs",
+        "library/igdb_flow.rs",
+        "library/aladin_flow.rs",
+        "library/external_binding.rs",
+        "library/collection_tracking.rs",
+        "library/release_watch.rs",
+        "library/collection_updates.rs",
+        "library/collection_personal_edits.rs",
+        "library/collection_binding_sync.rs",
+        "library/collection_release_sync.rs",
+        "library/book_migration.rs",
+        "library/legacy_package_migration.rs",
     ] {
         let mut source = std::fs::read_to_string(root.join(file)).unwrap();
         source.push_str("\nfn unreviewed_writer() { db.execute(\"UPDATE collections SET name='lost'\", []); }\n");

@@ -120,6 +120,17 @@ impl Library {
     where
         F: FnMut(&str) -> Result<Vec<AladinItem>, LibraryError>,
     {
+        if matches!(
+            super::collection_authority::collection_write_status(&*self.connection()?),
+            Err(LibraryError::CollectionAuthorityNotAdopted)
+        ) {
+            return Ok(ReleaseWatchRunResult {
+                checked: 0,
+                changed_collections: 0,
+                skipped: 0,
+                stop_reason: None,
+            });
+        }
         let _guard = self
             .release_watch_lock
             .lock()
@@ -157,7 +168,9 @@ impl Library {
             stop_reason: None,
         };
         for (collection_id, _) in due {
-            if crate::workload::is_restricted() { break; }
+            if crate::workload::is_restricted() {
+                break;
+            }
             let query = match self
                 .book_flow(provider)
                 .get_aladin_connection(&collection_id)
@@ -227,7 +240,28 @@ impl Library {
         let mut connection = self.connection()?;
         require_collection(&connection, collection_id)?;
         let transaction = connection.transaction()?;
-        if write_release_watch(&transaction, collection_id, enabled)? {
+        let authority = super::collection_authority::collection_write_status(&transaction)?;
+        if authority.active {
+            let current = release_watch_status(&transaction, collection_id)?;
+            if enabled && !transaction.query_row("SELECT EXISTS(SELECT 1 FROM collection_external_bindings WHERE collection_id=?1 AND provider IN ('kakao','aladin'))",[collection_id],|r|r.get::<_,bool>(0))? { return Err(LibraryError::ReleaseWatchRequiresAladinBinding); }
+            let pending:Option<String>=transaction.query_row("SELECT payload FROM collection_authority_outbox WHERE command_type='setReleaseSubscription' AND entity_key=?1 AND state IN ('pending','blocked') ORDER BY seq DESC LIMIT 1",[collection_id],|r|r.get(0)).optional()?;
+            let expected = pending
+                .as_deref()
+                .map(serde_json::from_str::<serde_json::Value>)
+                .transpose()
+                .map_err(|_| LibraryError::InvalidCloudResponse)?
+                .and_then(|p| p["enabled"].as_bool())
+                .unwrap_or(current.enabled);
+            if expected != enabled {
+                super::collection_authority::enqueue_collection_command(
+                    &transaction,
+                    &authority,
+                    "setReleaseSubscription",
+                    collection_id,
+                    serde_json::json!({"workId":collection_id,"enabled":enabled,"expectedEnabled":expected,"expectedRevision":null}),
+                )?;
+            }
+        } else if write_release_watch(&transaction, collection_id, enabled)? {
             // Subscriptions have no 0074 trigger; the Collection publication carries them.
             super::collection_personal_edits::bump_collections_generation(&transaction)?;
         }
@@ -256,12 +290,23 @@ impl Library {
             events
         };
         let now = chrono::Utc::now().to_rfc3339();
-        for event in &events {
-            transaction.execute(
-                "UPDATE release_watch_events SET read_at = ?1
-                 WHERE id = ?2 AND read_at IS NULL",
-                params![now, event.id],
+        let authority = super::collection_authority::collection_write_status(&transaction)?;
+        if authority.active {
+            let ids: Vec<_> = events.iter().map(|event| event.id.clone()).collect();
+            super::collection_authority::enqueue_release_ack(
+                &transaction,
+                &authority,
+                collection_id,
+                &ids,
             )?;
+        } else {
+            for event in &events {
+                transaction.execute(
+                    "UPDATE release_watch_events SET read_at = ?1
+                 WHERE id = ?2 AND read_at IS NULL",
+                    params![now, event.id],
+                )?;
+            }
         }
         transaction.commit()?;
         Ok(events)
@@ -305,6 +350,7 @@ pub(super) fn write_release_watch(
     collection_id: &str,
     enabled: bool,
 ) -> Result<bool, LibraryError> {
+    super::collection_authority::fence_collection_operation(connection)?;
     if enabled {
         let inserted = connection.execute(
             "INSERT INTO release_watch_subscriptions (

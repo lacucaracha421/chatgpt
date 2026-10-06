@@ -67,6 +67,78 @@ class CollectionAuthorityTests(unittest.TestCase):
         movie = work('m', '가', 'movie')
         self.items = [first, shown, movie]
 
+    def test_release_commands_share_pc_tablet_reads_and_feed(self):
+        self.ready()
+        event = dict(workId='a', eventId='batch4-release', provider='mangadex', kind='new_volume',
+                     volumeNumber=2, previousValue=None, currentValue=None, detectedAt='2026-10-06T00:00:00Z')
+        self.assertEqual(self.command('recordReleaseEvent', **event).status_code, 401)
+        operation = str(uuid.uuid4())
+        receipt = self.ok(self.command('recordReleaseEvent', headers=self.publisher, operation_id=operation, **event))
+        self.assertEqual(self.ok(self.command('recordReleaseEvent', headers=self.publisher, operation_id=operation, **event)), receipt)
+        self.assertEqual(receipt['entities']['works'][0]['derived']['unreadReleaseCount'], 1)
+        listed = self.ok(self.client.get('/v1/collections/releases', headers=self.auth))
+        self.assertEqual(listed['counts']['unread'], 1)
+        tablet = self.ok(self.client.post('/v1/collections/releases/acknowledge', headers=self.auth,
+                         json={'version': 1, 'operationId': str(uuid.uuid4()), 'eventIds': ['batch4-release']}))
+        self.assertEqual(tablet['acknowledged'], ['batch4-release'])
+        with api_app.get_db() as db:
+            state = ca.work_state(ca.work_row(db, LIBRARY, 'a'))
+            self.assertEqual(state['derived']['unreadReleaseCount'], 0)
+            self.assertIsNotNone(state['derived']['releaseEvents'][0]['readAt'])
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM collection_authority_changes WHERE command_type='acknowledgeReleaseEvents'").fetchone()[0], 1)
+        ack = self.ok(self.command('acknowledgeReleaseEvents', workId='a', eventIds=['batch4-release', 'missing']))
+        self.assertFalse(ack['changed'])
+        self.assertEqual(self.ok(self.client.get('/v1/collections/releases', headers=self.auth))['counts']['unread'], 0)
+
+    def test_release_pc_ack_feed_and_validation_and_legacy_fence(self):
+        self.ready()
+        event = dict(workId='a', eventId='pc-release', provider='kakao', kind='release_date_changed',
+                     volumeNumber=2, previousValue=None, currentValue='2026-10-07', detectedAt='2026-10-06T00:00:00Z')
+        self.ok(self.command('recordReleaseEvent', headers=self.publisher, **event))
+        receipt = self.ok(self.command('acknowledgeReleaseEvents', workId='a', eventIds=['pc-release']))
+        self.assertIsNotNone(receipt['entities']['works'][0]['derived']['releaseEvents'][0]['readAt'])
+        self.assertEqual(self.command('recordReleaseEvent', headers=self.publisher, **{**event, 'volumeNumber': True}).status_code, 422)
+        self.assertEqual(self.command('acknowledgeReleaseEvents', workId='a', eventIds=[]).status_code, 422)
+        self.assertEqual(self.command('acknowledgeReleaseEvents', workId='a', eventIds=['x','x']).status_code, 422)
+        upload = self.client.put('/v1/collections/releases/unread', headers=self.publisher,
+                 json={'version': 1, 'operationId': str(uuid.uuid4()), 'generation': '1', 'final': True, 'items': []})
+        self.assertEqual(upload.status_code, 409)
+
+    def test_batch4_dormant_commands_preserve_legacy_payload_bytes(self):
+        self.ok(self.publish_legacy())
+        before = self.client.get('/v1/collections', headers=self.auth).content
+        refused = self.command('acknowledgeReleaseEvents', workId='a', eventIds=['missing'])
+        self.assertEqual(refused.status_code, 409)
+        self.assertEqual(self.client.get('/v1/collections', headers=self.auth).content, before)
+
+    def test_tablet_release_shim_chunks_large_work_and_keeps_command_bounds(self):
+        self.ready()
+        ids = [f'large-{n}' for n in range(501)]
+        with api_app.get_db() as db:
+            db.executemany("INSERT INTO collection_release_events(event_id,collection_id,collection_name,provider,"
+                           "kind,volume_number,detected_at,detected_ms,generation,updated_at)"
+                           " VALUES(?,'a','Manga','mangadex','new_volume',2,'2026-10-06T00:00:00Z',1,1,'t')",
+                           [(event_id,) for event_id in ids])
+            operation = str(uuid.uuid4())
+            domain = {'libraryId': LIBRARY, 'epoch': 1}
+            ca.acknowledge_release_shim(db, domain, operation, {'a': ids}, '2026-10-06T00:00:00Z')
+            ca.acknowledge_release_shim(db, domain, operation, {'a': ids}, '2026-10-06T00:00:00Z')
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM collection_release_events WHERE read_at IS NULL").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM collection_authority_changes WHERE command_type='acknowledgeReleaseEvents'").fetchone()[0], 2)
+            self.assertEqual(ca.work_state(ca.work_row(db, LIBRARY, 'a'))['derived']['unreadReleaseCount'], 0)
+
+    def test_pc_release_commands_retain_read_event_bounds(self):
+        self.ready()
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO collection_release_events(event_id,collection_id,collection_name,provider,"
+                       "kind,volume_number,detected_at,detected_ms,generation,read_at,updated_at)"
+                       " VALUES('old','a','Manga','mangadex','new_volume',1,'2000-01-01T00:00:00Z',1,1,'2000-01-01T00:00:00Z','t')")
+            db.commit()
+        event = dict(workId='a', eventId='fresh', provider='mangadex', kind='new_volume',
+                     volumeNumber=2, previousValue=None, currentValue=None, detectedAt='2026-10-06T00:00:00Z')
+        receipt = self.ok(self.command('recordReleaseEvent', headers=self.publisher, **event))
+        self.assertEqual([item['eventId'] for item in receipt['entities']['works'][0]['derived']['releaseEvents']], ['fresh'])
+
     def test_volume_range_cas_receipt_feed_and_projection(self):
         self.ready()
         empty = {'minVolume': None, 'maxVolume': None, 'hideConnectionPrompt': False}

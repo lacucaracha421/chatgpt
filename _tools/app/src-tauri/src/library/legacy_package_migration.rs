@@ -528,6 +528,7 @@ impl Library {
         plan: &LegacyPackageMigrationPlan,
         mut progress: impl FnMut(LegacyPackageMigrationProgress),
     ) -> Result<LegacyPackageMigrationReport, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         if canonical_directory(self.root())? != plan.source.paths.library_root {
             return Err(LibraryError::LegacyLibraryMismatch);
         }

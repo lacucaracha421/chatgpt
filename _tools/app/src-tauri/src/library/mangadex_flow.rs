@@ -63,6 +63,7 @@ impl Library {
         request: MangaDexApplyRequest,
         check: Option<CommitCheck<'_>>,
     ) -> Result<CollectionSummary, LibraryError> {
+        super::collection_authority::collection_write_status(&*self.connection()?)?;
         let fetched = mangadex::fetch_work(&request.manga_id)?;
         let bytes = representative_japanese_cover(&fetched.preview.covers)
             .map(|cover| mangadex::download_cover(&request.manga_id, &cover.file_name))
@@ -128,6 +129,7 @@ impl Library {
         {
             let mut connection = self.connection()?;
             let transaction = connection.transaction()?;
+            let authority = super::collection_authority::collection_write_status(&transaction)?;
             if let Some(check) = check {
                 check(&transaction)?;
             }
@@ -156,30 +158,60 @@ impl Library {
                         params![
                             collection_id,
                             name,
-                            preview.year,
-                            preview.author,
-                            preview.genres,
-                            preview.overview,
+                            if authority.active { None } else { preview.year },
+                            if authority.active {
+                                None
+                            } else {
+                                preview.author.clone()
+                            },
+                            if authority.active {
+                                None
+                            } else {
+                                preview.genres.clone()
+                            },
+                            if authority.active {
+                                None
+                            } else {
+                                preview.overview.clone()
+                            },
                             now,
-                            preview.japanese_title,
+                            if authority.active {
+                                None
+                            } else {
+                                preview.japanese_title.clone()
+                            },
                         ],
                     )
                     .map_err(map_duplicate_name)?;
-            } else {
+                if authority.active {
+                    super::collection_authority::enqueue_collection_command(
+                        &transaction,
+                        &authority,
+                        "createWork",
+                        &collection_id,
+                        serde_json::json!({"workId":collection_id,"type":"manga","name":name,"legacyKind":null,"fields":{},"binding":null}),
+                    )?;
+                }
+            } else if !authority.active {
                 refresh_provider_fields(&transaction, &collection_id, &preview, &now)?;
             }
-            upsert_external_binding(
-                &transaction,
-                &collection_id,
-                ExternalBindingInput {
-                    provider: PROVIDER.into(),
-                    external_id: request.manga_id.clone(),
-                    provider_config_json: None,
-                    provider_data_json: Some(snapshot_json),
-                    last_synced_at: Some(now.clone()),
-                },
-                &now,
-            )?;
+            let binding_input = ExternalBindingInput {
+                provider: PROVIDER.into(),
+                external_id: request.manga_id.clone(),
+                provider_config_json: None,
+                provider_data_json: Some(snapshot_json),
+                last_synced_at: Some(now.clone()),
+            };
+            if authority.active {
+                super::collection_authority::enqueue_provider_snapshot(
+                    &transaction,
+                    &authority,
+                    &collection_id,
+                    &binding_input,
+                )?;
+            } else {
+                upsert_external_binding(&transaction, &collection_id, binding_input, &now)?;
+            }
             let representative_artwork =
                 if let (Some(cover), Some(prepared)) = (cover, prepared.as_ref()) {
                     Some((
@@ -223,6 +255,7 @@ impl Library {
         let connection = self
             .get_mangadex_connection(collection_id)?
             .ok_or(LibraryError::InvalidMangaDexIdentity)?;
+        super::collection_authority::collection_write_status(&*self.connection()?)?;
         let fetched = mangadex::fetch_work(&connection.manga_id)?;
         self.refresh_fetched_mangadex(collection_id, fetched)
     }
@@ -241,26 +274,34 @@ impl Library {
         {
             let mut connection = self.connection()?;
             let transaction = connection.transaction()?;
+            let authority = super::collection_authority::collection_write_status(&transaction)?;
             let now = chrono::Utc::now().to_rfc3339();
-            refresh_provider_fields(&transaction, collection_id, &fetched.preview, &now)?;
+            if !authority.active {
+                refresh_provider_fields(&transaction, collection_id, &fetched.preview, &now)?;
+            }
             super::collection_updates::reconcile_mangadex_volumes(
                 &transaction,
                 collection_id,
                 &fetched.preview.manga_id,
                 &fetched.preview.covers,
             )?;
-            upsert_external_binding(
-                &transaction,
-                collection_id,
-                ExternalBindingInput {
-                    provider: PROVIDER.into(),
-                    external_id: fetched.preview.manga_id,
-                    provider_config_json: None,
-                    provider_data_json: Some(fetched.snapshot_json),
-                    last_synced_at: Some(now.clone()),
-                },
-                &now,
-            )?;
+            let binding_input = ExternalBindingInput {
+                provider: PROVIDER.into(),
+                external_id: fetched.preview.manga_id,
+                provider_config_json: None,
+                provider_data_json: Some(fetched.snapshot_json),
+                last_synced_at: Some(now.clone()),
+            };
+            if authority.active {
+                super::collection_authority::enqueue_provider_snapshot(
+                    &transaction,
+                    &authority,
+                    collection_id,
+                    &binding_input,
+                )?;
+            } else {
+                upsert_external_binding(&transaction, collection_id, binding_input, &now)?;
+            }
             transaction.commit()?;
         }
         let connection = self.connection()?;
@@ -289,6 +330,7 @@ fn refresh_provider_fields(
     preview: &MangaDexWorkPreview,
     now: &str,
 ) -> Result<(), LibraryError> {
+    super::collection_authority::fence_collection_operation(connection)?;
     // Read before replacing the binding snapshot, including on reconnect. Only values
     // still matching that provider response belong to MangaDex; differing local values
     // (and values with no usable previous snapshot) must retain their precedence.

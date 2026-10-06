@@ -119,6 +119,7 @@ impl Library {
     }
 
     pub fn import_book_collections(&self, root: &str) -> Result<BookMigrationReport, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let plan = scan_book_import(Path::new(root))?;
         self.apply_book_import_plan(&plan)
     }
@@ -127,6 +128,7 @@ impl Library {
         &self,
         plan: &BookImportPlan,
     ) -> Result<BookMigrationReport, LibraryError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let connection = self.connection()?;
         set_collection_source_root(&connection, self.root(), Some(&plan.root))?;
         let mut report = BookMigrationReport {
@@ -245,6 +247,7 @@ fn upsert_collection(
     connection: &rusqlite::Connection,
     entry: &BookImportEntry,
 ) -> Result<bool, String> {
+    super::collection_authority::fence_collection_operation(connection).map_err(|error|error.to_string())?;
     let name = normalized_name(entry.name.clone()).map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();

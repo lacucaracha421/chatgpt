@@ -278,6 +278,7 @@ impl BookFlow<'_> {
         if !valid_selection(&request) {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
+        super::collection_authority::collection_write_status(&*self.library.connection()?)?;
         let items = self.search_items(ttb_key, &request.query)?;
         self.apply_aladin_items(request, items)
     }
@@ -287,6 +288,7 @@ impl BookFlow<'_> {
         ttb_key: &str,
         collection_id: &str,
     ) -> Result<AladinSyncResult, LibraryError> {
+        super::collection_authority::collection_write_status(&*self.library.connection()?)?;
         let config = self.aladin_binding_config(collection_id)?;
         let items = self.search_items(ttb_key, &config.query)?;
         self.refresh_aladin_items(collection_id, config, items)
@@ -557,6 +559,7 @@ impl BookFlow<'_> {
 
         let mut connection = self.library.connection()?;
         let transaction = connection.transaction()?;
+        let authority = super::collection_authority::collection_write_status(&transaction)?;
         require_collection(&transaction, collection_id)?;
         if let Some(check) = check {
             check(&transaction)?;
@@ -577,9 +580,11 @@ impl BookFlow<'_> {
             ignored,
         };
         let mut release_event_count = 0;
-        let tracks_ownership = self.provider != "kakao" || transaction.query_row(
+        let tracks_ownership = self.provider != "kakao"
+            || transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1)",
-                [collection_id], |row| row.get::<_, bool>(0),
+                [collection_id],
+                |row| row.get::<_, bool>(0),
             )?;
         let volume_range = load_transaction(&transaction, collection_id)?;
         for item in merged.values() {
@@ -591,7 +596,10 @@ impl BookFlow<'_> {
                 checked_at,
                 &mut result,
             )?;
-            if let Some(previous_checked_at) = subscription_last_checked_at.as_ref().filter(|_| tracks_ownership) {
+            if let Some(previous_checked_at) = subscription_last_checked_at
+                .as_ref()
+                .filter(|_| tracks_ownership)
+            {
                 for change in pending_release_changes(
                     existing.as_ref(),
                     item,
@@ -601,38 +609,62 @@ impl BookFlow<'_> {
                     if !volume_range.contains(change.volume_number) {
                         continue;
                     }
-                    transaction.execute(
-                        "INSERT INTO release_watch_events (
+                    if authority.active {
+                        super::collection_authority::enqueue_release_event(
+                            &transaction,
+                            &authority,
+                            collection_id,
+                            self.provider,
+                            event_kind_str(change.kind),
+                            change.volume_number,
+                            change.previous_value.as_deref(),
+                            change.current_value.as_deref(),
+                            checked_at,
+                        )?;
+                    } else {
+                        transaction.execute(
+                            "INSERT INTO release_watch_events (
                             id, collection_id, event_kind, volume_number,
                             previous_value, current_value, detected_at, read_at, provider
                          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
-                        params![
-                            uuid::Uuid::new_v4().to_string(),
-                            collection_id,
-                            event_kind_str(change.kind),
-                            change.volume_number,
-                            change.previous_value,
-                            change.current_value,
-                            checked_at,
-                            self.provider,
-                        ],
-                    )?;
+                            params![
+                                uuid::Uuid::new_v4().to_string(),
+                                collection_id,
+                                event_kind_str(change.kind),
+                                change.volume_number,
+                                change.previous_value,
+                                change.current_value,
+                                checked_at,
+                                self.provider,
+                            ],
+                        )?;
+                    }
                     release_event_count += 1;
                 }
             }
         }
-        super::external_binding::upsert_external_binding(
-            &transaction,
-            collection_id,
-            ExternalBindingInput {
-                provider: self.provider.into(),
-                external_id: anchor_item_id,
-                provider_config_json: Some(config_json),
-                provider_data_json: Some(snapshot_json),
-                last_synced_at: Some(checked_at.to_owned()),
-            },
-            checked_at,
-        )?;
+        let binding_input = ExternalBindingInput {
+            provider: self.provider.into(),
+            external_id: anchor_item_id,
+            provider_config_json: Some(config_json),
+            provider_data_json: Some(snapshot_json),
+            last_synced_at: Some(checked_at.to_owned()),
+        };
+        if authority.active {
+            super::collection_authority::enqueue_provider_snapshot(
+                &transaction,
+                &authority,
+                collection_id,
+                &binding_input,
+            )?;
+        } else {
+            super::external_binding::upsert_external_binding(
+                &transaction,
+                collection_id,
+                binding_input,
+                checked_at,
+            )?;
+        }
         if subscription_last_checked_at.is_some() {
             transaction.execute(
                 "UPDATE release_watch_subscriptions SET last_checked_at = ?1
@@ -640,7 +672,7 @@ impl BookFlow<'_> {
                 params![checked_at, collection_id, self.provider],
             )?;
         }
-        if self.provider == "kakao" {
+        if self.provider == "kakao" && !authority.active {
             transaction.execute(
                 "INSERT INTO release_watch_subscriptions (collection_id, provider, last_checked_at)
                  SELECT collection_id, 'kakao', ?2 FROM release_watch_subscriptions

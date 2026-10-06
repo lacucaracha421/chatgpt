@@ -694,6 +694,10 @@ impl Library {
         item: &BindRequest,
         applier: &dyn BindingApplier,
     ) -> Decision {
+        match self.connection().and_then(|c| super::collection_authority::fence_collection_operation(&c)) {
+            Ok(()) => {},
+            Err(error) => return classify(error),
+        }
         let target = match target(item) {
             Ok(target) => target,
             Err(reason) => return Decision::Failed(reason),

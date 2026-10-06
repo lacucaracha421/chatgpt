@@ -2,6 +2,373 @@ use super::*;
 use std::cell::{Cell, RefCell};
 
 const NOW: &str = "2026-10-06T00:00:00Z";
+
+#[test]
+fn collection_authority_tracking_is_queued_and_zero_is_projected_from_feed() {
+    let (_temp, l, s) = fixture();
+    let mut initial = work("w", 1);
+    initial["derived"]["ownedVolumes"] = json!([{"editionIndex":0,"count":1}]);
+    adopt(&l, &s, json!({"works":[initial],"ownership":[ownership()]}));
+    l.set_owned_volume_count("w", 0, 0).unwrap();
+    l.set_owned_volume_count("w", 0, 0).unwrap();
+    let c = l.connection().unwrap();
+    let raw: String = c
+        .query_row("SELECT payload FROM collection_authority_outbox", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let body: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(body["commandType"], "setOwnershipTracking");
+    assert_eq!(body["count"], 0);
+    assert_eq!(body["expectedCount"], 1);
+    assert_eq!(
+        c.query_row(
+            "SELECT COUNT(*) FROM collection_authority_outbox",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    drop(c);
+    assert!(l.list_volume_ownership("w").unwrap()[0].physical);
+    let mut w = work("w", 2);
+    w["derived"]["ownedVolumes"] = json!([{"editionIndex":0,"count":0}]);
+    let mut o = ownership();
+    o["physical"] = json!(false);
+    o["entityRevision"] = json!(2);
+    l.apply_collection_changes(&changes(
+        &s,
+        1,
+        json!([change(1, json!({"works":[w],"ownership":[o]}))]),
+    ))
+    .unwrap();
+    assert_eq!(l.list_ownership_tracking("w").unwrap(), vec![0]);
+    assert!(!l.list_volume_ownership("w").unwrap()[0].physical);
+}
+
+#[test]
+fn collection_authority_count_then_individual_ownership_predicts_fifo_revision() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    l.set_owned_volume_count("w", 0, 2).unwrap();
+    l.set_volume_ownership("w", 0, vec![1], "digital", true)
+        .unwrap();
+    l.set_volume_ownership("w", 0, vec![1], "physical", false)
+        .unwrap();
+    let c = l.connection().unwrap();
+    let rows = c
+        .prepare("SELECT payload FROM collection_authority_outbox ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|r| serde_json::from_str::<Value>(&r.unwrap()).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[1]["expectedRevision"], 1);
+    assert_eq!(rows[1]["physical"], true);
+    assert_eq!(rows[2]["expectedRevision"], 2);
+    assert_eq!(rows[2]["physical"], false);
+    assert_eq!(rows[2]["digital"], true);
+}
+
+#[test]
+fn collection_authority_provider_snapshot_is_deduplicated_without_local_merge() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    let input = super::super::models::ExternalBindingInput {
+        provider: "kakao".into(),
+        external_id: "book-1".into(),
+        provider_config_json: Some("{}".into()),
+        provider_data_json: Some("{\"title\":\"Fetched\"}".into()),
+        last_synced_at: Some(NOW.into()),
+    };
+    for _ in 0..2 {
+        let mut c = l.connection().unwrap();
+        let tx = c.transaction().unwrap();
+        enqueue_provider_snapshot(&tx, &s, "w", &input).unwrap();
+        tx.commit().unwrap();
+    }
+    let c = l.connection().unwrap();
+    assert_eq!(
+        c.query_row(
+            "SELECT COUNT(*) FROM collection_authority_outbox",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        c.query_row(
+            "SELECT COUNT(*) FROM collection_external_bindings",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        c.query_row(
+            "SELECT description FROM collections WHERE id='w'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "server memo"
+    );
+    let raw:String=c.query_row("SELECT payload FROM collection_authority_outbox WHERE command_type='applyProviderSnapshot'",[],|r|r.get(0)).unwrap();
+    let b: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(b["values"], json!({}));
+    assert_eq!(b["baseSnapshotDigest"], Value::Null);
+}
+
+#[test]
+fn collection_authority_release_ack_is_shared_and_deduplicated() {
+    let (_temp, l, s) = fixture();
+    let mut w = work("w", 1);
+    w["derived"]["releaseEvents"] = json!([{"eventId":"e","provider":"mangadex","kind":"new_volume","volumeNumber":2,"previousValue":null,"currentValue":null,"detectedAt":NOW,"readAt":null}]);
+    adopt(&l, &s, json!({"works":[w.clone()]}));
+    l.take_unread_release_changes("w").unwrap();
+    l.acknowledge_release_events("w", vec!["e".into()]).unwrap();
+    assert_eq!(
+        l.connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM collection_authority_outbox",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(l.list_unread_release_changes().unwrap().len(), 1);
+    w["entityRevision"] = json!(2);
+    w["derived"]["releaseEvents"][0]["readAt"] = json!(NOW);
+    l.apply_collection_changes(&changes(&s, 1, json!([change(1, json!({"works":[w]}))])))
+        .unwrap();
+    assert!(l.list_unread_release_changes().unwrap().is_empty());
+}
+
+#[test]
+fn collection_authority_provider_rebind_uses_zero_for_tombstone_cas() {
+    let (_temp, l, s) = fixture();
+    let binding = json!({"workId":"w","provider":"kakao","externalId":"book-1","config":null,"snapshot":null,"values":null,"snapshotDigest":null,"bound":false,"entityRevision":7,"createdAt":NOW,"updatedAt":NOW,"lastSyncedAt":null});
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[binding]}));
+    let input = super::super::models::ExternalBindingInput {
+        provider: "kakao".into(),
+        external_id: "book-1".into(),
+        provider_config_json: None,
+        provider_data_json: Some("{}".into()),
+        last_synced_at: None,
+    };
+    let mut connection = l.connection().unwrap();
+    let tx = connection.transaction().unwrap();
+    enqueue_provider_snapshot(&tx, &s, "w", &input).unwrap();
+    enqueue_provider_snapshot(&tx, &s, "w", &input).unwrap();
+    let raw: String = tx
+        .query_row(
+            "SELECT payload FROM collection_authority_outbox WHERE command_type='bindProvider'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let command: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(command["expectedRevision"], 0);
+    assert_eq!(
+        tx.query_row(
+            "SELECT COUNT(*) FROM collection_authority_outbox",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    tx.commit().unwrap();
+}
+
+#[test]
+fn collection_authority_batch4_operations_fence_unadopted_and_rare_imports() {
+    let (_temp, l, s) = fixture();
+    l.observe_collection_authority(&s).unwrap();
+    assert!(matches!(
+        l.set_owned_volume_count("missing", 0, 0),
+        Err(LibraryError::CollectionNotFound) | Err(LibraryError::CollectionAuthorityNotAdopted)
+    ));
+    assert!(matches!(
+        l.import_book_collections("nonexistent"),
+        Err(LibraryError::CollectionAuthorityOperationUnavailable)
+    ));
+    assert!(matches!(
+        l.connect_igdb_game("missing", 42),
+        Err(LibraryError::CollectionAuthorityOperationUnavailable)
+    ));
+}
+
+#[test]
+fn collection_authority_provider_stale_refetches_once_then_records_drop() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    let input = super::super::models::ExternalBindingInput {
+        provider: "kakao".into(),
+        external_id: "book-1".into(),
+        provider_config_json: Some("{}".into()),
+        provider_data_json: Some("{\"title\":\"old\"}".into()),
+        last_synced_at: None,
+    };
+    {
+        let mut c = l.connection().unwrap();
+        let tx = c.transaction().unwrap();
+        enqueue_provider_snapshot(&tx, &s, "w", &input).unwrap();
+        tx.execute("UPDATE collection_authority_outbox SET state='accepted' WHERE command_type='bindProvider'",[]).unwrap();
+        tx.commit().unwrap();
+    }
+    let refetches = Cell::new(0);
+    let send = |_body: &Value| {
+        Ok(CollectionDelivery::Conflict(
+            json!({"code":"providerSnapshotStale","current":{"binding":null}}),
+        ))
+    };
+    let refresh = |_body: &Value| {
+        refetches.set(refetches.get() + 1);
+        let mut input = input.clone();
+        input.provider_data_json = Some("{\"title\":\"fresh\"}".into());
+        let mut c = l.connection()?;
+        let tx = c.transaction()?;
+        enqueue_provider_snapshot(&tx, &s, "w", &input)?;
+        tx.execute("UPDATE collection_authority_outbox SET state='accepted' WHERE command_type='bindProvider'",[])?;
+        tx.commit()?;
+        Ok(())
+    };
+    assert!(l
+        .flush_collection_outbox_with_refresh(&s, &send, 0, &refresh)
+        .unwrap());
+    assert_eq!(refetches.get(), 1);
+    assert_eq!(l.connection().unwrap().query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE command_type='applyProviderSnapshot' AND state='dropped' AND drop_reason='providerSnapshotStale'",[],|r|r.get::<_,i64>(0)).unwrap(),2);
+    assert!(!l
+        .flush_collection_outbox_with_refresh(&s, &send, 0, &refresh)
+        .unwrap());
+}
+
+#[test]
+fn collection_authority_mangadex_apply_defers_fields_and_projects_original_title() {
+    use super::super::{
+        mangadex,
+        models::{MangaDexApplyRequest, MangaDexApplyTarget},
+    };
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    let detail: Value =
+        serde_json::from_str(include_str!("fixtures/mangadex_detail.json")).unwrap();
+    let covers: Value =
+        serde_json::from_str(include_str!("fixtures/mangadex_covers.json")).unwrap();
+    let mut preview =
+        mangadex::parse_work_preview(&detail.to_string(), &covers.to_string()).unwrap();
+    let original = preview.japanese_title.clone();
+    let manga_id = preview.manga_id.clone();
+    preview.covers.clear();
+    let fetched = mangadex::MangaDexFetchedWork {
+        preview,
+        snapshot_json: json!({"detail":detail,"covers":covers}).to_string(),
+    };
+    l.apply_fetched_mangadex(
+        MangaDexApplyRequest {
+            target: MangaDexApplyTarget::Existing {
+                collection_id: "w".into(),
+            },
+            manga_id,
+        },
+        fetched,
+        None,
+    )
+    .unwrap();
+    let c = l.connection().unwrap();
+    assert_eq!(
+        c.query_row("SELECT year FROM collections WHERE id='w'", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2026
+    );
+    assert_eq!(
+        c.query_row(
+            "SELECT COUNT(*) FROM collection_external_bindings",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    let raw:String=c.query_row("SELECT payload FROM collection_authority_outbox WHERE command_type='applyProviderSnapshot'",[],|r|r.get(0)).unwrap();
+    let body: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(body["values"]["originalTitle"], json!(original));
+}
+
+#[test]
+fn collection_authority_personal_replay_only_advances_local_receipts_and_cursor() {
+    use super::super::collection_personal_edits::PersonalEditEntry;
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)]}));
+    let endpoint = "https://fixture.invalid";
+    let library = l.library_id().unwrap();
+    l.adopt_collection_personal_edit_library(endpoint, &library)
+        .unwrap();
+    let item = PersonalEditEntry {
+        sequence: 1,
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        collection_id: "w".into(),
+        field: "myScore".into(),
+        value: json!(1.0),
+        previous: json!(4.5),
+        created_at: NOW.into(),
+    };
+    let outcome = l
+        .apply_collection_personal_edit_page(endpoint, &library, &[item.clone()])
+        .unwrap();
+    assert_eq!(outcome.changed, 0);
+    assert_eq!(outcome.skipped, 1);
+    assert_eq!(
+        l.connection()
+            .unwrap()
+            .query_row("SELECT my_score FROM collections WHERE id='w'", [], |r| r
+                .get::<_, f64>(
+                0
+            ))
+            .unwrap(),
+        4.5
+    );
+    assert_eq!(l.connection().unwrap().query_row("SELECT received_cursor FROM mobile_collection_personal_edit_sync WHERE endpoint=?1",[endpoint],|r|r.get::<_,i64>(0)).unwrap(),1);
+    assert_eq!(
+        l.apply_collection_personal_edit_page(endpoint, &library, &[item])
+            .unwrap()
+            .already_consumed,
+        1
+    );
+}
+
+#[test]
+fn collection_authority_release_read_replay_keeps_feed_owned_state_and_local_cursor() {
+    use crate::cloud::collection_releases::ReadEntry;
+    let (_temp, l, s) = fixture();
+    let mut w = work("w", 1);
+    w["derived"]["releaseEvents"] = json!([{"eventId":"e","provider":"mangadex","kind":"new_volume","volumeNumber":2,"previousValue":null,"currentValue":null,"detectedAt":NOW,"readAt":null}]);
+    adopt(&l, &s, json!({"works":[w]}));
+    let item = ReadEntry {
+        sequence: 1,
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        collection_id: "w".into(),
+        event_id: "e".into(),
+        created_at: NOW.into(),
+    };
+    assert_eq!(
+        l.apply_collection_release_reads("https://fixture.invalid", 0, &[item], 1)
+            .unwrap(),
+        0
+    );
+    assert_eq!(l.list_unread_release_changes().unwrap().len(), 1);
+    let raw:String=l.connection().unwrap().query_row("SELECT value FROM notes_state WHERE key='collectionReleaseSync:https://fixture.invalid'",[],|r|r.get(0)).unwrap();
+    let state: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(state["readCursor"], 1);
+}
 fn fixture() -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
