@@ -71,6 +71,10 @@ pub struct BookExternalBinding {
 impl Library {
     pub(crate) fn backfill_legacy_collection_kinds(&self) -> Result<u64, LibraryError> {
         let connection = self.connection()?;
+        // Shared work fields belong to the server once the Collections authority is active.
+        if super::collection_authority::collection_authority_active(&connection)? {
+            return Ok(0);
+        }
         let Some(root) = collection_source_root(&connection, self.root())? else {
             return Ok(0);
         };
@@ -247,7 +251,8 @@ fn upsert_collection(
     connection: &rusqlite::Connection,
     entry: &BookImportEntry,
 ) -> Result<bool, String> {
-    super::collection_authority::fence_collection_operation(connection).map_err(|error|error.to_string())?;
+    super::collection_authority::fence_collection_operation(connection)
+        .map_err(|error| error.to_string())?;
     let name = normalized_name(entry.name.clone()).map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();

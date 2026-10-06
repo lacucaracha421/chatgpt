@@ -7,17 +7,10 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "library/collection_authority.rs",
         "batch 1: confirmed replica/outbox apply",
     ),
-    ("library/mod.rs", "batch 6: startup normalization"),
     (
         "library/db.rs",
-        "batch 6: schema upgrades; local-only (stays): migration fixtures",
+        "local-only (stays): schema migrations (collection data rewrites predate the authority) and migration fixtures",
     ),
-    ("library/similarity.rs", "batch 6: membership replacement"),
-    (
-        "library/asset_authority.rs",
-        "batch 6: cross-domain cascades",
-    ),
-    ("library/trash.rs", "batch 6: asset cascades"),
     ("library/statistics.rs", "local-only (stays): activity"),
     (
         "library/av_link/mod.rs",
@@ -130,7 +123,7 @@ const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
     (
         "library/book_migration.rs",
         "backfill_legacy_collection_kinds",
-        "batch 6: startup migration",
+        "local-only (stays): legacy startup backfill, skipped while the authority is active",
     ),
     (
         "library/collection_updates.rs",
@@ -140,7 +133,7 @@ const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
     (
         "library/collection.rs",
         "normalize_showcase_orders",
-        "batch 6: startup normalization",
+        "local-only (stays): legacy startup normalization, skipped while the authority is active",
     ),
     (
         "library/collection_pc.rs",
@@ -173,6 +166,7 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
         "library/collection_updates.rs",
         "reconcile_mangadex_volumes",
     ),
+    ("library/similarity.rs", "resolve_replace_existing"),
     ("library/collection.rs", "create_collection"),
     ("library/collection.rs", "update_collection"),
     ("library/collection.rs", "delete_collection"),

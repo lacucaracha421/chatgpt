@@ -2059,3 +2059,63 @@ fn collection_authority_batch5_adoption_keeps_av_details_people_portraits_and_cr
     assert_fenced(l.save_av_person_memo("p", None));
     assert_eq!(count(&l, "collection_authority_outbox"), 0);
 }
+
+#[test]
+fn collection_authority_similarity_replacement_moves_membership_and_cover_through_commands() {
+    use super::super::models::{SimilarityDecision, SimilarityDecisionRequest};
+    let (_temp, l, s) = fixture();
+    let mut game = work("g", 3);
+    game["type"] = json!("game");
+    game["fields"]["status"] = Value::Null;
+    adopt(&l, &s, json!({"works":[game]}));
+    asset(&l, "old");
+    l.connection()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+                 VALUES('new','new','image','new','new','thumb-new',1,10,20,'now','review');
+             INSERT INTO collection_assets(collection_id,asset_id,added_at) VALUES('g','old','now');
+             UPDATE collections SET cover_asset_id='old' WHERE id='g';
+             INSERT INTO similarity_reviews
+                 (id,existing_asset_id,candidate_asset_id,distance,fingerprint_kind,status,created_at)
+             VALUES ('review','old','new',1,'pdq-v1','open','2026-10-06T00:00:00Z');",
+        )
+        .unwrap();
+    l.decide_similarity_review(SimilarityDecisionRequest {
+        review_id: "review".into(),
+        decision: SimilarityDecision::ReplaceExisting,
+    })
+    .unwrap();
+    let bodies = core_bodies(&l);
+    let membership = bodies
+        .iter()
+        .find(|b| b["commandType"] == "setMembership")
+        .expect("membership command");
+    assert_eq!(membership["assetId"], "new");
+    assert_eq!(membership["desiredState"], true);
+    let cover = bodies
+        .iter()
+        .find(|b| b["commandType"] == "updateWork")
+        .expect("cover command");
+    assert_eq!(cover["changes"], json!({"coverAssetId":"new"}));
+    assert_eq!(cover["expected"], json!({"coverAssetId":"old"}));
+    assert_eq!(
+        l.get_collection("g").unwrap().cover_asset_id.as_deref(),
+        Some("new")
+    );
+}
+
+#[test]
+fn collection_authority_startup_normalizers_leave_server_owned_fields_alone() {
+    let (_temp, l, s) = fixture();
+    let mut game = work("g", 3);
+    game["type"] = json!("game");
+    game["fields"]["status"] = Value::Null;
+    game["showcase"] = json!(true);
+    game["showcaseOrder"] = json!(7);
+    adopt(&l, &s, json!({"works":[game]}));
+    l.normalize_showcase_orders().unwrap();
+    assert_eq!(l.backfill_legacy_collection_kinds().unwrap(), 0);
+    assert_eq!(l.get_collection("g").unwrap().showcase_order, Some(7));
+    assert!(core_bodies(&l).is_empty());
+}

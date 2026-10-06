@@ -356,6 +356,30 @@ impl Library {
             )?;
         }
         let final_classification = existing_classification.or(candidate_classification);
+        // Under the Collections authority the inherited memberships and covers are server
+        // commands too; inactive libraries keep the legacy local rewrite only.
+        let authority = super::collection_authority::collection_write_status(&transaction)?;
+        let joined: Vec<String> = transaction
+            .prepare(
+                "SELECT collection_id FROM collection_assets WHERE asset_id = ?1
+                 AND collection_id NOT IN (SELECT collection_id FROM collection_assets WHERE asset_id = ?2)",
+            )?
+            .query_map(params![existing_id, candidate_id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let covered: Vec<(String, serde_json::Value)> = if authority.active {
+            transaction
+                .prepare("SELECT id FROM collections WHERE cover_asset_id = ?1")?
+                .query_map([existing_id], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|id| {
+                    let before = super::collection_authority::editable_work(&transaction, &id)?;
+                    Ok((id, before))
+                })
+                .collect::<Result<_, LibraryError>>()?
+        } else {
+            Vec::new()
+        };
         transaction.execute(
             "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
              SELECT collection_id, ?2, added_at
@@ -368,6 +392,31 @@ impl Library {
              WHERE cover_asset_id = ?1",
             params![existing_id, candidate_id, chrono::Utc::now().to_rfc3339()],
         )?;
+        if authority.active {
+            for collection_id in &joined {
+                let entity_key = serde_json::json!([collection_id, candidate_id]).to_string();
+                let revision = super::collection_authority::predicted_collection_revision(
+                    &transaction,
+                    "memberships",
+                    &entity_key,
+                )?;
+                super::collection_authority::enqueue_collection_command(
+                    &transaction,
+                    &authority,
+                    "setMembership",
+                    &entity_key,
+                    serde_json::json!({"workId":collection_id,"assetId":candidate_id,"desiredState":true,"expectedRevision":revision}),
+                )?;
+            }
+            for (collection_id, before) in &covered {
+                super::collection_authority::enqueue_work_changes(
+                    &transaction,
+                    &authority,
+                    collection_id,
+                    before,
+                )?;
+            }
+        }
         transaction.execute(
             "UPDATE assets SET favorite = (SELECT favorite FROM assets WHERE id = ?1)
              WHERE id = ?2 AND status = 'review'",
@@ -520,7 +569,10 @@ impl Library {
         self.index_missing_similarity_hashes_with_budget(crate::performance::budgets())
     }
 
-    fn index_missing_similarity_hashes_with_budget(&self, budget: crate::performance::Budgets) -> Result<SimilarityIndexProgress, LibraryError> {
+    fn index_missing_similarity_hashes_with_budget(
+        &self,
+        budget: crate::performance::Budgets,
+    ) -> Result<SimilarityIndexProgress, LibraryError> {
         let _index = INDEX_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -542,17 +594,20 @@ impl Library {
             ids
         };
 
-        let workers =
-            budget.indexing_workers(
-                std::thread::available_parallelism().map_or(1, |count| count.get()));
+        let workers = budget
+            .indexing_workers(std::thread::available_parallelism().map_or(1, |count| count.get()));
         std::thread::scope(|scope| {
             let handles: Vec<_> = asset_ids
                 .chunks(asset_ids.len().div_ceil(workers).max(1))
                 .map(|chunk| {
                     scope.spawn(move || {
-                        chunk
-                            .iter()
-                            .try_for_each(|id| { if crate::workload::is_restricted() { Ok(()) } else { self.index_similarity_asset(id) } })
+                        chunk.iter().try_for_each(|id| {
+                            if crate::workload::is_restricted() {
+                                Ok(())
+                            } else {
+                                self.index_similarity_asset(id)
+                            }
+                        })
                     })
                 })
                 .collect();
@@ -1330,16 +1385,38 @@ mod tests {
     #[test]
     fn similarity_profiles_produce_identical_hashes_and_keep_the_fifty_asset_batch() {
         let mut snapshots = Vec::new();
-        for profile in [crate::performance::Profile::Laptop, crate::performance::Profile::Main] {
+        for profile in [
+            crate::performance::Profile::Laptop,
+            crate::performance::Profile::Main,
+        ] {
             let fixture = library_with_unindexed_assets(51);
-            let first = fixture.library.index_missing_similarity_hashes_with_budget(profile.budgets()).unwrap();
+            let first = fixture
+                .library
+                .index_missing_similarity_hashes_with_budget(profile.budgets())
+                .unwrap();
             assert_eq!((first.remaining, first.failed), (1, 1));
-            let second = fixture.library.index_missing_similarity_hashes_with_budget(profile.budgets()).unwrap();
+            let second = fixture
+                .library
+                .index_missing_similarity_hashes_with_budget(profile.budgets())
+                .unwrap();
             assert_eq!((second.remaining, second.failed), (0, 1));
             let connection = fixture.library.connection().unwrap();
-            let mut query = connection.prepare("SELECT id, perceptual_hash, perceptual_hash_error FROM assets ORDER BY id").unwrap();
-            let rows = query.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<Vec<u8>>>(1)?, r.get::<_, Option<String>>(2)?))).unwrap()
-                .collect::<Result<Vec<_>, _>>().unwrap();
+            let mut query = connection
+                .prepare(
+                    "SELECT id, perceptual_hash, perceptual_hash_error FROM assets ORDER BY id",
+                )
+                .unwrap();
+            let rows = query
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<Vec<u8>>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
             snapshots.push(rows);
         }
         assert_eq!(snapshots[0], snapshots[1]);
@@ -1819,7 +1896,12 @@ mod tests {
         let fixture = review_fixture();
         let (sibling_review, sibling_candidate) = fixture.add_sibling_review();
         assert_eq!(
-            fixture.library.list_similarity_reviews(None, 20).unwrap().items.len(),
+            fixture
+                .library
+                .list_similarity_reviews(None, 20)
+                .unwrap()
+                .items
+                .len(),
             2
         );
         fixture
@@ -1859,7 +1941,11 @@ mod tests {
             .unwrap();
         assert_eq!(fixture.normal_ids().len(), 2);
         assert_eq!(
-            fixture.library.list_similarity_reviews(None, 20).unwrap().total_count,
+            fixture
+                .library
+                .list_similarity_reviews(None, 20)
+                .unwrap()
+                .total_count,
             0
         );
     }
@@ -1913,7 +1999,10 @@ mod tests {
             .unwrap()
             .execute("DELETE FROM assets WHERE id = ?1", [&fixture.existing_id])
             .unwrap_err();
-        assert!(error.to_string().contains("CHECK constraint failed"), "{error}");
+        assert!(
+            error.to_string().contains("CHECK constraint failed"),
+            "{error}"
+        );
         // A stranded row (trashed without release) is released by the purge itself.
         fixture
             .library

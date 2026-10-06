@@ -1,6 +1,6 @@
 # Collections authority slice 1B — implementation plan
 
-Status: accepted 2026-10-06 with the §4 split (user chose "temporarily fence the rarer PC-only operations"). Builds on the [design](collection-authority-design-20260924.md) (§7 revised slices, §8 decisions) and the [1B survey](collection-authority-1b-survey-20261004.md) (write inventory at `d207ebf4`). Nothing here activates the authority; activation is slice 1C and needs its own approval.
+Status: batches 1-6 code complete 2026-10-06 (dry run and 1C pending approval); accepted with the §4 split (user chose "temporarily fence the rarer PC-only operations"). Builds on the [design](collection-authority-design-20260924.md) (§7 revised slices, §8 decisions) and the [1B survey](collection-authority-1b-survey-20261004.md) (write inventory at `d207ebf4`). Nothing here activates the authority; activation is slice 1C and needs its own approval.
 
 ## 1. What 1B delivers
 
@@ -47,3 +47,7 @@ Fencing the second list shrinks batches 3–5 by roughly half and brings 1C forw
 - Tablet APK installs: per build as usual.
 - 1C activation: separate approval after the dry run reports no loss.
 - Rollback before 1C: discard staging; nothing to undo on the PC because the replica is dormant.
+
+## 6. Progress (2026-10-06)
+
+Committed on `main`: batch 1 `a54ea974`, 2a `544e3ace`, 2b `16b8d491`, 2c `1bf9ef40`, 3 `9d6c14e5`, 4 `ca2da8b0`, 5 `53f2142f`, 6 (code) — see the commit after `db50cba9`. Batch 6 routed the similarity replace-existing membership/cover rewrite through the outbox, skips the legacy startup normalizers (legacy kind backfill, showcase order) while active, and leaves no `batch N` entries in the writer guard. Server changes from 2a/3/4 are **not deployed**. Remaining before 1C: deploy the server (approval), run the PC "컬렉션 서버 이전 점검" verify-only dry run against production, then the separately approved activation.

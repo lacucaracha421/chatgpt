@@ -645,7 +645,9 @@ pub(crate) fn normalized_name(name: String) -> Result<String, LibraryError> {
     Ok(name)
 }
 
-pub(crate) fn normalized_description(description: Option<String>) -> Result<Option<String>, LibraryError> {
+pub(crate) fn normalized_description(
+    description: Option<String>,
+) -> Result<Option<String>, LibraryError> {
     let description = description
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty());
@@ -685,6 +687,10 @@ fn normalized_release_date(value: Option<String>) -> Result<Option<String>, Libr
 impl Library {
     pub(crate) fn normalize_showcase_orders(&self) -> Result<(), LibraryError> {
         let connection = self.connection()?;
+        // The server owns showcase order once the Collections authority is active.
+        if super::collection_authority::collection_authority_active(&connection)? {
+            return Ok(());
+        }
         connection.execute(
             "UPDATE collections
          SET showcase_order = NULL
@@ -816,7 +822,9 @@ pub(crate) fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<C
 
 fn season_date_range(json: &str) -> Option<[String; 2]> {
     let dates: Vec<Option<String>> = serde_json::from_str(json).ok()?;
-    let mut dates: Vec<_> = dates.into_iter().flatten()
+    let mut dates: Vec<_> = dates
+        .into_iter()
+        .flatten()
         .filter_map(|date| chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok())
         .collect();
     dates.sort();
@@ -946,20 +954,44 @@ mod tests {
     fn series_card_dates_use_regular_season_premieres_from_cached_binding() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
-        let item = library.create_collection(CreateCollection { name: "Series".into(), description: None, collection_type: CollectionType::Movie }).unwrap();
+        let item = library
+            .create_collection(CreateCollection {
+                name: "Series".into(),
+                description: None,
+                collection_type: CollectionType::Movie,
+            })
+            .unwrap();
         let snapshot = serde_json::json!({"series":{"seasons":[
             {"seasonNumber":0,"airDate":"2010-01-01"},
             {"seasonNumber":3,"airDate":null},
             {"seasonNumber":2,"airDate":"2024-05-05"},
             {"seasonNumber":1,"airDate":"2016-01-14"},
             {"seasonNumber":4,"airDate":"2025-02-30"}
-        ]}}).to_string();
-        for (identity, expected) in [("tv:42", Some(["2016-01-14".to_string(), "2024-05-05".to_string()])), ("42", None)] {
-            library.upsert_collection_external_binding(&item.id, ExternalBindingInput {
-                provider: "tmdb".into(), external_id: identity.into(), provider_config_json: None,
-                provider_data_json: Some(snapshot.clone()), last_synced_at: None,
-            }).unwrap();
-            assert_eq!(library.list_collections().unwrap()[0].season_date_range, expected);
+        ]}})
+        .to_string();
+        for (identity, expected) in [
+            (
+                "tv:42",
+                Some(["2016-01-14".to_string(), "2024-05-05".to_string()]),
+            ),
+            ("42", None),
+        ] {
+            library
+                .upsert_collection_external_binding(
+                    &item.id,
+                    ExternalBindingInput {
+                        provider: "tmdb".into(),
+                        external_id: identity.into(),
+                        provider_config_json: None,
+                        provider_data_json: Some(snapshot.clone()),
+                        last_synced_at: None,
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                library.list_collections().unwrap()[0].season_date_range,
+                expected
+            );
         }
     }
     use std::io::Cursor;
@@ -1517,7 +1549,11 @@ mod tests {
         let library = Library::open(temp.path()).unwrap();
         let listed = library.list_collections().unwrap();
         let order = |id: &str| {
-            listed.iter().find(|item| item.id == id).unwrap().showcase_order
+            listed
+                .iter()
+                .find(|item| item.id == id)
+                .unwrap()
+                .showcase_order
         };
         assert_eq!(order(&first.1), Some(0));
         assert_eq!(order(&first.0), Some(1));
@@ -1646,10 +1682,8 @@ mod tests {
         let library = Library::open(temp.path()).unwrap();
         let collection = create(&library, "Dungeon Meshi");
         let connection = library.connection().unwrap();
-        for (id, provider_image_id) in [
-            ("volume-2-art", "volume-2"),
-            ("volume-1-art", "volume-1"),
-        ] {
+        for (id, provider_image_id) in [("volume-2-art", "volume-2"), ("volume-1-art", "volume-1")]
+        {
             connection
                 .execute(
                     "INSERT INTO collection_work_artworks (
@@ -1754,7 +1788,13 @@ mod tests {
                      ) VALUES (?1, ?2, 'igdb', ?3, ?4,
                         ?5, 'image/jpeg', 100, 150, NULL, 1,
                         '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
-                    rusqlite::params![id, collection.id, id, kind, format!("work-artwork/{id}.jpg")],
+                    rusqlite::params![
+                        id,
+                        collection.id,
+                        id,
+                        kind,
+                        format!("work-artwork/{id}.jpg")
+                    ],
                 )
                 .unwrap();
         }
