@@ -20,6 +20,40 @@ use tauri::{
 
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static REPLICATION_WORK: AtomicBool = AtomicBool::new(false);
+static LAUNCH_STARTED: OnceLock<Instant> = OnceLock::new();
+static LAUNCH_SETTLED: AtomicBool = AtomicBool::new(false);
+static LAUNCH_WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+const LAUNCH_FALLBACK: Duration = Duration::from_secs(12);
+
+fn launch_ready(settled: bool, elapsed: Option<Duration>) -> bool {
+    settled || elapsed.is_none_or(|elapsed| elapsed >= LAUNCH_FALLBACK)
+}
+
+pub(crate) fn launch_maintenance_ready() -> bool {
+    launch_ready(
+        LAUNCH_SETTLED.load(Ordering::Acquire),
+        LAUNCH_STARTED.get().map(Instant::elapsed),
+    )
+}
+
+/// Wait without holding a library lock or occupying a blocking worker. Unit-test
+/// libraries have no window/setup and do not wait. A missing renderer has a cap.
+pub(crate) async fn after_launch_settled() {
+    let wake = LAUNCH_WAKE.notified();
+    tokio::pin!(wake);
+    wake.as_mut().enable();
+    if !launch_maintenance_ready() {
+        wake.await;
+    }
+}
+
+#[tauri::command]
+pub(crate) fn workload_launch_settled() {
+    if !LAUNCH_SETTLED.swap(true, Ordering::AcqRel) {
+        crate::perf_log::startup_record("launch.maintenance.ready", serde_json::json!({}));
+    }
+    LAUNCH_WAKE.notify_waiters();
+}
 
 /// Events and explicit tray actions own this state. The timer only reconciles it
 /// every 30 s for platforms that omit a visibility/minimize event.
@@ -460,6 +494,11 @@ pub(crate) fn close_to_tray(app: &tauri::AppHandle) -> bool {
     hide
 }
 pub(crate) fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = LAUNCH_STARTED.set(Instant::now());
+    std::thread::spawn(|| {
+        std::thread::sleep(LAUNCH_FALLBACK);
+        workload_launch_settled();
+    });
     let _ = APP.set(app.clone());
     let path = app.path().app_config_dir()?.join("library-machine.json");
     crate::performance::setup(&path)?;
@@ -686,7 +725,9 @@ fn start_timers(app: tauri::AppHandle) {
             }
             // A moved publisher log head (seen by the watcher or a pass) runs the lanes now.
             let publication_wake = crate::cloud::status_watch::take_publication_wake();
-            if publication_wake || publications.elapsed() >= Duration::from_secs(10) {
+            if launch_maintenance_ready()
+                && (publication_wake || publications.elapsed() >= Duration::from_secs(10))
+            {
                 publications = Instant::now();
                 // Read-only readiness runs here; only a ready lane wakes its isolated worker.
                 let _ = library.run_saved_mobile_publications();
@@ -861,6 +902,17 @@ impl Drop for Reset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn launch_maintenance_waits_for_renderer_or_bounded_fallback() {
+        assert!(launch_ready(false, None));
+        assert!(!launch_ready(false, Some(Duration::ZERO)));
+        assert!(!launch_ready(
+            false,
+            Some(LAUNCH_FALLBACK - Duration::from_millis(1))
+        ));
+        assert!(launch_ready(false, Some(LAUNCH_FALLBACK)));
+        assert!(launch_ready(true, Some(Duration::ZERO)));
+    }
     #[test]
     fn window_activity_records_initial_focus_hide_and_restore() {
         for (focused, hidden, expected) in [

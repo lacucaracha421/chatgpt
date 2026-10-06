@@ -2,6 +2,8 @@ import { nativeWorkload, workloadPollDelay, getWorkloadProfile } from "./workloa
 import { isWindowFocused, subscribeWindowFocus, windowPollDelay } from "./windowFocus";
 import { useEffect, useRef } from "react";
 import type { CloudBackfillProgress, LibraryGateway } from "../library/types";
+import { readCloudProgress } from "./cloudProgressRead";
+import { afterLaunchSettled, launchSplashPresent } from "../shared/launch/LaunchSplash";
 
 export const CLOUD_PROGRESS_EVENT = "lakomics:cloud-progress";
 
@@ -21,11 +23,12 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
   const worker = useRef<{ gateway: LibraryGateway; root: string; promise: Promise<unknown> } | null>(null);
   useEffect(() => {
     let disposed = false;
+    let started = !launchSplashPresent();
     let checking = false;
     let timer: number | null = null;
     let nextDelay = INACTIVE_DELAY_MS;
     const schedule = (delay: number) => {
-      if (disposed) return;
+      if (disposed || !started) return;
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(() => { void tick(); }, delay);
     };
@@ -35,7 +38,7 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
       checking = true;
       nextDelay = INACTIVE_DELAY_MS;
       try {
-        const progress = await gateway.cloudBackfillProgress();
+        let progress = await readCloudProgress(gateway, libraryRoot);
         if (disposed || !progress) return;
         const workerActive = worker.current?.gateway === gateway && worker.current.root === libraryRoot;
         const enabled = !progress.syncHeld && progress.replicationEnabled !== false && progress.controlState !== "paused";
@@ -50,7 +53,8 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
           }
         } else if (!nativeWorkload() && enabled && !workerActive && progress.controlState === "running") {
           await gateway.cloudBackfillSetControlState?.("idle");
-          progress.controlState = "idle";
+          // Status readers share this snapshot; publish a new value instead of mutating theirs.
+          progress = { ...progress, controlState: "idle" };
         }
         if (!disposed) window.dispatchEvent(new CustomEvent(CLOUD_PROGRESS_EVENT, { detail: { gateway, libraryRoot, progress } }));
       } catch (error) {
@@ -65,9 +69,11 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
     const unsubscribeFocus = subscribeWindowFocus(() => {
       schedule(isWindowFocused() ? 0 : windowPollDelay(workloadPollDelay(nextDelay)));
     });
-    schedule(0);
+    const start = () => { started = true; schedule(0); };
+    const cancel = started ? (start(), () => undefined) : afterLaunchSettled(start);
     return () => {
       disposed = true;
+      cancel();
       if (timer !== null) window.clearTimeout(timer);
       window.removeEventListener(CONTROL_EVENT, wake);
       unsubscribeFocus();

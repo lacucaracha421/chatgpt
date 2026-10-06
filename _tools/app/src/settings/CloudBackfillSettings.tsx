@@ -7,6 +7,8 @@ import type { CloudBackfillPreflightReport, CloudBackfillProgress } from "../lib
 import { Button } from "../shared/ui/Button";
 import { cloudProblemCount } from "../app/useCloudProblems";
 import { Toast } from "../shared/ui/Toast";
+import { readCloudProgress } from "../app/cloudProgressRead";
+import { afterLaunchSettled, launchSplashPresent } from "../shared/launch/LaunchSplash";
 
 
 function useCloudBackfill() {
@@ -32,9 +34,10 @@ function useCloudBackfill() {
       }
     };
     window.addEventListener(CLOUD_PROGRESS_EVENT, receive);
-    void gateway.cloudBackfillProgress().then((next) => { if (active) setProgress(next); })
-      .catch((loadError) => { if (active) setError(commandErrorMessage(loadError, "동기화 상태를 불러오지 못했습니다.")); });
-    return () => { active = false; window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); };
+    const read = () => { void readCloudProgress(gateway, library?.root ?? "").then((next) => { if (active) setProgress(next); })
+      .catch((loadError) => { if (active) setError(commandErrorMessage(loadError, "동기화 상태를 불러오지 못했습니다.")); }); };
+    const cancel = launchSplashPresent() ? afterLaunchSettled(read) : (read(), () => undefined);
+    return () => { active = false; cancel(); window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); };
   }, [gateway, library?.root]);
 
   const act = async (action: () => Promise<void>, fallback: string) => {

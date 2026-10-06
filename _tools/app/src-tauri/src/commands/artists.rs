@@ -33,6 +33,7 @@ async fn run<T: Send + 'static>(
 pub async fn get_artist_overview(
     state: State<'_, AppState>,
 ) -> Result<ArtistOverview, CommandError> {
+    crate::workload::after_launch_settled().await;
     run(state, |library| library.artist_overview()).await
 }
 
@@ -223,6 +224,7 @@ pub async fn list_artist_style_suggestions(
     limit: u32,
     state: State<'_, AppState>,
 ) -> Result<crate::library::artist_style::Page, CommandError> {
+    crate::workload::after_launch_settled().await;
     run(state, move |library| {
         library.list_artist_style_suggestions(offset, limit)
     })
@@ -234,6 +236,7 @@ pub async fn artist_style_suggestion(
     asset_id: String,
     state: State<'_, AppState>,
 ) -> Result<Option<crate::library::artist_style::Suggestion>, CommandError> {
+    crate::workload::after_launch_settled().await;
     run(state, move |library| {
         library.artist_style_suggestion(&asset_id)
     })

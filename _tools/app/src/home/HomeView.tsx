@@ -52,6 +52,8 @@ type CharacterQueue = { total: number; targets: ShadowReviewPendingTarget[] };
 export type HomeViewProps = {
   collections: CollectionSummary[];
   collectionsReady?: boolean;
+  /** The initial trash count has arrived; later count changes still refresh the overview. */
+  overviewReady?: boolean;
   /** Opens one asset in the library viewer (다시 보기 thumbnails). */
   onOpenAsset?: (assetId: string) => void;
   /** Similarity review groups waiting (the app's count). */
@@ -79,7 +81,7 @@ export type HomeViewProps = {
 
 /** PC Home: media on the left, today's attention and memories on the right. */
 
-export function HomeView({ collections, collectionsReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
+export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const requested = useContext(AreaRequested);
@@ -109,8 +111,21 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const [wishlistError, setWishlistError] = useState(false);
   const [releaseDetail, setReleaseDetail] = useState<ReleaseTitle | null>(null);
   const [shelfRetry, setShelfRetry] = useState(0);
-  const mediaVersion = `${refreshVersion}:${shelfRetry}:${collections.map(work => `${work.id}:${work.updatedAt}`).join('|')}`;
-  const media = useHomeMedia(gateway, today, active, mediaVersion);
+  // Wait for the already-pending first collection read. Later refreshes keep the old
+  // snapshot active until the changed collection key arrives.
+  const initialReads = useRef({ gateway, root, collections: false, overview: false });
+  if (initialReads.current.gateway !== gateway || initialReads.current.root !== root) {
+    initialReads.current = { gateway, root, collections: false, overview: false };
+  }
+  if (collectionsReady) initialReads.current.collections = true;
+  if (overviewReady) initialReads.current.overview = true;
+  const mediaActive = active && initialReads.current.collections;
+  const overviewActive = mediaActive && initialReads.current.overview;
+  const collectionVersion = useMemo(() => JSON.stringify(
+    collections.map(work => [work.id, work.updatedAt]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  ), [collections]);
+  const mediaVersion = JSON.stringify([root, refreshVersion, shelfRetry, collectionVersion]);
+  const media = useHomeMedia(gateway, today, mediaActive, mediaVersion);
   const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number; visit: number } | null>(null);
   const [calendarSnapshot, setCalendarSnapshot] = useState<ReleaseCalendar | null>(null);
   useEffect(() => {
@@ -132,7 +147,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const [overviewLoading, setOverviewLoading] = useState(Boolean(gateway.getHomeOverview));
   const [overviewError, setOverviewError] = useState(false);
   useEffect(() => {
-    if (!gateway.getHomeOverview || !active) return;
+    if (!gateway.getHomeOverview || !overviewActive) return;
     let live = true;
     setOverviewLoading(true);
     const { todayStart, weekStart } = localBoundaries(at);
@@ -149,7 +164,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     return () => { live = false; };
     // `now` is a test seam; only the local day, gateway and relevant changes repeat this read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway, refreshVersion, trashCount, queueRead, today, active]);
+  }, [gateway, root, collectionVersion, refreshVersion, trashCount, queueRead, today, overviewActive]);
 
   // 확인할 것 counts other screens own; read when Home opens and after their dialogs close.
   const [dialog, setDialog] = useState<Dialog | null>(null);

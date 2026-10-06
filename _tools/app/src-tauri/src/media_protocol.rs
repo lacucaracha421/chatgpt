@@ -1,8 +1,9 @@
 use std::{
     collections::{HashMap, VecDeque},
     io::{Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use tauri::http::{
@@ -29,6 +30,135 @@ pub(crate) fn media_response(
 }
 
 const PREVIEW_CACHE_CONTROL: &str = "private, max-age=86400";
+const PREVIEW_DISK_BYTES: u64 = 128 * 1024 * 1024;
+const PREVIEW_DISK_ENTRIES: usize = 512;
+const PREVIEW_DISK_AGE: Duration = Duration::from_secs(30 * 86400);
+static PREVIEW_DISK: OnceLock<PathBuf> = OnceLock::new();
+static PREVIEW_DISK_WRITE: Mutex<()> = Mutex::new(());
+
+pub(crate) fn set_preview_disk_cache(path: PathBuf) {
+    let _ = PREVIEW_DISK.set(path);
+}
+
+fn preview_disk_path(root: &Path, key: &PreviewCacheKey) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    // Version and provider/size are part of the key; no request path becomes a filesystem path.
+    let key = format!("v1:{:?}:{}", key.variant, key.image_path);
+    let digest = Sha256::digest(key.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    root.join(format!("{digest}.preview"))
+}
+
+fn preview_disk_read(root: &Path, key: &PreviewCacheKey) -> Option<Response<Vec<u8>>> {
+    let file = std::fs::File::open(preview_disk_path(root, key)).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file()
+        || metadata.len() > (MAX_WORK_ARTWORK_BYTES + 64) as u64
+        || metadata.modified().ok()?.elapsed().ok()? > PREVIEW_DISK_AGE
+    {
+        return None;
+    }
+    let mut stored = Vec::new();
+    file.take((MAX_WORK_ARTWORK_BYTES + 65) as u64)
+        .read_to_end(&mut stored)
+        .ok()?;
+    let split = stored.iter().position(|byte| *byte == b'\n')?;
+    if split > 32 || stored.len() <= split + 1 || stored.len() - split - 1 > MAX_WORK_ARTWORK_BYTES
+    {
+        return None;
+    }
+    let mime = std::str::from_utf8(&stored[..split]).ok()?;
+    if !matches!(mime, "image/jpeg" | "image/png" | "image/webp") {
+        return None;
+    }
+    Some(preview_response(stored[split + 1..].to_vec(), mime))
+}
+
+fn preview_disk_write(root: &Path, key: &PreviewCacheKey, response: &Response<Vec<u8>>) {
+    if response.status() != StatusCode::OK
+        || response.body().is_empty()
+        || response.body().len() > MAX_WORK_ARTWORK_BYTES
+    {
+        return;
+    }
+    let Some(mime) = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return;
+    };
+    if !matches!(mime, "image/jpeg" | "image/png" | "image/webp") {
+        return;
+    }
+    let Ok(_guard) = PREVIEW_DISK_WRITE.lock() else {
+        return;
+    };
+    if std::fs::create_dir_all(root).is_err() {
+        return;
+    }
+    let path = preview_disk_path(root, key);
+    let temp = root.join(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let mut stored = mime.as_bytes().to_vec();
+    stored.push(b'\n');
+    stored.extend_from_slice(response.body());
+    if std::fs::write(&temp, stored).is_err() {
+        let _ = std::fs::remove_file(&temp);
+        return;
+    }
+    // Another request may already have cached the same immutable provider image.
+    if preview_disk_read(root, key).is_some() {
+        let _ = std::fs::remove_file(&temp);
+        return;
+    }
+    let _ = std::fs::remove_file(&path);
+    if std::fs::rename(&temp, &path).is_err() {
+        let _ = std::fs::remove_file(&temp);
+        return;
+    }
+    prune_preview_disk(root, PREVIEW_DISK_BYTES, PREVIEW_DISK_ENTRIES);
+}
+
+fn prune_preview_disk(root: &Path, max_bytes: u64, max_entries: usize) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let mut files = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            let digest = name.strip_suffix(".preview")?;
+            if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            Some((
+                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                path,
+                metadata.len(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    files.sort_by_key(|(modified, _, _)| *modified);
+    let mut bytes: u64 = files.iter().map(|(_, _, size)| size).sum();
+    let mut count = files.len();
+    for (modified, path, size) in files {
+        let expired = modified.elapsed().is_ok_and(|age| age > PREVIEW_DISK_AGE);
+        if !expired && bytes <= max_bytes && count <= max_entries {
+            break;
+        }
+        if std::fs::remove_file(path).is_ok() {
+            bytes = bytes.saturating_sub(size);
+            count -= 1;
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum PreviewVariant {
@@ -149,7 +279,26 @@ fn cached_preview(
     key: PreviewCacheKey,
     fetch: impl FnOnce() -> Response<Vec<u8>>,
 ) -> Response<Vec<u8>> {
-    cached_preview_from(preview_cache(), key, fetch)
+    cached_preview_from(preview_cache(), key.clone(), || {
+        cached_preview_disk_from(PREVIEW_DISK.get().map(PathBuf::as_path), &key, fetch)
+    })
+}
+
+fn cached_preview_disk_from(
+    root: Option<&Path>,
+    key: &PreviewCacheKey,
+    fetch: impl FnOnce() -> Response<Vec<u8>>,
+) -> Response<Vec<u8>> {
+    if let Some(response) = root.and_then(|root| preview_disk_read(root, key)) {
+        crate::perf_log::startup_record("preview.cache", serde_json::json!({"source": "disk"}));
+        return response;
+    }
+    crate::perf_log::startup_record("preview.cache", serde_json::json!({"source": "network"}));
+    let response = fetch();
+    if let Some(root) = root {
+        preview_disk_write(root, key, &response);
+    }
+    response
 }
 
 fn cached_preview_from(
@@ -159,6 +308,10 @@ fn cached_preview_from(
 ) -> Response<Vec<u8>> {
     if let Ok(mut cache) = cache.lock() {
         if let Some(response) = cache.get(&key) {
+            crate::perf_log::startup_record(
+                "preview.cache",
+                serde_json::json!({"source": "memory"}),
+            );
             return response;
         }
     }
@@ -879,6 +1032,7 @@ fn empty_response(status: StatusCode) -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
+    use std::time::{Duration, SystemTime};
 
     use image::{DynamicImage, ImageFormat};
     use rusqlite::params;
@@ -909,6 +1063,118 @@ mod tests {
             .header(CONTENT_TYPE, "image/png")
             .body(bytes.to_vec())
             .unwrap()
+    }
+
+    #[test]
+    fn preview_disk_cache_survives_memory_reset_and_separates_provider_sizes() {
+        let directory = tempfile::tempdir().unwrap();
+        let key = PreviewCacheKey::new(PreviewVariant::TmdbPoster, "/cover.png");
+        cached_preview_from(
+            &std::sync::Mutex::new(PreviewCache::new(32)),
+            key.clone(),
+            || {
+                super::cached_preview_disk_from(Some(directory.path()), &key, || {
+                    preview_test_response(StatusCode::OK, b"disk")
+                })
+            },
+        );
+        let warm = cached_preview_from(
+            &std::sync::Mutex::new(PreviewCache::new(32)),
+            key.clone(),
+            || {
+                super::cached_preview_disk_from(Some(directory.path()), &key, || {
+                    panic!("warm restart must not fetch")
+                })
+            },
+        );
+        assert_eq!(warm.body(), b"disk");
+        assert_eq!(warm.headers()[CONTENT_TYPE], "image/png");
+        for variant in [
+            PreviewVariant::TmdbBackdrop,
+            PreviewVariant::IgdbCover,
+            PreviewVariant::IgdbHero,
+        ] {
+            assert!(super::preview_disk_read(
+                directory.path(),
+                &PreviewCacheKey::new(variant, "/cover.png")
+            )
+            .is_none());
+        }
+    }
+
+    #[test]
+    fn preview_disk_cache_recovers_corruption_and_never_caches_failures() {
+        let directory = tempfile::tempdir().unwrap();
+        let key = PreviewCacheKey::new(PreviewVariant::IgdbCover, "cover");
+        let path = super::preview_disk_path(directory.path(), &key);
+        std::fs::write(&path, b"invalid").unwrap();
+        let response = super::cached_preview_disk_from(Some(directory.path()), &key, || {
+            preview_test_response(StatusCode::OK, b"recovered")
+        });
+        assert_eq!(response.body(), b"recovered");
+        assert_eq!(
+            super::preview_disk_read(directory.path(), &key)
+                .unwrap()
+                .body(),
+            b"recovered"
+        );
+        let old = SystemTime::now() - super::PREVIEW_DISK_AGE - Duration::from_secs(1);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        assert!(super::preview_disk_read(directory.path(), &key).is_none());
+        super::cached_preview_disk_from(Some(directory.path()), &key, || {
+            preview_test_response(StatusCode::OK, b"renewed")
+        });
+        assert_eq!(
+            super::preview_disk_read(directory.path(), &key)
+                .unwrap()
+                .body(),
+            b"renewed"
+        );
+        let missing = PreviewCacheKey::new(PreviewVariant::TmdbPoster, "/missing.png");
+        for _ in 0..2 {
+            assert_eq!(
+                super::cached_preview_disk_from(Some(directory.path()), &missing, || {
+                    preview_test_response(StatusCode::NOT_FOUND, b"")
+                })
+                .status(),
+                StatusCode::NOT_FOUND
+            );
+            assert!(!super::preview_disk_path(directory.path(), &missing).exists());
+        }
+    }
+
+    #[test]
+    fn preview_disk_cache_bounds_bytes_and_entries_without_touching_other_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let other = directory.path().join("other.txt");
+        std::fs::write(&other, b"keep").unwrap();
+        for name in ["a", "b", "c"] {
+            super::preview_disk_write(
+                directory.path(),
+                &PreviewCacheKey::new(PreviewVariant::IgdbCover, name),
+                &preview_test_response(StatusCode::OK, b"123456"),
+            );
+        }
+        super::prune_preview_disk(directory.path(), 32, 1);
+        let files = std::fs::read_dir(directory.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "preview"))
+            .collect::<Vec<_>>();
+        assert!(files.len() <= 1);
+        assert!(
+            files
+                .iter()
+                .map(|entry| entry.metadata().unwrap().len())
+                .sum::<u64>()
+                <= 32
+        );
+        assert_eq!(std::fs::read(other).unwrap(), b"keep");
     }
 
     #[test]

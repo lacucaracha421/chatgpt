@@ -1,4 +1,5 @@
 import { pcHomeReady, pcStartupMark, pcStartupEvent, pcPerfEnabled } from "../pcPerfLog";
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
 import { reducedMotion } from "../motion/curves";
 import { viewportImages, waitForViewportImages } from "../motion/viewportImages";
@@ -39,6 +40,11 @@ export function releaseLaunchSplash() {
 /** True while a mounted splash still covers the app. */
 export function launchSplashWaiting() {
   return present && phase === "waiting";
+}
+
+/** Includes the fade; status consumers must not wake maintenance while it still covers Home. */
+export function launchSplashPresent() {
+  return present && phase !== "done";
 }
 
 /** Schedule background maintenance after the cover has left and a short idle window. */
@@ -140,7 +146,13 @@ export function LaunchSplash({ elapsed = pageClock, capMs = LAUNCH_CAP_MS }: Lau
     return () => { window.clearTimeout(timer); present = false; };
   }, [capMs, elapsed]);
   useEffect(() => {
-    if (current === "done") { pcStartupMark("splashEnd"); return; }
+    if (current === "done") {
+      pcStartupMark("splashEnd");
+      if ("__TAURI_INTERNALS__" in window) {
+        return afterLaunchSettled(() => { void invoke("workload_launch_settled").catch(() => undefined); });
+      }
+      return;
+    }
     if (current !== "leaving") return;
     const timer = window.setTimeout(() => {
       phase = "done";

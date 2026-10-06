@@ -206,6 +206,7 @@ fn read_home_overview(
     local_date: NaiveDate,
 ) -> Result<HomeOverview, CommandError> {
     let (assets, collections) = {
+        let _span = crate::perf_log::StartupSpan::start("home.overview.core");
         let connection = library.connection()?;
         (
             asset_counts(&connection, today_start, week_start)?,
@@ -213,14 +214,23 @@ fn read_home_overview(
         )
     };
     let mut failed = Vec::new();
-    let tagger = optional_home_read(library.tagger_review_counts(), "tagger", &mut failed)?;
-    let av_performer = optional_home_read(
-        library.home_av_performer(local_date),
-        "avPerformer",
-        &mut failed,
-    )?
-    .flatten();
-    let server = optional_home_read(server_status(library), "server", &mut failed)?;
+    let tagger = {
+        let _span = crate::perf_log::StartupSpan::start("home.overview.tagger");
+        optional_home_read(library.tagger_review_counts(), "tagger", &mut failed)?
+    };
+    let av_performer = {
+        let _span = crate::perf_log::StartupSpan::start("home.overview.avPerformer");
+        optional_home_read(
+            library.home_av_performer(local_date),
+            "avPerformer",
+            &mut failed,
+        )?
+        .flatten()
+    };
+    let server = {
+        let _span = crate::perf_log::StartupSpan::start("home.overview.server");
+        optional_home_read(server_status(library), "server", &mut failed)?
+    };
     Ok(HomeOverview {
         assets,
         collections,

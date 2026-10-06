@@ -550,6 +550,7 @@ pub async fn list_character_targets(
     state: State<'_, AppState>,
 ) -> Result<Vec<Target>, CommandError> {
     let library = current_required(state)?;
+    crate::workload::after_launch_settled().await;
     tauri::async_runtime::spawn_blocking(move || {
         library.list_character_targets().map_err(Into::into)
     })
@@ -986,6 +987,7 @@ pub async fn character_groups(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::library::character_groups::Group>, CommandError> {
     let library = current_required(state)?;
+    crate::workload::after_launch_settled().await;
     tauri::async_runtime::spawn_blocking(move || library.character_groups(&series_id))
         .await
         .map_err(|_| super::background_task_error())?

@@ -6,6 +6,8 @@ import { ASSET_LIFECYCLE_CHANGED_EVENT } from "./useAssetAuthoritySync";
 import { CLASSIFICATION_AUTHORITY_CHANGED_EVENT } from "./useClassificationAuthoritySync";
 import { CLOUD_PROGRESS_EVENT } from "./useCloudBackfillSupervisor";
 import { nativeWorkload } from "./workloadProfile";
+import { readCloudProgress } from "./cloudProgressRead";
+import { afterLaunchSettled, launchSplashPresent } from "../shared/launch/LaunchSplash";
 
 // Queue failures are individual assets; transport/metadata failures are one
 // actionable problem per direction. A failed replication cycle is not counted twice.
@@ -38,10 +40,11 @@ export function useCloudSyncStatus(gateway: LibraryGateway, libraryRoot: string)
       }
     };
     window.addEventListener(CLOUD_PROGRESS_EVENT, receive);
-    void Promise.resolve().then(() => gateway.cloudBackfillProgress()).then(progress => {
+    const read = () => { void readCloudProgress(gateway, libraryRoot).then(progress => {
       if (active && !receivedUpdate && progress) updateProgress(progress);
-    }).catch(() => undefined);
-    return () => { active = false; window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); };
+    }).catch(() => undefined); };
+    const cancel = launchSplashPresent() ? afterLaunchSettled(read) : (read(), () => undefined);
+    return () => { active = false; cancel(); window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); };
   }, [gateway, libraryRoot]);
   return { problemCount: progress ? cloudProblemCount(progress) : 0, progress };
 }

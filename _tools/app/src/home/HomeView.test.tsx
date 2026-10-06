@@ -350,6 +350,32 @@ describe("Home wishlist arrivals", () => {
   });
 });
 
+it('reads startup media and overview once after initial app replies, then refreshes real changes', async () => {
+  const props = { collections: [], collectionsReady: false, overviewReady: false, reviewCount: 0, unsortedCount: 0, trashCount: 0, notes: notesWith([]), onNavigate: vi.fn(), now: () => NOW };
+  const home = (extra: Partial<HomeViewProps> = {}) => <PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><HomeView {...props} {...extra} /></PrivacyProvider>;
+  const view = render(home());
+  await act(async () => {});
+  expect(gateway.getHomeMedia).not.toHaveBeenCalled();
+  expect(gateway.getRevisitSlate).not.toHaveBeenCalled();
+  expect(gateway.getHomeOverview).not.toHaveBeenCalled();
+  const collections = [{ id: 'a', updatedAt: '1' }, { id: 'b', updatedAt: '1' }] as HomeViewProps['collections'];
+  view.rerender(home({ collections, collectionsReady: true }));
+  await waitFor(() => expect(gateway.getHomeMedia).toHaveBeenCalledTimes(1));
+  expect(gateway.getRevisitSlate).toHaveBeenCalledTimes(1);
+  expect(gateway.getHomeOverview).not.toHaveBeenCalled();
+  view.rerender(home({ collections, collectionsReady: true, overviewReady: true, trashCount: 8 }));
+  await waitFor(() => expect(gateway.getHomeOverview).toHaveBeenCalledTimes(1));
+  view.rerender(home({ collections: [...collections].reverse(), collectionsReady: false, overviewReady: true, trashCount: 8 }));
+  await act(async () => {});
+  expect(gateway.getHomeMedia).toHaveBeenCalledTimes(1);
+  expect(gateway.getRevisitSlate).toHaveBeenCalledTimes(1);
+  expect(gateway.getHomeOverview).toHaveBeenCalledTimes(1);
+  view.rerender(home({ collections: [{ ...collections[0], updatedAt: '2' }, collections[1]], collectionsReady: true, overviewReady: true, trashCount: 9 }));
+  await waitFor(() => expect(gateway.getHomeMedia).toHaveBeenCalledTimes(2));
+  expect(gateway.getRevisitSlate).toHaveBeenCalledTimes(2);
+  expect(gateway.getHomeOverview).toHaveBeenCalledTimes(2);
+});
+
 it('keeps the saved visit until collections have successfully loaded and their arrivals are displayed', async () => {
   const previous = new Date(2026,8,24).toISOString();
   writeHomeVisit('fixture', {lastVisit: previous, pending: [], opened: []});

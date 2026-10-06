@@ -2,6 +2,10 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-10-06 — user-reported fixes
+
+- **Wrong Collection overview** (found 2026-10-04): 가치아쿠타 carried the MangaDex overview of 극락가 (same author). Fixed by the user (reported 2026-10-06); the fix itself was not inspected in this session.
+
 ## Closure checkpoint — 2026-10-05 (night) — UI unification phases 2–3, folder-move motion, bookmarks speed and acceptance closure
 
 Reconciled against committed `main` at `223fac11` (commits after `75f70dba`). Records are source-complete unless stated; Android 0.9.25 (`ad825712`) and 0.9.26 (`223fac11`) were built and installed on the tablet 2026-10-05.

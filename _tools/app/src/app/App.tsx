@@ -256,6 +256,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [reviewCount, setReviewCount] = useState(0);
   const [videoReviewAssetIds, setVideoReviewAssetIds] = useState<string[]>([]);
   const [trashCount, setTrashCount] = useState(0);
+  const [trashRead, setTrashRead] = useState<{ gateway: typeof gateway; root: string } | null>(null);
   const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number; galleryId: string | null; artist: string } | null>(null);
   const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
   const settingsReturnViewRef = useRef<AssetView>({ kind: "classification", classificationId: null });
@@ -306,9 +307,14 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     setUnsortedCount(page.totalCount ?? null);
   }, [gateway]);
   const refreshTrashCount = useCallback(async () => {
-    const page = await gateway.listTrash({ after: null, limit: 1 });
-    setTrashCount(page.totalCount);
-  }, [gateway]);
+    try {
+      const page = await gateway.listTrash({ after: null, limit: 1 });
+      setTrashCount(page.totalCount);
+    } finally {
+      // Failure must not prevent Home's independent overview from being read.
+      setTrashRead({ gateway, root: libraryRoot });
+    }
+  }, [gateway, libraryRoot]);
   const refreshMembershipCounts = useCallback(() => {
     void refreshClassifications();
     void refreshAlbums();
@@ -781,6 +787,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     : <DeferredViewFallback />
                 ) : view.kind === "home" ? (
                   <HomeView collections={collections} collectionsReady={collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot} reviewCount={reviewCount} unsortedCount={unsortedCount} trashCount={trashCount}
+                    overviewReady={trashRead?.gateway === gateway && trashRead.root === libraryRoot}
                     refreshVersion={assetRefresh} onNavigate={(next) => navigateView(next, { fromHome: true })} onOpenAsset={(assetId) => void openExisting(assetId, { fromHome: true })}
                     onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
                     characters={characterHub.targets} classifications={entries} />

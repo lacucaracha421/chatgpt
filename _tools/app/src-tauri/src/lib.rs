@@ -43,6 +43,9 @@ pub fn run() {
         .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
             perf_log::setup(app.handle());
+            if let Ok(cache) = app.path().app_cache_dir() {
+                media_protocol::set_preview_disk_cache(cache.join("provider-previews-v1"));
+            }
             workload::setup(app.handle())?;
             if let Some(window) = app.get_webview_window("main") {
                 window_size::restore(&window);
@@ -256,6 +259,7 @@ pub fn run() {
             });
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
+            workload::workload_launch_settled,
             perf_log::perf_log_enabled,
             perf_log::perf_log_append,
             media_protocol_queue::media_view_changed,

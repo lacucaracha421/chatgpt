@@ -1727,8 +1727,15 @@ pub fn list_ownership_tracking(collection_id: String, state: State<'_, AppState>
 }
 
 #[tauri::command]
-pub fn get_collection_update_status(provider: String, state: State<'_, AppState>) -> Result<crate::library::collection_updates::CollectionUpdateStatus, CommandError> {
-    current_required(state)?.collection_update_status(&provider).map_err(CommandError::from)
+pub async fn get_collection_update_status(
+    provider: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::collection_updates::CollectionUpdateStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.collection_update_status(&provider))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -3059,6 +3066,7 @@ pub async fn cloud_backfill_progress(
     state: State<'_, AppState>,
 ) -> Result<crate::cloud::backfill::BackfillProgress, CommandError> {
     let library = current_required(state)?;
+    crate::workload::after_launch_settled().await;
     tauri::async_runtime::spawn_blocking(move || library.cloud_backfill_progress())
         .await
         .map_err(|_| background_task_error())?
