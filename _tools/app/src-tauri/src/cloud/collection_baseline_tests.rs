@@ -9,6 +9,63 @@ const ALL: ReplicaFeatures = ReplicaFeatures {
     portrait_image: true,
 };
 
+#[test]
+fn collection_baseline_offline_export_preserves_steam_and_memberships_without_source_writes() {
+    let (temp, library, _feature) = fixture();
+    let db = library.connection().unwrap();
+    db.execute("INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,created_at,updated_at) VALUES('g','steam','570','{\"developer\":\"must not merge\"}','2026','2026')", []).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    drop(db);
+    let database = std::fs::read(temp.path().join("library.sqlite")).unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let destination = output.path().join("snapshot");
+    let (baseline, legacy) =
+        Library::export_collection_baseline(temp.path(), &destination, ENDPOINT, "revision")
+            .unwrap();
+    let steam = baseline["bindings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["provider"] == "steam")
+        .unwrap();
+    assert_eq!(steam["externalId"], "570");
+    assert_eq!(steam["values"], serde_json::json!({}));
+    assert_eq!(
+        baseline["memberships"],
+        serde_json::json!([{"workId":"g","assetId":"asset","addedAt":"2026-10-04T00:00:00Z"}])
+    );
+    assert_eq!(baseline["personalEditCursor"], 7);
+    assert_eq!(legacy["personalEditVersion"], 3);
+    assert_eq!(
+        std::fs::read(temp.path().join("library.sqlite")).unwrap(),
+        database
+    );
+    assert!(!temp.path().join(".cache/mobile-collections").exists());
+    assert!(destination
+        .join(".cache/mobile-collections/thumbnails")
+        .is_dir());
+    // Same committed replica, including source artwork manifests and portraits.
+    let ordinary = library
+        .collection_authority_baseline(ENDPOINT, "revision", Some(&_feature), ALL, &|_| {})
+        .unwrap();
+    assert_eq!(baseline, ordinary);
+    assert!(
+        Library::export_collection_baseline(temp.path(), &destination, ENDPOINT, "revision")
+            .is_err()
+    );
+    let nested = temp.path().join("forbidden");
+    assert!(
+        Library::export_collection_baseline(temp.path(), &nested, ENDPOINT, "revision").is_err()
+    );
+    assert!(!nested.exists());
+    std::fs::write(temp.path().join("library.sqlite-wal"), b"pending").unwrap();
+    let refused = output.path().join("refused");
+    assert!(
+        Library::export_collection_baseline(temp.path(), &refused, ENDPOINT, "revision").is_err()
+    );
+    assert!(!refused.exists());
+}
+
 fn keys(value: &Value, expected: &[&str]) {
     let actual: std::collections::BTreeSet<_> = value
         .as_object()

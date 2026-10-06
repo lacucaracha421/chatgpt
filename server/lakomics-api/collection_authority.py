@@ -73,10 +73,10 @@ PURGE_BATCH = 100
 
 TYPES = ("game", "manga", "movie", "av")
 LEGACY_KINDS = ("game", "manga", "movie", "gacha", "av")
-PROVIDERS = ("tmdb", "igdb", "mangadex", "aladin", "kakao")
+PROVIDERS = ("tmdb", "igdb", "mangadex", "aladin", "kakao", "steam")
 #: The PC only binds each provider to one Collection type.
 PROVIDER_TYPES = {"tmdb": "movie", "igdb": "game", "mangadex": "manga",
-                  "aladin": "manga", "kakao": "manga"}
+                  "aladin": "manga", "kakao": "manga", "steam": "game"}
 SOURCE_PROVIDERS = ("kakao", "aladin")
 SLOTS = ("work", "hero", "backdrop")
 SELECTION_KINDS = {"work": "cover", "hero": "hero", "backdrop": "backdrop",
@@ -195,6 +195,8 @@ PROVIDER_VALUE_FIELDS = {
                  "originalTitle": "text"},
     "aladin": {},
     "kakao": {},
+    # Legacy Steam App IDs are identities only, never work metadata.
+    "steam": {},
 }
 
 MAX_COMMAND_BYTES_CLIENT = 64 * 1024
@@ -793,7 +795,7 @@ def valid_external_id(provider, value):
         return False
     if provider == "tmdb":
         return bool(re.fullmatch(r"(tv:)?[1-9][0-9]{0,17}", value))
-    if provider == "igdb":
+    if provider in ("igdb", "steam"):
         return bool(re.fullmatch(r"[1-9][0-9]{0,17}", value))
     return True
 
@@ -2677,8 +2679,15 @@ def _baseline_fail(message, **extra):
     fail(409, "collectionBaselineRejected", message, **extra)
 
 
-def validate_staging(db, doc, *, verify=False):
+def validate_staging(db, doc, *, verify=False, problems=None):
     """§5 step 2: the staged baseline must describe exactly the live legacy state."""
+    # Offline diagnostics collect independent relation errors. Normal staging and
+    # verify callers retain their fail-fast behavior and transaction boundaries.
+    def reject(message, **extra):
+        if problems is None:
+            _baseline_fail(message, **extra)
+        else:
+            problems.append({"code": "collectionBaselineRejected", "message": message, **extra})
     library_id = doc["libraryId"]
     libraries = sorted({entry["libraryId"] for entry in authority.active_domains(db)})
     if libraries and libraries != [library_id]:
@@ -2688,16 +2697,16 @@ def validate_staging(db, doc, *, verify=False):
     state = db.execute("SELECT last_sequence FROM mobile_collection_edit_state WHERE singleton=1").fetchone()
     last = state[0] if state else 0
     if not verify and doc["personalEditCursor"] != last:
-        _baseline_fail("모바일 개인 편집을 모두 반영한 뒤 다시 준비해 주세요.",
+        reject("모바일 개인 편집을 모두 반영한 뒤 다시 준비해 주세요.",
                        reason="personalEditCursor", personalEditCursor=last)
     works = {work["workId"]: work for work in doc["works"]}
     if len(works) != len(doc["works"]):
-        _baseline_fail("작품 ID가 중복되었습니다.", reason="duplicateWork")
+        reject("작품 ID가 중복되었습니다.", reason="duplicateWork")
     live = {row[0]: row[1] for row in db.execute("SELECT id,type FROM mobile_collections")}
     staged = {work_id: work["type"] for work_id, work in works.items()
               if work["legacyKind"] != "gacha"}
     if not verify and staged != live:
-        _baseline_fail("게시된 컬렉션과 기준선의 작품 목록이 다릅니다.", reason="works",
+        reject("게시된 컬렉션과 기준선의 작품 목록이 다릅니다.", reason="works",
                        missing=sorted(set(live) - set(staged))[:20],
                        unknown=sorted(set(staged) - set(live))[:20],
                        typeMismatch=sorted(i for i in set(live) & set(staged)
@@ -2707,24 +2716,24 @@ def validate_staging(db, doc, *, verify=False):
     for work in doc["works"]:
         key = (work["type"], nocase(work["name"]))
         if key in names:
-            _baseline_fail("같은 종류에 같은 이름의 작품이 있습니다.", reason="nameConflict",
+            reject("같은 종류에 같은 이름의 작품이 있습니다.", reason="nameConflict",
                            workIds=[names[key], work["workId"]])
         names[key] = work["workId"]
     for work in doc["works"]:
         if not work["showcase"] and work["showcaseOrder"] is not None:
-            _baseline_fail("Showcase 순서가 올바르지 않습니다.", workId=work["workId"])
+            reject("Showcase 순서가 올바르지 않습니다.", workId=work["workId"])
     artworks = {}
     work_artworks = {}
     confirmed = {row[0]: (row[1], row[2]) for row in db.execute(
         "SELECT sha256,size_bytes,content_type FROM mobile_collection_artwork")}
     for art in doc["artworks"]:
         if art["artworkId"] in artworks:
-            _baseline_fail("이미지 ID가 중복되었습니다.", artworkId=art["artworkId"])
+            reject("이미지 ID가 중복되었습니다.", artworkId=art["artworkId"])
         if art["workId"] not in works:
-            _baseline_fail("작품에 속하지 않은 이미지가 있습니다.", artworkId=art["artworkId"])
+            reject("작품에 속하지 않은 이미지가 있습니다.", artworkId=art["artworkId"])
         for blob in (art["original"], art["thumbnail"]):
             if not verify and blob is not None and confirmed.get(blob["sha256"]) != (blob["sizeBytes"], blob["contentType"]):
-                _baseline_fail("업로드가 확인되지 않은 이미지가 있습니다.", reason="artworkBlob",
+                reject("업로드가 확인되지 않은 이미지가 있습니다.", reason="artworkBlob",
                                sha256=blob["sha256"])
         artworks[art["artworkId"]] = art["workId"]
         work_artworks.setdefault(art["workId"], []).append(art)
@@ -2732,11 +2741,11 @@ def validate_staging(db, doc, *, verify=False):
     for art in doc["artworks"]:
         per_work[art["workId"]] = per_work.get(art["workId"], 0) + 1
         if per_work[art["workId"]] > MAX_ARTWORKS_PER_WORK:
-            _baseline_fail("작품 이미지가 너무 많습니다.", workId=art["workId"])
+            reject("작품 이미지가 너무 많습니다.", workId=art["workId"])
 
     def owned(work_id, artwork_id):
         if artwork_id is not None and artworks.get(artwork_id) != work_id:
-            _baseline_fail("다른 작품의 이미지를 참조합니다.", reason="artworkOwnership",
+            reject("다른 작품의 이미지를 참조합니다.", reason="artworkOwnership",
                            workId=work_id, artworkId=artwork_id)
 
     for work in doc["works"]:
@@ -2748,108 +2757,109 @@ def validate_staging(db, doc, *, verify=False):
                 # Require restaging rather than activating a digest with disagreeing flags.
                 if any(art.get("selected") and art["kind"] in selection_kinds(slot)
                        for art in work_artworks.get(work["workId"], [])):
-                    _baseline_fail("Selected artwork has no selection slot; restage the baseline.",
+                    reject("Selected artwork has no selection slot; restage the baseline.",
                                    reason="artworkSelection", workId=work["workId"])
                 continue
             selected = work["selection"][slot]
             kinds = selection_kinds(slot)
             for art in work_artworks.get(work["workId"], []):
                 if art["artworkId"] == selected and art["kind"] not in kinds:
-                    _baseline_fail("Artwork kind does not match its slot.", reason="artworkSelection",
+                    reject("Artwork kind does not match its slot.", reason="artworkSelection",
                                    artworkId=art["artworkId"])
                 if art["kind"] in kinds and "selected" in art and art["selected"] != (art["artworkId"] == selected):
-                    _baseline_fail("Artwork flags disagree with selection slots.", reason="artworkSelection",
+                    reject("Artwork flags disagree with selection slots.", reason="artworkSelection",
                                    artworkId=art["artworkId"])
         for artwork_id in detail_artwork_references(work["details"]):
             owned(work["workId"], artwork_id)
     people = {person["personId"]: person for person in doc.get("people", [])}
     if len(people) != len(doc.get("people", [])):
-        _baseline_fail("Duplicate person IDs.", reason="duplicatePerson")
+        reject("Duplicate person IDs.", reason="duplicatePerson")
     for person in people.values():
         portrait = person["portraitImage"]
         if not verify and portrait is not None and confirmed.get(portrait["sha256"]) != (
                 portrait["sizeBytes"], portrait["contentType"]):
-            _baseline_fail("Unconfirmed portrait image.", reason="portraitBlob")
+            reject("Unconfirmed portrait image.", reason="portraitBlob")
     for work in doc["works"]:
         for credit in work.get("avCredits", []):
             if credit["personId"] not in people:
-                _baseline_fail("AV credit references a missing person.", reason="creditPerson")
+                reject("AV credit references a missing person.", reason="creditPerson")
             crop = credit["portraitCrop"]
             if crop is not None and works.get(artworks.get(crop["artworkId"]), {}).get("type") != "av":
-                _baseline_fail("Portrait crop must reference staged AV artwork.", reason="portraitCrop")
+                reject("Portrait crop must reference staged AV artwork.", reason="portraitCrop")
     if doc.get("stagingVersion") == 2:
         for section in ("artworks", "volumes"):
             orders = [(item["workId"], item["order"]) for item in doc[section]]
             if len(set(orders)) != len(orders):
-                _baseline_fail("Duplicate publication order.", reason="order", section=section)
+                reject("Duplicate publication order.", reason="order", section=section)
         if not verify and not all(binding["ok"] for binding in verification_bindings(db, doc).values()):
-            _baseline_fail("Publication bindings have changed.", reason="bindings")
+            reject("Publication bindings have changed.", reason="bindings")
     identities, pairs = set(), set()
     for binding in doc["bindings"]:
         if binding["workId"] not in works:
-            _baseline_fail("작품에 속하지 않은 연결이 있습니다.", workId=binding["workId"])
+            reject("작품에 속하지 않은 연결이 있습니다.", workId=binding["workId"])
+            continue
         if PROVIDER_TYPES[binding["provider"]] != works[binding["workId"]]["type"]:
-            _baseline_fail("작품 종류와 맞지 않는 연결이 있습니다.", workId=binding["workId"])
+            reject("작품 종류와 맞지 않는 연결이 있습니다.", workId=binding["workId"])
         pair = (binding["workId"], binding["provider"])
         identity = (binding["provider"], binding["externalId"])
         if pair in pairs or identity in identities:
-            _baseline_fail("작품 정보 연결이 중복되었습니다.", reason="providerIdentityTaken",
+            reject("작품 정보 연결이 중복되었습니다.", reason="providerIdentityTaken",
                            provider=binding["provider"], externalId=binding["externalId"])
         pairs.add(pair)
         identities.add(identity)
         if (binding["snapshot"] is None) != (binding["values"] is None):
-            _baseline_fail("연결 스냅샷과 값이 함께 있어야 합니다.", workId=binding["workId"])
+            reject("연결 스냅샷과 값이 함께 있어야 합니다.", workId=binding["workId"])
     slots, volume_counts = set(), {}
     for volume in doc["volumes"]:
         if volume["workId"] not in works:
-            _baseline_fail("작품에 속하지 않은 권이 있습니다.", volumeId=volume["volumeId"])
+            reject("작품에 속하지 않은 권이 있습니다.", volumeId=volume["volumeId"])
         slot = (volume["workId"], volume["volumeNumber"], volume["editionIndex"])
         if slot in slots:
-            _baseline_fail("같은 권과 판이 중복되었습니다.", volumeId=volume["volumeId"])
+            reject("같은 권과 판이 중복되었습니다.", volumeId=volume["volumeId"])
         slots.add(slot)
         volume_counts[volume["workId"]] = volume_counts.get(volume["workId"], 0) + 1
         if volume_counts[volume["workId"]] > MAX_VOLUMES_PER_WORK:
-            _baseline_fail("권이 너무 많습니다.", workId=volume["workId"])
+            reject("권이 너무 많습니다.", workId=volume["workId"])
         owned(volume["workId"], volume["coverArtworkId"])
     if len({volume["volumeId"] for volume in doc["volumes"]}) != len(doc["volumes"]):
-        _baseline_fail("권 ID가 중복되었습니다.")
+        reject("권 ID가 중복되었습니다.")
     source_keys, source_items = set(), set()
     for source in doc["volumeSources"]:
         if source["workId"] not in works:
-            _baseline_fail("작품에 속하지 않은 도서 정보가 있습니다.")
+            reject("작품에 속하지 않은 도서 정보가 있습니다.")
         key = (source["workId"], source["volumeNumber"], source["provider"])
         item = (source["provider"], source["providerItemId"])
         if key in source_keys or item in source_items:
-            _baseline_fail("도서 정보가 중복되었습니다.", reason="providerIdentityTaken",
+            reject("도서 정보가 중복되었습니다.", reason="providerIdentityTaken",
                            provider=source["provider"], externalId=source["providerItemId"])
         source_keys.add(key)
         source_items.add(item)
     owners = set()
     for entry in doc["ownership"]:
         if entry["workId"] not in works:
-            _baseline_fail("작품에 속하지 않은 소장 정보가 있습니다.")
+            reject("작품에 속하지 않은 소장 정보가 있습니다.")
         key = (entry["workId"], entry["volumeNumber"], entry["editionIndex"])
         if key in owners:
-            _baseline_fail("소장 정보가 중복되었습니다.")
+            reject("소장 정보가 중복되었습니다.")
         owners.add(key)
     members = set()
     asset_ids = set()
     for entry in doc["memberships"]:
         if entry["workId"] not in works:
-            _baseline_fail("작품에 속하지 않은 연결 자산이 있습니다.")
+            reject("작품에 속하지 않은 연결 자산이 있습니다.")
         key = (entry["workId"], entry["assetId"])
         if key in members:
-            _baseline_fail("작품 자산 연결이 중복되었습니다.")
+            reject("작품 자산 연결이 중복되었습니다.")
         members.add(key)
         asset_ids.add(entry["assetId"])
     for work in doc["works"]:
         cover = work["fields"]["coverAssetId"]
         if cover is not None:
             asset_ids.add(cover)
-    _validate_assets(db, sorted(asset_ids))
+    _validate_assets(db, sorted(asset_ids), reject=reject)
 
 
-def _validate_assets(db, asset_ids):
+def _validate_assets(db, asset_ids, *, reject=_baseline_fail):
     """Memberships vs Assets: committed, and never tombstoned when Asset authority is active."""
     if not asset_ids:
         return
@@ -2861,7 +2871,7 @@ def _validate_assets(db, asset_ids):
             chunk))
     missing = [asset_id for asset_id in asset_ids if asset_id not in known]
     if missing:
-        _baseline_fail("서버에 없는 자산이 연결되어 있습니다.", reason="membershipAssets",
+        reject("서버에 없는 자산이 연결되어 있습니다.", reason="membershipAssets",
                        assetIds=missing[:20], count=len(missing))
     active = authority.active_domain(db, asset_authority.DOMAIN)
     if active is None:
@@ -2875,7 +2885,7 @@ def _validate_assets(db, asset_ids):
     bad = [asset_id for asset_id in asset_ids
            if lifecycles.get(asset_id) not in (asset_authority.NORMAL, asset_authority.TRASH)]
     if bad:
-        _baseline_fail("영구 삭제되었거나 권위에 없는 자산이 연결되어 있습니다.",
+        reject("영구 삭제되었거나 권위에 없는 자산이 연결되어 있습니다.",
                        reason="membershipAssets", assetIds=bad[:20], count=len(bad))
 
 

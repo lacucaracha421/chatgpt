@@ -26,6 +26,111 @@ const FIELDS: &[&str] = &[
 ];
 
 impl Library {
+    /// Offline extraction: SQLite only opens the copied database. Source image
+    /// files are read in place; derived previews are written only to the snapshot.
+    /// The caller must close the app before copying (a nonempty WAL is refused).
+    pub fn export_collection_baseline(
+        source: &std::path::Path,
+        snapshot_dir: &std::path::Path,
+        endpoint: &str,
+        revision: &str,
+    ) -> Result<(Value, Value), Box<dyn std::error::Error>> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        fn hash(path: &std::path::Path) -> Result<Vec<u8>, std::io::Error> {
+            let mut file = std::fs::File::open(path)?;
+            let mut digest = Sha256::new();
+            let mut buffer = [0u8; 65536];
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                digest.update(&buffer[..count]);
+            }
+            Ok(digest.finalize().to_vec())
+        }
+        fn no_wal(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+            match std::fs::metadata(root.join("library.sqlite-wal")) {
+                Ok(m) if m.len() != 0 => {
+                    Err("Nonempty library.sqlite-wal; close the app first".into())
+                }
+                Ok(_) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.into()),
+            }
+        }
+        let root = source.canonicalize()?;
+        // Resolve the existing parent before creating anything (including symlinks).
+        let parent = snapshot_dir
+            .parent()
+            .ok_or("Snapshot directory needs a parent")?
+            .canonicalize()?;
+        let destination = parent.join(
+            snapshot_dir
+                .file_name()
+                .ok_or("Invalid snapshot directory")?,
+        );
+        if destination.starts_with(&root) || destination.exists() {
+            return Err("Snapshot must be a new directory outside the source library".into());
+        }
+        if endpoint.is_empty() || revision.is_empty() {
+            return Err("Endpoint and revision are required".into());
+        }
+        no_wal(&root)?;
+        let source_db = root.join("library.sqlite");
+        let before = hash(&source_db)?;
+        std::fs::create_dir(&destination)?;
+        let destination = destination.canonicalize()?;
+        let copied = destination.join("library.sqlite");
+        std::fs::copy(&source_db, &copied)?;
+        no_wal(&root)?;
+        if hash(&copied)? != before || hash(&source_db)? != before {
+            return Err("Source database changed while copying; close the app and retry".into());
+        }
+        let result = cache::with_export_cache(&destination, || -> Result<_, LibraryError> {
+            let mut db = rusqlite::Connection::open_with_flags(
+                &copied,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let tx = db.transaction()?;
+            let library_id = crate::library::library_id_on(&tx)?;
+            let adopted: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM mobile_collection_personal_edit_sync WHERE endpoint=?1 AND library_id=?2)",
+                rusqlite::params![endpoint, library_id], |r| r.get(0))?;
+            let feature = adopted.then(|| PersonalEditFeature {
+                endpoint: endpoint.into(),
+                library_id,
+                edit_version: 3,
+            });
+            let features = ReplicaFeatures {
+                av: true,
+                work_record: true,
+                cover_focus: true,
+                people: true,
+                portrait_image: true,
+            };
+            let snapshot = snapshot_from_transaction(
+                &root,
+                &tx,
+                Some(revision.into()),
+                feature.as_ref(),
+                features,
+                &|_| {},
+            )?;
+            let baseline = from_snapshot(&tx, &snapshot, endpoint, revision)?;
+            let replica = serde_json::to_value(&snapshot.replica)
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            tx.commit()?;
+            Ok((baseline, replica))
+        });
+        no_wal(&root)?;
+        if hash(&source_db)? != before {
+            return Err("Source database changed during export".into());
+        }
+        Ok(result?)
+    }
+
     pub(crate) fn collection_authority_baseline(
         &self,
         endpoint: &str,

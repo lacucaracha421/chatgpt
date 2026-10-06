@@ -43,6 +43,43 @@ class CollectionAuthorityVerifyTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200, result.text)
         return result.json()
 
+    def test_steam_stages_projects_and_preserves_inactive_payload_bytes(self):
+        before = self.client.get('/v1/collections', headers=self.auth).content
+        steam = dict(workId='game-work', provider='steam', externalId='570', config=None,
+                     snapshot={'developer': 'Never merged'}, values={}, lastSyncedAt=None)
+        self.doc['bindings'].append(steam)
+        self.assertEqual(self.report()['verdict'], 'lossless')
+        staged = self.ok(self.client.put(PREFIX + '/staging', headers=self.publisher, json=self.doc))
+        self.assertEqual(self.client.get('/v1/collections', headers=self.auth).content, before)
+        self.ok(self.client.post(PREFIX + '/activate', headers=self.publisher,
+                                json={'libraryId': LIBRARY, 'expectedStagedDigest': staged['stagedDigest']}))
+        with api_app.get_db() as db:
+            binding = ca.binding_projection(ca.binding_row(db, LIBRARY, 'game-work', 'steam'))
+            self.assertEqual(binding['externalId'], '570')
+            self.assertEqual(binding['values'], {})
+            self.assertEqual(ca.work_projection(db, LIBRARY, 'game-work')['fields']['developer'],
+                             next(w for w in self.doc['works'] if w['workId'] == 'game-work')['fields']['developer'])
+        params = {'libraryId': LIBRARY, 'epoch': 1}
+        manifest = self.ok(self.client.get(PREFIX + '/baseline', headers=self.auth, params=params))
+        page = self.ok(self.client.get(PREFIX + '/baseline', headers=self.auth,
+                       params={**params, 'snapshot': manifest['snapshotCursor'], 'section': 'bindings'}))
+        self.assertIn('steam', [b['provider'] for b in page['items']])
+
+    def test_steam_rejects_non_numeric_ids_values_and_wrong_work_type(self):
+        steam = dict(workId='game-work', provider='steam', externalId='570', config=None,
+                     snapshot=None, values=None, lastSyncedAt=None)
+        for external in ('0', '-1', '01', '570x', ' 570', 'tv:570', 570):
+            with self.subTest(external=external):
+                doc = copy.deepcopy(self.doc)
+                doc['bindings'].append({**steam, 'externalId': external})
+                self.assertEqual(self.report(doc)['verdict'], 'blocked')
+        doc = copy.deepcopy(self.doc)
+        doc['bindings'].append({**steam, 'snapshot': {}, 'values': {'developer': 'No'}})
+        self.assertEqual(self.report(doc)['validation']['code'], 'invalidProviderValues')
+        doc = copy.deepcopy(self.doc)
+        doc['bindings'].append({**steam, 'workId': 'av-work'})
+        self.assertEqual(self.report(doc)['verdict'], 'blocked')
+
     def test_example_is_lossless_in_both_public_views_and_people(self):
         parsed = ca.parse_staging(self.doc, verify=True)
         self.assertEqual(parsed['stagingVersion'], 2)

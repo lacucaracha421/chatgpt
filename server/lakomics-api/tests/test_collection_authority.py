@@ -449,6 +449,30 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.assertEqual(self.code(missing), 'invalidCollectionMembership')
 
     # --- commands ----------------------------------------------------------------------
+    def test_steam_bind_unbind_are_publisher_only_and_feed_preserves_identity(self):
+        self.ready()
+        self.ok(self.create('steam-game', 'Steam game', type_='game', developer='My developer'))
+        args = dict(workId='steam-game', provider='steam', externalId='570', config=None, expectedRevision=0)
+        self.assertEqual(self.command('bindProvider', **args).status_code, 401)
+        bound = self.ok(self.command('bindProvider', headers=self.publisher, **args))
+        self.assertEqual(bound['entities']['bindings'][0]['externalId'], '570')
+        self.assertEqual(self.command('unbindProvider', workId='steam-game', provider='steam', expectedRevision=1).status_code, 401)
+        snapshot = self.ok(self.command('applyProviderSnapshot', headers=self.publisher,
+                    workId='steam-game', provider='steam', externalId='570', snapshot={'developer': 'Ignored'},
+                    values={}, details=None, baseSnapshotDigest=None))
+        self.assertEqual(snapshot['entities']['bindings'][0]['values'], {})
+        self.assertEqual(self.work('steam-game')['fields']['developer'], 'My developer')
+        self.assertEqual(self.command('applyProviderSnapshot', headers=self.publisher,
+                    workId='steam-game', provider='steam', externalId='570', snapshot={},
+                    values={'developer': 'Forbidden'}, details=None, baseSnapshotDigest=None).status_code, 422)
+        feed = self.ok(self.client.get(PREFIX + '/changes', headers=self.auth,
+                       params={'libraryId': LIBRARY, 'epoch': 1, 'after': 0}))
+        bindings = [b for change in feed['items'] for b in change['entities'].get('bindings', [])]
+        self.assertTrue(any(b['provider'] == 'steam' and b['externalId'] == '570' for b in bindings))
+        unbound = self.ok(self.command('unbindProvider', headers=self.publisher, workId='steam-game',
+                                     provider='steam', expectedRevision=2))
+        self.assertFalse(unbound['entities']['bindings'][0]['bound'])
+
     def test_work_commands_revisions_and_receipts(self):
         self.ready()
         created = self.ok(self.create('w1', ' Film ', year=2001))

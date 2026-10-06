@@ -4,6 +4,54 @@ use std::cell::{Cell, RefCell};
 const NOW: &str = "2026-10-06T00:00:00Z";
 
 #[test]
+fn collection_authority_steam_binding_survives_baseline_and_changes() {
+    let (_temp, library, status) = fixture();
+    let mut game = work("w", 1);
+    game["type"] = json!("game");
+    game["fields"]["status"] = json!("unplayed");
+    let mut steam = binding();
+    steam["provider"] = json!("steam");
+    steam["externalId"] = json!("570");
+    steam["snapshot"] = Value::Null;
+    steam["values"] = Value::Null;
+    adopt(
+        &library,
+        &status,
+        json!({"works":[game],"bindings":[steam]}),
+    );
+    let db = library.connection().unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT external_id FROM collection_external_bindings WHERE provider='steam'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "570"
+    );
+    drop(db);
+    steam["externalId"] = json!("730");
+    steam["entityRevision"] = json!(2);
+    library
+        .apply_collection_changes(&changes(
+            &status,
+            1,
+            json!([change(1, json!({"bindings":[steam]}))]),
+        ))
+        .unwrap();
+    let db = library.connection().unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT external_id FROM collection_external_bindings WHERE provider='steam'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "730"
+    );
+}
+
+#[test]
 fn collection_authority_tracking_is_queued_and_zero_is_projected_from_feed() {
     let (_temp, l, s) = fixture();
     let mut initial = work("w", 1);

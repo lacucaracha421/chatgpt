@@ -1,5 +1,8 @@
 # Local API performance kit
 
+For offline Collections staging validation and projection comparison, see
+[the baseline dry-run harness](COLLECTION_BASELINE.md).
+
 From `server/lakomics-api`, using the existing environment:
 
 ```sh

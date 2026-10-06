@@ -64,6 +64,27 @@ fn stamp(file: &File) -> Result<Stamp, LibraryError> {
 type Descriptors = BTreeMap<PathBuf, (Stamp, ArtworkBlob)>;
 static DESCRIPTORS: OnceLock<Mutex<Descriptors>> = OnceLock::new();
 
+thread_local! {
+    static EXPORT_CACHE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn export_cache() -> Option<PathBuf> {
+    EXPORT_CACHE.with(|cache| cache.borrow().clone())
+}
+
+/// Only the offline exporter enters this scope. Keep ordinary publication caching
+/// unchanged, and restore the thread-local setting even if extraction fails.
+pub(super) fn with_export_cache<T>(root: &Path, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<PathBuf>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            EXPORT_CACHE.with(|cache| *cache.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(EXPORT_CACHE.with(|cache| cache.replace(Some(root.to_owned()))));
+    run()
+}
+
 fn persistent_path(root: &Path, path: &Path, stamp: &Stamp) -> Result<PathBuf, LibraryError> {
     let relative = path
         .strip_prefix(root)
@@ -130,6 +151,12 @@ pub(super) fn descriptor(
     path: &Path,
     limit: u64,
 ) -> Result<Option<ArtworkBlob>, LibraryError> {
+    if export_cache().is_some() {
+        // Never persist descriptors next to the read-only source library.
+        return read_existing_image(path, limit)?
+            .map(|bytes| blob_for(&bytes))
+            .transpose();
+    }
     let file = match File::open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),

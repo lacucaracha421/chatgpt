@@ -857,7 +857,8 @@ fn source_artwork(root: &Path, path: &Path, collection: &str,
     if artworks.len() >= MAX_ARTWORKS { return Err(LibraryError::InvalidCloudResponse); }
     let original = add_blob(root, &relative, MAX_ORIGINAL_BYTES, files, total)?.ok_or(LibraryError::InvalidWorkArtwork)?;
     let thumbnail_name = format!(".cache/mobile-collections/thumbnails/{}.webp", original.sha256);
-    let thumbnail_path = root.join(&thumbnail_name);
+    let thumbnail_root = if root.join(&thumbnail_name).exists() { root.to_owned() } else { cache::export_cache().unwrap_or_else(|| root.to_owned()) };
+    let thumbnail_path = thumbnail_root.join(&thumbnail_name);
     let _thumbnail_write=cache::THUMBNAIL_WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if !thumbnail_path.exists() {
         let bytes = read_existing_image(&path, MAX_ORIGINAL_BYTES)?.ok_or(LibraryError::InvalidWorkArtwork)?;
@@ -868,7 +869,7 @@ fn source_artwork(root: &Path, path: &Path, collection: &str,
         let image = reader.decode().map_err(|_| LibraryError::InvalidWorkArtwork)?;
         write_collection_thumbnail(&image, &thumbnail_path)?;
     }
-    let thumbnail = add_blob(root, &thumbnail_name, MAX_THUMBNAIL_BYTES, files, total)?;
+    let thumbnail = add_blob(&thumbnail_root, &thumbnail_name, MAX_THUMBNAIL_BYTES, files, total)?;
     artworks.push(ReplicaArtwork {id: id.clone(), kind: "cover".into(), selected: false, original: Some(original), thumbnail});
     Ok(id)
 }
