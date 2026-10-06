@@ -105,3 +105,7 @@ the baseline, and legacy publication stays quiet before reopening writes.
   Keep PC sync/publication held until recovery is validated: clearing the marker
   re-enables legacy paths. Never republish a PC snapshot as rollback; the restored
   server DB is the recovery source.
+
+### 1C activation (2026-10-06 22:46 KST)
+
+Activated on production: staged digest `39168b2f…7e8177`, verify `lossless`, epoch 1 (works 346, bindings 470, artworks 2,995, volumes 2,585, volumeSources 207, ownership 117, people 4). Server DB backup before activation: `/home/linuxuser/lakomics-1c-20261006/pre-collections-1c.sqlite3` (quick_check ok); the temporary publisher token was revoked. The PC dev build (`59461c1c`) adopted the baseline within a minute (marker adopted, outbox empty, legacy collections publication consumed and quiet, no cloud errors). Tablet 0.9.31 installed; a Collection created and a score edited on the tablet reached the PC replica (cursor 2).
