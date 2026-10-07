@@ -90,9 +90,9 @@ export function ProviderThumb({url}: {url: string | null}) {
         onLoad={() => setLoaded(source)} onError={() => setFailed(source)}/>}</>}</span>;
 }
 
-export function ProviderSearchSheet({provider, item, authority, onClose}: {provider: Provider; item: CollectionDetail; authority: Authority; onClose(): void}) {
+export function ProviderSearchSheet({provider, item, authority, initialKind = 'movie', onClose}: {provider: Provider; item: CollectionDetail; authority: Authority; initialKind?: 'movie' | 'tv'; onClose(): void}) {
   const [scope] = useState(() => ({connection: outboxConnection(), identity: authority.identity}));
-  const [query, setQuery] = useState(item.name), [kind, setKind] = useState<'movie' | 'tv'>('movie');
+  const [query, setQuery] = useState(item.name), [kind, setKind] = useState<'movie' | 'tv'>(initialKind);
   const [results, setResults] = useState<ProviderCandidate[] | null>(null), [picked, setPicked] = useState<ProviderDetail | null>(null);
   const [busy, setBusy] = useState(false), [failure, setFailure] = useState(''), [operation, setOperation] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -185,12 +185,15 @@ export function ProviderArtworkSheet({item, provider, externalId, authority, onC
   return <Dialog open title={artworkLabel(provider)} onClose={onClose}><DialogDescription className="sr-only">슬롯마다 유지, 비우기 또는 이미지를 선택합니다.</DialogDescription>
     <div className="library-sheet bind-sheet"><BusyLabel busy={busy} idle="">불러오는 중…</BusyLabel>
       {failure && <p role="alert" className="bind-message is-error">{failure}{!detail && <Button onClick={() => setRetry(value => value + 1)}>다시 시도</Button>}</p>}
+      {/* Many posters scroll here so 닫기/저장 stay reachable. */}
+      <div className="bind-scroll">
       {detail && slots.map(({slot, label, kinds}) => <section key={slot} aria-label={label}><h3>{label}</h3>
         <div className="collection-authority-types">{(['keep', 'clear'] as const).map(choice => <Button key={choice} disabled={busy || !!operations.length} aria-pressed={choices[slot] === choice} onClick={() => setChoices(current => ({...current, [slot]: choice}))}>{choice === 'keep' ? '유지' : '비우기'}</Button>)}</div>
         <div className={`collection-provider-grid ${slot === 'work' ? 'is-cover' : ''}`}>{detail.artwork.filter(art => kinds.includes(art.kind)).map((art, index) => <button key={`${art.kind}:${art.path}`} aria-label={`${label} ${index + 1}`} aria-pressed={typeof choices[slot] === 'object' && (choices[slot] as {path: string}).path === art.path}
           disabled={busy || !!operations.length} onClick={() => setChoices(current => ({...current, [slot]: art}))}><ProviderThumb url={art.previewUrl}/></button>)}</div>
       </section>)}
       {provider === 'tmdb' && detail?.artwork.some(art => art.kind === 'season_poster') && <section aria-label="시즌 포스터"><h3>시즌 포스터</h3><div className="collection-provider-grid is-cover">{detail.artwork.filter(art => art.kind === 'season_poster').map(art => <div key={`${art.seasonNumber}:${art.path}`}><ProviderThumb url={art.previewUrl}/><small>시즌 {art.seasonNumber}</small></div>)}</div></section>}
+      </div>
       {pending && <Badge>대기</Badge>}{conflict && <p role="alert">이미지 변경을 받지 못했습니다. 작품의 대기열에서 충돌을 확인해 주세요.</p>}
       <div className="bind-actions"><Button onClick={onClose}>닫기</Button><Button variant="primary" disabled={busy || !detail || !!operations.length} onClick={() => void save()}>저장</Button></div>
     </div>

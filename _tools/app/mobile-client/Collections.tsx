@@ -467,6 +467,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [workForm,setWorkForm]=useState<WorkForm|null>(null);
   // 작품 관리 (the detail's ⋯) and the 휴지통 shortcut.
   const [manage,setManage]=useState<ManageSheet>(null),[trashOpen,setTrashOpen]=useState(false);
+  const [createSearch,setCreateSearch]=useState<{workId:string;operationId:string;kind:'movie'|'tv'}|null>(null);
+  const [searchKind,setSearchKind]=useState<'movie'|'tv'>('movie');
   const providerStatus=useProviderStatus(active&&!paused,refresh);
   const trash=useCollectionTrash(edits.authority,browseLive,refresh);
   const localCreate=edits.authority.rows.find(row=>row.command.commandType==='createWork'&&row.command.workId===selected);
@@ -480,7 +482,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     // A step to the previous/next work keeps the shown work (inert) until the next one is ready.
     const step=stepping.current;stepping.current=false;
     committedDetail.current='';if(!step)setDetail(current=>current?.item.id===selected?current:null);
-    setDetailError('');setCoverIndex(null);setOverview(false);setPersonalSheet(null);setBindSheet(null);setManage(null);
+    setDetailError('');setCoverIndex(null);setOverview(false);setPersonalSheet(null);setBindSheet(null);setManage(null);setSearchKind('movie');
     if(!step&&detailRef.current)detailRef.current.scrollTop=0;
   },[selected]);
   useEffect(()=>{
@@ -500,6 +502,14 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     }).catch(reason=>{if(!controller.signal.aborted)setDetailError(errorText(reason));});
     return()=>controller.abort();
   },[active,paused,selected,detailKey,localCreateState]);
+  // Keep the pending work visible; connect only after the create receipt and server detail exist.
+  useEffect(()=>{
+    if(!createSearch)return;
+    if(selected!==createSearch.workId){setCreateSearch(null);return;}
+    const accepted=[...edits.authority.rows,...edits.authority.acknowledgements].some(row=>row.command.operationId===createSearch.operationId&&row.state==='accepted');
+    if(!active||paused||!accepted||detail?.item.id!==selected||detail.revision==='local-create')return;
+    setSearchKind(createSearch.kind);setManage('search');setCreateSearch(null);
+  },[createSearch,selected,active,paused,detail,edits.authority.rows,edits.authority.acknowledgements]);
   // The shared conditional poll (60 s while visible) keeps the chip and badges current; a pull re-reads at once.
   usePublicationCheck(active&&!paused,RELEASE_COUNTS_PATH,undefined,takeReleaseCounts);
   useEffect(()=>{if(!refresh||!active||paused)return;const controller=new AbortController();void api(RELEASE_COUNTS_PATH,controller.signal,undefined,'GET',true).then(reply=>{if(!controller.signal.aborted)takeReleaseCounts(reply);},()=>{});return()=>controller.abort();},[refresh]);
@@ -687,9 +697,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {item&&edits.authority.identity&&<WorkManage key={item.id} item={item} authority={edits.authority} status={providerStatus} active={active&&!paused} entityRevision={detail?.item.id===item.id?detail.entityRevision:null}
-      refreshing={edits.authority.acknowledgements.some(row=>row.command.workId===item.id&&(row.acceptedAt??0)>(detail?.readAt??0))} sheet={manage} onSheet={setManage} onForm={setWorkForm} onDeleted={onDeleted}/>}
+      refreshing={edits.authority.acknowledgements.some(row=>row.command.workId===item.id&&(row.acceptedAt??0)>(detail?.readAt??0))} searchKind={searchKind} sheet={manage} onSheet={sheet=>{setSearchKind('movie');setManage(sheet);}} onForm={setWorkForm} onDeleted={onDeleted}/>}
     {trashOpen&&<CollectionTrashSheet trash={trash} authority={edits.authority} privacy={privacyMode} onClose={()=>setTrashOpen(false)}/>}
-    {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)} onCreated={(id,kind)=>{chooseTab(kind);closeSearch();openWork(id);}}/>}
+    {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)} onCreated={(id,kind,operationId,mediaType)=>{chooseTab(kind);closeSearch();openWork(id);setCreateSearch(!workForm.retry&&mediaType?{workId:id,operationId,kind:mediaType}:null);}}/>}
     {directWork ? workView : <AreaSwitch activeKey={selected?'work':'shelf'} retained={['shelf','work']} waitForReady crossFade={false} views={{shelf: <>
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>
     {!selected&&!overlayOpen&&!performer&&!searching&&sections.shade}

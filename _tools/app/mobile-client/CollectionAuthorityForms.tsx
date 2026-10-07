@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {Badge, Button, Dialog, DialogDescription, Field, SegmentedControl, TextInput} from './ui';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_MAX, COLLECTION_NAME_REQUIRED, collectionCreateLabel,
-  collectionEditDraft, collectionEditError, collectionEditValue} from '../src/collections/collectionEditFields';
+  collectionEditDraft, collectionEditError, collectionEditValue, type CollectionCreateType} from '../src/collections/collectionEditFields';
 import type {CollectionDetail, CollectionKind} from './collectionModel';
 import {createdWork, discardLifecycle, isLifecycle, lifecycleInFlight, replaceCommand, retryCommandNow, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
@@ -12,10 +12,10 @@ import './collectionAuthority.css';
 type Authority = ReturnType<typeof useCollectionAuthority>;
 /** 새 컬렉션, or 컬렉션 편집: the name and the PC dialog's basic-info fields, saved as one updateWork. */
 export type WorkForm = {mode: 'create' | 'edit'; type: CollectionKind; item?: CollectionDetail; retry?: CommandIntent};
-// createWork accepts these four types; a TV series is a movie work with a TMDB binding, so 시리즈 is not offered.
-const createTypes = COLLECTION_CREATE_TYPES.filter((value): value is CollectionKind => value !== 'tv').map(value => ({value, label: collectionCreateLabel(value)}));
-export function CollectionWorkForm({form, authority, onClose, onCreated}: {form: WorkForm; authority: Authority; onClose(): void; onCreated?(id: string, type: CollectionKind): void}) {
-  const [type, setType] = useState(form.type ?? 'game');
+const createTypes = COLLECTION_CREATE_TYPES.map(value => ({value, label: collectionCreateLabel(value)}));
+export function CollectionWorkForm({form, authority, onClose, onCreated}: {form: WorkForm; authority: Authority; onClose(): void; onCreated?(id: string, type: CollectionKind, operationId: string, mediaType?: 'movie' | 'tv'): void}) {
+  const [createType, setCreateType] = useState<CollectionCreateType>(form.type ?? 'game');
+  const type = createType === 'tv' ? 'movie' : createType;
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries([
     ['name', form.item?.name ?? ''], ['description', form.item?.description ?? ''], ...Object.entries(collectionEditDraft(form.item as Fields | undefined)),
   ]));
@@ -62,17 +62,18 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
         if (!Object.keys(changes).length) { if (intent?.state === 'conflict') replaceCommand(intent.command.operationId, null); onClose(); return; }
         command = {commandType: 'updateWork', workId: form.item!.id, changes, expected, expectedRevision: null};
       }
+      let operationId: string | undefined;
       if (intent?.state === 'conflict') {
-        const replacement = replaceCommand(intent.command.operationId, command); setOperation(replacement?.command.operationId ?? null); void authority.flush();
-      } else setOperation(authority.enqueue(command).command.operationId);
-      if (form.mode === 'create') { onClose(); onCreated?.(command.workId, type); }
+        const replacement = replaceCommand(intent.command.operationId, command); operationId = replacement?.command.operationId; setOperation(operationId ?? null); void authority.flush();
+      } else { operationId = authority.enqueue(command).command.operationId; setOperation(operationId); }
+      if (form.mode === 'create' && operationId) { onClose(); onCreated?.(command.workId, type, operationId, type === 'movie' ? createType === 'tv' ? 'tv' : 'movie' : undefined); }
     } catch (reason) { setError(errorText(reason)); }
   };
   return <Dialog open title={title} onClose={onClose}><DialogDescription className="sr-only">작품 정보를 저장합니다.</DialogDescription>
     <form className={`library-sheet collection-authority-form${form.mode === 'create' ? ' collection-create-form' : ''}`} onSubmit={event => { event.preventDefault(); if (!pending) save(); }}>
       <Field label="이름" error={nameConflict ? '같은 종류에 같은 이름의 작품이 있습니다.' : undefined}><TextInput value={draft.name} maxLength={COLLECTION_NAME_MAX} disabled={pending} onChange={event => change('name', event.target.value)}/></Field>
       {form.mode === 'create' && <><Field label="설명"><TextInput value={draft.description} maxLength={2000} disabled={pending} onChange={event => change('description', event.target.value)}/></Field>
-        <SegmentedControl label="유형" fullWidth options={createTypes} value={type} onChange={setType}/></>}
+        <SegmentedControl label="유형" fullWidth options={createTypes} value={createType} onChange={setCreateType}/></>}
       {form.mode === 'edit' && COLLECTION_EDIT_FIELDS[type].map(field => <Field key={field.key} label={field.label}><TextInput {...COLLECTION_EDIT_INPUT[field.control]} value={draft[field.key] ?? ''} maxLength={field.maxLength} disabled={pending} onChange={event => change(field.key, event.target.value)}/></Field>)}
       {intent?.state === 'conflict' && !nameConflict && <p role="alert">다른 기기에서 작품 정보가 바뀌었거나 변경을 받지 못했습니다. 내용을 확인해 주세요.</p>}
       <BusyLabel busy={pending} idle=""><Badge>대기</Badge></BusyLabel>{error && <p role="alert">{error}</p>}

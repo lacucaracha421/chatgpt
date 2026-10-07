@@ -32,8 +32,8 @@ function ManageRow({icon: Icon, label, detail, danger = false, disabled = false,
  * was read at, which the delete expects; `refreshing` while a change confirmed since then has
  * not been read back yet.
  */
-export function WorkManage({item, authority, status, active, entityRevision, refreshing = false, sheet, onSheet, onForm, onDeleted}: {item: CollectionDetail; authority: Authority; status: ProviderStatusState; active: boolean;
-  entityRevision?: number | null; refreshing?: boolean; sheet: ManageSheet; onSheet(sheet: ManageSheet): void; onForm(form: WorkForm): void; onDeleted(workId: string): void}) {
+export function WorkManage({item, authority, status, active, entityRevision, refreshing = false, searchKind = 'movie', sheet, onSheet, onForm, onDeleted}: {item: CollectionDetail; authority: Authority; status: ProviderStatusState; active: boolean;
+  entityRevision?: number | null; refreshing?: boolean; searchKind?: 'movie' | 'tv'; sheet: ManageSheet; onSheet(sheet: ManageSheet): void; onForm(form: WorkForm): void; onDeleted(workId: string): void}) {
   const binding = useProviderBinding(item, authority, status, active);
   const [failure, setFailure] = useState('');
   const close = () => { setFailure(''); onSheet(null); };
@@ -73,7 +73,7 @@ export function WorkManage({item, authority, status, active, entityRevision, ref
         <div className="ui-dialog__actions"><Button onClick={close}>취소</Button><Button variant="danger" disabled={!!deleteBlocked} onClick={remove}>삭제</Button></div>
       </div>
     </Dialog>}
-    {sheet === 'search' && provider && <ProviderSearchSheet item={item} provider={provider} authority={authority} onClose={close}/>}
+    {sheet === 'search' && provider && <ProviderSearchSheet item={item} provider={provider} authority={authority} initialKind={searchKind} onClose={close}/>}
     {sheet === 'artwork' && provider && binding.externalId && <ProviderArtworkSheet item={item} provider={provider} externalId={binding.externalId} authority={authority} onClose={close}/>}
   </>;
 }

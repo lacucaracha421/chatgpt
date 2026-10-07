@@ -58,6 +58,7 @@ button.collection-bind-choice:focus-visible{outline:2px solid var(--color-focus)
 .bind-sheet{display:flex;flex-direction:column;gap:12px}
 .bind-sheet>*{flex:none}
 .bind-sheet>.bind-results{flex:0 1 auto}
+.bind-sheet>.bind-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:12px}
 .bind-search{display:flex;align-items:center;gap:8px;height:48px;padding:0 4px 0 12px;background:var(--color-bg);border:1px solid var(--color-border-strong,var(--color-border));border-radius:var(--radius-sm)}
 .bind-search>svg{width:18px;height:18px;flex:none;color:var(--color-muted)}
 .bind-search input{flex:1;min-width:0;height:100%;border:0;background:transparent;color:inherit;font:inherit;font-size:16px;outline:none}

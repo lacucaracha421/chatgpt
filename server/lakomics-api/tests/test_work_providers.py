@@ -596,8 +596,8 @@ class WorkProviderTests(unittest.TestCase):
     def test_json_cap_timeout_malformed_and_sanitized_status(self):
         self.keys()
         for value, status, code in (
-            (Response(b"x", headers={"Content-Length": str(wp.MAX_JSON_BYTES + 1)}), 413, "providerResponseTooLarge"),
-            (Response(b"x" * (wp.MAX_JSON_BYTES + 1)), 413, "providerResponseTooLarge"),
+            (Response(b"x", headers={"Content-Length": str(wp.MAX_RAW_RESPONSE_BYTES + 1)}), 413, "providerResponseTooLarge"),
+            (Response(b"x" * (wp.MAX_RAW_RESPONSE_BYTES + 1)), 413, "providerResponseTooLarge"),
             (Response(b"{invalid"), 502, "providerInvalidResponse"),
             (TimeoutError("private url/key"), 504, "providerTimeout"),
             (URLError("private url/key"), 502, "providerUnavailable"),
@@ -625,12 +625,27 @@ class WorkProviderTests(unittest.TestCase):
         raw["overview"] = "Present"
         self.responses(raw, self.season())
         first_bytes = len(json.dumps(raw, ensure_ascii=False).encode())
-        with mock.patch.object(wp, "MAX_JSON_BYTES", first_bytes + 10):
+        with mock.patch.object(wp, "MAX_RAW_TOTAL_BYTES", first_bytes + 10):
             self.code(self.get("tmdb/tv/42"), 413, "providerResponseTooLarge")
         self.open.reset_mock()
         with mock.patch.object(wp, "REQUEST_SECONDS", 0):
             self.code(self.get("tmdb/movie/42"), 504, "providerTimeout")
         self.open.assert_not_called()
+
+    def test_tmdb_raw_season_larger_than_snapshot_limit(self):
+        # A ko-KR season reply (guest casts, crew) can exceed the snapshot limit
+        # while the parsed binding stays small (주술회전 season 1: 2.3 MiB raw, 78 KB parsed).
+        self.keys()
+        raw = self.tv()
+        raw["overview"] = "Present"
+        season = self.season()
+        for episode in season["episodes"]:
+            episode["guest_stars"] = [{"name": "x" * 200}] * 200
+        self.responses(raw, season)
+        season_bytes = len(json.dumps(season, ensure_ascii=False).encode())
+        with mock.patch.object(wp, "MAX_JSON_BYTES", season_bytes // 2):
+            response = self.get("tmdb/tv/42")
+        self.assertEqual(response.status_code, 200, response.text)
 
     def test_portable_dates_and_pc_list_projection(self):
         self.assertEqual(wp.timestamp_date(-86400), "1969-12-31")

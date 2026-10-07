@@ -22,7 +22,7 @@ beforeEach(() => {
   mocks.api.mockImplementation(async (path: string, _signal: unknown, body?: Record<string, unknown>) => {
     if (path === AUTHORITY_STATUS_PATH) return active ? {...identity, active: true} : {active: false};
     if (path === '/v1/collections/status') return status;
-    if (path === COMMAND_PATH || path === '/v1/collections/personal-edits') { const reply = command(body!); if (reply instanceof Error) throw reply; return {...body, ...reply as object}; }
+    if (path === COMMAND_PATH || path === '/v1/collections/personal-edits') { const reply = await command(body!); if (reply instanceof Error) throw reply; return {...body, ...reply as object}; }
     if (path.startsWith('/v1/collections?')) return {ready: true, filterVersion: 1, revision: 'r1', items: [item], nextCursor: null, publishedAt: null};
     return {revision: 'r1', item};
   });
@@ -64,9 +64,7 @@ describe('activation-gated tablet forms', () => {
     expect(within(dialog).getByLabelText('이름')).toBeTruthy();
     expect(within(dialog).getByLabelText('설명')).toBeTruthy();
     expect(within(dialog).getByRole('radio', {name: label}).getAttribute('aria-checked')).toBe('true');
-    expect(within(dialog).getAllByRole('radio').map(button => button.getAttribute('aria-label'))).toEqual(['게임', '만화', '영화', 'AV']);
-    // The authority rejects type=tv; do not offer an unsaveable series option.
-    expect(within(dialog).queryByRole('radio', {name: '시리즈'})).toBeNull();
+    expect(within(dialog).getAllByRole('radio').map(button => button.getAttribute('aria-label'))).toEqual(['게임', '만화', '영화', '시리즈', 'AV']);
     expect(screen.queryByLabelText('개발사')).toBeNull();
     expect(screen.getByRole('button', {name: '취소'})).toBeTruthy();
   });
@@ -105,6 +103,55 @@ describe('activation-gated tablet forms', () => {
     act(() => { expect(backRef.current?.()).toBe(true); });
     await screen.findByRole('button', {name: '새 작품'});
     expect(screen.getAllByRole('radio', {name: '영화'})[0].getAttribute('aria-checked')).toBe('true');
+  });
+  it.each([['시리즈', 'tv'], ['영화', 'movie']] as const)('opens %s TMDB search only after the create is accepted and the server detail is ready', async (label, kind) => {
+    let accept!: (value: object) => void, showDetail!: (value: object) => void;
+    command = () => new Promise(resolve => { accept = resolve; });
+    const serverDetail = new Promise(resolve => { showDetail = resolve; });
+    const base = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path: string, ...args: unknown[]) => {
+      if (path === '/v1/providers/status') return {tmdb: true, igdb: true};
+      if (path === `/v1/collections/${sent()[0]?.workId}`) return serverDetail;
+      if (path.includes('/search?')) return {items: []};
+      return base(path, ...args);
+    });
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(await screen.findByRole('button', {name: '새 작품'}));
+    fireEvent.click(screen.getByRole('radio', {name: label}));
+    fireEvent.change(screen.getByLabelText('이름'), {target: {value: '새 작품 이름'}});
+    fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]).toMatchObject({commandType: 'createWork', type: 'movie', name: '새 작품 이름'});
+    await screen.findByRole('heading', {name: '새 작품 이름'});
+    expect(readCommands()[0].state).toBe('pending');
+    expect(screen.queryByRole('dialog', {name: 'TMDB에 연결'})).toBeNull();
+    expect(mocks.api.mock.calls.some(([path]) => path.includes('/search?'))).toBe(false);
+    await act(async () => { accept({}); });
+    await waitFor(() => expect(readCommands()[0].state).toBe('accepted'));
+    expect(screen.queryByRole('dialog', {name: 'TMDB에 연결'})).toBeNull();
+    expect(screen.getByRole('heading', {name: '새 작품 이름'})).toBeTruthy();
+    const created = {...item, id: sent()[0].workId, type: 'movie', name: '새 작품 이름'};
+    await act(async () => { showDetail({revision: 'r2', item: created}); });
+    const sheet = await screen.findByRole('dialog', {name: 'TMDB에 연결'});
+    expect(within(sheet).getByLabelText('검색어')).toHaveValue('새 작품 이름');
+    expect(within(sheet).getByRole('radio', {name: kind === 'tv' ? 'TV 시리즈' : '영화'})).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() => expect(mocks.api.mock.calls.some(([path]) => path === `/v1/providers/tmdb/search?${new URLSearchParams({query: created.name, kind})}`)).toBe(true));
+    fireEvent.click(within(sheet).getByRole('button', {name: '닫기'}));
+    await waitFor(() => expect(screen.queryByRole('dialog', {name: 'TMDB에 연결'})).toBeNull());
+  });
+  it('keeps a rejected series create in the existing conflict path without opening TMDB', async () => {
+    command = () => new ApiError('충돌', 409, {detail: {code: 'nameConflict'}});
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(await screen.findByRole('button', {name: '새 작품'}));
+    fireEvent.click(screen.getByRole('radio', {name: '시리즈'}));
+    fireEvent.change(screen.getByLabelText('이름'), {target: {value: '같은 시리즈'}});
+    fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    await waitFor(() => expect(readCommands()[0].state).toBe('conflict'));
+    expect(sent()[0].type).toBe('movie');
+    expect(screen.queryByRole('dialog', {name: 'TMDB에 연결'})).toBeNull();
+    expect(mocks.api.mock.calls.some(([path]) => path.includes('/search?'))).toBe(false);
+    fireEvent.click(await screen.findByRole('button', {name: '확인'}));
+    expect(await screen.findByRole('dialog', {name: '새 컬렉션'})).toBeTruthy();
   });
   it('does not show management for an active authority belonging to another library', async () => {
     mocks.api.mockImplementation(async (path: string) => path === AUTHORITY_STATUS_PATH ? {...identity, libraryId: 'f'.repeat(32), active: true}

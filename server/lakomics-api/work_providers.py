@@ -33,6 +33,10 @@ TMDB_ORIGIN = "https://api.themoviedb.org/3"
 TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 GAMES_URL = "https://api.igdb.com/v4/games"
 MAX_JSON_BYTES = ca.MAX_SNAPSHOT_BYTES
+# Raw TMDB detail and season replies carry crew and guest casts the parsed snapshot drops,
+# so they are bounded separately from MAX_JSON_BYTES (one ko-KR season measured 2.3 MiB).
+MAX_RAW_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_RAW_TOTAL_BYTES = 32 * 1024 * 1024
 REQUEST_SECONDS = 25
 IGDB_FIELDS = ("id,name,summary,first_release_date,genres.name,platforms.name,"
                "release_dates.date,release_dates.platform.name,involved_companies.developer,"
@@ -172,7 +176,7 @@ class Relay:
             fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
         time.sleep(wait)
         self.next_request[provider] = time.monotonic() + interval
-        limit = MAX_JSON_BYTES if budget is None else budget[0]
+        limit = MAX_JSON_BYTES if budget is None else min(MAX_RAW_RESPONSE_BYTES, budget[0])
         data, _ = outbound(url, deadline=deadline, limit=limit, headers=headers, body=body)
         if budget is not None:
             budget[0] -= len(data)
@@ -414,7 +418,7 @@ def detail_result(provider, external_id, snapshot, values, details, metadata, ar
 
 
 def tmdb_detail(relay, kind, id_, deadline):
-    budget = [MAX_JSON_BYTES]
+    budget = [MAX_RAW_TOTAL_BYTES]
     params = {"language": "ko-KR", "include_image_language": "ko,null,en",
               "append_to_response": "aggregate_credits,images" if kind == "tv" else "credits,images,release_dates"}
     raw = relay.tmdb(f"/{kind}/{id_}", deadline, params=params, budget=budget)
