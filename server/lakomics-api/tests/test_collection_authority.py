@@ -342,6 +342,158 @@ class CollectionAuthorityTests(unittest.TestCase):
         parsed = ca.parse_staging(doc, verify=True)
         self.assertEqual(next(w for w in parsed['works'] if w['type'] == 'av')['avCredits'][0]['creditName'], 'Work alias')
 
+    # --- AV people (step 3a) -----------------------------------------------------
+    def av_person(self, person_id='p'):
+        self.ok(self.create('av', 'AV', type_='av'))
+        self.ok(self.command('setAvCredits', workId='av', expectedRevision=1,
+                             credits=[{'personId': person_id, 'role': 'performer', 'order': 0, 'creditName': None}],
+                             people=[{'personId': person_id, 'displayName': 'Person', 'nameJa': None}]))
+
+    def person(self, person_id='p'):
+        reply = self.client.get('/v1/collections/people/' + person_id, headers=AUTH, params={'authority': 1})
+        self.assertEqual(reply.status_code, 200, reply.text)
+        legacy = self.client.get('/v1/collections/people/' + person_id, headers=AUTH).json()['person']
+        self.assertEqual(set(legacy), {'id', 'displayName', 'nameJa', 'memo', 'favorite', 'profile', 'portrait'})
+        self.assertEqual({k: reply.json()['person'][k] for k in legacy}, legacy)
+        return reply.json()['person']
+
+    def test_person_field_cas_replay_and_publication(self):
+        self.ready()
+        self.av_person()
+        fields = dict(personId='p', changes={'memo': ' memo ', 'favorite': True},
+                      expected={'memo': None, 'favorite': False})
+        operation = str(uuid.uuid4())
+        receipt = self.ok(self.command('setPerson', operation_id=operation, **fields))
+        self.assertTrue(receipt['changed'])
+        self.assertEqual((receipt['person']['memo'], receipt['person']['favorite'],
+                          receipt['person']['entityRevision']), ('memo', True, 2))
+        # Works that credit the person are republished so cached work entities learn it.
+        published = receipt['entities']['works'][0]
+        self.assertEqual((published['workId'], published['entityRevision']), ('av', 3))
+        self.assertEqual(published['avPeople'][0]['memo'], 'memo')
+        self.assertEqual(self.ok(self.command('setPerson', operation_id=operation, **fields)), receipt)
+        self.assertEqual(self.code(self.command('setPerson', operation_id=operation,
+                         **{**fields, 'changes': {'memo': 'other', 'favorite': True}})), 'operationConflict')
+        self.assertFalse(self.ok(self.command('setPerson', **fields))['changed'])
+        stale = self.command('setPerson', personId='p', changes={'memo': 'stale'}, expected={'memo': None})
+        self.assertEqual((stale.status_code, self.code(stale)), (409, 'revisionConflict'))
+        self.assertEqual(stale.json()['detail']['current']['person']['memo'], 'memo')
+        # Field CAS: another field's earlier change does not conflict.
+        self.ok(self.command('setPerson', personId='p', changes={'favorite': False}, expected={'favorite': True}))
+        person = self.person()
+        self.assertEqual((person['memo'], person['favorite'], person['entityRevision']), ('memo', False, 3))
+        self.assertEqual((person['id'], person['displayName']), ('p', 'Person'))
+        self.assertEqual(self.ok(self.detail('av'))['item']['name'], 'AV')
+        missing = self.command('setPerson', personId='nobody', changes={'favorite': True}, expected={'favorite': False})
+        self.assertEqual((missing.status_code, self.code(missing)), (404, 'personNotFound'))
+        with api_app.get_db() as db:
+            change = json.loads(db.execute("SELECT payload FROM collection_authority_changes WHERE command_type='setPerson'"
+                                           " ORDER BY sequence DESC LIMIT 1").fetchone()[0])
+            self.assertFalse(change['entities']['works'][0]['avPeople'][0]['favorite'])
+            rows, _, _ = ca.section_page(db, LIBRARY, 'works', None, 100)
+            self.assertEqual(next(w for w in rows if w['workId'] == 'av')['avPeople'][0]['entityRevision'], 3)
+
+    def test_person_limits_and_shapes(self):
+        self.ready()
+        self.av_person()
+        limit = ca.av_contract.MAX_PERSON_MEMO
+        pc = json.loads((Path(__file__).resolve().parents[3] / '_tools/app/src/collections/avLimits.json').read_text('utf-8'))
+        self.assertEqual(pc['personMemo'], limit)
+        self.ok(self.command('setPerson', personId='p', changes={'memo': 'x' * limit}, expected={'memo': None}))
+        for changes, expected in [({}, {}), ({'memo': 'x' * (limit + 1)}, {'memo': 'x' * limit}),
+                                  ({'favorite': 'yes'}, {'favorite': False}), ({'memo': 5}, {'memo': None}),
+                                  ({'profile': None}, {'profile': None}), ({'memo': 'a'}, {}),
+                                  ({'memo': 'a'}, {'memo': None, 'favorite': False})]:
+            with self.subTest(changes=str(changes)[:40], expected=str(expected)[:40]):
+                self.assertEqual(self.command('setPerson', personId='p', changes=changes,
+                                              expected=expected).status_code, 422)
+        self.assertEqual(self.command('setPerson', personId='../p', changes={'favorite': True},
+                                      expected={'favorite': False}).status_code, 422)
+
+    def test_person_portrait_crop_image_clear_and_receipts(self):
+        self.ready()
+        self.av_person()
+        self.ok(self.command('addArtwork', workId='av', artworkId='front', kind='cover', provider=None,
+                             providerImageId=None, width=10, height=20, language=None,
+                             original=self.cover, thumbnail=None))
+        crop = {'kind': 'crop', 'artworkId': 'front', 'rect': {'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4}}
+        operation = str(uuid.uuid4())
+        receipt = self.ok(self.command('setPersonPortrait', operation_id=operation, personId='p',
+                                       portrait=crop, expectedRevision=1))
+        self.assertEqual(receipt['person']['portraitSelection'], crop)
+        self.assertEqual(receipt['person']['portrait'], {'source': 'cover'})
+        self.assertEqual(self.ok(self.command('setPersonPortrait', operation_id=operation, personId='p',
+                                              portrait=crop, expectedRevision=1)), receipt)
+        self.assertFalse(self.ok(self.command('setPersonPortrait', personId='p', portrait=crop,
+                                              expectedRevision=1))['changed'])
+        # Today's readers: the credit's crop on the work and the person attribution.
+        public = self.ok(self.detail('av'))['item']['av']['people'][0]
+        self.assertEqual(public['portraitCrop'], {'artworkId': 'front', 'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4})
+        self.assertIsNone(public.get('portraitImage'))
+        stale = self.command('setPersonPortrait', personId='p', portrait=None, expectedRevision=1)
+        self.assertEqual((stale.status_code, self.code(stale)), (409, 'revisionConflict'))
+        self.assertEqual(stale.json()['detail']['current']['person']['portraitSelection'], crop)
+        # Image portraits need the same confirmed upload receipt as artwork originals.
+        data = b'portrait-jpeg'
+        original = {'sha256': hashlib.sha256(data).hexdigest(), 'sizeBytes': len(data), 'contentType': 'image/jpeg'}
+        image = {'kind': 'image', 'original': original, 'width': 300, 'height': 400,
+                 'attribution': {'source': 'commons', 'sourceUrl': 'https://commons.wikimedia.org/p',
+                                 'license': 'CC BY 4.0', 'author': 'Author'}}
+        unconfirmed = self.command('setPersonPortrait', personId='p', portrait=image, expectedRevision=2)
+        self.assertEqual((unconfirmed.status_code, self.code(unconfirmed)), (409, 'artworkBlobUnconfirmed'))
+        self.confirm(original)
+        receipt = self.ok(self.command('setPersonPortrait', personId='p', portrait=image, expectedRevision=2))
+        self.assertEqual(receipt['person']['portraitImage'], {**original, 'width': 300, 'height': 400})
+        public = self.ok(self.detail('av'))['item']['av']['people'][0]
+        self.assertEqual(public['portraitImage']['sha256'], original['sha256'])
+        self.assertIsNone(public['portraitCrop'])
+        self.assertEqual(self.person()['portrait']['source'], 'commons')
+        ticket = self.client.post('/v1/home/covers/%s/media-ticket' % original['sha256'], headers=AUTH, json={})
+        self.assertEqual(ticket.status_code, 200, ticket.text)
+        # Clearing removes the image and its ticket reference.
+        cleared = self.ok(self.command('setPersonPortrait', personId='p', portrait=None, expectedRevision=3))
+        self.assertEqual((cleared['person']['portraitSelection'], cleared['person']['portraitImage'],
+                          cleared['person']['portrait']), (None, None, None))
+        self.assertEqual(self.client.post('/v1/home/covers/%s/media-ticket' % original['sha256'], headers=AUTH,
+                                          json={}).status_code, 404)
+        for portrait in [{**crop, 'artworkId': 'missing'}, {**crop, 'rect': {**crop['rect'], 'w': 0.95}},
+                         {**crop, 'rect': {**crop['rect'], 'x': -0.1}}, {**crop, 'rect': {'x': 0, 'y': 0, 'w': 1}},
+                         {**image, 'original': {**original, 'contentType': 'image/png'}},
+                         {**image, 'width': ca.av_contract.MAX_PORTRAIT_DIMENSION + 1},
+                         {**image, 'attribution': {**image['attribution'], 'source': 'web'}},
+                         {**image, 'attribution': {'source': 'local'}}, {'kind': 'url', 'url': 'https://x'}, 'crop']:
+            with self.subTest(portrait=str(portrait)[:60]):
+                self.assertEqual(self.command('setPersonPortrait', personId='p', portrait=portrait,
+                                              expectedRevision=4).status_code, 422)
+        self.ok(self.create('other', 'Other', type_='av'))
+        self.ok(self.command('addArtwork', workId='other', artworkId='elsewhere', kind='cover', provider=None,
+                             providerImageId=None, width=10, height=20, language=None,
+                             original=self.cover, thumbnail=None))
+        foreign = self.command('setPersonPortrait', personId='p', expectedRevision=4,
+                               portrait={**crop, 'artworkId': 'elsewhere'})
+        self.assertEqual(self.code(foreign), 'invalidPersonPortrait')
+        missing = self.command('setPersonPortrait', personId='nobody', portrait=None, expectedRevision=1)
+        self.assertEqual(self.code(missing), 'personNotFound')
+
+    def test_person_staged_portrait_is_its_selection(self):
+        self.ready()
+        self.av_person()
+        data = b'staged'
+        original = {'sha256': hashlib.sha256(data).hexdigest(), 'sizeBytes': len(data), 'contentType': 'image/jpeg'}
+        with api_app.get_db() as db:
+            db.execute("UPDATE collection_authority_people SET portrait_image=?,payload=json_set(payload,'$.portrait',"
+                       "json(?)) WHERE person_id='p'", [ca.encode({**original, 'width': 3, 'height': 4}),
+                       ca.encode({'source': 'stashdb', 'sourceUrl': 'https://stashdb.org/p'})])
+            db.commit()
+        selection = self.person()['portraitSelection']
+        self.assertEqual(selection, {'kind': 'image', 'original': original, 'width': 3, 'height': 4,
+                                     'attribution': {'source': 'stashdb', 'sourceUrl': 'https://stashdb.org/p',
+                                                     'license': None, 'author': None}})
+        # Re-sending the staged selection is an idempotent no-op, not a conflict.
+        self.confirm(original)
+        self.assertFalse(self.ok(self.command('setPersonPortrait', personId='p', portrait=selection,
+                                              expectedRevision=99))['changed'])
+
     # --- helpers ---------------------------------------------------------------
     def confirm(self, *blobs):
         with api_app.get_db() as db:

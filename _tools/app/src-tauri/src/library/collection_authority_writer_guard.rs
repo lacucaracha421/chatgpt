@@ -3,7 +3,7 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 const ALLOWLIST: &[(&str, &str)] = &[
-    ("library/collection_authority_people.rs", "AV step 3a: confirmed person replica, reconcile and outbox projection"),
+    ("library/collection_authority_people.rs", "batch AV 3a: confirmed person replica, reconcile and outbox projection"),
     (
         "library/collection_authority.rs",
         "batch 1: confirmed replica/outbox apply",

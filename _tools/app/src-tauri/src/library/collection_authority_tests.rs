@@ -3481,8 +3481,7 @@ fn collection_authority_av_artwork_rejects_stale_images_and_unready_identity() {
 #[test]
 fn collection_authority_batch5_av_edits_are_fenced_and_automatic_profile_refresh_is_quiet() {
     use super::super::{
-        av_link::models::ApplyRequest, av_models::*, av_portrait::AvPortraitState,
-        av_stashdb::AvProfileState, home_data::HomeDataError,
+        av_link::models::ApplyRequest, av_models::*, av_stashdb::AvProfileState,
     };
     for adopted in [false, true] {
         let (_temp, l, s) = fixture();
@@ -3608,7 +3607,7 @@ fn collection_authority_batch5_adoption_keeps_av_details_people_portraits_and_cr
         Some("stash-p")
     );
     assert_eq!(l.list_av_favorites().unwrap().len(), 1);
-    // Adopted: editing stays fenced and nothing is queued.
+    // An old feed has no confirmed person revision yet, so person edits wait.
     assert_fenced(l.save_av_person_memo("p", None));
     assert_eq!(count(&l, "collection_authority_outbox"), 0);
 }
@@ -3671,4 +3670,245 @@ fn collection_authority_startup_normalizers_leave_server_owned_fields_alone() {
     assert_eq!(l.backfill_legacy_collection_kinds().unwrap(), 0);
     assert_eq!(l.get_collection("g").unwrap().showcase_order, Some(7));
     assert!(core_bodies(&l).is_empty());
+}
+
+// AV step 3a: person memo, favorite and portrait commands plus the one-time reconcile.
+fn people_fixture(reconciled: bool) -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
+    let (temp, l, s) = fixture();
+    seed_av(&l);
+    let mut av = work("av", 1);
+    av["type"] = json!("av");
+    av["name"] = json!("AV Work");
+    av["selection"]["work"] = json!("art");
+    av["details"]["av"] = json!({"productCode":"ABC-001","titleJa":"原題","maker":null,"label":"Label","series":null,"genres":[],"releaseDate":null});
+    av["avCredits"] = json!([{"personId":"p","name":"Display","nameJa":"表示","role":"performer","order":0,"creditName":"Alias","portraitCrop":null}]);
+    av["avPeople"] = json!([server_person(1, "remote memo")]);
+    let mut artwork = art();
+    artwork["workId"] = json!("av");
+    adopt(&l, &s, json!({"works":[av],"artworks":[artwork]}));
+    if reconciled {
+        l.connection()
+            .unwrap()
+            .execute("UPDATE collection_authority_people_reconcile SET queued=1", [])
+            .unwrap();
+    }
+    (temp, l, s)
+}
+
+fn server_person(revision: i64, memo: &str) -> Value {
+    json!({"id":"p","personId":"p","displayName":"Display","nameJa":"表示","memo":memo,"favorite":false,"profile":null,"portrait":null,"portraitSelection":null,"portraitImage":null,"entityRevision":revision})
+}
+
+fn person_receipt(s: &CollectionAuthorityStatus, body: &Value, person: Value, cursor: i64) -> Value {
+    let mut receipt = envelope(s);
+    receipt["operationId"] = body["operationId"].clone();
+    receipt["commandType"] = body["commandType"].clone();
+    receipt["changed"] = json!(true);
+    receipt["authorityCursor"] = json!(cursor);
+    receipt["entities"] = json!({});
+    receipt["person"] = person;
+    receipt
+}
+
+fn local_person(l: &Library) -> (Option<String>, usize, Option<String>) {
+    let favorites = l.list_av_favorites().unwrap().len();
+    let db = l.connection().unwrap();
+    (
+        db.query_row("SELECT memo FROM collection_people WHERE id='p'", [], |r| r.get(0)).unwrap(),
+        favorites,
+        db.query_row("SELECT kind FROM collection_person_portraits WHERE person_id='p'", [], |r| r.get(0)).optional().unwrap(),
+    )
+}
+
+#[test]
+fn collection_authority_people_adoption_projects_server_person_after_capturing_pc_values() {
+    let (_temp, l, _s) = people_fixture(false);
+    // The server person replaces local values, but the PC values were captured first.
+    assert_eq!(local_person(&l), (Some("remote memo".into()), 0, None));
+    let captured: Value = l.connection().unwrap().query_row("SELECT local_payload FROM collection_authority_people_reconcile WHERE person_id='p'", [], |r| r.get::<_, String>(0)).map(|s| serde_json::from_str(&s).unwrap()).unwrap();
+    assert_eq!((captured["memo"].as_str(), captured["favorite"].as_bool()), (Some("local memo"), Some(true)));
+    assert_eq!(captured["portraitSelection"]["kind"], "image");
+    assert_eq!(captured["portraitSelection"]["attribution"]["source"], "commons");
+    // Capture runs once per library/epoch: later local changes do not replace it.
+    l.connection().unwrap().execute("UPDATE collection_people SET memo='later' WHERE id='p'", []).unwrap();
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        capture_people_reconcile(&tx).unwrap();
+        tx.commit().unwrap();
+    }
+    let again: String = l.connection().unwrap().query_row("SELECT local_payload FROM collection_authority_people_reconcile WHERE person_id='p'", [], |r| r.get(0)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&again).unwrap(), captured);
+}
+
+#[test]
+fn collection_authority_people_memo_favorite_portrait_queue_projection_receipts_and_conflict() {
+    use super::super::av_models::AvPortraitRect;
+    let (temp, l, s) = people_fixture(true);
+    l.save_av_person_memo("p", Some("new memo".into())).unwrap();
+    l.set_av_favorite("p", true).unwrap();
+    l.set_av_portrait_crop("p", "art", AvPortraitRect { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }).unwrap();
+    // Unchanged saves queue nothing.
+    l.save_av_person_memo("p", Some("new memo".into())).unwrap();
+    l.set_av_favorite("p", true).unwrap();
+    let commands = provider_commands(&l);
+    assert_eq!(commands.len(), 3);
+    assert_eq!((commands[0]["changes"].clone(), commands[0]["expected"].clone()), (json!({"memo":"new memo"}), json!({"memo":"remote memo"})));
+    assert_eq!((commands[1]["changes"].clone(), commands[1]["expected"].clone()), (json!({"favorite":true}), json!({"favorite":false})));
+    assert_eq!(commands[2]["commandType"], "setPersonPortrait");
+    assert_eq!(commands[2]["portrait"], json!({"kind":"crop","artworkId":"art","rect":{"x":0.1,"y":0.2,"w":0.3,"h":0.4}}));
+    assert_eq!(commands[2]["expectedRevision"], 3);
+    // Each accepted person command republishes the work: later work CAS accounts for it.
+    assert_eq!(predicted_collection_revision(&*l.connection().unwrap(), "works", &json!(["av"]).to_string()).unwrap(), 4);
+    assert_eq!(local_person(&l), (Some("new memo".into()), 1, Some("crop".into())));
+    // Optimistic state survives reopening and a re-projection of confirmed state.
+    drop(l);
+    let l = Library::open(temp.path()).unwrap();
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        selections(&tx).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(local_person(&l), (Some("new memo".into()), 1, Some("crop".into())));
+    let server = RefCell::new(server_person(1, "remote memo"));
+    let sent = Cell::new(0);
+    l.flush_collection_outbox_with(&s, &|body| {
+        let mut server = server.borrow_mut();
+        match body["commandType"].as_str().unwrap() {
+            "setPerson" => for (field, value) in body["changes"].as_object().unwrap() {
+                assert_eq!(body["expected"][field], server[field]);
+                server[field] = value.clone();
+            },
+            "setPersonPortrait" => {
+                assert_eq!(body["expectedRevision"], server["entityRevision"]);
+                server["portraitSelection"] = body["portrait"].clone();
+                server["portrait"] = json!({"source":"cover"});
+            }
+            other => panic!("unexpected {other}"),
+        }
+        server["entityRevision"] = json!(server["entityRevision"].as_i64().unwrap() + 1);
+        sent.set(sent.get() + 1);
+        Ok(CollectionDelivery::Accepted(person_receipt(&s, body, server.clone(), sent.get())))
+    }, 0).unwrap();
+    assert_eq!(sent.get(), 3);
+    assert_eq!(local_person(&l), (Some("new memo".into()), 1, Some("crop".into())));
+    let cached: i64 = l.connection().unwrap().query_row("SELECT revision FROM collection_authority_people_cache WHERE person_id='p'", [], |r| r.get(0)).unwrap();
+    assert_eq!(cached, 4);
+    // A stale receipt for an older revision never rolls the confirmed person back.
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &server_person(2, "older"), NOW).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(local_person(&l).0.as_deref(), Some("new memo"));
+    // Clearing queues null; a conflict blocks it like other AV intents.
+    l.clear_av_portrait("p").unwrap();
+    let body = provider_commands(&l).pop().unwrap();
+    assert_eq!((body["portrait"].clone(), body["expectedRevision"].clone()), (Value::Null, json!(4)));
+    assert_eq!(local_person(&l).2, None);
+    l.flush_collection_outbox_with(&s, &|_| {
+        Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"person":server_person(5, "remote")}})))
+    }, 0).unwrap();
+    assert_eq!(l.connection().unwrap().query_row("SELECT state FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1", [], |r| r.get::<_, String>(0)).unwrap(), "blocked");
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 1);
+}
+
+#[test]
+fn collection_authority_people_image_portrait_is_reencoded_uploaded_and_downloaded_by_hash() {
+    let (_temp, l, s) = people_fixture(true);
+    let mut big = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2000, 1000).write_to(&mut big, image::ImageFormat::Png).unwrap();
+    l.connection().unwrap().execute("INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,license,author,updated_at) VALUES('p','commons',?1,'image/png',2000,1000,'p.png','https://commons.wikimedia.org/p','CC BY 4.0','Author','now')", [big.into_inner()]).unwrap();
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        let status = collection_write_status(&tx).unwrap();
+        enqueue_stored_person_portrait(&tx, &status, "p").unwrap();
+        tx.commit().unwrap();
+    }
+    let body = provider_commands(&l).pop().unwrap();
+    let portrait = &body["portrait"];
+    assert_eq!((portrait["kind"].as_str(), portrait["width"].as_i64(), portrait["height"].as_i64()), (Some("image"), Some(1600), Some(800)));
+    assert_eq!(portrait["original"]["contentType"], "image/jpeg");
+    assert_eq!(portrait["attribution"], json!({"source":"commons","sourceUrl":"https://commons.wikimedia.org/p","license":"CC BY 4.0","author":"Author"}));
+    let uploaded = RefCell::new(Vec::new());
+    l.upload_collection_command_artwork_with(&body, &|blob, bytes| {
+        assert_eq!(portrait_digest(bytes), blob.sha256);
+        uploaded.borrow_mut().push(blob.sha256.clone());
+        Ok(())
+    }, &|_| Ok(true)).unwrap();
+    assert_eq!(uploaded.borrow().as_slice(), [portrait["original"]["sha256"].as_str().unwrap().to_owned()]);
+    // Another device's image arrives as a confirmed selection; bytes are verified by hash.
+    let jpeg: Vec<u8> = l.connection().unwrap().query_row("SELECT bytes FROM collection_authority_portrait_blobs WHERE sha256=?1", [portrait["original"]["sha256"].as_str().unwrap()], |r| r.get(0)).unwrap();
+    l.connection().unwrap().execute("DELETE FROM collection_authority_portrait_blobs", []).unwrap();
+    l.connection().unwrap().execute("UPDATE collection_authority_outbox SET state='accepted'", []).unwrap();
+    let mut remote = server_person(2, "remote memo");
+    remote["portraitSelection"] = portrait.clone();
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &remote, NOW).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(l.materialize_person_portraits_with(&s, &|_| Ok(b"tampered".to_vec())).unwrap(), 0);
+    assert_eq!(count(&l, "collection_authority_portrait_blobs"), 0);
+    assert_eq!(l.materialize_person_portraits_with(&s, &|_| Err(LibraryError::CloudRequestUnavailable)).unwrap(), 0);
+    assert_eq!(l.materialize_person_portraits_with(&s, &|_| Ok(jpeg.clone())).unwrap(), 1);
+    let stored: (String, Vec<u8>) = l.connection().unwrap().query_row("SELECT kind,image_bytes FROM collection_person_portraits WHERE person_id='p'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((stored.0.as_str(), stored.1 == jpeg), ("commons", true));
+}
+
+#[test]
+fn collection_authority_people_reconcile_rules() {
+    let crop = json!({"kind":"crop","artworkId":"a","rect":{"x":0,"y":0,"w":0.5,"h":0.5}});
+    let other = json!({"kind":"crop","artworkId":"b","rect":{"x":0,"y":0,"w":0.5,"h":0.5}});
+    let image = |sha: &str, source: &str| json!({"kind":"image","original":{"sha256":sha},"attribution":{"source":source,"sourceUrl":null,"license":null,"author":null}});
+    let empty = json!({"memo":null,"favorite":false,"portraitSelection":null});
+    let case = |pc: Value, server: Value| reconcile_person_changes(&pc, &server);
+    // Fill empty server values.
+    assert_eq!(case(json!({"memo":"pc","favorite":true,"portraitSelection":crop}), empty.clone()), (json!({"memo":"pc","favorite":true}), Some(crop.clone())));
+    // Never send a PC null/false/blank, so nothing is ever cleared.
+    let full = json!({"memo":"server","favorite":true,"portraitSelection":crop});
+    assert_eq!(case(json!({"memo":null,"favorite":false,"portraitSelection":null}), full.clone()), (json!({}), None));
+    assert_eq!(case(json!({"memo":"  ","favorite":false,"portraitSelection":null}), full.clone()), (json!({}), None));
+    // Both nonempty and different: PC wins for memo and portrait.
+    assert_eq!(case(json!({"memo":"pc","favorite":true,"portraitSelection":other}), full.clone()), (json!({"memo":"pc"}), Some(other.clone())));
+    // Equal values queue nothing; a re-encoded image with the same source is the same picture.
+    assert_eq!(case(json!({"memo":" server ","favorite":true,"portraitSelection":crop}), full), (json!({}), None));
+    assert_eq!(case(json!({"memo":null,"favorite":false,"portraitSelection":image("a","commons")}), json!({"portraitSelection":image("b","commons")})), (json!({}), None));
+    assert_eq!(case(json!({"memo":null,"favorite":false,"portraitSelection":image("a","commons")}), json!({"portraitSelection":image("b","stashdb")})).1, Some(image("a","commons")));
+}
+
+#[test]
+fn collection_authority_people_reconcile_runs_once_resumes_and_waits_for_missing_people() {
+    let (_temp, l, s) = people_fixture(false);
+    l.connection().unwrap().execute_batch("INSERT INTO collection_people(id,display_name,memo,created_at,updated_at) VALUES('q','Local only','q memo','old','old');
+        INSERT INTO collection_authority_people_reconcile(library_id,epoch,person_id,local_payload) SELECT library_id,epoch,'q','{\"memo\":\"q memo\",\"favorite\":false,\"portraitSelection\":null}' FROM collection_authority_people_reconcile WHERE person_id='p'").unwrap();
+    let reads = RefCell::new(Vec::new());
+    // An interrupted read changes nothing and is retried later.
+    assert_eq!(l.reconcile_av_people_with(&s, &|_| Err(LibraryError::CloudRequestUnavailable)).unwrap(), 0);
+    assert_eq!(count(&l, "collection_authority_outbox"), 0);
+    let read = |person: &str| -> Result<Option<Value>, LibraryError> {
+        reads.borrow_mut().push(person.to_owned());
+        Ok((person == "p").then(|| json!({"person":server_person(1, "remote memo")})))
+    };
+    assert_eq!(l.reconcile_av_people_with(&s, &read).unwrap(), 1);
+    let commands = provider_commands(&l);
+    assert_eq!(commands.len(), 2);
+    assert_eq!(commands[0]["changes"], json!({"memo":"local memo","favorite":true}));
+    assert_eq!(commands[0]["expected"], json!({"memo":"remote memo","favorite":false}));
+    assert_eq!((commands[1]["commandType"].as_str(), commands[1]["portrait"]["kind"].as_str(), commands[1]["expectedRevision"].as_i64()), (Some("setPersonPortrait"), Some("image"), Some(2)));
+    assert_eq!(local_person(&l), (Some("local memo".into()), 1, Some("commons".into())));
+    assert_eq!(reads.borrow().as_slice(), ["p", "q"]);
+    // Completed rows never repeat; a missing person waits for a confirmed row.
+    assert_eq!(l.reconcile_av_people_with(&s, &read).unwrap(), 0);
+    assert_eq!(reads.borrow().len(), 2);
+    assert_eq!(count(&l, "collection_authority_outbox"), 2);
+    assert_eq!(l.connection().unwrap().query_row("SELECT memo FROM collection_people WHERE id='q'", [], |r| r.get::<_, String>(0)).unwrap(), "q memo");
+    // An older server without person revisions is not reconciled against.
+    l.connection().unwrap().execute("UPDATE collection_authority_people_reconcile SET missing=0 WHERE person_id='q'", []).unwrap();
+    assert_eq!(l.reconcile_av_people_with(&s, &|_| Ok(Some(json!({"person":{"id":"q","memo":null}})))).unwrap(), 0);
+    assert_eq!(count(&l, "collection_authority_outbox"), 2);
 }

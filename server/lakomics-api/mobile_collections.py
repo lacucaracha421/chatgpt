@@ -316,7 +316,7 @@ class PersonProfile(StrictModel):
 
 class PersonPortrait(StrictModel):
     """Attribution only: portrait paths, URLs to bytes and image bytes are never accepted."""
-    source: Literal["stashdb", "commons", "cover", "local"]
+    source: Literal["stashdb", "commons", "cover"]
     author: str | None = Field(default=None, max_length=2000)
     license: str | None = Field(default=None, max_length=500)
     licenseUrl: str | None = Field(default=None, max_length=2000)
@@ -491,14 +491,18 @@ def read_table(active):
     return "collection_authority_projection" if active is not None else "mobile_collections"
 
 
-def public_person(db, person_id, library_id=None):
-    """The same person payload for live reads and staging comparisons."""
+def public_person(db, person_id, library_id=None, *, entity=False):
+    """The same person payload for live reads and staging comparisons.
+
+    ``entity`` adds the authority person fields (revision, portrait selection and
+    image) to the live read; staging comparisons keep the legacy payload only.
+    """
     if library_id is None:
         row = db.execute("SELECT payload FROM mobile_collection_people WHERE id=?", [person_id]).fetchone()
     else:
         row = db.execute("SELECT * FROM collection_authority_people WHERE library_id=? AND person_id=?",
                          [library_id, person_id]).fetchone()
-        if row is not None:
+        if row is not None and entity:
             import collection_authority
             return {"person": collection_authority.person_entity(db, library_id, row)}
     return None if row is None else {"person": json.loads(row["payload"])}
@@ -841,12 +845,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 "collectionBindings": collection_bindings.capabilities()}
 
     @app.get("/v1/collections/people/{person_id}")
-    def get_person(person_id: ID, authorization: str | None = Header(default=None)):
+    def get_person(person_id: ID, authority: bool = False, authorization: str | None = Header(default=None)):
+        """``?authority=1`` adds the authority person fields; the default body is unchanged."""
         require_auth(authorization)
         with get_db() as db:
             db.execute("BEGIN")
             active = served(db)
-            payload = public_person(db, person_id, active["libraryId"] if active else None)
+            payload = public_person(db, person_id, active["libraryId"] if active else None, entity=authority)
         if payload is None:
             raise HTTPException(404, "Person is not published")
         return payload

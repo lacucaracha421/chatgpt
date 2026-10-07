@@ -8,5 +8,6 @@
   "genreLength": 100,
   "credits": 64,
   "personName": 500,
-  "creditName": 500
+  "creditName": 500,
+  "personMemo": 2000
 }

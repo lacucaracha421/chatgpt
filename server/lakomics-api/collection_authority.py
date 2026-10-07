@@ -126,7 +126,7 @@ PERSON_PORTRAIT = "setPersonPortrait"
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                         VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT)
+                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -1801,10 +1801,10 @@ def _set_person_portrait(ctx, entity, payload_sha):
         art = artwork_row(ctx.db, ctx.library_id, desired["artworkId"])
         if art is None or art["kind"] != "cover":
             fail(422, "invalidPersonPortrait", "표지 이미지를 찾을 수 없습니다.")
+        # The PC crops a selected cover; a later cover change must not reject the intent.
         work = work_state(require_work(ctx, art["work_id"]))
-        if (work["type"] != "av" or work["selection"]["work"] != art["artwork_id"]
-                or not any(c["personId"] == person_id for c in work["avCredits"])):
-            fail(422, "invalidPersonPortrait", "이 인물의 선택된 AV 표지가 필요합니다.")
+        if work["type"] != "av" or not any(c["personId"] == person_id for c in work["avCredits"]):
+            fail(422, "invalidPersonPortrait", "이 인물이 나오는 AV 표지가 필요합니다.")
         crop = {"artworkId": desired["artworkId"], **desired["rect"]}
         attribution = {"source": "cover"}
     elif desired is not None:

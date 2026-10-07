@@ -56,7 +56,12 @@ impl Library {
             }
         }
         if status.active {
-            super::collection_authority::enqueue_person_changes(&connection, &status, person_id, serde_json::json!({"favorite":favorite}))?;
+            super::collection_authority::enqueue_person_changes(
+                &connection,
+                &status,
+                person_id,
+                serde_json::json!({"favorite":favorite}),
+            )?;
         }
         if favorite {
             connection.execute(

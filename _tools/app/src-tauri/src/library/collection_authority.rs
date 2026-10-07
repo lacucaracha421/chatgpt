@@ -1500,6 +1500,15 @@ pub(crate) fn predicted_collection_revision(
                 _ => {}
             }
         } else if section == "works"
+            && matches!(command, "setPerson" | "setPersonPortrait")
+            && state["avCredits"]
+                .as_array()
+                .is_some_and(|c| c.iter().any(|c| c["personId"] == body["personId"]))
+        {
+            // The server republishes every work crediting a changed person. Person
+            // commands are queued only for a predicted change.
+            predicted += 1;
+        } else if section == "works"
             && matches!(command, "setAvDetails" | "setAvCredits")
             && key("works", &body)? == entity_key
         {
@@ -2127,16 +2136,7 @@ fn selections(tx: &Transaction<'_>) -> Result<(), LibraryError> {
     }
     tx.execute("INSERT INTO collection_assets(collection_id,asset_id,added_at) SELECT r.work_id,json_extract(r.payload,'$.assetId'),json_extract(r.payload,'$.addedAt') FROM collection_authority_revisions r JOIN assets a ON a.id=json_extract(r.payload,'$.assetId') JOIN collections c ON c.id=r.work_id WHERE r.section='memberships' AND r.deleted=0 AND NOT EXISTS(SELECT 1 FROM collection_authority_trash t WHERE t.work_id=r.work_id) ON CONFLICT(collection_id,asset_id) DO NOTHING",[])?;
     tx.execute("UPDATE collection_volumes SET cover_artwork_id=(SELECT a.id FROM collection_work_artworks a WHERE a.id=json_extract(r.payload,'$.coverArtworkId')) FROM collection_authority_revisions r WHERE r.section='volumes' AND r.deleted=0 AND collection_volumes.id=json_extract(r.payload,'$.volumeId')",[])?;
-    if let Some(l) = local(tx)? {
-        let people = tx.prepare("SELECT payload FROM collection_authority_people_cache WHERE library_id=?1 AND epoch=?2")?
-            .query_map(params![l.id.library,l.id.epoch], |r| r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
-        for raw in people {
-            let person: Value = serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
-            project_person_fields(tx,text(&person,"personId")?,&person,&chrono::Utc::now().to_rfc3339())?;
-            project_person_portrait(tx,text(&person,"personId")?,&person["portraitSelection"],&chrono::Utc::now().to_rfc3339())?;
-        }
-    }
-    reapply_pending_core_edits(tx)?;
+    project_person_crops(tx)?;
     Ok(())
 }
 
@@ -2384,7 +2384,7 @@ impl Library {
             return Ok((changed, false));
         }
         changed |= self.reconcile_av_people_with(&status, &|person| {
-            client.collection_authority_read(&format!("/v1/collections/people/{person}"), token)
+            client.collection_authority_person(person, token)
         })? > 0;
         let sent = if held {
             false
@@ -2392,8 +2392,10 @@ impl Library {
             self.flush_collection_outbox_with(
                 &status,
                 &|body| {
-                    if body["commandType"] == "addArtwork" ||
-                        (body["commandType"] == "setPersonPortrait" && body["portrait"]["kind"] == "image") {
+                    if body["commandType"] == "addArtwork"
+                        || (body["commandType"] == "setPersonPortrait"
+                            && body["portrait"]["kind"] == "image")
+                    {
                         self.upload_collection_command_artwork(client, token, body)?;
                     }
                     let credential = command_credential(body, token, publisher)?;
@@ -3074,26 +3076,33 @@ impl Library {
         use sha2::{Digest, Sha256};
         use std::io::Read;
         let is_portrait = body["commandType"] == "setPersonPortrait";
-        let blob: crate::cloud::collections::ArtworkBlob =
-            serde_json::from_value(if is_portrait {body["portrait"]["original"].clone()} else {body["original"].clone()})
-                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let blob: crate::cloud::collections::ArtworkBlob = if is_portrait {
+            portrait_blob(&body["portrait"]["original"])?
+        } else {
+            serde_json::from_value(body["original"].clone())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?
+        };
         if blob.size_bytes > 16 * 1024 * 1024 {
             return Err(LibraryError::InvalidWorkArtwork);
         }
         let mut bytes = Vec::new();
         if is_portrait {
-            bytes = self.connection()?.query_row("SELECT bytes FROM collection_authority_portrait_blobs WHERE sha256=?1", [&blob.sha256], |r| r.get(0))?;
+            bytes = self.connection()?.query_row(
+                "SELECT bytes FROM collection_authority_portrait_blobs WHERE sha256=?1",
+                [&blob.sha256],
+                |r| r.get(0),
+            )?;
         } else {
-        let mut media = self.resolve_work_artwork(text(body, "artworkId")?)?;
-        media
-            .file
-            .by_ref()
-            .take(blob.size_bytes + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|source| LibraryError::ReadMedia {
-                path: self.root().to_path_buf(),
-                source,
-            })?;
+            let mut media = self.resolve_work_artwork(text(body, "artworkId")?)?;
+            media
+                .file
+                .by_ref()
+                .take(blob.size_bytes + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|source| LibraryError::ReadMedia {
+                    path: self.root().to_path_buf(),
+                    source,
+                })?;
         }
         if bytes.len() as u64 != blob.size_bytes
             || Sha256::digest(&bytes)

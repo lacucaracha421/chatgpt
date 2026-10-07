@@ -109,13 +109,18 @@ impl Library {
         id: &str,
         memo: Option<String>,
     ) -> Result<AvPerformerPage, AvError> {
-        let memo = text(memo, 2000)?;
+        let memo = text(memo, super::av_models::av_limit("personMemo"))?;
         let mut c = self.connection()?;
         let tx = c.transaction()?;
         let status = super::collection_authority::collection_write_status(&tx)?;
         require_person(&tx, id)?;
         if status.active {
-            super::collection_authority::enqueue_person_changes(&tx, &status, id, serde_json::json!({"memo":memo}))?;
+            super::collection_authority::enqueue_person_changes(
+                &tx,
+                &status,
+                id,
+                serde_json::json!({"memo":memo}),
+            )?;
         }
         tx.execute(
             "UPDATE collection_people SET memo=?2,updated_at=?3 WHERE id=?1",

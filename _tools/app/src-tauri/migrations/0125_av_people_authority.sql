@@ -12,6 +12,8 @@ CREATE TABLE collection_authority_portrait_blobs (
 CREATE TABLE collection_authority_people_reconcile (
  library_id TEXT NOT NULL, epoch INTEGER NOT NULL, person_id TEXT NOT NULL,
  local_payload TEXT NOT NULL, queued INTEGER NOT NULL DEFAULT 0,
+ -- 1 while the server has no such person; a later confirmed person row retries it.
+ missing INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(library_id,epoch,person_id)
 );
 PRAGMA user_version = 125;

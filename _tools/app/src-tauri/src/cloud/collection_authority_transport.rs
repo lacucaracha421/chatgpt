@@ -32,7 +32,7 @@ impl CloudClient {
             200 => read_json_bounded(&mut response, 4 * 1024 * 1024),
             401 | 403 => Err(LibraryError::CloudUnauthorized),
             // Return the coded read refusal so reconciliation can restart a baseline.
-            404 | 409 => read_json_bounded(&mut response, 64 * 1024),
+            409 => read_json_bounded(&mut response, 64 * 1024),
             _ => Err(LibraryError::CloudRequestUnavailable),
         }
     }
@@ -122,23 +122,66 @@ impl CloudClient {
         Ok(())
     }
 
+    /// A confirmed authority person, or `None` while the server has not published it.
+    pub(crate) fn collection_authority_person(
+        &self,
+        person: &str,
+        token: &str,
+    ) -> Result<Option<Value>, LibraryError> {
+        let mut response = self
+            .coded_agent()?
+            .get(self.endpoint(&format!("/v1/collections/people/{person}?authority=1"))?)
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        match response.status().as_u16() {
+            200 => read_json_bounded(&mut response, 256 * 1024).map(Some),
+            404 => Ok(None),
+            401 | 403 => Err(LibraryError::CloudUnauthorized),
+            _ => Err(LibraryError::CloudRequestUnavailable),
+        }
+    }
+
     pub(crate) fn download_person_portrait(
         &self,
         blob: &crate::cloud::collections::ArtworkBlob,
         token: &str,
     ) -> Result<Vec<u8>, LibraryError> {
-        if blob.size_bytes > 5 * 1024 * 1024 { return Err(LibraryError::InvalidCloudResponse); }
-        let ticket = self.asset_request(&format!("/v1/home/covers/{}/media-ticket", blob.sha256), Some(&serde_json::json!({})), token)?;
-        if ticket["sha256"] != blob.sha256 || ticket["size_bytes"] != blob.size_bytes || ticket["content_type"] != blob.content_type {
+        if blob.size_bytes > 5 * 1024 * 1024 {
             return Err(LibraryError::InvalidCloudResponse);
         }
-        let url = url::Url::parse(ticket["url"].as_str().ok_or(LibraryError::InvalidCloudResponse)?)
-            .map_err(|_| LibraryError::InvalidCloudResponse)?;
-        if !matches!(url.scheme(), "http" | "https") { return Err(LibraryError::InvalidCloudResponse); }
+        let ticket = self.asset_request(
+            &format!("/v1/home/covers/{}/media-ticket", blob.sha256),
+            Some(&serde_json::json!({})),
+            token,
+        )?;
+        if ticket["sha256"] != blob.sha256
+            || ticket["size_bytes"] != blob.size_bytes
+            || ticket["content_type"] != blob.content_type
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let url = url::Url::parse(
+            ticket["url"]
+                .as_str()
+                .ok_or(LibraryError::InvalidCloudResponse)?,
+        )
+        .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
         // Blob hosts never receive the API credential. The library checks length/hash.
-        let mut response = self.agent.get(url.as_str()).call().map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        let mut response = self
+            .agent
+            .get(url.as_str())
+            .call()
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
         let mut bytes = Vec::new();
-        response.body_mut().as_reader().take(blob.size_bytes + 1).read_to_end(&mut bytes)
+        response
+            .body_mut()
+            .as_reader()
+            .take(blob.size_bytes + 1)
+            .read_to_end(&mut bytes)
             .map_err(|_| LibraryError::CloudRequestUnavailable)?;
         Ok(bytes)
     }
