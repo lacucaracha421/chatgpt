@@ -10,7 +10,6 @@ const state=(notes:MobileNote[])=>async(op:string,p:Record<string,unknown>)=>op=
 beforeEach(()=>{mock.native.mockReset();mock.native.mockImplementation(state([note]));});
 afterEach(()=>{cleanup();localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();});
 async function openNote(title:string){fireEvent.click(await screen.findByText(title));}
-async function openTrash(){fireEvent.click(await screen.findByRole('button',{name:'메모 목록 더보기'}));fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:/^휴지통/}));}
 const rows=()=>screen.getAllByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement[];
 async function editBody(){return await screen.findByRole('textbox',{name:'메모 본문'});}
 
@@ -92,18 +91,16 @@ it('puts the note kinds first in the list, above the search',async()=>{
  expect(kinds).toBeTruthy();
  expect(kinds.compareDocumentPosition(screen.getByLabelText('메모 검색'))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
-it('groups pinned notes, keeps the trash behind a small link and returns with Back',async()=>{
+it('groups pinned notes and leaves trash navigation to the unified screen',async()=>{
  mock.native.mockImplementation(state([note,pinned,trashed]));
  const backRef:{current:(()=>boolean)|null}={current:null};
  render(<Notes active backRef={backRef}/>);await screen.findByText('고정한 메모');
  expect(screen.getByRole('heading',{name:'고정됨'})).toBeTruthy();expect(screen.getByRole('heading',{name:'최근'})).toBeTruthy();
  expect(screen.queryByText('지운 메모')).toBeNull();
- // 휴지통 and 복구키 보기 sit behind the top bar's ⋯, not in the list.
+ // The list menu keeps recovery; deleted notes are reached only through More's unified trash.
  expect(screen.queryByRole('button',{name:/휴지통|복구키/})).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'메모 목록 더보기'}));
- const sheet=within(await screen.findByRole('dialog'));expect(sheet.getByRole('button',{name:'휴지통 1'})).toBeTruthy();expect(sheet.getByRole('button',{name:'복구키 보기'})).toBeTruthy();
- fireEvent.click(sheet.getByRole('button',{name:'휴지통 1'}));
- await screen.findByText('지운 메모');expect(screen.queryByText('고정한 메모')).toBeNull();expect(screen.queryByRole('button',{name:'새 메모'})).toBeNull();
+ const sheet=within(await screen.findByRole('dialog'));expect(sheet.queryByRole('button',{name:/휴지통/})).toBeNull();expect(sheet.getByRole('button',{name:'복구키 보기'})).toBeTruthy();
  act(()=>{expect(backRef.current?.()).toBe(true);});
  await screen.findByText('고정한 메모');expect(backRef.current?.()).toBe(false);
 });
@@ -119,17 +116,6 @@ it('creates notes from the floating button and moves an open note to the trash',
  fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
  await waitFor(()=>expect(saves().some(s=>s.id===note.id&&s.deleted===true&&s.pinned===true)).toBe(true));
  await screen.findByRole('button',{name:'새 메모'});
-});
-it('shows a trashed note read-only with a restore action',async()=>{
- mock.native.mockImplementation(state([note,trashed]));
- render(<Notes active backRef={{current:null}}/>);await screen.findByText('제목');await openTrash();
- fireEvent.click(await screen.findByText('지운 메모'));
- expect(await screen.findByText('휴지통에 있는 메모입니다.')).toBeTruthy();
- expect((await editBody() as HTMLTextAreaElement).readOnly).toBe(true);
- expect(screen.queryByPlaceholderText('메모 작성')).toBeNull();
- expect((screen.getByRole('textbox',{name:'메모 제목'}) as HTMLInputElement).readOnly).toBe(true);
- fireEvent.click(screen.getByRole('button',{name:'복원'}));
- await waitFor(()=>expect(screen.queryByText('휴지통에 있는 메모입니다.')).toBeNull());
 });
 it('colours with a circle and archives from the more sheet',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');

@@ -1,8 +1,8 @@
 .collection-provider-search{display:flex;align-items:flex-end;gap:8px}
 .collection-provider-search>.ui-field{flex:1;min-width:0}
-.collection-provider-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:10px}
+.collection-provider-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:12px}
 .collection-provider-grid.is-cover{grid-template-columns:repeat(auto-fill,minmax(80px,1fr))}
-.collection-provider-grid>button{min-height:44px;padding:3px;background:var(--color-surface);border:1px solid var(--color-border);color:inherit;cursor:pointer}
+.collection-provider-grid>button{min-height:44px;padding:4px;background:var(--color-surface);border:1px solid var(--color-border);color:inherit;cursor:pointer}
 .collection-provider-grid>button[aria-pressed=true]{outline:2px solid var(--color-focus);outline-offset:2px}
 .collection-provider-grid .bind-thumb{width:100%;aspect-ratio:16/9}
 .collection-provider-grid.is-cover .bind-thumb{aspect-ratio:2/3}

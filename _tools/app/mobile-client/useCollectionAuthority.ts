@@ -9,10 +9,11 @@ import {AUTHORITY_STATUS_PATH, COMMAND_EVENT, authorityIdentity, confirmedWork, 
 import {normalizeCollectionEdit, sameEditValue, type CollectionEditField, type CollectionEditValue, type OwnedVolumesValue} from './collectionEditOutbox';
 import type {CollectionSummary} from './collectionModel';
 
-export function useCollectionAuthority(active: boolean, onSettled: () => void) {
+export function useCollectionAuthority(active: boolean, onSettled: () => void, observeCurrentLibrary = false) {
   const connection = outboxConnection();
   const [status, setStatus] = useState<{connection: string | null; identity: AuthorityIdentity} | null>(null);
   const [library, setLibrary] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState(''), [statusRetry, setStatusRetry] = useState(0);
   const [rows, setRows] = useState(readCommands);
   const [confirmed, setConfirmed] = useState(() => readCommands().filter(row => row.state === 'accepted'));
   const [failure, setFailure] = useState('');
@@ -26,11 +27,17 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void) {
         const reply = await api(AUTHORITY_STATUS_PATH, controller.signal, undefined, 'GET', false, connection);
         if (controller.signal.aborted || connection !== outboxConnection()) return;
         const value = authorityIdentity(reply); setStatus(value ? {connection, identity: value} : null);
-      } catch { /* A temporary outage keeps the last confirmed identity usable offline. */ }
+        setStatusError(value ? '' : '컬렉션을 사용할 수 없습니다.');
+        // Trash has no published work list from which to observe the current library.
+        if (observeCurrentLibrary && value) setLibrary(value.libraryId);
+      } catch (error) {
+        // A temporary outage keeps the last confirmed identity usable offline.
+        if (!controller.signal.aborted) setStatusError(errorText(error));
+      }
     };
     void check(); const stop = visibleInterval(() => void check(), 60_000);
     return () => { controller.abort(); stop(); };
-  }, [active, connection]);
+  }, [active, connection, observeCurrentLibrary, statusRetry]);
   useEffect(() => {
     setConfirmed(readCommands().filter(row => row.state === 'accepted'));
     const read = () => {
@@ -111,7 +118,7 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void) {
     if (choice === 'overwrite') void flush();
     return true;
   };
-  return {identity, rows: scoped, acknowledgements: settledRows, failure, enqueue, enqueueBatch, edit, visible, resolveConflict, flush,
+  return {identity, rows: scoped, acknowledgements: settledRows, failure, statusError, retryStatus: () => setStatusRetry(value => value + 1), enqueue, enqueueBatch, edit, visible, resolveConflict, flush,
     drop: (workId: string) => { if (identity) dropWork(identity, workId); },
     observeLibrary: setLibrary,
     work: <T extends CollectionSummary>(item: T) => optimisticWork(confirmedWork(item, settledRows), scoped.filter(row=>row.state!=='accepted')),

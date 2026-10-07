@@ -245,7 +245,7 @@ Status: `TODO` — low priority. VCK/kHentai stays default; isolate optional pro
 
 ## USER-REQ-20261007 — Tablet 더보기 and one combined 휴지통
 
-Status: `TODO` — user 2026-10-07. Design round (PC canonical, tablet in the same round, `DESIGN.md` §12).
+Status: `DONE (device check pending)` — user 2026-10-07. PC `1d2ff4bd` (sectioned TrashBrowser, PC collection trash via the authority trash read + restoreWork), tablet 0.9.41 (Home 더보기 sheet replacing the gear/전송/비밀 buttons, sectioned `TrashLayer`, scattered entries removed). Not yet inspected in the native PC window or on the tablet screen.
 - **Tablet 더보기:** replace the tablet Home top-bar gear (설정) with a 더보기 panel that matches the PC rail's 더보기 (`src/layout/MorePanel.tsx`, `navigationEntries.tsx`): the same destinations and commands where the tablet supports them, with 설정 as one entry inside it.
 - **One 휴지통:** a single 휴지통 destination inside 더보기, identical on PC and tablet (user 2026-10-07), split into sections the user can switch between — one per trash kind (assets: PC `src/safety/TrashBrowser.tsx`, tablet `LibraryTrash.tsx`; collection works: tablet `CollectionTrash.tsx`, none on the PC yet; notes: the 휴지통 scopes in `NotesView.tsx` / `Notes.tsx`; encrypted vault: `ExternalVaultBrowser.tsx`, needs unlocking — confirm placement during design).
 - **Remove the scattered entries** (user choice): tablet Library top-bar trash icon, tablet Collections 휴지통 shortcut, PC rail/sidebar trash entry; 휴지통 is entered only from 더보기.

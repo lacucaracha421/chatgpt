@@ -327,7 +327,6 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
     </BottomSheet>}
     {/* Rarely used places sit behind the top bar's ⋯, out of the way of the notes. */}
     {sheet==='list'&&<BottomSheet title="메모 더보기" onClose={()=>setSheet(null)}>
-      <button className="sheet-option" onClick={()=>{setSheet(null);setScope('trash');}}><TrashIcon aria-hidden="true"/>휴지통 <span className="numeric muted">{trashed}</span></button>
       <button className="sheet-option" onClick={()=>setSheet('recovery')}><KeyIcon aria-hidden="true"/>복구키 보기</button>
     </BottomSheet>}
     {sheet==='recovery'&&<BottomSheet title="메모 복구키" onClose={()=>setSheet(null)}><RecoveryKey store={store}/></BottomSheet>}

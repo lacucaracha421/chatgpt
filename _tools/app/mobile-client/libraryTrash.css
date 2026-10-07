@@ -1,4 +1,12 @@
 /* Full-screen Library Trash browser. Covers the app like the review overlays. */
+.trash-overlay.trash-browser-tablet { grid-template-rows:auto auto minmax(0,1fr); }
+.trash-browser-tablet > .trash-bar h1 { font-size:var(--type-title); }
+.trash-sections, .trash-section { min-height:0; height:100%; }
+.trash-section-list { overflow-y:auto; padding:var(--space-4) var(--mobile-gutter); }
+.trash-assets { display:flex; flex-direction:column; height:100%; min-height:0; }
+.trash-assets .trash-scroll { flex:1; }
+.trash-assets .trash-empty { margin:var(--space-4) 0; }
+.trash-first-load { padding:var(--space-4) var(--mobile-gutter); }
 .trash-overlay { position:fixed; inset:0; z-index:180; display:grid; grid-template-rows:auto auto auto minmax(0,1fr) auto; background:var(--color-bg); color:var(--color-text); padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); overflow:hidden; }
 .trash-bar { display:flex; align-items:center; gap:8px; min-height:56px; padding:0 var(--mobile-gutter, 16px) 0 4px; }
 .trash-title { flex:1; min-width:0; }

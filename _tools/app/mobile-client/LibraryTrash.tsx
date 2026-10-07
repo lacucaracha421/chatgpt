@@ -1,10 +1,10 @@
-import {LoadingLine} from './TopBar';
 import {usePrivacyMode,useNsfwFilter} from './privacyMode';
 import {assetMasked} from '../src/shared/privacy/contentMask';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
-import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckCircleIcon, PhotoIcon, TrashIcon} from '@heroicons/react/24/outline';
-import {Button, EmptyState, IconButton} from './ui';
+import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckCircleIcon, PhotoIcon} from '@heroicons/react/24/outline';
+import {Button, EmptyState, IconButton, Skeleton} from './ui';
+import {TRASH_EMPTY} from '../src/safety/trashSections';
 import {errorText} from './transport';
 import {mediaTicket} from './media';
 import {Scrubber} from './Scrubber';
@@ -22,13 +22,15 @@ const POLL = 5000;
  * not-yet-accepted intents, with restore (single, selection, all). There is no empty action:
  * emptying the trash, and the retention purge, stay on the PC.
  */
-export function LibraryTrash({onClose, backRef, known, onRestored}: {
+export function LibraryTrash({onClose, backRef, known, onRestored, embedded = false, onState}: {
   onClose(): void;
   backRef: MutableRefObject<(() => boolean) | null>;
   /** Assets this session moved to the trash, so a pending tile can show its metadata. */
   known: ReadonlyMap<string, Asset>;
   /** Assets whose restore was queued, so the library can show them again. */
   onRestored?(ids: string[]): void;
+  embedded?: boolean;
+  onState?(ready: boolean, count: number | undefined): void;
 }) {
   const [privacy] = usePrivacyMode();
   const [filter] = useNsfwFilter();
@@ -36,7 +38,6 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
   const [totals, setTotals] = useState({count: 0, bytes: 0});
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
-  const [active, setActive] = useState(true);
   const [lifecycle, setLifecycleState] = useState<LifecycleState>({available: false, items: []});
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -50,16 +51,18 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
+    if (embedded) return;
     backRef.current = () => { onClose(); return true; };
     return () => { backRef.current = null; };
-  }, [backRef, onClose]);
+  }, [backRef, onClose, embedded]);
+  useEffect(() => { onState?.(phase !== 'loading', phase === 'ready' ? totals.count : undefined); }, [phase, totals.count, onState]);
 
   const reload = useCallback(async () => {
     try {
       const [page, state] = await Promise.all([readTrash(null), readLifecycle().catch(() => ({available: false, items: []}))]);
       if (!alive.current) return;
       setItems(page.items ?? []); setCursor(page.next_cursor); setHasMore(!!page.has_more);
-      setTotals({count: page.total_count ?? 0, bytes: page.total_bytes ?? 0}); setActive(page.active !== false);
+      setTotals({count: page.total_count ?? 0, bytes: page.total_bytes ?? 0});
       setLifecycleState(state); setPhase('ready'); setError('');
       activeIds.current = state.items.filter(row => row.state === 'pending' || row.state === 'sending').map(row => row.assetId).sort().join(',');
     } catch (reason) {
@@ -148,19 +151,19 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
   const moving = tiles.filter(tile => tile.status === 'moving').length;
   const chosen = tiles.filter(tile => selected.has(tile.id));
   const deferred = lifecycle.code === 'unauthorized' ? '서버를 업데이트하면 대기 중인 항목이 전송됩니다.' : conflictNotice(lifecycle);
-  return <div className="trash-overlay" role="dialog" aria-modal="true" aria-label="휴지통">
+  return <div className={embedded ? 'trash-assets' : 'trash-overlay'} role={embedded ? undefined : 'dialog'} aria-modal={embedded ? undefined : true} aria-label={embedded ? '휴지통 에셋' : '휴지통'}>
     <header className="trash-bar">
-      <IconButton label="휴지통 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
-      <div className="trash-title"><h1>휴지통</h1>
+      {!embedded && <IconButton label="휴지통 닫기" icon={ArrowLeftIcon} onClick={onClose}/>}
+      <div className="trash-title">{!embedded && <h1>휴지통</h1>}
         {phase === 'ready' && <p className="numeric" aria-live="polite">{totals.count}개 · {formatBytes(totals.bytes)}{moving > 0 && ` · 이동 대기 ${moving}`}</p>}
       </div>
       {tiles.length > 0 && <Button size="sm" variant="ghost" onClick={() => setSelected(allSelected ? new Set() : new Set(selectable.map(tile => tile.id)))}>{allSelected ? '선택 해제' : '전체 선택'}</Button>}
     </header>
     <p className="hint trash-hint">비우기는 PC에서 할 수 있습니다. 보존 기간이 지나면 PC가 영구 삭제합니다.</p>
     {(notice || deferred) && <p className="error-message trash-notice" role="alert">{notice || deferred}</p>}
-    <LoadingLine label={(phase === 'loading')&&'휴지통 불러오는 중'}/>
-    {phase === 'error' && <EmptyState className="trash-empty" title="휴지통을 불러오지 못했습니다" hint={error}><Button onClick={() => { setPhase('loading'); void reload(); }}>다시 시도</Button></EmptyState>}
-    {phase === 'ready' && !tiles.length && <EmptyState className="trash-empty" icon={TrashIcon} title="휴지통이 비어 있습니다" hint={!active && '이 서버는 아직 휴지통 동기화를 지원하지 않습니다.'}/>}
+    {phase === 'loading' && <div className="trash-grid trash-first-load" aria-label="휴지통을 불러오는 중">{[0,1,2].map(index => <Skeleton key={index} className="trash-tile" label={null}/>)}</div>}
+    {error && <p className="trash-notice" role="alert">{error}<Button onClick={() => { void reload(); }}>다시 시도</Button></p>}
+    {phase === 'ready' && !tiles.length && <EmptyState className="trash-empty" title={TRASH_EMPTY} inline/>}
     {phase === 'ready' && tiles.length > 0 && <div ref={scroller} className="trash-scroll">
       <div className="trash-grid">
         {tiles.map(tile => {

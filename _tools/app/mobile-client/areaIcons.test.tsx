@@ -37,7 +37,7 @@ it('uses the shared area icons in the tablet and PC 찾기 entries',()=>{
 });
 
 it('draws the PC rail and the tablet bottom navigation from the shared map',()=>{
-  const rail=source('../src/layout/WorkspaceNavigation.tsx'),nav=source('./App.tsx');
+  const rail=source('../src/layout/WorkspaceNavigation.tsx'),nav=source('./App.tsx')+source('./MoreSheet.tsx');
   for(const key of ['home','assets','collections','manga','notes','exchange','private_vault'])expect(rail).toContain(`AREA_ICONS.${key}`);
   for(const key of ['home','assets','collections','manga','notes','private_vault','exchange','settings'])expect(nav).toContain(`AREA_ICONS.${key}`);
   // No area glyph is picked locally any more.

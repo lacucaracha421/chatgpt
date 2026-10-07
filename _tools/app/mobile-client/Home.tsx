@@ -32,10 +32,13 @@ import {koreanReleases} from './collectionReleasesModel';
 import {useLocalDayClock} from '../src/shared/useLocalDayClock';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {useLaunchReady} from '../src/shared/launch/LaunchSplash';
+import {deletedTrashNotes} from '../src/safety/trashSections';
+import {setTabletTrashCount} from './trashCounts';
 import '../src/home/home.css';
 import './home.css';
 
 export interface HomeProps {
+  onUnsortedCount?(count: number | null): void;
   items: Asset[]; hasMore: boolean; captures: Asset[] | null; busy: boolean; paused: boolean; secondaryError: string;
   scope: string; exchange: ExchangeSnapshot | null;
   /** Retained for compatibility with callers that still hold the character index. Home does not expose review. */
@@ -141,7 +144,9 @@ export function Home(props: HomeProps) {
   const today = localToday(at);
   const [shelfScope, setShelfScope] = useState<string | null>(null);
   const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending: captures?.length ?? null, similarityKey: props.similarityKey, exchange: props.exchange, shelfEnabled: shelfScope === props.scope});
+  useEffect(() => {props.onUnsortedCount?.(d.summary?.unclassified ?? null);}, [props.onUnsortedCount, d.summary?.unclassified]);
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
+  useEffect(() => {if (memos && !memos.locked) setTabletTrashCount(props.scope, 'notes', deletedTrashNotes(memos.notes).length);}, [props.scope, memos]);
   const upcoming = useHomeUpcoming(!paused, props.scope, d.refreshKey);
   const revisit = useHomeRevisit(!paused, props.scope, d.refreshKey);
   const homeScroll = useRef<HTMLDivElement>(null);

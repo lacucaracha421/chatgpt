@@ -36,7 +36,8 @@ it('does not read the similarity queue while the retained root is hidden',async(
 it('shows root cards and All without recent folders, then searches every character level from the bar',async()=>{
  function Root(){const [segment,onSegment]=useState<'folders'|'albums'|'artists'>('folders');return <LibraryRoot {...props} segment={segment} onSegment={onSegment}/>;}
  render(<Root/>);
- expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();
+  expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'휴지통'})).toBeNull();
  expect(document.querySelector('.library-recents')).toBeNull();expect(screen.queryByText('최근 연 폴더')).toBeNull();
  // Search is a magnifier in the shared bar until opened.
  expect(screen.queryByRole('searchbox')).toBeNull();

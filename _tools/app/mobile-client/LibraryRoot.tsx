@@ -1,10 +1,10 @@
 import {useCallback,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type React from 'react';
-import {ChevronDownIcon,ChevronRightIcon,TrashIcon} from '@heroicons/react/24/outline';
+import {ChevronDownIcon,ChevronRightIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {SearchButton,TopBar} from './TopBar';
 import {useSimilarityReviewCount} from './useSimilarityReview';
-import {IconButton,SectionLabel} from './ui';
+import {SectionLabel} from './ui';
 import {useSectionShade} from './SectionShade';
 import {Cover} from './CoverGroup';
 import {FolderCards} from './FolderCards';
@@ -64,7 +64,7 @@ function useFolderFit(active:boolean,scroller:React.RefObject<HTMLDivElement|nul
   },[active,scroller,grid,key]);
   return fit;
 }
-export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onOpenArtist,onSearchSelect,onSearchFocus,endpoint='',onRefresh,albumTree,albumError,albumLoading=false,segment,onSegment,restoreScroll,onScroll,similarity,onTrash}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the Library Trash; absent until the lifecycle authority is adopted. */onTrash?():void;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSearchSelect?(item:AssetSuggestion):void;onSearchFocus?():void;endpoint?:string;onSelect(view:View):void;onOpenArtist(artist:LibraryArtist):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;albumLoading?:boolean;segment:LibrarySegment;onSegment(segment:LibrarySegment):void;restoreScroll:number;onScroll(top:number):void}) {
+export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onOpenArtist,onSearchSelect,onSearchFocus,endpoint='',onRefresh,albumTree,albumError,albumLoading=false,segment,onSegment,restoreScroll,onScroll,similarity}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSearchSelect?(item:AssetSuggestion):void;onSearchFocus?():void;endpoint?:string;onSelect(view:View):void;onOpenArtist(artist:LibraryArtist):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;albumLoading?:boolean;segment:LibrarySegment;onSegment(segment:LibrarySegment):void;restoreScroll:number;onScroll(top:number):void}) {
   const [searchOpen,setSearchOpen]=useState(false);
   const [queueOpen,setQueueOpen]=useState(false);
   const [artistNames,setArtistNames]=useState<string[]>([]);
@@ -100,7 +100,7 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   return <div className={`library-root${fit?' is-fit':''}`} style={{display:active?undefined:'none',...(fit?{'--root-cover-height':`${fit.cover}px`} as React.CSSProperties:{})}}>
     {searchOpen&&<AssetSearch items={suggestions} endpoint={endpoint} paused={paused} loading={busy||albumLoading||artistList.state==='idle'||artistList.state==='loading'} onClose={closeSearch} onChoose={chooseSuggestion} error={albumError||artistList.error} onRetry={()=>{onRefresh();artistList.retry();}}/>}
     <div style={{display:searchOpen?'none':undefined}} className="library-root-content">
-    <TopBar barRef={sections.barRef} title={sections.title('에셋')} loading={busy&&'목록 불러오는 중'} actions={<>{waiting>0&&<button className="top-bar__queue" onClick={openQueue} aria-label={`확인할 것 ${waiting}개`}>확인<span className="numeric">{waiting}</span></button>}<SearchButton onClick={openSearch}/>{onTrash&&<IconButton label="휴지통" icon={TrashIcon} onClick={onTrash}/>}</>}/>
+    <TopBar barRef={sections.barRef} title={sections.title('에셋')} loading={busy&&'목록 불러오는 중'} actions={<>{waiting>0&&<button className="top-bar__queue" onClick={openQueue} aria-label={`확인할 것 ${waiting}개`}>확인<span className="numeric">{waiting}</span></button>}<SearchButton onClick={openSearch}/></>}/>
     {sections.shade}
     <div className="library-root-scroll" ref={host} onScroll={event=>{const top=event.currentTarget.scrollTop;onScroll(top);if(top>8!==scrolled)setScrolled(top>8);}} aria-label="에셋 탐색">{pull}
     {sections.inline}

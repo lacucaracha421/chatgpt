@@ -1,9 +1,9 @@
 import {useEffect, useState} from 'react';
-import {RectangleStackIcon, TrashIcon} from '@heroicons/react/24/outline';
-import {BusyLabel} from '../src/shared/ui/BusyLabel';
+import {RectangleStackIcon} from '@heroicons/react/24/outline';
+import {trashExpiry, TRASH_EMPTY} from '../src/safety/trashSections';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
-import {BottomSheet} from './BottomSheet';
-import {Button, EmptyState} from './ui';
+import {Button, EmptyState, Skeleton} from './ui';
+import {setTabletTrashCount} from './trashCounts';
 import {isLifecycle, lifecycleInFlight, sameAuthority, type AuthorityIdentity, type CommandIntent} from './collectionCommandOutbox';
 import type {CollectionKind} from './collectionModel';
 import type {useCollectionAuthority} from './useCollectionAuthority';
@@ -15,7 +15,6 @@ import './collectionAuthority.css';
 type Authority = ReturnType<typeof useCollectionAuthority>;
 export const TRASH_PATH = '/v1/collections/authority/trash';
 export type TrashItem = {workId: string; type: CollectionKind; name: string; trashedAt: string; purgeAt: string; entityRevision: number};
-const DAY_MS = 86_400_000;
 
 /**
  * Each work's newest delete or restore that is still queued or was confirmed this session. A
@@ -32,22 +31,22 @@ const validItem = (value: Partial<TrashItem>): value is TrashItem => typeof valu
   && ['game', 'manga', 'movie', 'av'].includes(value.type as string) && typeof value.purgeAt === 'string' && Number.isSafeInteger(value.entityRevision);
 
 /**
- * The Collections 휴지통: trashed works newest first, read while Collections is shown (its count
- * sits on the shortcut). `available` stays false until the server answers, so an older server
- * or APK simply shows no shortcut.
+ * Trashed works newest first. Retain the last read during refreshes and publish only known
+ * counts for More; data reads remain owned by the tablet's authority connection.
  */
 export function useCollectionTrash(authority: Authority, active: boolean, refreshKey: unknown) {
   const identity = authority.identity, connection = outboxConnection();
-  const [reply, setReply] = useState<{identity: AuthorityIdentity; connection: string | null; items: TrashItem[]; readAt: number} | null>(null);
+  const [reply, setReply] = useState<{identity: AuthorityIdentity; connection: string | null; items: TrashItem[]; hasMore: boolean; readAt: number} | null>(null);
   const [failure, setFailure] = useState(''), [retry, setRetry] = useState(0);
   useEffect(() => {
     if (!active || !identity || !connection) return;
     const controller = new AbortController(), readAt = Date.now();
     const params = new URLSearchParams({libraryId: identity.libraryId, epoch: String(identity.epoch)});
-    void api<AuthorityIdentity & {items: Partial<TrashItem>[]}>(`${TRASH_PATH}?${params}`, controller.signal, undefined, 'GET', false, connection).then(value => {
-      if (controller.signal.aborted || !sameAuthority({...value, contractVersion: 1}, identity) || !Array.isArray(value.items)) return;
-      setReply({identity, connection, items: value.items.filter(validItem), readAt}); setFailure('');
-    }, reason => { if (!controller.signal.aborted) setFailure(errorText(reason)); });
+    void api<AuthorityIdentity & {items: Partial<TrashItem>[]; hasMore?: boolean}>(`${TRASH_PATH}?${params}`, controller.signal, undefined, 'GET', false, connection).then(value => {
+      if (controller.signal.aborted) return;
+      if (!sameAuthority({...value, contractVersion: 1}, identity) || !Array.isArray(value.items)) throw new Error('컬렉션 휴지통을 불러오지 못했습니다.');
+      setReply({identity, connection, items: value.items.filter(validItem), hasMore: !!value.hasMore, readAt}); setFailure('');
+    }).catch(reason => { if (!controller.signal.aborted) setFailure(errorText(reason)); });
     return () => controller.abort();
   }, [active, identity?.libraryId, identity?.epoch, connection, refreshKey, retry]);
   const current = reply && identity && sameAuthority(reply.identity, identity) && reply.connection === connection ? reply : null;
@@ -58,31 +57,27 @@ export function useCollectionTrash(authority: Authority, active: boolean, refres
     const intent = intents.get(item.workId);
     return !(intent?.command.commandType === 'restoreWork' && (lifecycleInFlight(intent) || intent.state === 'accepted' && (intent.acceptedAt ?? 0) > current.readAt));
   }) ?? [];
-  return {available: !!current, items, failure, retry: () => setRetry(value => value + 1)};
+  useEffect(() => { if (current && connection) setTabletTrashCount(connection, 'collections', current.hasMore ? 0 : items.length); }, [current, connection, items.length]);
+  return {available: !!current, items, hasMore: current?.hasMore ?? false, failure, retry: () => setRetry(value => value + 1)};
 }
 export type CollectionTrashState = ReturnType<typeof useCollectionTrash>;
 
-function purgeLabel(purgeAt: string, now: number) {
-  const days = Math.ceil((Date.parse(purgeAt) - now) / DAY_MS);
-  return days > 0 ? `${days}일 후 영구 삭제` : '곧 영구 삭제';
-}
-
-export function CollectionTrashSheet({trash, authority, privacy, onClose}: {trash: CollectionTrashState; authority: Authority; privacy: boolean; onClose(): void}) {
+export function CollectionTrashContent({trash, authority, privacy}: {trash: CollectionTrashState; authority: Authority; privacy: boolean}) {
   const [failure, setFailure] = useState('');
   // AV stays out of sight in privacy mode, as its tab does.
-  const items = trash.items.filter(item => !privacy || item.type !== 'av'), now = Date.now();
+  const items = trash.items.filter(item => !privacy || item.type !== 'av');
   const restore = (item: TrashItem) => {
     try { authority.enqueue({commandType: 'restoreWork', workId: item.workId, expectedRevision: item.entityRevision}, item.name); setFailure(''); }
     catch (reason) { setFailure(errorText(reason)); }
   };
-  return <BottomSheet title="휴지통" onClose={onClose}>
-    {(failure || trash.failure) && <p role="alert" className="collection-manage-failure">{failure || trash.failure}{!failure && <Button variant="ghost" onClick={trash.retry}>다시 시도</Button>}</p>}
-    {!trash.available ? <BusyLabel busy={!trash.failure} idle=""><p className="hint" role="status">휴지통을 불러오는 중…</p></BusyLabel>
-      : !items.length ? <EmptyState icon={TrashIcon} title="휴지통이 비어 있어요" inline/>
+  return <>
+    {(failure || trash.failure) && <p role="alert" className="collection-manage-failure">{failure || trash.failure}<Button variant="ghost" onClick={() => {setFailure(''); trash.retry();}}>다시 시도</Button></p>}
+    {!trash.available ? !trash.failure && <div className="collection-trash" aria-label="휴지통을 불러오는 중">{[0,1,2].map(index => <Skeleton className="collection-trash-row" key={index} label={null}/>)}</div>
+      : !items.length ? <EmptyState title={TRASH_EMPTY} inline/>
       : <ul className="collection-trash" aria-label="휴지통 작품">{items.map(item => <li key={item.workId} className="collection-trash-row">
         <span className="bind-thumb collection-trash-thumb"><span className="bind-thumb-placeholder"><RectangleStackIcon aria-hidden="true"/></span></span>
-        <span className="collection-trash-text"><strong>{item.name}</strong><small>{KIND_LABEL[item.type]} · <span className="numeric">{purgeLabel(item.purgeAt, now)}</span></small></span>
+        <span className="collection-trash-text"><strong>{item.name}</strong><small>{KIND_LABEL[item.type]} · <span className="numeric">{trashExpiry(item.purgeAt)}</span></small></span>
         <Button aria-label={`${item.name} 되살리기`} onClick={() => restore(item)}>되살리기</Button>
       </li>)}</ul>}
-  </BottomSheet>;
+  </>;
 }

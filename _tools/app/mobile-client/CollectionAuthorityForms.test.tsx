@@ -7,6 +7,9 @@ vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./t
 vi.mock('./media', () => ({mediaTicket: vi.fn()}));
 import {ApiError} from './transport';
 import {Collections} from './Collections';
+import {TrashLayer} from './TrashLayer';
+import {NotesStore} from '../src/notes/store';
+import {TRASH_SECTION_STORAGE_KEY} from '../src/safety/trashSections';
 import {useCollectionEdits} from './useCollectionEdits';
 import {AUTHORITY_STATUS_PATH, COMMAND_PATH, readCommands} from './collectionCommandOutbox';
 import {readCollectionEdits} from './collectionEditOutbox';
@@ -338,6 +341,14 @@ describe('delete and 휴지통', () => {
       return previous(path, ...args);
     });
   });
+  const openTrash = async () => {
+    localStorage.setItem(TRASH_SECTION_STORAGE_KEY, 'collections');
+    const store=new NotesStore(async <T,>() => ({unlocked:true,notes:[]} as T));
+    render(<TrashLayer endpoint="https://test.example" store={store} known={new Map()} onRestored={()=>{}} onClose={()=>{}} backRef={{current:null}}/>);
+    const screenLayer=screen.getByRole('dialog',{name:'휴지통'});
+    await act(async()=>{});
+    return screenLayer;
+  };
   const shortcuts = () => screen.getByRole('group', {name: '컬렉션 바로가기'});
   const openDelete = async () => {
     fireEvent.click(await screen.findByText(item.name));
@@ -430,11 +441,8 @@ describe('delete and 휴지통', () => {
       {workId: 'old-2', type: 'movie', name: '지운 영화', trashedAt: '2026-10-05T00:00:00Z', purgeAt: new Date(Date.now() + 10 * DAY - 60_000).toISOString(), entityRevision: 7},
       {workId: 'old-1', type: 'manga', name: '지운 만화', trashedAt: '2026-10-01T00:00:00Z', purgeAt: new Date(Date.now() + 2 * DAY - 60_000).toISOString(), entityRevision: 3},
     ];
-    render(<Collections active paused={false} backRef={{current: null}}/>);
-    const shortcut = await within(await screen.findByRole('group', {name: '컬렉션 바로가기'})).findByRole('button', {name: '휴지통 2'});
-    expect(shortcut.querySelector('.collection-shortcuts__count')?.textContent).toBe('2');
-    fireEvent.click(shortcut);
-    const sheet = await screen.findByRole('dialog', {name: '휴지통'});
+    const sheet = await openTrash();
+    await within(sheet).findByText('지운 영화');
     const rows = within(sheet).getAllByRole('listitem');
     expect(rows.map(row => row.querySelector('strong')!.textContent)).toEqual(['지운 영화', '지운 만화']);
     expect(rows[0].textContent).toContain('영화 · 10일 후 영구 삭제');
@@ -443,28 +451,23 @@ describe('delete and 휴지통', () => {
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'restoreWork', workId: 'old-2', expectedRevision: 7});
     expect(within(sheet).queryByText('지운 영화')).toBeNull();
-    // The sheet hides the screen behind it from assistive tech; the count under it has moved on.
-    expect(within(screen.getByRole('group', {name: '컬렉션 바로가기', hidden: true})).getByRole('button', {name: '휴지통 1', hidden: true})).toBeTruthy();
+    expect(screen.getByRole('tab',{name:'컬렉션 1'})).toBeTruthy();
   });
   it('brings a restore that could not be sent back to the list', async () => {
     command = () => new Error('오프라인');
     trashItems = [{workId: 'old-2', type: 'movie', name: '지운 영화', trashedAt: '2026-10-05T00:00:00Z', purgeAt: new Date(Date.now() + 10 * DAY).toISOString(), entityRevision: 7}];
-    render(<Collections active paused={false} backRef={{current: null}}/>);
-    fireEvent.click(await within(await screen.findByRole('group', {name: '컬렉션 바로가기'})).findByRole('button', {name: '휴지통 1'}));
-    const sheet = await screen.findByRole('dialog', {name: '휴지통'});
+    const sheet = await openTrash();
+    await within(sheet).findByText('지운 영화');
     fireEvent.click(within(sheet).getByRole('button', {name: '지운 영화 되살리기'}));
     await waitFor(() => expect(readCommands()[0]).toMatchObject({state: 'pending', attempts: 1, lastError: '오프라인'}));
     expect(within(sheet).getByText('지운 영화')).toBeTruthy();
   });
   it('shows the empty state and no count when the trash is empty', async () => {
-    render(<Collections active paused={false} backRef={{current: null}}/>);
-    const shortcut = await within(await screen.findByRole('group', {name: '컬렉션 바로가기'})).findByRole('button', {name: '휴지통'});
-    expect(shortcut.querySelector('.collection-shortcuts__count')).toBeNull();
-    fireEvent.click(shortcut);
-    expect(await within(await screen.findByRole('dialog', {name: '휴지통'})).findByText('휴지통이 비어 있어요')).toBeTruthy();
+    const sheet=await openTrash();
+    expect(await within(sheet.querySelector('.trash-section-list') as HTMLElement).findByText('휴지통이 비어 있습니다')).toBeTruthy();
+    expect(screen.getByRole('tab',{name:'컬렉션'})).toBeTruthy();
   });
-  it('shows no shortcut while the server has no 휴지통 route', async () => {
-    trashItems = new ApiError('Not Found', 404, null);
+  it('removes the Collections trash shortcut even when the server supports it', async () => {
     render(<Collections active paused={false} backRef={{current: null}}/>);
     await screen.findByText(item.name); await act(async () => {});
     expect(within(shortcuts()).queryByRole('button', {name: /휴지통/})).toBeNull();

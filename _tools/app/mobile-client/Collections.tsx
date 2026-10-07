@@ -20,7 +20,7 @@ import {useCollectionEdits} from './useCollectionEdits';
 import {AuthorityQueue, CollectionWorkForm, type WorkForm} from './CollectionAuthorityForms';
 import {useProviderStatus} from './CollectionProviders';
 import {WorkManage, WorkManageButton, type ManageSheet} from './CollectionWorkManage';
-import {CollectionTrashSheet, lifecycleIntents, useCollectionTrash} from './CollectionTrash';
+import { lifecycleIntents, useCollectionTrash} from './CollectionTrash';
 import {lifecycleInFlight} from './collectionCommandOutbox';
 import {CollectionReleases} from './CollectionReleases';
 import {invalidateReleases, observePublication} from './releaseStore';
@@ -33,7 +33,7 @@ import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, us
 import {displayDate} from '../src/shared/displayDate';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
-import {BellIcon, CalendarDaysIcon, SparklesIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, TrashIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {BellIcon, CalendarDaysIcon, SparklesIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon,  XMarkIcon} from '@heroicons/react/24/outline';
 import {SparklesIcon as SparklesSolidIcon, StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -466,11 +466,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
   const [workForm,setWorkForm]=useState<WorkForm|null>(null);
   // 작품 관리 (the detail's ⋯) and the 휴지통 shortcut.
-  const [manage,setManage]=useState<ManageSheet>(null),[trashOpen,setTrashOpen]=useState(false);
+  const [manage,setManage]=useState<ManageSheet>(null);
   const [createSearch,setCreateSearch]=useState<{workId:string;operationId:string;kind:'movie'|'tv'}|null>(null);
   const [searchKind,setSearchKind]=useState<'movie'|'tv'>('movie');
   const providerStatus=useProviderStatus(active&&!paused,refresh);
-  const trash=useCollectionTrash(edits.authority,browseLive,refresh);
+  useCollectionTrash(edits.authority,browseLive,refresh);
   const localCreate=edits.authority.rows.find(row=>row.command.commandType==='createWork'&&row.command.workId===selected);
   const localCreateState=localCreate?.state;
   // Retire accepted overlays only against the raw server read, never the optimistic display.
@@ -537,7 +537,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     if(manage){setManage(null);return true;}
     if(coverIndex!==null){setCoverIndex(null);return true;}
     if(sheet){setSheet(null);return true;}
-    if(trashOpen){setTrashOpen(false);return true;}
     if(personalSheet){setPersonalSheet(null);return true;}
     if(bindSheet){setBindSheet(null);return true;}
     if(selected){closeWork();return true;}
@@ -546,10 +545,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     if(showcaseAll){setShowcaseAll(false);return true;}
     if(calendarOpen){setCalendarOpen(false);return true;}
     return false;
-  },[workForm,manage,coverIndex,sheet,trashOpen,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,closeWork,closePerformer,closeInbox]);
+  },[workForm,manage,coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,closeWork,closePerformer,closeInbox]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
-  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet&&!manage&&!trashOpen){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet,manage,trashOpen]);
-  useEffect(()=>{if(!active){setSheet(null);setTrashOpen(false);}},[active]);
+  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet&&!manage){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet,manage]);
+  useEffect(()=>{if(!active){setSheet(null);}},[active]);
 
   const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;if(showcaseRef.current)showcaseRef.current.scrollTop=0;setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
   const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
@@ -580,7 +579,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   };
   const calendarInterestCount=calendarReply?.wishlist.filter(entry=>entry.kind===tab).reduce((sum,entry)=>sum+entry.unread.length,0)??0;
   const showcaseCount=showcasePage?.totalCount??(showcase.committed?showcaseItems.length:undefined);
-  const trashCount=trash.items.filter(work=>!privacyMode||work.type!=='av').length;
   // A deleted work leaves the shelves at once: while its delete is on its way, and once confirmed
   // until the list is read again (a read after the confirmation is the server's word). A delete
   // that could not be sent shows its work again, with the shelf queue's 대기 row.
@@ -604,7 +602,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}>{showcaseAll?<SparklesSolidIcon aria-hidden="true"/>:<SparklesIcon aria-hidden="true"/>}<span className="collection-shortcuts__label">쇼케이스</span></Button>
     {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
     {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
-    {trash.available&&<Button variant="quiet" size="sm" aria-label={`휴지통${trashCount>0?` ${trashCount.toLocaleString()}`:''}`} onClick={()=>{setSheet(null);setTrashOpen(true);}}><TrashIcon aria-hidden="true"/><span className="collection-shortcuts__label">휴지통</span>{trashCount>0&&<span className="numeric collection-shortcuts__count">{trashCount.toLocaleString()}</span>}</Button>}
   </div>;
   const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true"/><Button variant="quiet" size="sm" aria-label="정렬" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="내 별점" aria-pressed={filters.rating!=='all'} onClick={()=>setSheet('rating')}><StarIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="보기" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/></Button></>},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
@@ -698,7 +695,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {item&&edits.authority.identity&&<WorkManage key={item.id} item={item} authority={edits.authority} status={providerStatus} active={active&&!paused} entityRevision={detail?.item.id===item.id?detail.entityRevision:null}
       refreshing={edits.authority.acknowledgements.some(row=>row.command.workId===item.id&&(row.acceptedAt??0)>(detail?.readAt??0))} searchKind={searchKind} sheet={manage} onSheet={sheet=>{setSearchKind('movie');setManage(sheet);}} onForm={setWorkForm} onDeleted={onDeleted}/>}
-    {trashOpen&&<CollectionTrashSheet trash={trash} authority={edits.authority} privacy={privacyMode} onClose={()=>setTrashOpen(false)}/>}
     {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)} onCreated={(id,kind,operationId,mediaType)=>{chooseTab(kind);closeSearch();openWork(id);setCreateSearch(!workForm.retry&&mediaType?{workId:id,operationId,kind:mediaType}:null);}}/>}
     {directWork ? workView : <AreaSwitch activeKey={selected?'work':'shelf'} retained={['shelf','work']} waitForReady crossFade={false} views={{shelf: <>
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>

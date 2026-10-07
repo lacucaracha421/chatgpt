@@ -20,7 +20,10 @@ import {usePublicationCheck} from './usePublicationCheck';
 import {validCharacterIndex,type CharacterIndex} from './characterModel';
 import {useCharacterReviewBackgroundFlush} from './useCharacterReview';
 import {SimilarityReview} from './SimilarityReview';
-import {LibraryTrash} from './LibraryTrash';
+import {TrashLayer} from './TrashLayer';
+import {MoreButton, MoreSheet} from './MoreSheet';
+import {useTabletTrashCount} from './trashCounts';
+import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useLibraryTrash} from './useLibraryTrash';
 import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
 import {useDuplicateDecisionFlush} from './CatalogDuplicates';
@@ -32,7 +35,7 @@ import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
 import {sendingSummary} from './homeDashboard';
 
-import {Badge, Button, EmptyState, IconButton, Mark} from './ui';
+import {Button, EmptyState, Mark} from './ui';
 import {closeVisibleShade,useSectionShade} from './SectionShade';
 import {api, errorText, native} from './transport';
 import {clearMediaCache} from './media';
@@ -145,6 +148,8 @@ export function App() {
   const [privacyMode] = usePrivacyMode();
   const [nsfwFilter]=useNsfwFilter();
   const [searchChips,setSearchChips]=useState<AssetSearchChip[]>([]);
+  const [moreOpen,setMoreOpen]=useState(false);
+  const [unsortedCount,setUnsortedCount]=useState<number|null>(null);
   const [findOpen,setFindOpen]=useState(false),[findRetry,setFindRetry]=useState(0);
   const findStore=useMemo(()=>new NotesStore(mobileNotesRequest),[status.endpoint]);
   const findWorks=useFindWorks(findOpen&&status.configured,status.endpoint);
@@ -241,7 +246,7 @@ export function App() {
   const loadInFlight = useRef(false), loadInterrupted = useRef(false);
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
-  const latest = useRef({findOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
+  const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
   const clearSelection=useCallback(()=>{setClassificationBatchIds(null);setAssetInfo(null);setSelectedIds(new Set());},[]);
   const selectAsset=useCallback((id:string)=>setSelectedIds(current=>current.has(id)?current:new Set(current).add(id)),[]);
   const toggleSelectedAsset=useCallback((id:string)=>setSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;}),[]);
@@ -658,8 +663,9 @@ export function App() {
     };
     const back = () => {
       const state = latest.current;
-      // Find consumes Back before the tab or any surface it was opened over.
-      if (state.findOpen) setFindOpen(false);
+      // Transient navigation sheets consume Back before their originating view.
+      if (state.moreOpen) setMoreOpen(false);
+      else if (state.findOpen) setFindOpen(false);
       else if (state.vaultOpen) {if(!vaultBack.current?.())setVaultOpen(false);}
       else if (state.fault) setFault(null);
       else if (state.exchangeOpen) {if (!exchangeBack.current?.()) setExchangeOpen(false);}
@@ -848,12 +854,12 @@ export function App() {
   const seriesNode=characterIndex?.nodes.find(node=>node.id===focusedCharacter);
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
-  const paused=area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
+  const totalTrashCount=useTabletTrashCount(status.endpoint,findStore);
+  const reviewCount=useSimilarityReviewCount(status.configured&&area==='assets'&&page.view.tab==='home'&&!similarity,similarityClosed,status.endpoint)??0;
+  const paused=moreOpen||area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
   const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings&&!filtersOpen&&!sortOpen,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
-  const exchangeBadge=exchangeUnseen>0 ? (exchangeUnseen>99 ? '99+' : String(exchangeUnseen)) : exchangeSending ? (exchangeSending.progress===null ? '…' : `${Math.round(exchangeSending.progress*100)}%`) : '';
-  const exchangeLabel=exchangeUnseen>0 ? `전송 · 받은 파일 ${exchangeUnseen}개` : exchangeSending ? `전송 · 보내는 중 ${exchangeBadge}` : '전송';
   const intro=<>{!!childEntries.length&&<section className="folder-intro"><FolderCards strip place={currentEntry?.id} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&!busy&&<EmptyState icon={RectangleStackIcon} title={hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':childEntries.length?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'}/>}</>;
   // A drill-down level is a committed Library place; its depth decides the entrance direction.
   // Home, other tabs and filter changes are not levels, so they never slide.
@@ -955,7 +961,7 @@ export function App() {
         {assetToolbar}{assetToolbar&&kindShade.shade}{revisitToolbar}
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
-        <LibraryRoot endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
+        <LibraryRoot endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? null : <>
         <Gallery stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={visibleItems} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&selectionBar}
@@ -975,10 +981,10 @@ export function App() {
   );
   // Home's header belongs to the Home view, so it leaves with Home during a tab switch instead of
   // vanishing first and shifting the retained Home content up.
-  const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={AREA_ICONS.private_vault} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={AREA_ICONS.exchange} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<Badge variant="corner" className="header-badge" aria-hidden="true">{exchangeBadge}</Badge>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AREA_ICONS.settings} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
+  const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{area==='assets'&&page.view.tab==='home'&&<MoreButton count={reviewCount} onOpen={()=>setMoreOpen(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
   const homeAreaNode=<>{!artistsCovered&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
-    <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
+    <Home onUnsortedCount={setUnsortedCount} items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
           review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => {closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onRevisit={(key,title) => {const view:View={tab:'library',revisit:key,title};fromHome(view);select(view);}} onUnclassified={() => {const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
           onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
@@ -1016,6 +1022,10 @@ export function App() {
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}><BusyLabel busy={!!(checking)} idle={'라이브러리 연결'}>연결 확인 중</BusyLabel><ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{closeArtists();openHome();}}><AREA_ICONS.home aria-hidden="true"/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{closeArtists();setHomeOrigin(null);openLibrary();}}><AREA_ICONS.assets aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><AREA_ICONS.collections aria-hidden="true"/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><AREA_ICONS.manga aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><AREA_ICONS.notes aria-hidden="true"/><span>메모</span></button></nav>}
     {status.configured&&<FindSheet open={findOpen} onClose={()=>setFindOpen(false)} entries={findEntries} endpoint={status.endpoint} privacy={privacyMode} loading={findWorks.loading||findNotes.loading||albumLoading||searchArtists.state==='loading'} error={findWorks.error||findNotes.error||albumError||searchArtists.error} onRetry={()=>{setFindRetry(value=>value+1);findWorks.retry();searchArtists.retry();void findStore.load();}}/>}
+    {moreOpen&&<MoreSheet onClose={()=>setMoreOpen(false)} reviewCount={reviewCount} unsortedCount={unsortedCount} unseen={exchangeUnseen} trashCount={totalTrashCount} vaultPresent={vaultPresent} exchangeActivity={exchangeSending?'보내는 중':undefined}
+      onReview={()=>setSimilarity(true)} onUnsorted={()=>{const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);}}
+      onExchange={()=>setExchangeOpen(true)} onVault={()=>setVaultOpen(true)} onArtists={()=>{closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
+      onTrash={()=>trash.setOpen(true)} onSettings={()=>setSettings(true)}/>}
     {sortOpen&&<BottomSheet title="정렬" onClose={()=>setSortOpen(false)}><div role="radiogroup" aria-label="정렬">{ASSET_SORTS.map(sort=><button key={sort} className="sheet-option" role="radio" aria-checked={sortOf(filters)===sort} onClick={()=>applySort(sort)}>{SORT_LABELS[sort]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}><div className="view-options-host" ref={setOptionsHost}/><StepSlider className="view-options-density" label="썸네일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/>{!privacyMode&&!nsfwFilter&&faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
     {classificationNotice&&<div className="exchange-toast" role="status" ref={classificationToast} data-state="open"><span>{classificationNotice}</span><Button variant="ghost" onClick={()=>setClassificationNotice('')}>닫기</Button></div>}
@@ -1027,7 +1037,7 @@ export function App() {
     {similarity && <div className="tablet-layer" ref={similarityLayer}><SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/></div>}
     {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)}/>}
     {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
-    {trash.open && <div className="tablet-layer" ref={trashLayer}><LibraryTrash key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}
+    {trash.open && <div className="tablet-layer" ref={trashLayer}><TrashLayer endpoint={status.endpoint} store={findStore} key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <div className="tablet-layer" ref={exchangeLayer}><Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/></div>}
     {exchange.toast && status.configured && !viewer && !fault && !vaultOpen && <div className="exchange-toast" role="status" key={exchange.toast.key} ref={exchangeToast} data-state="open"><span>{exchange.toast.text}</span><Button variant="ghost" onClick={()=>{exchange.dismissToast();setExchangeOpen(true);}}>보기</Button></div>}

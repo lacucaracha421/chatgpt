@@ -91,7 +91,8 @@ it('drops old index reads on an explicit reconfiguration even when the endpoint 
   render(<App/>);await act(async()=>{});
   const paths=['/v1/library/list-generation','/v1/library/classifications','/v1/library/characters'];
   const old=reads.filter(read=>paths.includes(read.path));expect(old).toHaveLength(3);
-  fireEvent.click(screen.getByRole('button',{name:'연결 및 설정'}));
+  fireEvent.click(screen.getByRole('button',{name:'더보기'}));
+  fireEvent.click(screen.getByRole('button',{name:'설정',exact:true}));
   fireEvent.click(screen.getByRole('button',{name:'연결 변경'}));
   await act(async()=>fireEvent.submit(screen.getByRole('button',{name:'연결 확인하고 저장'}).closest('form')!));
   expect(mocks.native.mock.calls.some(([op])=>op==='configure')).toBe(true);
@@ -302,15 +303,36 @@ it('points the durable outboxes at the configured connection as soon as the stat
   render(<App/>);
   await waitFor(()=>expect(outboxConnection()).toBe('https://example.invalid'));
 });
-it('shows unseen transfers in the Home header and opens the exchange screen', async () => {
+it('opens the unified trash from More and returns to the unchanged Home on Back', async () => {
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string,...args:unknown[])=>path.startsWith('/v1/library/trash')?Promise.resolve({active:true,items:[],total_count:0,total_bytes:0,next_cursor:null,has_more:false}):original(path,...args));
+  render(<App/>);await screen.findByRole('heading',{name:'에셋'});
+  fireEvent.click(screen.getByRole('button',{name:'홈'}));await screen.findByRole('button',{name:'전체 보기'});
+  const header=document.querySelector('.app-header')!;
+  expect(within(header as HTMLElement).getByRole('button',{name:'더보기'})).toBeTruthy();
+  expect(within(header as HTMLElement).getByRole('button',{name:'찾기'})).toBeTruthy();
+  expect(within(header as HTMLElement).queryByRole('button',{name:/연결 및 설정|전송|비밀 보관함/})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'더보기'}));
+  fireEvent.click(screen.getByRole('button',{name:'휴지통'}));
+  const layer=await screen.findByRole('dialog',{name:'휴지통'});
+  expect(within(layer).getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['에셋','컬렉션','메모']);
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'휴지통'})).toBeNull());
+  expect(screen.getByRole('button',{name:'전체 보기'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'홈'}).getAttribute('aria-current')).toBe('page');
+});
+
+it('shows unseen transfers in More and opens the exchange screen', async () => {
   const snapshot = exchangeSnapshot({unseen: 3});
   mocks.native.mockImplementation(async (op: string) => op === 'status' ? {configured: true, endpoint: 'https://example.invalid'} : op === 'exchangeState' || op === 'exchangeVisible' ? snapshot : {configured: true, endpoint: 'https://example.invalid'});
   render(<App/>);
   await screen.findByRole('heading', {name: '에셋'});
   fireEvent.click(await screen.findByRole('button', {name: '홈', exact: true}));
   await screen.findByRole('button', {name: '전체 보기'});
-  const transfer = await screen.findByRole('button', {name: '전송 · 받은 파일 3개'});
-  expect(transfer.closest('.header-action-badge')?.querySelector('.header-badge')?.textContent).toBe('3');
+  expect(screen.queryByRole('button', {name: /전송|비밀 보관함|연결 및 설정/})).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: '더보기'}));
+  const transfer = await screen.findByRole('button', {name: '전송 3개'});
+  expect(transfer.closest('nav')?.getAttribute('aria-label')).toBe('확인할 것');
   fireEvent.click(transfer);
   const screenLayer = await screen.findByRole('dialog', {name: '전송'});
   // It is pushed in as a full-screen layer, and Back takes it away the same way.
@@ -318,15 +340,17 @@ it('shows unseen transfers in the Home header and opens the exchange screen', as
   act(() => {window.dispatchEvent(new Event('lakomics-back'));});
   await waitFor(() => expect(screen.queryByRole('dialog', {name: '전송'})).toBeNull());
 });
-it('shows the outgoing transfer percentage when there are no unseen files', async () => {
+it('shows outgoing transfer activity in More without a queue count', async () => {
   const snapshot = exchangeSnapshot({outgoing: [{transferId: 'tx1', batchId: 'b1', fileName: '스케치.zip', sizeBytes: 100, bytes: 62, peer: 'pc', peerId: 'pc', state: 'uploading', code: '', createdAt: '2026-09-25T10:00:00Z'}]});
   mocks.native.mockImplementation(async (op: string) => op === 'status' ? {configured: true, endpoint: 'https://example.invalid'} : op === 'exchangeState' || op === 'exchangeVisible' ? snapshot : {configured: true, endpoint: 'https://example.invalid'});
   render(<App/>);
   await screen.findByRole('heading', {name: '에셋'});
   fireEvent.click(await screen.findByRole('button', {name: '홈', exact: true}));
   await screen.findByRole('button', {name: '전체 보기'});
-  const transfer = await screen.findByRole('button', {name: '전송 · 보내는 중 62%'});
-  expect(transfer.closest('.header-action-badge')?.querySelector('.header-badge')?.textContent).toBe('62%');
+  fireEvent.click(screen.getByRole('button', {name: '더보기'}));
+  const transfer = await screen.findByRole('button', {name: '전송'});
+  expect(transfer.getAttribute('aria-description')).toBe('보내는 중');
+  expect(transfer.closest('nav')?.getAttribute('aria-label')).toBe('이동');
 });
 it('opens character browsing inside Library and uses Android back for its parent',async()=>{
   const original=mocks.api.getMockImplementation()!;
@@ -625,18 +649,18 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
   expect(document.querySelector('.desktop-index')).toBeNull();
   expect(screen.queryByRole('heading',{name:'최근 연 폴더'})).toBeNull();
   expect(document.querySelector('.classification-tree')).toBeNull();
-  expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'더보기'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
-  await screen.findByRole('button',{name:'연결 및 설정'});
+  await screen.findByRole('button',{name:'더보기'});
   fireEvent.click(screen.getByRole('button',{name:'컬렉션',exact:true}));
-  expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'더보기'})).toBeNull();
   // Collections draws its own title bar; Home's bar leaves with the Home view once the switch commits.
   await waitFor(()=>expect([...document.querySelectorAll('.app-header')].filter(header=>!header.closest('[style*="display: none"], [aria-hidden="true"]'))).toHaveLength(0),{timeout:2500});
   expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   // Catalog and Notes also draw their own title bars; no area offers the old sidebar.
   for(const area of ['카탈로그','메모']){
     fireEvent.click(screen.getByRole('button',{name:area,exact:true}));
-    expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'더보기'})).toBeNull();
     await waitFor(()=>expect([...document.querySelectorAll('.app-header')].filter(header=>!header.closest('[style*="display: none"], [aria-hidden="true"]'))).toHaveLength(0),{timeout:2500});
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }

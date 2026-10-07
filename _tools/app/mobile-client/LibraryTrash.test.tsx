@@ -108,6 +108,14 @@ describe('Library Trash browser',()=>{
     fireEvent.click(screen.getByRole('button',{name:'선택 해제'}));
     expect(screen.getByText('복원할 항목을 선택하세요')).toBeTruthy();
   });
+
+  it('restores the selected group through the lifecycle outbox',async()=>{
+    mount();
+    fireEvent.click(await screen.findByRole('button',{name:'전체 선택'}));
+    fireEvent.click(screen.getByRole('button',{name:'복원'}));
+    await waitFor(()=>expect(mocks.native.mock.calls.filter(([op])=>op==='assetLifecycleSet')).toHaveLength(3));
+    expect(mocks.native.mock.calls.filter(([op])=>op==='assetLifecycleSet').map(([,body])=>body.assetId)).toEqual(expect.arrayContaining(['a','b','p']));
+  });
 });
 
 describe('Viewer trash and undo',()=>{
