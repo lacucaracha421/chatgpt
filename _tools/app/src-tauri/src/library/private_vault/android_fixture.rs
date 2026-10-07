@@ -124,6 +124,7 @@ fn android_golden_fixture() {
         trashed_at: None,
         content_sha256: None,
         thumbnail_sha256: None,
+        folder_id: None,
     };
     let index = VaultIndex {
         format_version: 1,
@@ -132,6 +133,7 @@ fn android_golden_fixture() {
             item(1, VaultItemKind::Image, png.len() as u64),
             item(3, VaultItemKind::Video, video.len() as u64),
         ],
+        folders: Vec::new(),
     };
     let mut json = serde_json::to_value(&index).unwrap();
     json["futureField"] = serde_json::json!({"ignored":[true,1.5,null]});

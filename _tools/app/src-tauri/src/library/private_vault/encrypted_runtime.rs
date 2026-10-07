@@ -54,6 +54,9 @@ use crate::library::{
 /// runtime's private session state and write lock).
 #[path = "encrypted_files.rs"]
 mod files;
+/// User folders (a child module for the same reason).
+#[path = "encrypted_folders.rs"]
+mod folders;
 
 const MAX_TITLE_CHARS: usize = 200;
 const MAX_PAGE_SIZE: u32 = 500;
@@ -804,10 +807,20 @@ impl Library {
             .as_ref()
             .ok_or(LibraryError::EncryptedVaultLocked)?;
         let limit = query.limit.clamp(1, MAX_PAGE_SIZE) as u64;
+        let folders = query
+            .folder_id
+            .as_deref()
+            .map(|folder| folders::folder_with_descendants(&session.index, folder));
         let matching = || {
             session.index.items.iter().rev().filter(|item| {
                 item.trashed_at.is_some() == query.trashed
                     && query.kind.is_none_or(|kind| item_kind(item.kind) == kind)
+                    && (!query.unfiled_only || item.folder_id.is_none())
+                    && folders.as_ref().is_none_or(|folders| {
+                        item.folder_id
+                            .as_deref()
+                            .is_some_and(|folder| folders.contains(folder))
+                    })
             })
         };
         let total_count = matching().count() as u64;
@@ -826,6 +839,7 @@ impl Library {
                 has_thumbnail: item.thumbnail_object_id.is_some()
                     || item.poster_object_id.is_some(),
                 trashed_at: item.trashed_at.clone(),
+                folder_id: item.folder_id.clone(),
             })
             .collect::<Vec<_>>();
         let end = query.offset.saturating_add(items.len() as u64);
@@ -1264,6 +1278,7 @@ impl Library {
             trashed_at: None,
             content_sha256: Some(content_sha256.clone()),
             thumbnail_sha256: None,
+            folder_id: None,
         };
         {
             let mut state = self.encrypted_vault.state();
@@ -1889,6 +1904,8 @@ mod tests {
             offset,
             limit,
             trashed: false,
+            folder_id: None,
+            unfiled_only: false,
         }
     }
 

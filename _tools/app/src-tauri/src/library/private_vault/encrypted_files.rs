@@ -492,6 +492,8 @@ mod tests {
                 offset: 0,
                 limit: 100,
                 trashed,
+                folder_id: None,
+                unfiled_only: false,
             })
             .unwrap()
             .items
@@ -582,6 +584,8 @@ mod tests {
                 offset: 0,
                 limit: 10,
                 trashed: true,
+                folder_id: None,
+                unfiled_only: false,
             })
             .unwrap();
         assert_eq!(trashed.total_count, 2);

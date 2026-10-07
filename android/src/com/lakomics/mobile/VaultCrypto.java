@@ -158,7 +158,10 @@ final class VaultCrypto {
     }
     static List<Item> index(byte[] bytes) throws Invalid {
         Map<String,Object> root = json(bytes, MAX_INDEX);
-        if (number(root,"formatVersion") != 1) throw new Unsupported();
+        // Version 2 adds PC user folders (`folders`, item `folderId`); this read-only view
+        // still shows one flat list and ignores them.
+        long version = number(root,"formatVersion");
+        if (version != 1 && version != 2) throw new Unsupported();
         number(root,"revision");
         if (!(root.get("items") instanceof List)) throw new Invalid();
         List<Item> items = new ArrayList<>(); Set<String> ids = new HashSet<>();

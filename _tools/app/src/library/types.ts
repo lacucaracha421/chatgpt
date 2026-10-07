@@ -890,8 +890,23 @@ export type CreatedEncryptedVault = { status: EncryptedVaultStatus; recoveryKey:
 
 export type EncryptedVaultItemKind = "image" | "video";
 
-/** `trashed`: list the vault trash instead of the gallery. */
-export type EncryptedVaultQuery = { kind: EncryptedVaultItemKind | null; offset: number; limit: number; trashed?: boolean };
+/**
+ * `trashed`: list the vault trash instead of the gallery. `folderId`: only that folder and its
+ * descendants. `unfiledOnly`: only items in no folder.
+ */
+export type EncryptedVaultQuery = { kind: EncryptedVaultItemKind | null; offset: number; limit: number; trashed?: boolean; folderId?: string | null; unfiledOnly?: boolean };
+
+/** A user folder of the unlocked vault; its name exists only in the encrypted index. */
+export type EncryptedVaultFolder = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: string;
+  /** Items directly in the folder, trash excluded. */
+  itemCount: number;
+  /** Items in the folder and its descendants, trash excluded. */
+  totalItemCount: number;
+};
 
 export type EncryptedVaultItem = {
   id: string;
@@ -905,6 +920,7 @@ export type EncryptedVaultItem = {
   hasThumbnail: boolean;
   /** Set while the item is in the vault trash. */
   trashedAt?: string | null;
+  folderId?: string | null;
 };
 
 export type EncryptedVaultItemPage = { items: EncryptedVaultItem[]; totalCount: number; nextOffset: number | null };
@@ -1604,6 +1620,14 @@ export interface LibraryGateway {
   getEncryptedVaultExportStatus?(): Promise<EncryptedVaultExportJob | null>;
   listEncryptedVaultItems?(query: EncryptedVaultQuery): Promise<EncryptedVaultItemPage>;
   setEncryptedVaultTitle?(itemId: string, title: string | null): Promise<void>;
+  listEncryptedVaultFolders?(): Promise<EncryptedVaultFolder[]>;
+  createEncryptedVaultFolder?(name: string, parentId: string | null): Promise<EncryptedVaultFolder>;
+  renameEncryptedVaultFolder?(folderId: string, name: string): Promise<void>;
+  moveEncryptedVaultFolder?(folderId: string, parentId: string | null): Promise<void>;
+  /** Refused while the folder has child folders; its items move to the parent folder. */
+  deleteEncryptedVaultFolder?(folderId: string): Promise<void>;
+  /** `folderId: null` takes the items out of every folder. Returns how many changed. */
+  moveEncryptedVaultItemsToFolder?(itemIds: string[], folderId: string | null): Promise<number>;
   previewEncryptedVaultSidecarCleanup?(): Promise<EncryptedVaultSidecarCleanupPreview>;
   applyEncryptedVaultSidecarCleanup?(): Promise<EncryptedVaultSidecarCleanupResult>;
   getMangaRoot(): Promise<string | null>;

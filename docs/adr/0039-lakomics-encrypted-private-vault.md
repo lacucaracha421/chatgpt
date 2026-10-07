@@ -88,3 +88,22 @@ Vault screens set `FLAG_SECURE` (no screenshots or recents preview); on API 33+ 
 - Android follows the same format rules as the PC, with no Android-specific variant: header limits, AAD strings, HKDF info, nonce and AAD layout, final-chunk flag, length derivation, last-chunk authentication, recovery-key parsing, strict object ids, rejection of unknown index versions and tolerance of unknown JSON fields.
 - A golden fixture vault produced by the PC implementation is opened by both the PC and Android tests; any format change must keep both passing.
 - Real OTG/SAF random access, exFAT, unlock time, video seeking, unplug-to-lock, `FLAG_SECURE` and Keystore behaviour after reboot are device acceptance items; JVM and fixture tests do not prove them.
+
+## Amendment (2026-10-07): User folders
+
+The PC vault view gets user folders, managed like Assets folders (ADR-0013/0030), in its previously empty index column.
+
+### Model
+
+- Folders exist only inside the encrypted index: `VaultIndex.folders` holds `{ id, name, parentId, createdAt }` and an item names at most one folder with `folderId`. Folder names are vault metadata like titles; they never reach `vault.json`, the main library database or the cloud.
+- Folders nest through `parentId`. Sibling names are unique ignoring case; names are 1–100 characters without control characters. A folder lists its own items and those of its descendants. Moving a folder into itself or a descendant is refused.
+- Deleting a folder is refused while it has child folders; its items move to its parent folder, or become unfiled at the top level. No item is deleted. Existing items start unfiled; the import's original relative path does not create folders.
+- Trash and restore keep an item's folder. The trash view is not scoped by folders.
+- Folder changes follow the title rules: write lock, refused in a session opened from `index.prev.bin`, and the previous folders are restored when the save fails.
+
+### Index format version 2
+
+- An index is saved as version 2 only while it holds a folder or a `folderId`; otherwise it stays version 1, so a vault that never used folders still opens in older builds.
+- Version 1 readers reject version 2 (`UnsupportedFormat`) instead of opening it and silently dropping folders on their next save. Every PC and tablet build that may open a vault with folders must be updated first.
+- Loading checks that folder ids are unique, parents exist, there is no cycle and every `folderId` names a folder; a version 1 index carrying folders is corrupt. Saving refuses an inconsistent index.
+- The tablet reader accepts versions 1 and 2 and keeps its flat list, ignoring folders, until the tablet screen follows the PC design.

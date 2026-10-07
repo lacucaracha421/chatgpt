@@ -1480,6 +1480,12 @@ pub struct EncryptedVaultQuery {
     /// Lists the vault trash instead of the gallery.
     #[serde(default)]
     pub trashed: bool,
+    /// Only items in this folder or its descendants.
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    /// Only items in no folder.
+    #[serde(default)]
+    pub unfiled_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1496,6 +1502,21 @@ pub struct EncryptedVaultItemSummary {
     pub has_thumbnail: bool,
     /// Set while the item is in the vault trash.
     pub trashed_at: Option<String>,
+    pub folder_id: Option<String>,
+}
+
+/// A user folder of the unlocked vault (names exist only in its encrypted index).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultFolder {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub created_at: String,
+    /// Items directly in the folder, trash excluded.
+    pub item_count: u64,
+    /// Items in the folder and its descendants, trash excluded.
+    pub total_item_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

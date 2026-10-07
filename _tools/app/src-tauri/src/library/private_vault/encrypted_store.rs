@@ -42,7 +42,12 @@ const OBJECTS_DIR: &str = "objects";
 const TEMP_MARKER: &str = ".tmp-";
 /// Fixed object id used for the index blob; its purpose (Index) keeps it apart from objects.
 const INDEX_OBJECT_ID: [u8; 16] = [0; 16];
+/// Index without folders. Still written while a vault has no folders, so builds that predate
+/// folders keep opening it.
 const INDEX_FORMAT_VERSION: u32 = 1;
+/// Index with user folders (ADR-0039 2026-10-07 amendment). Older builds refuse it instead
+/// of saving an index that silently drops the folders.
+const FOLDERS_INDEX_FORMAT_VERSION: u32 = 2;
 const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 /// Orphan cleanup leaves objects and temporary files younger than this alone: they may
 /// belong to an import still running in another runtime (for example a library switch)
@@ -80,6 +85,19 @@ pub(crate) struct VaultItem {
     /// SHA-256 (hex) of the custom thumbnail's plaintext, when it came from a sidecar file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnail_sha256: Option<String>,
+    /// The user folder holding this item (`VaultIndex::folders`); `None` is unfiled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+}
+
+/// A user folder. Folders nest through `parent_id`; an item belongs to at most one folder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct VaultFolder {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,6 +107,8 @@ pub(crate) struct VaultIndex {
     /// Incremented on every save.
     pub revision: u64,
     pub items: Vec<VaultItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders: Vec<VaultFolder>,
 }
 
 impl Default for VaultIndex {
@@ -97,11 +117,56 @@ impl Default for VaultIndex {
             format_version: INDEX_FORMAT_VERSION,
             revision: 0,
             items: Vec::new(),
+            folders: Vec::new(),
         }
     }
 }
 
 impl VaultIndex {
+    /// The lowest format that holds this index: folders need version 2.
+    fn required_format_version(&self) -> u32 {
+        if self.folders.is_empty() && self.items.iter().all(|item| item.folder_id.is_none()) {
+            INDEX_FORMAT_VERSION
+        } else {
+            FOLDERS_INDEX_FORMAT_VERSION
+        }
+    }
+
+    /// Folder ids are unique, parents exist and no folder is its own ancestor. Items may
+    /// only name existing folders. The app never writes anything else.
+    fn folders_are_consistent(&self) -> bool {
+        let mut parents = std::collections::HashMap::new();
+        for folder in &self.folders {
+            if parents
+                .insert(folder.id.as_str(), folder.parent_id.as_deref())
+                .is_some()
+            {
+                return false;
+            }
+        }
+        let acyclic = self.folders.iter().all(|folder| {
+            let mut current = folder.parent_id.as_deref();
+            let mut steps = 0;
+            while let Some(parent) = current {
+                steps += 1;
+                if parent == folder.id || steps > self.folders.len() {
+                    return false;
+                }
+                match parents.get(parent) {
+                    Some(next) => current = *next,
+                    None => return false,
+                }
+            }
+            true
+        });
+        acyclic
+            && self.items.iter().all(|item| {
+                item.folder_id
+                    .as_deref()
+                    .is_none_or(|folder| parents.contains_key(folder))
+            })
+    }
+
     /// Every object id the index keeps alive.
     pub(crate) fn referenced_objects(&self) -> HashSet<&str> {
         self.items
@@ -394,8 +459,14 @@ impl EncryptedVault {
         let index = serde_json::from_slice::<VaultIndex>(&bytes);
         bytes.as_mut_slice().zeroize();
         let index = index.map_err(|_| VaultError::Corrupt)?;
-        if index.format_version != INDEX_FORMAT_VERSION {
-            return Err(VaultError::UnsupportedFormat);
+        match index.format_version {
+            INDEX_FORMAT_VERSION if index.required_format_version() == INDEX_FORMAT_VERSION => {}
+            FOLDERS_INDEX_FORMAT_VERSION => {}
+            INDEX_FORMAT_VERSION => return Err(VaultError::Corrupt),
+            _ => return Err(VaultError::UnsupportedFormat),
+        }
+        if !index.folders_are_consistent() {
+            return Err(VaultError::Corrupt);
         }
         Ok(index)
     }
@@ -408,6 +479,10 @@ impl EncryptedVault {
     /// hard link, because the vault usually lives on exFAT/FAT32 USB drives.
     pub(crate) fn save_index(&self, index: &mut VaultIndex) -> Result<()> {
         self.verify_identity()?;
+        if !index.folders_are_consistent() {
+            return Err(VaultError::Corrupt);
+        }
+        index.format_version = index.required_format_version();
         index.revision += 1;
         let mut bytes = serde_json::to_vec(index).map_err(|_| VaultError::Corrupt)?;
         let result = write_atomic(
@@ -678,6 +753,7 @@ mod tests {
             trashed_at: None,
             content_sha256: None,
             thumbnail_sha256: None,
+            folder_id: None,
         }
     }
 
@@ -1263,5 +1339,111 @@ mod tests {
         let old: VaultItem = serde_json::from_value(json).unwrap();
         assert_eq!(old.content_sha256, None);
         assert!(!serde_json::to_string(&old).unwrap().contains("Sha256"));
+    }
+
+    /// Seals arbitrary index JSON as `index.bin`, bypassing `save_index`'s checks.
+    fn write_raw_index(vault: &EncryptedVault, json: &serde_json::Value) {
+        let bytes = serde_json::to_vec(json).unwrap();
+        let mut sealed = Vec::new();
+        crypto::seal_object(
+            &vault.key,
+            Purpose::Index,
+            &vault.vault_id,
+            &INDEX_OBJECT_ID,
+            &mut bytes.as_slice(),
+            &mut sealed,
+        )
+        .unwrap();
+        fs::write(vault.dir.join(INDEX_FILE), sealed).unwrap();
+    }
+
+    fn folder(id: &str, parent_id: Option<&str>) -> VaultFolder {
+        VaultFolder {
+            id: id.into(),
+            name: format!("폴더 {id}"),
+            parent_id: parent_id.map(str::to_owned),
+            created_at: "2026-10-07T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn folders_raise_the_index_format_only_while_they_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault, _) = create(dir.path());
+        let mut index = VaultIndex {
+            items: vec![item(&"a".repeat(32), None)],
+            ..VaultIndex::default()
+        };
+        vault.save_index(&mut index).unwrap();
+        assert_eq!(vault.load_index().unwrap().format_version, 1);
+
+        index.folders = vec![folder("parent", None), folder("child", Some("parent"))];
+        index.items[0].folder_id = Some("child".into());
+        vault.save_index(&mut index).unwrap();
+        let loaded = vault.load_index().unwrap();
+        assert_eq!(loaded.format_version, 2);
+        assert_eq!(loaded.folders, index.folders);
+        assert_eq!(loaded.items[0].folder_id.as_deref(), Some("child"));
+
+        index.folders.clear();
+        index.items[0].folder_id = None;
+        vault.save_index(&mut index).unwrap();
+        let loaded = vault.load_index().unwrap();
+        assert_eq!(loaded.format_version, 1);
+        let json = serde_json::to_string(&loaded).unwrap();
+        assert!(!json.contains("folders") && !json.contains("folderId"));
+    }
+
+    #[test]
+    fn inconsistent_folders_and_unknown_versions_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault, _) = create(dir.path());
+        let item_json = serde_json::to_value(item(&"a".repeat(32), None)).unwrap();
+        let parent = serde_json::to_value(folder("parent", None)).unwrap();
+        let index = |version: u32, folders: serde_json::Value, folder_id: Option<&str>| {
+            let mut item = item_json.clone();
+            if let Some(folder_id) = folder_id {
+                item["folderId"] = folder_id.into();
+            }
+            serde_json::json!({
+                "formatVersion": version,
+                "revision": 1,
+                "items": [item],
+                "folders": folders,
+            })
+        };
+
+        write_raw_index(
+            &vault,
+            &index(2, serde_json::json!([parent]), Some("parent")),
+        );
+        assert_eq!(vault.load_index().unwrap().folders.len(), 1);
+        // A version 1 index never carries folders.
+        write_raw_index(&vault, &index(1, serde_json::json!([parent]), None));
+        assert!(is_corrupt(vault.load_index()));
+        write_raw_index(&vault, &index(3, serde_json::json!([]), None));
+        assert!(matches!(
+            vault.load_index(),
+            Err(VaultError::UnsupportedFormat)
+        ));
+        for (folders, folder_id) in [
+            (serde_json::json!([parent]), Some("missing")),
+            (serde_json::json!([parent, parent]), None),
+            (
+                serde_json::json!([folder("a", Some("b")), folder("b", Some("a"))]),
+                None,
+            ),
+            (serde_json::json!([folder("a", Some("missing"))]), None),
+        ] {
+            write_raw_index(&vault, &index(2, folders, folder_id));
+            assert!(is_corrupt(vault.load_index()));
+        }
+
+        let mut dangling = VaultIndex {
+            items: vec![item(&"a".repeat(32), None)],
+            ..VaultIndex::default()
+        };
+        dangling.items[0].folder_id = Some("missing".into());
+        assert!(is_corrupt(vault.save_index(&mut dangling)));
     }
 }

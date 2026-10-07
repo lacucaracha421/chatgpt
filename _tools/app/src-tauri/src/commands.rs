@@ -460,6 +460,13 @@ impl From<LibraryError> for CommandError {
             LibraryError::EncryptedVaultImportRunning => "encrypted_vault_import_running",
             LibraryError::EncryptedVaultReadOnly => "encrypted_vault_read_only",
             LibraryError::InvalidEncryptedVaultTitle => "invalid_encrypted_vault_title",
+            LibraryError::InvalidEncryptedVaultFolderName => "invalid_encrypted_vault_folder_name",
+            LibraryError::EncryptedVaultFolderNotFound => "encrypted_vault_folder_not_found",
+            LibraryError::DuplicateEncryptedVaultFolderName => {
+                "duplicate_encrypted_vault_folder_name"
+            }
+            LibraryError::EncryptedVaultFolderCycle => "encrypted_vault_folder_cycle",
+            LibraryError::EncryptedVaultFolderHasChildren => "encrypted_vault_folder_has_children",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
             LibraryError::UnsafeMangaRoot(_) => "unsafe_manga_root",
@@ -3509,6 +3516,85 @@ pub async fn set_encrypted_vault_title(
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_encrypted_vault_folders(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::models::EncryptedVaultFolder>, CommandError> {
+    current_required(state)?
+        .list_encrypted_vault_folders()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn create_encrypted_vault_folder(
+    name: String,
+    parent_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultFolder, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.create_encrypted_vault_folder(&name, parent_id.as_deref())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn rename_encrypted_vault_folder(
+    folder_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.rename_encrypted_vault_folder(&folder_id, &name))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn move_encrypted_vault_folder(
+    folder_id: String,
+    parent_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.move_encrypted_vault_folder(&folder_id, parent_id.as_deref())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn delete_encrypted_vault_folder(
+    folder_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.delete_encrypted_vault_folder(&folder_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn move_encrypted_vault_items_to_folder(
+    item_ids: Vec<String>,
+    folder_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.move_encrypted_vault_items_to_folder(&item_ids, folder_id.as_deref())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]

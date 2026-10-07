@@ -629,6 +629,16 @@ pub enum LibraryError {
     EncryptedVaultReadOnly,
     #[error("제목은 200자 이하여야 합니다")]
     InvalidEncryptedVaultTitle,
+    #[error("폴더 이름은 1~100자로 입력해 주세요")]
+    InvalidEncryptedVaultFolderName,
+    #[error("폴더를 찾을 수 없습니다")]
+    EncryptedVaultFolderNotFound,
+    #[error("같은 위치에 같은 이름의 폴더가 있습니다")]
+    DuplicateEncryptedVaultFolderName,
+    #[error("폴더를 자신의 하위 폴더로 옮길 수 없습니다")]
+    EncryptedVaultFolderCycle,
+    #[error("하위 폴더가 있는 폴더는 삭제할 수 없습니다")]
+    EncryptedVaultFolderHasChildren,
     #[error("라이브러리 파일을 쓸 수 없습니다: {path}")]
     WriteAsset {
         path: PathBuf,

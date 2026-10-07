@@ -166,6 +166,12 @@ public final class VaultCryptoTest {
             rejects(()->VaultCrypto.index(reader.range(0,(int)reader.length)));
         }
         String indexText=new String(index,StandardCharsets.UTF_8);
+        String folderIndex=indexText.replaceFirst("\"formatVersion\":\\s*1","\"formatVersion\":2,\"folders\":[{\"id\":\"f\",\"name\":\"여행\",\"parentId\":null,\"createdAt\":\"2026-10-07T00:00:00Z\"}]")
+            .replaceFirst("\"id\":\\s*\"fixture-1\"","\"folderId\":\"f\",\"id\":\"fixture-1\"");
+        check(!folderIndex.equals(indexText));
+        List<VaultCrypto.Item> foldered=VaultCrypto.index(VaultCrypto.utf8(folderIndex));
+        check(foldered.size()==2 && foldered.get(0).title.equals("사용자 지정 제목"));
+        rejects(()->VaultCrypto.index(VaultCrypto.utf8(folderIndex.replaceFirst("\"formatVersion\":2","\"formatVersion\":3"))));
         rejects(()->VaultCrypto.index(VaultCrypto.utf8(indexText.replace(items.get(0).object,"../../etc/passwd"))));
         for(String id:new String[]{"abc","0303030303030303030303030303030G","AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","../030303030303030303030303030303","03030303030303030303030303030303/"})rejects(()->VaultCrypto.objectId(id));
         byte[] extended=Arrays.copyOf(video,video.length+1);

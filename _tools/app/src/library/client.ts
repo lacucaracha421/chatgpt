@@ -65,6 +65,7 @@ import type {
   EncryptedVaultImportJob,
   EncryptedVaultImportProgress,
   EncryptedVaultImportReport,
+  EncryptedVaultFolder,
   EncryptedVaultItemPage,
   EncryptedVaultSidecarCleanupPreview,
   EncryptedVaultSidecarCleanupResult,
@@ -650,6 +651,14 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   getEncryptedVaultExportStatus: () => invoke<EncryptedVaultExportJob | null>("encrypted_vault_export_status"),
   listEncryptedVaultItems: (query) => invoke<EncryptedVaultItemPage>("list_encrypted_vault_items", { query }),
   setEncryptedVaultTitle: (itemId, title) => invoke<void>("set_encrypted_vault_title", { itemId, title }),
+  listEncryptedVaultFolders: () => invoke<EncryptedVaultFolder[]>("list_encrypted_vault_folders"),
+  createEncryptedVaultFolder: (name, parentId) =>
+    invoke<EncryptedVaultFolder>("create_encrypted_vault_folder", { name, parentId }),
+  renameEncryptedVaultFolder: (folderId, name) => invoke<void>("rename_encrypted_vault_folder", { folderId, name }),
+  moveEncryptedVaultFolder: (folderId, parentId) => invoke<void>("move_encrypted_vault_folder", { folderId, parentId }),
+  deleteEncryptedVaultFolder: (folderId) => invoke<void>("delete_encrypted_vault_folder", { folderId }),
+  moveEncryptedVaultItemsToFolder: (itemIds, folderId) =>
+    invoke<number>("move_encrypted_vault_items_to_folder", { itemIds, folderId }),
   previewEncryptedVaultSidecarCleanup: () =>
     invoke<EncryptedVaultSidecarCleanupPreview>("preview_encrypted_vault_sidecar_cleanup"),
   applyEncryptedVaultSidecarCleanup: () =>
