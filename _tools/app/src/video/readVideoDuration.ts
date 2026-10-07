@@ -15,9 +15,13 @@ export function readVideoDuration(url: string): Promise<number> {
     video.muted = true;
     video.preload = "metadata";
     video.addEventListener("error", () => finish(null), { once: true });
+    const known = () => Number.isFinite(video.duration) && video.duration > 0;
     video.addEventListener("loadedmetadata", () => {
-      const seconds = video.duration;
-      finish(Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1_000) : null);
+      if (known()) return finish(Math.round(video.duration * 1_000));
+      // Recordings without a length in their header: seeking past the end makes the engine
+      // find the real end and report it through `durationchange`.
+      video.addEventListener("durationchange", () => { if (known()) finish(Math.round(video.duration * 1_000)); });
+      video.currentTime = Number.MAX_SAFE_INTEGER;
     }, { once: true });
     video.src = url;
   });

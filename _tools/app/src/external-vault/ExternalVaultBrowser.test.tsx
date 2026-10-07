@@ -14,7 +14,8 @@ vi.mock("../video/readVideoDuration", () => ({ readVideoDuration: vi.fn() }));
 import { readVideoDuration } from "../video/readVideoDuration";
 import { captureVideoFrame } from "../video/captureVideoFrame";
 vi.mock("../assets/AssetGallery", () => ({
-  AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
+  AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource, onVideoDurationKnown }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
+    <button onClick={() => items.forEach((item: any) => onVideoDurationKnown?.(item, 5_000))}>preview lengths</button>
     {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-duration={item.media?.durationMs} data-thumbnail-revision={item.thumbnailRevision ?? ""} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
       onClick={(event) => onSelectionGesture?.(item, { toggle: event.ctrlKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(item)}>{item.title || item.originalName}</button>)}
     <button onClick={() => onDeleteSelection?.()}>delete key</button>
@@ -407,6 +408,21 @@ it("measures lengths the backend could not read in the viewer and stores them", 
   // A video the viewer cannot read either is tried once, not in a loop.
   await waitFor(() => expect(readVideoDuration).toHaveBeenCalledTimes(2));
   expect(screen.getByRole("button", { name: "못 읽는 영상" })).toHaveAttribute("data-duration", "0");
+});
+
+it("keeps a length a tile preview reported for a video whose length was unknown", async () => {
+  const gateway = vaultGateway();
+  vi.mocked(gateway.listEncryptedVaultItems!).mockResolvedValue({ ...page, items: [{ ...page.items[1]!, durationMs: 61_000 }, { ...page.items[1]!, id: "w", title: "예전 영상" }, page.items[0]!] });
+  (gateway as any).recordEncryptedVaultVideoDurations = vi.fn().mockResolvedValue(1);
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await screen.findByRole("button", { name: "예전 영상" });
+  await userEvent.click(screen.getByRole("button", { name: "preview lengths" }));
+  await userEvent.click(screen.getByRole("button", { name: "preview lengths" }));
+  // Only the unknown video is stored, once; a known length and images are left alone.
+  expect(gateway.recordEncryptedVaultVideoDurations).toHaveBeenCalledTimes(1);
+  expect(gateway.recordEncryptedVaultVideoDurations).toHaveBeenCalledWith([{ id: "w", durationMs: 5_000 }]);
+  expect(screen.getByRole("button", { name: "예전 영상" })).toHaveAttribute("data-duration", "5000");
+  expect(screen.getByRole("button", { name: "내 영상" })).toHaveAttribute("data-duration", "61000");
 });
 
 it("does not measure video lengths in a read-only session", async () => {

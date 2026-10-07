@@ -240,6 +240,18 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     })();
   }, [backendLengthsDone, gateway, items, measureRound, readOnly]);
 
+  /** A tile preview or the viewer played a video whose length was still unknown: keep it. */
+  const observedLengths = useRef(new Set<string>());
+  function recordObservedLength(asset: AssetSummary, durationMs: number) {
+    const record = gateway.recordEncryptedVaultVideoDurations;
+    if (!record || readOnly || durationMs <= 0 || observedLengths.current.has(asset.id)) return;
+    const known = items.find((item) => item.id === asset.id);
+    if (!known || known.media.kind !== "video" || known.media.durationMs) return;
+    observedLengths.current.add(asset.id);
+    applyLengths([{ id: asset.id, durationMs }]);
+    void record([{ id: asset.id, durationMs }]).catch(() => observedLengths.current.delete(asset.id));
+  }
+
   function applyLengths(lengths: { id: string; durationMs: number }[]) {
     if (lengths.length === 0) return;
     const byId = new Map(lengths.map((entry) => [entry.id, entry.durationMs]));
@@ -639,7 +651,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
           if (!target) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }}>
-        <AssetGallery items={items} layout="masonry" scopeKey={`external-vault:${filter}:${scopeKey}`} totalCount={totalCount}
+        <AssetGallery items={items} layout="masonry" onVideoDurationKnown={recordObservedLength} scopeKey={`external-vault:${filter}:${scopeKey}`} totalCount={totalCount}
           mediaSource="vault" metadataVisible={!privacyMode} captionLabel={(asset) => asset.title || asset.originalName}
           privacyMode={privacyMode}
           selectedAssetIds={selection.ids} focusAssetId={selection.focusId}
@@ -663,6 +675,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     {active && <AssetViewer items={items} activeId={active} onActiveIdChange={setViewerId} onClose={() => setViewerId(null)} privacyMode={privacyMode} mediaSource="vault"
       onTrash={trashView || readOnly || !gateway.trashEncryptedVaultItems ? undefined : trashFromViewer}
       onExport={trashView || !gateway.exportEncryptedVaultItems ? undefined : (asset) => void exportItems([asset.id])}
+      onVideoDurationKnown={recordObservedLength}
       onSetVideoThumbnail={trashView || readOnly || !gateway.setEncryptedVaultThumbnailFromFrame ? undefined : (asset, timeMs) => void setThumbnailFromFrame(asset, timeMs)} />}
     {titleEditorOpen && single && !readOnly && <TitleEditor asset={single} gateway={gateway}
       onClose={() => setTitleEditorOpen(false)} onChanged={() => void loadFirst()} />}
