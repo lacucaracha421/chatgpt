@@ -1619,8 +1619,12 @@ export interface LibraryGateway {
   exportEncryptedVaultItems?(itemIds: string[], destination: string, onProgress?: (progress: EncryptedVaultExportProgress) => void): Promise<EncryptedVaultExportProgress>;
   getEncryptedVaultExportStatus?(): Promise<EncryptedVaultExportJob | null>;
   listEncryptedVaultItems?(query: EncryptedVaultQuery): Promise<EncryptedVaultItemPage>;
+  /** "이 프레임을 썸네일로" for a library video (this PC only; the cloud keeps the previous one). */
+  setVideoThumbnailFromFrame?(assetId: string, timeMs: number): Promise<AssetSummary>;
   setEncryptedVaultTitle?(itemId: string, title: string | null): Promise<void>;
   listEncryptedVaultFolders?(): Promise<EncryptedVaultFolder[]>;
+  /** "이 프레임을 썸네일로" for a vault video; the frame is read through the decrypting stream. */
+  setEncryptedVaultThumbnailFromFrame?(itemId: string, timeMs: number): Promise<void>;
   createEncryptedVaultFolder?(name: string, parentId: string | null): Promise<EncryptedVaultFolder>;
   renameEncryptedVaultFolder?(folderId: string, name: string): Promise<void>;
   moveEncryptedVaultFolder?(folderId: string, parentId: string | null): Promise<void>;

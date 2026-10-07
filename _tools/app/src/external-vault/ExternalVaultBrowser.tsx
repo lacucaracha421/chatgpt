@@ -100,6 +100,8 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   const [dropTarget, setDropTarget] = useState<VaultDropTarget>(null);
   const [items, setItems] = useState<AssetSummary[]>([]);
   const [itemFolders, setItemFolders] = useState<ReadonlyMap<string, string | null>>(() => new Map());
+  /** Bumped after a thumbnail changes so mounted vault thumbnails load again. */
+  const [thumbnailKey, setThumbnailKey] = useState<number | undefined>(undefined);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -430,6 +432,25 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     if (ok) setConfirm(null);
   }
 
+  async function setThumbnailFromFrame(asset: AssetSummary, timeMs: number) {
+    const call = gateway.setEncryptedVaultThumbnailFromFrame;
+    if (!call || readOnly || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await call(asset.id, timeMs);
+      // Vault thumbnails are never cached by the server; a new revision makes mounted images reload.
+      const revision = Date.now();
+      setThumbnailKey(revision);
+      setItems((current) => current.map((item) => item.id === asset.id ? { ...item, thumbnailRevision: String(revision) } : item));
+      setMessage({ text: "이 프레임을 썸네일로 지정했습니다." });
+    } catch (cause) {
+      setError(vaultChangeErrorMessage(cause, "썸네일을 바꾸지 못했습니다."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function trashFromViewer(asset: AssetSummary) {
     const index = items.findIndex((item) => item.id === asset.id);
     const neighbor = items[index + 1] ?? items[index - 1] ?? null;
@@ -538,7 +559,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
           if (!target) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }}>
-        <AssetGallery items={items} layout="masonry" scopeKey={`external-vault:${filter}:${scopeKey}`} totalCount={totalCount}
+        <AssetGallery items={items} layout="masonry" scopeKey={`external-vault:${filter}:${scopeKey}`} totalCount={totalCount} thumbnailCacheKey={thumbnailKey}
           mediaSource="vault" metadataVisible={!privacyMode} captionLabel={(asset) => asset.title || asset.originalName}
           privacyMode={privacyMode}
           selectedAssetIds={selection.ids} focusAssetId={selection.focusId}
@@ -561,7 +582,8 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
       onPick={(parentId) => void moveFolder(folderDialog.folder.id, parentId)} />}
     {active && <AssetViewer items={items} activeId={active} onActiveIdChange={setViewerId} onClose={() => setViewerId(null)} privacyMode={privacyMode} mediaSource="vault"
       onTrash={trashView || readOnly || !gateway.trashEncryptedVaultItems ? undefined : trashFromViewer}
-      onExport={trashView || !gateway.exportEncryptedVaultItems ? undefined : (asset) => void exportItems([asset.id])} />}
+      onExport={trashView || !gateway.exportEncryptedVaultItems ? undefined : (asset) => void exportItems([asset.id])}
+      onSetVideoThumbnail={trashView || readOnly || !gateway.setEncryptedVaultThumbnailFromFrame ? undefined : (asset, timeMs) => void setThumbnailFromFrame(asset, timeMs)} />}
     {titleEditorOpen && single && !readOnly && <TitleEditor asset={single} gateway={gateway}
       onClose={() => setTitleEditorOpen(false)} onChanged={() => void loadFirst()} />}
     {confirm && <Dialog open title={confirm.kind === "empty" ? "휴지통 비우기" : "영구 삭제"} onClose={() => { if (!busy) setConfirm(null); }}>

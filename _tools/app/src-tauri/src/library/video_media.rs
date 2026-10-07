@@ -108,6 +108,114 @@ pub(crate) fn render_video_frame_webp(
     )
 }
 
+/// Prefix of a user-chosen video thumbnail inside `video-media/<asset id>/`. It lives next to
+/// `poster.webp` (kept, so interrupted-preparation checks and re-preparation still work) and
+/// inside the directory trash purge removes. Each choice gets a new file name, because the
+/// thumbnail revision the WebView caches by is derived from the path.
+const CUSTOM_THUMBNAIL_PREFIX: &str = "custom-";
+
+impl Library {
+    /// Makes the frame at `time_ms` of a prepared video its thumbnail (local only; the cloud
+    /// copy keeps the previous thumbnail).
+    pub fn set_video_thumbnail_from_frame(
+        &self,
+        asset_id: &str,
+        time_ms: u64,
+    ) -> Result<super::models::AssetSummary, LibraryError> {
+        self.set_video_thumbnail_with(asset_id, |source| render_video_frame_webp(source, time_ms))?;
+        self.get_asset(asset_id)
+    }
+
+    /// Vault variant: ffmpeg reads the frame from the in-memory decrypting loopback stream
+    /// (`playback_url`), so no plaintext file is written (ADR-0039).
+    pub fn set_encrypted_vault_thumbnail_from_frame(
+        &self,
+        item_id: &str,
+        playback_url: &str,
+        time_ms: u64,
+    ) -> Result<(), LibraryError> {
+        let frame = render_video_frame_webp(Path::new(playback_url), time_ms)?;
+        self.set_encrypted_vault_thumbnail(item_id, &frame)
+    }
+
+    /// `render` turns the original video file into WebP bytes. Returns the new thumbnail path.
+    pub(crate) fn set_video_thumbnail_with(
+        &self,
+        asset_id: &str,
+        render: impl FnOnce(&Path) -> Result<Vec<u8>, LibraryError>,
+    ) -> Result<String, LibraryError> {
+        let _guard = self
+            .video_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (relative_path, previous, state): (String, Option<String>, String) = self
+            .connection()?
+            .query_row(
+                "SELECT assets.relative_path, assets.thumbnail_relative_path,
+                        video_assets.preparation_state
+                 FROM assets JOIN video_assets ON video_assets.asset_id = assets.id
+                 WHERE assets.id = ?1 AND assets.status != 'trash'",
+                [asset_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?
+            .ok_or(LibraryError::AssetNotFound)?;
+        if state != "ready" {
+            return Err(LibraryError::VideoPreparationFailed);
+        }
+        let bytes = render(&self.root().join(&relative_path))?;
+        if bytes.is_empty() || image::load_from_memory(&bytes).is_err() {
+            return Err(LibraryError::VideoPreparationFailed);
+        }
+        let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+        let short_hash = digest.as_ref()[..8]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let directory_relative = format!("video-media/{asset_id}");
+        let file_name = format!("{CUSTOM_THUMBNAIL_PREFIX}{short_hash}.webp");
+        let new_relative = format!("{directory_relative}/{file_name}");
+        if previous.as_deref() == Some(new_relative.as_str()) {
+            return Ok(new_relative);
+        }
+        let directory = self.root().join(&directory_relative);
+        fs::create_dir_all(&directory).map_err(|source| LibraryError::WriteAsset {
+            path: directory.clone(),
+            source,
+        })?;
+        let temporary = directory.join(format!(
+            ".{CUSTOM_THUMBNAIL_PREFIX}{}.tmp",
+            uuid::Uuid::new_v4()
+        ));
+        let destination = directory.join(&file_name);
+        fs::write(&temporary, &bytes)
+            .and_then(|()| fs::rename(&temporary, &destination))
+            .map_err(|source| {
+                let _ = fs::remove_file(&temporary);
+                LibraryError::WriteAsset {
+                    path: destination.clone(),
+                    source,
+                }
+            })?;
+        if let Err(error) = self.connection().and_then(|connection| {
+            connection
+                .execute(
+                    "UPDATE assets SET thumbnail_relative_path = ?2 WHERE id = ?1",
+                    params![asset_id, new_relative],
+                )
+                .map_err(Into::into)
+        }) {
+            let _ = fs::remove_file(&destination);
+            return Err(error);
+        }
+        let custom_prefix = format!("{directory_relative}/{CUSTOM_THUMBNAIL_PREFIX}");
+        if let Some(previous) = previous.filter(|path| path.starts_with(&custom_prefix)) {
+            let _ = fs::remove_file(self.root().join(previous));
+        }
+        Ok(new_relative)
+    }
+}
+
 impl VideoTool for ProcessVideoTool {
     fn probe(&self, source: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
         let output = run_tool(
@@ -1674,6 +1782,89 @@ mod tests {
 
         assert_eq!(progress.failed, 0);
         assert_eq!(tool.poster_seeks_ms.borrow().as_slice(), &[500]);
+    }
+
+    fn webp(width: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::DynamicImage::new_rgb8(width, 4)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::WebP,
+            )
+            .unwrap();
+        bytes
+    }
+
+    fn thumbnail_path(library: &Library, asset_id: &str) -> Option<String> {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT thumbnail_relative_path FROM assets WHERE id = ?1",
+                [asset_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_chosen_frame_replaces_the_thumbnail_under_a_new_path_and_keeps_the_poster() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_pending_video(&library, "video-1", "mp4", "h264", Some("aac"), 2_000);
+        let refused = library.set_video_thumbnail_with("video-1", |_| Ok(webp(8)));
+        assert!(matches!(refused, Err(LibraryError::VideoPreparationFailed)));
+        library
+            .prepare_pending_videos_with(&FakeVideoTool::default(), 1)
+            .unwrap();
+        let poster = thumbnail_path(&library, "video-1").unwrap();
+
+        let mut seen_source = None;
+        let first = library
+            .set_video_thumbnail_with("video-1", |source| {
+                seen_source = Some(source.to_path_buf());
+                Ok(webp(8))
+            })
+            .unwrap();
+        assert_eq!(
+            seen_source.unwrap(),
+            library.root().join("assets/vi/video-1.mp4")
+        );
+        assert!(first.starts_with("video-media/video-1/custom-") && first.ends_with(".webp"));
+        assert_eq!(
+            thumbnail_path(&library, "video-1").as_deref(),
+            Some(first.as_str())
+        );
+        assert!(library.root().join(&first).is_file());
+        assert!(library.root().join(&poster).is_file());
+
+        let second = library
+            .set_video_thumbnail_with("video-1", |_| Ok(webp(9)))
+            .unwrap();
+        assert_ne!(first, second);
+        assert!(!library.root().join(&first).exists());
+        assert!(library.root().join(&second).is_file());
+        assert_eq!(
+            library
+                .set_video_thumbnail_with("video-1", |_| Ok(webp(9)))
+                .unwrap(),
+            second
+        );
+
+        for bad in [Vec::new(), b"not an image".to_vec()] {
+            assert!(matches!(
+                library.set_video_thumbnail_with("video-1", |_| Ok(bad)),
+                Err(LibraryError::VideoPreparationFailed)
+            ));
+        }
+        assert_eq!(
+            thumbnail_path(&library, "video-1").as_deref(),
+            Some(second.as_str())
+        );
+        assert!(matches!(
+            library.set_video_thumbnail_with("missing", |_| Ok(webp(8))),
+            Err(LibraryError::AssetNotFound)
+        ));
     }
 
     fn insert_pending_video(

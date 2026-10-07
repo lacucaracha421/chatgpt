@@ -17,7 +17,7 @@ const CONTROLS_IDLE_MS = 1_800;
 export const VIDEO_SEEK_STEP_SECONDS = 5;
 
 /** Lets a host (the asset viewer) route arrow keys to the player while focus sits elsewhere. */
-export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void; togglePlayback: () => void };
+export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void; togglePlayback: () => void; currentTimeMs: () => number };
 /** Longest time the pre-seek frame may cover the video if `seeked` never fires. */
 const SEEK_FREEZE_MAX_MS = 1_500;
 
@@ -253,7 +253,7 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     setCurrentTime(next);
     scheduleIdle();
   };
-  useImperativeHandle(ref, () => ({ seekBy, togglePlayback }));
+  useImperativeHandle(ref, () => ({ seekBy, togglePlayback, currentTimeMs: () => Math.max(0, Math.round((videoRef.current?.currentTime ?? 0) * 1000)) }));
   const hoverTime = hoverRatio === null || !timelineAvailable ? 0 : hoverRatio * safeDuration;
   const hoverFrame = timelineAvailable && hoverRatio !== null
     ? Math.round(hoverRatio * Math.max(0, asset.media.scrubFrameCount - 1))

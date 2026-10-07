@@ -423,6 +423,16 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     } : current);
     setSelectedAsset((current) => current?.id === updated.id ? updated : current);
   };
+  const setVideoThumbnailFromFrame = async (asset: AssetSummary, timeMs: number) => {
+    if (!gateway.setVideoThumbnailFromFrame) return;
+    try {
+      updateAssetSummary(await gateway.setVideoThumbnailFromFrame(asset.id, timeMs));
+      setUndoAssetIds(null);
+      setMessage("이 프레임을 썸네일로 지정했습니다.");
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "썸네일을 바꾸지 못했습니다."));
+    }
+  };
   const runBatch = async (operation: () => Promise<void>, failureMessage: string, targetIds = selectedIds) => {
     if (batchPending || targetIds.length === 0) return false;
     setBatchPending(true);
@@ -717,6 +727,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       onAddToAlbum={addViewerAssetToAlbum}
       folders={viewerFolders}
       onMoveToFolder={moveViewerAssetToFolder}
+      onSetVideoThumbnail={gateway.setVideoThumbnailFromFrame ? (asset, timeMs) => void setVideoThumbnailFromFrame(asset, timeMs) : undefined}
       renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={characterTargets} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={(targets) => assignCharactersToAssets([asset.id], targets)} onClose={close} />}
       renderInfo={(asset) => <AssetInfoPanel preview={false} assets={[asset]} classifications={classifications} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />}
       onNearEnd={activePage && tailCursor !== null ? loadNextPage : undefined}

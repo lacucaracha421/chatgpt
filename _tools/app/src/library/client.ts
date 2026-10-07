@@ -652,6 +652,10 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   listEncryptedVaultItems: (query) => invoke<EncryptedVaultItemPage>("list_encrypted_vault_items", { query }),
   setEncryptedVaultTitle: (itemId, title) => invoke<void>("set_encrypted_vault_title", { itemId, title }),
   listEncryptedVaultFolders: () => invoke<EncryptedVaultFolder[]>("list_encrypted_vault_folders"),
+  setEncryptedVaultThumbnailFromFrame: (itemId, timeMs) =>
+    invoke<void>("set_encrypted_vault_thumbnail_from_frame", { itemId, timeMs }),
+  setVideoThumbnailFromFrame: (assetId, timeMs) =>
+    invoke<AssetSummary>("set_video_thumbnail_from_frame", { assetId, timeMs }),
   createEncryptedVaultFolder: (name, parentId) =>
     invoke<EncryptedVaultFolder>("create_encrypted_vault_folder", { name, parentId }),
   renameEncryptedVaultFolder: (folderId, name) => invoke<void>("rename_encrypted_vault_folder", { folderId, name }),

@@ -107,3 +107,8 @@ The PC vault view gets user folders, managed like Assets folders (ADR-0013/0030)
 - Version 1 readers reject version 2 (`UnsupportedFormat`) instead of opening it and silently dropping folders on their next save. Every PC and tablet build that may open a vault with folders must be updated first.
 - Loading checks that folder ids are unique, parents exist, there is no cycle and every `folderId` names a folder; a version 1 index carrying folders is corrupt. Saving refuses an inconsistent index.
 - The tablet reader accepts versions 1 and 2 and keeps its flat list, ignoring folders, until the tablet screen follows the PC design.
+
+## Amendment (2026-10-07): Video thumbnail from a viewer frame
+
+- "이 프레임을 썸네일로" in the shared viewer makes the current frame a vault video's custom thumbnail (`thumbnailObjectId`, `thumbnailSha256`). ffmpeg reads the frame from the existing loopback vault-playback stream, which decrypts ranges in memory; no plaintext file is written. The frame is re-encoded like other vault thumbnails and stored as a new encrypted object.
+- The generated poster is kept. The replaced custom thumbnail object is deleted unless another item still references it; anything left behind is removed by orphan cleanup. The action is refused while an import runs and in a session opened from the backup index. No format change: the tablet already prefers `thumbnailObjectId`.

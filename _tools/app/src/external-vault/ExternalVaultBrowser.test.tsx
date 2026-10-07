@@ -17,8 +17,10 @@ vi.mock("../assets/AssetGallery", () => ({
   </div>,
 }));
 vi.mock("../assets/AssetViewer", () => ({
-  AssetViewer: ({ items, activeId, onClose, mediaSource, onAssetOpened, onTrash, onExport }: any) => activeId ? <div aria-label="vault viewer" data-media-source={mediaSource} data-records={String(Boolean(onAssetOpened))} data-active={activeId}>
+  AssetViewer: ({ items, activeId, onClose, mediaSource, onAssetOpened, onTrash, onExport, onSetVideoThumbnail }: any) => activeId ? <div aria-label="vault viewer" data-media-source={mediaSource} data-records={String(Boolean(onAssetOpened))} data-active={activeId}
+    data-thumbnail-revision={items.find((item: any) => item.id === activeId)?.thumbnailRevision ?? ""}>
     <button onClick={onClose}>close</button>
+    {onSetVideoThumbnail && <button onClick={() => onSetVideoThumbnail(items.find((item: any) => item.id === activeId), 4_200)}>frame thumbnail</button>}
     {onTrash && <button onClick={() => onTrash(items.find((item: any) => item.id === activeId))}>viewer trash</button>}
     {onExport && <button onClick={() => onExport(items.find((item: any) => item.id === activeId))}>viewer export</button>}
   </div> : null,
@@ -352,4 +354,25 @@ it("is read-only when the vault opened from its backup index", async () => {
   await userEvent.click(screen.getByRole("button", { name: "delete key" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(gateway.restoreEncryptedVaultItems).not.toHaveBeenCalled();
+});
+
+it("makes the viewer frame a vault video's thumbnail and reloads that thumbnail", async () => {
+  const gateway = vaultGateway();
+  (gateway as any).setEncryptedVaultThumbnailFromFrame = vi.fn().mockResolvedValue(undefined);
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  fireEvent.doubleClick(await screen.findByRole("button", { name: "내 영상" }));
+  const viewer = screen.getByLabelText("vault viewer");
+  expect(viewer).toHaveAttribute("data-thumbnail-revision", "");
+  await userEvent.click(within(viewer).getByRole("button", { name: "frame thumbnail" }));
+  await waitFor(() => expect(gateway.setEncryptedVaultThumbnailFromFrame).toHaveBeenCalledWith("v", 4_200));
+  expect(await screen.findByText("이 프레임을 썸네일로 지정했습니다.")).toBeInTheDocument();
+  expect(screen.getByLabelText("vault viewer").getAttribute("data-thumbnail-revision")).toMatch(/^\d+$/);
+});
+
+it("offers no frame thumbnail in a read-only session", async () => {
+  const gateway = vaultGateway();
+  (gateway as any).setEncryptedVaultThumbnailFromFrame = vi.fn();
+  render(<ExternalVaultBrowser gateway={gateway} status={{ ...unlocked, backupIndex: true }} onStatusChange={vi.fn()} />);
+  fireEvent.doubleClick(await screen.findByRole("button", { name: "내 영상" }));
+  expect(within(screen.getByLabelText("vault viewer")).queryByRole("button", { name: "frame thumbnail" })).not.toBeInTheDocument();
 });

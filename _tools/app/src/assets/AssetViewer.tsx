@@ -15,7 +15,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
 import { artistHandle } from "../artists/format";
@@ -26,6 +26,7 @@ import type { AlbumEntry, AssetSummary, ClassificationEntry } from "../library/t
 import { breadcrumbPath } from "../shared/breadcrumb";
 import { displayDate, displayTime } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
+import { ContextMenu } from "../shared/ui/ContextMenu";
 import { IconButton } from "../shared/ui/IconButton";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -66,8 +67,15 @@ type AssetViewerProps = {
   renderInfo?: (asset: AssetSummary) => ReactNode;
   /** Context actions of the place the viewer was opened from (a character's 이 캐릭터에서 빼기). */
   renderExtraActions?: (asset: AssetSummary) => ReactNode;
+  /** "이 프레임을 썸네일로": makes the video frame at `timeMs` the asset's thumbnail. */
+  onSetVideoThumbnail?: (asset: AssetSummary, timeMs: number) => void;
   onNearEnd?: () => void;
 };
+
+/** Right-click actions on the viewer's video: only rendered when there is one to offer. */
+function ViewerMediaContextMenu({ enabled, onSetThumbnail, children }: { enabled: boolean; onSetThumbnail: () => void; children: ReactElement }) {
+  return enabled ? <ContextMenu items={[{ id: "frame-thumbnail", label: "이 프레임을 썸네일로", onSelect: onSetThumbnail }]}>{children}</ContextMenu> : children;
+}
 
 /** Folders an asset may be moved to from the viewer: everything except the 오리지널 root. */
 export function movableViewerFolders(classifications: ClassificationEntry[]): ClassificationEntry[] {
@@ -95,6 +103,7 @@ export function AssetViewer({
   renderCharacterPicker,
   renderInfo,
   renderExtraActions,
+  onSetVideoThumbnail,
   onNearEnd,
 }: AssetViewerProps) {
   const library = useOptionalLibrary();
@@ -375,8 +384,10 @@ export function AssetViewer({
           </div>
           {previous && <button className="asset-viewer__edge asset-viewer__edge--left" type="button" aria-label="이전 자산" onClick={() => move(previous)} {...chromeHover}><ChevronLeftIcon aria-hidden="true" /></button>}
           {next && <button className="asset-viewer__edge asset-viewer__edge--right" type="button" aria-label="다음 자산" onClick={() => move(next)} {...chromeHover}><ChevronRightIcon aria-hidden="true" /></button>}
-          {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={124} grown={stripGrown} className="asset-viewer__filmstrip" onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; if (active) setStripGrown(true); revealChrome(); }} renderThumbnail={(_, i) => masked(items[i], requestedPrivacy) ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
+          {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={124} grown={stripGrown} className="asset-viewer__filmstrip" onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; if (active) setStripGrown(true); revealChrome(); }} renderThumbnail={(_, i) => masked(items[i], requestedPrivacy) ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id, items[i].thumbnailRevision ?? undefined) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
         </div>
+        <ViewerMediaContextMenu enabled={Boolean(onSetVideoThumbnail) && asset.media.kind === "video" && !privacyMode}
+          onSetThumbnail={() => onSetVideoThumbnail?.(asset, videoPlayerRef.current?.currentTimeMs() ?? 0)}>
         <div data-viewer-media className="asset-viewer__media-surface">
         {privacyMode
           ? <Skeleton className="privacy-mask asset-viewer__media-mask" label="비공개 모드" />
@@ -386,6 +397,7 @@ export function AssetViewer({
               ? <EmptyState title="이미지를 불러오지 못했습니다">다른 자산으로 이동하면 자동으로 다시 시도합니다.</EmptyState>
               : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} className="asset-viewer__media" style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
         </div>
+        </ViewerMediaContextMenu>
         {replacementFailed && <div className="asset-viewer__load-error" role="status">이미지를 불러오지 못했습니다. 다른 자산으로 이동하면 다시 시도합니다.</div>}
       </div>
       {infoOpen && renderInfo && <aside className="asset-viewer__dock" role="complementary" aria-label="자산 정보">

@@ -61,6 +61,73 @@ fn export_error_code(error: &LibraryError) -> &'static str {
 }
 
 impl Library {
+    /// Makes `image_bytes` (any decodable image, e.g. a video frame) the custom thumbnail of a
+    /// vault video, re-encoded like other vault thumbnails. The generated poster is kept; the
+    /// previous custom thumbnail object is deleted unless another item still uses it.
+    pub fn set_encrypted_vault_thumbnail(
+        &self,
+        item_id: &str,
+        image_bytes: &[u8],
+    ) -> Result<(), LibraryError> {
+        let image = image::load_from_memory(image_bytes)
+            .map_err(|_| LibraryError::VideoPreparationFailed)?;
+        let mut thumbnail = crate::library::ingestion::encode_thumbnail_webp(&image)?;
+        let runtime = &*self.encrypted_vault;
+        if runtime.import_running() {
+            return Err(LibraryError::EncryptedVaultImportRunning);
+        }
+        let _writes = runtime.writes();
+        if runtime.import_running() {
+            return Err(LibraryError::EncryptedVaultImportRunning);
+        }
+        let (vault, generation, mut index) = {
+            let state = runtime.state();
+            let session = state
+                .session
+                .as_ref()
+                .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.writable()?;
+            (
+                Arc::clone(&session.vault),
+                session.generation,
+                session.index.clone(),
+            )
+        };
+        let position = index
+            .items
+            .iter()
+            .position(|item| {
+                item.id == item_id
+                    && item.trashed_at.is_none()
+                    && item.kind == super::VaultItemKind::Video
+            })
+            .ok_or(LibraryError::AssetNotFound)?;
+        let written = vault.write_object_hashed(&mut thumbnail.as_slice());
+        thumbnail.zeroize();
+        let (object_id, sha256) =
+            written.map_err(|error| self.vault_write_error(generation, error))?;
+        let item = &mut index.items[position];
+        let previous = item.thumbnail_object_id.replace(object_id.clone());
+        item.thumbnail_sha256 = Some(sha256);
+        if let Err(error) = vault.save_index(&mut index) {
+            let _ = vault.remove_objects([object_id.as_str()]);
+            return Err(self.vault_write_error(generation, error));
+        }
+        {
+            let mut state = runtime.state();
+            let session = state
+                .session_matching(generation)
+                .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.index = index.clone();
+        }
+        if let Some(previous) = previous {
+            if !index.referenced_objects().contains(previous.as_str()) {
+                let _ = vault.remove_objects([previous.as_str()]);
+            }
+        }
+        Ok(())
+    }
+
     /// Moves items to the vault trash (hidden from the gallery and its counts). Returns how
     /// many items changed; unknown or already trashed ids are ignored.
     pub fn trash_encrypted_vault_items(&self, item_ids: &[String]) -> Result<u64, LibraryError> {
@@ -987,6 +1054,65 @@ mod tests {
             let (path, _) = super::reserve_name(temp.path(), "noext").unwrap();
             assert_eq!(path.file_name().unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn a_chosen_frame_replaces_the_custom_thumbnail_and_deletes_the_old_object() {
+        let (temp, library, vault) = setup();
+        let picked = temp.path().join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        fs::write(picked.join("clip.mp4"), video_bytes(8192)).unwrap();
+        write_png(&picked.join("photo.png"), 10);
+        library
+            .import_files_into_encrypted_vault(
+                &[picked.join("clip.mp4"), picked.join("photo.png")],
+                &mut |_| {},
+            )
+            .unwrap();
+        let clip = id_of(&library, "clip.mp4");
+        let photo = id_of(&library, "photo.png");
+        let thumbnail = |library: &Library| {
+            let mut media = library
+                .encrypted_vault_media(&clip, super::super::EncryptedVaultMediaVariant::Thumbnail)
+                .unwrap();
+            let len = media.len();
+            media.read_range(0, len).unwrap()
+        };
+        let poster = thumbnail(&library);
+        let objects_before = objects(&vault).len();
+        let frame = write_png(&temp.path().join("frame.png"), 20);
+
+        library
+            .set_encrypted_vault_thumbnail(&clip, &frame)
+            .unwrap();
+        let first = thumbnail(&library);
+        assert_ne!(first, poster);
+        assert_eq!(&first[..4], b"RIFF");
+        assert_eq!(objects(&vault).len(), objects_before + 1);
+
+        let other = write_png(&temp.path().join("other.png"), 30);
+        library
+            .set_encrypted_vault_thumbnail(&clip, &other)
+            .unwrap();
+        assert_ne!(thumbnail(&library), first);
+        // The replaced custom thumbnail object is gone; the poster stays.
+        assert_eq!(objects(&vault).len(), objects_before + 1);
+        unlock(&library);
+        assert_ne!(thumbnail(&library), first);
+
+        assert!(matches!(
+            library.set_encrypted_vault_thumbnail(&photo, &frame),
+            Err(LibraryError::AssetNotFound)
+        ));
+        assert!(matches!(
+            library.set_encrypted_vault_thumbnail(&clip, b"not an image"),
+            Err(LibraryError::VideoPreparationFailed)
+        ));
+        library.lock_encrypted_vault();
+        assert!(matches!(
+            library.set_encrypted_vault_thumbnail(&clip, &frame),
+            Err(LibraryError::EncryptedVaultLocked)
+        ));
     }
 
     #[test]
