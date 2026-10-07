@@ -24,6 +24,7 @@ import { assetThumbnailUrl, assetUrl, thumbnailUrl, vaultAssetUrl, vaultPlayback
 import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { AssetVideoTileMedia } from "./AssetVideoTileMedia";
+import { useVaultThumbnailSrc } from "./vaultThumbnailCache";
 import { useGalleryEvent } from "./useGalleryEvent";
 import "../styles/tokens.css";
 
@@ -35,6 +36,8 @@ const QUICK_PREVIEW_GAP = 8;
 const QUICK_PREVIEW_MARGIN = 12;
 const DATE_HEADING_HEIGHT = 44;
 const EMPTY_SELECTION: ReadonlySet<string> = new Set();
+/** Holds an image tile's place while its vault thumbnail loads into memory. */
+const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 
 type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect; boundary: DOMRect | null };
 
@@ -505,9 +508,11 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
   const creatorKey = asset.creatorHandle?.replace(/^@+/, "") || asset.creatorUrl || "";
   // A caption the view supplies (the artist's own name on an artist page) wins over the account handle.
   const metadataLabel = (captionLabel ?? (creatorKey ? artistHandle({ keys: [creatorKey] }) : asset.creatorName?.trim())) ?? "";
+  const rawThumbnail = asset.media.kind === "image" || tileHasThumbnail(asset, mediaSource) ? tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource) : null;
+  const thumbnail = useVaultThumbnailSrc(rawThumbnail, mediaSource === "vault" && !privacyMode);
   return <div role="option" data-asset-id={asset.id} data-focused={focusVisible ? "true" : undefined} className="asset-gallery__asset ui-selectable-media" style={{ width: asset.width, height }} aria-label={alt} aria-description={[metadataLabel, collectedDate(asset.collectedAt).full].filter(Boolean).join(" · ")} aria-selected={selected} tabIndex={focused ? 0 : -1} onFocus={event => { if (event.target === event.currentTarget) onFocusAsset?.(asset, true); }} onClick={(event) => { const gesture = { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }; if (onFocusAsset && !gesture.toggle && !gesture.range) onFocusAsset(asset); else onSelectionGesture?.(asset, gesture); }} onDoubleClick={() => onDoubleOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.(asset.id, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
     <div className="asset-gallery__image" style={{ height }}>
-    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileHasThumbnail(asset, mediaSource) ? tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource) : null} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <StableImage src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
+    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={thumbnail} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <StableImage src={thumbnail ?? TRANSPARENT_PIXEL} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
     {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
     </div>
     {selected && <span className="ui-selection-check" aria-hidden="true" />}

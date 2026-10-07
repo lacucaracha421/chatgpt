@@ -7,8 +7,9 @@ pub(crate) fn allow_cover_canvas(response: &mut Response<Vec<u8>>, origin: Optio
     let packaged = matches!(origin, "http://tauri.localhost" | "https://tauri.localhost" | "tauri://localhost");
     let development = cfg!(debug_assertions) && matches!(origin, "http://localhost:1420" | "http://127.0.0.1:1420");
     // `/asset/` lets the bundled FAULT game read original images as Blobs; still app origins and images only.
-    let cover = ["/av-link-jacket/", "/work-artwork/", "/work-artwork-thumbnail/", "/collection-source-thumbnail/", "/thumbnail/", "/asset/"]
+    let cover = ["/av-link-jacket/", "/work-artwork/", "/work-artwork-thumbnail/", "/collection-source-thumbnail/", "/thumbnail/", "/asset/", "/vault-thumbnail/"]
         .iter().any(|prefix| path.starts_with(prefix));
+    // `/vault-thumbnail/` lets the vault view keep decrypted thumbnails in memory (never on disk).
     // A vault video's frame is captured from the app's own player for "이 프레임을 썸네일로".
     let vault_video = path.starts_with("/vault-playback/");
     let mime = response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("");
@@ -58,6 +59,12 @@ mod tests {
         let mut image = image();
         allow_cover_canvas(&mut image, Some("http://tauri.localhost"), "/vault-playback/id");
         assert!(!image.headers().contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+        let mut thumbnail = Response::builder().header(header::CONTENT_TYPE, "image/webp").body(vec![]).unwrap();
+        allow_cover_canvas(&mut thumbnail, Some("http://tauri.localhost"), "/vault-thumbnail/id/v1");
+        assert_eq!(thumbnail.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "http://tauri.localhost");
+        let mut elsewhere = Response::builder().header(header::CONTENT_TYPE, "image/webp").body(vec![]).unwrap();
+        allow_cover_canvas(&mut elsewhere, Some("https://example.com"), "/vault-thumbnail/id/v1");
+        assert!(!elsewhere.headers().contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
     }
 
     #[test]

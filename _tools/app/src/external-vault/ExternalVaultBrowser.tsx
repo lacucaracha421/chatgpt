@@ -22,6 +22,7 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
 import { vaultPlaybackUrl } from "../assets/mediaUrl";
+import { clearVaultThumbnailCache } from "../assets/vaultThumbnailCache";
 import { captureVideoFrame } from "../video/captureVideoFrame";
 import { readVideoDuration } from "../video/readVideoDuration";
 import { vaultErrorMessage } from "./vaultErrors";
@@ -180,7 +181,11 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   // background and patch the shown tiles in place. The backend skips videos it could not read.
   const durationFill = useRef<"idle" | "running" | "done">("idle");
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    // Decrypted thumbnails stay in memory only while the vault view is open.
+    return () => { mounted.current = false; clearVaultThumbnailCache(); };
+  }, []);
   const needsDurations = !readOnly && Boolean(gateway.fillEncryptedVaultVideoDurations)
     && items.some((item) => item.media.kind === "video" && !item.media.durationMs);
   useEffect(() => {

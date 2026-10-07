@@ -118,3 +118,7 @@ The PC vault view gets user folders, managed like Assets folders (ADR-0013/0030)
 
 - Vault items gain an optional `durationMs`, recorded by FFprobe when a video is imported. Videos imported earlier are measured in the background while the vault is open on the PC: a few at a time, FFprobe reads each through the loopback vault-playback stream (no plaintext file), and the lengths found are stored with one index save. A video that cannot be probed is not tried again until the next unlock, and a session opened from the backup index measures nothing.
 - No format change: the field is optional, older PC builds and the tablet ignore it, and an older PC build that saves the index only drops lengths that are measured again later. Tiles show "—" instead of "0:00" while a length is unknown.
+
+## Amendment (2026-10-07): Thumbnails kept in memory
+
+- The vault view keeps decrypted thumbnails in memory (object URLs) while it is open, so moving between folders does not decrypt every thumbnail again. The media protocol still serves them with `no-store`, so they never reach the WebView's disk cache; the memory copy is dropped when the vault view closes or locks. The view reads them with `fetch`, which the media protocol allows only for the app's own origins on `/vault-thumbnail/`.

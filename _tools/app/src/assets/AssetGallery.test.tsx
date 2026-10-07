@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetGallery } from "./AssetGallery";
+
+// URL selection is tested here; the in-memory vault thumbnail cache has its own tests.
+vi.mock("./vaultThumbnailCache", () => ({ useVaultThumbnailSrc: (url: string | null) => url }));
 import { GalleryViewMenu } from "./GalleryViewMenu";
 import { useState } from "react";
 import { readFileSync } from "node:fs";
