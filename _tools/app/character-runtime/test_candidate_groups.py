@@ -125,12 +125,11 @@ class ReportTests(unittest.TestCase):
 
     def build(self):
         stdout = io.StringIO()
-        # The standalone CLI has no models argument; provide the fixture's
-        # receipt-backed identity at its contract boundary, including cache reads.
-        identity = effective_feature_id(self.models)
-        with contextlib.redirect_stdout(stdout), patch("character_encoder.feature_id", return_value=identity):
+        # Exercise receipt resolution and cache validation with different computed
+        # and pinned identities, without overriding the cache reader's identity.
+        with contextlib.redirect_stdout(stdout):
             cg.main(["build", "--library", str(self.library), "--database", str(self.database),
-                     "--output-dir", str(self.output)])
+                     "--models", str(self.models), "--output-dir", str(self.output)])
         return json.loads((self.output / "report.json").read_text(encoding="utf-8"))
 
     def test_schema_classification_and_read_only(self):

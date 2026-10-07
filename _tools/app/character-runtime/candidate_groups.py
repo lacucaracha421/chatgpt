@@ -178,7 +178,7 @@ def source_post(url, batch, asset_id):
 
 # ---------------------------------------------------------------------- inputs
 
-def load_features(root):
+def load_features(root, *, expected_feature_id=None):
     """All non-fallback S36 crops in a feature directory, sorted by hash."""
     from character_encoder import load_feature
     hashes, crops, boxes, vectors, skipped = [], [], [], [], 0
@@ -188,7 +188,7 @@ def load_features(root):
             skipped += 1
             continue
         try:
-            feature = load_feature(path, h)
+            feature = load_feature(path, h, expected_feature_id=expected_feature_id)
         except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
             skipped += 1
             continue
@@ -528,6 +528,7 @@ def main(argv=None):
     build.add_argument("--database", type=Path, required=True, help="library.sqlite or a backup copy (opened read-only)")
     build.add_argument("--output-dir", type=Path, help="Default: <library>/.cache/characters/candidate-groups/<version>")
     build.add_argument("--no-html", action="store_true")
+    build.add_argument("--models", type=Path, help="Runtime models folder; applies its verified S36 equivalence receipt")
     preview = sub.add_parser("preview", help="Regenerate preview.html from an existing report.json")
     preview.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -547,12 +548,14 @@ def main(argv=None):
         guard(output, library if library in output.parents else output.anchor)
         policy_file = json.loads((HERE / "s36_policy.json").read_text(encoding="utf-8"))
         edge_max, suggest_max = policy_thresholds(policy_file)
-        fid = feature_identity()
+        # A verified feature-equivalence receipt in the models folder maps this machine's
+        # computed identity to the pinned one (feature_equivalence.py --write).
+        fid = feature_identity(args.models)
         if policy_file["feature_id"] != fid:
             raise ValueError("s36_policy.json feature_id differs from the current S36 contract")
         feature_root = library / ".cache/characters" / S36_NAMESPACE / fid
         guard(feature_root, library)
-        hashes, crops, boxes, vectors, skipped = load_features(feature_root)
+        hashes, crops, boxes, vectors, skipped = load_features(feature_root, expected_feature_id=fid)
         with open_readonly(args.database) as connection:
             lib = load_library(connection)
         report = build_report(hashes, crops, boxes, vectors, lib, edge_max=edge_max,
