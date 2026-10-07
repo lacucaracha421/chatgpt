@@ -3582,6 +3582,19 @@ pub async fn set_encrypted_vault_thumbnail_image(
         .map_err(CommandError::from)
 }
 
+/// Stores vault video lengths the viewer measured itself (FFprobe could not read them).
+#[tauri::command]
+pub async fn record_encrypted_vault_video_durations(
+    durations: Vec<crate::library::models::EncryptedVaultDuration>,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.record_encrypted_vault_video_durations(&durations))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
 #[tauri::command]
 pub fn list_encrypted_vault_folders(
     state: State<'_, AppState>,

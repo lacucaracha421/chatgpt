@@ -23,6 +23,7 @@ import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
 import { vaultPlaybackUrl } from "../assets/mediaUrl";
 import { captureVideoFrame } from "../video/captureVideoFrame";
+import { readVideoDuration } from "../video/readVideoDuration";
 import { vaultErrorMessage } from "./vaultErrors";
 import { dismissVaultExport, reattachVaultExport, startVaultExport, useVaultExportJob, vaultExportProgressText, vaultExportResultText } from "./vaultExportJob";
 import { dismissVaultImport, reattachVaultImport, startVaultFileImport, startVaultImport, useVaultImportJob, vaultImportProgressText } from "./vaultImportJob";
@@ -192,12 +193,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
         while (mounted.current) {
           const step = await fill();
           if (!mounted.current) break;
-          if (step.filled.length > 0) {
-            const lengths = new Map(step.filled.map((entry) => [entry.id, entry.durationMs]));
-            setItems((current) => current.map((item) => item.media.kind === "video" && lengths.has(item.id)
-              ? { ...item, media: { ...item.media, durationMs: lengths.get(item.id)! } }
-              : item));
-          }
+          applyLengths(step.filled);
           // Each step fills or gives up on its videos, so `remaining` shrinks; stop if it does not.
           if (step.remaining === 0 || step.remaining >= previous) break;
           previous = step.remaining;
@@ -206,8 +202,46 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
         // Lengths are a convenience; the tiles keep showing "—".
       }
       durationFill.current = mounted.current ? "done" : "idle";
+      if (mounted.current) setBackendLengthsDone(true);
     })();
   }, [gateway, needsDurations]);
+
+  // Videos FFprobe could not read: the WebView reads their length from the metadata itself,
+  // a few at a time, and the backend stores it so the next launch shows it too.
+  const [backendLengthsDone, setBackendLengthsDone] = useState(false);
+  const [measureRound, setMeasureRound] = useState(0);
+  const measuredIds = useRef(new Set<string>());
+  const measuring = useRef(false);
+  useEffect(() => {
+    const record = gateway.recordEncryptedVaultVideoDurations;
+    if (!backendLengthsDone || !record || readOnly || measuring.current) return;
+    const pending = items.filter((item) => item.media.kind === "video" && !item.media.durationMs && !measuredIds.current.has(item.id)).slice(0, 8);
+    if (pending.length === 0) return;
+    measuring.current = true;
+    void (async () => {
+      const found: { id: string; durationMs: number }[] = [];
+      for (const item of pending) {
+        if (!mounted.current) break;
+        measuredIds.current.add(item.id);
+        const durationMs = await readVideoDuration(vaultPlaybackUrl(item.id)).catch(() => null);
+        if (durationMs) found.push({ id: item.id, durationMs });
+      }
+      if (found.length > 0 && mounted.current) {
+        applyLengths(found);
+        await record(found).catch(() => 0);
+      }
+      measuring.current = false;
+      if (mounted.current) setMeasureRound((round) => round + 1);
+    })();
+  }, [backendLengthsDone, gateway, items, measureRound, readOnly]);
+
+  function applyLengths(lengths: { id: string; durationMs: number }[]) {
+    if (lengths.length === 0) return;
+    const byId = new Map(lengths.map((entry) => [entry.id, entry.durationMs]));
+    setItems((current) => current.map((item) => item.media.kind === "video" && byId.has(item.id)
+      ? { ...item, media: { ...item.media, durationMs: byId.get(item.id)! } }
+      : item));
+  }
 
   // The import lives outside this view; refresh when one ends (also one that ended while
   // the view was closed is already in the first load) and, while it runs, the first page.

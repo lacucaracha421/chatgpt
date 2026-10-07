@@ -100,6 +100,40 @@ impl Library {
             .iter()
             .map(|(id, name)| (id.as_str(), probe(id, name).filter(|value| *value > 0)))
             .collect::<HashMap<_, _>>();
+        let changed = self.store_video_durations(&probed)?;
+        let remaining = {
+            let state = self.encrypted_vault.state();
+            state
+                .session
+                .as_ref()
+                .map_or(0, |session| missing_durations(session).count() as u64)
+        };
+        Ok(EncryptedVaultDurationFill {
+            filled: changed,
+            remaining,
+        })
+    }
+
+    /// Stores lengths the viewer measured itself, for videos FFprobe could not read. Only
+    /// videos still without a length change. Returns how many were stored.
+    pub fn record_encrypted_vault_video_durations(
+        &self,
+        durations: &[EncryptedVaultDuration],
+    ) -> Result<usize, LibraryError> {
+        let measured = durations
+            .iter()
+            .filter(|entry| entry.duration_ms > 0)
+            .map(|entry| (entry.id.as_str(), Some(entry.duration_ms)))
+            .collect::<HashMap<_, _>>();
+        Ok(self.store_video_durations(&measured)?.len())
+    }
+
+    /// Stores the lengths found (`Some`) with one index save and remembers the videos that
+    /// could not be measured (`None`) for this session.
+    fn store_video_durations(
+        &self,
+        probed: &HashMap<&str, Option<u64>>,
+    ) -> Result<Vec<EncryptedVaultDuration>, LibraryError> {
         let _writes = self.encrypted_vault.writes();
         let (vault, generation, changed) = {
             let mut state = self.encrypted_vault.state();
@@ -111,7 +145,10 @@ impl Library {
             let mut changed = Vec::new();
             for item in &mut session.index.items {
                 match probed.get(item.id.as_str()) {
-                    Some(Some(duration)) if item.duration_ms.is_none() => {
+                    Some(Some(duration))
+                        if item.duration_ms.is_none()
+                            && item.kind == super::VaultItemKind::Video =>
+                    {
                         item.duration_ms = Some(*duration);
                         changed.push(EncryptedVaultDuration {
                             id: item.id.clone(),
@@ -139,17 +176,7 @@ impl Library {
                 return Err(error);
             }
         }
-        let remaining = {
-            let state = self.encrypted_vault.state();
-            state
-                .session
-                .as_ref()
-                .map_or(0, |session| missing_durations(session).count() as u64)
-        };
-        Ok(EncryptedVaultDurationFill {
-            filled: changed,
-            remaining,
-        })
+        Ok(changed)
     }
 
     /// Makes `image_bytes` (any decodable image, e.g. a video frame) the custom thumbnail of a
@@ -1220,12 +1247,29 @@ mod tests {
             .fill_encrypted_vault_video_durations_with(2, |_, _| unreachable!())
             .unwrap();
         assert_eq!((idle.filled.len(), idle.remaining), (0, 0));
+        // The viewer measures the failed one itself; a known length is never overwritten.
+        let b = id_of(&library, "b.mp4");
+        let measured = |duration_ms| crate::library::models::EncryptedVaultDuration {
+            id: b.clone(),
+            duration_ms,
+        };
+        assert_eq!(
+            library
+                .record_encrypted_vault_video_durations(&[measured(0), measured(42_000)])
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            library
+                .record_encrypted_vault_video_durations(&[measured(9_000)])
+                .unwrap(),
+            0
+        );
         unlock(&library);
-        assert_eq!(durations(&library), filled);
-        let retried = library
-            .fill_encrypted_vault_video_durations_with(2, |_, _| Some(7_000))
-            .unwrap();
-        assert_eq!((retried.filled.len(), retried.remaining), (1, 0));
+        let recorded = durations(&library);
+        assert!(recorded.contains(&("b.mp4".into(), Some(42_000))));
+        assert_eq!(recorded.iter().filter(|(_, d)| d.is_none()).count(), 0);
+        assert_ne!(recorded, filled);
     }
 
     #[test]

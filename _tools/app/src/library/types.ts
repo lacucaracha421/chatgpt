@@ -1635,6 +1635,8 @@ export interface LibraryGateway {
   /** A frame the viewer captured itself (any image bytes); re-encoded like other vault thumbnails. */
   setEncryptedVaultThumbnailImage?(itemId: string, image: Uint8Array): Promise<void>;
   fillEncryptedVaultVideoDurations?(): Promise<EncryptedVaultDurationFill>;
+  /** Stores lengths the viewer measured itself for videos the backend could not read. */
+  recordEncryptedVaultVideoDurations?(durations: { id: string; durationMs: number }[]): Promise<number>;
   createEncryptedVaultFolder?(name: string, parentId: string | null): Promise<EncryptedVaultFolder>;
   renameEncryptedVaultFolder?(folderId: string, name: string): Promise<void>;
   moveEncryptedVaultFolder?(folderId: string, parentId: string | null): Promise<void>;

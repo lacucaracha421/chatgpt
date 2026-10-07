@@ -678,6 +678,7 @@ pub fn run() {
             commands::set_video_thumbnail_from_frame,
             commands::set_encrypted_vault_thumbnail_from_frame,
             commands::set_encrypted_vault_thumbnail_image,
+            commands::record_encrypted_vault_video_durations,
             commands::fill_encrypted_vault_video_durations,
             commands::create_encrypted_vault_folder,
             commands::rename_encrypted_vault_folder,

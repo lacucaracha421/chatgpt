@@ -1509,7 +1509,7 @@ pub struct EncryptedVaultItemSummary {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedVaultDuration {
     pub id: String,
