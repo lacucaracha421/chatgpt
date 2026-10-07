@@ -106,6 +106,7 @@ export const ArtworkMemoryContext=createContext<ArtworkMemory|null>(null);
 export const ARTWORK_RETRY_MS=[1000,3000,10_000] as const;
 export const ARTWORK_BUSY_RETRY_MS=2000, ARTWORK_BUSY_RETRIES=10;
 export const mediaBusy=(error:unknown)=>(error as {details?:{code?:unknown}|null}|null)?.details?.code==='media_busy';
+export const artworkMissing=(error:unknown)=>(error as {status?:unknown}|null)?.status===404;
 export type Retries={source:string;failed:number;busy:number};
 
 /**
@@ -136,6 +137,7 @@ export function useCoverUrl(item:CollectionSummary,id:string|null|undefined,revi
     });
     void request.then(ticket=>{if(!controller.signal.aborted)setShown({source,url:ticket.url});}).catch(error=>{
       if(controller.signal.aborted)return;
+      if(artworkMissing(error))return;
       if(retries.current.source!==source)retries.current={source,failed:0,busy:0};
       const state=retries.current,busy=mediaBusy(error)&&state.busy<ARTWORK_BUSY_RETRIES;
       const delay=busy?ARTWORK_BUSY_RETRY_MS:ARTWORK_RETRY_MS[state.failed];
@@ -144,7 +146,7 @@ export function useCoverUrl(item:CollectionSummary,id:string|null|undefined,revi
       window.clearTimeout(timer.current);timer.current=window.setTimeout(()=>setAttempt(value=>value+1),delay);
     });
     return()=>controller.abort();
-  },[source,active,visible,attempt]);// eslint-disable-line react-hooks/exhaustive-deps
+  },[source,revision,active,visible,attempt]);// eslint-disable-line react-hooks/exhaustive-deps
   // A work without any cover shows the case's own material; one whose cover changed keeps the old one until the new decodes.
   return !id&&!item.coverAssetId?null:shown?.url??null;
 }

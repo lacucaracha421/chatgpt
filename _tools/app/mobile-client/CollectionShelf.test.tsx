@@ -13,12 +13,34 @@ const item: CollectionSummary = {id: 'manga', name: '만화 제목', author: '�
   ]};
 afterEach(() => {cleanup(); vi.useRealTimers(); vi.clearAllMocks();});
 
+it('does not retry a definitive artwork 404 and retries when the publication changes', async () => {
+  vi.useFakeTimers();
+  mocks.native.mockRejectedValue(Object.assign(new Error('Artwork variant unavailable'), {status: 404}));
+  const work:CollectionSummary={id:'zelda',name:'The Legend of Zelda',type:'game',showcase:false,selectedWorkArtworkId:'cover'};
+  const tile=(revision:string)=><ShelfTile item={work} revision={revision} active privacy={false} picked={false} onTap={()=>{}}/>;
+  const view=render(tile('r1'));
+  await act(async()=>{await vi.advanceTimersByTimeAsync(30_000);});
+  expect(mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork')).toHaveLength(1);
+  view.rerender(tile('r2'));
+  await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+  expect(mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork')).toHaveLength(2);
+});
+
 it('uses only the matching front cover volume for focus and the optional 1 marker', () => {
   expect(workCaseData(item, {front: '/front'}, false)).toMatchObject({author: item.author, coverFocus: .25, volumeNumber: 1, front: '/front'});
   expect(workCaseData({...item, selectedWorkArtworkId: 'second'}, {front: '/front'}, false)).toMatchObject({coverFocus: .75, volumeNumber: null});
   expect(workCaseData({...item, selectedWorkArtworkId: 'custom'}, {front: '/front'}, false)).toMatchObject({coverFocus: null, volumeNumber: null});
   expect(workCaseData({...item, selectedWorkArtworkId: null}, {front: '/front'}, false)).toMatchObject({coverFocus: .25, volumeNumber: 1});
   expect(workCaseData({...item, selectedWorkArtworkId: null, volumes: undefined}, {front: '/front'}, false)).toMatchObject({coverFocus: null, volumeNumber: null});
+});
+
+it('requests the original through the shelf for the published thumbnail-less Zelda cover', async () => {
+  mocks.native.mockResolvedValue({url:'https://example.invalid/zelda-original'});
+  const cover='e5448c5e-4b3a-4da8-947c-9eaa693fd2b1',digest='4a865c75'+'a'.repeat(56);
+  const work:CollectionSummary={id:'b8845f02-459e-461f-a49d-c0b9a6ae78dd',name:'The Legend of Zelda',type:'game',showcase:false,selectedWorkArtworkId:cover,artworkVersions:{[cover]:{thumbnail:null,original:digest}}};
+  const {container}=render(<ShelfTile item={work} revision="r1" active privacy={false} picked={false} onTap={()=>{}}/>);
+  await waitFor(()=>expect(container.querySelector('.cs-front img')).not.toBeNull());
+  expect(mocks.native).toHaveBeenCalledWith('collectionArtwork',{collectionId:work.id,artworkId:cover,variant:'original',revision:'r1',digest},expect.any(AbortSignal));
 });
 
 it('draws title, the same front source and author without requesting a separate manga spine', async () => {

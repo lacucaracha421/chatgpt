@@ -29,6 +29,11 @@ final class MediaRepository {
  private final Semaphore coverTransfers=new Semaphore(6,true);
  private final Set<CancellationSignal> active=ConcurrentHashMap.newKeySet();
  private final Map<String,LockEntry> locks=new HashMap<>();
+ private final CollectionArtworkRequests artworkRequests=new CollectionArtworkRequests();
+ private static final class ArtworkTicketMissing extends IOException{
+  final CloudClient.HttpFailure failure;
+  ArtworkTicketMissing(CloudClient.HttpFailure failure){super("Artwork ticket unavailable",failure);this.failure=failure;}
+ }
  private static final class LockEntry{final ReentrantLock lock=new ReentrantLock();int users;}
  private static final class Scope{boolean cover,small;String key,ticketGroup;long generation;JSONObject connection;ThumbnailCache.Kind kind=ThumbnailCache.Kind.VIEW;}
  private MediaRepository(Context context)throws IOException{
@@ -100,7 +105,11 @@ final class MediaRepository {
     if(item.has("assetId")){
      String id=item.getString("assetId");if(!id.matches("[A-Za-z0-9_-]{1,128}"))throw new IllegalArgumentException();
      keys.add(ThumbnailCache.mediaKey(account,id,"thumbnail",""));
-    }else keys.add(ThumbnailCache.collectionArtworkKey(account,item.getString("collectionId"),item.getString("artworkId"),item.getString("variant"),item.getString("revision"),item.optString("digest","")));
+    }else {
+     String collection=item.getString("collectionId"),artwork=item.getString("artworkId"),requested=item.getString("variant"),revision=item.getString("revision");
+     String variant=artworkRequests.variant(artworkRequestKey(account,cache().generation(),collection,artwork,revision),requested);
+     keys.add(ThumbnailCache.collectionArtworkKey(account,collection,artwork,variant,revision,variant.equals(requested)?item.optString("digest",""):""));
+    }
    }
    synchronized(cache()){
     String generation=ThumbnailCache.key(account)+"/"+cache().warmGeneration();
@@ -110,7 +119,7 @@ final class MediaRepository {
    }
   }
  }
- void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache().clear();}finally{tickets.clear();thumbnailTickets.clear();proxy.clear();}}}
+ void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache().clear();}finally{tickets.clear();thumbnailTickets.clear();proxy.clear();artworkRequests.clear();}}}
  InputStream stream(String key,long generation)throws IOException{return cache().open(key,generation);}
  private final ScheduledExecutorService ticketWorker=StartupPerf.scheduled("mediaTickets",r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
  private final TicketBatcher<Scope,JSONObject> tickets=new TicketBatcher<>(ticketWorker,this::fetchTickets,MediaRepository::ticketExpiry,System::currentTimeMillis);
@@ -328,6 +337,17 @@ final class MediaRepository {
   signal.throwIfCanceled();String mime=cachedImageMime(scope);if(!imageMime(mime)){cache().remove(scope.key,scope.generation);throw new IOException("Catalog image type is unsupported");}return local(scope,mime);
  }
  JSONObject collectionArtwork(String collection,String artwork,String variant,String revision,String digest,CancellationSignal signal)throws Exception{
+  Scope request=scoped(account->artworkRequestKey(account,cache().generation(),collection,artwork,revision));
+  try{return artworkRequests.read(request.key,variant,resolved->{
+    signal.throwIfCanceled();
+    return collectionArtworkVariant(collection,artwork,resolved,revision,resolved.equals(variant)?digest:"",signal);
+   },error->error instanceof ArtworkTicketMissing);
+  }catch(ArtworkTicketMissing missing){throw missing.failure;}
+ }
+ private static String artworkRequestKey(String account,long generation,String collection,String artwork,String revision)throws Exception{
+  return generation+"/"+ThumbnailCache.collectionArtworkKey(account,collection,artwork,"thumbnail",revision,"");
+ }
+ private JSONObject collectionArtworkVariant(String collection,String artwork,String variant,String revision,String digest,CancellationSignal signal)throws Exception{
   Scope scope=scoped(account->ThumbnailCache.collectionArtworkKey(account,collection,artwork,variant,revision,digest));scope.small=variant.equals("thumbnail");scope.kind=ThumbnailCache.Kind.KEEP;
   PerfLog.Op perf=PerfLog.current.get();
   LockEntry entry=retainLock(scope.key);boolean locked=false;
@@ -341,7 +361,8 @@ final class MediaRepository {
    if(imageMime(mime)){if(perf!=null)perf.cache="hit";return local(scope,mime);}
   }catch(FileNotFoundException ignored){}
   if(perf!=null)perf.cache="miss";
-  TicketSource source=fresh->{long started=System.nanoTime();try{return client.apiFor(scope.connection,"/v1/collections/"+collection+"/artworks/"+artwork+"/media-ticket","POST",new JSONObject().put("variant",variant),signal);}finally{if(perf!=null)perf.ticket+=System.nanoTime()-started;}};
+  // Only a ticket 404 is definitive. A signed download URL failing is not an absent variant.
+  TicketSource source=fresh->{long started=System.nanoTime();try{return client.apiFor(scope.connection,"/v1/collections/"+collection+"/artworks/"+artwork+"/media-ticket","POST",new JSONObject().put("variant",variant),signal);}catch(CloudClient.HttpFailure failure){if(failure.status==404)throw new ArtworkTicketMissing(failure);throw failure;}finally{if(perf!=null)perf.ticket+=System.nanoTime()-started;}};
   JSONObject first=source.read(false);
   if(!digest.isEmpty()&&!digest.equals(first.optString("sha256")))throw new IOException("Artwork changed; refresh metadata");
   if(!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>ThumbnailCache.MAX_FILE)throw new IOException("Artwork exceeds limit");

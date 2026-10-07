@@ -51,7 +51,7 @@ import {Scrubber} from './Scrubber';
 import type {ScrubberSort} from './scrubberModel';
 
 import {api, errorText} from './transport';
-import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
+import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkMissing, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
 import {AvCast, AvLookupSender, AvPerformerShelves, AvRelatedWorks, AvViewTabs, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
@@ -85,6 +85,7 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
   const [attempt,setAttempt]=useState(0),retries=useRef<Retries>({source,failed:0,busy:0}),retryTimer=useRef(0);
   /** Schedules the next try of this source, or returns false once its retries are spent. */
   const retryLater=(error:unknown)=>{
+    if(artworkMissing(error))return false;
     if(retries.current.source!==source)retries.current={source,failed:0,busy:0};
     const state=retries.current,busy=mediaBusy(error)&&state.busy<ARTWORK_BUSY_RETRIES;
     const delay=busy?ARTWORK_BUSY_RETRY_MS:ARTWORK_RETRY_MS[state.failed];
@@ -111,8 +112,8 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
       loaded.current=source;setImage({source,url:ticket.url});
     }).catch(error=>{if(!controller.signal.aborted&&!retryLater(error))setFailed(source);});
     return()=>{controller.abort();window.clearTimeout(retryTimer.current);};
-  },[source,active,visible,attempt,privacy]);
-  const broken=failed===source,ready=!privacy&&!!image&&!broken&&(!!id||!!item.coverAssetId);
+  },[source,revision,active,visible,attempt,privacy]);
+  const broken=failed===source,ready=!privacy&&!!image&&(!broken||image.source!==source)&&(!!id||!!item.coverAssetId);
   shown.current=ready?image.url:null;
   const solid=ready&&physical&&flat!==source;
   // A card with no cover to wait for (none, or it failed) arrives at once.
