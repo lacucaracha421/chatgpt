@@ -3536,34 +3536,31 @@ pub async fn set_video_thumbnail_from_frame(
 #[tauri::command]
 pub async fn fill_encrypted_vault_video_durations(
     state: State<'_, AppState>,
-    runtime: State<'_, crate::extension_api::ExtensionRuntime>,
 ) -> Result<crate::library::models::EncryptedVaultDurationFill, CommandError> {
     let library = current_required(state)?;
-    let runtime = runtime.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        library.fill_encrypted_vault_video_durations(|item_id| runtime.vault_playback_url(item_id))
+        library.fill_encrypted_vault_video_durations(|item_id, work| {
+            crate::extension_api::with_vault_stream(&library, item_id, work)
+        })
     })
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
 }
 
-/// "이 프레임을 썸네일로" for a vault video: the frame is read through the decrypting
-/// loopback stream, never from a plaintext file.
+/// "이 프레임을 썸네일로" for a vault video: the frame is read through a decrypting loopback
+/// stream of its own, never from a plaintext file.
 #[tauri::command]
 pub async fn set_encrypted_vault_thumbnail_from_frame(
     item_id: String,
     time_ms: u64,
     state: State<'_, AppState>,
-    runtime: State<'_, crate::extension_api::ExtensionRuntime>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
-    let url = runtime.vault_playback_url(&item_id).ok_or_else(|| CommandError {
-        code: "playback_unavailable",
-        message: "영상 재생 서버를 사용할 수 없습니다. 앱을 다시 실행해 주세요.".into(),
-    })?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.set_encrypted_vault_thumbnail_from_frame(&item_id, &url, time_ms)
+        library.set_encrypted_vault_thumbnail_from_frame(&item_id, time_ms, |item_id, work| {
+            crate::extension_api::with_vault_stream(&library, item_id, work)
+        })
     })
     .await
     .map_err(|_| background_task_error())?

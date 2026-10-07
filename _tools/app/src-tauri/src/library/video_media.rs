@@ -126,35 +126,42 @@ impl Library {
         self.get_asset(asset_id)
     }
 
-    /// Vault variant: ffmpeg reads the frame from the in-memory decrypting loopback stream
-    /// (`playback_url`), so no plaintext file is written (ADR-0039).
+    /// Vault variant: ffmpeg reads the frame from an in-memory decrypting loopback stream that
+    /// `with_stream(item_id, work)` serves while `work(url)` runs, so no plaintext file is
+    /// written (ADR-0039).
     pub fn set_encrypted_vault_thumbnail_from_frame(
         &self,
         item_id: &str,
-        playback_url: &str,
         time_ms: u64,
+        with_stream: impl FnOnce(&str, &mut dyn FnMut(&str)),
     ) -> Result<(), LibraryError> {
-        let frame = render_video_frame_webp(Path::new(playback_url), time_ms)?;
-        self.set_encrypted_vault_thumbnail(item_id, &frame)
+        let mut frame = Err(LibraryError::VideoPreparationFailed);
+        with_stream(item_id, &mut |url| {
+            frame = render_video_frame_webp(Path::new(url), time_ms);
+        });
+        self.set_encrypted_vault_thumbnail(item_id, &frame?)
     }
 
-    /// Fills in vault video lengths a few at a time: FFprobe reads each video through the
-    /// decrypting loopback stream (`playback_url(item_id)`), so no plaintext file is written.
+    /// Fills in vault video lengths a few at a time: FFprobe reads each video through a
+    /// decrypting loopback stream (see `set_encrypted_vault_thumbnail_from_frame`).
     pub fn fill_encrypted_vault_video_durations(
         &self,
-        playback_url: impl Fn(&str) -> Option<String>,
+        with_stream: impl Fn(&str, &mut dyn FnMut(&str)),
     ) -> Result<super::models::EncryptedVaultDurationFill, LibraryError> {
         const BATCH: usize = 8;
         self.fill_encrypted_vault_video_durations_with(BATCH, |item_id, file_name| {
-            let url = playback_url(item_id)?;
             let extension = Path::new(file_name)
                 .extension()
                 .and_then(|value| value.to_str())
                 .map(str::to_ascii_lowercase)
                 .unwrap_or_default();
-            probe_video(Path::new(&url), &extension)
-                .ok()
-                .map(|probe| probe.duration_ms)
+            let mut duration = None;
+            with_stream(item_id, &mut |url| {
+                duration = probe_video(Path::new(url), &extension)
+                    .ok()
+                    .map(|probe| probe.duration_ms);
+            });
+            duration
         })
     }
 
