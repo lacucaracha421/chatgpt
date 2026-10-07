@@ -138,6 +138,8 @@ final class VaultCrypto {
     static final class Item {
         final String id, object, title, kind, thumbnail, poster, mime;
         final long width, height; // 0 when the index has no dimension
+        final long durationMs; // 0 when the PC has not recorded the video's length
+        final String folderId; // null when unfiled
         final boolean trashed;
         Item(Map<String,Object> m) throws Invalid {
             id = string(m,"id"); object = string(m,"objectId"); objectId(object);
@@ -151,15 +153,28 @@ final class VaultCrypto {
             String customTitle = optional(m,"title"); title = customTitle == null ? filename : customTitle;
             thumbnail = optional(m,"thumbnailObjectId"); poster = optional(m,"posterObjectId");
             if (thumbnail != null) objectId(thumbnail); if (poster != null) objectId(poster);
+            durationMs = m.get("durationMs") == null ? 0 : number(m,"durationMs");
+            folderId = optional(m,"folderId");
             trashed = optional(m,"trashedAt") != null;
             // v1 has no MIME field: PC derives it from the authenticated index filename.
             mime = mime(filename);
         }
     }
-    static List<Item> index(byte[] bytes) throws Invalid {
+    /** A PC user folder (index version 2). Folders are browsed here, never changed. */
+    static final class Folder {
+        final String id, name, parentId;
+        Folder(Map<String,Object> m) throws Invalid {
+            id = string(m,"id"); name = string(m,"name"); parentId = optional(m,"parentId"); string(m,"createdAt");
+        }
+    }
+    static final class Index {
+        final List<Item> items; final List<Folder> folders;
+        Index(List<Item> items, List<Folder> folders) { this.items = items; this.folders = folders; }
+    }
+    static List<Item> index(byte[] bytes) throws Invalid { return parse(bytes).items; }
+    static Index parse(byte[] bytes) throws Invalid {
         Map<String,Object> root = json(bytes, MAX_INDEX);
-        // Version 2 adds PC user folders (`folders`, item `folderId`); this read-only view
-        // still shows one flat list and ignores them.
+        // Version 2 adds PC user folders (`folders`, item `folderId`).
         long version = number(root,"formatVersion");
         if (version != 1 && version != 2) throw new Unsupported();
         number(root,"revision");
@@ -168,7 +183,26 @@ final class VaultCrypto {
         for (Object v : (List<?>) root.get("items")) {
             Item item = new Item(map(v)); if (!ids.add(item.id)) throw new Invalid(); items.add(item);
         }
-        return items;
+        List<Folder> folders = new ArrayList<>(); Set<String> folderIds = new HashSet<>();
+        Object listed = root.get("folders");
+        if (listed != null) {
+            if (version != 2 || !(listed instanceof List)) throw new Invalid();
+            for (Object v : (List<?>) listed) {
+                Folder folder = new Folder(map(v)); if (!folderIds.add(folder.id)) throw new Invalid(); folders.add(folder);
+            }
+        }
+        // The PC keeps folders consistent; anything else is corrupt, as it is there.
+        for (Folder folder : folders) if (folder.parentId != null && !folderIds.contains(folder.parentId)) throw new Invalid();
+        for (Item item : items) if (item.folderId != null && !folderIds.contains(item.folderId)) throw new Invalid();
+        for (Folder folder : folders) {
+            Set<String> seen = new HashSet<>(); String at = folder.id;
+            while (at != null) {
+                if (!seen.add(at)) throw new Invalid();
+                String current = at; at = null;
+                for (Folder other : folders) if (other.id.equals(current)) { at = other.parentId; break; }
+            }
+        }
+        return new Index(items, folders);
     }
     static String mime(String filename) {
         int dot = filename.lastIndexOf('.');

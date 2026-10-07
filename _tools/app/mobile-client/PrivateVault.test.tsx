@@ -208,3 +208,46 @@ it('masks vault gallery thumbnails in privacy mode',async()=>{
     expect(screen.getAllByLabelText('비공개 모드로 이미지 숨김').length).toBeGreaterThan(0);
   } finally {localStorage.removeItem('lakomics.mobile.privacyMode');}
 });
+
+const foldered:VaultState={...open,folders:[{id:'trip',name:'여행',parentId:null},{id:'beach',name:'바다',parentId:'trip'}],items:[
+  {...open.items[0]!,folderId:'trip'},
+  {...open.items[1]!,folderId:'beach',durationMs:61_000},
+  {...open.items[2]!},
+]};
+
+it('shows the lengths the PC recorded instead of a dash',async()=>{
+  mocked.native.mockImplementation(async(operation:string)=>operation==='vaultUnlock'?foldered:locked);
+  await unlocked();
+  const video=screen.getByRole('button',{name:'영상 제목 · 영상'});
+  expect(video.getAttribute('aria-description')).toBe('영상 1:01');
+  expect(video.textContent).toContain('1:01');
+});
+
+it('browses the PC folders read-only: 미분류, a folder with its subfolders, and Back goes up',async()=>{
+  mocked.native.mockImplementation(async(operation:string)=>operation==='vaultUnlock'?foldered:locked);
+  const backRef:{current:(()=>boolean)|null}={current:null};
+  render(<PrivateVault onClose={vi.fn()} backRef={backRef}/>);
+  fireEvent.change(await screen.findByLabelText('비밀번호'),{target:{value:'password'}});
+  fireEvent.click(screen.getByRole('button',{name:'보관함 열기'}));
+  await screen.findByRole('button',{name:'사용자 지정 제목 · 이미지'});
+  // Top level: 미분류 and the top-level folder, with their item counts (a folder counts its subfolders).
+  expect(screen.getByRole('button',{name:'미분류, 1개'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'여행, 2개'}));
+  expect(screen.getByRole('heading',{name:'여행'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'사용자 지정 제목 · 이미지'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'영상 제목 · 영상'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'두 번째 이미지 · 이미지'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'바다, 1개'}));
+  expect(screen.queryByRole('button',{name:'사용자 지정 제목 · 이미지'})).toBeNull();
+  // Back climbs one level at a time before it leaves the vault.
+  act(()=>{expect(backRef.current!()).toBe(true);});
+  expect(screen.getByRole('heading',{name:'여행'})).toBeTruthy();
+  act(()=>{expect(backRef.current!()).toBe(true);});
+  expect(screen.queryByRole('heading',{name:'여행'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'미분류, 1개'}));
+  expect(screen.getByRole('button',{name:'두 번째 이미지 · 이미지'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'영상 제목 · 영상'})).toBeNull();
+  // Nothing here moves or creates folders.
+  expect(screen.queryByRole('button',{name:/폴더 (만들기|이동)/})).toBeNull();
+  libraryMediaUntouched();
+});

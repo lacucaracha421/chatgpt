@@ -106,7 +106,7 @@ The PC vault view gets user folders, managed like Assets folders (ADR-0013/0030)
 - An index is saved as version 2 only while it holds a folder or a `folderId`; otherwise it stays version 1, so a vault that never used folders still opens in older builds.
 - Version 1 readers reject version 2 (`UnsupportedFormat`) instead of opening it and silently dropping folders on their next save. Every PC and tablet build that may open a vault with folders must be updated first.
 - Loading checks that folder ids are unique, parents exist, there is no cycle and every `folderId` names a folder; a version 1 index carrying folders is corrupt. Saving refuses an inconsistent index.
-- The tablet reader accepts versions 1 and 2 and keeps its flat list, ignoring folders, until the tablet screen follows the PC design.
+- The tablet reader accepts versions 1 and 2. It browses the PC's folders read-only (전체, 미분류, and a folder with its subfolders, as on the PC) and checks folder consistency like the PC; folders are created and filled only on the PC. It also shows the video lengths the PC recorded.
 
 ## Amendment (2026-10-07): Video thumbnail from a viewer frame
 
