@@ -107,7 +107,7 @@ class WorkProviderTests(unittest.TestCase):
     def test_image_proxy_allowed_sizes_fixed_hosts_cache_and_bytes(self):
         for provider, path, sizes, origin in (
             ("tmdb", "/poster.jpg", ("w185", "w342", "w780"), "https://image.tmdb.org/t/p/"),
-            ("igdb", "co_99", ("t_cover_big", "t_screenshot_med", "t_720p"),
+            ("igdb", "co_99", ("t_cover_big", "t_screenshot_med", "t_720p", "t_1080p"),
              "https://images.igdb.com/igdb/image/upload/")):
             for size in sizes:
                 with self.subTest(provider=provider, size=size):
@@ -163,6 +163,10 @@ class WorkProviderTests(unittest.TestCase):
             self.assertEqual(urlsplit(preview).netloc, "")
             query = {key: value[0] for key, value in parse_qs(urlsplit(preview).query).items()}
             self.assertIn(query["size"], wp.PREVIEW_SIZES[query["provider"]])
+        sizes = lambda detail: {a["kind"]: parse_qs(urlsplit(a["previewUrl"]).query)["size"][0]
+                                for a in detail["artwork"]}
+        self.assertEqual(sizes(film), {"poster": "w342", "backdrop": "w780"})
+        self.assertEqual(sizes(game_detail), {"cover": "t_cover_big", "artwork": "t_1080p", "screenshot": "t_1080p"})
 
     def test_apply_create_client_receipt_shape_feed_and_retry_without_lookup(self):
         self.keys()
@@ -191,7 +195,7 @@ class WorkProviderTests(unittest.TestCase):
     def test_apply_igdb_create_and_refresh(self):
         self.keys()
         body = self.apply_body(provider="igdb")
-        self.responses({"access_token": "token", "expires_in": 3600}, [game()])
+        self.responses({"access_token": "token", "expires_in": 3600}, [game()], Response(png(), "image/png"))
         self.ok(self.apply(body))
         state = self.fixture.work(body["workId"])
         self.assertEqual(state["name"], "Game")
@@ -211,6 +215,263 @@ class WorkProviderTests(unittest.TestCase):
         self.assertEqual(state["fields"]["description"], "My memo")
         self.assertEqual(state["fields"]["myScore"], 4.5)
         self.assertEqual(self.ok(self.apply(refresh)), result)
+
+    def provider_artworks(self, work_id):
+        with fixtures.api_app.get_db() as db:
+            return [wp.ca.artwork_projection(row) for row in db.execute(
+                "SELECT * FROM collection_authority_artworks WHERE library_id=? AND work_id=?"
+                " ORDER BY provider_image_id", [fixtures.LIBRARY, work_id]).fetchall()]
+
+    def tv_responses(self, *images):
+        raw = self.tv()
+        raw["overview"] = "Series"
+        self.responses(raw, self.season(), *images)
+
+    def test_apply_tv_posters_precede_snapshot_and_replay_without_io(self):
+        self.keys()
+        body = self.apply_body(externalId="tv:42")
+        self.tv_responses(Response(png(), "image/png"))
+        result = self.ok(self.apply(body))
+        self.assertEqual([r["commandType"] for r in result["receipts"]],
+                         ["createWork", "addArtwork", "applyProviderSnapshot"])
+        arts = self.provider_artworks(body["workId"])
+        self.assertEqual(len(arts), 1)
+        art = arts[0]
+        self.assertEqual(art["kind"], "cover")
+        self.assertEqual(art["providerImageId"], "season:100:cover:" + art["original"]["sha256"])
+        self.assertFalse(art["selected"])
+        self.assertEqual(art["thumbnail"]["contentType"], "image/webp")
+        self.assertEqual(self.open.call_args.args[0].full_url,
+                         "https://image.tmdb.org/t/p/w342/season.jpg")
+        final = result["receipts"][-1]
+        season = final["entities"]["bindings"][0]["snapshot"]["series"]["seasons"][0]
+        self.assertEqual(season["posterArtworkId"], art["artworkId"])
+        state = self.fixture.work(body["workId"])
+        self.assertEqual(state["details"]["series"]["seasons"][0]["posterArtworkId"], art["artworkId"])
+        self.assertTrue(all(value is None for value in state["selection"].values()))
+        before = self.feed()
+        self.open.reset_mock(side_effect=True)
+        self.open.side_effect = AssertionError("Replay must not download")
+        with mock.patch.object(fake_s3, "head_object", side_effect=AssertionError("Replay must not use R2")):
+            self.assertEqual(self.ok(self.apply(body)), result)
+        self.assertEqual(self.feed(), before)
+        self.open.assert_not_called()
+
+    def test_apply_tv_refresh_reuses_ids_blobs_and_retains_posters_on_download_failure(self):
+        self.keys()
+        body = self.apply_body(externalId="tv:42")
+        self.tv_responses(Response(png(), "image/png"))
+        self.ok(self.apply(body))
+        before = self.provider_artworks(body["workId"])
+        with mock.patch.object(fake_s3, "put_object", wraps=fake_s3.put_object) as put:
+            self.tv_responses(Response(png(), "image/png"))
+            result = self.ok(self.apply(self.apply_body("refresh", work_id=body["workId"], externalId="tv:42")))
+            self.assertEqual([r["commandType"] for r in result["receipts"]], ["applyProviderSnapshot"])
+            put.assert_not_called()
+        self.assertEqual(self.provider_artworks(body["workId"]), before)
+        self.tv_responses(HTTPError("https://ignored", 404, "missing", {}, None))
+        self.ok(self.apply(self.apply_body("refresh", work_id=body["workId"], externalId="tv:42")))
+        state = self.fixture.work(body["workId"])
+        self.assertEqual(state["details"]["series"]["seasons"][0]["posterArtworkId"], before[0]["artworkId"])
+
+    def test_apply_tv_changed_poster_bytes_create_an_immutable_new_record(self):
+        self.keys()
+        body = self.apply_body(externalId="tv:42")
+        self.tv_responses(Response(png(), "image/png"))
+        self.ok(self.apply(body))
+        old = self.provider_artworks(body["workId"])[0]
+        output = io.BytesIO()
+        Image.new("RGB", (2, 3), "blue").save(output, format="PNG")
+        self.tv_responses(Response(output.getvalue(), "image/png"))
+        self.ok(self.apply(self.apply_body("refresh", work_id=body["workId"], externalId="tv:42")))
+        arts = self.provider_artworks(body["workId"])
+        self.assertEqual(len(arts), 2)
+        self.assertIn(old, arts)
+        current_id = self.fixture.work(body["workId"])["details"]["series"]["seasons"][0]["posterArtworkId"]
+        self.assertNotEqual(current_id, old["artworkId"])
+
+    def test_apply_connect_reuses_pc_season_identity_and_preserves_pc_snapshot_digest(self):
+        self.keys()
+        work_id = str(uuid.uuid4())
+        self.fixture.ok(self.fixture.create(work_id, "PC TV"))
+        self.responses(Response(png(), "image/png"))
+        blob = self.ok(self.artwork("/season.jpg", size="w342"))
+        pc_id = str(uuid.uuid4())
+        self.fixture.ok(self.fixture.command("addArtwork", headers=self.fixture.publisher,
+            workId=work_id, artworkId=pc_id, kind="cover", provider="tmdb",
+            providerImageId="season:100:cover:" + blob["original"]["sha256"],
+            original=blob["original"], thumbnail=None, width=blob["width"], height=blob["height"], language=None))
+        self.tv_responses(Response(png(), "image/png"))
+        result = self.ok(self.apply(self.apply_body("connect", work_id=work_id, externalId="tv:42")))
+        self.assertEqual([r["commandType"] for r in result["receipts"]], ["bindProvider", "applyProviderSnapshot"])
+        self.assertEqual(len(self.provider_artworks(work_id)), 1)
+        binding = result["receipts"][-1]["entities"]["bindings"][0]
+        expected = wp.tmdb_normalize({**self.tv(), "overview": "Series"}, "tv",
+            seasons=[{"id": 100, "seasonNumber": 1, "name": "Season 1", "overview": "Season overview",
+                "airDate": "2020-01-01", "posterPath": "/season.jpg", "posterArtworkId": pc_id,
+                "episodes": binding["snapshot"]["series"]["seasons"][0]["episodes"]}])["binding"]["snapshot"]
+        self.assertEqual(binding["snapshot"], expected)
+        self.assertEqual(binding["snapshotDigest"], wp.ca.digest(expected))
+        self.assertIsNone(self.provider_artworks(work_id)[0]["thumbnail"])
+
+    def test_apply_igdb_imports_screenshots_unselected_and_skips_corrupt_or_missing_images(self):
+        self.keys()
+        raw = game()
+        raw["screenshots"] += [{"image_id": "broken"}, {"image_id": "missing"}, {"image_id": "good"}]
+        body = self.apply_body(provider="igdb")
+        self.responses({"access_token": "token", "expires_in": 3600}, [raw], Response(png(), "image/png"),
+            Response(b"broken", "image/png"), HTTPError("https://ignored", 404, "missing", {}, None),
+            Response(png(), "image/png"))
+        result = self.ok(self.apply(body))
+        arts = self.provider_artworks(body["workId"])
+        self.assertEqual(len(arts), 2)
+        self.assertTrue(all(a["kind"] == "screenshot" and not a["selected"] for a in arts))
+        self.assertEqual({a["providerImageId"].split(":")[0] for a in arts}, {"shot99", "good"})
+        self.assertTrue(all("/t_original/" in call.args[0].full_url
+            for call in self.open.call_args_list[2:]))
+        self.assertEqual(result["receipts"][-1]["entities"]["bindings"][0]["snapshot"], raw)
+        self.assertTrue(all(value is None for value in self.fixture.work(body["workId"])["selection"].values()))
+
+    def test_apply_igdb_connect_and_refresh_do_not_duplicate_screenshots(self):
+        self.keys()
+        work_id = str(uuid.uuid4())
+        self.fixture.ok(self.fixture.create(work_id, "Game shell", type_="game"))
+        body = self.apply_body("connect", provider="igdb", work_id=work_id)
+        self.responses({"access_token": "token", "expires_in": 3600}, [game()], Response(png(), "image/png"))
+        result = self.ok(self.apply(body))
+        self.assertEqual([r["commandType"] for r in result["receipts"]],
+                         ["bindProvider", "addArtwork", "applyProviderSnapshot"])
+        before = self.provider_artworks(work_id)
+        self.responses([game()], Response(png(), "image/png"))
+        self.ok(self.apply(self.apply_body("connect", provider="igdb", work_id=work_id)))
+        self.responses([game()])
+        result = self.ok(self.apply(self.apply_body("refresh", provider="igdb", work_id=work_id)))
+        self.assertEqual([r["commandType"] for r in result["receipts"]], ["applyProviderSnapshot"])
+        self.assertEqual(self.provider_artworks(work_id), before)
+
+    def test_apply_budget_commits_partial_gallery_and_refresh_fills_the_rest(self):
+        self.keys()
+        raw = game()
+        raw["screenshots"].append({"image_id": "second"})
+        body = self.apply_body(provider="igdb")
+        clock = [100.0]
+        store = wp.store_artwork
+        def first_image(*args, **kwargs):
+            result = store(*args, **kwargs)
+            clock[0] += wp.REQUEST_SECONDS - wp.ARTWORK_COMMIT_SECONDS
+            return result
+        self.responses({"access_token": "token", "expires_in": 3600}, [raw], Response(png(), "image/png"))
+        with mock.patch.object(wp.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(wp, "store_artwork", side_effect=first_image):
+            result = self.ok(self.apply(body))
+            self.assertEqual(len(self.provider_artworks(body["workId"])), 1)
+            self.assertEqual(result["receipts"][-1]["entities"]["bindings"][0]["snapshot"], raw)
+            self.open.reset_mock(side_effect=True)
+            self.open.side_effect = AssertionError("A partial success is replayed exactly")
+            self.assertEqual(self.ok(self.apply(body)), result)
+            clock[0] = 200.0
+            self.responses([raw], Response(png(), "image/png"))
+            self.ok(self.apply(self.apply_body("refresh", provider="igdb", work_id=body["workId"])))
+        self.assertEqual(len(self.provider_artworks(body["workId"])), 2)
+
+    def test_apply_tv_missing_posters_are_prioritized_after_budget_fallback(self):
+        self.keys()
+        raw = {**self.tv(), "overview": "Series"}
+        raw["seasons"].append({"id": 101, "season_number": 2})
+        second = {**self.season(), "id": 101, "season_number": 2, "poster_path": "/second.jpg", "episodes": []}
+        body = self.apply_body(externalId="tv:42")
+        clock = [100.0]
+        store = wp.store_artwork
+        def one_image(*args, **kwargs):
+            result = store(*args, **kwargs)
+            clock[0] += wp.REQUEST_SECONDS - wp.ARTWORK_COMMIT_SECONDS
+            return result
+        with mock.patch.object(wp.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(wp, "store_artwork", side_effect=one_image):
+            self.responses(raw, self.season(), second, Response(png(), "image/png"))
+            self.ok(self.apply(body))
+            clock[0] = 200.0
+            self.responses(raw, self.season(), second, Response(png(), "image/png"))
+            self.ok(self.apply(self.apply_body("refresh", work_id=body["workId"], externalId="tv:42")))
+        self.assertEqual(self.open.call_args.args[0].full_url, "https://image.tmdb.org/t/p/w342/second.jpg")
+        seasons = self.fixture.work(body["workId"])["details"]["series"]["seasons"]
+        self.assertTrue(all(s["posterArtworkId"] for s in seasons))
+        self.assertEqual(len(self.provider_artworks(body["workId"])), 2)
+
+    def test_apply_tv_broken_poster_is_optional_and_atomic_snapshot_rejection_rolls_back_artwork(self):
+        self.keys()
+        body = self.apply_body(externalId="tv:42")
+        self.tv_responses(Response(b"broken", "image/png"))
+        self.ok(self.apply(body))
+        self.assertEqual(self.provider_artworks(body["workId"]), [])
+        self.assertIsNone(self.fixture.work(body["workId"])["details"]["series"]["seasons"][0]["posterArtworkId"])
+        before = self.feed()
+        original = wp.ca.apply_command
+        def reject(db, **kwargs):
+            if kwargs["command_type"] == wp.ca.APPLY_SNAPSHOT:
+                wp.ca.fail(409, "providerSnapshotStale", "Fixture rejection")
+            return original(db, **kwargs)
+        self.tv_responses(Response(png(), "image/png"))
+        with mock.patch.object(wp.ca, "apply_command", side_effect=reject):
+            self.code(self.apply(self.apply_body("refresh", work_id=body["workId"], externalId="tv:42")),
+                      409, "providerSnapshotStale")
+        self.assertEqual(self.provider_artworks(body["workId"]), [])
+        self.assertEqual(self.feed(), before)
+
+    def test_apply_gallery_byte_budget_defers_remaining_images(self):
+        self.keys()
+        body = self.apply_body(provider="igdb")
+        raw = game()
+        raw["screenshots"].append({"image_id": "second"})
+        self.responses({"access_token": "token", "expires_in": 3600}, [raw], Response(png(), "image/png"))
+        with mock.patch.object(wp, "MAX_AUTO_ARTWORK_BYTES", len(png())):
+            self.ok(self.apply(body))
+        self.assertEqual(len(self.provider_artworks(body["workId"])), 1)
+        self.assertEqual(self.open.call_count, 3)
+
+    def test_apply_gallery_capacity_or_busy_decoder_does_not_reject_metadata(self):
+        self.keys()
+        body = self.apply_body(provider="igdb")
+        self.responses({"access_token": "token", "expires_in": 3600}, [game()], Response(png(), "image/png"))
+        with mock.patch.object(wp.ca, "MAX_ARTWORKS_PER_WORK", 0):
+            self.ok(self.apply(body))
+        self.assertEqual(self.provider_artworks(body["workId"]), [])
+        self.responses([game()])
+        self.relay.locks["artwork"].acquire()
+        try:
+            self.ok(self.apply(self.apply_body("refresh", provider="igdb", work_id=body["workId"])))
+        finally:
+            self.relay.locks["artwork"].release()
+        self.assertEqual(self.provider_artworks(body["workId"]), [])
+
+    def test_automatic_storage_uses_short_nonretrying_client_and_closes_it(self):
+        import r2
+        self.responses(Response(png(), "image/png"))
+        with mock.patch.object(r2, "_R2Client", type(fake_s3), create=True), \
+                mock.patch.object(r2, "_storage_client", return_value=fake_s3, create=True) as factory, \
+                mock.patch.object(fake_s3, "close", create=True) as close:
+            wp.store_artwork(wp.ArtworkRequest(provider="tmdb", path="/season.jpg", size="w342"),
+                wp.time.monotonic() + 5, fixtures.api_app.get_db, lambda: fake_s3,
+                lambda: "test-bucket", automatic=True)
+        config = factory.call_args.args[0]
+        self.assertLessEqual(config.connect_timeout, 3)
+        self.assertLessEqual(config.read_timeout, 3)
+        self.assertEqual(config.retries["total_max_attempts"], 1)
+        close.assert_called_once()
+
+    def test_automatic_image_pixel_limit_and_expired_storage_budget(self):
+        with mock.patch.object(wp, "MAX_AUTO_IMAGE_PIXELS", 5):
+            self.responses(Response(png(), "image/png"))
+            with self.assertRaises(wp.HTTPException) as error:
+                wp.store_artwork(wp.ArtworkRequest(provider="tmdb", path="/season.jpg"),
+                    wp.time.monotonic() + 5, fixtures.api_app.get_db,
+                    lambda: fake_s3, lambda: "test-bucket", automatic=True)
+            self.assertEqual(error.exception.detail["code"], "providerImageInvalid")
+        with mock.patch.object(fake_s3, "head_object") as head:
+            with self.assertRaises(wp.HTTPException) as error:
+                wp._stored_blob(fake_s3, "test-bucket", png(), "image/png", deadline=0)
+            self.assertEqual(error.exception.detail["code"], "providerTimeout")
+            head.assert_not_called()
 
     def test_apply_tmdb_tv_identity_uses_tv_lookup_and_movie_type(self):
         self.keys()

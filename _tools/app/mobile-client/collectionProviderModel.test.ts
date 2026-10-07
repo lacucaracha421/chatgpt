@@ -47,6 +47,27 @@ it('sends only S3 fields for create and refresh and no snapshot or internal enve
   expect(Object.keys(body).sort()).toEqual(['commandId', 'epoch', 'externalId', 'libraryId', 'operation', 'provider', 'workId'].sort());
 });
 
+it.each(['create', 'connect', 'refresh'] as const)('accepts atomic gallery receipts for provider %s', async operation => {
+  apply({operation, type: operation === 'create' ? 'movie' : undefined});
+  const types = [...(operation === 'create' ? ['createWork'] : operation === 'connect' ? ['bindProvider'] : []),
+    'addArtwork', 'addArtwork', 'applyProviderSnapshot'];
+  const receipts = types.map((commandType, index) => ({...identity, commandType, operationId: `gallery-${index}`}));
+  mocks.api.mockImplementation(async path => path === AUTHORITY_STATUS_PATH ? {...identity, active: true} : {receipts});
+  await flushCommands();
+  expect(readCommands()[0]).toMatchObject({state: 'accepted', receipts});
+});
+
+it.each([
+  ['addArtwork', 'createWork', 'applyProviderSnapshot'],
+  ['createWork', 'applyProviderSnapshot', 'addArtwork'],
+  ['createWork', 'selectArtwork', 'applyProviderSnapshot'],
+])('rejects misplaced or unexpected gallery receipts: %s', (...types) => {
+  apply();
+  const receipts = types.map((commandType, index) => ({...identity, commandType, operationId: `invalid-${index}`}));
+  mocks.api.mockImplementation(async path => path === AUTHORITY_STATUS_PATH ? {...identity, active: true} : {receipts});
+  return flushCommands().then(() => expect(readCommands()[0].state).toBe('pending'));
+});
+
 it('rejects out-of-order receipts, blocks dependent artwork and parks stale-epoch errors', async () => {
   apply({operation: 'connect', workId: item.id});
   enqueueCommand(identity, {commandType: 'selectArtwork', workId: item.id, slot: 'work', artworkId: null, expectedArtworkId: 'old'});
@@ -89,6 +110,7 @@ it('maps IGDB hero choices and scopes preview bytes to the configured API connec
   expect(mocks.native).toHaveBeenCalledWith('providerImage', {path: candidate.previewUrl, connection}, signal);
   for (const url of ['https://image.tmdb.org/x.jpg', '//evil/x', '/v1/providers/image?provider=tmdb&path=x&size=original']) expect(providerImagePath(url)).toBeNull();
   expect(providerDetailPath('tmdb', 'tv:42')).toBe('/v1/providers/tmdb/tv/42');
+  expect(providerImagePath('/v1/providers/image?provider=igdb&path=art1&size=t_1080p')).not.toBeNull();
 });
 
 it('reads paginated binding identities from the existing authority baseline', async () => {
@@ -100,4 +122,19 @@ it('reads paginated binding identities from the existing authority baseline', as
   });
   expect(await readProviderBinding(identity, item.id, 'tmdb', new AbortController().signal)).toBe('tv:42');
   expect(mocks.api).toHaveBeenCalledTimes(3);
+});
+
+it('sends provider previews a few at a time so a long candidate sheet never overflows the native lane', async () => {
+  const pending: (() => void)[] = [];
+  let running = 0, peak = 0;
+  mocks.native.mockImplementation(() => new Promise(resolve => { running++; peak = Math.max(peak, running); pending.push(() => { running--; resolve({url: 'data:image/jpeg;base64,YQ=='}); }); }));
+  const path = '/v1/providers/image?provider=tmdb&path=%2Fp.jpg&size=w342';
+  const aborted = new AbortController();
+  const all = Array.from({length: 60}, (_, index) => providerPreview(path, index === 59 ? aborted.signal : new AbortController().signal));
+  aborted.abort();
+  await expect(all[59]).rejects.toThrow();
+  while (pending.length) { pending.shift()!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }
+  await Promise.all(all.slice(0, 59));
+  expect(peak).toBeLessThanOrEqual(6);
+  expect(mocks.native).toHaveBeenCalledTimes(59);
 });

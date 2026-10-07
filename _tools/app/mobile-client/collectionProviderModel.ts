@@ -26,12 +26,30 @@ export function providerImagePath(value: string | null): string | null {
   const params = new URLSearchParams(value.slice(value.indexOf('?') + 1));
   const provider = params.get('provider'), size = params.get('size');
   return (provider === 'tmdb' && ['w185', 'w342', 'w780'].includes(size ?? '')
-    || provider === 'igdb' && ['t_cover_big', 't_screenshot_med', 't_720p'].includes(size ?? '')) && params.has('path') ? value : null;
+    || provider === 'igdb' && ['t_cover_big', 't_screenshot_med', 't_720p', 't_1080p'].includes(size ?? '')) && params.has('path') ? value : null;
 }
+// Native image lanes hold 8 running + 48 queued requests and refuse the rest, so a sheet
+// with many candidates (55 posters + backdrops + season posters) must not send them all at once.
+const PREVIEW_SLOTS = 6;
+let previewsRunning = 0;
+const previewQueue: (() => void)[] = [];
+function nextPreview() { previewsRunning--; previewQueue.shift()?.(); }
 export function providerPreview(value: string | null, signal: AbortSignal) {
   const path = providerImagePath(value), connection = outboxConnection();
   if (!path || !connection) return Promise.resolve<{url: string} | null>(null);
-  return native<{url: string}>('providerImage', {path, connection}, signal);
+  return new Promise<{url: string} | null>((resolve, reject) => {
+    const start = () => {
+      if (signal.aborted) { nextPreview(); reject(new DOMException('Aborted', 'AbortError')); return; }
+      native<{url: string}>('providerImage', {path, connection}, signal).then(resolve, reject).finally(nextPreview);
+    };
+    const queued = () => { previewsRunning++; start(); };
+    if (previewsRunning < PREVIEW_SLOTS) { queued(); return; }
+    previewQueue.push(queued);
+    signal.addEventListener('abort', () => {
+      const index = previewQueue.indexOf(queued);
+      if (index >= 0) { previewQueue.splice(index, 1); reject(new DOMException('Aborted', 'AbortError')); }
+    }, {once: true});
+  });
 }
 /** The existing read projection omits bindings. Read only that baseline section, with its frozen cursor. */
 export async function readProviderBinding(identity: AuthorityIdentity, workId: string, provider: Provider, signal: AbortSignal) {

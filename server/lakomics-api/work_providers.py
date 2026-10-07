@@ -17,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request as HTTPRequest, build_opener
 
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi import Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -38,6 +39,12 @@ MAX_JSON_BYTES = ca.MAX_SNAPSHOT_BYTES
 MAX_RAW_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_RAW_TOTAL_BYTES = 32 * 1024 * 1024
 REQUEST_SECONDS = 25
+# Automatic imports are sequential and retain only manifests, never a gallery's bytes.
+# PC allows 200 seasons, 16 MiB per authority image and 32 MiB of season posters.
+MAX_AUTO_ARTWORK_BYTES = 32 * 1024 * 1024
+MAX_AUTO_IMAGE_PIXELS = 16 * 1024 * 1024
+ARTWORK_COMMIT_SECONDS = 2
+AUTO_IMAGE_SECONDS = 5
 IGDB_FIELDS = ("id,name,summary,first_release_date,genres.name,platforms.name,"
                "release_dates.date,release_dates.platform.name,involved_companies.developer,"
                "involved_companies.publisher,involved_companies.company.name,"
@@ -47,7 +54,7 @@ TMDB_SIZES = {"original", "w92", "w154", "w185", "w342", "w500", "w780", "w300",
 IGDB_SIZES = {"original", "cover_small", "cover_big", "thumb", "screenshot_med",
               "screenshot_big", "screenshot_huge", "720p", "1080p"}
 PREVIEW_SIZES = {"tmdb": {"w185", "w342", "w780"},
-                 "igdb": {"t_cover_big", "t_screenshot_med", "t_720p"}}
+                 "igdb": {"t_cover_big", "t_screenshot_med", "t_720p", "t_1080p"}}
 
 
 def fail(status, code, message):
@@ -85,13 +92,14 @@ class UpstreamStatus(Exception):
         self.status = status
 
 
-def outbound(url, *, deadline, limit=MAX_JSON_BYTES, headers=None, body=None, image=False):
+def outbound(url, *, deadline, limit=MAX_JSON_BYTES, headers=None, body=None, image=False,
+             socket_seconds=5):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
     request = HTTPRequest(url, data=body, headers=headers or {})
     try:
-        with _opener.open(request, timeout=min(5, remaining)) as response:
+        with _opener.open(request, timeout=min(socket_seconds, remaining)) as response:
             if response.status != 200:
                 raise UpstreamStatus(response.status)
             mime = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
@@ -303,9 +311,10 @@ def preview_image_url(provider, path, size):
 
 
 def candidate(provider, kind, path, width=None, height=None, **extra):
+    size = ("w780" if kind == "backdrop" else "w342") if provider == "tmdb" else \
+        ("t_cover_big" if kind == "cover" else "t_1080p")
     return {"kind": kind, "path": path,
-            "previewUrl": preview_url(provider, path, "w185" if provider == "tmdb" else
-                                      "t_cover_big" if kind == "cover" else "t_screenshot_med"),
+            "previewUrl": preview_url(provider, path, size),
             "width": positive(width), "height": positive(height), **extra}
 
 
@@ -599,7 +608,7 @@ def igdb_detail(relay, id_, deadline):
     return igdb_normalize(rows[0])
 
 
-def apply_provider(body, relay, get_db):
+def apply_provider(body, relay, get_db, storage, bucket):
     request_payload = body.model_dump(exclude_unset=True)
     namespace = uuid.UUID(body.commandId)
     batch_id = str(uuid.uuid5(namespace, "providerApply"))
@@ -634,32 +643,82 @@ def apply_provider(body, relay, get_db):
     if cached is not None:
         return cached
     require_keys(body.provider)
-    if body.provider == "tmdb":
-        kind = "tv" if body.externalId.startswith("tv:") else "movie"
-        id_ = int(body.externalId.split(":")[-1])
-        detail = relay.paced("tmdb", lambda deadline: tmdb_detail(relay, kind, id_, deadline))
-    else:
-        detail = relay.paced("igdb", lambda deadline: igdb_detail(relay, int(body.externalId), deadline))
+
+    def fetch(deadline):
+        if body.provider == "tmdb":
+            kind = "tv" if body.externalId.startswith("tv:") else "movie"
+            detail = tmdb_detail(relay, kind, int(body.externalId.split(":")[-1]), deadline)
+        else:
+            detail = igdb_detail(relay, int(body.externalId), deadline)
+        candidates = [a for a in detail["artwork"] if a["kind"] in ("season_poster", "screenshot")]
+        # IGDB has no PC count cap besides its bounded response. The authority's
+        # per-work ceiling plus the time/aggregate-byte budgets bound this relay.
+        candidates = candidates[:ca.MAX_ARTWORKS_PER_WORK]
+        existing = {}
+        with get_db() as db:
+            rows = db.execute("SELECT * FROM collection_authority_artworks WHERE library_id=?"
+                              " AND work_id=? AND provider=?",
+                              [body.libraryId, body.workId, body.provider]).fetchall()
+            known_screenshots = {r["provider_image_id"].rsplit(":screenshot:", 1)[0] for r in rows
+                if r["kind"] == "screenshot" and r["provider_image_id"]
+                and re.fullmatch(r"[A-Za-z0-9_-]+:screenshot:[a-f0-9]{64}", r["provider_image_id"])}
+            if binding and binding["snapshot_external_id"] == body.externalId and binding["snapshot"]:
+                previous = (json.loads(binding["snapshot"]).get("series") or {}).get("seasons") or []
+                owned = {r["artwork_id"]: r for r in rows}
+                for season in previous:
+                    art = owned.get(season.get("posterArtworkId"))
+                    if art is not None and art["kind"] == "cover":
+                        existing[season["id"]] = (season.get("posterPath"), art["artwork_id"])
+        seasons = (detail["binding"]["snapshot"].get("series") or {}).get("seasons") or []
+        for season in seasons:
+            old = existing.get(season["id"])
+            if old and old[0] == season.get("posterPath"):
+                set_season_artwork(detail, season["id"], old[1])
+        # Missing posters first so a long series makes progress on later refreshes.
+        candidates.sort(key=lambda a: a.get("seasonId") in existing)
+        prepared, total = [], 0
+
+        def download(_):
+            nonlocal total
+            for art in candidates:
+                kind = "cover" if art["kind"] == "season_poster" else "screenshot"
+                image = f"season:{art['seasonId']}" if kind == "cover" else art["path"]
+                # PC IGDB refresh preserves its gallery. Only fill missing shots
+                # here, including ones deferred by a previous request's budget.
+                if body.operation == "refresh" and kind == "screenshot" and image in known_screenshots:
+                    continue
+                remaining = deadline - ARTWORK_COMMIT_SECONDS - time.monotonic()
+                if remaining < 1 or total >= MAX_AUTO_ARTWORK_BYTES:
+                    break
+                try:
+                    receipt = store_artwork(ArtworkRequest(provider=body.provider, path=art["path"],
+                        size="w342" if kind == "cover" else "original"),
+                        min(deadline - ARTWORK_COMMIT_SECONDS, time.monotonic() + AUTO_IMAGE_SECONDS),
+                        get_db, storage, bucket, automatic=True,
+                        byte_limit=min(MAX_ARTWORK_BYTES, MAX_AUTO_ARTWORK_BYTES - total))
+                except (HTTPException, UpstreamStatus):
+                    # Optional artwork never turns a valid metadata apply into a failure.
+                    continue
+                total += receipt["original"]["sizeBytes"]
+                prepared.append((art, kind, image, receipt))
+            return prepared
+
+        if candidates:
+            try:
+                relay.paced("artwork", download)
+            except HTTPException as exc:
+                if exc.status_code != 429:
+                    raise
+                # Another image import owns the decoder/storage lane. Refresh can retry.
+        return detail, prepared
+
+    detail, prepared = relay.paced(body.provider, fetch)
 
     def command(kind, **fields):
         return {"libraryId": body.libraryId, "epoch": body.epoch, "contractVersion": ca.CONTRACT_VERSION,
                 "operationId": str(uuid.uuid5(namespace, kind)), "commandType": kind,
                 "workId": body.workId, **fields}
 
-    provider_binding = detail["binding"]
-    if body.operation == "create":
-        metadata = detail["metadata"]
-        commands = [command(ca.CREATE, type=body.type, name=metadata["name"], legacyKind=None,
-            fields={k: v for k, v in metadata.items() if k != "name"}, binding=provider_binding)]
-    else:
-        bound = binding is not None and binding["bound"]
-        commands = []
-        if body.operation == "connect":
-            commands.append(command(ca.BIND, provider=body.provider, externalId=body.externalId,
-                config=provider_binding["config"], expectedRevision=binding["entity_revision"] if bound else 0))
-        commands.append(command(ca.APPLY_SNAPSHOT,
-            **{k: provider_binding[k] for k in ("provider", "externalId", "snapshot", "values", "details")},
-            baseSnapshotDigest=binding["snapshot_digest"] if bound else None))
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         try:
@@ -673,6 +732,49 @@ def apply_provider(body, relay, get_db):
                     ctx = ca.Context(db, ca.authority.active_domain(db, ca.DOMAIN),
                         command_type=ca.APPLY_SNAPSHOT, operation_id=batch_id, now=ca.now_iso())
                     ca.conflict(ctx, "binding", ca.binding_projection(current), code="providerSnapshotStale")
+            artwork_commands = []
+            capacity = ca.MAX_ARTWORKS_PER_WORK - db.execute(
+                "SELECT COUNT(*) FROM collection_authority_artworks WHERE library_id=? AND work_id=?",
+                [body.libraryId, body.workId]).fetchone()[0]
+            pending_ids = set()
+            for art, kind, image, receipt in prepared:
+                # Exactly the PC authority identity; reuse PC-made IDs as well.
+                identity_ = f"{image}:{kind}:{receipt['original']['sha256']}"
+                existing = db.execute("SELECT artwork_id FROM collection_authority_artworks"
+                    " WHERE library_id=? AND work_id=? AND provider=? AND provider_image_id=?"
+                    " ORDER BY artwork_id LIMIT 1",
+                    [body.libraryId, body.workId, body.provider, identity_]).fetchone()
+                artwork_id = existing[0] if existing else str(uuid.uuid5(uuid.UUID(body.workId),
+                    body.provider + ":" + identity_))
+                if existing is None and artwork_id not in pending_ids:
+                    if len(artwork_commands) >= capacity:
+                        continue
+                    pending_ids.add(artwork_id)
+                    artwork_commands.append({**command(ca.ADD_ARTWORK),
+                        "operationId": str(uuid.uuid5(namespace, "addArtwork:" + artwork_id)),
+                        "artworkId": artwork_id, "kind": kind, "provider": body.provider,
+                        "providerImageId": identity_, "original": receipt["original"],
+                        "thumbnail": receipt["thumbnail"], "width": receipt["width"],
+                        "height": receipt["height"], "language": None})
+                if kind == "cover":
+                    set_season_artwork(detail, art["seasonId"], artwork_id)
+            provider_binding = detail["binding"]
+            bound = binding is not None and binding["bound"]
+            commands = []
+            if body.operation == "create":
+                metadata = detail["metadata"]
+                # References must resolve after addArtwork, within this same batch.
+                commands.append(command(ca.CREATE, type=body.type, name=metadata["name"], legacyKind=None,
+                    fields={k: v for k, v in metadata.items() if k != "name"},
+                    binding=None if artwork_commands else provider_binding))
+            elif body.operation == "connect":
+                commands.append(command(ca.BIND, provider=body.provider, externalId=body.externalId,
+                    config=provider_binding["config"], expectedRevision=binding["entity_revision"] if bound else 0))
+            commands.extend(artwork_commands)
+            if body.operation != "create" or artwork_commands:
+                commands.append(command(ca.APPLY_SNAPSHOT,
+                    **{k: provider_binding[k] for k in ("provider", "externalId", "snapshot", "values", "details")},
+                    baseSnapshotDigest=binding["snapshot_digest"] if bound else None))
             result = ca.apply_command_batch(db, library_id=body.libraryId, epoch=body.epoch,
                 operation_id=batch_id, request_payload=request_payload, commands=commands, now=ca.now_iso())
             db.commit()
@@ -682,7 +784,15 @@ def apply_provider(body, relay, get_db):
             raise
 
 
-def image_dimensions(data, mime):
+def set_season_artwork(detail, season_id, artwork_id):
+    binding = detail["binding"]
+    for series in (binding["snapshot"].get("series"), (binding["details"] or {}).get("series")):
+        for season in (series or {}).get("seasons") or []:
+            if season["id"] == season_id:
+                season["posterArtworkId"] = artwork_id
+
+
+def image_dimensions(data, mime, *, max_pixels=None):
     try:
         from PIL import Image
     except ImportError:
@@ -692,6 +802,8 @@ def image_dimensions(data, mime):
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
                 width, height = image.size
+                if max_pixels is not None and width * height > max_pixels:
+                    raise ValueError("image pixel budget exceeded")
                 if not positive(width) or not positive(height) or Image.MIME.get(image.format) != mime:
                     raise ValueError("invalid image")
                 image.verify()
@@ -729,33 +841,62 @@ def artwork_thumbnail(data):
         return None
 
 
-def _stored_blob(client, storage_bucket, data, mime):
+def _stored_blob(client, storage_bucket, data, mime, *, deadline=None):
     """Put one content-addressed blob (once) and confirm its storage receipt."""
     sha = hashlib.sha256(data).hexdigest()
     key = artwork_key(sha)
+
+    def check_budget():
+        if deadline is not None and time.monotonic() >= deadline:
+            fail(504, "providerTimeout", "Provider artwork request budget exceeded.")
+
+    check_budget()
     try:
         metadata = client.head_object(Bucket=storage_bucket, Key=key)
     except ClientError as exc:
         if str(exc.response.get("Error", {}).get("Code")) not in ("404", "NoSuchKey", "NotFound"):
             raise
         head_cache.ticket_heads.invalidate(client, storage_bucket, key)
+        check_budget()
         client.put_object(Bucket=storage_bucket, Key=key, Body=io.BytesIO(data), ContentType=mime)
+        check_budget()
         metadata = client.head_object(Bucket=storage_bucket, Key=key)
     if metadata.get("ContentLength") != len(data) or metadata.get("ContentType") != mime:
         fail(409, "providerArtworkMismatch", "저장된 이미지가 확인 정보와 일치하지 않습니다.")
     return {"sha256": sha, "sizeBytes": len(data), "contentType": mime}
 
 
-def store_artwork(body, deadline, get_db, storage, bucket):
+def store_artwork(body, deadline, get_db, storage, bucket, *, automatic=False,
+                  byte_limit=MAX_ARTWORK_BYTES):
     url = image_url(body.provider, body.path, body.size)
-    data, mime = outbound(url, deadline=deadline, limit=MAX_ARTWORK_BYTES, image=True)
-    width, height = image_dimensions(data, mime)
+    data, mime = outbound(url, deadline=deadline, limit=byte_limit, image=True,
+        socket_seconds=1 if automatic else 5)
+    width, height = image_dimensions(data, mime,
+        max_pixels=MAX_AUTO_IMAGE_PIXELS if automatic else None)
     thumbnail_data = artwork_thumbnail(data)
     try:
         client, storage_bucket = storage(), bucket()
-        blob = _stored_blob(client, storage_bucket, data, mime)
-        thumbnail = None if thumbnail_data is None else _stored_blob(
-            client, storage_bucket, thumbnail_data, ARTWORK_THUMBNAIL_MIME)
+        owned_client = None
+        if automatic:
+            # The service's shared R2 transfer client waits 60s and retries. Use
+            # the existing factory with short, non-retrying sockets for this lane.
+            import r2
+            if hasattr(r2, "_R2Client") and isinstance(client, r2._R2Client):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    fail(504, "providerTimeout", "Provider artwork request budget exceeded.")
+                timeout = min(3, max(0.5, remaining / 4))
+                owned_client = client = r2._storage_client(Config(signature_version="s3v4",
+                    connect_timeout=timeout, read_timeout=timeout,
+                    retries={"mode": "standard", "total_max_attempts": 1}, max_pool_connections=1))
+        storage_deadline = deadline if automatic else None
+        try:
+            blob = _stored_blob(client, storage_bucket, data, mime, deadline=storage_deadline)
+            thumbnail = None if thumbnail_data is None else _stored_blob(
+                client, storage_bucket, thumbnail_data, ARTWORK_THUMBNAIL_MIME, deadline=storage_deadline)
+        finally:
+            if owned_client is not None:
+                owned_client.close()
         with get_db() as db:
             for receipt in (blob, thumbnail):
                 if receipt is not None:
@@ -797,7 +938,7 @@ def register(app, get_db, require_client, storage, bucket):
                 fail(413, "providerRequestTooLarge", "작품 정보 적용 요청 크기가 너무 큽니다.")
             chunks.extend(chunk)
         body = parse_apply(chunks)
-        return await run_in_threadpool(apply_provider, body, relay, get_db)
+        return await run_in_threadpool(apply_provider, body, relay, get_db, storage, bucket)
 
     @app.get("/v1/providers/status")
     def status(authorization: str | None = Header(default=None)):

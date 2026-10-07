@@ -141,10 +141,14 @@ async function deliver(connection: string) {
     try {
       if (row.command.commandType === 'providerApply') {
         const reply = await api<{receipts: CommandReceipt[]}>('/v1/providers/apply', undefined, providerApplyBody(row.command), 'POST', false, connection);
-        const types = row.command.operation === 'connect' ? ['bindProvider', 'applyProviderSnapshot']
-          : [row.command.operation === 'create' ? 'createWork' : 'applyProviderSnapshot'];
-        if (!Array.isArray(reply?.receipts) || reply.receipts.length !== types.length || reply.receipts.some((receipt, index) =>
-          !sameAuthority(receipt, row.command) || typeof receipt.operationId !== 'string' || receipt.commandType !== types[index]))
+        // Relay-imported gallery artwork precedes the final snapshot atomically.
+        // Keep accepting older servers' single create receipt.
+        const order = row.command.operation === 'create' ? /^createWork(?:,addArtwork)*,applyProviderSnapshot$|^createWork$/
+          : row.command.operation === 'connect' ? /^bindProvider(?:,addArtwork)*,applyProviderSnapshot$/
+          : /^(?:addArtwork,)*applyProviderSnapshot$/;
+        if (!Array.isArray(reply?.receipts) || !order.test(reply.receipts.map(receipt => receipt?.commandType).join(','))
+          || reply.receipts.some(receipt => !receipt || !sameAuthority(receipt, row.command) || typeof receipt.operationId !== 'string')
+          || new Set(reply.receipts.map(receipt => receipt.operationId)).size !== reply.receipts.length)
           throw new Error('서버 응답을 확인하지 못했습니다. 다시 전송합니다.');
         // Retain the server's command receipts in their original order, just as ordinary acknowledgements.
         changeIntent(connection, row.command.operationId, stored => { stored.receipts = reply.receipts; stored.acceptedAt = Date.now(); stored.state = 'accepted'; });
