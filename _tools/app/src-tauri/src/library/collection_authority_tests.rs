@@ -2978,6 +2978,7 @@ fn seed_av(l: &Library) {
         INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at) VALUES('p','commons',X'01','image/png',1,1,'p.png','https://commons.wikimedia.org/p','old');
         INSERT INTO collection_person_profiles(person_id,source,status,stashdb_id,name,fetched_at) VALUES('p','stashdb','matched','stash-p','Display','2000-01-01T00:00:00Z');
         INSERT INTO av_favorite_performers(person_id,created_at) VALUES('p','old');").unwrap();
+    l.connection().unwrap().execute("UPDATE collection_person_portraits SET image_bytes=?1 WHERE person_id='p'", [provider_png()]).unwrap();
 }
 
 fn av_local_state(l: &Library) -> Value {
@@ -3511,20 +3512,6 @@ fn collection_authority_batch5_av_edits_are_fenced_and_automatic_profile_refresh
         }
         let link: ApplyRequest = serde_json::from_value(json!({"collectionId":null,"newCollectionName":"New AV","expectedRevision":null,"split":{"x1":0,"x2":0},"surfaces":{"front":"keep","spine":"keep","back":"keep"},"fields":{},"performers":[],"directors":[]})).unwrap();
         assert_fenced(l.apply_av_link("inbox", link));
-        assert_fenced(l.save_av_person_memo("p", Some("new memo".into())));
-        let rect = AvPortraitRect {
-            x: 0.0,
-            y: 0.0,
-            w: 0.5,
-            h: 0.5,
-        };
-        assert_fenced(l.set_av_portrait_crop("p", "art", rect));
-        assert_fenced(l.clear_av_portrait("p"));
-        let portraits = AvPortraitState::default();
-        assert_fenced(l.preview_av_commons_portrait_with("p", &portraits, &NoNetwork));
-        assert_fenced(l.use_av_commons_portrait("p", &portraits));
-        assert_fenced(l.preview_av_stashdb_portrait_with("p", "image", &portraits, &NoNetwork));
-        assert_fenced(l.use_av_stashdb_portrait("p", &portraits));
         let profiles = AvProfileState::default();
         // Opening a performer page (force=false) keeps the stored stale profile quietly.
         let quiet = l
@@ -3552,14 +3539,6 @@ fn collection_authority_batch5_av_edits_are_fenced_and_automatic_profile_refresh
         ));
         assert_fenced(l.dismiss_av_performer_profile("p", &profiles));
         assert_fenced(l.clear_av_performer_profile("p", &profiles));
-        for favorite in [true, false] {
-            assert!(matches!(
-                l.set_av_favorite("p", favorite),
-                Err(HomeDataError::Library(
-                    LibraryError::CollectionAuthorityOperationUnavailable
-                ))
-            ));
-        }
         assert_eq!(av_local_state(&l), before);
         assert_eq!(count(&l, "collection_authority_outbox"), 0);
         // Reads stay available.

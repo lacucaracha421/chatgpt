@@ -4,13 +4,16 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 124;
+pub(crate) const SCHEMA_VERSION: i64 = 125;
 
-/// Test helper: undoes migrations 0103 through 0124 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0125 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE collection_authority_people_reconcile;
+    DROP TABLE collection_authority_portrait_blobs;
+    DROP TABLE collection_authority_people_cache;
     DROP TABLE character_target_tagger_tag_exclusions;
     DROP TABLE collection_authority_trash;
     DROP TABLE collection_authority_materialization;
@@ -740,6 +743,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 123 {
             transaction.execute_batch(include_str!("../../migrations/0124_av_authority_limits.sql"))?;
         }
+        if version <= 124 {
+            transaction.execute_batch(include_str!("../../migrations/0125_av_people_authority.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -911,7 +917,7 @@ pub(super) mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            124
+            SCHEMA_VERSION
         );
         assert_eq!(
             db.pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))

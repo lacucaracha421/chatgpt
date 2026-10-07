@@ -41,7 +41,11 @@ const COMMANDS: &[&str] = &[
     "acknowledgeReleaseEvents",
     "setAvDetails",
     "setAvCredits",
+    "setPerson",
+    "setPersonPortrait",
 ];
+
+include!("collection_authority_people.rs");
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1894,7 +1898,8 @@ fn apply_av(tx: &Transaction<'_>, v: &Value, now: &str) -> Result<(), LibraryErr
     )?;
     tx.execute("INSERT INTO collection_av_details(collection_id,product_code,title_ja,maker,label,series,genres_json,release_date) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(collection_id) DO UPDATE SET product_code=excluded.product_code,title_ja=excluded.title_ja,maker=excluded.maker,label=excluded.label,series=excluded.series,genres_json=excluded.genres_json,release_date=excluded.release_date",
         params![text(v,"workId")?,sql_value(&av["productCode"])?,sql_value(&av["titleJa"])?,sql_value(&av["maker"])?,sql_value(&av["label"])?,sql_value(&av["series"])?,av["genres"].to_string(),sql_value(&av["releaseDate"]) ?])?;
-    // Names now arrive as people; leave memo/profile/portrait rows intact.
+    capture_people_reconcile(tx)?;
+    // Older feeds omit person revisions; retain their PC-local person data.
     if let Some(people) = v.get("avPeople") {
         for person in people
             .as_array()
@@ -1903,6 +1908,9 @@ fn apply_av(tx: &Transaction<'_>, v: &Value, now: &str) -> Result<(), LibraryErr
             tx.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,name_ja=excluded.name_ja",
                 params![safe_id(text(person,"personId")?)?,text(person,"displayName")?,sql_value(&person["nameJa"])?,now])?;
             remember_av_person(tx, text(person, "personId")?)?;
+            if person.get("entityRevision").is_some() {
+                receive_person(tx, person, now)?;
+            }
         }
     }
     if let Some(credits) = v["avCredits"].as_array() {
@@ -2119,6 +2127,16 @@ fn selections(tx: &Transaction<'_>) -> Result<(), LibraryError> {
     }
     tx.execute("INSERT INTO collection_assets(collection_id,asset_id,added_at) SELECT r.work_id,json_extract(r.payload,'$.assetId'),json_extract(r.payload,'$.addedAt') FROM collection_authority_revisions r JOIN assets a ON a.id=json_extract(r.payload,'$.assetId') JOIN collections c ON c.id=r.work_id WHERE r.section='memberships' AND r.deleted=0 AND NOT EXISTS(SELECT 1 FROM collection_authority_trash t WHERE t.work_id=r.work_id) ON CONFLICT(collection_id,asset_id) DO NOTHING",[])?;
     tx.execute("UPDATE collection_volumes SET cover_artwork_id=(SELECT a.id FROM collection_work_artworks a WHERE a.id=json_extract(r.payload,'$.coverArtworkId')) FROM collection_authority_revisions r WHERE r.section='volumes' AND r.deleted=0 AND collection_volumes.id=json_extract(r.payload,'$.volumeId')",[])?;
+    if let Some(l) = local(tx)? {
+        let people = tx.prepare("SELECT payload FROM collection_authority_people_cache WHERE library_id=?1 AND epoch=?2")?
+            .query_map(params![l.id.library,l.id.epoch], |r| r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        for raw in people {
+            let person: Value = serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+            project_person_fields(tx,text(&person,"personId")?,&person,&chrono::Utc::now().to_rfc3339())?;
+            project_person_portrait(tx,text(&person,"personId")?,&person["portraitSelection"],&chrono::Utc::now().to_rfc3339())?;
+        }
+    }
+    reapply_pending_core_edits(tx)?;
     Ok(())
 }
 
@@ -2365,13 +2383,17 @@ impl Library {
         if !l.adopted {
             return Ok((changed, false));
         }
+        changed |= self.reconcile_av_people_with(&status, &|person| {
+            client.collection_authority_read(&format!("/v1/collections/people/{person}"), token)
+        })? > 0;
         let sent = if held {
             false
         } else {
             self.flush_collection_outbox_with(
                 &status,
                 &|body| {
-                    if body["commandType"] == "addArtwork" {
+                    if body["commandType"] == "addArtwork" ||
+                        (body["commandType"] == "setPersonPortrait" && body["portrait"]["kind"] == "image") {
                         self.upload_collection_command_artwork(client, token, body)?;
                     }
                     let credential = command_credential(body, token, publisher)?;
@@ -2429,6 +2451,9 @@ impl Library {
             selections(&tx)?;
             tx.commit()?;
         }
+        changed |= self.materialize_person_portraits_with(&status, &|blob| {
+            client.download_person_portrait(blob, token)
+        })? > 0;
         // Drain originals in small batches within a bounded time per cadence, so a
         // fresh adoption (hundreds of covers) fills in within minutes, not hours.
         let deadline = std::time::Instant::now() + MATERIALIZE_BUDGET;
@@ -2635,6 +2660,8 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
         let body: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
         match body["commandType"].as_str() {
+            Some("setPerson") => project_person_fields(tx, text(&body, "personId")?, &body["changes"], &created_at)?,
+            Some("setPersonPortrait") => project_person_portrait(tx, text(&body, "personId")?, &body["portrait"], &created_at)?,
             Some("setAvDetails") => {
                 project_av_details(tx, text(&body, "workId")?, &body["changes"])?
             }
@@ -3046,14 +3073,18 @@ impl Library {
     ) -> Result<(), LibraryError> {
         use sha2::{Digest, Sha256};
         use std::io::Read;
+        let is_portrait = body["commandType"] == "setPersonPortrait";
         let blob: crate::cloud::collections::ArtworkBlob =
-            serde_json::from_value(body["original"].clone())
+            serde_json::from_value(if is_portrait {body["portrait"]["original"].clone()} else {body["original"].clone()})
                 .map_err(|_| LibraryError::InvalidCloudResponse)?;
         if blob.size_bytes > 16 * 1024 * 1024 {
             return Err(LibraryError::InvalidWorkArtwork);
         }
-        let mut media = self.resolve_work_artwork(text(body, "artworkId")?)?;
         let mut bytes = Vec::new();
+        if is_portrait {
+            bytes = self.connection()?.query_row("SELECT bytes FROM collection_authority_portrait_blobs WHERE sha256=?1", [&blob.sha256], |r| r.get(0))?;
+        } else {
+        let mut media = self.resolve_work_artwork(text(body, "artworkId")?)?;
         media
             .file
             .by_ref()
@@ -3063,6 +3094,7 @@ impl Library {
                 path: self.root().to_path_buf(),
                 source,
             })?;
+        }
         if bytes.len() as u64 != blob.size_bytes
             || Sha256::digest(&bytes)
                 .iter()
@@ -3100,6 +3132,7 @@ impl Library {
             }
             _ => {}
         }
+        capture_people_reconcile(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -3218,6 +3251,9 @@ impl Library {
                     // remote rows before this receipt still have to be received.
                     let l = local(&tx)?.unwrap();
                     apply_entities(&tx, &receipt["entities"], &l.generation, &timestamp)?;
+                    if let Some(person) = receipt.get("person") {
+                        receive_person(&tx, person, &timestamp)?;
+                    }
                     selections(&tx)?;
                     tx.execute("UPDATE collection_authority_outbox SET state='accepted',receipt=?2,last_error=NULL,updated_at=?3 WHERE seq=?1",params![seq,receipt.to_string(),timestamp])?;
                     sent = true;

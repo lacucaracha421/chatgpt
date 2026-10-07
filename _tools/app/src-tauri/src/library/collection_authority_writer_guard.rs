@@ -3,6 +3,7 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 const ALLOWLIST: &[(&str, &str)] = &[
+    ("library/collection_authority_people.rs", "AV step 3a: confirmed person replica, reconcile and outbox projection"),
     (
         "library/collection_authority.rs",
         "batch 1: confirmed replica/outbox apply",
@@ -220,6 +221,12 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
     ),
     ("library/aladin_flow.rs", "reconcile_source"),
     ("library/av_artwork.rs", "apply_av_artwork"),
+    ("library/av_detail.rs", "save_av_person_memo"),
+    ("library/av_portrait.rs", "set_av_portrait_crop"),
+    ("library/av_portrait.rs", "clear_av_portrait"),
+    ("library/av_portrait.rs", "use_av_commons_portrait"),
+    ("library/av_portrait.rs", "use_av_stashdb_portrait"),
+    ("library/home_data.rs", "set_av_favorite"),
 ];
 
 const FENCED_FUNCTIONS: &[(&str, &str)] = &[
@@ -245,17 +252,11 @@ const FENCED_FUNCTIONS: &[(&str, &str)] = &[
     ("library/launchbox.rs", "store_spine"),
     ("library/launchbox.rs", "fill_launchbox_platforms"),
     ("library/collection_pc.rs", "store_cover_focus"),
-    // AV link, person metadata, portraits, profiles and favorites remain fenced.
+    // AV link and StashDB profile writes remain fenced.
     ("library/av_link/apply.rs", "apply_people"),
     ("library/av_link/apply.rs", "apply_av_link"),
-    ("library/av_detail.rs", "save_av_person_memo"),
-    ("library/av_portrait.rs", "set_av_portrait_crop"),
-    ("library/av_portrait.rs", "clear_av_portrait"),
-    ("library/av_portrait.rs", "use_av_commons_portrait"),
-    ("library/av_portrait.rs", "use_av_stashdb_portrait"),
     ("library/av_stashdb.rs", "save"),
     ("library/av_stashdb.rs", "clear_av_performer_profile"),
-    ("library/home_data.rs", "set_av_favorite"),
 ];
 
 // Functions in these two files use a standalone closing brace at their declaration
@@ -310,7 +311,10 @@ fn remaining_source(file: &str, source: &str) -> String {
                 || body.contains("enqueue_provider_snapshot(")
                 || body.contains("enqueue_release_event(")
                 || body.contains("enqueue_release_ack(")
-                || body.contains("enqueue_av_changes("),
+                || body.contains("enqueue_av_changes(")
+                || body.contains("enqueue_person_changes(")
+                || body.contains("enqueue_person_portrait(")
+                || body.contains("enqueue_stored_person_portrait("),
             "{f}::{name} lost transactional outbox"
         );
         ranges.push(range);

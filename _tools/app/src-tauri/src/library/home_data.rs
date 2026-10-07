@@ -38,9 +38,9 @@ impl Library {
         person_id: &str,
         favorite: bool,
     ) -> Result<(), HomeDataError> {
-        let connection = self.connection()?;
-        // Favorites are shared person data without an authority command yet (1B §4).
-        super::collection_authority::fence_collection_operation(&connection)?;
+        let mut database = self.connection()?;
+        let connection = database.transaction()?;
+        let status = super::collection_authority::collection_write_status(&connection)?;
         if favorite {
             let performer: bool = connection.query_row(
                 "SELECT EXISTS(
@@ -54,6 +54,11 @@ impl Library {
             if !performer {
                 return Err(HomeDataError::InvalidAvPerformer);
             }
+        }
+        if status.active {
+            super::collection_authority::enqueue_person_changes(&connection, &status, person_id, serde_json::json!({"favorite":favorite}))?;
+        }
+        if favorite {
             connection.execute(
                 "INSERT INTO av_favorite_performers(person_id,created_at) VALUES(?1,?2)
                  ON CONFLICT(person_id) DO NOTHING",
@@ -65,6 +70,7 @@ impl Library {
                 [person_id],
             )?;
         }
+        connection.commit()?;
         Ok(())
     }
 

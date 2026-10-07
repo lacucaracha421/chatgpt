@@ -150,8 +150,7 @@ impl Library {
         }
         let mut c = self.connection()?;
         let tx = c.transaction()?;
-        // Portraits have no authority command yet (1B §4).
-        super::collection_authority::fence_collection_operation(&tx)?;
+        let status = super::collection_authority::collection_write_status(&tx)?;
         require_person(&tx, person)?;
         let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_work_artworks a JOIN collections c ON c.id=a.collection_id AND c.type='av' WHERE a.id=?1 AND a.kind='cover' AND a.selected=1 AND EXISTS(SELECT 1 FROM collection_person_relations r WHERE r.collection_id=c.id AND r.person_id=?2))",params![artwork,person],|r|r.get(0))?;
         if !valid {
@@ -162,19 +161,23 @@ impl Library {
             [person],
         )?;
         tx.execute("INSERT INTO collection_person_portraits(person_id,kind,artwork_id,x,y,w,h,updated_at) VALUES(?1,'crop',?2,?3,?4,?5,?6,?7)",params![person,artwork,rect.x,rect.y,rect.w,rect.h,chrono::Utc::now().to_rfc3339()])?;
+        super::collection_authority::enqueue_stored_person_portrait(&tx, &status, person)?;
         let result = portrait(&tx, person)?.ok_or(AvError::Invalid)?;
         tx.commit()?;
         self.publication_inputs.signal(&[9]);
         Ok(result)
     }
     pub fn clear_av_portrait(&self, person: &str) -> Result<(), AvError> {
-        let c = self.connection()?;
-        super::collection_authority::fence_collection_operation(&c)?;
-        require_person(&c, person)?;
-        c.execute(
+        let mut c = self.connection()?;
+        let tx = c.transaction()?;
+        let status = super::collection_authority::collection_write_status(&tx)?;
+        require_person(&tx, person)?;
+        super::collection_authority::enqueue_person_portrait(&tx, &status, person, Value::Null)?;
+        tx.execute(
             "DELETE FROM collection_person_portraits WHERE person_id=?1",
             [person],
         )?;
+        tx.commit()?;
         self.publication_inputs.signal(&[9]);
         Ok(())
     }
@@ -186,7 +189,6 @@ impl Library {
     ) -> Result<Option<AvCommonsPreview>, AvError> {
         let qid: Option<String> = {
             let c = self.connection()?;
-            super::collection_authority::fence_collection_operation(&c)?;
             require_person(&c, person)?;
             c.query_row(
                 "SELECT wikidata_id FROM collection_people WHERE id=?1",
@@ -247,7 +249,7 @@ impl Library {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut c = self.connection()?;
         let tx = c.transaction()?;
-        super::collection_authority::fence_collection_operation(&tx)?;
+        let status = super::collection_authority::collection_write_status(&tx)?;
         require_person(&tx, person)?;
         let key = (self.root().to_path_buf(), person.to_owned());
         let Some(PendingImage::Commons(image)) = pending.get(&key).and_then(|p| p.image.as_ref())
@@ -259,6 +261,7 @@ impl Library {
             [person],
         )?;
         tx.execute("INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,author,license,license_url,source_url,updated_at) VALUES(?1,'commons',?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![person,image.bytes,image.mime,image.width,image.height,image.preview.file_name,image.preview.author,image.preview.license,image.preview.license_url,image.preview.source_url,chrono::Utc::now().to_rfc3339()])?;
+        super::collection_authority::enqueue_stored_person_portrait(&tx, &status, person)?;
         let result = AvPortrait::Commons {
             preview: image.preview.clone(),
         };
@@ -276,7 +279,6 @@ impl Library {
         state: &AvPortraitState,
         http: &impl HttpClient,
     ) -> Result<AvStashdbPreview, AvError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let key = (self.root().to_path_buf(), person.to_owned());
         let generation = uuid::Uuid::new_v4();
         state
@@ -379,7 +381,6 @@ impl Library {
         person: &str,
         state: &AvPortraitState,
     ) -> Result<AvPortrait, AvError> {
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let mut pending = state
             .0
             .lock()
@@ -402,13 +403,14 @@ impl Library {
         }
         let mut c = self.connection()?;
         let tx = c.transaction()?;
-        super::collection_authority::fence_collection_operation(&tx)?;
+        let status = super::collection_authority::collection_write_status(&tx)?;
         require_person(&tx, person)?;
         tx.execute(
             "DELETE FROM collection_person_portraits WHERE person_id=?1",
             [person],
         )?;
         tx.execute("INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at) VALUES(?1,'stashdb',?2,'image/jpeg',?3,?4,?5,?6,?7)", params![person,image.bytes,image.preview.width,image.preview.height,image.image_id,image.preview.source_url,chrono::Utc::now().to_rfc3339()])?;
+        super::collection_authority::enqueue_stored_person_portrait(&tx, &status, person)?;
         let result = AvPortrait::Stashdb {
             preview: image.preview.clone(),
         };

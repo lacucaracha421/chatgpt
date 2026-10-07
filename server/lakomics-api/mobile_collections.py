@@ -316,7 +316,7 @@ class PersonProfile(StrictModel):
 
 class PersonPortrait(StrictModel):
     """Attribution only: portrait paths, URLs to bytes and image bytes are never accepted."""
-    source: Literal["stashdb", "commons", "cover"]
+    source: Literal["stashdb", "commons", "cover", "local"]
     author: str | None = Field(default=None, max_length=2000)
     license: str | None = Field(default=None, max_length=500)
     licenseUrl: str | None = Field(default=None, max_length=2000)
@@ -496,8 +496,11 @@ def public_person(db, person_id, library_id=None):
     if library_id is None:
         row = db.execute("SELECT payload FROM mobile_collection_people WHERE id=?", [person_id]).fetchone()
     else:
-        row = db.execute("SELECT payload FROM collection_authority_people WHERE library_id=? AND person_id=?",
+        row = db.execute("SELECT * FROM collection_authority_people WHERE library_id=? AND person_id=?",
                          [library_id, person_id]).fetchone()
+        if row is not None:
+            import collection_authority
+            return {"person": collection_authority.person_entity(db, library_id, row)}
     return None if row is None else {"person": json.loads(row["payload"])}
 
 

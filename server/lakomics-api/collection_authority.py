@@ -118,13 +118,15 @@ RECORD_RELEASE = "recordReleaseEvent"
 ACK_RELEASE = "acknowledgeReleaseEvents"
 AV_DETAILS = "setAvDetails"
 AV_CREDITS = "setAvCredits"
+PERSON = "setPerson"
+PERSON_PORTRAIT = "setPersonPortrait"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS)
+                         VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -135,6 +137,8 @@ COMMAND_KEYS = {
     UPDATE: {"workId", "changes", "expected", "expectedRevision"},
     AV_DETAILS: {"workId", "changes", "expected"},
     AV_CREDITS: {"workId", "credits", "people", "expectedRevision"},
+    PERSON: {"personId", "changes", "expected"},
+    PERSON_PORTRAIT: {"personId", "portrait", "expectedRevision"},
     DELETE: {"workId", "expectedRevision"},
     RESTORE: {"workId", "expectedRevision"},
     PURGE: {"workId", "expectedRevision"},
@@ -453,7 +457,9 @@ def startup_db(db):
     db.executescript(DDL)
     additions = {
         "collection_authority_works": {"av_credits": "TEXT NOT NULL DEFAULT '[]'"},
-        "collection_authority_people": {"display_name": "TEXT", "name_ja": "TEXT"},
+        "collection_authority_people": {"display_name": "TEXT", "name_ja": "TEXT",
+                                        "entity_revision": "INTEGER NOT NULL DEFAULT 1",
+                                        "portrait_selection": "TEXT"},
         "collection_authority_artworks": {"published_order": "INTEGER",
                                            "selected": "INTEGER CHECK(selected IN (0,1))"},
         "collection_authority_volumes": {"cover_focus_x": "REAL", "published": "TEXT",
@@ -860,13 +866,15 @@ def av_work_entity(db, library_id, state):
         return state
     people = []
     for person_id in sorted({c["personId"] for c in state.get("avCredits", [])}):
-        row = db.execute("SELECT payload,portrait_image FROM collection_authority_people"
+        row = db.execute("SELECT * FROM collection_authority_people"
                          " WHERE library_id=? AND person_id=?", [library_id, person_id]).fetchone()
         if row is None:
             continue
         payload = json.loads(row["payload"])
         name, name_ja = av_person_identity(db, library_id, person_id, payload)
         people.append({**payload, "personId": person_id, "displayName": name, "nameJa": name_ja,
+                       "entityRevision": row["entity_revision"],
+                       "portraitSelection": person_portrait_selection(db, library_id, row),
                        "portraitImage": None if row["portrait_image"] is None else json.loads(row["portrait_image"])})
     return {**state, "avPeople": people}
 
@@ -1258,7 +1266,8 @@ def _finish(ctx, payload_sha, entity_key, **extra):
     transaction, so they commit together or not at all.
     """
     db = ctx.db
-    if not ctx.entities:
+    person_changed = extra.pop("personChanged", False)
+    if not ctx.entities and not person_changed:
         result = ctx.result(changed=False, sequence=None, cursor=ctx.row["cursor"], **extra)
         _receipt(db, ctx, payload_sha, entity_key, result)
         return result
@@ -1671,6 +1680,161 @@ def _set_av_credits(ctx, entity, payload_sha):
         state["details"]["av"] = {**dict.fromkeys(av_contract.TEXT_LIMITS), "genres": [], "releaseDate": None}
     _bump_work(ctx, state)
     return _finish(ctx, payload_sha, state["workId"])
+
+
+def person_portrait_selection(db, library_id, row):
+    if row["portrait_selection"] is not None:
+        return json.loads(row["portrait_selection"])
+    payload = json.loads(row["payload"])
+    if row["portrait_image"] is not None:
+        image = json.loads(row["portrait_image"])
+        attribution = payload.get("portrait") or {}
+        return {"kind": "image", "original": {k: image[k] for k in ("sha256", "sizeBytes", "contentType")},
+                "width": image["width"], "height": image["height"],
+                "attribution": {"source": attribution.get("source", "local"),
+                                **{k: attribution.get(k) for k in ("sourceUrl", "license", "author")}}}
+    crop = db.execute("SELECT json_extract(c.value,'$.portraitCrop') FROM collection_authority_works w,"
+                      " json_each(w.av_credits) c WHERE w.library_id=? AND json_extract(c.value,'$.personId')=?"
+                      " AND json_extract(c.value,'$.portraitCrop') IS NOT NULL ORDER BY w.work_id LIMIT 1",
+                      [library_id, row["person_id"]]).fetchone()
+    if crop:
+        value = json.loads(crop[0])
+        return {"kind": "crop", "artworkId": value["artworkId"],
+                "rect": {k: value[k] for k in ("x", "y", "w", "h")}}
+    return None
+
+
+def person_entity(db, library_id, row):
+    payload = json.loads(row["payload"])
+    name, name_ja = av_person_identity(db, library_id, row["person_id"], payload)
+    return {**payload, "personId": row["person_id"], "displayName": name, "nameJa": name_ja,
+            "entityRevision": row["entity_revision"],
+            "portraitSelection": person_portrait_selection(db, library_id, row),
+            "portraitImage": None if row["portrait_image"] is None else json.loads(row["portrait_image"])}
+
+
+def _person_row(ctx, person_id):
+    row = ctx.db.execute("SELECT * FROM collection_authority_people WHERE library_id=? AND person_id=?",
+                         [ctx.library_id, person_id]).fetchone()
+    if row is None:
+        fail(404, "personNotFound", "인물을 찾을 수 없습니다.", personId=person_id)
+    return row
+
+
+def _publish_person(ctx, person_id):
+    # Shipped PCs reject extra feed sections: republish the affected works instead.
+    rows = ctx.db.execute("SELECT DISTINCT w.* FROM collection_authority_works w,json_each(w.av_credits) c"
+                          " WHERE w.library_id=? AND w.lifecycle<>'tombstoned'"
+                          " AND json_extract(c.value,'$.personId')=? ORDER BY w.work_id",
+                          [ctx.library_id, person_id]).fetchall()
+    for row in rows:
+        _bump_work(ctx, work_state(row))
+
+
+def _person_fields(value):
+    if not isinstance(value, dict) or not value or not set(value) <= {"memo", "favorite"}:
+        fail()
+    return {k: _av_text(v, av_contract.MAX_PERSON_MEMO) if k == "memo" else _bool(v)
+            for k, v in value.items()}
+
+
+def _set_person(ctx, entity, payload_sha):
+    row = _person_row(ctx, entity["personId"])
+    payload = json.loads(row["payload"])
+    changes, expected = entity["changes"], entity["expected"]
+    current = {k: normalized_optional(payload.get(k)) if k == "memo" else bool(payload.get(k, False))
+               for k in changes}
+    if current == changes:
+        return _finish(ctx, payload_sha, row["person_id"], person=person_entity(ctx.db, ctx.library_id, row))
+    if current != expected:
+        conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
+    payload.update(changes)
+    ctx.db.execute("UPDATE collection_authority_people SET payload=?,entity_revision=entity_revision+1"
+                   " WHERE library_id=? AND person_id=?", [encode(payload), ctx.library_id, row["person_id"]])
+    _publish_person(ctx, row["person_id"])
+    return _finish(ctx, payload_sha, row["person_id"], personChanged=True,
+                   person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, row["person_id"])))
+
+
+def _portrait_input(value):
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        fail()
+    if value.get("kind") == "crop" and set(value) == {"kind", "artworkId", "rect"}:
+        rect = value["rect"]
+        if not isinstance(rect, dict) or set(rect) != {"x", "y", "w", "h"}:
+            fail()
+        if any(type(v) not in (int, float) or not 0 <= v <= 1 for v in rect.values()):
+            fail()
+        if rect["w"] <= .02 or rect["h"] <= .02 or rect["x"] + rect["w"] > 1 or rect["y"] + rect["h"] > 1:
+            fail()
+        return {"kind": "crop", "artworkId": require_id(value["artworkId"]), "rect": rect}
+    if value.get("kind") != "image" or set(value) != {"kind", "original", "width", "height", "attribution"}:
+        fail()
+    original = blob_manifest(value["original"])
+    if original["contentType"] != "image/jpeg" or original["sizeBytes"] > av_contract.MAX_PORTRAIT_BYTES:
+        fail()
+    attribution = value["attribution"]
+    if (not isinstance(attribution, dict) or set(attribution) != {"source", "sourceUrl", "license", "author"}
+            or attribution["source"] not in ("commons", "stashdb", "local")):
+        fail()
+    attribution = {"source": attribution["source"], "sourceUrl": _text(attribution["sourceUrl"], 2000),
+                   "license": _text(attribution["license"], 500), "author": _text(attribution["author"], 2000)}
+    return {"kind": "image", "original": original,
+            "width": _int(value["width"], low=1, high=av_contract.MAX_PORTRAIT_DIMENSION, nullable=False),
+            "height": _int(value["height"], low=1, high=av_contract.MAX_PORTRAIT_DIMENSION, nullable=False),
+            "attribution": attribution}
+
+
+def _set_person_portrait(ctx, entity, payload_sha):
+    person_id, desired = entity["personId"], entity["portrait"]
+    row = _person_row(ctx, person_id)
+    if desired is not None and desired["kind"] == "image":
+        _require_confirmed_blob(ctx.db, desired["original"])
+    if person_portrait_selection(ctx.db, ctx.library_id, row) == desired:
+        return _finish(ctx, payload_sha, person_id, person=person_entity(ctx.db, ctx.library_id, row))
+    if row["entity_revision"] != entity["expectedRevision"]:
+        conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
+    crop, image, attribution = None, None, None
+    if desired is not None and desired["kind"] == "crop":
+        art = artwork_row(ctx.db, ctx.library_id, desired["artworkId"])
+        if art is None or art["kind"] != "cover":
+            fail(422, "invalidPersonPortrait", "표지 이미지를 찾을 수 없습니다.")
+        work = work_state(require_work(ctx, art["work_id"]))
+        if (work["type"] != "av" or work["selection"]["work"] != art["artwork_id"]
+                or not any(c["personId"] == person_id for c in work["avCredits"])):
+            fail(422, "invalidPersonPortrait", "이 인물의 선택된 AV 표지가 필요합니다.")
+        crop = {"artworkId": desired["artworkId"], **desired["rect"]}
+        attribution = {"source": "cover"}
+    elif desired is not None:
+        image = {**desired["original"], "width": desired["width"], "height": desired["height"]}
+        attribution = desired["attribution"]
+    payload = json.loads(row["payload"])
+    payload["portrait"] = attribution
+    ctx.db.execute("UPDATE collection_authority_people SET payload=?,portrait_image=?,portrait_selection=?,"
+                   " entity_revision=entity_revision+1 WHERE library_id=? AND person_id=?",
+                   [encode(payload), None if image is None else encode(image), encode(desired), ctx.library_id, person_id])
+    # Today's work readers use the crop on each credit, and Home tickets own image blobs.
+    rows = ctx.db.execute("SELECT * FROM collection_authority_works WHERE library_id=? AND type='av'",
+                          [ctx.library_id]).fetchall()
+    for work_row_ in rows:
+        state = work_state(work_row_)
+        if any(c["personId"] == person_id for c in state["avCredits"]):
+            for credit in state["avCredits"]:
+                if credit["personId"] == person_id:
+                    credit["portraitCrop"] = crop
+            write_work(ctx.db, ctx.library_id, state)
+    import home_publications
+    import mobile_collections
+    images = [json.loads(r[0]) for r in ctx.db.execute(
+        "SELECT portrait_image FROM collection_authority_people WHERE library_id=? AND portrait_image IS NOT NULL",
+        [ctx.library_id])]
+    home_publications.replace_cover_refs(ctx.db, mobile_collections.PORTRAIT_OWNER, [
+        home_publications.BlobCover(**{k: i[k] for k in ("sha256", "sizeBytes", "contentType")}) for i in images])
+    _publish_person(ctx, person_id)
+    return _finish(ctx, payload_sha, person_id, personChanged=True,
+                   person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, person_id)))
 
 
 def _delete(ctx, entity, payload_sha):
@@ -2315,6 +2479,7 @@ HANDLERS = {
     TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
     VOLUME_RANGE: _volume_range, RECORD_RELEASE: _record_release, ACK_RELEASE: _ack_release,
     AV_DETAILS: _set_av_details, AV_CREDITS: _set_av_credits,
+    PERSON: _set_person, PERSON_PORTRAIT: _set_person_portrait,
 }
 
 
@@ -2438,6 +2603,14 @@ def parse_command(body):
             # Field-level CAS needs an expectation for every touched field.
             fail(422, "invalidCollectionCommand", "변경하는 모든 필드의 기대값이 필요합니다.")
         entity.update(changes=changes, expected=expected, expectedRevision=revision)
+    elif command_type == PERSON:
+        changes, expected = _person_fields(body["changes"]), _person_fields(body["expected"])
+        if set(changes) != set(expected):
+            fail()
+        entity.update(personId=require_id(body["personId"]), changes=changes, expected=expected)
+    elif command_type == PERSON_PORTRAIT:
+        entity.update(personId=require_id(body["personId"]), portrait=_portrait_input(body["portrait"]),
+                      expectedRevision=_revision(body["expectedRevision"], minimum=1))
     elif command_type == AV_DETAILS:
         changes, expected = _av_fields(body["changes"]), _av_fields(body["expected"])
         if not changes or set(changes) != set(expected):
