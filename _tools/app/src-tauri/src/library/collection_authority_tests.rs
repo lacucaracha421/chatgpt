@@ -762,54 +762,64 @@ fn collection_authority_batch4_operations_fence_unadopted_and_rare_imports() {
 
 #[test]
 fn collection_authority_provider_stale_refetches_once_then_records_drop() {
-    for (kind,provider,external) in [("manga","kakao","book-1"),("movie","tmdb","42"),("game","igdb","42")] {
-    let (_temp, l, s) = fixture();
-    let mut initial = work("w",1);
-    initial["type"] = json!(kind);
-    adopt(&l, &s, json!({"works":[initial]}));
-    let input = super::super::models::ExternalBindingInput {
-        provider: provider.into(),
-        external_id: external.into(),
-        provider_config_json: Some("{}".into()),
-        provider_data_json: Some(json!({"id":42,"title":"old","film":{"cast":[],"releases":[],"related":null}}).to_string()),
-        last_synced_at: None,
-    };
-    {
-        let mut c = l.connection().unwrap();
-        let tx = c.transaction().unwrap();
-        enqueue_provider_snapshot(&tx, &s, "w", &input).unwrap();
-        tx.execute("UPDATE collection_authority_outbox SET state='accepted' WHERE command_type='bindProvider'",[]).unwrap();
-        tx.commit().unwrap();
-    }
-    let refetches = Cell::new(0);
-    let send = |body: &Value| {
-        assert_eq!(body["details"].is_object(),provider=="tmdb");
-        if provider == "tmdb" { assert!(body["details"]["film"].is_object()); }
-        Ok(CollectionDelivery::Conflict(
-            json!({"code":"providerSnapshotStale","current":{"binding":null}}),
-        ))
-    };
-    let refresh = |_body: &Value| {
-        refetches.set(refetches.get() + 1);
-        let mut input = input.clone();
-        let mut snapshot: Value = serde_json::from_str(input.provider_data_json.as_deref().unwrap()).unwrap();
-        snapshot["title"] = json!("fresh");
-        input.provider_data_json = Some(snapshot.to_string());
-        let mut c = l.connection()?;
-        let tx = c.transaction()?;
-        enqueue_provider_snapshot(&tx, &s, "w", &input)?;
-        tx.execute("UPDATE collection_authority_outbox SET state='accepted' WHERE command_type='bindProvider'",[])?;
-        tx.commit()?;
-        Ok(())
-    };
-    assert!(l
-        .flush_collection_outbox_with_refresh(&s, &send, 0, &refresh)
-        .unwrap());
-    assert_eq!(refetches.get(), 1);
-    assert_eq!(l.connection().unwrap().query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE command_type='applyProviderSnapshot' AND state='dropped' AND drop_reason='providerSnapshotStale'",[],|r|r.get::<_,i64>(0)).unwrap(),2);
-    assert!(!l
-        .flush_collection_outbox_with_refresh(&s, &send, 0, &refresh)
-        .unwrap());
+    for (kind, provider, external) in [
+        ("manga", "kakao", "book-1"),
+        ("movie", "tmdb", "42"),
+        ("game", "igdb", "42"),
+    ] {
+        let (_temp, l, s) = fixture();
+        let mut initial = work("w", 1);
+        initial["type"] = json!(kind);
+        adopt(&l, &s, json!({"works":[initial]}));
+        let input = super::super::models::ExternalBindingInput {
+            provider: provider.into(),
+            external_id: external.into(),
+            provider_config_json: Some("{}".into()),
+            provider_data_json: Some(
+                json!({"id":42,"title":"old","film":{"cast":[],"releases":[],"related":null}})
+                    .to_string(),
+            ),
+            last_synced_at: None,
+        };
+        {
+            let mut c = l.connection().unwrap();
+            let tx = c.transaction().unwrap();
+            enqueue_provider_snapshot(&tx, &s, "w", &input).unwrap();
+            tx.execute("UPDATE collection_authority_outbox SET state='accepted' WHERE command_type='bindProvider'",[]).unwrap();
+            tx.commit().unwrap();
+        }
+        let refetches = Cell::new(0);
+        let send = |body: &Value| {
+            assert_eq!(body["details"].is_object(), provider == "tmdb");
+            if provider == "tmdb" {
+                assert!(body["details"]["film"].is_object());
+            }
+            Ok(CollectionDelivery::Conflict(
+                json!({"code":"providerSnapshotStale","current":{"binding":null}}),
+            ))
+        };
+        let refresh = |_body: &Value| {
+            refetches.set(refetches.get() + 1);
+            let mut input = input.clone();
+            let mut snapshot: Value =
+                serde_json::from_str(input.provider_data_json.as_deref().unwrap()).unwrap();
+            snapshot["title"] = json!("fresh");
+            input.provider_data_json = Some(snapshot.to_string());
+            let mut c = l.connection()?;
+            let tx = c.transaction()?;
+            enqueue_provider_snapshot(&tx, &s, "w", &input)?;
+            tx.execute("UPDATE collection_authority_outbox SET state='accepted' WHERE command_type='bindProvider'",[])?;
+            tx.commit()?;
+            Ok(())
+        };
+        assert!(l
+            .flush_collection_outbox_with_refresh(&s, &send, 0, &refresh)
+            .unwrap());
+        assert_eq!(refetches.get(), 1);
+        assert_eq!(l.connection().unwrap().query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE command_type='applyProviderSnapshot' AND state='dropped' AND drop_reason='providerSnapshotStale'",[],|r|r.get::<_,i64>(0)).unwrap(),2);
+        assert!(!l
+            .flush_collection_outbox_with_refresh(&s, &send, 0, &refresh)
+            .unwrap());
     }
 }
 
@@ -2485,79 +2495,576 @@ fn assert_fenced<T: std::fmt::Debug>(result: Result<T, super::super::av_models::
     );
 }
 
+fn av_artwork_fixture() -> (
+    tempfile::TempDir,
+    Library,
+    CollectionAuthorityStatus,
+    String,
+    Value,
+    String,
+) {
+    let (temp, library, status) = fixture();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut value = work(&id, 1);
+    value["type"] = json!("av");
+    value["selection"]["back"] = Value::Null;
+    adopt(&library, &status, json!({"works":[value.clone()]}));
+    let path = temp.path().join("jacket.png");
+    std::fs::write(&path, provider_png()).unwrap();
+    (
+        temp,
+        library,
+        status,
+        id,
+        value,
+        path.to_str().unwrap().into(),
+    )
+}
+
+fn av_artwork_choice(library: &Library, path: &str) -> super::super::av_models::ArtworkDecision {
+    use super::super::av_models::{ArtworkDecision, CoverSurface};
+    let preview = library
+        .preview_av_artwork(path, CoverSurface::Front)
+        .unwrap();
+    ArtworkDecision::Local {
+        path: path.into(),
+        sha256: preview.sha256,
+    }
+}
+
+fn av_artwork_request(
+    library: &Library,
+    id: &str,
+    front: super::super::av_models::ArtworkDecision,
+    spine: super::super::av_models::ArtworkDecision,
+    back: super::super::av_models::ArtworkDecision,
+) -> super::super::av_models::ApplyAvArtwork {
+    super::super::av_models::ApplyAvArtwork {
+        expected_revision: library.get_av_cover_set(id).unwrap().revision,
+        front,
+        spine,
+        back,
+    }
+}
+
+#[test]
+fn collection_authority_av_artwork_slots_are_immediate_idempotent_and_survive_receipts() {
+    use super::super::av_models::ArtworkDecision::{Clear, Keep};
+    let (_temp, library, status, id, server, path) = av_artwork_fixture();
+    let choice = av_artwork_choice(&library, &path);
+    let saved = library
+        .apply_av_artwork(
+            &id,
+            av_artwork_request(
+                &library,
+                &id,
+                choice.clone(),
+                choice.clone(),
+                choice.clone(),
+            ),
+        )
+        .unwrap();
+    let ids = [
+        saved.front_id.clone().unwrap(),
+        saved.spine_id.clone().unwrap(),
+        saved.back_id.clone().unwrap(),
+    ];
+    assert_ne!(ids[0], ids[1]);
+    assert_ne!(ids[0], ids[2]);
+    assert_ne!(ids[1], ids[2]);
+    let commands = core_bodies(&library);
+    assert_eq!(commands.len(), 6);
+    let mut paths = Vec::new();
+    for (index, (kind, slot)) in [("cover", "work"), ("spine", "spine"), ("back", "back")]
+        .iter()
+        .enumerate()
+    {
+        let add = &commands[index * 2];
+        let select = &commands[index * 2 + 1];
+        assert_eq!(add["commandType"], "addArtwork");
+        assert_eq!(add["provider"], "local-manual");
+        assert_eq!(add["kind"], *kind);
+        assert_eq!(add["artworkId"], ids[index]);
+        assert_eq!(
+            add["providerImageId"],
+            format!(
+                "sha256:{kind}:{}",
+                add["original"]["sha256"].as_str().unwrap()
+            )
+        );
+        assert_eq!(select["commandType"], "selectArtwork");
+        assert_eq!(select["slot"], *slot);
+        assert_eq!(select["artworkId"], ids[index]);
+        assert!(select["expectedArtworkId"].is_null());
+        assert_eq!(
+            artwork_slot(&*library.connection().unwrap(), &id, slot).unwrap(),
+            Some(ids[index].clone())
+        );
+        let relative: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT relative_path FROM collection_work_artworks WHERE id=?1",
+                [&ids[index]],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(relative.starts_with(&format!("work-artwork/{id}/")));
+        assert_eq!(
+            std::fs::read(library.root().join(&relative)).unwrap(),
+            std::fs::read(&path).unwrap()
+        );
+        assert!(library.resolve_work_artwork_thumbnail(&ids[index]).is_ok());
+        paths.push(relative);
+    }
+    assert_eq!(library.connection().unwrap().query_row(
+        "SELECT entity_revision FROM collection_authority_revisions WHERE section='works' AND work_id=?1",
+        [&id], |row| row.get::<_, i64>(0),
+    ).unwrap(), 1);
+    library
+        .apply_av_artwork(
+            &id,
+            av_artwork_request(
+                &library,
+                &id,
+                choice.clone(),
+                choice.clone(),
+                choice.clone(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(core_bodies(&library), commands);
+    assert_eq!(count(&library, "collection_work_artworks"), 3);
+    assert_eq!(
+        std::fs::read_dir(library.root().join("work-artwork").join(&id))
+            .unwrap()
+            .count(),
+        3
+    );
+
+    let server = RefCell::new(server);
+    let delivered = Cell::new(0);
+    let deliver = |body: &Value| {
+        // Even earlier add/selection receipts must preserve all queued surfaces.
+        for (index, slot) in ["work", "spine", "back"].iter().enumerate() {
+            assert_eq!(
+                artwork_slot(&*library.connection().unwrap(), &id, slot).unwrap(),
+                if delivered.get() < 6 {
+                    Some(ids[index].clone())
+                } else if index == 0 {
+                    Some(ids[0].clone())
+                } else {
+                    None
+                }
+            );
+        }
+        let mut entities = json!({});
+        match body["commandType"].as_str().unwrap() {
+            "addArtwork" => {
+                library.upload_collection_command_artwork_with(
+                    body,
+                    &|blob, bytes| {
+                        assert_eq!(bytes, std::fs::read(&path).unwrap());
+                        assert_eq!(blob.size_bytes, bytes.len() as u64);
+                        Ok(())
+                    },
+                    &|_| Ok(true),
+                )?;
+                let mut artwork = body.clone();
+                artwork["createdAt"] = json!(NOW);
+                artwork["entityRevision"] = json!(1);
+                entities["artworks"] = json!([artwork]);
+            }
+            "selectArtwork" => {
+                let mut work = server.borrow_mut();
+                let slot = body["slot"].as_str().unwrap();
+                assert_eq!(body["expectedArtworkId"], work["selection"][slot]);
+                work["selection"][slot] = body["artworkId"].clone();
+                work["entityRevision"] = json!(work["entityRevision"].as_i64().unwrap() + 1);
+                entities["works"] = json!([work.clone()]);
+            }
+            other => panic!("unexpected command: {other}"),
+        }
+        delivered.set(delivered.get() + 1);
+        let mut receipt = envelope(&status);
+        receipt["operationId"] = body["operationId"].clone();
+        receipt["commandType"] = body["commandType"].clone();
+        receipt["changed"] = json!(true);
+        receipt["authorityCursor"] = json!(delivered.get());
+        receipt["entities"] = entities;
+        Ok(CollectionDelivery::Accepted(receipt))
+    };
+    library
+        .flush_collection_outbox_with(&status, &deliver, 0)
+        .unwrap();
+    assert_eq!(delivered.get(), 6);
+    let received = library.get_av_cover_set(&id).unwrap();
+    assert_eq!(
+        [received.front_id, received.spine_id, received.back_id],
+        ids.clone().map(Some)
+    );
+    for (artwork, relative) in ids.iter().zip(paths) {
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT relative_path FROM collection_work_artworks WHERE id=?1",
+                    [artwork],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            relative
+        );
+        assert!(library.resolve_work_artwork(artwork).is_ok());
+    }
+    assert_eq!(count(&library, "collection_authority_materialization"), 0);
+    library
+        .apply_av_artwork(
+            &id,
+            av_artwork_request(&library, &id, choice.clone(), choice.clone(), choice),
+        )
+        .unwrap();
+    assert_eq!(core_bodies(&library), commands);
+    let cleared = library
+        .apply_av_artwork(&id, av_artwork_request(&library, &id, Keep, Clear, Clear))
+        .unwrap();
+    assert_eq!(cleared.front_id, Some(ids[0].clone()));
+    assert!(cleared.spine_id.is_none() && cleared.back_id.is_none());
+    assert_eq!(count(&library, "collection_authority_outbox"), 8);
+    library
+        .apply_av_artwork(&id, av_artwork_request(&library, &id, Keep, Clear, Clear))
+        .unwrap();
+    assert_eq!(count(&library, "collection_authority_outbox"), 8);
+    library
+        .flush_collection_outbox_with(&status, &deliver, 0)
+        .unwrap();
+    assert_eq!(delivered.get(), 8);
+    let received = library.get_av_cover_set(&id).unwrap();
+    assert_eq!(received.front_id, Some(ids[0].clone()));
+    assert!(received.spine_id.is_none() && received.back_id.is_none());
+    assert_eq!(count(&library, "collection_work_artworks"), 3);
+}
+
+#[test]
+fn collection_authority_av_artwork_reuses_local_import_and_manual_content_in_both_directions() {
+    use super::super::{av_models::ArtworkDecision::Keep, work_artwork::WorkArtworkKind};
+    for provider in ["local", "local-manual"] {
+        let (_temp, library, status, id, _server, path) = av_artwork_fixture();
+        let prepared = library
+            .prepare_work_artwork(&id, &std::fs::read(&path).unwrap())
+            .unwrap();
+        let first_id = prepared.id.clone();
+        let mut db = library.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        Library::insert_work_artwork_in_transaction(
+            &tx,
+            &id,
+            provider,
+            "source-path",
+            WorkArtworkKind::Cover,
+            None,
+            &prepared,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        drop(db);
+        prepared.commit();
+        let before = core_bodies(&library);
+        let saved = library
+            .apply_av_artwork(
+                &id,
+                av_artwork_request(
+                    &library,
+                    &id,
+                    av_artwork_choice(&library, &path),
+                    Keep,
+                    Keep,
+                ),
+            )
+            .unwrap();
+        assert_eq!(saved.front_id, Some(first_id.clone()));
+        let redundant = library
+            .prepare_work_artwork(&id, &std::fs::read(&path).unwrap())
+            .unwrap();
+        let mut db = library.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        assert_eq!(
+            enqueue_artwork(
+                &tx,
+                &status,
+                &id,
+                "local",
+                "renamed-source",
+                "cover",
+                None,
+                &redundant
+            )
+            .unwrap(),
+            first_id
+        );
+        tx.commit().unwrap();
+        drop(db);
+        drop(redundant);
+        assert_eq!(core_bodies(&library), before);
+        assert_eq!(count(&library, "collection_work_artworks"), 1);
+        assert_eq!(
+            std::fs::read_dir(library.root().join("work-artwork").join(&id))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn collection_authority_av_artwork_reuses_confirmed_legacy_manual_identity_and_blob_hash() {
+    use super::super::av_models::{ArtworkDecision::Keep, CoverSurface};
+    for legacy_identity in [true, false] {
+        let (_temp, library, status, id, mut server, path) = av_artwork_fixture();
+        let preview = library
+            .preview_av_artwork(&path, CoverSurface::Front)
+            .unwrap();
+        let mut artwork = art();
+        artwork["workId"] = json!(id);
+        artwork["provider"] = json!("local-manual");
+        artwork["providerImageId"] = json!(if legacy_identity {
+            format!("cover/{}", preview.sha256)
+        } else {
+            "old-provider-key".into()
+        });
+        artwork["original"]["sha256"] = json!(preview.sha256);
+        artwork["original"]["sizeBytes"] = json!(std::fs::read(&path).unwrap().len());
+        server["entityRevision"] = json!(2);
+        library
+            .apply_collection_changes(&changes(
+                &status,
+                1,
+                json!([change(1, json!({"works":[server],"artworks":[artwork]}))]),
+            ))
+            .unwrap();
+        let saved = library
+            .apply_av_artwork(
+                &id,
+                av_artwork_request(
+                    &library,
+                    &id,
+                    av_artwork_choice(&library, &path),
+                    Keep,
+                    Keep,
+                ),
+            )
+            .unwrap();
+        assert_eq!(saved.front_id.as_deref(), Some("art"));
+        let commands = core_bodies(&library);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0]["commandType"], "selectArtwork");
+        assert_eq!(commands[0]["artworkId"], "art");
+        assert_eq!(count(&library, "collection_work_artworks"), 1);
+        assert_eq!(
+            std::fs::read_dir(library.root().join("work-artwork").join(&id))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
+fn collection_authority_av_artwork_transaction_failure_rolls_back_every_slot_and_file() {
+    use super::super::av_models::ArtworkDecision::Keep;
+    let (_temp, library, _status, id, _server, path) = av_artwork_fixture();
+    library.connection().unwrap().execute_batch(
+        "CREATE TRIGGER reject_av_back BEFORE INSERT ON collection_authority_outbox WHEN NEW.command_type='selectArtwork' AND json_extract(NEW.payload,'$.slot')='back' BEGIN SELECT RAISE(ABORT,'reject back selection'); END;",
+    ).unwrap();
+    let before = library.get_av_cover_set(&id).unwrap();
+    let choice = av_artwork_choice(&library, &path);
+    assert!(library
+        .apply_av_artwork(
+            &id,
+            av_artwork_request(&library, &id, choice.clone(), Keep, choice)
+        )
+        .is_err());
+    assert_eq!(
+        library.get_av_cover_set(&id).unwrap().revision,
+        before.revision
+    );
+    assert_eq!(count(&library, "collection_authority_outbox"), 0);
+    assert_eq!(count(&library, "collection_work_artworks"), 0);
+    for folder in ["work-artwork", "work-artwork-thumbnails"] {
+        assert_eq!(
+            std::fs::read_dir(library.root().join(folder).join(&id))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
+fn collection_authority_av_artwork_rejects_stale_images_and_unready_identity() {
+    use super::super::av_models::{ArtworkDecision, AvError};
+    let (_temp, library, _status, id, _server, path) = av_artwork_fixture();
+    let choice = av_artwork_choice(&library, &path);
+    let mut stale = av_artwork_request(
+        &library,
+        &id,
+        choice.clone(),
+        ArtworkDecision::Keep,
+        ArtworkDecision::Keep,
+    );
+    stale.expected_revision = "stale".into();
+    assert!(matches!(
+        library.apply_av_artwork(&id, stale),
+        Err(AvError::Stale)
+    ));
+    let before = library.get_av_cover_set(&id).unwrap().revision;
+    let wrong = ArtworkDecision::Local {
+        path: path.clone(),
+        sha256: "changed".into(),
+    };
+    assert!(matches!(
+        library.apply_av_artwork(
+            &id,
+            av_artwork_request(&library, &id, choice, ArtworkDecision::Keep, wrong)
+        ),
+        Err(AvError::Image)
+    ));
+    assert_eq!(library.get_av_cover_set(&id).unwrap().revision, before);
+    assert_eq!(count(&library, "collection_authority_outbox"), 0);
+    assert_eq!(count(&library, "collection_work_artworks"), 0);
+    assert_eq!(
+        std::fs::read_dir(library.root().join("work-artwork").join(&id))
+            .unwrap()
+            .count(),
+        0
+    );
+    let missing = ArtworkDecision::Local {
+        path: "missing.png".into(),
+        sha256: "missing".into(),
+    };
+    let input = av_artwork_request(
+        &library,
+        &id,
+        missing,
+        ArtworkDecision::Keep,
+        ArtworkDecision::Keep,
+    );
+    library
+        .connection()
+        .unwrap()
+        .execute("UPDATE collection_authority_sync SET adopted=0", [])
+        .unwrap();
+    assert!(matches!(
+        library.apply_av_artwork(&id, input.clone()),
+        Err(AvError::Library(
+            LibraryError::CollectionAuthorityNotAdopted
+        ))
+    ));
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE collection_authority_sync SET adopted=1,library_id='wrong-library'",
+            [],
+        )
+        .unwrap();
+    assert!(matches!(
+        library.apply_av_artwork(&id, input),
+        Err(AvError::Library(LibraryError::CollectionAuthorityMismatch))
+    ));
+}
+
 #[test]
 fn collection_authority_batch5_av_edits_are_fenced_and_automatic_profile_refresh_is_quiet() {
     use super::super::{
         av_link::models::ApplyRequest, av_models::*, av_portrait::AvPortraitState,
         av_stashdb::AvProfileState, home_data::HomeDataError,
     };
-    let (_temp, l, s) = fixture();
-    seed_av(&l);
-    let before = av_local_state(&l);
-    l.observe_collection_authority(&s).unwrap();
-    let details: SaveAvDetails = serde_json::from_value(json!({"expectedRevision":3,"productCode":"NEW-1","label":null,"series":null,"people":[{"person":{"kind":"new","displayName":"New"},"role":"performer","creditName":null}]})).unwrap();
-    assert_fenced(l.save_av_details("av", details));
-    let artwork: ApplyAvArtwork = serde_json::from_value(json!({"expectedRevision":"any","front":{"kind":"clear"},"spine":{"kind":"keep"},"back":{"kind":"keep"}})).unwrap();
-    assert_fenced(l.apply_av_artwork("av", artwork));
-    let link: ApplyRequest = serde_json::from_value(json!({"collectionId":null,"newCollectionName":"New AV","expectedRevision":null,"split":{"x1":0,"x2":0},"surfaces":{"front":"keep","spine":"keep","back":"keep"},"fields":{},"performers":[],"directors":[]})).unwrap();
-    assert_fenced(l.apply_av_link("inbox", link));
-    assert_fenced(l.save_av_person_memo("p", Some("new memo".into())));
-    let rect = AvPortraitRect {
-        x: 0.0,
-        y: 0.0,
-        w: 0.5,
-        h: 0.5,
-    };
-    assert_fenced(l.set_av_portrait_crop("p", "art", rect));
-    assert_fenced(l.clear_av_portrait("p"));
-    let portraits = AvPortraitState::default();
-    assert_fenced(l.preview_av_commons_portrait_with("p", &portraits, &NoNetwork));
-    assert_fenced(l.use_av_commons_portrait("p", &portraits));
-    assert_fenced(l.preview_av_stashdb_portrait_with("p", "image", &portraits, &NoNetwork));
-    assert_fenced(l.use_av_stashdb_portrait("p", &portraits));
-    let profiles = AvProfileState::default();
-    // Opening a performer page (force=false) keeps the stored stale profile quietly.
-    let quiet = l
-        .refresh_av_performer_profile_with("p", false, &profiles, &NoNetwork, Some("key"))
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        (quiet.status.as_str(), quiet.fetched_at.as_str()),
-        ("matched", "2000-01-01T00:00:00Z")
-    );
-    assert_fenced(l.refresh_av_performer_profile_with(
-        "p",
-        true,
-        &profiles,
-        &NoNetwork,
-        Some("key"),
-    ));
-    assert_fenced(l.search_av_performer_profile_with("p", &NoNetwork, Some("key")));
-    assert_fenced(l.choose_av_performer_profile_with(
-        "p",
-        "stash-q",
-        &profiles,
-        &NoNetwork,
-        Some("key"),
-    ));
-    assert_fenced(l.dismiss_av_performer_profile("p", &profiles));
-    assert_fenced(l.clear_av_performer_profile("p", &profiles));
-    for favorite in [true, false] {
-        assert!(matches!(
-            l.set_av_favorite("p", favorite),
-            Err(HomeDataError::Library(
-                LibraryError::CollectionAuthorityOperationUnavailable
-            ))
+    for adopted in [false, true] {
+        let (_temp, l, s) = fixture();
+        seed_av(&l);
+        l.observe_collection_authority(&s).unwrap();
+        if adopted {
+            let mut av = work("av", 1);
+            av["type"] = json!("av");
+            adopt(&l, &s, json!({"works":[av]}));
+        }
+        let before = av_local_state(&l);
+        let details: SaveAvDetails = serde_json::from_value(json!({"expectedRevision":3,"productCode":"NEW-1","label":null,"series":null,"people":[{"person":{"kind":"new","displayName":"New"},"role":"performer","creditName":null}]})).unwrap();
+        assert_fenced(l.save_av_details("av", details));
+        let artwork: ApplyAvArtwork = serde_json::from_value(json!({"expectedRevision":"any","front":{"kind":"clear"},"spine":{"kind":"keep"},"back":{"kind":"keep"}})).unwrap();
+        let result = l.apply_av_artwork("av", artwork);
+        if adopted {
+            assert!(matches!(result, Err(AvError::Stale)));
+        } else {
+            assert!(matches!(
+                result,
+                Err(AvError::Library(
+                    LibraryError::CollectionAuthorityNotAdopted
+                ))
+            ));
+        }
+        let link: ApplyRequest = serde_json::from_value(json!({"collectionId":null,"newCollectionName":"New AV","expectedRevision":null,"split":{"x1":0,"x2":0},"surfaces":{"front":"keep","spine":"keep","back":"keep"},"fields":{},"performers":[],"directors":[]})).unwrap();
+        assert_fenced(l.apply_av_link("inbox", link));
+        assert_fenced(l.save_av_person_memo("p", Some("new memo".into())));
+        let rect = AvPortraitRect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.5,
+            h: 0.5,
+        };
+        assert_fenced(l.set_av_portrait_crop("p", "art", rect));
+        assert_fenced(l.clear_av_portrait("p"));
+        let portraits = AvPortraitState::default();
+        assert_fenced(l.preview_av_commons_portrait_with("p", &portraits, &NoNetwork));
+        assert_fenced(l.use_av_commons_portrait("p", &portraits));
+        assert_fenced(l.preview_av_stashdb_portrait_with("p", "image", &portraits, &NoNetwork));
+        assert_fenced(l.use_av_stashdb_portrait("p", &portraits));
+        let profiles = AvProfileState::default();
+        // Opening a performer page (force=false) keeps the stored stale profile quietly.
+        let quiet = l
+            .refresh_av_performer_profile_with("p", false, &profiles, &NoNetwork, Some("key"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (quiet.status.as_str(), quiet.fetched_at.as_str()),
+            ("matched", "2000-01-01T00:00:00Z")
+        );
+        assert_fenced(l.refresh_av_performer_profile_with(
+            "p",
+            true,
+            &profiles,
+            &NoNetwork,
+            Some("key"),
         ));
+        assert_fenced(l.search_av_performer_profile_with("p", &NoNetwork, Some("key")));
+        assert_fenced(l.choose_av_performer_profile_with(
+            "p",
+            "stash-q",
+            &profiles,
+            &NoNetwork,
+            Some("key"),
+        ));
+        assert_fenced(l.dismiss_av_performer_profile("p", &profiles));
+        assert_fenced(l.clear_av_performer_profile("p", &profiles));
+        for favorite in [true, false] {
+            assert!(matches!(
+                l.set_av_favorite("p", favorite),
+                Err(HomeDataError::Library(
+                    LibraryError::CollectionAuthorityOperationUnavailable
+                ))
+            ));
+        }
+        assert_eq!(av_local_state(&l), before);
+        assert_eq!(count(&l, "collection_authority_outbox"), 0);
+        // Reads stay available.
+        assert_eq!(l.get_av_details("av").unwrap().people.len(), 1);
+        assert_eq!(
+            l.get_av_performer("p").unwrap().person.memo.as_deref(),
+            Some("local memo")
+        );
     }
-    assert_eq!(av_local_state(&l), before);
-    assert_eq!(count(&l, "collection_authority_outbox"), 0);
-    // Reads stay available.
-    assert_eq!(l.get_av_details("av").unwrap().people.len(), 1);
-    assert_eq!(
-        l.get_av_performer("p").unwrap().person.memo.as_deref(),
-        Some("local memo")
-    );
 }
 
 #[test]

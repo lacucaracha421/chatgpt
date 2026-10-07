@@ -896,7 +896,7 @@ pub(crate) fn editable_work(db: &Connection, work: &str) -> Result<Value, Librar
 }
 
 pub(crate) fn artwork_identity(provider: &str, kind: &str, image: &str, sha: &str) -> String {
-    if provider == "local" {
+    if matches!(provider, "local" | "local-manual") {
         format!("sha256:{kind}:{sha}")
     } else if matches!(provider, "tmdb" | "igdb") {
         // A screenshot promoted to hero, or new bytes at the same provider path,
@@ -914,7 +914,10 @@ pub(crate) fn local_artwork_by_hash(
     sha: &str,
 ) -> Result<Option<String>, LibraryError> {
     let image = artwork_identity("local", kind, "", sha);
-    db.query_row("SELECT a.id FROM collection_work_artworks a WHERE a.collection_id=?1 AND a.provider='local' AND a.kind=?2 AND (a.provider_image_id=?3 OR EXISTS(SELECT 1 FROM collection_authority_revisions r WHERE r.section='artworks' AND r.deleted=0 AND json_extract(r.payload,'$.artworkId')=a.id AND json_extract(r.payload,'$.original.sha256')=?4)) ORDER BY a.id LIMIT 1",params![work,kind,image,sha],|r|r.get(0)).optional().map_err(Into::into)
+    // Manual AV rows predate the authority and used kind/sha256 identities.
+    // Local imports and manual edits share content identity within each role.
+    let manual_image = format!("{kind}/{sha}");
+    db.query_row("SELECT a.id FROM collection_work_artworks a WHERE a.collection_id=?1 AND a.provider IN ('local','local-manual') AND a.kind=?2 AND (a.provider_image_id=?3 OR (a.provider='local-manual' AND a.provider_image_id=?5) OR EXISTS(SELECT 1 FROM collection_authority_revisions r WHERE r.section='artworks' AND r.deleted=0 AND json_extract(r.payload,'$.artworkId')=a.id AND json_extract(r.payload,'$.original.sha256')=?4)) ORDER BY a.id LIMIT 1",params![work,kind,image,sha,manual_image],|r|r.get(0)).optional().map_err(Into::into)
 }
 
 pub(crate) fn enqueue_artwork(
@@ -930,7 +933,7 @@ pub(crate) fn enqueue_artwork(
     if prepared.original.size_bytes > 16 * 1024 * 1024 {
         return Err(LibraryError::InvalidWorkArtwork);
     }
-    if provider == "local" {
+    if matches!(provider, "local" | "local-manual") {
         if let Some(id) = local_artwork_by_hash(tx, work, kind, &prepared.original.sha256)? {
             return Ok(id);
         }

@@ -243,6 +243,15 @@ Status: `TODO` — low priority. VCK/kHentai stays default; isolate optional pro
 
 # Desktop UI follow-ups
 
+## AV-AUTHORITY-001 — AV editing and StashDB under the Collections authority
+
+Status: `IN PROGRESS` — user 2026-10-07: AV first, then book import. The 1B plan (§4) fenced AV detail/people/portrait editing and StashDB refresh; the server stores `details.av`, `av_credits` and `collection_authority_people` but has no command to change them and no StashDB code. Order chosen by the user, PC first and the tablet in the same round:
+1. Front/spine/back artwork through `addArtwork`/`selectArtwork` (no server change).
+2. `setAvDetails` + `setAvCredits` commands (field CAS; `creditName` kept; PC limits aligned to the server's), PC + tablet editing.
+3. People: memo, favourite, portrait commands plus a people section in the feed. User approved (2026-10-07) a one-time upload of the PC's current people rows to the server at the start of this step (server DB backup first; never overwrite server-only values with PC nulls or vice versa).
+4. StashDB as a server relay like `work_providers.py`; the user will add the key to the server (root-only drop-in, `LAKOMICS_STASHDB_API_KEY`); profiles belong to people, not work bindings.
+5. Unfence AV link apply (inbox → work) as createWork + artwork + setAvDetails + setAvCredits.
+
 ## USER-REQ-20261007 — Tablet 더보기 and one combined 휴지통
 
 Status: `DONE (device check pending)` — user 2026-10-07. PC `1d2ff4bd` (sectioned TrashBrowser, PC collection trash via the authority trash read + restoreWork), tablet 0.9.41 (Home 더보기 sheet replacing the gear/전송/비밀 buttons, sectioned `TrashLayer`, scattered entries removed). Not yet inspected in the native PC window or on the tablet screen.

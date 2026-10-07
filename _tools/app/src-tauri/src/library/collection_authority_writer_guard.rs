@@ -218,6 +218,7 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
         "set_collection_volume_range",
     ),
     ("library/aladin_flow.rs", "reconcile_source"),
+    ("library/av_artwork.rs", "apply_av_artwork"),
 ];
 
 const FENCED_FUNCTIONS: &[(&str, &str)] = &[
@@ -246,7 +247,6 @@ const FENCED_FUNCTIONS: &[(&str, &str)] = &[
     // Batch 5: AV details, people, portraits, profiles and favorites have no
     // authority command yet. AV inbox/candidates/name cache/poll state stay local.
     ("library/av_collection.rs", "save_av_details"),
-    ("library/av_artwork.rs", "apply_av_artwork"),
     ("library/av_link/apply.rs", "apply_people"),
     ("library/av_link/apply.rs", "apply_av_link"),
     ("library/av_detail.rs", "save_av_person_memo"),

@@ -41,8 +41,8 @@ impl Library {
     }
     pub fn get_av_cover_set(&self,id: &str) -> Result<AvCoverSet,AvError> { cover_set(&*self.connection()?,id) }
     pub fn apply_av_artwork(&self,id: &str,input: ApplyAvArtwork) -> Result<AvCoverSet,AvError> {
-        // Fenced before reading local files; the transaction re-checks below.
-        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
+        // Check adoption before reading local files; the transaction re-checks below.
+        super::collection_authority::collection_write_status(&*self.connection()?)?;
         if self.get_av_cover_set(id)?.revision != input.expected_revision { return Err(AvError::Stale); }
         let decisions = [(CoverSurface::Front,input.front),(CoverSurface::Spine,input.spine),(CoverSurface::Back,input.back)];
         let mut prepared: Vec<Option<PreparedWorkArtwork>> = Vec::new();
@@ -56,7 +56,7 @@ impl Library {
         }
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        super::collection_authority::fence_collection_operation(&transaction)?;
+        let authority = super::collection_authority::collection_write_status(&transaction)?;
         if cover_set(&transaction,id)?.revision != input.expected_revision { return Err(AvError::Stale); }
         let mut committed = [false;3];
         for (index,(surface,decision)) in decisions.iter().enumerate() {
@@ -64,6 +64,19 @@ impl Library {
                 ArtworkDecision::Keep => {},
                 ArtworkDecision::Clear => Self::clear_work_artwork_kind_in_transaction(&transaction,id,surface.kind())?,
                 ArtworkDecision::Local {sha256,..} => {
+                    if authority.active {
+                        let item = prepared[index].as_ref().ok_or(AvError::Image)?;
+                        let artwork_id = super::collection_authority::enqueue_artwork(
+                            &transaction, &authority, id, "local-manual", "",
+                            surface.kind().as_str(), None, item,
+                        )?;
+                        super::collection_authority::enqueue_artwork_selection(
+                            &transaction, &authority, id, surface.kind().as_str(), Some(&artwork_id),
+                        )?;
+                        // Reused rows keep their original files; drop this redundant preparation.
+                        committed[index] = artwork_id == item.id;
+                        continue;
+                    }
                     let key = format!("{}/{sha256}",surface.kind().as_str());
                     let existing: Option<String> = transaction.query_row("SELECT id FROM collection_work_artworks WHERE collection_id=?1 AND provider='local-manual' AND provider_image_id=?2 AND kind=?3",params![id,key,surface.kind().as_str()],|r|r.get(0)).optional()?;
                     if let Some(existing) = existing {
