@@ -39,6 +39,8 @@ const COMMANDS: &[&str] = &[
     "setVolumeRange",
     "recordReleaseEvent",
     "acknowledgeReleaseEvents",
+    "setAvDetails",
+    "setAvCredits",
 ];
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
@@ -1168,6 +1170,197 @@ pub(crate) fn enqueue_work_changes(
     Ok(())
 }
 
+pub(crate) fn editable_av(db: &Connection, work: &str) -> Result<Value, LibraryError> {
+    let av = db.query_row("SELECT product_code,title_ja,maker,label,series,genres_json,release_date FROM collection_av_details WHERE collection_id=?1", [work], |r| {
+        Ok(json!({"productCode":r.get::<_,Option<String>>(0)?,"titleJa":r.get::<_,Option<String>>(1)?,"maker":r.get::<_,Option<String>>(2)?,"label":r.get::<_,Option<String>>(3)?,"series":r.get::<_,Option<String>>(4)?,"genres":r.get::<_,Option<String>>(5)?.and_then(|s|serde_json::from_str::<Value>(&s).ok()).unwrap_or(json!([])),"releaseDate":r.get::<_,Option<String>>(6)?}))
+    }).optional()?.unwrap_or_else(empty_av);
+    let credits = db.prepare("SELECT person_id,role,sort_order,credit_name FROM collection_person_relations WHERE collection_id=?1 ORDER BY role,sort_order,person_id")?.query_map([work], |r| Ok(json!({"personId":r.get::<_,String>(0)?,"role":r.get::<_,String>(1)?,"order":r.get::<_,i64>(2)?,"creditName":r.get::<_,Option<String>>(3)?})))?.collect::<Result<Vec<_>,_>>()?;
+    Ok(json!({"av":av,"credits":credits}))
+}
+
+fn empty_av() -> Value {
+    json!({"productCode":null,"titleJa":null,"maker":null,"label":null,"series":null,"genres":[],"releaseDate":null})
+}
+
+fn av_comparable(value: &Value) -> Value {
+    if let Some(s) = value.as_str() {
+        s.trim()
+            .is_empty()
+            .then_some(Value::Null)
+            .unwrap_or_else(|| json!(s.trim()))
+    } else {
+        value.clone()
+    }
+}
+
+fn credit_values(credits: &Value) -> Value {
+    let mut rows: Vec<Value> = credits.as_array().into_iter().flatten().map(|c| json!({"personId":c["personId"],"role":c["role"],"order":c["order"],"creditName":c["creditName"]})).collect();
+    rows.sort_by(|a, b| {
+        (
+            a["role"].as_str(),
+            a["order"].as_i64(),
+            a["personId"].as_str(),
+        )
+            .cmp(&(
+                b["role"].as_str(),
+                b["order"].as_i64(),
+                b["personId"].as_str(),
+            ))
+    });
+    json!(rows)
+}
+
+fn confirmed_av_person_key(db: &Connection, person: &str) -> Result<String, LibraryError> {
+    let identity = local(db)?
+        .ok_or(LibraryError::CollectionAuthorityNotAdopted)?
+        .id;
+    Ok(format!(
+        "collectionAuthorityPerson:{}:{}:{person}",
+        identity.library, identity.epoch
+    ))
+}
+
+fn remember_av_person(tx: &Transaction<'_>, person: &str) -> Result<(), LibraryError> {
+    // People are never deleted by credit replacement. Remember confirmation after
+    // the last credit disappears, scoped to this library/epoch, without a schema change.
+    tx.execute(
+        "INSERT OR IGNORE INTO notes_state(key,value) VALUES(?1,'1')",
+        [confirmed_av_person_key(tx, person)?],
+    )?;
+    Ok(())
+}
+
+fn validate_av_changes(changes: &Value) -> Result<(), LibraryError> {
+    use super::av_models::av_limit;
+    for (field, value) in changes
+        .as_object()
+        .ok_or(LibraryError::InvalidCollectionMetadata)?
+    {
+        let valid = match field.as_str() {
+            "genres" => value.as_array().is_some_and(|rows| {
+                rows.len() <= av_limit("genres")
+                    && rows.iter().all(|v| {
+                        v.as_str()
+                            .is_some_and(|s| s.chars().count() <= av_limit("genreLength"))
+                    })
+            }),
+            "releaseDate" => {
+                value.is_null()
+                    || value.as_str().is_some_and(|s| {
+                        s.len() == 10
+                            && s.bytes().enumerate().all(|(i, c)| {
+                                if i == 4 || i == 7 {
+                                    c == b'-'
+                                } else {
+                                    c.is_ascii_digit()
+                                }
+                            })
+                            && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+                    })
+            }
+            "productCode" | "titleJa" | "maker" | "label" | "series" => {
+                value.is_null()
+                    || value
+                        .as_str()
+                        .is_some_and(|s| s.chars().count() <= av_limit(field))
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err(LibraryError::InvalidCollectionMetadata);
+        }
+    }
+    Ok(())
+}
+
+/// Save and immutable command insertion share the caller's local transaction.
+pub(crate) fn enqueue_av_changes(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    before: &Value,
+) -> Result<(), LibraryError> {
+    let after = editable_av(tx, work)?;
+    let raw: Option<String> = tx.query_row("SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id=?1", [work], |r|r.get(0)).optional()?;
+    let mut confirmed: Value = raw
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| LibraryError::InvalidCloudResponse)?
+        .unwrap_or(json!({"details":{"av":empty_av()}}));
+    if confirmed["details"]["av"].is_null() {
+        confirmed["details"]["av"] = empty_av();
+    }
+    let pending = tx.prepare("SELECT payload FROM collection_authority_outbox WHERE state='pending' AND json_extract(payload,'$.workId')=?1 ORDER BY seq")?.query_map([work], |r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    for raw in pending {
+        let body: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if body["commandType"] == "setAvDetails" {
+            for (field, value) in body["changes"]
+                .as_object()
+                .ok_or(LibraryError::InvalidCloudResponse)?
+            {
+                confirmed["details"]["av"][field] = value.clone();
+            }
+        }
+    }
+    let mut changes = json!({});
+    let mut expected = json!({});
+    for field in ["productCode", "label", "series"] {
+        if before["av"][field] != after["av"][field] {
+            changes[field] = after["av"][field].clone();
+            expected[field] = confirmed["details"]["av"][field].clone();
+        }
+    }
+    if !changes.as_object().unwrap().is_empty() {
+        validate_av_changes(&changes)?;
+        validate_av_changes(&expected)?;
+        enqueue_collection_command(
+            tx,
+            status,
+            "setAvDetails",
+            work,
+            json!({"workId":work,"changes":changes,"expected":expected}),
+        )?;
+    }
+    if before["credits"] != after["credits"] {
+        let mut people = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for credit in after["credits"].as_array().unwrap() {
+            let person = safe_id(text(credit, "personId")?)?;
+            if !seen.insert(person) {
+                continue;
+            }
+            let known: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?2) OR EXISTS(SELECT 1 FROM collection_authority_revisions r,json_each(r.payload,'$.avCredits') c WHERE r.section='works' AND json_extract(c.value,'$.personId')=?1) OR EXISTS(SELECT 1 FROM collection_authority_outbox o,json_each(o.payload,'$.people') p WHERE o.state='pending' AND o.command_type='setAvCredits' AND json_extract(p.value,'$.personId')=?1)",params![person,confirmed_av_person_key(tx,person)?],|r|r.get(0))?;
+            if !known {
+                let (display, name_ja): (String, Option<String>) = tx.query_row(
+                    "SELECT display_name,name_ja FROM collection_people WHERE id=?1",
+                    [person],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?;
+                if display.trim().is_empty()
+                    || display.chars().count() > super::av_models::av_limit("personName")
+                    || name_ja.as_ref().is_some_and(|s| {
+                        s.chars().count() > super::av_models::av_limit("personName")
+                    })
+                {
+                    return Err(LibraryError::InvalidCollectionMetadata);
+                }
+                people.push(json!({"personId":person,"displayName":display,"nameJa":name_ja}));
+            }
+        }
+        let revision = predicted_collection_revision(tx, "works", &json!([work]).to_string())?;
+        enqueue_collection_command(
+            tx,
+            status,
+            "setAvCredits",
+            work,
+            json!({"workId":work,"credits":after["credits"],"people":people,"expectedRevision":revision}),
+        )?;
+    }
+    Ok(())
+}
+
 /// Predict only revision-CAS commands; field updates use expected values instead.
 pub(crate) fn predicted_collection_revision(
     db: &Connection,
@@ -1302,6 +1495,46 @@ pub(crate) fn predicted_collection_revision(
                 }
                 _ => {}
             }
+        } else if section == "works"
+            && matches!(command, "setAvDetails" | "setAvCredits")
+            && key("works", &body)? == entity_key
+        {
+            if state["details"].is_null() {
+                state["details"] = json!({"av":empty_av()});
+            }
+            if state["details"]["av"].is_null() {
+                state["details"]["av"] = empty_av();
+            }
+            if command == "setAvDetails" {
+                let mut changed = false;
+                for (field, value) in body["changes"]
+                    .as_object()
+                    .ok_or(LibraryError::InvalidCloudResponse)?
+                {
+                    changed |= av_comparable(&state["details"]["av"][field]) != av_comparable(value);
+                    state["details"]["av"][field] = value.clone();
+                }
+                if changed {
+                    predicted += 1;
+                }
+            } else {
+                if credit_values(&state["avCredits"]) != body["credits"] {
+                    predicted += 1;
+                }
+                state["avCredits"] = body["credits"].clone();
+            }
+        } else if section == "works"
+            && command == "selectArtwork"
+            && key("works", &body)? == entity_key
+        {
+            if state["selection"].is_null() {
+                state["selection"] = json!({});
+            }
+            let slot = text(&body, "slot")?;
+            if state["selection"][slot] != body["artworkId"] {
+                predicted += 1;
+            }
+            state["selection"][slot] = body["artworkId"].clone();
         } else if section == "volumeSources"
             && command == "upsertVolumeSource"
             && key("volumeSources", &body)? == entity_key
@@ -1652,15 +1885,29 @@ fn apply_av(tx: &Transaction<'_>, v: &Value, now: &str) -> Result<(), LibraryErr
     if av.is_null() {
         return Ok(());
     }
+    let work = text(v, "workId")?;
+    let before = editable_av(tx, work)?;
+    let had_details: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collection_av_details WHERE collection_id=?1)",
+        [work],
+        |r| r.get(0),
+    )?;
     tx.execute("INSERT INTO collection_av_details(collection_id,product_code,title_ja,maker,label,series,genres_json,release_date) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(collection_id) DO UPDATE SET product_code=excluded.product_code,title_ja=excluded.title_ja,maker=excluded.maker,label=excluded.label,series=excluded.series,genres_json=excluded.genres_json,release_date=excluded.release_date",
         params![text(v,"workId")?,sql_value(&av["productCode"])?,sql_value(&av["titleJa"])?,sql_value(&av["maker"])?,sql_value(&av["label"])?,sql_value(&av["series"])?,av["genres"].to_string(),sql_value(&av["releaseDate"]) ?])?;
-    // The feed has credits but no people section. Preserve existing person-local
-    // metadata and retain every received credit in the raw work projection.
+    // Names now arrive as people; leave memo/profile/portrait rows intact.
+    if let Some(people) = v.get("avPeople") {
+        for person in people
+            .as_array()
+            .ok_or(LibraryError::InvalidCloudResponse)?
+        {
+            tx.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,name_ja=excluded.name_ja",
+                params![safe_id(text(person,"personId")?)?,text(person,"displayName")?,sql_value(&person["nameJa"])?,now])?;
+            remember_av_person(tx, text(person, "personId")?)?;
+        }
+    }
     if let Some(credits) = v["avCredits"].as_array() {
         let work = text(v, "workId")?;
-        // A credit's `name` is the person's display name, not the per-work credit
-        // name. AV editing is fenced while active, so the local credit name is still
-        // the confirmed one; new credits have none.
+        // Compatibility with older feeds that omit creditName and avPeople.
         let credit_names: std::collections::HashMap<(String, String), Option<String>> = tx
             .prepare("SELECT person_id,role,credit_name FROM collection_person_relations WHERE collection_id=?1")?
             .query_map([work], |r| Ok(((r.get(0)?, r.get(1)?), r.get(2)?)))?
@@ -1671,15 +1918,29 @@ fn apply_av(tx: &Transaction<'_>, v: &Value, now: &str) -> Result<(), LibraryErr
         )?;
         for c in credits {
             let (person, role) = (text(c, "personId")?, text(c, "role")?);
-            tx.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,name_ja=excluded.name_ja",
-                params![person,text(c,"name")?,sql_value(&c["nameJa"])?,now])?;
-            let credit_name = credit_names
-                .get(&(person.to_owned(), role.to_owned()))
-                .cloned()
-                .flatten();
+            if v.get("avPeople").is_none() {
+                tx.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,name_ja=excluded.name_ja",
+                    params![person,text(c,"name")?,sql_value(&c["nameJa"])?,now])?;
+                remember_av_person(tx, person)?;
+            }
+            let credit_name = if let Some(value) = c.get("creditName") {
+                sql_value(value)?
+            } else {
+                credit_names
+                    .get(&(person.to_owned(), role.to_owned()))
+                    .cloned()
+                    .flatten()
+                    .map_or(rusqlite::types::Value::Null, rusqlite::types::Value::Text)
+            };
             tx.execute("INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order,credit_name) VALUES(?1,?2,?3,?4,?5)",
                 params![work,person,role,integer(c,"order")?,credit_name])?;
         }
+    }
+    if had_details && before != editable_av(tx, work)? {
+        tx.execute(
+            "UPDATE collection_av_details SET revision=revision+1 WHERE collection_id=?1",
+            [work],
+        )?;
     }
     Ok(())
 }
@@ -2374,6 +2635,10 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
         let body: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
         match body["commandType"].as_str() {
+            Some("setAvDetails") => {
+                project_av_details(tx, text(&body, "workId")?, &body["changes"])?
+            }
+            Some("setAvCredits") => project_av_credits(tx, &body, &created_at)?,
             Some("selectArtwork") => project_selection(
                 tx,
                 text(&body, "workId")?,
@@ -2477,6 +2742,59 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
         }
     }
     project_pending_provider_fields(tx)?;
+    Ok(())
+}
+
+fn project_av_details(
+    tx: &Transaction<'_>,
+    work: &str,
+    changes: &Value,
+) -> Result<(), LibraryError> {
+    validate_av_changes(changes)?;
+    tx.execute("INSERT OR IGNORE INTO collection_av_details(collection_id) SELECT id FROM collections WHERE id=?1", [work])?;
+    for (field, value) in changes.as_object().unwrap() {
+        let column = match field.as_str() {
+            "productCode" => "product_code",
+            "titleJa" => "title_ja",
+            "maker" => "maker",
+            "label" => "label",
+            "series" => "series",
+            "genres" => "genres_json",
+            "releaseDate" => "release_date",
+            _ => return Err(LibraryError::InvalidCloudResponse),
+        };
+        let stored = if field == "genres" {
+            rusqlite::types::Value::Text(value.to_string())
+        } else {
+            sql_value(value)?
+        };
+        tx.execute(
+            &format!("UPDATE collection_av_details SET {column}=?2 WHERE collection_id=?1"),
+            params![work, stored],
+        )?;
+    }
+    Ok(())
+}
+
+fn project_av_credits(tx: &Transaction<'_>, body: &Value, now: &str) -> Result<(), LibraryError> {
+    let work = text(body, "workId")?;
+    // A later pending command may reference a person created by its predecessor.
+    for person in body["people"]
+        .as_array()
+        .ok_or(LibraryError::InvalidCloudResponse)?
+    {
+        tx.execute("INSERT OR IGNORE INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4)",params![text(person,"personId")?,text(person,"displayName")?,sql_value(&person["nameJa"])?,now])?;
+    }
+    tx.execute(
+        "DELETE FROM collection_person_relations WHERE collection_id=?1",
+        [work],
+    )?;
+    for credit in body["credits"]
+        .as_array()
+        .ok_or(LibraryError::InvalidCloudResponse)?
+    {
+        tx.execute("INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order,credit_name) SELECT id,?2,?3,?4,?5 FROM collections WHERE id=?1",params![work,text(credit,"personId")?,text(credit,"role")?,integer(credit,"order")?,sql_value(&credit["creditName"]) ?])?;
+    }
     Ok(())
 }
 

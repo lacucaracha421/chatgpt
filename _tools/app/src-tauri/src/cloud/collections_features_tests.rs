@@ -10,6 +10,7 @@ const ALL: ReplicaFeatures = ReplicaFeatures {
     cover_focus: true,
     people: true,
     portrait_image: true,
+    av_credit_name: true,
 };
 const AV_ONLY: ReplicaFeatures = ReplicaFeatures {
     av: true,
@@ -17,6 +18,7 @@ const AV_ONLY: ReplicaFeatures = ReplicaFeatures {
     cover_focus: false,
     people: false,
     portrait_image: false,
+    av_credit_name: false,
 };
 
 fn fixture() -> (tempfile::TempDir, Library) {
@@ -90,6 +92,10 @@ fn replica_features_follow_the_status_advertisement() {
         ),
         (
             json!({"collectionTypes": ["av"], "replicaFeatures": ["workRecord", "coverFocus", "people", "portraitImage"]}),
+            ReplicaFeatures { av_credit_name: false, ..ALL },
+        ),
+        (
+            json!({"collectionTypes": ["av"], "replicaFeatures": ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName"]}),
             ALL,
         ),
     ] {
@@ -100,6 +106,18 @@ fn replica_features_follow_the_status_advertisement() {
         ReplicaFeatures::from_status(&CollectionsStatus::default()),
         ReplicaFeatures::default()
     );
+}
+
+#[test]
+fn replica_features_av_credit_name_is_additive_and_advertised() {
+    let (_temp, library) = fixture();
+    library.connection().unwrap().execute("UPDATE collection_person_relations SET credit_name='Work alias' WHERE collection_id='av' AND person_id='p'",[]).unwrap();
+    let old: Value = serde_json::from_str(&body(&library,AV_ONLY)).unwrap();
+    assert!(item(&old,"av")["av"]["people"][0].get("creditName").is_none());
+    let new: Value = serde_json::from_str(&body(&library,ALL)).unwrap();
+    assert_eq!(item(&new,"av")["av"]["people"][0]["creditName"],"Work alias");
+    let status: CollectionsStatus = serde_json::from_value(json!({"replicaFeatures":["avCreditName"]})).unwrap();
+    assert!(ReplicaFeatures::from_status(&status).av_credit_name);
 }
 
 #[test]

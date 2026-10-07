@@ -151,6 +151,7 @@ const REMAINING_FUNCTIONS: &[(&str, &str, &str)] = &[
     ),
 ];
 const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
+    ("library/av_collection.rs", "save_av_details"),
     ("library/collection.rs", "connect_fetched_igdb_game"),
     ("library/tmdb_flow.rs", "apply_fetched_tmdb_title"),
     ("library/tmdb_flow.rs", "refresh_fetched_tmdb_title"),
@@ -244,9 +245,7 @@ const FENCED_FUNCTIONS: &[(&str, &str)] = &[
     ("library/launchbox.rs", "store_spine"),
     ("library/launchbox.rs", "fill_launchbox_platforms"),
     ("library/collection_pc.rs", "store_cover_focus"),
-    // Batch 5: AV details, people, portraits, profiles and favorites have no
-    // authority command yet. AV inbox/candidates/name cache/poll state stay local.
-    ("library/av_collection.rs", "save_av_details"),
+    // AV link, person metadata, portraits, profiles and favorites remain fenced.
     ("library/av_link/apply.rs", "apply_people"),
     ("library/av_link/apply.rs", "apply_av_link"),
     ("library/av_detail.rs", "save_av_person_memo"),
@@ -310,7 +309,8 @@ fn remaining_source(file: &str, source: &str) -> String {
                 || body.contains("import_authority_artwork_files(")
                 || body.contains("enqueue_provider_snapshot(")
                 || body.contains("enqueue_release_event(")
-                || body.contains("enqueue_release_ack("),
+                || body.contains("enqueue_release_ack(")
+                || body.contains("enqueue_av_changes("),
             "{f}::{name} lost transactional outbox"
         );
         ranges.push(range);

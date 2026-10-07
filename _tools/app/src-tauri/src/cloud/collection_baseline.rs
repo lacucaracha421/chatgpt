@@ -109,6 +109,7 @@ impl Library {
                 cover_focus: true,
                 people: true,
                 portrait_image: true,
+                av_credit_name: true,
             };
             let snapshot = snapshot_from_transaction(
                 &root,
@@ -246,8 +247,10 @@ pub(super) fn from_snapshot(
                     .ok_or(LibraryError::InvalidCloudResponse)?;
                 portraits.insert(person_id.to_owned(), person["portraitImage"].clone());
             }
-            staged_credits.push(json!({"personId":person["id"], "name":person["name"], "nameJa":person["nameJa"],
-                "role":person["role"], "order":person["order"], "portraitCrop":person["portraitCrop"]}));
+            let mut credit = json!({"personId":person["id"], "name":person["name"], "nameJa":person["nameJa"],
+                "role":person["role"], "order":person["order"], "portraitCrop":person["portraitCrop"]});
+            if let Some(name) = person.get("creditName") { credit["creditName"] = name.clone(); }
+            staged_credits.push(credit);
         }
         let art = work["artworks"]
             .as_array()

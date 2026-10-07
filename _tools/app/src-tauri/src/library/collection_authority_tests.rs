@@ -1,6 +1,508 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
+fn av_details_fixture() -> (tempfile::TempDir, Library, CollectionAuthorityStatus, Value) {
+    let (temp, library, status) = fixture();
+    seed_av(&library);
+    let mut server = work("av", 1);
+    server["type"] = json!("av");
+    server["name"] = json!("AV Work");
+    server["fields"]["status"] = Value::Null;
+    server["details"]["av"] = json!({"productCode":"ABC-001","titleJa":"原題","maker":"Maker","label":"Label","series":null,"genres":["g"],"releaseDate":"2026-01-02"});
+    server["avCredits"] = json!([{"personId":"p","name":"ignored credit display","nameJa":null,"role":"performer","order":0,"creditName":"Alias","portraitCrop":null}]);
+    server["avPeople"] = json!([{"personId":"p","displayName":"Display","nameJa":"表示","memo":"remote memo","profile":null,"portrait":null}]);
+    adopt(&library, &status, json!({"works":[server.clone()]}));
+    (temp, library, status, server)
+}
+
+fn av_draft(library: &Library) -> super::super::av_models::SaveAvDetails {
+    use super::super::av_models::*;
+    let details = library.get_av_details("av").unwrap();
+    SaveAvDetails {
+        expected_revision: details.revision,
+        product_code: details.product_code,
+        label: details.label,
+        series: details.series,
+        people: details
+            .people
+            .into_iter()
+            .map(|p| AvPersonInput {
+                person: AvPersonChoice::Existing { id: p.id },
+                role: p.role,
+                credit_name: p.credit_name,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn collection_authority_av_details_queue_projection_receipts_and_reopen() {
+    use super::super::av_models::*;
+    let (temp, library, status, server) = av_details_fixture();
+    let mut draft = av_draft(&library);
+    draft.product_code = Some(" NEW-1 ".into());
+    draft.people.push(AvPersonInput {
+        person: AvPersonChoice::New {
+            display_name: "New person".into(),
+        },
+        role: AvPersonRole::Director,
+        credit_name: Some("Credit one".into()),
+    });
+    let saved = library.save_av_details("av", draft).unwrap();
+    let added = saved
+        .people
+        .iter()
+        .find(|p| p.role == AvPersonRole::Director)
+        .unwrap()
+        .id
+        .clone();
+    assert_eq!(saved.product_code.as_deref(), Some("NEW-1"));
+    let mut draft = av_draft(&library);
+    draft.label = Some("New label".into());
+    draft
+        .people
+        .iter_mut()
+        .find(|p| p.role == AvPersonRole::Director)
+        .unwrap()
+        .credit_name = Some("Credit two".into());
+    library.save_av_details("av", draft).unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(commands.len(), 4);
+    assert_eq!(commands[0]["commandType"], "setAvDetails");
+    assert_eq!(commands[0]["changes"], json!({"productCode":"NEW-1"}));
+    assert_eq!(commands[0]["expected"], json!({"productCode":"ABC-001"}));
+    assert_eq!(commands[1]["commandType"], "setAvCredits");
+    assert_eq!(commands[1]["expectedRevision"], 2);
+    assert_eq!(
+        commands[1]["people"],
+        json!([{"personId":added,"displayName":"New person","nameJa":null}])
+    );
+    assert_eq!(commands[3]["expectedRevision"], 4);
+    assert_eq!(commands[3]["people"], json!([]));
+    library.save_av_details("av", av_draft(&library)).unwrap();
+    assert_eq!(provider_commands(&library).len(), 4);
+    drop(library);
+    let library = Library::open(temp.path()).unwrap();
+    assert_eq!(
+        library.get_av_details("av").unwrap().label.as_deref(),
+        Some("New label")
+    );
+    let server = RefCell::new(server);
+    let sent = Cell::new(0);
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                let local = library.get_av_details("av").unwrap();
+                assert_eq!(local.label.as_deref(), Some("New label"));
+                assert_eq!(
+                    local
+                        .people
+                        .iter()
+                        .find(|p| p.id == added)
+                        .unwrap()
+                        .credit_name
+                        .as_deref(),
+                    Some("Credit two")
+                );
+                let mut server = server.borrow_mut();
+                match body["commandType"].as_str().unwrap() {
+                    "setAvDetails" => {
+                        for (field, value) in body["changes"].as_object().unwrap() {
+                            assert_eq!(body["expected"][field], server["details"]["av"][field]);
+                            server["details"]["av"][field] = value.clone();
+                        }
+                    }
+                    "setAvCredits" => {
+                        assert_eq!(body["expectedRevision"], server["entityRevision"]);
+                        for person in body["people"].as_array().unwrap() {
+                            server["avPeople"]
+                                .as_array_mut()
+                                .unwrap()
+                                .push(person.clone());
+                        }
+                        server["avCredits"] = body["credits"].clone();
+                    }
+                    other => panic!("unexpected {other}"),
+                }
+                server["entityRevision"] = json!(server["entityRevision"].as_i64().unwrap() + 1);
+                sent.set(sent.get() + 1);
+                let mut receipt = envelope(&status);
+                receipt["operationId"] = body["operationId"].clone();
+                receipt["commandType"] = body["commandType"].clone();
+                receipt["changed"] = json!(true);
+                receipt["authorityCursor"] = json!(sent.get());
+                receipt["entities"] = json!({"works":[server.clone()]});
+                Ok(CollectionDelivery::Accepted(receipt))
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(sent.get(), 4);
+    let db = library.connection().unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM collection_authority_outbox WHERE state='accepted'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        4
+    );
+    assert_eq!(local(&db).unwrap().unwrap().id.cursor, 0);
+    drop(db);
+    let details = library.get_av_details("av").unwrap();
+    assert_eq!(details.title_ja.as_deref(), Some("原題"));
+    assert_eq!(details.maker.as_deref(), Some("Maker"));
+    assert_eq!(details.genres, vec!["g"]);
+    assert_eq!(details.people[0].display_name, "Display");
+    assert_eq!(
+        library
+            .get_av_performer("p")
+            .unwrap()
+            .person
+            .memo
+            .as_deref(),
+        Some("local memo")
+    );
+    assert_eq!(library.list_av_favorites().unwrap().len(), 1);
+    assert!(library
+        .get_av_performer("p")
+        .unwrap()
+        .person
+        .portrait
+        .is_some());
+    assert_eq!(
+        library
+            .get_av_performer_profile("p")
+            .unwrap()
+            .unwrap()
+            .stashdb_id
+            .as_deref(),
+        Some("stash-p")
+    );
+}
+
+#[test]
+fn collection_authority_av_details_fifo_expected_values_and_revision_noops() {
+    let (_temp, library, status, _) = av_details_fixture();
+    for code in ["First", "Second"] {
+        let mut draft = av_draft(&library);
+        draft.product_code = Some(code.into());
+        library.save_av_details("av", draft).unwrap();
+    }
+    let mut draft = av_draft(&library);
+    draft.people[0].credit_name = Some("Changed".into());
+    library.save_av_details("av", draft).unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(commands[1]["expected"], json!({"productCode":"First"}));
+    assert_eq!(commands[2]["expectedRevision"], 3);
+    assert_eq!(
+        predicted_collection_revision(
+            &library.connection().unwrap(),
+            "works",
+            &json!(["av"]).to_string()
+        )
+        .unwrap(),
+        4
+    );
+    assert_eq!(
+        command_credential(&commands[0], "client", Some("publisher")).unwrap(),
+        "client"
+    );
+    assert_eq!(status.contract_version, Some(1));
+}
+
+#[test]
+fn collection_authority_av_details_revision_counts_pending_artwork_and_normalized_noops() {
+    let (_temp, library, status, mut server) = av_details_fixture();
+    server["details"]["av"]["label"] = json!(" Label ");
+    server["entityRevision"] = json!(2);
+    library
+        .apply_collection_changes(&changes(
+            &status,
+            1,
+            json!([change(1, json!({"works":[server]}))]),
+        ))
+        .unwrap();
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    enqueue_collection_command(
+        &tx,
+        &status,
+        "setAvDetails",
+        "av",
+        json!({"workId":"av","changes":{"label":"Label"},"expected":{"label":" Label "}}),
+    )
+    .unwrap();
+    enqueue_collection_command(
+        &tx,
+        &status,
+        "selectArtwork",
+        "av",
+        json!({"workId":"av","slot":"back","artworkId":"back","expectedArtworkId":null}),
+    )
+    .unwrap();
+    assert_eq!(
+        predicted_collection_revision(&tx, "works", &json!(["av"]).to_string()).unwrap(),
+        3
+    );
+    tx.commit().unwrap();
+    drop(db);
+    let mut draft = av_draft(&library);
+    draft.people[0].credit_name = Some("Changed".into());
+    library.save_av_details("av", draft).unwrap();
+    assert_eq!(
+        provider_commands(&library).last().unwrap()["expectedRevision"],
+        3
+    );
+}
+
+#[test]
+fn collection_authority_av_details_reusing_unlinked_confirmed_person_queues_no_people() {
+    use super::super::av_models::*;
+    let (_temp, library, status, mut server) = av_details_fixture();
+    let mut draft = av_draft(&library);
+    draft.people.clear();
+    library.save_av_details("av", draft).unwrap();
+    server["avCredits"] = json!([]);
+    server["avPeople"] = json!([]);
+    server["entityRevision"] = json!(2);
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                let mut receipt = envelope(&status);
+                receipt["operationId"] = body["operationId"].clone();
+                receipt["commandType"] = body["commandType"].clone();
+                receipt["changed"] = json!(true);
+                receipt["authorityCursor"] = json!(1);
+                receipt["entities"] = json!({"works":[server]});
+                Ok(CollectionDelivery::Accepted(receipt))
+            },
+            0,
+        )
+        .unwrap();
+    let mut draft = av_draft(&library);
+    draft.people.push(AvPersonInput {
+        person: AvPersonChoice::Existing { id: "p".into() },
+        role: AvPersonRole::Director,
+        credit_name: Some("Director credit".into()),
+    });
+    library.save_av_details("av", draft).unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(commands.last().unwrap()["people"], json!([]));
+    assert_eq!(commands.last().unwrap()["expectedRevision"], 2);
+}
+
+#[test]
+fn collection_authority_av_details_credit_revision_conflict_reaches_queue_health() {
+    let (_temp, library, status, server) = av_details_fixture();
+    let mut draft = av_draft(&library);
+    draft.people[0].credit_name = Some("Local credit".into());
+    library.save_av_details("av", draft).unwrap();
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                assert_eq!(body["commandType"], "setAvCredits");
+                Ok(CollectionDelivery::Conflict(
+                    json!({"code":"revisionConflict","current":{"work":server}}),
+                ))
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(
+        library
+            .authority_sync_health()
+            .unwrap()
+            .collections
+            .blocked_count,
+        1
+    );
+    assert_eq!(provider_commands(&library).len(), 1);
+}
+
+#[test]
+fn collection_authority_av_details_accepts_maximum_credit_count() {
+    use super::super::av_models::*;
+    let (_temp, library, _, _) = av_details_fixture();
+    let mut draft = av_draft(&library);
+    draft.people = (0..av_limit("credits"))
+        .map(|index| AvPersonInput {
+            person: AvPersonChoice::New {
+                display_name: format!("Person {index}"),
+            },
+            role: AvPersonRole::Performer,
+            credit_name: None,
+        })
+        .collect();
+    assert_eq!(
+        library.save_av_details("av", draft).unwrap().people.len(),
+        64
+    );
+    let commands = provider_commands(&library);
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0]["credits"].as_array().unwrap().len(), 64);
+    assert_eq!(commands[0]["people"].as_array().unwrap().len(), 64);
+    assert_eq!(commands[0]["expectedRevision"], 1);
+}
+
+#[test]
+fn collection_authority_av_details_conflict_surfaces_without_mutating_confirmed_state() {
+    let (_temp, library, status, mut server) = av_details_fixture();
+    let mut draft = av_draft(&library);
+    draft.label = Some("Local label".into());
+    library.save_av_details("av", draft).unwrap();
+    server["details"]["av"]["label"] = json!("Remote label");
+    server["entityRevision"] = json!(2);
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                assert_eq!(body["expected"]["label"], "Label");
+                Ok(CollectionDelivery::Conflict(
+                    json!({"code":"revisionConflict","current":{"work":server}}),
+                ))
+            },
+            0,
+        )
+        .unwrap();
+    let db = library.connection().unwrap();
+    let (state, code, detail): (String, String, String) = db
+        .query_row(
+            "SELECT state,conflict_code,conflict_detail FROM collection_authority_outbox",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (state.as_str(), code.as_str()),
+        ("blocked", "revisionConflict")
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&detail).unwrap()["current"]["work"]["details"]["av"]
+            ["label"],
+        "Remote label"
+    );
+    assert_eq!(db.query_row("SELECT entity_revision FROM collection_authority_revisions WHERE section='works' AND work_id='av'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+}
+
+#[test]
+fn collection_authority_av_details_atomic_rollback_and_server_limits() {
+    use super::super::av_models::*;
+    let (_temp, library, _, _) = av_details_fixture();
+    let before = editable_av(&library.connection().unwrap(), "av").unwrap();
+    let revision = library.get_av_details("av").unwrap().revision;
+    library.connection().unwrap().execute_batch("CREATE TRIGGER reject_av_credits BEFORE INSERT ON collection_authority_outbox WHEN NEW.command_type='setAvCredits' BEGIN SELECT RAISE(ABORT,'credits failure'); END;").unwrap();
+    let mut draft = av_draft(&library);
+    draft.product_code = Some("Queued first".into());
+    draft.people.push(AvPersonInput {
+        person: AvPersonChoice::New {
+            display_name: "Rolled back".into(),
+        },
+        role: AvPersonRole::Director,
+        credit_name: None,
+    });
+    assert!(library.save_av_details("av", draft).is_err());
+    assert_eq!(
+        editable_av(&library.connection().unwrap(), "av").unwrap(),
+        before
+    );
+    assert_eq!(library.get_av_details("av").unwrap().revision, revision);
+    assert!(library.search_av_people("Rolled back").unwrap().is_empty());
+    assert!(provider_commands(&library).is_empty());
+    library
+        .connection()
+        .unwrap()
+        .execute_batch("DROP TRIGGER reject_av_credits")
+        .unwrap();
+    for key in ["productCode", "titleJa", "maker", "label", "series"] {
+        let mut changes = json!({});
+        changes[key] = json!("字".repeat(av_limit(key)));
+        validate_av_changes(&changes).unwrap();
+        changes[key] = json!("字".repeat(av_limit(key) + 1));
+        assert!(validate_av_changes(&changes).is_err());
+    }
+    validate_av_changes(&json!({"genres":vec!["字".repeat(100);64],"releaseDate":"2024-02-29"}))
+        .unwrap();
+    for value in [
+        json!({"genres":vec!["g";65]}),
+        json!({"genres":["字".repeat(101)]}),
+        json!({"genres":null}),
+        json!({"releaseDate":"2026-02-30"}),
+        json!({"releaseDate":"2026-1-01"}),
+    ] {
+        assert!(validate_av_changes(&value).is_err());
+    }
+    for key in ["code", "label", "series", "name", "credit", "people"] {
+        let mut draft = av_draft(&library);
+        match key {
+            "code" => draft.product_code = Some("x".repeat(65)),
+            "label" => draft.label = Some("x".repeat(501)),
+            "series" => draft.series = Some("x".repeat(501)),
+            "name" => draft.people.push(AvPersonInput {
+                person: AvPersonChoice::New {
+                    display_name: "x".repeat(501),
+                },
+                role: AvPersonRole::Director,
+                credit_name: None,
+            }),
+            "credit" => draft.people[0].credit_name = Some("x".repeat(501)),
+            "people" => draft.people = vec![draft.people[0].clone(); 65],
+            _ => unreachable!(),
+        }
+        assert!(library.save_av_details("av", draft).is_err(), "{key}");
+        assert!(provider_commands(&library).is_empty());
+    }
+    let mut draft = av_draft(&library);
+    draft.product_code = Some("x".repeat(64));
+    draft.label = Some("x".repeat(500));
+    draft.series = Some("x".repeat(500));
+    draft.people.push(AvPersonInput {
+        person: AvPersonChoice::New {
+            display_name: "字".repeat(500),
+        },
+        role: AvPersonRole::Director,
+        credit_name: Some("字".repeat(500)),
+    });
+    library.save_av_details("av", draft).unwrap();
+}
+
+#[test]
+fn collection_authority_av_details_oversize_body_and_stale_remote_edit_are_rejected() {
+    use super::super::av_models::*;
+    let (_temp, library, status, mut server) = av_details_fixture();
+    let old = av_draft(&library);
+    let mut oversized = av_draft(&library);
+    oversized.people = (0..64)
+        .map(|_| AvPersonInput {
+            person: AvPersonChoice::New {
+                display_name: "字".repeat(500),
+            },
+            role: AvPersonRole::Performer,
+            credit_name: Some("字".repeat(500)),
+        })
+        .collect();
+    assert!(library.save_av_details("av", oversized).is_err());
+    assert!(provider_commands(&library).is_empty());
+    assert_eq!(library.get_av_details("av").unwrap().people.len(), 1);
+    server["details"]["av"]["maker"] = json!("Remote maker");
+    server["entityRevision"] = json!(2);
+    let mut feed = envelope(&status);
+    feed["items"] = json!([{"sequence":1,"authorityCursor":1,"entities":{"works":[server]}}]);
+    feed["cursor"] = json!(1);
+    feed["nextAfter"] = json!(1);
+    feed["hasMore"] = json!(false);
+    library.apply_collection_changes(&feed).unwrap();
+    assert!(matches!(
+        library.save_av_details("av", old),
+        Err(AvError::Stale)
+    ));
+    assert!(provider_commands(&library).is_empty());
+}
+
 const NOW: &str = "2026-10-06T00:00:00Z";
 
 fn provider_edit_before_delivery(new_import: bool) {
@@ -2992,7 +3494,9 @@ fn collection_authority_batch5_av_edits_are_fenced_and_automatic_profile_refresh
         }
         let before = av_local_state(&l);
         let details: SaveAvDetails = serde_json::from_value(json!({"expectedRevision":3,"productCode":"NEW-1","label":null,"series":null,"people":[{"person":{"kind":"new","displayName":"New"},"role":"performer","creditName":null}]})).unwrap();
-        assert_fenced(l.save_av_details("av", details));
+        if !adopted {
+            assert!(matches!(l.save_av_details("av", details), Err(AvError::Library(LibraryError::CollectionAuthorityNotAdopted))));
+        }
         let artwork: ApplyAvArtwork = serde_json::from_value(json!({"expectedRevision":"any","front":{"kind":"clear"},"spine":{"kind":"keep"},"back":{"kind":"keep"}})).unwrap();
         let result = l.apply_av_artwork("av", artwork);
         if adopted {
@@ -3091,7 +3595,7 @@ fn collection_authority_batch5_adoption_keeps_av_details_people_portraits_and_cr
             details.maker.as_deref(),
             details.genres.clone()
         ),
-        (3, Some("ABC-001"), Some("Maker"), vec!["g".to_owned()])
+        (4, Some("ABC-001"), Some("Maker"), vec!["g".to_owned()])
     );
     let credits: Vec<_> = details
         .people

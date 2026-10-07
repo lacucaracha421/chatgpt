@@ -4,9 +4,9 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 123;
+pub(crate) const SCHEMA_VERSION: i64 = 124;
 
-/// Test helper: undoes migrations 0103 through 0123 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0124 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
@@ -737,6 +737,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 122 {
             transaction.execute_batch(include_str!("../../migrations/0123_character_tagger_tag_exclusions.sql"))?;
         }
+        if version <= 123 {
+            transaction.execute_batch(include_str!("../../migrations/0124_av_authority_limits.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -888,6 +891,108 @@ pub(super) mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn av_authority_limits_migration_from_123_preserves_people_children_and_outbox() {
+        let mut db = Connection::open_in_memory().unwrap();
+        historical_schema(&mut db, 123);
+        db.execute_batch("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('av','AV','av','t','t');
+            INSERT INTO collection_av_details(collection_id,product_code,label,series,revision,title_ja,maker,genres_json) VALUES('av','CODE','Label','Series',7,'Title','Maker','[\"g\"]');
+            INSERT INTO collection_people(id,display_name,name_ja,wikidata_id,fanza_actress_id,memo,created_at,updated_at) VALUES('p','Person','Name','Q1','F1','Memo','t','t');
+            INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order,credit_name) VALUES('av','p','performer',0,'Alias');
+            INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at) VALUES('p','commons',x'1234','image/png',1,1,'photo','https://example.test','t');
+            INSERT INTO collection_person_profiles(person_id,source,status,stashdb_id,name,fetched_at) VALUES('p','stashdb','matched','stash-p','Profile',42);
+            INSERT INTO av_favorite_performers(person_id,created_at) VALUES('p','t');
+            INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,adopted,generation,updated_at) VALUES(1,'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',1,1,1,'g','t');
+            INSERT INTO collection_authority_outbox(operation_id,library_id,epoch,contract_version,command_type,entity_key,payload,state,receipt,created_at,updated_at) VALUES('op','eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',1,1,'updateWork','av','{}','accepted','{\"receipt\":true}','t','t');").unwrap();
+        let before: (i64,i64,i64,i64) = db.query_row("SELECT generation,published_generation,first_dirty,last_dirty FROM mobile_publication_state WHERE kind='collections'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        migrate_to_latest(&mut db, 123).unwrap();
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            124
+        );
+        assert_eq!(
+            db.pragma_query_value(None, "foreign_keys", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(!db
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+        assert_eq!(db.query_row("SELECT label,series,revision,title_ja,maker,genres_json FROM collection_av_details WHERE collection_id='av'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?))).unwrap(),("Label".into(),"Series".into(),7,"Title".into(),"Maker".into(),"[\"g\"]".into()));
+        assert_eq!(db.query_row("SELECT display_name,name_ja,wikidata_id,fanza_actress_id,memo FROM collection_people WHERE id='p'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?))).unwrap(),("Person".into(),"Name".into(),"Q1".into(),"F1".into(),"Memo".into()));
+        assert_eq!(
+            db.query_row(
+                "SELECT credit_name FROM collection_person_relations",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "Alias"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT hex(image_bytes) FROM collection_person_portraits",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "1234"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT stashdb_id FROM collection_person_profiles",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "stash-p"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM av_favorite_performers", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT state,receipt FROM collection_authority_outbox",
+                [],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            )
+            .unwrap(),
+            ("accepted".into(), "{\"receipt\":true}".into())
+        );
+        let after = db.query_row("SELECT generation,published_generation,first_dirty,last_dirty FROM mobile_publication_state WHERE kind='collections'",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?))).unwrap();
+        assert_eq!(before, after);
+        db.execute(
+            "UPDATE collection_av_details SET label=?1,series=?1",
+            ["x".repeat(500)],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE collection_people SET display_name=?1",
+            ["x".repeat(500)],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE collection_person_relations SET credit_name=?1",
+            ["x".repeat(500)],
+        )
+        .unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT generation FROM mobile_publication_state WHERE kind='collections'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            before.0 + 1
+        );
     }
 
     #[test]

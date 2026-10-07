@@ -35,6 +35,8 @@ struct AvPerson {
     id: String,
     name: String,
     name_ja: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credit_name: Option<String>,
     role: String,
     order: i64,
     portrait_crop: Option<AvPortraitCrop>,
@@ -157,6 +159,7 @@ pub(super) fn committed_av(
     id: &str,
     covers: &BTreeSet<String>,
     mut portraits: Option<&mut PortraitImages>,
+    credit_names: bool,
 ) -> Result<AvInfo, LibraryError> {
     let row = db
         .query_row(
@@ -188,7 +191,7 @@ pub(super) fn committed_av(
     // this projection, including when the same person appears in multiple works.
     let mut statement = db.prepare(
         "SELECT p.id, p.display_name, p.name_ja, r.role, r.sort_order,
-                crop.artwork_id, crop.x, crop.y, crop.w, crop.h
+                 crop.artwork_id, crop.x, crop.y, crop.w, crop.h, r.credit_name
          FROM collection_person_relations r JOIN collection_people p ON p.id=r.person_id
          LEFT JOIN collection_person_portraits crop ON crop.person_id=p.id AND crop.kind='crop'
          WHERE r.collection_id=?1 ORDER BY r.sort_order, r.role, p.id LIMIT 65",
@@ -210,6 +213,7 @@ pub(super) fn committed_av(
                 id: r.get(0)?,
                 name: r.get(1)?,
                 name_ja: r.get(2)?,
+                credit_name: if credit_names { r.get(10)? } else { None },
                 role: r.get(3)?,
                 order: r.get(4)?,
                 portrait_crop,

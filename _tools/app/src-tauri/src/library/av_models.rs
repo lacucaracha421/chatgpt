@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+/// Shared with the PC editor; values mirror server av_contract.py.
+pub(crate) fn av_limit(key: &str) -> usize {
+    static LIMITS: std::sync::LazyLock<serde_json::Value> = std::sync::LazyLock::new(|| {
+        serde_json::from_str(include_str!("../../../src/collections/avLimits.json"))
+            .expect("valid bundled AV limits")
+    });
+    LIMITS[key].as_u64().expect("known AV limit") as usize
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AvError {
     #[error("AV 입력을 확인해 주세요.")]

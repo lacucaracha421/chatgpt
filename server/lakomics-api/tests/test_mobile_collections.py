@@ -448,7 +448,7 @@ class MobileCollectionsTests(unittest.TestCase):
 
     def test_status_advertises_replica_features(self):
         status = self.client.get("/v1/collections/status", headers=AUTH).json()
-        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage"])
+        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName"])
 
     def test_legacy_payload_and_revision_are_byte_identical(self):
         item = {**work("legacy"), "volumes": [{"id": "volume", "volumeNumber": 2, "editionIndex": 1, "displayLabel": "2권"}]}

@@ -4,6 +4,7 @@ import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
 import { Select } from "../shared/ui/Select";
 import { avError } from "./avClient";
+import limits from "./avLimits.json";
 import type { AvDetails, AvGateway, AvPerson, AvPersonInput, AvPersonRole } from "./avTypes";
 
 type CreditDraft = AvPersonInput & { key: string; displayName: string };
@@ -25,7 +26,7 @@ export function AvEditPanel({ details, api, onClose, onSaved }: {
   }, [query, api]);
   function add(person?: AvPerson) {
     const displayName = person?.displayName ?? query.trim();
-    if (!displayName || people.length >= 100) return;
+    if (!displayName || people.length >= limits.credits) return;
     if (person && people.some(item => item.person.kind === "existing" && item.person.id === person.id && item.role === role)) { setError("이미 같은 역할로 연결된 인물입니다."); return; }
     setPeople(items => [...items, { key: crypto.randomUUID(), displayName, person: person ? { kind: "existing", id: person.id } : { kind: "new", displayName }, role, creditName: null }]);
     setQuery(""); setError(null);
@@ -45,19 +46,19 @@ export function AvEditPanel({ details, api, onClose, onSaved }: {
   }
   return <Dialog open title="AV 정보 편집" variant="medium" onClose={() => { if (!saving) onClose(); }}>
     <div className="av-edit-panel">
-      <TextField label="품번" maxLength={120} value={code} onChange={event => setCode(event.target.value)} />
-      <TextField label="레이블" maxLength={240} value={label} onChange={event => setLabel(event.target.value)} />
-      <TextField label="시리즈" maxLength={240} value={series} onChange={event => setSeries(event.target.value)} />
+      <TextField label="품번" maxLength={limits.productCode} value={code} onChange={event => setCode(event.target.value)} />
+      <TextField label="레이블" maxLength={limits.label} value={label} onChange={event => setLabel(event.target.value)} />
+      <TextField label="시리즈" maxLength={limits.series} value={series} onChange={event => setSeries(event.target.value)} />
       <div className="av-people-add"><Select label="역할" value={role} onChange={event => setRole(event.target.value as AvPersonRole)}><option value="performer">출연</option><option value="director">감독</option></Select>
-        <TextField label="인물 이름 검색" maxLength={120} value={query} onChange={event => setQuery(event.target.value)} />
-        {query.trim() && <Button disabled={saving || people.length >= 100} onClick={() => add()}>새 인물로 추가</Button>}
+        <TextField label="인물 이름 검색" maxLength={limits.personName} value={query} onChange={event => setQuery(event.target.value)} />
+        {query.trim() && <Button disabled={saving || people.length >= limits.credits} onClick={() => add()}>새 인물로 추가</Button>}
         {results.length > 0 && <ul aria-label="기존 인물">{results.map(person => <li key={person.id}><Button disabled={saving} onClick={() => add(person)}>{person.displayName} · {person.id.slice(0, 8)}</Button></li>)}</ul>}
       </div>
       {(["performer", "director"] as const).map(creditRole => <section key={creditRole} aria-label={creditRole === "performer" ? "출연자" : "감독"}>
         <h3>{creditRole === "performer" ? "출연자" : "감독"}</h3>
         {people.map((person, index) => person.role !== creditRole ? null : <div key={person.key} className="av-person-row">
           <span>{person.displayName}</span>
-          <TextField label={`${person.displayName} 작품 내 표기`} maxLength={120} value={person.creditName ?? ""} onChange={event => setPeople(items => items.map((item, position) => position === index ? { ...item, creditName: event.target.value } : item))} />
+          <TextField label={`${person.displayName} 작품 내 표기`} maxLength={limits.creditName} value={person.creditName ?? ""} onChange={event => setPeople(items => items.map((item, position) => position === index ? { ...item, creditName: event.target.value } : item))} />
           <Button aria-label={`${person.displayName} 위로`} disabled={saving || !people.slice(0, index).some(item => item.role === creditRole)} onClick={() => move(index, -1)}>위</Button>
           <Button aria-label={`${person.displayName} 아래로`} disabled={saving || !people.slice(index + 1).some(item => item.role === creditRole)} onClick={() => move(index, 1)}>아래</Button>
           <Button disabled={saving} aria-label={`${person.displayName} 연결 제거`} onClick={() => setPeople(items => items.filter((_, position) => position !== index))}>제거</Button>

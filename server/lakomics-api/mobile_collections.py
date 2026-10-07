@@ -40,6 +40,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import av_contract
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
@@ -66,7 +67,7 @@ ImageMime = Literal["image/jpeg", "image/png", "image/webp", "image/gif", "image
 CollectionType = Literal["game", "manga", "movie", "av"]
 COLLECTION_TYPES = ("game", "manga", "movie", "av")
 #: Optional replica fields this server accepts (see the module docstring).
-REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage")
+REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage", "avCreditName")
 #: Allowed item ``status`` values per Collection type (feature ``workRecord``); the same
 #: list validates a mobile ``status`` edit (personal-edit version 3).
 ITEM_STATUSES = personal_edits.ITEM_STATUSES
@@ -265,8 +266,9 @@ class AvPortraitImage(StrictModel):
 
 class AvPerson(StrictModel):
     id: ID
-    name: str = Field(max_length=500)
-    nameJa: str | None = Field(default=None, max_length=500)
+    name: str = Field(max_length=av_contract.MAX_PERSON_NAME)
+    nameJa: str | None = Field(default=None, max_length=av_contract.MAX_PERSON_NAME)
+    creditName: str | None = Field(default=None, max_length=av_contract.MAX_CREDIT_NAME)
     role: Literal["performer", "director"]
     order: StrictInt
     portraitCrop: AvPortraitCrop | None = None
@@ -274,14 +276,14 @@ class AvPerson(StrictModel):
 
 
 class AvInfo(StrictModel):
-    productCode: str | None = Field(default=None, max_length=64)
-    titleJa: str | None = Field(default=None, max_length=2000)
-    maker: str | None = Field(default=None, max_length=500)
-    label: str | None = Field(default=None, max_length=500)
-    series: str | None = Field(default=None, max_length=500)
-    genres: list[Annotated[str, StringConstraints(max_length=100)]] = Field(default_factory=list, max_length=64)
-    releaseDate: Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")] | None = None
-    people: list[AvPerson] = Field(default_factory=list, max_length=64)
+    productCode: str | None = Field(default=None, max_length=av_contract.TEXT_LIMITS["productCode"])
+    titleJa: str | None = Field(default=None, max_length=av_contract.TEXT_LIMITS["titleJa"])
+    maker: str | None = Field(default=None, max_length=av_contract.TEXT_LIMITS["maker"])
+    label: str | None = Field(default=None, max_length=av_contract.TEXT_LIMITS["label"])
+    series: str | None = Field(default=None, max_length=av_contract.TEXT_LIMITS["series"])
+    genres: list[Annotated[str, StringConstraints(max_length=av_contract.MAX_GENRE_LENGTH)]] = Field(default_factory=list, max_length=av_contract.MAX_GENRES)
+    releaseDate: Annotated[str, StringConstraints(pattern=av_contract.DATE_PATTERN)] | None = None
+    people: list[AvPerson] = Field(default_factory=list, max_length=av_contract.MAX_CREDITS)
 
     @field_validator("releaseDate")
     @classmethod
@@ -430,7 +432,9 @@ def stored(item: Collection) -> dict:
     for volume in payload["volumes"]:
         if volume["coverFocusX"] is None:
             del volume["coverFocusX"]
-    for person in payload.get("av", {}).get("people", ()):
+    for index, person in enumerate(payload.get("av", {}).get("people", ())):
+        if person["creditName"] is None and "creditName" not in item.av.people[index].model_fields_set:
+            del person["creditName"]
         if person["portraitImage"] is None:
             del person["portraitImage"]
     if "ownedVolumes" in payload:

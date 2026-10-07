@@ -61,6 +61,7 @@ from starlette.concurrency import run_in_threadpool
 import asset_authority
 import asset_visibility
 import authority
+import av_contract
 
 DOMAIN = "collections"
 CONTRACT_VERSION = 1
@@ -115,13 +116,15 @@ RELEASE_SUBSCRIPTION = "setReleaseSubscription"
 VOLUME_RANGE = "setVolumeRange"
 RECORD_RELEASE = "recordReleaseEvent"
 ACK_RELEASE = "acknowledgeReleaseEvents"
+AV_DETAILS = "setAvDetails"
+AV_CREDITS = "setAvCredits"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                        VOLUME_RANGE, ACK_RELEASE)
+                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -130,6 +133,8 @@ ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "comman
 COMMAND_KEYS = {
     CREATE: {"workId", "type", "name", "legacyKind", "fields", "binding"},
     UPDATE: {"workId", "changes", "expected", "expectedRevision"},
+    AV_DETAILS: {"workId", "changes", "expected"},
+    AV_CREDITS: {"workId", "credits", "people", "expectedRevision"},
     DELETE: {"workId", "expectedRevision"},
     RESTORE: {"workId", "expectedRevision"},
     PURGE: {"workId", "expectedRevision"},
@@ -423,6 +428,8 @@ CREATE TABLE IF NOT EXISTS collection_authority_people(
  person_id TEXT NOT NULL,
  payload TEXT NOT NULL,
  portrait_image TEXT,
+ display_name TEXT,
+ name_ja TEXT,
  PRIMARY KEY(library_id,person_id));
 """
 
@@ -446,6 +453,7 @@ def startup_db(db):
     db.executescript(DDL)
     additions = {
         "collection_authority_works": {"av_credits": "TEXT NOT NULL DEFAULT '[]'"},
+        "collection_authority_people": {"display_name": "TEXT", "name_ja": "TEXT"},
         "collection_authority_artworks": {"published_order": "INTEGER",
                                            "selected": "INTEGER CHECK(selected IN (0,1))"},
         "collection_authority_volumes": {"cover_focus_x": "REAL", "published": "TEXT",
@@ -825,7 +833,42 @@ def work_state(row):
 
 def work_projection(db, library_id, work_id):
     row = work_row(db, library_id, work_id)
-    return None if row is None else work_state(row)
+    return None if row is None else av_work_entity(db, library_id, work_state(row))
+
+
+def av_person_identity(db, library_id, person_id, payload):
+    """Staged people predate name fields; their existing credits own those names."""
+    if "displayName" in payload:
+        return payload["displayName"], payload.get("nameJa")
+    stored = db.execute("SELECT display_name,name_ja FROM collection_authority_people"
+                        " WHERE library_id=? AND person_id=?", [library_id, person_id]).fetchone()
+    if stored is not None and stored[0] is not None:
+        return stored[0], stored[1]
+    row = db.execute(
+        "SELECT json_extract(c.value,'$.name'),json_extract(c.value,'$.nameJa')"
+        " FROM collection_authority_works w,json_each(w.av_credits) c"
+        " WHERE w.library_id=? AND json_extract(c.value,'$.personId')=?"
+        " ORDER BY w.work_id LIMIT 1", [library_id, person_id]).fetchone()
+    if row is None:
+        fail(422, "invalidCollectionCommand", "인물 이름을 찾을 수 없습니다.")
+    return row[0], row[1]
+
+
+def av_work_entity(db, library_id, state):
+    """Add people within the work, retaining the shipped baseline section layout."""
+    if state["type"] != "av":
+        return state
+    people = []
+    for person_id in sorted({c["personId"] for c in state.get("avCredits", [])}):
+        row = db.execute("SELECT payload,portrait_image FROM collection_authority_people"
+                         " WHERE library_id=? AND person_id=?", [library_id, person_id]).fetchone()
+        if row is None:
+            continue
+        payload = json.loads(row["payload"])
+        name, name_ja = av_person_identity(db, library_id, person_id, payload)
+        people.append({**payload, "personId": person_id, "displayName": name, "nameJa": name_ja,
+                       "portraitImage": None if row["portrait_image"] is None else json.loads(row["portrait_image"])})
+    return {**state, "avPeople": people}
 
 
 def write_work(db, library_id, state, *, insert=False):
@@ -1186,6 +1229,8 @@ class Context:
         self.touched = set()
 
     def add(self, kind, value, work_id=None):
+        if kind == "works":
+            value = av_work_entity(self.db, self.library_id, value)
         self.entities.setdefault(kind, []).append(value)
         if work_id is not None:
             self.touched.add(work_id)
@@ -1525,6 +1570,107 @@ def _update(ctx, entity, payload_sha):
             state["fields"][field] = value
     _bump_work(ctx, state)
     return _finish(ctx, payload_sha, work_id)
+
+
+def _av_work(ctx, work_id):
+    state = work_state(require_work(ctx, work_id))
+    if state["type"] != "av":
+        fail(409, "collectionAvUnavailable", "AV 작품에서만 사용할 수 있습니다.")
+    return state
+
+
+def _av_value(field, value):
+    if field == "genres":
+        if (not isinstance(value, list) or len(value) > av_contract.MAX_GENRES
+                or any(not isinstance(v, str) or len(v) > av_contract.MAX_GENRE_LENGTH for v in value)):
+            fail()
+        return value
+    if value is not None and not isinstance(value, str):
+        fail()
+    value = normalized_optional(value)
+    if field == "releaseDate":
+        if value is not None:
+            if not re.fullmatch(av_contract.DATE_PATTERN, value):
+                fail()
+            try:
+                datetime.date.fromisoformat(value)
+            except ValueError:
+                fail()
+        return value
+    return _text(value, av_contract.TEXT_LIMITS[field])
+
+
+def _av_fields(value):
+    allowed = {*av_contract.TEXT_LIMITS, "genres", "releaseDate"}
+    if not isinstance(value, dict) or not set(value) <= allowed:
+        fail()
+    return {field: _av_value(field, item) for field, item in value.items()}
+
+
+def _set_av_details(ctx, entity, payload_sha):
+    state = _av_work(ctx, entity["workId"])
+    av = state["details"].get("av") or {**dict.fromkeys(av_contract.TEXT_LIMITS),
+                                      "genres": [], "releaseDate": None}
+    changes, expected = entity["changes"], entity["expected"]
+    if all(_av_value(k, av.get(k)) == v for k, v in changes.items()):
+        return _finish(ctx, payload_sha, state["workId"])
+    if any(_av_value(k, av.get(k)) != expected[k] for k in changes):
+        conflict(ctx, "work", av_work_entity(ctx.db, ctx.library_id, state))
+    state["details"]["av"] = {**av, **changes}
+    _bump_work(ctx, state)
+    return _finish(ctx, payload_sha, state["workId"])
+
+
+def _credit_values(credits):
+    return sorted([{k: c.get(k) for k in ("personId", "role", "order", "creditName")} for c in credits],
+                  key=lambda c: (c["role"], c["order"], c["personId"]))
+
+
+def _av_text(value, limit, *, nullable=True):
+    _text(value, limit, nullable=nullable)
+    return normalized_optional(value)
+
+
+def _set_av_credits(ctx, entity, payload_sha):
+    state = _av_work(ctx, entity["workId"])
+    # Revision CAS matches other whole-entity replacements. Check it before creating people.
+    unchanged = _credit_values(state.get("avCredits", [])) == entity["credits"]
+    if not unchanged and entity["expectedRevision"] != state["entityRevision"]:
+        conflict(ctx, "work", av_work_entity(ctx.db, ctx.library_id, state))
+    supplied = {p["personId"]: p for p in entity["people"]}
+    identities = {}
+    for person_id in {c["personId"] for c in entity["credits"]}:
+        row = ctx.db.execute("SELECT payload FROM collection_authority_people WHERE library_id=? AND person_id=?",
+                             [ctx.library_id, person_id]).fetchone()
+        if row is not None:
+            identities[person_id] = av_person_identity(ctx.db, ctx.library_id, person_id, json.loads(row[0]))
+        elif person_id in supplied:
+            person = supplied[person_id]
+            identities[person_id] = person["displayName"], person["nameJa"]
+        else:
+            fail(422, "invalidCollectionCommand", "새 인물의 정보가 필요합니다.")
+    if unchanged:
+        return _finish(ctx, payload_sha, state["workId"])
+    # Retain staged identities even after their last relation is removed. The
+    # existing memo/profile/portrait payload is never rewritten by this command.
+    for old in state.get("avCredits", []):
+        ctx.db.execute("UPDATE collection_authority_people SET display_name=?,name_ja=?"
+                       " WHERE library_id=? AND person_id=? AND display_name IS NULL",
+                       [old["name"], old.get("nameJa"), ctx.library_id, old["personId"]])
+    for person_id, person in supplied.items():
+        # Concurrent creation never changes the existing payload, even if names differ.
+        payload = {"id": person_id, "displayName": person["displayName"], "nameJa": person["nameJa"],
+                   "memo": None, "favorite": False, "profile": None, "portrait": None}
+        ctx.db.execute("INSERT OR IGNORE INTO collection_authority_people(library_id,person_id,payload,display_name,name_ja) VALUES(?,?,?,?,?)",
+                       [ctx.library_id, person_id, encode(payload), person["displayName"], person["nameJa"]])
+    old_credits = {(c["personId"], c["role"]): c for c in state.get("avCredits", [])}
+    state["avCredits"] = [{**c, "name": identities[c["personId"]][0], "nameJa": identities[c["personId"]][1],
+                           "portraitCrop": old_credits.get((c["personId"], c["role"]), {}).get("portraitCrop")}
+                          for c in entity["credits"]]
+    if state["details"].get("av") is None:
+        state["details"]["av"] = {**dict.fromkeys(av_contract.TEXT_LIMITS), "genres": [], "releaseDate": None}
+    _bump_work(ctx, state)
+    return _finish(ctx, payload_sha, state["workId"])
 
 
 def _delete(ctx, entity, payload_sha):
@@ -2168,6 +2314,7 @@ HANDLERS = {
     UPSERT_VOLUME_SOURCE: _upsert_source, OWNERSHIP: _ownership, MEMBERSHIP: _membership,
     TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
     VOLUME_RANGE: _volume_range, RECORD_RELEASE: _record_release, ACK_RELEASE: _ack_release,
+    AV_DETAILS: _set_av_details, AV_CREDITS: _set_av_credits,
 }
 
 
@@ -2291,6 +2438,49 @@ def parse_command(body):
             # Field-level CAS needs an expectation for every touched field.
             fail(422, "invalidCollectionCommand", "변경하는 모든 필드의 기대값이 필요합니다.")
         entity.update(changes=changes, expected=expected, expectedRevision=revision)
+    elif command_type == AV_DETAILS:
+        changes, expected = _av_fields(body["changes"]), _av_fields(body["expected"])
+        if not changes or set(changes) != set(expected):
+            fail()
+        entity.update(changes=changes, expected=expected)
+    elif command_type == AV_CREDITS:
+        credits, people = body["credits"], body["people"]
+        if (not isinstance(credits, list) or len(credits) > av_contract.MAX_CREDITS
+                or not isinstance(people, list) or len(people) > av_contract.MAX_CREDITS):
+            fail()
+        parsed, seen, orders = [], set(), set()
+        for credit in credits:
+            if not isinstance(credit, dict) or set(credit) != {"personId", "role", "order", "creditName"}:
+                fail()
+            person_id = require_id(credit["personId"])
+            role = credit["role"]
+            if role not in ("performer", "director") or (person_id, role) in seen:
+                fail()
+            seen.add((person_id, role))
+            order = _int(credit["order"], low=0, high=av_contract.MAX_CREDITS-1, nullable=False)
+            if (role, order) in orders:
+                fail()
+            orders.add((role, order))
+            parsed.append({"personId": person_id, "role": role,
+                           "order": order,
+                           "creditName": _av_text(credit["creditName"], av_contract.MAX_CREDIT_NAME)})
+        new_people, ids = [], set()
+        for person in people:
+            if not isinstance(person, dict) or set(person) != {"personId", "displayName", "nameJa"}:
+                fail()
+            person_id = require_id(person["personId"])
+            if person_id in ids or not any(c["personId"] == person_id for c in parsed):
+                fail()
+            ids.add(person_id)
+            name = _av_text(person["displayName"], av_contract.MAX_PERSON_NAME, nullable=False)
+            if not name:
+                fail()
+            new_people.append({"personId": person_id, "displayName": name,
+                               "nameJa": _av_text(person["nameJa"], av_contract.MAX_PERSON_NAME)})
+        # Canonical list order makes desired-state no-ops independent of JSON array ordering.
+        parsed.sort(key=lambda c: (c["role"], c["order"], c["personId"]))
+        entity.update(credits=parsed, people=sorted(new_people, key=lambda p: p["personId"]),
+                      expectedRevision=_revision(body["expectedRevision"], minimum=1))
     elif command_type in (DELETE, RESTORE, PURGE):
         entity["expectedRevision"] = _revision(body["expectedRevision"], minimum=1)
     elif command_type == SHOWCASE_ORDER:
@@ -2631,18 +2821,21 @@ def parse_staging(body, *, verify=False):
             _exact(av, {"productCode", "titleJa", "maker", "label", "series", "genres", "releaseDate"}, "av")
             av = _replica_value(mobile.AvInfo, av, "av")
             del av["people"]
-        credits = _staged_list(work, "avCredits", 64)
+        credits = _staged_list(work, "avCredits", av_contract.MAX_CREDITS)
         if kind != "av" and (av is not None or credits):
             fail(422, code, "AV details and credits require an AV work.")
         if credits and av is None:
             fail(422, code, "AV credits require AV details.")
         parsed_credits = []
         for credit in credits:
-            _exact(credit, {"personId", "name", "nameJa", "role", "order", "portraitCrop"}, "avCredits")
+            _exact(credit, {"personId", "name", "nameJa", "role", "order", "portraitCrop"}
+                   | ({"creditName"} if "creditName" in credit else set()), "avCredits")
             person_id = require_id(credit["personId"], code)
             value = _replica_value(mobile.AvPerson,
                                    {"id": person_id, **{k: v for k, v in credit.items() if k != "personId"}},
                                    "avCredits")
+            if "creditName" not in credit:
+                value.pop("creditName")
             parsed_credits.append({"personId": person_id,
                                    **{k: v for k, v in value.items() if k not in ("id", "portraitImage")}})
         for key, model in (("releaseWatch", mobile.ReleaseWatch), ("releaseSchedule", mobile.ReleaseSchedule)):
@@ -3395,6 +3588,8 @@ def section_page(db, library_id, section, after, limit):
     items, keys, size = [], [], 0
     for row in rows[:limit]:
         item = project(row)
+        if section == WORKS_SECTION:
+            item = av_work_entity(db, library_id, item)
         encoded = len(encode(item).encode())
         if items and size + encoded > MAX_PAGE_BYTES:
             break

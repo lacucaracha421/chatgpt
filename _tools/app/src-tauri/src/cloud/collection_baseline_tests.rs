@@ -7,7 +7,38 @@ const ALL: ReplicaFeatures = ReplicaFeatures {
     cover_focus: true,
     people: true,
     portrait_image: true,
+    av_credit_name: true,
 };
+
+#[test]
+fn collection_baseline_preserves_av_credit_names_and_legacy_shape() {
+    let (_temp, library, feature) = fixture();
+    library.connection().unwrap().execute(
+        "UPDATE collection_person_relations SET credit_name='Work alias' WHERE collection_id='av' AND person_id='crop'", [],
+    ).unwrap();
+    let doc = library
+        .collection_authority_baseline(ENDPOINT, "revision", Some(&feature), ALL, &|_| {})
+        .unwrap();
+    assert_eq!(
+        item(&doc, "works", "workId", "av")["avCredits"][0]["creditName"],
+        "Work alias"
+    );
+    let old = library
+        .collection_authority_baseline(
+            ENDPOINT,
+            "revision",
+            Some(&feature),
+            ReplicaFeatures {
+                av_credit_name: false,
+                ..ALL
+            },
+            &|_| {},
+        )
+        .unwrap();
+    assert!(item(&old, "works", "workId", "av")["avCredits"][0]
+        .get("creditName")
+        .is_none());
+}
 
 #[test]
 fn collection_baseline_offline_export_preserves_steam_and_memberships_without_source_writes() {

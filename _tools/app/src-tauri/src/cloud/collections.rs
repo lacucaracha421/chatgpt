@@ -77,6 +77,7 @@ pub(crate) struct ReplicaFeatures {
     pub cover_focus: bool,
     pub people: bool,
     pub portrait_image: bool,
+    pub av_credit_name: bool,
 }
 impl ReplicaFeatures {
     pub(crate) fn from_status(status: &super::client::CollectionsStatus) -> Self {
@@ -86,6 +87,7 @@ impl ReplicaFeatures {
             cover_focus: status.supports_replica_feature("coverFocus"),
             people: status.supports_replica_feature("people"),
             portrait_image: status.supports_replica_feature("portraitImage"),
+            av_credit_name: status.supports_replica_feature("avCreditName"),
         }
     }
 }
@@ -737,7 +739,7 @@ fn snapshot_from_transaction(root: &Path, transaction: &rusqlite::Transaction<'_
         let mut portraits = av::PortraitImages::new();
         for collection in &mut collections {
             if collection.summary.collection_type == crate::library::models::CollectionType::Av {
-                let info = av::committed_av(&transaction, &collection.summary.id, &covers, portrait_database.as_ref().map(|_| &mut portraits))?;
+                let info = av::committed_av(&transaction, &collection.summary.id, &covers, portrait_database.as_ref().map(|_| &mut portraits), features.av_credit_name)?;
                 metadata_bytes += serde_json::to_vec(&info)
                     .map_err(|_| LibraryError::InvalidCloudResponse)?.len() + 6;
                 if metadata_bytes > MAX_METADATA_BYTES {

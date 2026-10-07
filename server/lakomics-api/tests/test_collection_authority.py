@@ -178,6 +178,170 @@ class CollectionAuthorityTests(unittest.TestCase):
             self.assertEqual(self.command('setVolumeRange', **{**fields, **delta}).status_code, 422)
         self.assertEqual(self.command('setVolumeRange', **{**fields, 'workId': 'm'}).status_code, 409)
 
+    # --- AV authority ----------------------------------------------------------
+    def test_av_details_field_cas_replay_feed_and_projection(self):
+        self.ready()
+        self.ok(self.create('av', 'AV', type_='av'))
+        fields = dict(workId='av', changes={'productCode': ' CODE-1 ', 'maker': 'Maker',
+                                          'genres': ['genre'], 'releaseDate': '2026-10-07'},
+                      expected={'productCode': None, 'maker': None, 'genres': [], 'releaseDate': None})
+        operation = str(uuid.uuid4())
+        receipt = self.ok(self.command('setAvDetails', operation_id=operation, **fields))
+        av = receipt['entities']['works'][0]['details']['av']
+        self.assertEqual(av['productCode'], 'CODE-1')
+        self.assertEqual(receipt['entities']['works'][0]['entityRevision'], 2)
+        self.assertEqual(self.ok(self.command('setAvDetails', operation_id=operation, **fields)), receipt)
+        self.assertFalse(self.ok(self.command('setAvDetails', **fields))['changed'])
+        self.assertEqual(self.code(self.command('setAvDetails', operation_id=operation,
+                         **{**fields, 'changes': {**fields['changes'], 'maker': 'different'}})), 'operationConflict')
+        self.ok(self.update('av', {'name': 'Renamed'}, {'name': 'AV'}))
+        self.ok(self.command('setAvDetails', workId='av', changes={'label': 'Label'}, expected={'label': None}))
+        conflict = self.command('setAvDetails', workId='av', changes={'maker': 'Other', 'series': 'Series'},
+                                expected={'maker': None, 'series': None})
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(self.code(conflict), 'revisionConflict')
+        self.assertEqual(self.work('av')['details']['av']['maker'], 'Maker')
+        self.assertIsNone(self.work('av')['details']['av']['series'])
+        public = self.ok(self.detail('av'))['item']
+        self.assertEqual(public['name'], 'Renamed')
+        self.assertEqual(public['av']['productCode'], 'CODE-1')
+        self.assertEqual(public['av']['genres'], ['genre'])
+        with api_app.get_db() as db:
+            rows, _, _ = ca.section_page(db, LIBRARY, 'works', None, 100)
+            self.assertEqual(next(w for w in rows if w['workId'] == 'av')['details']['av']['label'], 'Label')
+            change = json.loads(db.execute("SELECT payload FROM collection_authority_changes WHERE command_type='setAvDetails' ORDER BY sequence LIMIT 1").fetchone()[0])
+            self.assertEqual(change['entities']['works'][0]['details']['av'], av)
+
+    def test_av_details_limits_expected_keys_and_wrong_type(self):
+        self.ready()
+        self.ok(self.create('av', 'AV', type_='av'))
+        for key, length in ca.av_contract.TEXT_LIMITS.items():
+            self.ok(self.command('setAvDetails', workId='av', changes={key: 'x' * length}, expected={key: None}))
+            self.assertEqual(self.command('setAvDetails', workId='av', changes={key: 'x' * (length+1)},
+                             expected={key: 'x'*length}).status_code, 422)
+        for changes, expected in [({}, {}), ({'unknown': 'x'}, {'unknown': None}),
+                                  ({'maker': 'x'}, {}), ({'maker': 'x'}, {'maker': None, 'label': None}),
+                                  ({'genres': ['x'] * 65}, {'genres': []}),
+                                  ({'genres': ['x'*101]}, {'genres': []}),
+                                  ({'genres': None}, {'genres': []}),
+                                  ({'releaseDate': '2026-02-30'}, {'releaseDate': None}),
+                                  ({'releaseDate': '2026-1-01'}, {'releaseDate': None}),
+                                  ({'maker': 42}, {'maker': None})]:
+            with self.subTest(changes=changes):
+                self.assertEqual(self.command('setAvDetails', workId='av', changes=changes, expected=expected).status_code, 422)
+        self.ok(self.command('setAvDetails', workId='av', changes={'genres': ['x'*100]*64}, expected={'genres': []}))
+        self.assertEqual(self.code(self.command('setAvDetails', workId='m', changes={'maker': 'x'},
+                                              expected={'maker': None})), 'collectionAvUnavailable')
+
+    def test_av_credits_create_once_preserve_existing_and_round_trip(self):
+        self.ready()
+        self.ok(self.create('av', 'AV', type_='av'))
+        person = {'personId': 'person-1', 'displayName': 'Person', 'nameJa': '名前'}
+        credit = {'personId': 'person-1', 'role': 'performer', 'order': 0, 'creditName': 'Alias'}
+        fields = dict(workId='av', credits=[credit], people=[person], expectedRevision=1)
+        operation = str(uuid.uuid4())
+        first = self.ok(self.command('setAvCredits', operation_id=operation, **fields))
+        self.assertEqual(self.ok(self.command('setAvCredits', operation_id=operation, **fields)), first)
+        self.assertFalse(self.ok(self.command('setAvCredits', **fields))['changed'])
+        self.assertEqual(self.work('av')['avCredits'][0]['creditName'], 'Alias')
+        with api_app.get_db() as db:
+            row = db.execute('SELECT payload FROM collection_authority_people WHERE person_id=?', ['person-1']).fetchone()
+            payload = json.loads(row[0])
+            self.assertEqual((payload['memo'], payload['profile'], payload['portrait']), (None, None, None))
+            payload.update(memo='kept memo', favorite=True,
+                           profile={'source': 'stashdb', 'name': 'Profile'}, portrait={'source': 'commons'})
+            original = ca.encode(payload)
+            db.execute('UPDATE collection_authority_people SET payload=? WHERE person_id=?', [original, 'person-1'])
+            db.commit()
+        changed = self.ok(self.command('setAvCredits', **{**fields, 'credits': [{**credit, 'creditName': '別名'}],
+                             'people': [{**person, 'displayName': 'Never overwrite'}], 'expectedRevision': 2}))
+        self.assertEqual(changed['entities']['works'][0]['avPeople'][0]['displayName'], 'Person')
+        self.assertEqual(changed['entities']['works'][0]['avPeople'][0]['memo'], 'kept memo')
+        public = self.ok(self.detail('av'))['item']['av']['people'][0]
+        self.assertEqual((public['name'], public['nameJa'], public['creditName']), ('Person', '名前', '別名'))
+        self.assertEqual(self.listing(type='av')['items'][0]['av']['people'][0]['creditName'], '別名')
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute('SELECT payload FROM collection_authority_people WHERE person_id=?', ['person-1']).fetchone()[0], original)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM collection_authority_people').fetchone()[0], 1)
+            rows, _, _ = ca.section_page(db, LIBRARY, 'works', None, 100)
+            baseline = next(w for w in rows if w['workId'] == 'av')
+            self.assertEqual(baseline['avCredits'][0]['creditName'], '別名')
+            self.assertEqual(baseline['avPeople'][0]['profile']['name'], 'Profile')
+            change = json.loads(db.execute("SELECT payload FROM collection_authority_changes WHERE command_type='setAvCredits' ORDER BY sequence DESC LIMIT 1").fetchone()[0])
+            self.assertEqual(change['entities']['works'][0]['avCredits'][0]['creditName'], '別名')
+        # A clear is explicit and remains null in the public projection.
+        self.ok(self.command('setAvCredits', **{**fields, 'credits': [{**credit, 'creditName': None}],
+                    'people': [], 'expectedRevision': 3}))
+        self.assertIsNone(self.ok(self.detail('av'))['item']['av']['people'][0]['creditName'])
+
+    def test_av_credits_revision_conflict_limits_and_atomic_people(self):
+        self.ready()
+        self.ok(self.create('av', 'AV', type_='av'))
+        credit = {'personId': 'p', 'role': 'performer', 'order': 0, 'creditName': None}
+        person = {'personId': 'p', 'displayName': 'Person', 'nameJa': None}
+        fields = dict(workId='av', credits=[credit], people=[person], expectedRevision=1)
+        self.ok(self.update('av', {'name': 'Remote'}, {'name': 'AV'}))
+        self.assertEqual(self.code(self.command('setAvCredits', **fields)), 'revisionConflict')
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM collection_authority_people').fetchone()[0], 0)
+        fields['expectedRevision'] = 2
+        for delta in [{'credits': [credit]*65}, {'credits': [credit, credit]},
+                      {'credits': [credit, {**credit, 'personId': 'q'}]},
+                      {'credits': [{**credit, 'order': True}]}, {'credits': [{**credit, 'order': -1}]},
+                      {'credits': [{**credit, 'order': 64}]}, {'credits': [{**credit, 'role': 'writer'}]},
+                      {'credits': [{**credit, 'creditName': 'x'*501}]},
+                      {'credits': [{**credit, 'creditName': 5}]}, {'credits': [{**credit, 'personId': '../p'}]},
+                      {'people': [{**person, 'displayName': 'x'*501}]},
+                      {'people': [{**person, 'nameJa': 'x'*501}]}, {'people': [{**person, 'displayName': ' '}]},
+                      {'people': [person, person]}, {'people': [{**person, 'personId': 'unused'}]},
+                      {'expectedRevision': 0}]:
+            with self.subTest(delta=delta):
+                self.assertEqual(self.command('setAvCredits', **{**fields, **delta}).status_code, 422)
+        self.assertEqual(self.command('setAvCredits', **{**fields, 'people': []}).status_code, 422)
+        self.assertEqual(self.code(self.command('setAvCredits', **{**fields, 'workId': 'm'})), 'collectionAvUnavailable')
+        self.ok(self.command('setAvCredits', **{**fields, 'credits': [{**credit, 'creditName': 'x'*500}],
+                                'people': [{**person, 'displayName': 'x'*500, 'nameJa': 'x'*500}]}))
+        maximum = [{'personId': f'person-{index}', 'role': 'performer', 'order': index,
+                    'creditName': None} for index in range(ca.av_contract.MAX_CREDITS)]
+        people = [{'personId': c['personId'], 'displayName': c['personId'], 'nameJa': None} for c in maximum]
+        receipt = self.ok(self.command('setAvCredits', workId='av', credits=maximum, people=people, expectedRevision=3))
+        self.assertEqual(len(receipt['entities']['works'][0]['avCredits']), ca.av_contract.MAX_CREDITS)
+
+    def test_av_staged_person_identity_survives_last_credit_removal(self):
+        self.ready()
+        self.ok(self.create('av', 'AV', type_='av'))
+        with api_app.get_db() as db:
+            original = ca.encode({'id': 'legacy', 'memo': 'memo', 'favorite': True, 'profile': None, 'portrait': None})
+            db.execute('INSERT INTO collection_authority_people(library_id,person_id,payload) VALUES(?,?,?)',
+                       [LIBRARY, 'legacy', original])
+            state = ca.work_state(ca.work_row(db, LIBRARY, 'av'))
+            state['avCredits'] = [{'personId': 'legacy', 'name': 'Legacy', 'nameJa': '旧名',
+                                   'role': 'performer', 'order': 0, 'portraitCrop': None}]
+            ca.write_work(db, LIBRARY, state)
+            db.commit()
+        self.ok(self.command('setAvCredits', workId='av', credits=[], people=[], expectedRevision=1))
+        self.ok(self.command('setAvCredits', workId='av', credits=[{'personId': 'legacy', 'role': 'director',
+                    'order': 0, 'creditName': 'Credit'}], people=[], expectedRevision=2))
+        self.assertEqual(self.work('av')['avCredits'][0]['name'], 'Legacy')
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute('SELECT payload FROM collection_authority_people WHERE person_id=?', ['legacy']).fetchone()[0], original)
+
+    def test_av_pc_limits_match_server_read_and_command_limits(self):
+        pc = json.loads((Path(__file__).resolve().parents[3] / '_tools/app/src/collections/avLimits.json').read_text('utf-8'))
+        self.assertEqual({k: pc[k] for k in ca.av_contract.TEXT_LIMITS}, ca.av_contract.TEXT_LIMITS)
+        self.assertEqual((pc['genres'], pc['genreLength'], pc['credits'], pc['personName'], pc['creditName']),
+                         (ca.av_contract.MAX_GENRES, ca.av_contract.MAX_GENRE_LENGTH, ca.av_contract.MAX_CREDITS,
+                          ca.av_contract.MAX_PERSON_NAME, ca.av_contract.MAX_CREDIT_NAME))
+
+    def test_av_staging_preserves_credit_name_and_accepts_old_shape(self):
+        doc = json.loads((Path(__file__).resolve().parents[3] / 'tests/fixtures/collection-authority/staging-v2-example.json').read_text('utf-8'))
+        av = next(w for w in doc['works'] if w['type'] == 'av')
+        parsed = ca.parse_staging(doc, verify=True)
+        self.assertNotIn('creditName', next(w for w in parsed['works'] if w['type'] == 'av')['avCredits'][0])
+        av['avCredits'][0]['creditName'] = 'Work alias'
+        parsed = ca.parse_staging(doc, verify=True)
+        self.assertEqual(next(w for w in parsed['works'] if w['type'] == 'av')['avCredits'][0]['creditName'], 'Work alias')
+
     # --- helpers ---------------------------------------------------------------
     def confirm(self, *blobs):
         with api_app.get_db() as db:

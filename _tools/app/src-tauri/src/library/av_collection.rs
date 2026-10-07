@@ -167,7 +167,7 @@ impl Library {
         details(&*self.connection()?, id)
     }
     pub fn search_av_people(&self, query: &str) -> Result<Vec<AvPerson>, AvError> {
-        let query = text(Some(query.into()), 120)?.unwrap_or_default();
+        let query = text(Some(query.into()), av_limit("personName"))?.unwrap_or_default();
         if query.is_empty() {
             return Ok(vec![]);
         }
@@ -183,26 +183,35 @@ impl Library {
         Ok(result)
     }
     pub fn save_av_details(&self, id: &str, input: SaveAvDetails) -> Result<AvDetails, AvError> {
-        if input.expected_revision < 0 || input.people.len() > 100 {
+        if input.expected_revision < 0 || input.people.len() > av_limit("credits") {
             return Err(AvError::Invalid);
         }
-        let product_code = text(input.product_code, 120)?;
-        let label = text(input.label, 240)?;
-        let series = text(input.series, 240)?;
+        let product_code = text(input.product_code, av_limit("productCode"))?;
+        let label = text(input.label, av_limit("label"))?;
+        let series = text(input.series, av_limit("series"))?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        // AV details/people have no authority command yet (1B §4).
-        super::collection_authority::fence_collection_operation(&transaction)?;
+        let status = super::collection_authority::collection_write_status(&transaction)?;
         let previous = details(&transaction, id)?;
         if previous.revision != input.expected_revision {
             return Err(AvError::Stale);
         }
+        let before = super::collection_authority::editable_av(&transaction, id)?;
         let now = chrono::Utc::now().to_rfc3339();
         let mut seen = BTreeSet::new();
         let mut people = Vec::new();
         for item in input.people {
             let person_id = match item.person {
                 AvPersonChoice::Existing { id } => {
+                    if status.active
+                        && (id.is_empty()
+                            || id.len() > 128
+                            || !id
+                                .bytes()
+                                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_')))
+                    {
+                        return Err(AvError::Invalid);
+                    }
                     let exists: bool = transaction.query_row(
                         "SELECT EXISTS(SELECT 1 FROM collection_people WHERE id=?1)",
                         [&id],
@@ -214,7 +223,8 @@ impl Library {
                     id
                 }
                 AvPersonChoice::New { display_name } => {
-                    let display_name = text(Some(display_name), 120)?.ok_or(AvError::Invalid)?;
+                    let display_name =
+                        text(Some(display_name), av_limit("personName"))?.ok_or(AvError::Invalid)?;
                     let id = uuid::Uuid::new_v4().to_string();
                     transaction.execute("INSERT INTO collection_people(id,display_name,created_at,updated_at) VALUES(?1,?2,?3,?3)",params![id,display_name,now])?;
                     id
@@ -223,7 +233,11 @@ impl Library {
             if !seen.insert((person_id.clone(), item.role.clone())) {
                 return Err(AvError::Invalid);
             }
-            people.push((person_id, item.role, text(item.credit_name, 120)?));
+            people.push((
+                person_id,
+                item.role,
+                text(item.credit_name, av_limit("creditName"))?,
+            ));
         }
         transaction.execute(
             "DELETE FROM collection_person_relations WHERE collection_id=?1",
@@ -244,11 +258,16 @@ impl Library {
             "UPDATE collections SET updated_at=?1 WHERE id=?2",
             params![now, id],
         )?;
+        if status.active {
+            super::collection_authority::enqueue_av_changes(&transaction, &status, id, &before)?;
+        }
         let result = details(&transaction, id)?;
         transaction.commit()?;
         self.publication_inputs.signal(&[9]);
         Ok(result)
     }
+
+
 }
 
 #[cfg(test)]
