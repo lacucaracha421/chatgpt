@@ -9,6 +9,8 @@ import { ExternalVaultBrowser } from "./ExternalVaultBrowser";
 import { resetVaultExportJob } from "./vaultExportJob";
 import { resetVaultImportJob } from "./vaultImportJob";
 
+vi.mock("../video/captureVideoFrame", () => ({ captureVideoFrame: vi.fn() }));
+import { captureVideoFrame } from "../video/captureVideoFrame";
 vi.mock("../assets/AssetGallery", () => ({
   AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
     {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-duration={item.media?.durationMs} data-thumbnail-revision={item.thumbnailRevision ?? ""} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
@@ -397,6 +399,25 @@ it("does not measure video lengths in a read-only session", async () => {
   render(<ExternalVaultBrowser gateway={gateway} status={{ ...unlocked, backupIndex: true }} onStatusChange={vi.fn()} />);
   await screen.findByRole("button", { name: "내 영상" });
   expect(gateway.fillEncryptedVaultVideoDurations).not.toHaveBeenCalled();
+});
+
+it("uses the frame the viewer captured itself and falls back to the backend capture", async () => {
+  const gateway = vaultGateway();
+  (gateway as any).setEncryptedVaultThumbnailFromFrame = vi.fn().mockResolvedValue(undefined);
+  (gateway as any).setEncryptedVaultThumbnailImage = vi.fn().mockResolvedValue(undefined);
+  const frame = new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" });
+  vi.mocked(captureVideoFrame).mockResolvedValueOnce(frame).mockRejectedValueOnce(new Error("tainted"));
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  fireEvent.doubleClick(await screen.findByRole("button", { name: "내 영상" }));
+  await userEvent.click(within(screen.getByLabelText("vault viewer")).getByRole("button", { name: "frame thumbnail" }));
+  await waitFor(() => expect(gateway.setEncryptedVaultThumbnailImage).toHaveBeenCalledWith("v", new Uint8Array([1, 2, 3])));
+  expect(vi.mocked(captureVideoFrame).mock.calls[0]).toEqual([expect.stringMatching(/\/vault-playback\/v$/), 4_200]);
+  expect(gateway.setEncryptedVaultThumbnailFromFrame).not.toHaveBeenCalled();
+  expect(await screen.findByText("이 프레임을 썸네일로 지정했습니다.")).toBeInTheDocument();
+
+  await userEvent.click(within(screen.getByLabelText("vault viewer")).getByRole("button", { name: "frame thumbnail" }));
+  await waitFor(() => expect(gateway.setEncryptedVaultThumbnailFromFrame).toHaveBeenCalledWith("v", 4_200));
+  expect(gateway.setEncryptedVaultThumbnailImage).toHaveBeenCalledTimes(1);
 });
 
 it("offers no frame thumbnail in a read-only session", async () => {

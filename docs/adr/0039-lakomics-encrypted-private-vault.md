@@ -111,6 +111,7 @@ The PC vault view gets user folders, managed like Assets folders (ADR-0013/0030)
 ## Amendment (2026-10-07): Video thumbnail from a viewer frame
 
 - "이 프레임을 썸네일로" in the shared viewer makes the current frame a vault video's custom thumbnail (`thumbnailObjectId`, `thumbnailSha256`). ffmpeg reads the frame from the existing loopback vault-playback stream, which decrypts ranges in memory; no plaintext file is written. The frame is re-encoded like other vault thumbnails and stored as a new encrypted object.
+- The viewer captures the frame itself first: a hidden player of its own reads `/vault-playback/<id>` with CORS, which the media protocol grants only to the app's own origins and only for vault video responses, and the frame bytes are sent to the backend as an image. When the WebView cannot read the frame, FFmpeg takes it instead through a private loopback stream that exists only for that run.
 - The generated poster is kept. The replaced custom thumbnail object is deleted unless another item still references it; anything left behind is removed by orphan cleanup. The action is refused while an import runs and in a session opened from the backup index. No format change: the tablet already prefers `thumbnailObjectId`.
 
 ## Amendment (2026-10-07): Video length

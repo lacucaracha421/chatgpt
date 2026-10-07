@@ -9,9 +9,11 @@ pub(crate) fn allow_cover_canvas(response: &mut Response<Vec<u8>>, origin: Optio
     // `/asset/` lets the bundled FAULT game read original images as Blobs; still app origins and images only.
     let cover = ["/av-link-jacket/", "/work-artwork/", "/work-artwork-thumbnail/", "/collection-source-thumbnail/", "/thumbnail/", "/asset/"]
         .iter().any(|prefix| path.starts_with(prefix));
-    let image = response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
-        .is_some_and(|mime| mime.starts_with("image/"));
-    if !(packaged || development) || !cover || !image || !response.status().is_success() { return; }
+    // A vault video's frame is captured from the app's own player for "이 프레임을 썸네일로".
+    let vault_video = path.starts_with("/vault-playback/");
+    let mime = response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("");
+    let allowed = (cover && mime.starts_with("image/")) || (vault_video && mime.starts_with("video/"));
+    if !(packaged || development) || !allowed || !response.status().is_success() { return; }
     if let Ok(value) = HeaderValue::from_str(origin) {
         response.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
         response.headers_mut().append(header::VARY, HeaderValue::from_static("Origin"));
@@ -42,6 +44,22 @@ mod tests {
             assert!(!response.headers().contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
         }
     }
+    #[test]
+    fn app_can_capture_a_vault_video_frame_but_nothing_else_of_the_vault() {
+        let video = |status: u16| Response::builder().status(status).header(header::CONTENT_TYPE, "video/mp4").body(vec![]).unwrap();
+        let mut ranged = video(206);
+        allow_cover_canvas(&mut ranged, Some("http://tauri.localhost"), "/vault-playback/id");
+        assert_eq!(ranged.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "http://tauri.localhost");
+        for (origin, path) in [("https://example.com", "/vault-playback/id"), ("http://tauri.localhost", "/vault-asset/id"), ("http://tauri.localhost", "/playback/id")] {
+            let mut response = video(200);
+            allow_cover_canvas(&mut response, Some(origin), path);
+            assert!(!response.headers().contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN), "{origin}{path}");
+        }
+        let mut image = image();
+        allow_cover_canvas(&mut image, Some("http://tauri.localhost"), "/vault-playback/id");
+        assert!(!image.headers().contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
     #[test]
     fn failures_and_non_image_responses_stay_unchanged() {
         for (status,mime) in [(404,"image/png"),(200,"application/json")] {

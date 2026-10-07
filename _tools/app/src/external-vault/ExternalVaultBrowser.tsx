@@ -21,6 +21,8 @@ import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
+import { vaultPlaybackUrl } from "../assets/mediaUrl";
+import { captureVideoFrame } from "../video/captureVideoFrame";
 import { vaultErrorMessage } from "./vaultErrors";
 import { dismissVaultExport, reattachVaultExport, startVaultExport, useVaultExportJob, vaultExportProgressText, vaultExportResultText } from "./vaultExportJob";
 import { dismissVaultImport, reattachVaultImport, startVaultFileImport, startVaultImport, useVaultImportJob, vaultImportProgressText } from "./vaultImportJob";
@@ -469,13 +471,21 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     if (!call || readOnly || busy) return;
     setBusy(true);
     setError(null);
+    setMessage({ text: "썸네일을 만드는 중입니다…" });
     try {
-      await call(asset.id, timeMs);
+      // The viewer's own decoded frame is fastest; the backend capture is the fallback where
+      // this WebView cannot read the frame.
+      const captured = gateway.setEncryptedVaultThumbnailImage
+        ? await captureVideoFrame(vaultPlaybackUrl(asset.id), timeMs).catch(() => null)
+        : null;
+      if (captured) await gateway.setEncryptedVaultThumbnailImage!(asset.id, new Uint8Array(await captured.arrayBuffer()));
+      else await call(asset.id, timeMs);
       // Vault thumbnails are never cached by the server; a new revision reloads only this item's images.
       const revision = Date.now();
       setItems((current) => current.map((item) => item.id === asset.id ? { ...item, thumbnailRevision: String(revision) } : item));
       setMessage({ text: "이 프레임을 썸네일로 지정했습니다." });
     } catch (cause) {
+      setMessage(null);
       setError(vaultChangeErrorMessage(cause, "썸네일을 바꾸지 못했습니다."));
     } finally {
       setBusy(false);

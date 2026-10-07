@@ -1632,6 +1632,8 @@ export interface LibraryGateway {
   listEncryptedVaultFolders?(): Promise<EncryptedVaultFolder[]>;
   /** "이 프레임을 썸네일로" for a vault video; the frame is read through the decrypting stream. */
   setEncryptedVaultThumbnailFromFrame?(itemId: string, timeMs: number): Promise<void>;
+  /** A frame the viewer captured itself (any image bytes); re-encoded like other vault thumbnails. */
+  setEncryptedVaultThumbnailImage?(itemId: string, image: Uint8Array): Promise<void>;
   fillEncryptedVaultVideoDurations?(): Promise<EncryptedVaultDurationFill>;
   createEncryptedVaultFolder?(name: string, parentId: string | null): Promise<EncryptedVaultFolder>;
   renameEncryptedVaultFolder?(folderId: string, name: string): Promise<void>;

@@ -3567,6 +3567,21 @@ pub async fn set_encrypted_vault_thumbnail_from_frame(
     .map_err(CommandError::from)
 }
 
+/// "이 프레임을 썸네일로" for a vault video when the viewer captured the frame itself
+/// (`image` is any decodable image; it is re-encoded like other vault thumbnails).
+#[tauri::command]
+pub async fn set_encrypted_vault_thumbnail_image(
+    item_id: String,
+    image: Vec<u8>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_encrypted_vault_thumbnail(&item_id, &image))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
 #[tauri::command]
 pub fn list_encrypted_vault_folders(
     state: State<'_, AppState>,
