@@ -3,8 +3,10 @@ import {setOutboxConnection} from './outboxConnection';
 const mocks = vi.hoisted(() => ({api: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), api: mocks.api}));
 import {ApiError} from './transport';
-import {AUTHORITY_STATUS_PATH, COMMAND_PATH, authorityIdentity, createdWork, discardLifecycle, enqueueCommand, flushCommands, lifecycleInFlight, retryCommandNow,
+import {AUTHORITY_STATUS_PATH, COMMAND_PATH, authorityIdentity, confirmedWork, createdWork, discardLifecycle, enqueueCommand, enqueueCommands, flushCommands, lifecycleInFlight, retryCommandNow,
   optimisticWork, readCommands, reconcileCommands, replaceCommand, type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
+import {avCredits, AV_INPUT_ERROR} from './avEditModel';
+import type {CollectionDetail} from './collectionModel';
 
 const identity: AuthorityIdentity = {libraryId: 'e'.repeat(32), epoch: 7, contractVersion: 1};
 const connection = 'https://a.example';
@@ -20,6 +22,42 @@ function server(command: (body: WorkCommand) => unknown = () => ({}), status: un
 const sent = () => mocks.api.mock.calls.filter(([path]) => path === COMMAND_PATH).map(([, , body]) => body);
 beforeEach(() => { localStorage.clear(); setOutboxConnection(connection); mocks.api.mockReset(); vi.restoreAllMocks(); });
 describe('durable Collection commands', () => {
+  const av: CollectionDetail = {id:'av',name:'AV',type:'av',showcase:false,volumes:[],artworks:[],av:{productCode:'OLD',genres:['old'],people:[{id:'p1',name:'인물',role:'performer',order:0,creditName:null}]}};
+  const details: WorkCommand = {commandType:'setAvDetails',workId:av.id,changes:{productCode:'NEW',genres:['new']},expected:{productCode:'OLD',genres:['old']}};
+  const credits: WorkCommand = {commandType:'setAvCredits',workId:av.id,credits:[{personId:'p1',role:'director',order:0,creditName:'표기'}],people:[],expectedRevision:4};
+  it.each([details,credits])('uses a single checked receipt for $commandType and preserves retry identity on a mismatched receipt', async command => {
+    const row=enqueueCommand(identity,command);
+    server(()=>({commandType:'updateWork'})); await flushCommands();
+    expect(readCommands()[0]).toMatchObject({state:'pending',attempts:1});
+    retryCommandNow(row.command.operationId); server(); await flushCommands();
+    expect(readCommands()[0]).toMatchObject({state:'accepted',receipts:[{operationId:row.command.operationId,commandType:command.commandType}]});
+    expect(readCommands()[0].receipts).toHaveLength(1);
+  });
+  it('reconciles AV arrays and credits without dropping stale overlays, retains confirmed state across surfaces, and lets later remote edits win', async () => {
+    const people=[{...av.av!.people[0],role:'director' as const,creditName:'표기'}];
+    enqueueCommands(identity,[credits,details],{people,expectedCredits:avCredits(av.av!.people)});
+    server(); await flushCommands();
+    const accepted=readCommands();
+    const shown=optimisticWork(av,accepted);
+    expect(shown.av).toMatchObject({productCode:'NEW',genres:['new'],people:[{id:'p1',role:'director',name:'인물',creditName:'표기'}]});
+    reconcileCommands(identity,av,'detail'); expect(readCommands()).toHaveLength(2);
+    reconcileCommands(identity,shown,'list'); expect(readCommands()).toEqual([]);
+    expect(confirmedWork(av,accepted)).toEqual(shown);
+    const remote={...shown,av:{...shown.av!,productCode:'REMOTE',genres:['remote'],people:[]}};
+    expect(confirmedWork(remote,accepted)).toEqual(remote);
+  });
+  it('validates the complete AV batch before storing anything', () => {
+    expect(()=>enqueueCommands(identity,[details,{...credits,expectedRevision:0}])).toThrow(AV_INPUT_ERROR);
+    expect(readCommands()).toEqual([]);
+    expect(()=>enqueueCommand(identity,{...details,expected:{maker:null}})).toThrow(AV_INPUT_ERROR);
+  });
+  it('rejects an oversized AV envelope without truncating names or storing part of the batch', () => {
+    const people=Array.from({length:64},(_,index)=>({personId:`p${index}`,displayName:'あ'.repeat(500),nameJa:null}));
+    const command: WorkCommand={commandType:'setAvCredits',workId:av.id,expectedRevision:4,people,
+      credits:people.map((person,order)=>({personId:person.personId,order,role:'performer',creditName:'あ'.repeat(500)}))};
+    expect(()=>enqueueCommands(identity,[details,command])).toThrow(AV_INPUT_ERROR);
+    expect(readCommands()).toEqual([]);
+  });
   it('keeps a delete visible as undelivered: why it waits, then sent again on 다시 시도, or dropped', async () => {
     const remove: WorkCommand = {commandType: 'deleteWork', workId: 'gone', expectedRevision: 3};
     const row = enqueueCommand(identity, remove, '지울 작품');

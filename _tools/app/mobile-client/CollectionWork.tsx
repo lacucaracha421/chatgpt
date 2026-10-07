@@ -156,7 +156,7 @@ function CaseWorkSurface({shown, current, active, privacy, score, record = workR
   const flatReady = useRef(false);
   const shownId = shown?.item.id;
   useEffect(() => { setMode('case'); setPicked('case'); flatReady.current = false; }, [shownId]);
-  const work = shown.item;
+  const work = shown.item.type === 'av' && shown.item.av ? {...shown.item, releaseDate: shown.item.av.releaseDate ?? null} : shown.item;
   const strip = work.artworks.filter(art => !OBJECT_KINDS.includes(art.kind) && art.id !== heroArtwork(work));
   const art = useArtworkSet(work, {art: {id: strip.some(entry => entry.id === picked) ? picked : null, original: true}}, shown.revision, active && !privacy);
   const presentation = JSON.stringify([work.id, shown.urls, privacy]);
@@ -188,7 +188,7 @@ function CaseWorkSurface({shown, current, active, privacy, score, record = workR
               publisher: work.type === 'av' ? work.av?.maker : work.type === 'movie' ? work.productionCompany : work.publisher,
               platformName: work.type === 'game' ? record(work).find(([label]) => label === '기기')?.[1] || work.platforms?.split('·')[0]?.trim() : null}}
             inside={<CaseInside title={work.name} type={work.type} hero={shown.urls.hero} front={data.front} privacy={privacy} record={caseRecord(record(work), <CaseScore score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}
-              people={people.map(person => ({...person, portrait: person.portraitCrop || person.portraitImage ? <PersonPortrait person={person} current={work} items={portraitSources ?? [work]} revision={shown.revision} size="large"/> : null}))}/>}
+              people={people.map(person => ({...person, name: person.creditName || person.name, portrait: person.portraitCrop || person.portraitImage ? <PersonPortrait person={person} current={work} items={portraitSources ?? [work]} revision={shown.revision} size="large"/> : null}))}/>}
             onReady={() => ready('object')}/>
         </div>
         {work.type === 'av' && <div className="work-flat-slot" style={mode === 'flat' ? undefined : hidden} aria-hidden={mode !== 'flat'} inert={mode !== 'flat' || undefined}>

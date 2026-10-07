@@ -7,7 +7,7 @@ export type CollectionVolume = {id:string; volumeNumber:number; editionIndex:num
 export type AvPortraitCrop = {artworkId:string;x:number;y:number;w:number;h:number};
 /** A performer's StashDB / Commons portrait as published (`portraitImage` feature); the bytes come through the Home cover ticket. */
 export type AvPortraitImage = {sha256:string;sizeBytes:number;contentType:string;width:number;height:number};
-export type AvPerson = {id:string;name:string;nameJa?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null;portraitImage?:AvPortraitImage|null};
+export type AvPerson = {id:string;name:string;nameJa?:string|null;creditName?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null;portraitImage?:AvPortraitImage|null};
 export type AvInfo = {productCode?:string|null;titleJa?:string|null;maker?:string|null;label?:string|null;series?:string|null;genres:string[];releaseDate?:string|null;people:AvPerson[]};
 export type CollectionSummary = {
   artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null}>;

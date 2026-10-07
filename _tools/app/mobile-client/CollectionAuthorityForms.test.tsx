@@ -40,6 +40,42 @@ const openEdit = async () => {
   return screen.findByRole('dialog', {name: '컬렉션 편집'});
 };
 describe('activation-gated tablet forms', () => {
+  it('opens the AV editor from the work menu and keeps the detail mounted with optimistic details and credit names', async () => {
+    localStorage.setItem('lakomics.mobile.collectionView.av.v1', JSON.stringify({layout:'grid',perRow:4}));
+    const av: CollectionDetail = {...item, id:'av-edit', type:'av', av:{productCode:'OLD-001',titleJa:'以前の題名',maker:'제작',label:'기존 레이블',series:null,genres:[],releaseDate:null,
+      people:[{id:'actor',name:'배우 이름',role:'performer',order:0,creditName:null}]}};
+    command = () => new Error('offline');
+    const previous = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path:string, ...args:unknown[]) => {
+      if (path.startsWith('/v1/collections?')) return {ready:true,filterVersion:1,revision:'r1',items:[av],nextCursor:null,publishedAt:null};
+      if (path===`/v1/collections/${av.id}`) return {revision:'r1',item:av,entityRevision:9};
+      return previous(path,...args);
+    });
+    const backRef={current:null as null|(()=>boolean)};
+    render(<Collections active paused={false} backRef={backRef}/>);
+    fireEvent.click(await screen.findByRole('radio',{name:'AV'}));
+    // The first tap picks the tile; the second opens the work.
+    fireEvent.click(await screen.findByText(av.name));
+    fireEvent.click(await screen.findByText(av.name));
+    const article=await screen.findByRole('article',{name:'AV 작품 화면'});
+    fireEvent.click(await screen.findByRole('button',{name:'작품 관리'}));
+    fireEvent.click(within(screen.getByRole('dialog',{name:'작품 관리'})).getByRole('button',{name:'AV 정보 편집'}));
+    const dialog=screen.getByRole('dialog',{name:'AV 정보 편집'});
+    fireEvent.change(within(dialog).getByLabelText('일본어 제목'),{target:{value:'新しい題名'}});
+    fireEvent.change(within(dialog).getByLabelText('레이블'),{target:{value:'새 레이블'}});
+    fireEvent.change(within(dialog).getByLabelText('배우 이름 작품 내 표기'),{target:{value:'작품 표기'}});
+    fireEvent.click(within(dialog).getByRole('button',{name:'저장'}));
+    await waitFor(()=>expect(readCommands()).toHaveLength(2));
+    expect(readCommands()[0].command).toMatchObject({commandType:'setAvCredits',expectedRevision:9,people:[]});
+    expect(readCommands()[1].command).toMatchObject({commandType:'setAvDetails',changes:{titleJa:'新しい題名',label:'새 레이블'},expected:{titleJa:'以前の題名',label:'기존 레이블'}});
+    act(()=>{expect(backRef.current?.()).toBe(true);});
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'AV 정보 편집'})).toBeNull());
+    expect(await screen.findByRole('heading',{name:'新しい題名',level:1})).toBeTruthy();
+    expect(screen.getByRole('article',{name:'AV 작품 화면'})).toBe(article);
+    expect(within(article).getAllByText('새 레이블').length).toBeGreaterThan(0);
+    expect(within(article).getByRole('region',{name:'출연 · 감독'})).toHaveTextContent('작품 표기');
+    expect(screen.getAllByText('대기').length).toBeGreaterThan(0);
+  });
   it('keeps create and work management hidden while inactive', async () => {
     active = false;
     localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));

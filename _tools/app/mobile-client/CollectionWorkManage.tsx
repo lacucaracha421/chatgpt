@@ -4,7 +4,10 @@ import {BottomSheet} from './BottomSheet';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
 import {ProviderArtworkSheet, ProviderSearchSheet, useProviderBinding, type ProviderStatusState} from './CollectionProviders';
 import {artworkLabel, providerName} from './collectionProviderModel';
-import type {CollectionDetail} from './collectionModel';
+import type {CollectionDetail, CollectionSummary} from './collectionModel';
+import type {CommandIntent} from './collectionCommandOutbox';
+import {AV_EDIT_TITLE} from './avEditModel';
+import {AvWorkEditSheet} from './AvWorkEditSheet';
 import type {WorkForm} from './CollectionAuthorityForms';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {errorText} from './transport';
@@ -12,7 +15,7 @@ import './collectionAuthority.css';
 
 type Authority = ReturnType<typeof useCollectionAuthority>;
 /** The 작품 관리 menu, or the form or sheet one of its rows opened. */
-export type ManageSheet = 'menu' | 'delete' | 'search' | 'artwork' | null;
+export type ManageSheet = 'menu' | 'delete' | 'search' | 'artwork' | 'av' | null;
 
 /** The work detail's top-bar ⋯: one place for everything the PC's 작품 관리 menu offers. */
 export function WorkManageButton({onOpen}: {onOpen(): void}) {
@@ -32,7 +35,7 @@ function ManageRow({icon: Icon, label, detail, danger = false, disabled = false,
  * was read at, which the delete expects; `refreshing` while a change confirmed since then has
  * not been read back yet.
  */
-export function WorkManage({item, authority, status, active, entityRevision, refreshing = false, searchKind = 'movie', sheet, onSheet, onForm, onDeleted}: {item: CollectionDetail; authority: Authority; status: ProviderStatusState; active: boolean;
+export function WorkManage({item, confirmed = item, items = [], avRetry, authority, status, active, entityRevision, refreshing = false, searchKind = 'movie', sheet, onSheet, onForm, onDeleted}: {item: CollectionDetail; confirmed?: CollectionDetail; items?: CollectionSummary[]; avRetry?: CommandIntent; authority: Authority; status: ProviderStatusState; active: boolean;
   entityRevision?: number | null; refreshing?: boolean; searchKind?: 'movie' | 'tv'; sheet: ManageSheet; onSheet(sheet: ManageSheet): void; onForm(form: WorkForm): void; onDeleted(workId: string): void}) {
   const binding = useProviderBinding(item, authority, status, active);
   const [failure, setFailure] = useState('');
@@ -53,6 +56,7 @@ export function WorkManage({item, authority, status, active, entityRevision, ref
     {sheet === 'menu' && <BottomSheet title="작품 관리" onClose={close}>
       <div className="collection-manage-group" role="group" aria-label="편집">
         <ManageRow icon={PencilSquareIcon} label="컬렉션 편집" onClick={() => { close(); onForm({mode: 'edit', type: item.type, item}); }}/>
+        {item.type === 'av' && <ManageRow icon={PencilSquareIcon} label={AV_EDIT_TITLE} onClick={() => onSheet('av')}/>}
       </div>
       {provider && <div className="collection-manage-group" role="group" aria-label="외부 정보">
         <ManageRow icon={binding.externalId ? ArrowPathIcon : LinkIcon} label={binding.externalId ? `${name} 새로고침` : `${name}에 연결`}
@@ -75,5 +79,6 @@ export function WorkManage({item, authority, status, active, entityRevision, ref
     </Dialog>}
     {sheet === 'search' && provider && <ProviderSearchSheet item={item} provider={provider} authority={authority} initialKind={searchKind} onClose={close}/>}
     {sheet === 'artwork' && provider && binding.externalId && <ProviderArtworkSheet item={item} provider={provider} externalId={binding.externalId} authority={authority} onClose={close}/>}
+    {sheet === 'av' && item.type === 'av' && <AvWorkEditSheet item={item} confirmed={confirmed} items={items} entityRevision={entityRevision} refreshing={refreshing} authority={authority} retry={avRetry} onClose={close}/>}
   </>;
 }

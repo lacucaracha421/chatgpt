@@ -467,6 +467,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [workForm,setWorkForm]=useState<WorkForm|null>(null);
   // 작품 관리 (the detail's ⋯) and the 휴지통 shortcut.
   const [manage,setManage]=useState<ManageSheet>(null);
+  const [avRetry,setAvRetry]=useState<import('./collectionCommandOutbox').CommandIntent|undefined>();
   const [createSearch,setCreateSearch]=useState<{workId:string;operationId:string;kind:'movie'|'tv'}|null>(null);
   const [searchKind,setSearchKind]=useState<'movie'|'tv'>('movie');
   const providerStatus=useProviderStatus(active&&!paused,refresh);
@@ -663,7 +664,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
   const visibleRecord=(work:CollectionDetail)=>workRecordFacts(work,edits);
   const workInfo=(work:CollectionDetail)=><>
-    <AuthorityQueue authority={edits.authority} workId={work.id} item={work} onForm={setWorkForm}/>
+    <AuthorityQueue authority={edits.authority} workId={work.id} item={work} onForm={setWorkForm} onAvEdit={row=>{setAvRetry(row);setManage('av');}}/>
     <PersonalRecord item={work} edits={edits} onSheet={setPersonalSheet}/>
     <CollectionPersonal item={work} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
     <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...workFacts(work,work.av??null),...moreWorkFacts(work,work.av??null,work.series?{status:work.series.status}:null)]}/></section>
@@ -675,7 +676,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const editionVolumesShared=item?.type==='manga'?volumes.map(volume=>sharedVolume(volume,today)):[];
   const mangaInfo=item?.type==='manga'&&<>
     <header className="tablet-work__identity"><h1>{item.name}</h1>{originalTitle(item)&&<small>{originalTitle(item)}</small>}</header>
-    <AuthorityQueue authority={edits.authority} workId={item.id} item={item} onForm={setWorkForm}/>
+    <AuthorityQueue authority={edits.authority} workId={item.id} item={item} onForm={setWorkForm} onAvEdit={row=>{setAvRetry(row);setManage('av');}}/>
     {(item.ownedVolumes!=null||item.releaseWatch!=null||editionOptions.length>1)&&<section className="collection-personal" aria-label="소장"><SectionLabel title="소장"/><TrackingRows item={item} edits={edits} onOwned={edition=>setPersonalSheet(`owned-${edition}`)}/>{editionOptions.length>1&&<div ref={filterWheel} className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}</section>}
     <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet} includeTracking={false}/>
     <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
@@ -693,8 +694,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
         :<CaseWork item={item} portraitSources={main.items} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} record={visibleRecord} onStep={stepWork} info={workInfo}/>}</>}</div>
     </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
-    {item&&edits.authority.identity&&<WorkManage key={item.id} item={item} authority={edits.authority} status={providerStatus} active={active&&!paused} entityRevision={detail?.item.id===item.id?detail.entityRevision:null}
-      refreshing={edits.authority.acknowledgements.some(row=>row.command.workId===item.id&&(row.acceptedAt??0)>(detail?.readAt??0))} searchKind={searchKind} sheet={manage} onSheet={sheet=>{setSearchKind('movie');setManage(sheet);}} onForm={setWorkForm} onDeleted={onDeleted}/>}
+    {item&&edits.authority.identity&&<WorkManage key={item.id} item={item} confirmed={detail!.item} items={[...main.items,...showcaseItems]} avRetry={avRetry} authority={edits.authority} status={providerStatus} active={active&&!paused} entityRevision={detail?.item.id===item.id?detail.entityRevision:null}
+      refreshing={edits.authority.acknowledgements.some(row=>row.command.workId===item.id&&(row.acceptedAt??0)>(detail?.readAt??0))} searchKind={searchKind} sheet={manage} onSheet={sheet=>{setAvRetry(undefined);setSearchKind('movie');setManage(sheet);}} onForm={setWorkForm} onDeleted={onDeleted}/>}
     {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)} onCreated={(id,kind,operationId,mediaType)=>{chooseTab(kind);closeSearch();openWork(id);setCreateSearch(!workForm.retry&&mediaType?{workId:id,operationId,kind:mediaType}:null);}}/>}
     {directWork ? workView : <AreaSwitch activeKey={selected?'work':'shelf'} retained={['shelf','work']} waitForReady crossFade={false} views={{shelf: <>
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>

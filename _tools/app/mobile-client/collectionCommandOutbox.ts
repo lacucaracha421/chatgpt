@@ -2,6 +2,7 @@ import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection'
 import {api, ApiError, errorText} from './transport';
 import type {CollectionDetail, CollectionKind, CollectionSummary} from './collectionModel';
 import {SAVE_FAILED} from './collectionEditOutbox';
+import {avCredits, avValue, canonicalAvCredits, emptyAv, sameAvValue, validateAvCredits, validateAvDetails, type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson, type AvOverlay} from './avEditModel';
 
 export const AUTHORITY_STATUS_PATH = '/v1/collections/authority/status';
 export const COMMAND_PATH = '/v1/collections/authority/commands';
@@ -22,6 +23,8 @@ export type WorkCommand =
   | {commandType: 'selectArtwork'; workId: string; slot: 'work' | 'hero' | 'backdrop'; artworkId: string | null; expectedArtworkId: string | null}
   | {commandType: 'createWork'; workId: string; type: CollectionKind; name: string; legacyKind: null; fields: Fields; binding: null}
   | {commandType: 'updateWork'; workId: string; changes: Fields; expected: Fields; expectedRevision: number | null}
+  | {commandType: 'setAvDetails'; workId: string; changes: AvDetailFields; expected: AvDetailFields}
+  | {commandType: 'setAvCredits'; workId: string; credits: AvCredit[]; people: AvNewPerson[]; expectedRevision: number}
   | {commandType: 'deleteWork' | 'restoreWork'; workId: string; expectedRevision: number}
   | {commandType: 'setOwnershipTracking'; workId: string; editionIndex: number; count: number; expectedCount: number | null; expectedRevision: null}
   | {commandType: 'setReleaseSubscription'; workId: string; enabled: boolean; expectedEnabled: boolean; expectedRevision: null};
@@ -30,8 +33,9 @@ export type Command = AuthorityIdentity & WorkCommand & {operationId: string};
  * `label` names the work for queue rows whose work is not on screen (a delete or restore);
  * `lastError` is why the last delivery attempt did not reach the server.
  */
-export type CommandIntent = {command: Command; label?: string; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
-  state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: {name: string; fields: Fields}}}};
+export type ConflictWork = {name: string; fields: Fields; entityRevision?: number; details?: {av?: CollectionSummary['av']}; avCredits?: AvCredit[]};
+export type CommandIntent = {command: Command; label?: string; avOverlay?: AvOverlay; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
+  state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: ConflictWork}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
   const value = reply as Partial<AuthorityIdentity> & {active?: boolean} | null;
   return value?.active === true && typeof value.libraryId === 'string' && /^[a-f0-9]{32}$/.test(value.libraryId)
@@ -63,15 +67,20 @@ export const SESSION_STARTED_AT = Date.now();
  */
 export const lifecycleInFlight = (row: CommandIntent) => row.state === 'pending' && row.attempts === 0 && !row.lastError && row.createdAt >= SESSION_STARTED_AT;
 export function enqueueCommand(identity: AuthorityIdentity, command: WorkCommand, label?: string): CommandIntent {
+  validateAvCommand(command);
   const intent: CommandIntent = {command: {...identity, ...command, operationId: crypto.randomUUID()},
     ...(label ? {label} : {}), createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'};
+  validateAvCommand(intent.command);
   write([...readCommands(), intent]);
   return intent;
 }
-/** Persist related artwork commands together, before any network delivery can begin. */
-export function enqueueCommands(identity: AuthorityIdentity, commands: WorkCommand[]): CommandIntent[] {
+/** Persist related commands together, before any network delivery can begin. */
+export function enqueueCommands(identity: AuthorityIdentity, commands: WorkCommand[], avOverlay?: AvOverlay): CommandIntent[] {
+  commands.forEach(validateAvCommand);
   const intents: CommandIntent[] = commands.map(command => ({command: {...identity, ...command, operationId: crypto.randomUUID()},
+    ...(command.commandType === 'setAvCredits' && avOverlay ? {avOverlay} : {}),
     createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'}));
+  intents.forEach(intent => validateAvCommand(intent.command));
   write([...readCommands(), ...intents]); return intents;
 }
 export function providerApplyBody(command: Command & {commandType: 'providerApply'}) {
@@ -99,16 +108,28 @@ export function dropWork(identity: AuthorityIdentity, workId: string, connection
   write(readCommands(connection).filter(row => !sameAuthority(row.command, identity) || row.command.workId !== workId), connection);
 }
 /** A conflict proves rejection. A replacement payload always receives a fresh operation ID. */
-export function replaceCommand(operationId: string, command: WorkCommand | null) {
+export function replaceCommand(operationId: string, command: WorkCommand | null, avOverlay?: AvOverlay) {
   const rows = readCommands(), index = rows.findIndex(row => row.command.operationId === operationId);
   if (index < 0 || rows[index].state !== 'conflict') return;
-  if (command) rows[index] = {...rows[index], command: {libraryId: rows[index].command.libraryId, epoch: rows[index].command.epoch, contractVersion: 1, ...command, operationId: crypto.randomUUID()},
-    state: 'pending', conflict: undefined, attempts: 0, nextAttemptAt: 0};
+  if (command) {
+    validateAvCommand(command);
+    rows[index] = {...rows[index], command: {libraryId: rows[index].command.libraryId, epoch: rows[index].command.epoch, contractVersion: 1, ...command, operationId: crypto.randomUUID()},
+      ...(avOverlay ? {avOverlay} : {}), state: 'pending', conflict: undefined, receipts: undefined, acceptedAt: undefined, attempts: 0, nextAttemptAt: 0};
+    validateAvCommand(rows[index].command);
+  }
   else rows.splice(index, 1);
   write(rows);
   return command ? rows[index] : undefined;
 }
 const inFlight = new Map<string, Promise<void>>();
+function validateAvCommand(command: WorkCommand) {
+  if (command.commandType === 'setAvDetails') {
+    validateAvDetails(command.changes); validateAvDetails(command.expected);
+    if (!Object.keys(command.changes).length || !sameAvValue(Object.keys(command.changes).sort(), Object.keys(command.expected).sort())) throw new Error('AV 입력을 확인해 주세요.');
+  } else if (command.commandType === 'setAvCredits') validateAvCredits(command.credits, command.people, command.expectedRevision);
+  if ((command.commandType === 'setAvDetails' || command.commandType === 'setAvCredits') && new TextEncoder().encode(JSON.stringify(command)).byteLength > 64 * 1024)
+    throw new Error('AV 입력을 확인해 주세요.');
+}
 export function flushCommands(): Promise<void> {
   const connection = outboxConnection();
   if (!connection) return Promise.resolve();
@@ -139,6 +160,7 @@ async function deliver(connection: string) {
       continue;
     }
     try {
+      validateAvCommand(row.command);
       if (row.command.commandType === 'providerApply') {
         const reply = await api<{receipts: CommandReceipt[]}>('/v1/providers/apply', undefined, providerApplyBody(row.command), 'POST', false, connection);
         // Relay-imported gallery artwork precedes the final snapshot atomically.
@@ -162,7 +184,7 @@ async function deliver(connection: string) {
       // acknowledgement they just observed, and the queue lets it go.
       if (isLifecycle(row.command)) write(readCommands(connection).filter(stored => stored.command.operationId !== row.command.operationId), connection);
     } catch (error) {
-      const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: {name: string; fields: Fields}}}} | null)?.detail : null;
+      const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: ConflictWork}}} | null)?.detail : null;
       const code = detail?.code;
       if (code === 'workDeleted') { dropWork(identity, row.command.workId, connection); continue; }
       if (error instanceof ApiError && error.status !== null && error.status >= 400 && error.status < 500 && ![401, 403, 408, 429].includes(error.status)) {
@@ -196,6 +218,16 @@ export function reconcileCommands(identity: AuthorityIdentity, item: CollectionS
     }
     // A detail response cannot retire the shelf's optimistic new tile before its list catches up.
     if (command.commandType === 'createWork') return source !== 'list';
+    if (command.commandType === 'setAvDetails') return !Object.entries(command.changes).every(([key, value]) => {
+      const latest = [...rows.slice(index + 1)].reverse().find(later => sameAuthority(later.command, identity) && later.command.workId === item.id
+        && later.command.commandType === 'setAvDetails' && key in later.command.changes);
+      return latest ? latest.state === 'accepted' && latest.command.commandType === 'setAvDetails' && sameAvValue(avValue(item.av, key as AvDetailKey), latest.command.changes[key as AvDetailKey])
+        : sameAvValue(avValue(item.av, key as AvDetailKey), value);
+    });
+    if (command.commandType === 'setAvCredits') {
+      const latest = [...rows.slice(index)].reverse().find(later => sameAuthority(later.command, identity) && later.command.workId === item.id && later.command.commandType === 'setAvCredits')!;
+      return latest.state !== 'accepted' || latest.command.commandType !== 'setAvCredits' || !sameAvValue(avCredits(item.av?.people ?? []), canonicalAvCredits(latest.command.credits));
+    }
     if (command.commandType === 'updateWork') return !Object.entries(command.changes).every(([key, value]) => {
       const latest = [...rows.slice(index + 1)].reverse().find(later => sameAuthority(later.command, identity)
         && later.command.workId === item.id && later.command.commandType === 'updateWork' && key in later.command.changes);
@@ -217,8 +249,18 @@ export function reconcileCommands(identity: AuthorityIdentity, item: CollectionS
 }
 export function optimisticWork<T extends CollectionSummary>(item: T, rows: CommandIntent[]): T {
   let next = item;
-  for (const {command} of rows.filter(row => row.command.workId === item.id)) {
+  for (const {command, avOverlay} of rows.filter(row => row.command.workId === item.id)) {
     if (command.commandType === 'updateWork') next = {...next, ...command.changes};
+    if (command.commandType === 'setAvDetails') next = {...next, av: {...(next.av ?? emptyAv()), ...command.changes}};
+    if (command.commandType === 'setAvCredits') {
+      const people = command.credits.map(credit => {
+        const known = avOverlay?.people.find(person => person.id === credit.personId) ?? next.av?.people.find(person => person.id === credit.personId);
+        const added = command.people.find(person => person.personId === credit.personId);
+        return {...known, id: credit.personId, name: known?.name ?? added?.displayName ?? credit.personId, nameJa: known?.nameJa ?? added?.nameJa ?? null,
+          role: credit.role, order: credit.order, creditName: credit.creditName};
+      }).sort((a,b) => (a.role === b.role ? a.order - b.order : a.role === 'performer' ? -1 : 1));
+      next = {...next, av: {...(next.av ?? emptyAv()), people}};
+    }
     if (command.commandType === 'setOwnershipTracking') next = {...next, ownedVolumes: [...(next.ownedVolumes ?? []).filter(entry => entry.editionIndex !== command.editionIndex), {editionIndex: command.editionIndex, count: command.count}]};
     if (command.commandType === 'setReleaseSubscription') next = {...next, releaseWatch: {...next.releaseWatch, available: next.releaseWatch?.available ?? false, enabled: command.enabled}};
   }
@@ -229,7 +271,11 @@ export function confirmedWork<T extends CollectionSummary>(item: T, rows: Comman
   let next = item;
   for (const row of rows.filter(row => row.command.workId === item.id)) {
     const command = row.command;
-    if (command.commandType === 'updateWork') {
+    if (command.commandType === 'setAvDetails') {
+      const changes = Object.fromEntries(Object.entries(command.changes).filter(([key]) => sameAvValue(avValue(next.av, key as AvDetailKey), command.expected[key as AvDetailKey])));
+      next = {...next, av: {...(next.av ?? emptyAv()), ...changes}};
+    } else if (command.commandType === 'setAvCredits' && row.avOverlay && sameAvValue(avCredits(next.av?.people ?? []), row.avOverlay.expectedCredits)) next = optimisticWork(next, [row]);
+    else if (command.commandType === 'updateWork') {
       const changes = Object.fromEntries(Object.entries(command.changes).filter(([key]) => Object.is((next as unknown as Fields)[key] ?? null, command.expected[key])));
       next = {...next, ...changes};
     } else if (command.commandType === 'setOwnershipTracking' && (next.ownedVolumes?.find(entry => entry.editionIndex === command.editionIndex)?.count ?? null) === command.expectedCount)

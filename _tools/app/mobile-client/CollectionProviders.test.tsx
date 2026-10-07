@@ -65,7 +65,7 @@ it.each([
   ['movie', ['편집', '외부 정보', '삭제'], ['컬렉션 편집', 'TMDB 새로고침', '포스터·배경 변경', '컬렉션 삭제']],
   ['game', ['편집', '외부 정보', '삭제'], ['컬렉션 편집', 'IGDB 새로고침', '표지·hero 변경', '컬렉션 삭제']],
   ['manga', ['편집', '삭제'], ['컬렉션 편집', '컬렉션 삭제']],
-  ['av', ['편집', '삭제'], ['컬렉션 편집', '컬렉션 삭제']],
+  ['av', ['편집', '삭제'], ['컬렉션 편집', 'AV 정보 편집', '컬렉션 삭제']],
 ] as const)('groups the %s menu like the PC 작품 관리 menu', async (type, groups, rows) => {
   render(<Harness work={{...item, id: type === 'game' ? 'game-1' : item.id, type}}/>);
   const sheet = await menu();

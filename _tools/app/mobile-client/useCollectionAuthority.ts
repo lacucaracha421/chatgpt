@@ -8,6 +8,7 @@ import {AUTHORITY_STATUS_PATH, COMMAND_EVENT, authorityIdentity, confirmedWork, 
   type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
 import {normalizeCollectionEdit, sameEditValue, type CollectionEditField, type CollectionEditValue, type OwnedVolumesValue} from './collectionEditOutbox';
 import type {CollectionSummary} from './collectionModel';
+import type {AvOverlay} from './avEditModel';
 
 export function useCollectionAuthority(active: boolean, onSettled: () => void, observeCurrentLibrary = false) {
   const connection = outboxConnection();
@@ -65,9 +66,9 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void, o
     if (!identity) throw new Error('작품을 편집할 수 없습니다. 연결을 확인해 주세요.');
     const result = enqueueCommand(identity, command, label); void flush(); return result;
   }, [identity?.libraryId, identity?.epoch, flush]);
-  const enqueueBatch = (commands: WorkCommand[]) => {
+  const enqueueBatch = (commands: WorkCommand[], avOverlay?: AvOverlay) => {
     if (!identity) throw new Error('작품을 편집할 수 없습니다. 연결을 확인해 주세요.');
-    const result = enqueueCommands(identity, commands); void flush(); return result;
+    const result = enqueueCommands(identity, commands, avOverlay); void flush(); return result;
   };
   const edit = (workId: string, field: CollectionEditField, value: CollectionEditValue, expected: CollectionEditValue) => {
     const normalized = normalizeCollectionEdit(field, value);

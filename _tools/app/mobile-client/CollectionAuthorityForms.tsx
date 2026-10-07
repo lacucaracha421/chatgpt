@@ -81,7 +81,7 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
     </form>
   </Dialog>;
 }
-export function AuthorityQueue({authority, workId, item, onForm}: {authority: Authority; workId?: string; item?: CollectionDetail; onForm(form: WorkForm): void}) {
+export function AuthorityQueue({authority, workId, item, onForm, onAvEdit}: {authority: Authority; workId?: string; item?: CollectionDetail; onForm(form: WorkForm): void; onAvEdit?(row: CommandIntent): void}) {
   if (!authority.identity) return null;
   // The shelf lists the rows whose work it cannot open: creations, provider adds, deletes and restores.
   const rows = authority.rows.filter(row => row.state !== 'accepted' && (workId ? row.command.workId === workId : row.command.commandType === 'createWork'
@@ -93,9 +93,10 @@ export function AuthorityQueue({authority, workId, item, onForm}: {authority: Au
       const created = createdWork(row);
       if (created) onForm({mode: 'create', type: created.type, item: created, retry: row});
       else if (item && row.command.commandType === 'updateWork') onForm({mode: 'edit', type: item.type, item: authority.work(item), retry: row});
-    }}>확인</Button>}<Button variant="ghost" onClick={() => {
+    }}>확인</Button>}{item?.type === 'av' && onAvEdit && (row.command.commandType === 'setAvDetails' || row.command.commandType === 'setAvCredits') && <Button variant="ghost" onClick={() => onAvEdit(row)}>확인</Button>}<Button variant="ghost" onClick={() => {
       if (row.command.commandType === 'createWork') authority.drop(row.command.workId);
       else replaceCommand(row.command.operationId, null);
+      if (row.command.commandType === 'setAvDetails' || row.command.commandType === 'setAvCredits') void authority.flush();
     }}>버리기</Button></>}
     {/* A delete or restore that is not on its way says why and can be sent again or dropped. */}
     {row.state === 'pending' && isLifecycle(row.command) && !lifecycleInFlight(row) && <>
