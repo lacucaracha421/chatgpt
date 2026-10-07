@@ -708,6 +708,8 @@ function toAssetSummary(item: EncryptedVaultItem): AssetSummary {
     collectedAt: item.importedAt, favorite: false, sourceUrl: null, sourcePublishedAt: null,
     creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null,
     importBatchId: null, originalModifiedAt: item.importedAt,
+    // Without it a reload would fall back to the bare URL, whose old image the WebView may still show.
+    ...(item.thumbnailRevision ? { thumbnailRevision: item.thumbnailRevision } : {}),
     media: item.kind === "video"
       ? { kind: "video", durationMs: item.durationMs ?? 0, preparationState: "ready", scrubFrameCount: 0 }
       : { kind: "image" },

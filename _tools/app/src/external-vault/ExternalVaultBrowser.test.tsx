@@ -11,7 +11,7 @@ import { resetVaultImportJob } from "./vaultImportJob";
 
 vi.mock("../assets/AssetGallery", () => ({
   AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
-    {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-duration={item.media?.durationMs} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
+    {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-duration={item.media?.durationMs} data-thumbnail-revision={item.thumbnailRevision ?? ""} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
       onClick={(event) => onSelectionGesture?.(item, { toggle: event.ctrlKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(item)}>{item.title || item.originalName}</button>)}
     <button onClick={() => onDeleteSelection?.()}>delete key</button>
   </div>,
@@ -382,6 +382,13 @@ it("shows recorded video lengths and fills in older ones in the background", asy
   await waitFor(() => expect(screen.getByRole("button", { name: "예전 영상" })).toHaveAttribute("data-duration", "2500"));
   // A step whose videos all failed keeps going; one that makes no progress ends the loop.
   await waitFor(() => expect(gateway.fillEncryptedVaultVideoDurations).toHaveBeenCalledTimes(3));
+});
+
+it("keeps the listed thumbnail revision so a reload never falls back to an old image", async () => {
+  const gateway = vaultGateway();
+  vi.mocked(gateway.listEncryptedVaultItems!).mockResolvedValue({ ...page, items: [{ ...page.items[1]!, thumbnailRevision: "123" }] });
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  expect(await screen.findByRole("button", { name: "내 영상" })).toHaveAttribute("data-thumbnail-revision", "123");
 });
 
 it("does not measure video lengths in a read-only session", async () => {

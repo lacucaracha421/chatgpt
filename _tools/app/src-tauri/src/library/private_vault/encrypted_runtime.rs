@@ -439,6 +439,22 @@ fn item_kind(kind: VaultItemKind) -> EncryptedVaultItemKind {
     }
 }
 
+/// Digits naming the object a thumbnail is served from, so a changed thumbnail gets a new
+/// `/vault-thumbnail/<id>/v<n>` URL and the WebView never shows the image it kept for the old one.
+fn thumbnail_revision(item: &VaultItem) -> Option<String> {
+    let object_id = item
+        .thumbnail_object_id
+        .as_deref()
+        .or(item.poster_object_id.as_deref())?;
+    // FNV-1a: stable across runs, unlike the std hasher.
+    let hash = object_id
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    Some(hash.to_string())
+}
+
 fn original_mime(item: &VaultItem) -> &'static str {
     let path = Path::new(&item.original_file_name);
     let jfif = path
@@ -842,6 +858,7 @@ impl Library {
                 imported_at: item.imported_at.clone(),
                 has_thumbnail: item.thumbnail_object_id.is_some()
                     || item.poster_object_id.is_some(),
+                thumbnail_revision: thumbnail_revision(item),
                 duration_ms: item.duration_ms,
                 trashed_at: item.trashed_at.clone(),
                 folder_id: item.folder_id.clone(),

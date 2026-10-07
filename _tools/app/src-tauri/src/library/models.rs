@@ -1500,6 +1500,8 @@ pub struct EncryptedVaultItemSummary {
     pub original_file_name: String,
     pub imported_at: String,
     pub has_thumbnail: bool,
+    /// Changes whenever the thumbnail does; versions the thumbnail URL.
+    pub thumbnail_revision: Option<String>,
     /// Set while the item is in the vault trash.
     pub trashed_at: Option<String>,
     pub folder_id: Option<String>,

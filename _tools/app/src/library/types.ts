@@ -918,6 +918,8 @@ export type EncryptedVaultItem = {
   originalFileName: string;
   importedAt: string;
   hasThumbnail: boolean;
+  /** Changes whenever the thumbnail does; versions the thumbnail URL. */
+  thumbnailRevision?: string | null;
   /** Set while the item is in the vault trash. */
   trashedAt?: string | null;
   folderId?: string | null;

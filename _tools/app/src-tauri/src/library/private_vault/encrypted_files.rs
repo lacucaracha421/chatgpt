@@ -1250,7 +1250,25 @@ mod tests {
             let len = media.len();
             media.read_range(0, len).unwrap()
         };
+        let revision = |library: &Library| {
+            library
+                .list_encrypted_vault_items(EncryptedVaultQuery {
+                    kind: Some(EncryptedVaultItemKind::Video),
+                    offset: 0,
+                    limit: 10,
+                    trashed: false,
+                    folder_id: None,
+                    unfiled_only: false,
+                })
+                .unwrap()
+                .items
+                .into_iter()
+                .find(|item| item.id == clip)
+                .and_then(|item| item.thumbnail_revision)
+                .unwrap()
+        };
         let poster = thumbnail(&library);
+        let poster_revision = revision(&library);
         let objects_before = objects(&vault).len();
         let frame = write_png(&temp.path().join("frame.png"), 20);
 
@@ -1259,6 +1277,11 @@ mod tests {
             .unwrap();
         let first = thumbnail(&library);
         assert_ne!(first, poster);
+        // A new thumbnail gets a new URL revision, which stays stable across listings.
+        let first_revision = revision(&library);
+        assert_ne!(first_revision, poster_revision);
+        assert_eq!(revision(&library), first_revision);
+        assert!(first_revision.bytes().all(|byte| byte.is_ascii_digit()));
         assert_eq!(&first[..4], b"RIFF");
         assert_eq!(objects(&vault).len(), objects_before + 1);
 
@@ -1267,6 +1290,7 @@ mod tests {
             .set_encrypted_vault_thumbnail(&clip, &other)
             .unwrap();
         assert_ne!(thumbnail(&library), first);
+        assert_ne!(revision(&library), first_revision);
         // The replaced custom thumbnail object is gone; the poster stays.
         assert_eq!(objects(&vault).len(), objects_before + 1);
         unlock(&library);
