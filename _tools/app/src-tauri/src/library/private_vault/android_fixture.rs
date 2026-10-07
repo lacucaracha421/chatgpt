@@ -125,6 +125,7 @@ fn android_golden_fixture() {
         content_sha256: None,
         thumbnail_sha256: None,
         folder_id: None,
+        duration_ms: None,
     };
     let index = VaultIndex {
         format_version: 1,

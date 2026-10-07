@@ -121,6 +121,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     setScrubbing(false);
   };
   const durationSeconds = videoDuration;
+  // An unknown length (0) shows "—", not "0:00", until the video itself reports one.
+  const shownDurationMs = asset.media.durationMs || Math.round(videoDuration * 1_000) || null;
   const scrubRatio = previewRatio ?? playedRatio;
   const scrubWithKeyboard = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const durationMs = Math.max(0, asset.media.durationMs);
@@ -172,7 +174,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); if (videoShown) setPreviewRatio(null); } }}
       onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setVideoDuration(d); }}
     />}
-    {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(asset.media.durationMs)}` : formatDuration(asset.media.durationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
+    {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(shownDurationMs)}` : formatDuration(shownDurationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
     <div
       className="video-tile__scrub"
       tabIndex={0}

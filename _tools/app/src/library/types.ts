@@ -921,7 +921,12 @@ export type EncryptedVaultItem = {
   /** Set while the item is in the vault trash. */
   trashedAt?: string | null;
   folderId?: string | null;
+  /** Video length; null for images and for older videos not measured yet. */
+  durationMs?: number | null;
 };
+
+/** One background step that measures older vault videos missing a length. */
+export type EncryptedVaultDurationFill = { filled: { id: string; durationMs: number }[]; remaining: number };
 
 export type EncryptedVaultItemPage = { items: EncryptedVaultItem[]; totalCount: number; nextOffset: number | null };
 
@@ -1625,6 +1630,7 @@ export interface LibraryGateway {
   listEncryptedVaultFolders?(): Promise<EncryptedVaultFolder[]>;
   /** "이 프레임을 썸네일로" for a vault video; the frame is read through the decrypting stream. */
   setEncryptedVaultThumbnailFromFrame?(itemId: string, timeMs: number): Promise<void>;
+  fillEncryptedVaultVideoDurations?(): Promise<EncryptedVaultDurationFill>;
   createEncryptedVaultFolder?(name: string, parentId: string | null): Promise<EncryptedVaultFolder>;
   renameEncryptedVaultFolder?(folderId: string, name: string): Promise<void>;
   moveEncryptedVaultFolder?(folderId: string, parentId: string | null): Promise<void>;

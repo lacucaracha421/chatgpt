@@ -105,6 +105,7 @@ impl VaultKeyStore for OsVaultKeyStore {
 pub(crate) struct VideoFacts {
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub duration_ms: Option<u64>,
     /// In-memory WebP poster; never written to disk.
     pub poster: Option<Vec<u8>>,
 }
@@ -137,6 +138,7 @@ impl VideoInspector for NativeVideoInspector {
         VideoFacts {
             width: Some(probe.width).filter(|value| *value > 0),
             height: Some(probe.height).filter(|value| *value > 0),
+            duration_ms: Some(probe.duration_ms).filter(|value| *value > 0),
             poster,
         }
     }
@@ -192,6 +194,8 @@ struct Session {
     /// newer than that backup are unknown to it, so nothing is deleted or saved in this
     /// session (`Session::writable`).
     from_backup_index: bool,
+    /// Videos whose duration backfill failed in this session; not probed again until unlock.
+    duration_probe_failed: HashSet<String>,
 }
 
 impl Session {
@@ -838,6 +842,7 @@ impl Library {
                 imported_at: item.imported_at.clone(),
                 has_thumbnail: item.thumbnail_object_id.is_some()
                     || item.poster_object_id.is_some(),
+                duration_ms: item.duration_ms,
                 trashed_at: item.trashed_at.clone(),
                 folder_id: item.folder_id.clone(),
             })
@@ -1219,11 +1224,14 @@ impl Library {
         let legacy_thumbnail = legacy
             .and_then(|entry| entry.custom_thumbnail.as_deref())
             .and_then(|relative| read_legacy_thumbnail(source_root, relative));
-        let (width, height, generated) = match kind {
-            VaultItemKind::Image => image_facts(path),
+        let (width, height, generated, duration_ms) = match kind {
+            VaultItemKind::Image => {
+                let (width, height, generated) = image_facts(path);
+                (width, height, generated, None)
+            }
             VaultItemKind::Video => {
                 let facts = self.encrypted_vault.env.video.inspect(path);
-                (facts.width, facts.height, facts.poster)
+                (facts.width, facts.height, facts.poster, facts.duration_ms)
             }
         };
         let Ok(mut file) = File::open(path) else {
@@ -1279,6 +1287,7 @@ impl Library {
             content_sha256: Some(content_sha256.clone()),
             thumbnail_sha256: None,
             folder_id: None,
+            duration_ms,
         };
         {
             let mut state = self.encrypted_vault.state();
@@ -1591,6 +1600,7 @@ impl Library {
             index,
             generation: state.generation,
             from_backup_index,
+            duration_probe_failed: HashSet::new(),
         });
         state.located = Some(Located { root, vault_id });
         state.auto_unlock_tried = Some(vault_id);
@@ -1854,6 +1864,7 @@ pub(crate) mod test_support {
             VideoFacts {
                 width: Some(64),
                 height: Some(36),
+                duration_ms: Some(2_500),
                 poster: crate::library::ingestion::encode_thumbnail_webp(&frame).ok(),
             }
         }

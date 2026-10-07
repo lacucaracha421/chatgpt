@@ -257,3 +257,10 @@ it("keeps the scrub frame, not the first frame, until a scrubbed video is on scr
   fireEvent.playing(media);
   expect(media).toHaveAttribute("data-shown");
 });
+
+it("shows an unknown length as a dash, not 0:00", () => {
+  const unknown = video();
+  unknown.media = { ...unknown.media, durationMs: 0 };
+  const { container } = render(<VideoTileMedia asset={unknown} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  expect(container.querySelector(".video-tile__duration")).toHaveTextContent("—");
+});

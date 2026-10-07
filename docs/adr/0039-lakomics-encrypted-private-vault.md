@@ -112,3 +112,8 @@ The PC vault view gets user folders, managed like Assets folders (ADR-0013/0030)
 
 - "이 프레임을 썸네일로" in the shared viewer makes the current frame a vault video's custom thumbnail (`thumbnailObjectId`, `thumbnailSha256`). ffmpeg reads the frame from the existing loopback vault-playback stream, which decrypts ranges in memory; no plaintext file is written. The frame is re-encoded like other vault thumbnails and stored as a new encrypted object.
 - The generated poster is kept. The replaced custom thumbnail object is deleted unless another item still references it; anything left behind is removed by orphan cleanup. The action is refused while an import runs and in a session opened from the backup index. No format change: the tablet already prefers `thumbnailObjectId`.
+
+## Amendment (2026-10-07): Video length
+
+- Vault items gain an optional `durationMs`, recorded by FFprobe when a video is imported. Videos imported earlier are measured in the background while the vault is open on the PC: a few at a time, FFprobe reads each through the loopback vault-playback stream (no plaintext file), and the lengths found are stored with one index save. A video that cannot be probed is not tried again until the next unlock, and a session opened from the backup index measures nothing.
+- No format change: the field is optional, older PC builds and the tablet ignore it, and an older PC build that saves the index only drops lengths that are measured again later. Tiles show "—" instead of "0:00" while a length is unknown.

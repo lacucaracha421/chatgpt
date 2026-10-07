@@ -1503,6 +1503,25 @@ pub struct EncryptedVaultItemSummary {
     /// Set while the item is in the vault trash.
     pub trashed_at: Option<String>,
     pub folder_id: Option<String>,
+    /// Video length when known.
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultDuration {
+    pub id: String,
+    pub duration_ms: u64,
+}
+
+/// One step of filling in the length of vault videos imported before it was recorded.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultDurationFill {
+    /// The videos whose length was filled in by this step.
+    pub filled: Vec<EncryptedVaultDuration>,
+    /// Videos still without a length that were not tried yet in this session.
+    pub remaining: u64,
 }
 
 /// A user folder of the unlocked vault (names exist only in its encrypted index).

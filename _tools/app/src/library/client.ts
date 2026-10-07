@@ -65,6 +65,7 @@ import type {
   EncryptedVaultImportJob,
   EncryptedVaultImportProgress,
   EncryptedVaultImportReport,
+  EncryptedVaultDurationFill,
   EncryptedVaultFolder,
   EncryptedVaultItemPage,
   EncryptedVaultSidecarCleanupPreview,
@@ -654,6 +655,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   listEncryptedVaultFolders: () => invoke<EncryptedVaultFolder[]>("list_encrypted_vault_folders"),
   setEncryptedVaultThumbnailFromFrame: (itemId, timeMs) =>
     invoke<void>("set_encrypted_vault_thumbnail_from_frame", { itemId, timeMs }),
+  fillEncryptedVaultVideoDurations: () =>
+    invoke<EncryptedVaultDurationFill>("fill_encrypted_vault_video_durations"),
   setVideoThumbnailFromFrame: (assetId, timeMs) =>
     invoke<AssetSummary>("set_video_thumbnail_from_frame", { assetId, timeMs }),
   createEncryptedVaultFolder: (name, parentId) =>

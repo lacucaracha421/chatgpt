@@ -88,6 +88,9 @@ pub(crate) struct VaultItem {
     /// The user folder holding this item (`VaultIndex::folders`); `None` is unfiled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder_id: Option<String>,
+    /// Video length; missing for images and for videos imported before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 /// A user folder. Folders nest through `parent_id`; an item belongs to at most one folder.
@@ -754,6 +757,7 @@ mod tests {
             content_sha256: None,
             thumbnail_sha256: None,
             folder_id: None,
+            duration_ms: None,
         }
     }
 

@@ -3532,6 +3532,22 @@ pub async fn set_video_thumbnail_from_frame(
         .map_err(CommandError::from)
 }
 
+/// Fills in the length of a few vault videos imported before it was recorded.
+#[tauri::command]
+pub async fn fill_encrypted_vault_video_durations(
+    state: State<'_, AppState>,
+    runtime: State<'_, crate::extension_api::ExtensionRuntime>,
+) -> Result<crate::library::models::EncryptedVaultDurationFill, CommandError> {
+    let library = current_required(state)?;
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.fill_encrypted_vault_video_durations(|item_id| runtime.vault_playback_url(item_id))
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
 /// "이 프레임을 썸네일로" for a vault video: the frame is read through the decrypting
 /// loopback stream, never from a plaintext file.
 #[tauri::command]

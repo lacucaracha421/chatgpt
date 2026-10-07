@@ -26,7 +26,10 @@ use super::{
 };
 use crate::library::{
     error::LibraryError,
-    models::{EncryptedVaultExportJob, EncryptedVaultExportProgress},
+    models::{
+        EncryptedVaultDuration, EncryptedVaultDurationFill, EncryptedVaultExportJob,
+        EncryptedVaultExportProgress,
+    },
     Library,
 };
 
@@ -49,6 +52,15 @@ impl Drop for ExportJobGuard<'_> {
     }
 }
 
+/// Vault videos without a length that this session has not failed to probe.
+fn missing_durations(session: &super::Session) -> impl Iterator<Item = &VaultItem> {
+    session.index.items.iter().filter(|item| {
+        item.kind == super::VaultItemKind::Video
+            && item.duration_ms.is_none()
+            && !session.duration_probe_failed.contains(&item.id)
+    })
+}
+
 /// Command error code of an export failure, kept in the job for a UI that reattaches.
 fn export_error_code(error: &LibraryError) -> &'static str {
     match error {
@@ -61,6 +73,85 @@ fn export_error_code(error: &LibraryError) -> &'static str {
 }
 
 impl Library {
+    /// Fills in the length of up to `limit` vault videos imported before it was recorded.
+    /// `probe(item_id, original_file_name)` runs outside every lock; the lengths found are
+    /// stored with one index save. Failed videos are not tried again until the next unlock.
+    /// Does nothing in a read-only session.
+    pub fn fill_encrypted_vault_video_durations_with(
+        &self,
+        limit: usize,
+        mut probe: impl FnMut(&str, &str) -> Option<u64>,
+    ) -> Result<EncryptedVaultDurationFill, LibraryError> {
+        let candidates = {
+            let state = self.encrypted_vault.state();
+            let session = state
+                .session
+                .as_ref()
+                .ok_or(LibraryError::EncryptedVaultLocked)?;
+            if session.writable().is_err() {
+                return Ok(EncryptedVaultDurationFill::default());
+            }
+            missing_durations(session)
+                .take(limit)
+                .map(|item| (item.id.clone(), item.original_file_name.clone()))
+                .collect::<Vec<_>>()
+        };
+        let probed = candidates
+            .iter()
+            .map(|(id, name)| (id.as_str(), probe(id, name).filter(|value| *value > 0)))
+            .collect::<HashMap<_, _>>();
+        let _writes = self.encrypted_vault.writes();
+        let (vault, generation, changed) = {
+            let mut state = self.encrypted_vault.state();
+            let session = state
+                .session
+                .as_mut()
+                .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.writable()?;
+            let mut changed = Vec::new();
+            for item in &mut session.index.items {
+                match probed.get(item.id.as_str()) {
+                    Some(Some(duration)) if item.duration_ms.is_none() => {
+                        item.duration_ms = Some(*duration);
+                        changed.push(EncryptedVaultDuration {
+                            id: item.id.clone(),
+                            duration_ms: *duration,
+                        });
+                    }
+                    Some(None) => {
+                        session.duration_probe_failed.insert(item.id.clone());
+                    }
+                    _ => {}
+                }
+            }
+            (Arc::clone(&session.vault), session.generation, changed)
+        };
+        if !changed.is_empty() {
+            if let Err(error) = self.persist_encrypted_index(&vault, generation) {
+                let mut state = self.encrypted_vault.state();
+                if let Some(session) = state.session_matching(generation) {
+                    for item in &mut session.index.items {
+                        if changed.iter().any(|filled| filled.id == item.id) {
+                            item.duration_ms = None;
+                        }
+                    }
+                }
+                return Err(error);
+            }
+        }
+        let remaining = {
+            let state = self.encrypted_vault.state();
+            state
+                .session
+                .as_ref()
+                .map_or(0, |session| missing_durations(session).count() as u64)
+        };
+        Ok(EncryptedVaultDurationFill {
+            filled: changed,
+            remaining,
+        })
+    }
+
     /// Makes `image_bytes` (any decodable image, e.g. a video frame) the custom thumbnail of a
     /// vault video, re-encoded like other vault thumbnails. The generated poster is kept; the
     /// previous custom thumbnail object is deleted unless another item still uses it.
@@ -1054,6 +1145,87 @@ mod tests {
             let (path, _) = super::reserve_name(temp.path(), "noext").unwrap();
             assert_eq!(path.file_name().unwrap(), expected);
         }
+    }
+
+    fn durations(library: &Library) -> Vec<(String, Option<u64>)> {
+        let mut found = library
+            .list_encrypted_vault_items(EncryptedVaultQuery {
+                kind: Some(EncryptedVaultItemKind::Video),
+                offset: 0,
+                limit: 100,
+                trashed: false,
+                folder_id: None,
+                unfiled_only: false,
+            })
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|item| (item.original_file_name, item.duration_ms))
+            .collect::<Vec<_>>();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn video_lengths_are_recorded_on_import_and_filled_in_for_older_items() {
+        let (temp, library, _vault) = setup();
+        let picked = temp.path().join("picked");
+        fs::create_dir_all(&picked).unwrap();
+        for (index, name) in ["a.mp4", "b.mp4", "c.mp4"].into_iter().enumerate() {
+            fs::write(picked.join(name), video_bytes(4096 + index)).unwrap();
+        }
+        library
+            .import_into_encrypted_vault(&picked, &mut |_| {})
+            .unwrap();
+        assert_eq!(
+            durations(&library),
+            [
+                ("a.mp4".into(), Some(2_500)),
+                ("b.mp4".into(), Some(2_500)),
+                ("c.mp4".into(), Some(2_500))
+            ]
+        );
+        // Videos imported before lengths were recorded.
+        {
+            let mut state = library.encrypted_vault.state();
+            for item in &mut state.session.as_mut().unwrap().index.items {
+                item.duration_ms = None;
+            }
+        }
+        let mut probed = Vec::new();
+        let first = library
+            .fill_encrypted_vault_video_durations_with(2, |_, name| {
+                probed.push(name.to_owned());
+                (name != "b.mp4").then_some(61_000)
+            })
+            .unwrap();
+        assert_eq!(probed.len(), 2);
+        assert_eq!(first.filled.len(), 1);
+        assert_eq!(first.filled[0].duration_ms, 61_000);
+        assert_eq!(first.remaining, 1);
+        let second = library
+            .fill_encrypted_vault_video_durations_with(2, |_, _| Some(5_000))
+            .unwrap();
+        assert_eq!((second.filled.len(), second.remaining), (1, 0));
+        let filled = durations(&library);
+        assert_eq!(
+            filled
+                .iter()
+                .filter(|(_, duration)| duration.is_none())
+                .count(),
+            1
+        );
+        // A failed video is not probed again in this session, and the lengths were saved.
+        let idle = library
+            .fill_encrypted_vault_video_durations_with(2, |_, _| unreachable!())
+            .unwrap();
+        assert_eq!((idle.filled.len(), idle.remaining), (0, 0));
+        unlock(&library);
+        assert_eq!(durations(&library), filled);
+        let retried = library
+            .fill_encrypted_vault_video_durations_with(2, |_, _| Some(7_000))
+            .unwrap();
+        assert_eq!((retried.filled.len(), retried.remaining), (1, 0));
     }
 
     #[test]

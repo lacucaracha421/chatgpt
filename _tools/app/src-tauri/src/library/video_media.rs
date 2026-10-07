@@ -138,6 +138,26 @@ impl Library {
         self.set_encrypted_vault_thumbnail(item_id, &frame)
     }
 
+    /// Fills in vault video lengths a few at a time: FFprobe reads each video through the
+    /// decrypting loopback stream (`playback_url(item_id)`), so no plaintext file is written.
+    pub fn fill_encrypted_vault_video_durations(
+        &self,
+        playback_url: impl Fn(&str) -> Option<String>,
+    ) -> Result<super::models::EncryptedVaultDurationFill, LibraryError> {
+        const BATCH: usize = 8;
+        self.fill_encrypted_vault_video_durations_with(BATCH, |item_id, file_name| {
+            let url = playback_url(item_id)?;
+            let extension = Path::new(file_name)
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(str::to_ascii_lowercase)
+                .unwrap_or_default();
+            probe_video(Path::new(&url), &extension)
+                .ok()
+                .map(|probe| probe.duration_ms)
+        })
+    }
+
     /// `render` turns the original video file into WebP bytes. Returns the new thumbnail path.
     pub(crate) fn set_video_thumbnail_with(
         &self,

@@ -11,7 +11,7 @@ import { resetVaultImportJob } from "./vaultImportJob";
 
 vi.mock("../assets/AssetGallery", () => ({
   AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
-    {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
+    {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-duration={item.media?.durationMs} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
       onClick={(event) => onSelectionGesture?.(item, { toggle: event.ctrlKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(item)}>{item.title || item.originalName}</button>)}
     <button onClick={() => onDeleteSelection?.()}>delete key</button>
   </div>,
@@ -367,6 +367,29 @@ it("makes the viewer frame a vault video's thumbnail and reloads that thumbnail"
   await waitFor(() => expect(gateway.setEncryptedVaultThumbnailFromFrame).toHaveBeenCalledWith("v", 4_200));
   expect(await screen.findByText("이 프레임을 썸네일로 지정했습니다.")).toBeInTheDocument();
   expect(screen.getByLabelText("vault viewer").getAttribute("data-thumbnail-revision")).toMatch(/^\d+$/);
+});
+
+it("shows recorded video lengths and fills in older ones in the background", async () => {
+  const gateway = vaultGateway();
+  const older = { ...page.items[1], id: "w", title: "예전 영상" };
+  vi.mocked(gateway.listEncryptedVaultItems!).mockResolvedValue({ ...page, items: [{ ...page.items[1], durationMs: 61_000 }, older] });
+  (gateway as any).fillEncryptedVaultVideoDurations = vi.fn()
+    .mockResolvedValueOnce({ filled: [], remaining: 3 })
+    .mockResolvedValueOnce({ filled: [{ id: "w", durationMs: 2_500 }], remaining: 1 })
+    .mockResolvedValueOnce({ filled: [], remaining: 1 });
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  expect(await screen.findByRole("button", { name: "내 영상" })).toHaveAttribute("data-duration", "61000");
+  await waitFor(() => expect(screen.getByRole("button", { name: "예전 영상" })).toHaveAttribute("data-duration", "2500"));
+  // A step whose videos all failed keeps going; one that makes no progress ends the loop.
+  await waitFor(() => expect(gateway.fillEncryptedVaultVideoDurations).toHaveBeenCalledTimes(3));
+});
+
+it("does not measure video lengths in a read-only session", async () => {
+  const gateway = vaultGateway();
+  (gateway as any).fillEncryptedVaultVideoDurations = vi.fn();
+  render(<ExternalVaultBrowser gateway={gateway} status={{ ...unlocked, backupIndex: true }} onStatusChange={vi.fn()} />);
+  await screen.findByRole("button", { name: "내 영상" });
+  expect(gateway.fillEncryptedVaultVideoDurations).not.toHaveBeenCalled();
 });
 
 it("offers no frame thumbnail in a read-only session", async () => {

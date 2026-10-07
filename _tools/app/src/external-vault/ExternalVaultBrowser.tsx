@@ -175,6 +175,40 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     }
   }, [kind, listItems, nextOffset, trashView, scope]);
 
+  // Videos imported before lengths were recorded show "—"; measure them a few at a time in the
+  // background and patch the shown tiles in place. The backend skips videos it could not read.
+  const durationFill = useRef<"idle" | "running" | "done">("idle");
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const needsDurations = !readOnly && Boolean(gateway.fillEncryptedVaultVideoDurations)
+    && items.some((item) => item.media.kind === "video" && !item.media.durationMs);
+  useEffect(() => {
+    const fill = gateway.fillEncryptedVaultVideoDurations;
+    if (!needsDurations || !fill || durationFill.current !== "idle") return;
+    durationFill.current = "running";
+    void (async () => {
+      try {
+        let previous = Number.POSITIVE_INFINITY;
+        while (mounted.current) {
+          const step = await fill();
+          if (!mounted.current) break;
+          if (step.filled.length > 0) {
+            const lengths = new Map(step.filled.map((entry) => [entry.id, entry.durationMs]));
+            setItems((current) => current.map((item) => item.media.kind === "video" && lengths.has(item.id)
+              ? { ...item, media: { ...item.media, durationMs: lengths.get(item.id)! } }
+              : item));
+          }
+          // Each step fills or gives up on its videos, so `remaining` shrinks; stop if it does not.
+          if (step.remaining === 0 || step.remaining >= previous) break;
+          previous = step.remaining;
+        }
+      } catch {
+        // Lengths are a convenience; the tiles keep showing "—".
+      }
+      durationFill.current = mounted.current ? "done" : "idle";
+    })();
+  }, [gateway, needsDurations]);
+
   // The import lives outside this view; refresh when one ends (also one that ended while
   // the view was closed is already in the first load) and, while it runs, the first page.
   const seenCompletions = useRef(completions);
@@ -678,7 +712,7 @@ function toAssetSummary(item: EncryptedVaultItem): AssetSummary {
     creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null,
     importBatchId: null, originalModifiedAt: item.importedAt,
     media: item.kind === "video"
-      ? { kind: "video", durationMs: 0, preparationState: "ready", scrubFrameCount: 0 }
+      ? { kind: "video", durationMs: item.durationMs ?? 0, preparationState: "ready", scrubFrameCount: 0 }
       : { kind: "image" },
   };
 }

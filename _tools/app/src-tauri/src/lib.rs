@@ -677,6 +677,7 @@ pub fn run() {
             commands::list_encrypted_vault_folders,
             commands::set_video_thumbnail_from_frame,
             commands::set_encrypted_vault_thumbnail_from_frame,
+            commands::fill_encrypted_vault_video_durations,
             commands::create_encrypted_vault_folder,
             commands::rename_encrypted_vault_folder,
             commands::move_encrypted_vault_folder,

@@ -370,6 +370,7 @@ mod tests {
                     content_sha256: None,
                     thumbnail_sha256: None,
                     folder_id: None,
+                    duration_ms: None,
                 })
                 .collect(),
             ..VaultIndex::default()
