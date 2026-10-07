@@ -221,7 +221,6 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
     {id:"scope-all",label:"모든 메모",selected:scope==="all"&&!label,icon:menuCount(scopeCounts.all),onSelect:()=>{setScope("all");setLabel(null);}},
     {id:"scope-pinned",label:"고정",selected:scope==="pinned"&&!label,icon:menuCount(scopeCounts.pinned),onSelect:()=>{setScope("pinned");setLabel(null);}},
     {id:"scope-archive",label:"보관함",selected:scope==="archive"&&!label,icon:menuCount(scopeCounts.archive),onSelect:()=>{setScope("archive");setLabel(null);}},
-    {id:"scope-trash",label:"휴지통",selected:scope==="trash"&&!label,icon:menuCount(scopeCounts.trash),onSelect:()=>{setScope("trash");setLabel(null);}},
     {id:"labels-heading",label:"라벨",disabled:true,onSelect:()=>{}},
     ...allLabels.map((entry):MenuItem=>({id:`label-${labelKey(entry.label)}`,label:entry.label,selected:!!label&&labelKey(label)===labelKey(entry.label),icon:menuCount(entry.count),onSelect:()=>{setLabel(entry.label);if(scope==="trash"||scope==="pinned")setScope("all");}})),
     ...(label?[{id:"label-clear",label:"라벨 해제",onSelect:()=>setLabel(null)}]:[]),

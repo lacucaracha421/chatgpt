@@ -181,6 +181,21 @@ export type CollectionAuthorityVerifyReport = {
   artworks: { originalMissing: number; unconfirmedBlobs: number; samples: string[] };
 };
 export type CollectionAuthorityVerifyResult = { report: CollectionAuthorityVerifyReport; reportPath: string };
+export type CollectionTrashItem = {
+  workId: string;
+  type: "game" | "manga" | "movie" | "av";
+  name: string;
+  trashedAt: string;
+  purgeAt: string;
+  entityRevision: number;
+  restorePending: boolean;
+};
+export type CollectionTrashPage = {
+  libraryId: string;
+  epoch: number;
+  items: CollectionTrashItem[];
+  hasMore: boolean;
+};
 export type BookmarkReconciliationResult = {
   libraryId: string | null; epoch: number | null; contractVersion: number | null;
   serverCursor: number | null; localCursor: number | null; behindBy: number;
@@ -1429,6 +1444,10 @@ export interface LibraryGateway {
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
   pushCloudCollections?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CloudCollectionsPublishResult>;
   verifyCollectionAuthorityBaseline?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CollectionAuthorityVerifyResult>;
+  listCollectionTrash?(): Promise<CollectionTrashPage>;
+  /** Cached cover bytes of a trashed work; rejects when there is none. */
+  collectionTrashCover?(workId: string): Promise<ArrayBuffer>;
+  restoreCollectionWork?(workId: string, expectedRevision: number, libraryId: string, epoch: number): Promise<void>;
   openCollectionAuthorityReport?(path: string): Promise<void>;
   runDueMobilePublications?(orderIds:string[]): Promise<void>;
   /** Native signal that Collections changed in the background (mobile personal edits). */

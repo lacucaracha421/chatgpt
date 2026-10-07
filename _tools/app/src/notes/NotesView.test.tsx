@@ -7,7 +7,7 @@ import { NotesWorkspace, RecoveryKeyReveal } from "./NotesView";
 import { NotesStore, type NotesRequest, type Note } from "./store";
 afterEach(cleanup);
 function surface(store:NotesStore){return render(<WorkspaceChromeProvider scope="notes"><ChromeTarget name="navigation"/><ChromeTarget name="actions"/><ChromeTarget name="search"/><NotesWorkspace store={store}/></WorkspaceChromeProvider>);}
-it("creates, edits, pins, trashes and restores through the actual notes editor",async()=>{
+it("creates, edits, pins and trashes without a separate trash destination",async()=>{
   let notes:Note[]=[];
   const request=(async(op:string,input:any)=>{
     if(op==="save"){const note={...input,createdAt:"2026-09-07T00:00:00Z",updatedAt:"2026-09-07T00:00:00Z",localRevision:input.expectedRevision+1,pending:true,conflict:false};notes=[note,...notes.filter(n=>n.id!==note.id)];return note;}
@@ -25,12 +25,9 @@ it("creates, edits, pins, trashes and restores through the actual notes editor",
   await waitFor(()=>expect(store.snapshot().notes[0].pinned).toBe(true));
   await userEvent.click(screen.getByRole("button",{name:"휴지통으로"}));
   await userEvent.click(screen.getByRole("button",{name:/보기/}));
-  await userEvent.click(await screen.findByRole("menuitem",{name:"휴지통"}));
-  await userEvent.click(screen.getByRole("button",{name:/읽을 책.*내일 2장 읽기/}));
-  expect(screen.getByRole("textbox",{name:"메모 본문"})).toHaveAttribute("readonly");
-  await userEvent.click(screen.getByRole("button",{name:"복원"}));
+  expect(screen.queryByRole("menuitem",{name:"휴지통"})).not.toBeInTheDocument();
   await waitFor(()=>expect(store.snapshot().saving).toBe(false));
-  expect(store.snapshot().notes[0]).toMatchObject({title:"읽을 책",body:"내일 2장 읽기",deleted:false,pinned:true});
+  expect(store.snapshot().notes[0]).toMatchObject({title:"읽을 책",body:"내일 2장 읽기",deleted:true,pinned:true});
 });
 it("keeps the kind filter and the new/view menus in the section bar under the top bar",async()=>{
   const store=new NotesStore((async()=>({unlocked:true,notes:[],lastSyncedAt:null})) as NotesRequest);surface(store);

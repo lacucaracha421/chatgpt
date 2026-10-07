@@ -145,7 +145,7 @@ export function ProviderSearchSheet({provider, item, authority, initialKind = 'm
           <Button variant="primary" disabled={pending || busy || !!operation} onClick={confirm}>연결</Button></div>
       </div> : results && <ul className="bind-results">{results.map(candidate => <li key={candidate.externalId}><button className="bind-result" disabled={busy} onClick={() => pick(candidate)}>
         <ProviderThumb url={candidate.previewUrl}/><span className="bind-result-text"><strong>{candidate.name}</strong><small>{candidate.originalTitle}</small><small>{candidate.year}</small></span>
-      </button></li>)}{results.length === 0 && <li className="bind-empty">검색 결과가 없습니다.</li>}</ul>}
+      </button></li>)}{results.length === 0 && <li className="bind-empty">검색 결과 없음</li>}</ul>}
       <Button onClick={onClose}>닫기</Button>
     </div>
   </Dialog>;

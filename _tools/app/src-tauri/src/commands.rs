@@ -2815,6 +2815,48 @@ pub async fn verify_collection_authority_baseline(
 }
 
 #[tauri::command]
+pub async fn list_collection_trash(
+    state: State<'_, AppState>,
+) -> Result<crate::library::collection_authority::CollectionTrashPage, CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || library.list_collection_trash().map_err(CommandError::from)).await
+}
+
+/// Raw cover bytes for one trashed work; an absent cover is `MediaNotFound`.
+#[tauri::command]
+pub async fn get_collection_trash_cover(
+    state: State<'_, AppState>,
+    work_id: String,
+) -> Result<tauri::ipc::Response, CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .collection_trash_cover(&work_id)
+            .map_err(CommandError::from)?
+            .map(tauri::ipc::Response::new)
+            .ok_or_else(|| CommandError::from(LibraryError::MediaNotFound))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn restore_collection_work(
+    state: State<'_, AppState>,
+    work_id: String,
+    expected_revision: i64,
+    library_id: String,
+    epoch: i64,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .restore_collection_work(&work_id, expected_revision, &library_id, epoch)
+            .map_err(CommandError::from)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn open_collection_authority_report(app: AppHandle, path: String) -> Result<(), CommandError> {
     use tauri::Manager;
     use tauri_plugin_opener::OpenerExt;

@@ -374,6 +374,9 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     return invoke<import("./types").CollectionAuthorityVerifyResult>("verify_collection_authority_baseline", { onProgress: channel });
   },
   openCollectionAuthorityReport: path => invoke<void>("open_collection_authority_report", { path }),
+  listCollectionTrash: () => invoke<import("./types").CollectionTrashPage>("list_collection_trash"),
+  collectionTrashCover: workId => invoke<ArrayBuffer>("get_collection_trash_cover", { workId }),
+  restoreCollectionWork: (workId, expectedRevision, libraryId, epoch) => invoke<void>("restore_collection_work", { workId, expectedRevision, libraryId, epoch }),
   subscribeArtistsChanged: (handler) => {
     let stopped = false;
     let unlisten: (() => void) | undefined;

@@ -4,6 +4,11 @@ import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/type
 import { useExchangeSnapshot } from "../exchange/exchangeStore";
 import { ChartBarIcon, FolderIcon, InboxIcon, PlusIcon, RectangleStackIcon, Square2StackIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
 import { AREA_ICONS } from "../shared/ui/areaIcons";
+import { useSyncExternalStore } from "react";
+import { useOptionalLibrary } from "../library/LibraryContext";
+import { notesStore } from "../notes/store";
+import { deletedTrashNotes } from "../safety/trashSections";
+import { collectionTrashCount, subscribeTrashCounts } from "../safety/trashCounts";
 
 import { type NavigationEntry } from "../shared/findEntries";
 export { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "../shared/findEntries";
@@ -15,6 +20,7 @@ const SETTINGS_SECTIONS = [
 ] as const satisfies readonly (readonly [SettingsSection, string])[];
 
 const ARTIST_KINDS: AssetView["kind"][] = ["artists", "creator"];
+const noSubscription = () => () => {};
 
 export type NavigationEntryOptions = {
   view: AssetView;
@@ -35,6 +41,12 @@ export type NavigationEntryOptions = {
 export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCount, trashCount, privateVaultAvailable, privateVaultActivity, onImportFiles }: NavigationEntryOptions): NavigationEntry[] {
   const workload = useWorkloadProfile();
   const received = useExchangeSnapshot().unseen;
+  const root = useOptionalLibrary()?.library?.root;
+  const store = root ? notesStore(root) : null;
+  const notesCount = useSyncExternalStore(store?.subscribe ?? noSubscription, () => deletedTrashNotes(store?.snapshot().notes ?? []).length);
+  const collections = useSyncExternalStore(subscribeTrashCounts, () => root ? collectionTrashCount(root) : 0);
+  // Only use already-cached counts; opening 더보기 must never fetch the trash.
+  const totalTrashCount = trashCount + collections + notesCount;
   const go = (next: AssetView) => () => onNavigate(next);
   const queued = (count: number | null) => (count ?? 0) > 0;
   const entries: NavigationEntry[] = [
@@ -46,7 +58,7 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
     ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: "비밀", keywords: ["비밀 보관함"], icon: <AREA_ICONS.private_vault />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
     { id: "artists", group: "go", label: "작가", keywords: ["다시보기", "작가 미상", "artist"], icon: <AREA_ICONS.artists />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },
     { id: "statistics", group: "go", label: "통계", icon: <ChartBarIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },
-    { id: "trash", group: "go", label: "휴지통", icon: <TrashIcon />, count: trashCount > 0 ? trashCount : undefined, selected: view.kind === "trash", run: go({ kind: "trash" }) },
+    { id: "trash", group: "go", label: "휴지통", icon: <TrashIcon />, count: totalTrashCount > 0 ? totalTrashCount : undefined, selected: view.kind === "trash", run: go({ kind: "trash" }) },
     { id: "settings", group: "go", label: "설정", icon: <AREA_ICONS.settings />, selected: view.kind === "settings", run: go({ kind: "settings" }) },
   ];
   const queues = entries.filter((entry) => entry.group === "queue");

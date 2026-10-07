@@ -244,6 +244,176 @@ pub(crate) fn collection_authority_active(db: &Connection) -> Result<bool, Libra
     Ok(local(db)?.is_some())
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CollectionTrashItem {
+    work_id: String,
+    r#type: String,
+    name: String,
+    trashed_at: String,
+    purge_at: String,
+    entity_revision: i64,
+    #[serde(default)]
+    restore_pending: bool,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CollectionTrashPage {
+    library_id: String,
+    epoch: i64,
+    items: Vec<CollectionTrashItem>,
+    has_more: bool,
+}
+
+fn pending_restore(db: &Connection, work: &str, revision: i64) -> Result<bool, LibraryError> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collection_authority_outbox o JOIN collection_authority_sync s ON s.singleton=1 AND o.library_id=s.library_id AND o.epoch=s.epoch AND o.contract_version=s.contract_version WHERE o.command_type='restoreWork' AND json_extract(o.payload,'$.workId')=?1 AND (o.state IN ('pending','blocked') OR (o.state='accepted' AND json_extract(o.payload,'$.expectedRevision')=?2)))",
+        params![work, revision], |row| row.get(0),
+    )?)
+}
+
+impl Library {
+    pub(crate) fn list_collection_trash(&self) -> Result<CollectionTrashPage, LibraryError> {
+        let status = collection_write_status(&*self.connection()?)?;
+        if !status.active {
+            return Err(LibraryError::CollectionAuthorityNotAdopted);
+        }
+        let config = self.cloud_sync_config()?;
+        let client = self.cloud_client(
+            config
+                .api_base_url
+                .as_deref()
+                .ok_or(LibraryError::InvalidCloudSyncConfig)?,
+        )?;
+        let token = super::credential::read_cloud_api_token_os()?;
+        self.list_collection_trash_with(&client, &token.expose())
+    }
+
+    fn list_collection_trash_with(
+        &self,
+        client: &CloudClient,
+        token: &str,
+    ) -> Result<CollectionTrashPage, LibraryError> {
+        let status = collection_write_status(&*self.connection()?)?;
+        let id = status
+            .identity(&*self.connection()?)?
+            .ok_or(LibraryError::CollectionAuthorityNotAdopted)?;
+        let value = client.collection_authority_read(&url_path("trash", &id, &[]), token)?;
+        envelope(&value, &id)?;
+        let mut page: CollectionTrashPage =
+            serde_json::from_value(value).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let db = self.connection()?;
+        // The read must still belong to the adopted identity after network I/O.
+        let current = collection_write_status(&db)?
+            .identity(&db)?
+            .ok_or(LibraryError::CollectionAuthorityMismatch)?;
+        if !same(&id, &current) {
+            return Err(LibraryError::CollectionAuthorityMismatch);
+        }
+        for item in &mut page.items {
+            safe_id(&item.work_id)?;
+            if item.entity_revision < 1
+                || !matches!(item.r#type.as_str(), "game" | "manga" | "movie" | "av")
+            {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+            item.restore_pending = pending_restore(&db, &item.work_id, item.entity_revision)?;
+        }
+        Ok(page)
+    }
+
+    /// One trashed work's cached cover thumbnail, read on demand as raw bytes (never inlined in the list).
+    pub(crate) fn collection_trash_cover(
+        &self,
+        work: &str,
+    ) -> Result<Option<Vec<u8>>, LibraryError> {
+        use std::io::Read;
+        safe_id(work)?;
+        let db = self.connection()?;
+        let db = &*db;
+        // Trashing removes the live artwork rows, but keeps their cached files.
+        // Read an existing thumbnail only; never backfill/download media here.
+        let raw: Option<String> = db.query_row("SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id=?1", [work], |row| row.get(0)).optional()?;
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let payload: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let path = if let Some(artwork) = payload["selection"]["work"].as_str() {
+            safe_id(artwork)?;
+            Some(format!("work-artwork-thumbnails/{work}/{artwork}.webp"))
+        } else if let Some(asset) = payload["fields"]["coverAssetId"].as_str() {
+            db.query_row(
+                "SELECT thumbnail_relative_path FROM assets WHERE id=?1",
+                [asset],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten()
+        } else {
+            None
+        };
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        let Ok(media) = self.open_library_media(&path) else {
+            return Ok(None);
+        };
+        const MAX_COVER_BYTES: u64 = 256 * 1024;
+        if media.length > MAX_COVER_BYTES
+            || !matches!(media.mime, "image/webp" | "image/png" | "image/jpeg")
+        {
+            return Ok(None);
+        }
+        let mut bytes = Vec::new();
+        if media
+            .file
+            .take(MAX_COVER_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .is_err()
+            || bytes.len() as u64 > MAX_COVER_BYTES
+        {
+            return Ok(None);
+        }
+        Ok(Some(bytes))
+    }
+
+    pub(crate) fn restore_collection_work(
+        &self,
+        work: &str,
+        revision: i64,
+        library: &str,
+        epoch: i64,
+    ) -> Result<(), LibraryError> {
+        safe_id(work)?;
+        if revision < 1 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let status = collection_write_status(&tx)?;
+        let id = status
+            .identity(&tx)?
+            .ok_or(LibraryError::CollectionAuthorityNotAdopted)?;
+        if id.library != library || id.epoch != epoch {
+            return Err(LibraryError::CollectionAuthorityMismatch);
+        }
+        if !pending_restore(&tx, work, revision)? {
+            enqueue_collection_command(
+                &tx,
+                &status,
+                "restoreWork",
+                work,
+                json!({"workId":work,"expectedRevision":revision}),
+            )?;
+        }
+        // Keep the work in trash until the authority's receipt/change projects it.
+        tx.commit()?;
+        Ok(())
+    }
+}
+
 /// Queue provider metadata and project its FIFO merge without changing confirmed revisions.
 pub(crate) fn enqueue_provider_snapshot(
     tx: &Transaction<'_>,
@@ -1288,7 +1458,10 @@ fn restore_local_work(tx: &Transaction<'_>, work: &str, name: &str) -> Result<()
     };
     let mut snapshot: Value =
         serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
-    if let Some(rows) = snapshot["collections"].as_array_mut() {
+    if let Some(rows) = snapshot
+        .get_mut("collections")
+        .and_then(Value::as_array_mut)
+    {
         for row in rows {
             row["name"] = json!(name);
         }
@@ -2887,3 +3060,186 @@ fn verify_blob(path: &Path, sha: &str, size: u64) -> Result<(), LibraryError> {
 #[cfg(test)]
 #[path = "collection_authority_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod collection_trash_tests {
+    use super::tests::{adopt, fixture, work};
+    use super::*;
+
+    fn trashed() -> Value {
+        let mut value = work("w", 2);
+        value["lifecycle"] = json!("trashed");
+        value["trashedAt"] = json!("2026-10-06T00:00:00Z");
+        value
+    }
+
+    #[test]
+    fn collection_trash_restore_is_durable_deduplicated_and_projects_on_receipt() {
+        let (_temp, library, status) = fixture();
+        adopt(&library, &status, json!({"works":[trashed()]}));
+        let id = status.library_id.as_deref().unwrap();
+        library.restore_collection_work("w", 2, id, 1).unwrap();
+        library.restore_collection_work("w", 2, id, 1).unwrap();
+        assert!(library.get_collection("w").is_err());
+        let (count, raw): (i64, String) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*),payload FROM collection_authority_outbox",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let body: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(body["commandType"], "restoreWork");
+        assert_eq!(body["expectedRevision"], 2);
+        assert!(pending_restore(&library.connection().unwrap(), "w", 2).unwrap());
+        library
+            .flush_collection_outbox_with(
+                &status,
+                &|command| {
+                    Ok(CollectionDelivery::Accepted(json!({
+                        "libraryId":id,"epoch":1,"contractVersion":1,
+                        "operationId":command["operationId"],"commandType":"restoreWork",
+                        "changed":true,"authorityCursor":1,"entities":{"works":[work("w",3)]}
+                    })))
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(library.get_collection("w").unwrap().name, "Work w");
+        // A stale UI click after acceptance still reuses the completed request.
+        library.restore_collection_work("w", 2, id, 1).unwrap();
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM collection_authority_outbox",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn collection_trash_restore_fences_inactive_unadopted_and_wrong_identity() {
+        let (_temp, library, status) = fixture();
+        let id = status.library_id.as_deref().unwrap();
+        assert!(matches!(
+            library.restore_collection_work("w", 2, id, 1),
+            Err(LibraryError::CollectionAuthorityNotAdopted)
+        ));
+        library.observe_collection_authority(&status).unwrap();
+        assert!(matches!(
+            library.restore_collection_work("w", 2, id, 1),
+            Err(LibraryError::CollectionAuthorityNotAdopted)
+        ));
+        adopt(&library, &status, json!({"works":[trashed()]}));
+        assert!(matches!(
+            library.restore_collection_work("w", 2, "other", 1),
+            Err(LibraryError::CollectionAuthorityMismatch)
+        ));
+        assert!(matches!(
+            library.restore_collection_work("w", 2, id, 2),
+            Err(LibraryError::CollectionAuthorityMismatch)
+        ));
+        assert!(library.restore_collection_work("w", 0, id, 1).is_err());
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM collection_authority_outbox",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        library.restore_collection_work("w", 2, id, 1).unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collection_authority_outbox SET epoch=2,state='accepted'",
+                [],
+            )
+            .unwrap();
+        assert!(!pending_restore(&library.connection().unwrap(), "w", 2).unwrap());
+        library.restore_collection_work("w", 2, id, 1).unwrap();
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM collection_authority_outbox",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn collection_trash_read_uses_authority_identity_client_token_and_pending_outbox() {
+        let (temp, library, status) = fixture();
+        let mut value = trashed();
+        value["selection"]["work"] = json!("cover");
+        adopt(&library, &status, json!({"works":[value]}));
+        let cover = temp.path().join("work-artwork-thumbnails/w/cover.webp");
+        std::fs::create_dir_all(cover.parent().unwrap()).unwrap();
+        std::fs::write(&cover, b"cached cover").unwrap();
+        let id = status.library_id.as_deref().unwrap();
+        library.restore_collection_work("w", 2, id, 1).unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}", server.server_addr())).unwrap();
+        let reply = json!({"libraryId":id,"epoch":1,"contractVersion":1,"hasMore":false,"items":[{
+            "workId":"w","type":"manga","name":"Work w","trashedAt":"2026-10-06T00:00:00Z","purgeAt":"2026-11-05T00:00:00Z","entityRevision":2
+        }]});
+        let expected_id = id.to_owned();
+        let handle = std::thread::spawn(move || {
+            for epoch in [1, 2] {
+                let request = server
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(request.method(), &tiny_http::Method::Get);
+                assert!(request
+                    .url()
+                    .starts_with("/v1/collections/authority/trash?"));
+                assert!(request.url().contains(&format!("libraryId={expected_id}")));
+                assert!(request.url().contains("epoch=1"));
+                assert!(request
+                    .headers()
+                    .iter()
+                    .any(|header| header.field.equiv("Authorization")
+                        && header.value.as_str() == "Bearer client-token"));
+                let mut value = reply.clone();
+                value["epoch"] = json!(epoch);
+                request
+                    .respond(tiny_http::Response::from_string(value.to_string()))
+                    .unwrap();
+            }
+        });
+        let page = library
+            .list_collection_trash_with(&client, "client-token")
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert!(page.items[0].restore_pending);
+        assert_eq!(
+            library.collection_trash_cover("w").unwrap().unwrap(),
+            b"cached cover"
+        );
+        assert_eq!(std::fs::read(cover).unwrap(), b"cached cover");
+        assert!(matches!(
+            library.list_collection_trash_with(&client, "client-token"),
+            Err(LibraryError::CollectionAuthorityMismatch)
+        ));
+        handle.join().unwrap();
+    }
+}

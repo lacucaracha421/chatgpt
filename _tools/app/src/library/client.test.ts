@@ -578,3 +578,22 @@ describe("heart album membership", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("collection trash gateway", () => {
+  beforeEach(() => invoke.mockReset());
+  it("lists the trash without inlining covers and reads one cover as bytes on demand", async () => {
+    invoke.mockResolvedValueOnce({ libraryId: "library", epoch: 1, hasMore: false, items: [{ workId: "work", restorePending: true }] });
+    const page = await libraryGateway.listCollectionTrash!();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("list_collection_trash");
+    expect(page.items[0]).toEqual({ workId: "work", restorePending: true });
+    const bytes = new Uint8Array([255, 0, 17]).buffer;
+    invoke.mockResolvedValueOnce(bytes);
+    await expect(libraryGateway.collectionTrashCover!("work")).resolves.toBe(bytes);
+    expect(invoke).toHaveBeenLastCalledWith("get_collection_trash_cover", { workId: "work" });
+  });
+  it("enqueues restoration with the identity and revision from the read", async () => {
+    await libraryGateway.restoreCollectionWork!("work", 2, "library", 1);
+    expect(invoke).toHaveBeenCalledWith("restore_collection_work", { workId: "work", expectedRevision: 2, libraryId: "library", epoch: 1 });
+  });
+});

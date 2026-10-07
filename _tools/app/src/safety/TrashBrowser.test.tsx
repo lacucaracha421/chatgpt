@@ -2,11 +2,14 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { LibraryGateway, TrashPage } from "../library/types";
+import type { CollectionTrashPage, LibraryGateway, TrashPage } from "../library/types";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { TrashBrowser } from "./TrashBrowser";
 import { ASSET_LIFECYCLE_CHANGED_EVENT } from "../app/useAssetAuthoritySync";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
+import { NotesTrashSection } from "./TrashBrowser";
+import { NotesStore, type NotesRequest, type Note } from "../notes/store";
+import { TRASH_SECTION_STORAGE_KEY } from "./trashSections";
 
 function renderTrash(ui: React.ReactElement, gateway?: LibraryGateway) {
   return render(
@@ -19,7 +22,7 @@ function renderTrash(ui: React.ReactElement, gateway?: LibraryGateway) {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.removeItem(TRASH_SECTION_STORAGE_KEY); });
 
 it("loads trash, shows its purge date, and restores an asset", async () => {
   const user = userEvent.setup();
@@ -100,7 +103,7 @@ it("shows a retry instead of an empty state when listing trash fails", async () 
   await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   expect(await screen.findByText("trash list failed")).toBeVisible();
-  expect(screen.getByRole("heading", { name: "휴지통을 불러오지 못했습니다." })).toBeVisible();
+  expect(screen.queryByText("휴지통이 비어 있습니다")).not.toBeVisible();
   await user.click(screen.getByRole("button", { name: "다시 시도" }));
 
   expect(await screen.findByText("asset-1.png")).toBeVisible();
@@ -315,4 +318,90 @@ it("renders the shared deletion date", async () => {
   vi.mocked(gateway.listTrash).mockResolvedValue({ items: [{ asset: asset(), trashedAt: "2025-07-20T12:00:00", purgeAt: null }], nextCursor: null, totalCount: 1, totalBytes: 1024 });
   renderTrash(<TrashBrowser />, gateway);
   expect(await screen.findByText("옮긴 날 2025.7.20")).toBeInTheDocument();
+});
+
+function collectionTrash(restorePending = false): CollectionTrashPage {
+  return { libraryId: "library", epoch: 1, hasMore: false, items: [{ workId: "work", type: "manga", name: "작품", trashedAt: "2026-10-06T00:00:00Z", purgeAt: "2026-11-05T00:00:00Z", entityRevision: 2, restorePending }] };
+}
+
+it("remembers the section and queues a restore once while showing 대기", async () => {
+  const gateway = createGateway();
+  gateway.listCollectionTrash = vi.fn().mockResolvedValue(collectionTrash());
+  gateway.restoreCollectionWork = vi.fn().mockImplementation(() => {
+    vi.mocked(gateway.listCollectionTrash!).mockResolvedValue(collectionTrash(true));
+    return Promise.resolve();
+  });
+  let onSync!: () => void;
+  gateway.subscribeCollectionsChanged = vi.fn(handler => { onSync = handler; return () => {}; });
+  const mounted = renderTrash(<TrashBrowser />, gateway);
+  await screen.findByText("asset-1.png");
+  await userEvent.click(screen.getByRole("tab", { name: "컬렉션 1" }));
+  const restore = await screen.findByRole("button", { name: "작품 되살리기" });
+  expect(screen.queryByRole("button", { name: "휴지통 비우기" })).not.toBeInTheDocument();
+  await userEvent.click(restore);
+  await waitFor(() => expect(restore).toBeDisabled());
+  await userEvent.click(restore);
+  expect(gateway.restoreCollectionWork).toHaveBeenCalledTimes(1);
+  expect(gateway.restoreCollectionWork).toHaveBeenCalledWith("work", 2, "library", 1);
+  expect(screen.getByText("대기")).toBeVisible();
+  vi.mocked(gateway.listCollectionTrash).mockResolvedValue({ ...collectionTrash(), items: [] });
+  act(() => { onSync(); });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "작품 되살리기" })).not.toBeInTheDocument());
+  vi.mocked(gateway.listCollectionTrash).mockResolvedValue(collectionTrash(true));
+  mounted.unmount();
+  renderTrash(<TrashBrowser />, gateway);
+  expect(screen.getByRole("tab", { name: /컬렉션/ })).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByRole("button", { name: "작품 되살리기" })).toBeDisabled();
+});
+
+it("holds the old content inert until the next section is ready and preserves rows on reload", async () => {
+  let resolve!: (value: CollectionTrashPage) => void;
+  const gateway = createGateway();
+  gateway.listCollectionTrash = vi.fn().mockReturnValue(new Promise<CollectionTrashPage>(done => { resolve = done; }));
+  renderTrash(<TrashBrowser />, gateway);
+  const asset = await screen.findByText("asset-1.png");
+  await userEvent.click(screen.getByRole("tab", { name: "컬렉션" }));
+  expect(asset).toBeVisible();
+  expect(asset.closest("[inert]")).not.toBeNull();
+  await act(async () => { resolve(collectionTrash()); });
+  expect(await screen.findByText("작품")).toBeVisible();
+  expect(asset).not.toBeVisible();
+  vi.mocked(gateway.listCollectionTrash).mockRejectedValueOnce(new Error("연결 실패"));
+  act(() => { window.dispatchEvent(new Event("focus")); });
+  expect(await screen.findByText("연결 실패")).toBeVisible();
+  vi.mocked(gateway.listCollectionTrash).mockReturnValueOnce(new Promise<CollectionTrashPage>(done => { resolve = done; }));
+  await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(screen.getByText("작품")).toBeVisible();
+  await act(async () => { resolve({ ...collectionTrash(), items: [] }); });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "작품 되살리기" })).not.toBeInTheDocument());
+});
+
+it("shows a one-line inactive authority error and retries", async () => {
+  localStorage.setItem(TRASH_SECTION_STORAGE_KEY, "collections");
+  const gateway = createGateway();
+  gateway.listCollectionTrash = vi.fn().mockRejectedValueOnce(new Error("컬렉션 연결을 확인해 주세요.")).mockResolvedValueOnce(collectionTrash());
+  renderTrash(<TrashBrowser />, gateway);
+  expect(await screen.findByText("컬렉션 연결을 확인해 주세요.")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(await screen.findByText("작품")).toBeVisible();
+});
+
+it("restores deleted notes through the existing notes store without losing their content", async () => {
+  const note: Note = { id: "note", title: "메모", body: "내용", pinned: true, deleted: true, createdAt: "2025-07-20T12:00:00", updatedAt: "2025-07-20T12:00:00", localRevision: 1, pending: false, conflict: false };
+  let notes = [note];
+  const request = vi.fn(async (operation: string, input: any) => {
+    if (operation === "save") {
+      const saved = { ...note, ...input, localRevision: 2 };
+      notes = [saved];
+      return saved;
+    }
+    return { unlocked: true, notes, lastSyncedAt: null };
+  });
+  const store = new NotesStore(request as NotesRequest);
+  await store.load();
+  render(<NotesTrashSection store={store} />);
+  expect(screen.getByText("옮긴 날 2025.7.20")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "메모 되살리기" }));
+  await waitFor(() => expect(request).toHaveBeenCalledWith("save", expect.objectContaining({ id: "note", deleted: false, pinned: true, body: "내용" })));
+  expect(await screen.findByText("휴지통이 비어 있습니다")).toBeVisible();
 });
