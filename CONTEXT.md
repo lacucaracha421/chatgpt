@@ -84,6 +84,10 @@ _Avoid_: 외부 점수, 즐겨찾기, 쇼케이스 순위
 SteamDB, IGDB, Kakao, MangaDex, TMDB 같은 외부 서비스에서 가져와 외부 연결에 보존한 작품 정보의 원본 snapshot이다. 로컬 작품 정보에 명시적으로 적용할 수 있지만 새로고침만으로 사용자 값을 덮어쓰지 않는다.
 _Avoid_: 내 메모, 수동 메타데이터
 
+**컬렉션 권한 (Collections Authority)**:
+Since 2026-10-06 the Cloud API is the source of truth for Collection works, their artwork, external bindings and trash. The PC and the tablet change them only by sending authority commands (with receipts and revision checks) and read them back from the server's published state; the PC keeps a local replica. An operation that has no command yet is fenced on the PC with a clear message instead of writing locally.
+_Avoid_: PC가 원본, 로컬 전용 쓰기, 동기화 백업
+
 **외부 연결 (External Binding)**:
 컬렉션과 provider의 외부 레코드를 잇는 identity 및 동기화 연결이다. 한 컬렉션은 MangaDex 작품 정보와 Kakao 한국 정발 정보처럼 목적이 다른 여러 외부 연결을 동시에 가질 수 있다.
 _Avoid_: 메타데이터 출처, 단일 외부 ID, 다운로드 경로

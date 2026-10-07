@@ -12,6 +12,7 @@ source/document consistency, not new native acceptance or production verificatio
 
 - [Desktop setup and behavior](../_tools/app/README.md): Windows and Linux Tauri application.
 - [Linux platform setup and acceptance limits](operations/linux-desktop.md).
+- [Windows development PC: paths, shells, WSL server tests and Android builds](operations/windows-desktop.md).
 - [Android build, current source version and acceptance](../android/README.md).
 - [Browser collector (active, `extension-list/`)](../extension-list/README.md). The legacy `extension/` collector was removed on 2026-09-26 (see Git history); [edge-extension.md](edge-extension.md) remains as its historical operation guide.
 
@@ -57,6 +58,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `edge-extension.md` — legacy `extension/` collector routing and Cloud Library behavior (historical; the code was removed 2026-09-26); the active collector is documented in `../extension-list/README.md`, with source rules in `../extension-list/AGENTS.md`.
 - `agents/catalog-troubleshooting.md` — catalog transport/checkpoint behavior and rollout safeguards.
 - `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
+- `operations/windows-desktop.md` — the Windows development PC: checkout and library paths, Git Bash/PowerShell, WSL server tests, Android builds.
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.
 - `research/server-review-2026-09-24.md` — Cloud API review: upload/disconnect and WAL fixes, synthetic polling measurements, module correctness findings, and `data/` retention proposals; no deployment or production verification.
 - `research/pc-ui-design-decisions-20260923.md` — open PC UI consistency decisions and visual-direction proposals from the 2026-09-23 screenshot review; not approved design.

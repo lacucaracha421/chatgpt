@@ -29,7 +29,7 @@ Use `docs/README.md` as the map:
 - UI: `DESIGN.md` §12 (the PC and tablet foundation; PC first, tablet in the same round), `docs/agents/pc-design-reference.md`; use the shared components in `_tools/app/src/shared/ui/` and the role tokens.
 - Substantial Works/Collection changes: `docs/agents/lakomics-works-handoff-v2.md`, `docs/agents/pc-design-reference.md`, `docs/agents/works-viewer-design.md`. Historical prototype HTML is not production code to copy.
 - Catalog operations: `docs/agents/catalog-troubleshooting.md`.
-- Linux: `docs/operations/linux-desktop.md`; backup and migration: `docs/operations/pc-migration.md`.
+- Windows (main development PC): `docs/operations/windows-desktop.md`; Linux: `docs/operations/linux-desktop.md`; backup and migration: `docs/operations/pc-migration.md`.
 - Pending work: `docs/roadmap/lakomics-backlog.md`. Intended work is not implemented behavior; dated acceptance covers only its recorded revision and inputs.
 
 ## Trace the requested behavior
@@ -38,7 +38,7 @@ For an ordinary UI edit, stay in the affected component. For persistence or cros
 
 `UI -> client/bridge -> native command or HTTP route -> domain handler -> transaction/state -> read projection or replica -> UI refresh`
 
-Inspect callers, schemas, migrations, and tests before changing a contract. For authority work, identify activation/fences, library/epoch identity, entity versus assignment revisions, receipts/idempotency, outbox delivery, changes/baselines, deletion semantics, and legacy read/write fallbacks. Confirm reachability before labeling a fallback an authority violation. Do not assume production activation from source presence.
+Inspect callers, schemas, migrations, and tests before changing a contract. For authority work, identify activation/fences, library/epoch identity, entity versus assignment revisions, receipts/idempotency, outbox delivery, changes/baselines, deletion semantics, and legacy read/write fallbacks. Confirm reachability before labeling a fallback an authority violation. Do not assume production activation from source presence; the activated domains are recorded in `docs/adr/README.md` (Asset lifecycle since 2026-09-19, Collections since 2026-10-06). In an activated domain every write goes through authority commands or is fenced with a clear message; never add a local-only write path.
 
 Do not branch application behavior on user-editable names or machine-specific paths. Resolve configured paths and stable identifiers. Keep filesystem, SQLite, media processing, and native credentials behind their owning interfaces.
 
