@@ -439,12 +439,12 @@ APK: `android/build/lakomics-mobile-0.6.5-release.apk`, SHA-256 `eddedb3266781d6
 
 ## Build
 
-Requirements: existing JDK 17 (`JAVA_HOME`), Android SDK platform 35 and build-tools 35.0.0, Python 3 for the release builder (or PowerShell for the older debug builder), and frontend dependencies already installed in `_tools/app`. No Gradle/Kotlin/Capacitor dependencies are added.
+Requirements: JDK 17 or newer (`JAVA_HOME`; the Windows PC builds with Temurin JDK 21), Android SDK platform 35 and build-tools 35.0.0, Python 3 for the release builder (or PowerShell for the older debug builder), and frontend dependencies already installed in `_tools/app`. No Gradle/Kotlin/Capacitor dependencies are added.
 
 Release packaging on Linux or Windows: run `npm run mobile:build` in `_tools/app`, then from the repository root:
 
 ```sh
-python android/build.py --sdk-root <SDK-path> --java-home <JDK-17-path>
+python android/build.py --sdk-root <SDK-path> --java-home <JDK-17-or-newer-path>
 ```
 
 The builder uses `d8 --release`, validates `android:debuggable=false`, verifies bundled asset bytes and portable ZIP paths, aligns the APK and verifies its v2/v3 signatures. It requires the existing ignored `android/build/debug.keystore` and never creates or replaces a signing key. This is a release configuration signed with the existing personal-install development certificate, not a new store-distribution identity.

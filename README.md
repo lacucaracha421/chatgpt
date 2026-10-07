@@ -12,7 +12,7 @@ is offline.
 | --- | --- | --- |
 | Desktop | React/TypeScript + Vite UI and Tauri/Rust library management on Windows and Linux | [Desktop setup and behavior](_tools/app/README.md) |
 | Android | Independent Java/WebView client with Home, Library, Collections, Manga Catalog and reader, media cache, and Android picker integration | [Android setup and current scope](android/README.md) |
-| Browser collector | Chromium extension for media collection and X translation; direct PC and optional Cloud Capture routes | [Collector README](extension/README.md) and [operation guide](docs/edge-extension.md) |
+| Browser collector | Chromium extension for media collection and X translation; direct PC and optional Cloud Capture routes | [Collector README](extension-list/README.md) and [operation guide](docs/edge-extension.md) |
 | Cloud API | Optional capture transport, library/Collection replicas, and shared catalog reads | [Cloud architecture](docs/agents/cloud-capture.md) |
 
 Works are modeled as typed Collections. Online Catalog is a separate browsing
@@ -49,9 +49,8 @@ This is a source/documentation checkpoint, not a new deployment or device test.
 - Windows and Linux desktop implementations exist; Linux packaging, codec parity,
   native external drag acceptance, and Windows regression evidence have separate
   verification limits documented in the Linux guide.
-- Android source declares version 0.4.3 (14), including the single-page manga reader,
-  pinch zoom, and video autoplay/loop defaults. The recorded 0.4.3 install and native
-  reader acceptance remain pending; source version does not identify the installed APK.
+- The Android source version lives in `android/AndroidManifest.xml`; the source version
+  does not identify the installed APK.
 - Initial full-library backfill is recorded complete. Repeating it is a separately
   authorized recovery operation.
 - The [living backlog](docs/roadmap/lakomics-backlog.md) owns remaining work and

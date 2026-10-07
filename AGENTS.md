@@ -13,7 +13,7 @@
 
 ## Repository map and compatibility
 
-- Canonical checkouts: `C:\chatgpt` (Windows) and `/home/laku/chatgpt` (Linux). Verify the working directory before host-specific commands.
+- Canonical checkouts: `V:\chatgpt` (Windows, Dev Drive) and `/home/laku/chatgpt` (Linux). Verify the working directory before host-specific commands.
 
   | Component | Path |
   | --- | --- |
@@ -33,7 +33,7 @@
 
 ## Data, credentials, and user work
 
-- Active production library: `C:\New_lakomics_assets` (Windows) and `/home/laku/MEGA 다운로드/before-linux-backup/New_lakomics_assets` (Linux; active despite the `before-linux-backup` name). Never infer another library from old exports, fixtures, desktop folders, or modification times; other library paths need explicit task scope.
+- Active production library: `C:\laku\New_lakomics_assets` (Windows) and `/home/laku/MEGA 다운로드/before-linux-backup/New_lakomics_assets` (Linux; active despite the `before-linux-backup` name). Never infer another library from old exports, fixtures, desktop folders, or modification times; other library paths need explicit task scope.
 - Necessary read-only audits of the active library are allowed. Migration, indexing, metadata updates, file moves, and any other writes need separate explicit approval.
 - Resolve the configured library at runtime; never branch application behavior on the machine-specific production path.
 - Never rerun the completed full Cloud Library backfill or replace the catalog database to verify a change. Recovery operations need separate approval.
