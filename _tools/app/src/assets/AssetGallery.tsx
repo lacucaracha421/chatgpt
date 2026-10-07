@@ -517,7 +517,8 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
 
 
 export function tileThumbnailUrl(asset: AssetSummary, cacheKey?: string | number, mediaSource: "library" | "vault" = "library") {
-  if (mediaSource === "vault") return vaultThumbnailUrl(asset.id, cacheKey);
+  // A vault item carries a revision only after its thumbnail changed, so just that tile reloads.
+  if (mediaSource === "vault") return vaultThumbnailUrl(asset.id, asset.thumbnailRevision ?? cacheKey);
   return asset.thumbnailRevision ? assetThumbnailUrl(asset) : thumbnailUrl(asset.id, cacheKey);
 }
 

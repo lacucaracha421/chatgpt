@@ -100,8 +100,6 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   const [dropTarget, setDropTarget] = useState<VaultDropTarget>(null);
   const [items, setItems] = useState<AssetSummary[]>([]);
   const [itemFolders, setItemFolders] = useState<ReadonlyMap<string, string | null>>(() => new Map());
-  /** Bumped after a thumbnail changes so mounted vault thumbnails load again. */
-  const [thumbnailKey, setThumbnailKey] = useState<number | undefined>(undefined);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -473,9 +471,8 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     setError(null);
     try {
       await call(asset.id, timeMs);
-      // Vault thumbnails are never cached by the server; a new revision makes mounted images reload.
+      // Vault thumbnails are never cached by the server; a new revision reloads only this item's images.
       const revision = Date.now();
-      setThumbnailKey(revision);
       setItems((current) => current.map((item) => item.id === asset.id ? { ...item, thumbnailRevision: String(revision) } : item));
       setMessage({ text: "이 프레임을 썸네일로 지정했습니다." });
     } catch (cause) {
@@ -593,7 +590,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
           if (!target) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }}>
-        <AssetGallery items={items} layout="masonry" scopeKey={`external-vault:${filter}:${scopeKey}`} totalCount={totalCount} thumbnailCacheKey={thumbnailKey}
+        <AssetGallery items={items} layout="masonry" scopeKey={`external-vault:${filter}:${scopeKey}`} totalCount={totalCount}
           mediaSource="vault" metadataVisible={!privacyMode} captionLabel={(asset) => asset.title || asset.originalName}
           privacyMode={privacyMode}
           selectedAssetIds={selection.ids} focusAssetId={selection.focusId}

@@ -516,9 +516,16 @@ describe("AssetGallery", () => {
     expect(sources()).toEqual(mounted);
     fireEvent.load(document.querySelector('img[src$="/v12"]')!);
     expect(sources()[0]).toBe("http://lakomics.localhost/thumbnail/asset-0/v12");
-    second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={items} />);
+    const vaultItems = [asset(0), asset(1)];
+    second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={vaultItems} />);
     fireEvent.load(document.querySelector('img[src$="/vault-thumbnail/asset-0"]')!);
     expect(sources()[0]).toBe("http://lakomics.localhost/vault-thumbnail/asset-0");
+    // A changed vault thumbnail reloads only that tile.
+    second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={[{ ...vaultItems[0]!, thumbnailRevision: "7" }, vaultItems[1]!]} />);
+    fireEvent.load(document.querySelector('img[src$="/vault-thumbnail/asset-0/v7"]')!);
+    expect(sources()[0]).toBe("http://lakomics.localhost/vault-thumbnail/asset-0/v7");
+    expect(document.querySelector('img[src$="/vault-thumbnail/asset-1"]')).not.toBeNull();
+    expect(document.querySelector('img[src*="/vault-thumbnail/asset-1/"]')).toBeNull();
   });
 
   it("versions video posters and hover scrub frames with the content revision", () => {
