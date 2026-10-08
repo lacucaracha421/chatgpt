@@ -1,6 +1,6 @@
 import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection';
 import {api, ApiError, errorText} from './transport';
-import type {CollectionDetail, CollectionKind, CollectionSummary} from './collectionModel';
+import type {CollectionDetail, CollectionKind, CollectionSummary, CollectionPerson} from './collectionModel';
 import {SAVE_FAILED} from './collectionEditOutbox';
 import {avCredits, avValue, canonicalAvCredits, emptyAv, normalizePersonMemo, sameAvValue, validateAvCredits, validateAvDetails, validatePersonFields, AV_INPUT_ERROR,
   type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson, type AvOverlay, type PersonFields, type PersonKey, type PersonValues} from './avEditModel';
@@ -17,7 +17,7 @@ export type BlobReceipt = {sha256: string; sizeBytes: number; contentType: strin
 export type ArtworkReceipt = {provider: Provider; providerImageId: string; original: BlobReceipt; width: number; height: number};
 /** The relay's reply: an older server sends no thumbnail. */
 export type ArtworkReply = ArtworkReceipt & {thumbnail?: BlobReceipt | null};
-export type CommandReceipt = AuthorityIdentity & {operationId: string; commandType: string; authorityCursor?: number};
+export type CommandReceipt = AuthorityIdentity & {operationId: string; commandType: string; authorityCursor?: number; changed?: boolean; person?: CollectionPerson};
 export type WorkCommand =
   | ({commandType: 'providerApply'} & ProviderApply)
   | ({commandType: 'addArtwork'; workId: string; artworkId: string; kind: string; language: null; thumbnail: BlobReceipt | null} & ArtworkReceipt)
@@ -30,8 +30,16 @@ export type WorkCommand =
   | {commandType: 'setOwnershipTracking'; workId: string; editionIndex: number; count: number; expectedCount: number | null; expectedRevision: null}
   | {commandType: 'setReleaseSubscription'; workId: string; enabled: boolean; expectedEnabled: boolean; expectedRevision: null};
 /** A person command has no work: its queue order and label belong to the person. */
-export type PersonCommand = {commandType: 'setPerson'; personId: string; workId?: never; changes: PersonFields; expected: PersonFields};
+export type SetPersonCommand = {commandType: 'setPerson'; personId: string; workId?: never; changes: PersonFields; expected: PersonFields};
+export type PortraitManifest = {original: BlobReceipt; width: number; height: number; attribution: {source: 'stashdb' | 'commons' | 'local'; sourceUrl: string | null; license: string | null; author: string | null}};
+export type PersonRevisionCommand = {personId: string; workId?: never; expectedRevision: number} & (
+  {commandType: 'setPersonProfile'; stashdbId: string | null} |
+  {commandType: 'setPersonPortrait'; portrait: ({kind: 'image'} & PortraitManifest) | null});
+export type PersonCommand = SetPersonCommand | PersonRevisionCommand;
 export type AuthorityCommand = WorkCommand | PersonCommand;
+export function isPersonCommand(command: AuthorityCommand): command is PersonCommand {
+  return command.commandType === 'setPerson' || command.commandType === 'setPersonProfile' || command.commandType === 'setPersonPortrait';
+}
 export type Command = AuthorityIdentity & AuthorityCommand & {operationId: string};
 /**
  * `label` names the work for queue rows whose work is not on screen (a delete or restore);
@@ -52,10 +60,15 @@ export const sameAuthority = (a: AuthorityIdentity, b: AuthorityIdentity) => a.l
 export function readCommands(connection = outboxConnection()): CommandIntent[] {
   try {
     const key = outboxKey(KEY, connection), rows: unknown = key ? JSON.parse(localStorage.getItem(key) ?? '[]') : [];
-    return Array.isArray(rows) ? rows.filter(row => row?.command && typeof row.command.operationId === 'string'
-      && (typeof row.command.workId === 'string' || row.command.commandType === 'setPerson' && typeof row.command.personId === 'string')
-      && authorityIdentity({...row.command, active: true})
-      && ['pending', 'conflict', 'accepted'].includes(row.state)) : [];
+    return Array.isArray(rows) ? rows.filter(row => {
+      if (!row?.command || typeof row.command.operationId !== 'string'
+        || !(typeof row.command.workId === 'string' || isPersonCommand(row.command) && typeof row.command.personId === 'string')
+        || !authorityIdentity({...row.command, active: true}) || !['pending', 'conflict', 'accepted'].includes(row.state)) return false;
+      if (row.command.commandType === 'setPersonProfile' || row.command.commandType === 'setPersonPortrait') {
+        try { validateAvCommand(row.command); } catch { return false; }
+      }
+      return true;
+    }) : [];
   } catch { return []; }
 }
 function write(rows: CommandIntent[], connection = outboxConnection()) {
@@ -134,6 +147,10 @@ function validateAvCommand(command: AuthorityCommand) {
     if (typeof command.personId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.personId)) throw new Error(AV_INPUT_ERROR);
     validatePersonFields(command.changes); validatePersonFields(command.expected);
     if (!sameAvValue(Object.keys(command.changes).sort(), Object.keys(command.expected).sort())) throw new Error(AV_INPUT_ERROR);
+  } else if (command.commandType === 'setPersonProfile' || command.commandType === 'setPersonPortrait') {
+    if (typeof command.personId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.personId) || !Number.isSafeInteger(command.expectedRevision) || command.expectedRevision < 1) throw new Error(AV_INPUT_ERROR);
+    if (command.commandType === 'setPersonProfile' && command.stashdbId !== null && (typeof command.stashdbId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.stashdbId))) throw new Error(AV_INPUT_ERROR);
+    if (command.commandType === 'setPersonPortrait' && command.portrait !== null) { if (command.portrait?.kind !== 'image') throw new Error(AV_INPUT_ERROR); validatePortraitManifest(command.portrait); }
   } else if (command.commandType === 'setAvDetails') {
     validateAvDetails(command.changes); validateAvDetails(command.expected);
     if (!Object.keys(command.changes).length || !sameAvValue(Object.keys(command.changes).sort(), Object.keys(command.expected).sort())) throw new Error('AV 입력을 확인해 주세요.');
@@ -197,9 +214,9 @@ async function deliver(connection: string) {
     } catch (error) {
       const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: ConflictWork; person?: ConflictPerson}}} | null)?.detail : null;
       const code = detail?.code;
-      if (code === 'workDeleted' && row.command.commandType !== 'setPerson') { dropWork(identity, row.command.workId, connection); continue; }
+      if (code === 'workDeleted' && !isPersonCommand(row.command)) { dropWork(identity, row.command.workId, connection); continue; }
       // The server has no such person: no retry can succeed, so its queued edits go, with a note.
-      if (code === 'personNotFound' && row.command.commandType === 'setPerson') { dropPerson(identity, row.command.personId, connection, row.label); continue; }
+      if (code === 'personNotFound' && isPersonCommand(row.command)) { dropPerson(identity, row.command.personId, connection, row.label); continue; }
       if (error instanceof ApiError && error.status !== null && error.status >= 400 && error.status < 500 && ![401, 403, 408, 429].includes(error.status)) {
         changeIntent(connection, row.command.operationId, stored => {
           stored.state = 'conflict'; stored.conflict = {code: code ?? 'commandRejected', current: detail?.current};
@@ -212,7 +229,7 @@ async function deliver(connection: string) {
   }
 }
 /** The queue order of a command: per work, or per person for `setPerson`. */
-const entityKey = (command: AuthorityCommand) => command.commandType === 'setPerson' ? `person:${command.personId}` : `work:${command.workId}`;
+const entityKey = (command: AuthorityCommand) => isPersonCommand(command) ? `person:${command.personId}` : `work:${command.workId}`;
 const personNotices = new Map<string, string>();
 export const PERSON_NOT_FOUND = (name?: string) => `서버에 ${name ? `${name} ` : '이 '}배우 정보가 없어 변경을 보내지 못했습니다.`;
 /** Why this person's queued edits were dropped, until the page that shows it is closed. */
@@ -222,7 +239,7 @@ export function clearPersonNotice(personId: string) {
 }
 function dropPerson(identity: AuthorityIdentity, personId: string, connection: string, label?: string) {
   personNotices.set(personId, PERSON_NOT_FOUND(label));
-  write(readCommands(connection).filter(row => !sameAuthority(row.command, identity) || row.command.commandType !== 'setPerson' || row.command.personId !== personId), connection);
+  write(readCommands(connection).filter(row => !sameAuthority(row.command, identity) || !isPersonCommand(row.command) || row.command.personId !== personId), connection);
 }
 function retryLater(connection: string, operationId: string, reason: string) {
   changeIntent(connection, operationId, stored => {
@@ -317,7 +334,7 @@ export function createdWork(row: CommandIntent): CollectionDetail | null {
 }
 
 const personKeys: PersonKey[] = ['memo', 'favorite'];
-const isPersonRow = (row: CommandIntent, personId: string): row is CommandIntent & {command: Command & PersonCommand} =>
+const isPersonRow = (row: CommandIntent, personId: string): row is CommandIntent & {command: Command & SetPersonCommand} =>
   row.command.commandType === 'setPerson' && row.command.personId === personId;
 /** A confirmed read plus this device's accepted intents that the read may predate (each only on its exact expected value). */
 export function confirmedPerson(person: PersonValues, personId: string, rows: CommandIntent[]): PersonValues {
@@ -337,7 +354,7 @@ export function optimisticPerson(person: PersonValues, personId: string, rows: C
  * values are the confirmed values with this person's earlier unsent intents applied in queue order,
  * since the server applies those first.
  */
-export function personCommand(personId: string, confirmed: PersonValues, rows: CommandIntent[], desired: PersonFields): PersonCommand | null {
+export function personCommand(personId: string, confirmed: PersonValues, rows: CommandIntent[], desired: PersonFields): SetPersonCommand | null {
   const base = optimisticPerson(confirmed, personId, rows);
   const changes: PersonFields = {}, expected: PersonFields = {};
   for (const key of personKeys) {
@@ -351,7 +368,11 @@ export function personCommand(personId: string, confirmed: PersonValues, rows: C
 /** 덮어쓰기 for a refused `setPerson`: the same wish, expected from the server's current person. */
 export function rebasePersonCommand(row: CommandIntent): PersonCommand | null {
   const command = row.command, current = row.conflict?.current?.person;
-  if (command.commandType !== 'setPerson' || !current) return null;
+  if (!isPersonCommand(command) || !current) return null;
+  if (command.commandType !== 'setPerson') return row.conflict?.code === 'revisionConflict' && Number.isSafeInteger(current.entityRevision) && current.entityRevision! > 0
+    ? command.commandType === 'setPersonProfile'
+      ? {commandType: 'setPersonProfile', personId: command.personId, stashdbId: command.stashdbId, expectedRevision: current.entityRevision!}
+      : {commandType: 'setPersonPortrait', personId: command.personId, portrait: command.portrait, expectedRevision: current.entityRevision!} : null;
   const expected: PersonFields = {};
   for (const key of personKeys) if (key in command.changes) (expected as Record<PersonKey, unknown>)[key] = key === 'memo' ? normalizePersonMemo(current.memo) : current.favorite === true;
   return {commandType: 'setPerson', personId: command.personId, changes: command.changes, expected};
@@ -361,6 +382,41 @@ export function reconcilePerson(identity: AuthorityIdentity, personId: string, p
   const rows = readCommands();
   const next = rows.filter(row => !(row.state === 'accepted' && sameAuthority(row.command, identity) && isPersonRow(row, personId)
     && (readStartedAt !== undefined && readStartedAt > (row.acceptedAt ?? Infinity)
-      || personKeys.every(key => !(key in row.command.changes) || (row.command as PersonCommand).changes[key] === (key === 'memo' ? normalizePersonMemo(person.memo) : person.favorite)))));
+      || personKeys.every(key => !(key in row.command.changes) || (row.command as SetPersonCommand).changes[key] === (key === 'memo' ? normalizePersonMemo(person.memo) : person.favorite)))));
+  if (next.length !== rows.length) write(next);
+}
+
+/** Wait for unresolved person intents: profile refresh and portrait equality can be no-ops. */
+export function personRevision(personId: string, revision: number | undefined, rows: CommandIntent[]): number | null {
+  if (!Number.isSafeInteger(revision) || revision! < 1) return null;
+  let result = revision!;
+  for (const row of rows) if (isPersonCommand(row.command) && row.command.personId === personId) {
+    if (row.state !== 'accepted') return null;
+    const accepted = row.receipts?.[row.receipts.length - 1]?.person?.entityRevision;
+    if (Number.isSafeInteger(accepted) && accepted! > 0) result = Math.max(result, accepted!);
+    else return null;
+  }
+  return result;
+}
+export function validatePortraitManifest(value: PortraitManifest) {
+  if (!value || !value.original || !/^[a-f0-9]{64}$/.test(value.original.sha256) || value.original.contentType !== 'image/jpeg'
+    || !Number.isSafeInteger(value.original.sizeBytes) || value.original.sizeBytes < 1 || value.original.sizeBytes > 5 * 1024 * 1024
+    || !Number.isSafeInteger(value.width) || value.width < 1 || value.width > 1600 || !Number.isSafeInteger(value.height) || value.height < 1 || value.height > 1600
+    || !value.attribution || !['stashdb', 'commons', 'local'].includes(value.attribution.source)) throw new Error(AV_INPUT_ERROR);
+}
+/** Full person receipts update identity/profile immediately; older receipts leave the plain read intact. */
+export function confirmedPersonEntity(person: CollectionPerson, personId: string, rows: CommandIntent[]): CollectionPerson {
+  let next = person;
+  for (const row of rows) if (row.state === 'accepted' && isPersonCommand(row.command) && row.command.personId === personId) {
+    const received = row.receipts?.[row.receipts.length - 1]?.person;
+    if (received && (received.id === personId || received.personId === personId) && (received.entityRevision ?? 0) >= (next.entityRevision ?? 0)) next = {...next, ...received, id: personId};
+  }
+  return next;
+}
+export function reconcilePersonRevision(identity: AuthorityIdentity, personId: string, revision: number, readStartedAt: number) {
+  const rows = readCommands();
+  const next = rows.filter(row => !(row.state === 'accepted' && sameAuthority(row.command, identity) && isPersonCommand(row.command)
+    && row.command.personId === personId && row.command.commandType !== 'setPerson' && readStartedAt > (row.acceptedAt ?? Infinity)
+    && revision >= (row.receipts?.[row.receipts.length - 1]?.person?.entityRevision ?? Infinity)));
   if (next.length !== rows.length) write(next);
 }

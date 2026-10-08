@@ -110,6 +110,12 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/collections/personal-edits?libraryId=0123456789abcdef0123456789abcdef&after=0&limit=100","GET"));
  for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/personal-edits",method));
  pass(()->NetworkPolicy.api("/v1/collections/people/person-1","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/people/person-1?authority=1","GET"));
+ pass(()->NetworkPolicy.api("/v1/providers/stashdb/search?query=a","GET"));pass(()->NetworkPolicy.api("/v1/providers/stashdb/performers/abc-1","GET"));
+ pass(()->NetworkPolicy.api("/v1/providers/stashdb/portrait","POST"));pass(()->NetworkPolicy.providerImage("/v1/providers/stashdb/image?stashdbId=a&imageId=b"));
+ for(String path:new String[]{"/v1/providers/stashdb/performers/","/v1/providers/stashdb/performers/a/b","/v1/providers/stashdb/performers/../x","/v1/providers/stashdb/x"})reject(()->NetworkPolicy.api(path,"GET"));
+ for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/providers/stashdb/portrait",method));
+ reject(()->NetworkPolicy.providerImage("/v1/providers/stashdb/search?query=a"));
  pass(()->NetworkPolicy.api("/v1/collections/people/0f8c2a6e-3b1d-4c55-9e7a-2d4b6f8a1c3e","GET"));
  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/people/person-1",method));
  for(String p:new String[]{"/v1/collections/people/","/v1/collections/people/person-1/","/v1/collections/people/person-1/portrait","/v1/collections/people/../replica","/v1/collections/people/%2e%2e","/v1/collections/people/a.b","/v1/collections/people/"+"a".repeat(129)})for(String method:new String[]{"GET","POST"})reject(()->NetworkPolicy.api(p,method));

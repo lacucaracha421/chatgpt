@@ -87,16 +87,31 @@
 
 /* Performer profile: the PC pieces fold into a portrait identity row on the tablet. */
 .tablet-performer { display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-6) 0 var(--space-8); }
-.tablet-performer__band { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--space-6); align-items: start; }
-.tablet-performer__portrait { aspect-ratio: 4 / 5; min-width: 0; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
+/* The identity column runs the portrait's height: name and facts from the top, the library line and
+   the StashDB choice at the bottom, level with the portrait's lower edge. */
+.tablet-performer__band { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--space-6); align-items: stretch; }
+.tablet-performer__portrait { position: relative; align-self: start; aspect-ratio: 4 / 5; min-width: 0; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
 .tablet-performer__portrait .av-portrait-large { display: block; width: 100%; height: 100%; border-radius: 0; }
-.tablet-performer__identity { display: grid; align-content: start; gap: var(--space-4); min-width: 0; }
+/* 사진 바꾸기 sits on the portrait as on the PC; touch has no hover, so it stays visible. */
+.tablet-performer__portrait-change.ui-button { position: absolute; right: var(--space-2); bottom: var(--space-2); background: var(--color-cover-scrim); color: var(--color-text); font-size: var(--type-meta); }
+.tablet-performer__portrait-change.ui-button:disabled { opacity: .5; }
+.tablet-performer__identity { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.tablet-performer__name { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .tablet-performer__identity h1 { margin: 0; font-size: var(--type-title); font-weight: 600; line-height: var(--line-title); overflow-wrap: anywhere; }
-.tablet-performer__identity > p:not(.av-performer-library-stats) { margin: calc(-1 * var(--space-3)) 0 0; color: var(--color-muted); font-family: var(--font-ja), var(--font-ui); }
+.tablet-performer__name > p { margin: 0; color: var(--color-muted); font-family: var(--font-ja), var(--font-ui); }
 .tablet-performer__facts { display: grid; gap: var(--space-3); min-width: 0; }
+.tablet-performer__facts:empty { display: none; }
+/* Links stay compact text buttons (their hit area is already 44); the first one lines up with the column edge.
+   Folded, they keep one line and scroll sideways when the column is narrow, so +N never sits alone;
+   unfolded, they wrap. The block padding keeps the 44 hit area inside the scroller. */
+.tablet-performer .av-profile__links { gap: var(--space-2) 0; margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2)); padding-block: var(--space-1); }
+.tablet-performer .av-profile__links:not(:has(> [aria-expanded="true"])) { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.tablet-performer .av-profile__links::-webkit-scrollbar { display: none; }
+.tablet-performer__footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-2); margin-top: auto; min-width: 0; }
+.tablet-performer__footer .av-performer-library-stats { flex: 1 1 auto; min-width: 0; }
+.tablet-performer__stashdb.ui-button { margin-right: calc(-1 * var(--space-2)); font-size: var(--type-meta); }
 .tablet-performer__favorite { display: inline-block; margin-left: var(--space-2); vertical-align: -2px; color: var(--color-accent); }
 .tablet-performer__favorite svg { display: block; width: var(--icon-md); height: var(--icon-md); }
-.tablet-performer .av-profile__links .ui-button { min-height: var(--touch-target); }
 .tablet-performer__memo { display: flex; flex-direction: column; gap: var(--space-2); }
 .tablet-performer__memo p { margin: 0; color: var(--color-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tablet-performer__works { display: flex; flex-direction: column; gap: var(--space-3); }

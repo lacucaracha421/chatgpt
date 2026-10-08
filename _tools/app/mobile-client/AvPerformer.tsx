@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {ArrowsUpDownIcon, PencilIcon, Squares2X2Icon, StarIcon} from '@heroicons/react/24/outline';
+import {ArrowsUpDownIcon, CameraIcon, ChevronDownIcon, PencilIcon, Squares2X2Icon, StarIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolidIcon} from '@heroicons/react/24/solid';
 import {CollectionList} from '../src/collections/CollectionList';
 import {ProfileRows, ProfileLinks} from '../src/collections/av/AvPerformerProfile';
@@ -12,8 +12,13 @@ import {AvPerformerLibraryStats} from '../src/collections/av/AvPerformerLibraryS
 import {allWorks} from './collectionReleasesModel';
 import {api, ApiError, errorText, native} from './transport';
 import {AuthorityQueue} from './CollectionAuthorityForms';
-import {clearPersonNotice, confirmedPerson, optimisticPerson, personCommand, personNotice, reconcilePerson} from './collectionCommandOutbox';
+import {clearPersonNotice, confirmedPersonEntity, isPersonCommand, personRevision, reconcilePersonRevision, confirmedPerson, optimisticPerson, personCommand, personNotice, reconcilePerson} from './collectionCommandOutbox';
 import {normalizePersonMemo, personMemoLength, PERSON_MEMO_LIMIT, PERSON_MEMO_TOO_LONG, type PersonFields, type PersonValues} from './avEditModel';
+import {outboxConnection} from './outboxConnection';
+import {AvStashdbSheet} from './AvStashdbSheet';
+import {usePortraitUrl} from './collectionArtwork';
+import {usePrivacyMode} from './privacyMode';
+import type {PersonRevisionCommand} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {personPath, personReply, type AvPerson, type CollectionPerson, type CollectionPersonProfile, type CollectionSummary} from './collectionModel';
 
@@ -22,7 +27,7 @@ type ReleaseOrder = 'newest' | 'oldest';
 type PerformerShelf = {works: CollectionSummary[]; revision: string};
 type Authority = ReturnType<typeof useCollectionAuthority>;
 /** The person read: `readAt` is when the read began, so acknowledgements after it ask for another read. */
-type PersonRead = {id: string; person: CollectionPerson | null; readAt: number};
+type PersonRead = {scope?: string;id: string; person: CollectionPerson | null; readAt: number};
 
 /** 내 메모 for a performer (PC: the memo editor on the performer page), as the tablet's memo sheet. */
 function PersonMemoSheet({initial, onClose, onSave}: {initial: string; onClose(): void; onSave(value: string): void}) {
@@ -89,9 +94,14 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   const [role, setRole] = useState<RoleFilter>('all'), [picked, setPicked] = useState<string | null>(null);
   // The published person of `id`; null when the server has none (404, an older server) or the read failed.
   const [person, setPerson] = useState<PersonRead | null>(null);
+  const [stashSheet, setStashSheet] = useState<'profile' | 'portrait' | null>(null);
+  const [authorityPerson, setAuthorityPerson] = useState<PersonRead | null>(null);
+  const [portraitWish, setPortraitWish] = useState<{personId: string; operationId: string; url: string | null; digest: string | null} | null>(null);
+  const [privateMode] = usePrivacyMode();
+  const hidePhotos = privacy || privateMode;
   const [memoOpen, setMemoOpen] = useState(false), [editError, setEditError] = useState('');
   // This device's latest acknowledged change to the shown person: a read that began before it is re-read.
-  const acknowledged = Math.max(0, ...(authority?.acknowledgements ?? []).map(row => row.command.commandType === 'setPerson' && row.command.personId === personId ? row.acceptedAt ?? 0 : 0));
+  const acknowledged = Math.max(0, ...(authority?.acknowledgements ?? []).map(row => isPersonCommand(row.command) && row.command.personId === personId ? row.acceptedAt ?? 0 : 0));
   const stale = person?.id === personId && acknowledged >= person.readAt;
   useEffect(() => {
     if (!active || person?.id === personId && !stale) return;
@@ -104,8 +114,32 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     });
     return () => controller.abort();
   }, [active, personId, person?.id, stale]);
-  useEffect(() => { setMemoOpen(false); setEditError(''); }, [personId]);
+  useEffect(() => { setMemoOpen(false); setStashSheet(null); setEditError(''); setPortraitWish(null); }, [personId]);
   const identity = authority?.identity;
+  const authorityScope = identity ? JSON.stringify([outboxConnection(), identity.libraryId, identity.epoch]) : '';
+  const authorityRead = authorityPerson?.scope === authorityScope ? authorityPerson : null;
+  useEffect(() => { setStashSheet(null); setPortraitWish(null); }, [authorityScope]);
+  const authorityStale = authorityRead?.id === personId && acknowledged >= authorityRead.readAt;
+  useEffect(() => {
+    if (!active || !identity || authorityRead?.id === personId && !authorityStale) return;
+    const controller = new AbortController(), readAt = Date.now();
+    void api<unknown>(`${personPath(personId)}?authority=1`, controller.signal).then(reply => personReply(reply, personId)).then(value => {
+      if (!controller.signal.aborted) setAuthorityPerson({id: personId, person: value, readAt, scope: authorityScope});
+    }, () => {});
+    return () => controller.abort();
+  }, [active, identity?.libraryId, identity?.epoch, personId, authorityRead?.id, authorityStale, authorityScope]);
+  useEffect(() => {
+    if (identity && authorityRead?.id === personId && authorityRead.person?.entityRevision)
+      reconcilePersonRevision(identity, personId, authorityRead.person.entityRevision, authorityRead.readAt);
+  }, [identity, authorityRead, personId]);
+  const received = person?.person && authority ? confirmedPersonEntity(
+    authorityRead?.id === person.id && authorityRead.person ? {...person.person, ...authorityRead.person} : person.person, person.id, authority.acknowledgements) : person?.person;
+  const confirmedPortrait = usePortraitUrl(received?.portraitImage?.sha256 ?? null, !hidePhotos);
+  // Keep the chosen preview until the confirmed replacement has decoded; feed lag never restores the old photo.
+  const wishRow = portraitWish && [...(authority?.rows ?? []), ...(authority?.acknowledgements ?? [])].find(row => row.command.operationId === portraitWish.operationId);
+  const wishAccepted = portraitWish?.digest === null ? received?.portraitSelection === null : received?.portraitImage?.sha256 === portraitWish?.digest;
+  const wishVisible = portraitWish?.personId === personId && (!!wishRow || wishAccepted) &&
+    !(wishAccepted && portraitWish?.digest && confirmedPortrait.ready && !confirmedPortrait.failed && received?.portraitImage?.sha256 === portraitWish.digest);
   const read = person?.id === personId ? person.person : null;
   useEffect(() => {
     if (identity && read && person) reconcilePerson(identity, personId, {memo: normalizePersonMemo(read.memo), favorite: read.favorite === true}, person.readAt);
@@ -143,7 +177,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   if (!page.person) return <article className="tablet-performer" aria-label="AV 배우"><EmptyState title="이 배우의 작품이 없습니다"/></article>;
   const shown = page.works.filter(work => role === 'all' || (role === 'solo') === page.solo(work)).sort(byRelease(order));
   const tap = (id: string) => { if (picked === id) onOpen(id, shown.map(work => work.id)); else setPicked(id); };
-  const published = person.person, waiting = shownId !== personId;
+  const published = received ?? person.person, waiting = shownId !== personId;
   const source = published && portraitSourceText(published, page.person.portraitCrop, shelf!.works);
   const profile = published?.profile ? sharedProfile(published.id, published.profile) : null;
   // 즐겨찾기 and 내 메모 are edited only against a confirmed server person with the authority active;
@@ -151,11 +185,13 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   const editable = !!identity && !!published && !waiting;
   const confirmed: PersonValues | null = published && authority ? confirmedPerson({memo: normalizePersonMemo(published.memo), favorite: published.favorite === true}, shownId, authority.acknowledgements) : null;
   const values: PersonValues | null = confirmed && authority ? optimisticPerson(confirmed, shownId, authority.rows) : null;
-  const refused = !!authority?.rows.some(row => row.state === 'conflict' && row.command.commandType === 'setPerson' && row.command.personId === shownId);
+  const refused = !!authority?.rows.some(row => row.state === 'conflict' && isPersonCommand(row.command) && row.command.personId === shownId);
+  const portraitPending = !!authority?.rows.some(row => row.state !== 'accepted' && isPersonCommand(row.command) && row.command.personId === shownId && row.command.commandType !== 'setPerson');
+  const revision = authority && published ? personRevision(shownId, published.entityRevision, authority.rows) : null;
   const memo = values ? values.memo : published?.memo?.trim();
   const notice = personNotice(shownId);
   const save = (desired: PersonFields) => {
-    if (!editable || !authority || !confirmed || refused) return false;
+    if (!editable || !authority || !confirmed || refused || portraitPending) return false;
     try {
       const command = personCommand(shownId, confirmed, authority.rows, desired);
       if (command) authority.enqueue(command, page.person!.name);
@@ -165,23 +201,28 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   return <article className="tablet-performer" aria-label="AV 배우" aria-busy={waiting} inert={waiting || undefined}>
     <header className="tablet-performer__band">
       <div className="tablet-performer__portrait" title={source ? `사진 출처: ${source}` : undefined}>
-        <PersonPortrait person={page.person} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} size="large"/>
+        {!hidePhotos && wishVisible && portraitWish ? portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><img src={portraitWish.url} alt=""/></span> : <span className="av-portrait av-portrait-large" aria-label={`${page.person.name} 사진`}>{page.person.name.slice(0, 1)}</span>
+          : <PersonPortrait person={{...page.person, ...(published && 'portraitImage' in published ? {portraitImage: published.portraitImage, portraitCrop: published.portraitSelection === null ? null : page.person.portraitCrop} : {})}} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} size="large" privacy={hidePhotos}/>}
+        {editable && <Button size="sm" variant="quiet" className="tablet-performer__portrait-change" disabled={revision === null || refused} onClick={() => setStashSheet('portrait')}><CameraIcon aria-hidden="true"/>사진 바꾸기</Button>}
       </div>
       <div className="tablet-performer__identity">
-        <div className="tablet-performer__title"><h1>{page.person.name}{!editable && published?.favorite && <span className="tablet-performer__favorite" role="img" aria-label="즐겨찾기한 배우"><StarSolidIcon aria-hidden="true"/></span>}</h1>
+        <div className="tablet-performer__name"><div className="tablet-performer__title"><h1>{page.person.name}{!editable && published?.favorite && <span className="tablet-performer__favorite" role="img" aria-label="즐겨찾기한 배우"><StarSolidIcon aria-hidden="true"/></span>}</h1>
           {editable && values && <IconButton pop className="tablet-performer__favorite-toggle" label={values.favorite ? '즐겨찾기 해제' : '즐겨찾기'} icon={StarIcon} activeIcon={StarSolidIcon} active={values.favorite}
-            disabled={refused} onClick={() => save({favorite: !values.favorite})}/>}</div>
-        {page.person.nameJa && <p lang="ja">{page.person.nameJa}</p>}
+            disabled={refused || portraitPending} onClick={() => save({favorite: !values.favorite})}/>}</div>
+        {page.person.nameJa && <p lang="ja">{page.person.nameJa}</p>}</div>
         <section className="tablet-performer__facts" aria-label="프로필 정보">
           {profile && <ProfileRows profile={profile}/>}
           {profile && <ProfileLinks key={shownId} profile={profile} openLink={url => native('openExternal', {url}).then(() => {})}/>}
         </section>
-        <AvPerformerLibraryStats workCount={page.works.length} soloCount={page.works.filter(page.solo).length} firstRelease={page.dates[0] ?? null} lastRelease={page.dates[page.dates.length - 1] ?? null} averageScore={page.average}/>
+        <div className="tablet-performer__footer">
+          <AvPerformerLibraryStats workCount={page.works.length} soloCount={page.works.filter(page.solo).length} firstRelease={page.dates[0] ?? null} lastRelease={page.dates[page.dates.length - 1] ?? null} averageScore={page.average}/>
+          {editable && <Button size="sm" variant="quiet" className="tablet-performer__stashdb" aria-label="StashDB 프로필 선택" disabled={revision === null || refused} onClick={() => setStashSheet('profile')}>{profile ? 'StashDB' : 'StashDB 프로필 선택'}<ChevronDownIcon aria-hidden="true"/></Button>}
+        </div>
       </div>
     </header>
     {editable ? <section className="tablet-performer__memo" aria-label="내 메모">
-      <SectionLabel title="메모" actions={<Button size="icon" variant="ghost" aria-label="배우 메모 편집" disabled={refused} onClick={() => setMemoOpen(true)}><PencilIcon aria-hidden="true"/></Button>}/>
-      <button type="button" className="tablet-performer__memo-text" disabled={refused} onClick={() => setMemoOpen(true)}>{memo || <span className="tablet-performer__memo-empty">메모 쓰기</span>}</button>
+      <SectionLabel title="메모" actions={<Button size="icon" variant="ghost" aria-label="배우 메모 편집" disabled={refused || portraitPending} onClick={() => setMemoOpen(true)}><PencilIcon aria-hidden="true"/></Button>}/>
+      <button type="button" className="tablet-performer__memo-text" disabled={refused || portraitPending} onClick={() => setMemoOpen(true)}>{memo || <span className="tablet-performer__memo-empty">메모 쓰기</span>}</button>
     </section> : memo && <section className="tablet-performer__memo" aria-label="내 메모"><SectionLabel title="메모"/><p>{memo}</p></section>}
     {(editable || notice) && <div className="tablet-performer__edits">
       {editable && <AuthorityQueue authority={authority!} personId={shownId} onForm={() => {}}/>}
@@ -190,6 +231,9 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
       {notice && <div className="inline-error" role="alert"><span>{notice}</span><Button variant="ghost" onClick={() => clearPersonNotice(shownId)}>닫기</Button></div>}
     </div>}
     {memoOpen && editable && <PersonMemoSheet initial={memo ?? ''} onClose={() => setMemoOpen(false)} onSave={value => { if (save({memo: value})) setMemoOpen(false); }}/>}
+    {stashSheet && editable && published && <AvStashdbSheet mode={stashSheet} person={published} name={page.person.name} privacy={hidePhotos} authority={authority!} onClose={() => setStashSheet(null)} onPortrait={(command: PersonRevisionCommand, url, operationId) => {
+      if (command.commandType === 'setPersonPortrait') setPortraitWish({personId: shownId, operationId, url, digest: command.portrait?.original.sha256 ?? null});
+    }}/>}
     <section className="tablet-performer__works" aria-labelledby="tablet-performer-works">
       <div className="tablet-performer__tools">
         <h2 id="tablet-performer-works">작품 <span className="numeric">{shown.length.toLocaleString()}</span></h2>
@@ -205,7 +249,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     </section>
     {page.coPerformers.length > 0 && <section className="tablet-performer__related" aria-label="자주 함께 나온 배우"><SectionLabel as="h2" title="자주 함께 나온 배우" count={page.coPerformers.length}/>
       <div className="tablet-performer__co">{page.coPerformers.map(({person, count}) => <Button key={person.id} variant="ghost" className="tablet-work-person" aria-label={`${person.name} ${count}편`} onClick={() => onPerformer(person.id)}>
-        <PersonPortrait person={person} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision}/><span><b>{person.name}</b><small className="numeric">{count.toLocaleString()}편</small></span>
+        <PersonPortrait person={person} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} privacy={hidePhotos}/><span><b>{person.name}</b><small className="numeric">{count.toLocaleString()}편</small></span>
       </Button>)}</div>
     </section>}
     {page.labels.length > 0 && <section className="tablet-performer__related" aria-label="레이블"><SectionLabel as="h2" title="레이블" count={page.labels.length}/>

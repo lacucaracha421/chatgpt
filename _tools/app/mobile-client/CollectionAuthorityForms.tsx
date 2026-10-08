@@ -5,7 +5,7 @@ import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_MAX, COLLECTION_NAME_REQUIRED, collectionCreateLabel,
   collectionEditDraft, collectionEditError, collectionEditValue, type CollectionCreateType} from '../src/collections/collectionEditFields';
 import type {CollectionDetail, CollectionKind} from './collectionModel';
-import {createdWork, discardLifecycle, isLifecycle, lifecycleInFlight, rebasePersonCommand, replaceCommand, retryCommandNow, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
+import {createdWork, isPersonCommand, discardLifecycle, isLifecycle, lifecycleInFlight, rebasePersonCommand, replaceCommand, retryCommandNow, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {errorText} from './transport';
 import './collectionAuthority.css';
@@ -89,7 +89,7 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
  */
 function PersonQueueRow({row, authority, named}: {row: CommandIntent; authority: Authority; named: boolean}) {
   const waiting = useDelayedBusy(row.state === 'pending', {delay: 400});
-  if (row.command.commandType !== 'setPerson' || row.state === 'pending' && !waiting && !row.lastError) return null;
+  if (!isPersonCommand(row.command) || row.state === 'pending' && !waiting && !row.lastError) return null;
   const rebased = rebasePersonCommand(row);
   return <div className="collection-authority-queue" data-person={row.command.personId}><Badge>{row.state === 'conflict' ? '충돌' : '대기'}</Badge>
     {named && <span>{`${row.label ?? '배우'} 배우 정보`}</span>}
@@ -104,9 +104,9 @@ function PersonQueueRow({row, authority, named}: {row: CommandIntent; authority:
 }
 export function AuthorityQueue({authority, workId, personId, item, onForm, onAvEdit}: {authority: Authority; workId?: string; personId?: string; item?: CollectionDetail; onForm(form: WorkForm): void; onAvEdit?(row: CommandIntent): void}) {
   if (!authority.identity) return null;
-  const person = (row: CommandIntent) => row.command.commandType === 'setPerson';
+  const person = (row: CommandIntent) => isPersonCommand(row.command);
   // A performer page lists its person's changes; the shelf only the ones that need a decision.
-  if (personId) return <>{authority.rows.filter(row => row.state !== 'accepted' && row.command.commandType === 'setPerson' && row.command.personId === personId)
+  if (personId) return <>{authority.rows.filter(row => row.state !== 'accepted' && isPersonCommand(row.command) && row.command.personId === personId)
     .map(row => <PersonQueueRow key={row.command.operationId} row={row} authority={authority} named={false}/>)}</>;
   // The shelf lists the rows whose work it cannot open: creations, provider adds, deletes and restores.
   const rows = authority.rows.filter(row => row.state !== 'accepted' && (workId ? row.command.workId === workId : row.command.commandType === 'createWork'

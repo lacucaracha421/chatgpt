@@ -1,0 +1,16 @@
+.tablet-stashdb { display: grid; gap: var(--space-3, 12px); }
+.tablet-stashdb form { display: flex; align-items: end; gap: 12px; }
+.tablet-stashdb form > :first-child { flex: 1; }
+.tablet-stashdb button { min-height: 44px; }
+.tablet-stashdb__candidates { display: grid; gap: 8px; }
+.tablet-stashdb__candidates button { justify-content: start; white-space: normal; text-align: start; }
+.tablet-stashdb__candidates img { width: 48px; height: 64px; object-fit: cover; border-radius: 6px; }
+.tablet-stashdb__candidates span { display: grid; gap: 4px; }
+.tablet-stashdb__candidates small { color: var(--color-text-muted); }
+.tablet-stashdb__photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px; }
+.tablet-stashdb__photos button { height: auto; padding: 4px; aspect-ratio: 3 / 4; }
+.tablet-stashdb__photos img { width: 100%; height: 100%; object-fit: contain; }
+@media (prefers-reduced-motion: no-preference) {
+  .tablet-stashdb__candidates, .tablet-stashdb__photos:not(:empty) { animation: notice-enter 200ms var(--ease-standard); }
+  .tablet-stashdb img { animation: collection-art-arrive 180ms var(--ease-standard); }
+}

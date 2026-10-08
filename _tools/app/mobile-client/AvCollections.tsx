@@ -29,8 +29,9 @@ function initials(value:string) {
  * shown one until it is decoded; a failed image falls back to the crop. Privacy mode shows
  * initials only and requests nothing, as on the PC.
  */
-export function PersonPortrait({person,current,items,revision,size='small'}:{person:AvPerson;current:CollectionSummary;items:CollectionSummary[];revision:string;size?:'small'|'large'}) {
-  const [privacy]=usePrivacyMode();
+export function PersonPortrait({person,current,items,revision,size='small',privacy:hide=false}:{person:AvPerson;current:CollectionSummary;items:CollectionSummary[];revision:string;size?:'small'|'large';privacy?:boolean}) {
+  const [privateMode]=usePrivacyMode();
+  const privacy=hide||privateMode;
   const image=person.portraitImage?.sha256?person.portraitImage:null;
   const portrait=usePortraitUrl(image?.sha256??null,!privacy);
   const imageWanted=!!image&&!portrait.failed;

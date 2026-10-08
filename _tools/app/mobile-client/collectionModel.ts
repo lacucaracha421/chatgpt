@@ -56,7 +56,7 @@ export type CollectionPersonProfile = {
   urls:{site:string;url:string}[];
 };
 export type CollectionPerson = {
-  id:string; memo:string|null; favorite:boolean;
+  id:string; personId?:string; entityRevision?:number; stashdbId?:string|null; portraitImage?:AvPortraitImage|null; portraitSelection?:unknown; memo:string|null; favorite:boolean;
   profile:CollectionPersonProfile|null;
   portrait:null|{source:'stashdb'|'commons'|'cover';author:string|null;license:string|null;licenseUrl:string|null;sourceUrl:string|null};
 };

@@ -221,7 +221,7 @@ export function resetPortraitMemory(){portraitUrls.clear();portraitLoads.clear()
  * A performer portrait image as a decoded URL. A new hash keeps the shown image until the next
  * one is decoded; `failed` says the current hash could not be shown, so the caller falls back.
  */
-export function usePortraitUrl(sha256:string|null,active:boolean):{url:string|null;failed:boolean} {
+export function usePortraitUrl(sha256:string|null,active:boolean):{url:string|null;failed:boolean;ready:boolean} {
   const [shown,setShown]=useState<{sha:string;url:string}|null>(()=>{const url=sha256&&rememberedPortrait(sha256);return url&&sha256?{sha:sha256,url}:null;});
   const [failed,setFailed]=useState<string|null>(null);
   useEffect(()=>{
@@ -231,5 +231,5 @@ export function usePortraitUrl(sha256:string|null,active:boolean):{url:string|nu
     void loadPortrait(sha256,controller.signal).then(url=>{if(!controller.signal.aborted)setShown({sha:sha256,url});},()=>{if(!controller.signal.aborted)setFailed(sha256);});
     return()=>controller.abort();
   },[sha256,active,shown?.sha]);
-  return {url:sha256&&active&&failed!==sha256?shown?.url??null:null,failed:!!sha256&&failed===sha256};
+  return {url:sha256&&active&&failed!==sha256?shown?.url??null:null,failed:!!sha256&&failed===sha256,ready:!!sha256&&shown?.sha===sha256};
 }
