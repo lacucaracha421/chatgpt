@@ -845,7 +845,7 @@ test('Claude batches use structured output and Sonnet runs at low effort',async(
   const result=await f.handle({type:'translation:request-batch',items:[{id:'a',text:'Hello'},{id:'b',text:'Good morning'}]});
   assert.equal(result.ok,true); assert.deepEqual(result.items.map(item=>item.text),['안녕','좋은 아침']);
   const body=JSON.parse(f.calls[0].init.body);
-  assert.equal(body.model,'claude-sonnet-5-5'); assert.equal('thinking' in body,false);
+  assert.equal(body.model,'claude-sonnet-5-5'); assert.deepEqual(body.thinking,{type:'between_tools'});
   assert.equal(body.output_config.effort,'low'); assert.equal(body.output_config.format.type,'json_schema');
   assert.deepEqual(body.output_config.format.schema.required,['translations']);
 });
@@ -883,4 +883,60 @@ test('a sub model without its key never hides the main model failure',async()=>{
   const result=await f.handle({type:'translation:request',text:'Hello'});
   assert.equal(result.ok,false); assert.equal(result.code,'http_503');
   assert.equal(f.calls.every(call=>call.url.includes('openrouter')),true);
+});
+
+test('Claude models allow four requests in flight; other models keep two',async()=>{
+  for (const [settings,expected] of [[claudeSettings(),4],[legacy,2]]) {
+    let active=0,maxActive=0; const releases=[];
+    const f=fixture(settings,async()=>{
+      active+=1; maxActive=Math.max(maxActive,active);
+      return new Promise(resolve=>releases.push(()=>{active-=1; resolve(claudeAnswer('번역됨'));}));
+    });
+    assert.equal((await f.handle({type:'translation:settings'})).concurrency,expected);
+    const jobs=Array.from({length:6},(_,i)=>f.handle({type:'translation:request',text:`Post ${i}`}));
+    await new Promise(resolve=>setTimeout(resolve,20)); assert.equal(maxActive,expected);
+    while(releases.length) { releases.shift()(); await new Promise(resolve=>setTimeout(resolve,5)); }
+    await Promise.all(jobs);
+  }
+});
+
+test('the cache keeps recently used translations and writes them once after a burst',async()=>{
+  const cacheKey='lakomics:translation-cache:v2';
+  const old=Array.from({length:1500},(_,i)=>[`old ${i}`,`오래됨 ${i}`]);
+  const f=fixture({...legacy,[cacheKey]:old},async(_url,init)=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
+  // Reading the oldest entry makes it the most recent, so it survives the next eviction.
+  assert.equal((await f.handle({type:'translation:request',text:'old 0'})).text,'오래됨 0');
+  for (const text of ['new a','new b']) assert.equal((await f.handle({type:'translation:request',text})).text,'새 번역');
+  assert.equal(f.calls.length,2);
+  assert.equal(f.memory[cacheKey].length,1500,'not written yet');
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  const keys=f.memory[cacheKey].map(([key])=>key);
+  assert.equal(keys.length,1500);
+  assert.equal(keys.includes('old 0'),true); assert.equal(keys.includes('old 1'),false); assert.equal(keys.includes('old 2'),false);
+  assert.deepEqual(keys.slice(-3),['old 0','new a','new b']);
+});
+
+test('clearing the cache cancels a pending write',async()=>{
+  const cacheKey='lakomics:translation-cache:v2';
+  const f=fixture(legacy);
+  assert.equal((await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'})).ok,true);
+  assert.equal((await f.handle({type:'translation:clear'})).ok,true);
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  assert.deepEqual(f.memory[cacheKey],[]);
+});
+
+test('one X tab uses the request slots the selected model allows',async()=>{
+  const html=Array.from({length:16},(_,i)=>`<div data-testid="tweetText" lang="en">Concurrent post ${i}</div>`).join('');
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  let active=0,maxActive=0;
+  for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  const finish=(callback,result)=>{active+=1; maxActive=Math.max(maxActive,active); w.setTimeout(()=>{active-=1; callback(result);},120);};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true,concurrency:4});
+    else if(message.type==='translation:request') finish(callback,{ok:true,text:'빠른 번역'});
+    else if(message.type==='translation:request-batch') finish(callback,{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`번역 ${item.id}`}))});
+  }},storage:{onChanged:{addListener(){}}}};
+  w.eval(content); await clock.advance(500);
+  assert.equal(maxActive,4); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,16); w.close();
 });

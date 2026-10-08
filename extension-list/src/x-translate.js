@@ -8,7 +8,8 @@
   const MAX_FAILURES = 3;
   const RETRY_DELAY_CAP_MS = 60000;
   const RETRY_DELAY_DEFAULT_MS = 1500;
-  const MAX_IN_FLIGHT = 2;
+  // Requests in flight from this tab; the background raises it for models with higher limits.
+  let maxInFlight = 2;
   const SHOW_MORE = '[data-testid="tweet-text-show-more-link"]';
   const EXPAND_WAIT_MS = 1500;
   let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true, inFlight = 0;
@@ -385,7 +386,7 @@
   // at once. After new posts come into view, the one nearest the viewport centre goes
   // alone first so the post being read appears first.
   function drain() {
-    while (inFlight < MAX_IN_FLIGHT && enabled && hasApiKey && !blocked) {
+    while (inFlight < maxInFlight && enabled && hasApiKey && !blocked) {
       const requestEpoch = epoch;
       let work = null;
       while (!work && fallbacks.length) {
@@ -457,6 +458,7 @@
     reset();
     enabled = settings.enabled;
     hasApiKey = settings.hasApiKey;
+    maxInFlight = Number.isInteger(settings.concurrency) && settings.concurrency > 0 ? Math.min(settings.concurrency, 6) : 2;
     blocked = false;
     ui.toggle.checked = enabled;
     if (settings.modelLabel) ui.model.textContent = settings.modelLabel;
