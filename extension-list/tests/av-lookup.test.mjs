@@ -174,10 +174,10 @@ test('chip hides on scroll, Escape, and a changed selection', () => {
   fixture.close();
 });
 
-test('manifest grants context menus, carries version 3.0.0.47, and excludes the pairing page from the chip', async () => {
+test('manifest grants context menus, carries version 3.0.0.48, and excludes the pairing page from the chip', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '3.0.0.47');
-  assert.equal(manifest.version_name, '3.0.0-alpha.47');
+  assert.equal(manifest.version, '3.0.0.48');
+  assert.equal(manifest.version_name, '3.0.0-alpha.48');
   assert.ok(manifest.permissions.includes('contextMenus'));
   const general = manifest.content_scripts.find(entry => entry.matches?.includes('https://*/*'));
   assert.ok(general.js.includes('src/av-lookup.js'));

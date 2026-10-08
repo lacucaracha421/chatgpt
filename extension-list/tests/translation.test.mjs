@@ -48,14 +48,17 @@ function translationWindow(html, handleMessage) {
   return w;
 }
 function fixture(initial={}, fetcher) {
-  const memory = structuredClone(initial), calls = [];
+  const memory = structuredClone(initial), calls = [], gets = [], sets = [];
   const context = vm.createContext({ AbortController, setTimeout, clearTimeout,
-    chrome:{storage:{local:{async get(){return structuredClone(memory);},async set(v){Object.assign(memory,structuredClone(v));},async remove(keys){keys.forEach(k=>delete memory[k]);}}}},
+    chrome:{storage:{local:{async get(keys){gets.push(keys); return structuredClone(memory);},async set(v){sets.push(Object.keys(v)); Object.assign(memory,structuredClone(v));},async remove(keys){keys.forEach(k=>delete memory[k]);}}}},
     fetch:async(url,init)=>{calls.push({url,init}); return fetcher ? fetcher(url,init) : {ok:true,json:async()=>({choices:[{message:{content:'안녕하세요 [[LINK_0]]'}}]})};},
   });
   vm.runInContext(service,context);
-  return {memory,calls,handle:message=>context.LakomicsTranslation.handle(message)};
+  return {memory,calls,gets,sets,handle:message=>context.LakomicsTranslation.handle(message)};
 }
+const SHARD='lakomics:translation-cache:v3:';
+const shardKeys=memory=>Object.keys(memory).filter(key=>key.startsWith(SHARD));
+const cachedTexts=memory=>shardKeys(memory).flatMap(key=>memory[key].map(([text])=>text));
 const legacy = {'xtranslate:gm:oit.settings.v2':{provider:'ollama',openrouterApiKey:'fixture-key',ollamaApiKey:'retired',autoTranslate:true},'xtranslate:gm:oit.cache.v2':{old:'cache'}};
 
 test('migration preserves OpenRouter key and automatic preference, removes retired settings without exposing keys',async()=>{
@@ -469,7 +472,7 @@ test('a cache clear removes parked failures and requests the visible post again'
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome.storage.onChanged.addListener=fn=>{changed=fn;};
   w.eval(content); await clock.advance(400);
-  changed({'lakomics:translation-cache:v2':{newValue:[]}},'local'); await clock.advance(400);
+  changed({'lakomics:translation-cache-cleared':{newValue:1}},'local'); await clock.advance(400);
   assert.equal(requests,2); w.close();
 });
 
@@ -900,29 +903,62 @@ test('Claude models allow four requests in flight; other models keep two',async(
   }
 });
 
-test('the cache keeps recently used translations and writes them once after a burst',async()=>{
-  const cacheKey='lakomics:translation-cache:v2';
-  const old=Array.from({length:1500},(_,i)=>[`old ${i}`,`오래됨 ${i}`]);
-  const f=fixture({...legacy,[cacheKey]:old},async(_url,init)=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
-  // Reading the oldest entry makes it the most recent, so it survives the next eviction.
-  assert.equal((await f.handle({type:'translation:request',text:'old 0'})).text,'오래됨 0');
-  for (const text of ['new a','new b']) assert.equal((await f.handle({type:'translation:request',text})).text,'새 번역');
-  assert.equal(f.calls.length,2);
-  assert.equal(f.memory[cacheKey].length,1500,'not written yet');
-  await new Promise(resolve=>setTimeout(resolve,1700));
-  const keys=f.memory[cacheKey].map(([key])=>key);
-  assert.equal(keys.length,1500);
-  assert.equal(keys.includes('old 0'),true); assert.equal(keys.includes('old 1'),false); assert.equal(keys.includes('old 2'),false);
-  assert.deepEqual(keys.slice(-3),['old 0','new a','new b']);
+test('the old single cache moves into shards once and later wakes read only what they need',async()=>{
+  const old=Array.from({length:40},(_,i)=>[`old ${i}`,`오래됨 ${i}`]);
+  const f=fixture({...legacy,'lakomics:translation-cache:v2':old});
+  assert.equal((await f.handle({type:'translation:request',text:'old 7'})).text,'오래됨 7');
+  assert.equal(f.calls.length,0);
+  assert.equal(f.memory['lakomics:translation-cache:v2'],undefined);
+  assert.equal(f.memory['lakomics:translation:storage-v3'],true);
+  assert.deepEqual(cachedTexts(f.memory).sort(),old.map(([text])=>text).sort());
+  assert.equal(shardKeys(f.memory).length>1,true);
+  // A restarted worker reads settings and single shards, never the whole storage area.
+  const again=fixture(structuredClone(f.memory));
+  assert.equal((await again.handle({type:'translation:request',text:'old 9'})).text,'오래됨 9');
+  assert.equal(again.calls.length,0);
+  assert.equal(again.gets.some(keys=>keys===null||keys===undefined),false);
+  assert.equal(again.sets.length,0,'unchanged settings are not rewritten');
 });
 
-test('clearing the cache cancels a pending write',async()=>{
-  const cacheKey='lakomics:translation-cache:v2';
+test('the cache keeps recently used translations and writes only the touched shard after a burst',async()=>{
+  const f=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
+  assert.equal((await f.handle({type:'translation:request',text:'new a'})).text,'새 번역');
+  assert.equal((await f.handle({type:'translation:request',text:'new a'})).text,'새 번역');
+  assert.equal(f.calls.length,1);
+  const before=f.sets.length;
+  assert.deepEqual(cachedTexts(f.memory),[],'not written yet');
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  assert.deepEqual(f.sets.slice(before),[[shardKeys(f.memory)[0]]]);
+  assert.deepEqual(cachedTexts(f.memory),['new a']);
+});
+
+test('a full shard evicts its least recently used entry',async()=>{
+  // Fill one shard past its limit with texts that hash to the same shard.
+  const probe=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'번역'}}]})}));
+  await probe.handle({type:'translation:request',text:'seed'}); await new Promise(resolve=>setTimeout(resolve,1700));
+  const target=shardKeys(probe.memory)[0];
+  const same=[]; for(let i=0;same.length<96;i++){
+    const text=`post ${i}`;
+    let hash=2166136261; for(let j=0;j<text.length;j++) hash=Math.imul(hash^text.charCodeAt(j),16777619);
+    if(SHARD+((hash>>>0)%16)===target) same.push(text);
+  }
+  const stored=same.slice(0,94).map(text=>[text,`옛 ${text}`]);
+  const f=fixture({...legacy,'lakomics:translation:storage-v3':true,[target]:stored},async()=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
+  assert.equal((await f.handle({type:'translation:request',text:same[0]})).text,`옛 ${same[0]}`);
+  assert.equal((await f.handle({type:'translation:request',text:same[94]})).text,'새 번역');
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  const texts=f.memory[target].map(([text])=>text);
+  assert.equal(texts.length,94); assert.equal(texts.includes(same[0]),true); assert.equal(texts.includes(same[1]),false);
+  assert.deepEqual(texts.slice(-2),[same[0],same[94]]);
+});
+
+test('clearing the cache cancels a pending write and announces the clear',async()=>{
   const f=fixture(legacy);
   assert.equal((await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'})).ok,true);
   assert.equal((await f.handle({type:'translation:clear'})).ok,true);
   await new Promise(resolve=>setTimeout(resolve,1700));
-  assert.deepEqual(f.memory[cacheKey],[]);
+  assert.deepEqual(cachedTexts(f.memory),[]);
+  assert.equal(typeof f.memory['lakomics:translation-cache-cleared'],'number');
 });
 
 test('one X tab uses the request slots the selected model allows',async()=>{
@@ -1011,4 +1047,22 @@ test('a long rate-limit cooldown is handed back at once and a sub model answers 
   const second=await f.handle({type:'translation:request',text:'Two'});
   assert.ok(Date.now()-started<1000,'the cooling main model is not slept through');
   assert.equal(second.ok,true); assert.equal(calls,3,'the cooling model is skipped, not called again');
+});
+
+test('page churn outside post text does not rescan, while new or edited post text does',async()=>{
+  const w=translationWindow('<article><div data-testid="tweetText" lang="en">First post</div><time>1m</time></article><div id="feed"></div>',
+    ()=>({ok:true,enabled:false,hasApiKey:true}));
+  const clock=fakeTimers(w); w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(400);
+  let scans=0; const query=w.document.querySelectorAll.bind(w.document);
+  w.document.querySelectorAll=selector=>{ if(selector==='[data-testid="tweetText"]') scans++; return query(selector); };
+  w.document.querySelector('time').textContent='2m';
+  w.document.querySelector('article').setAttribute('href','/status/1');
+  w.document.getElementById('feed').append(w.document.createElement('span'));
+  await clock.advance(400); assert.equal(scans,0);
+  w.document.querySelector('[data-testid="tweetText"]').firstChild.data='First post, edited';
+  await clock.advance(400); assert.equal(scans,1);
+  const next=w.document.createElement('article'); next.innerHTML='<div data-testid="tweetText" lang="en">Second post</div>';
+  w.document.getElementById('feed').append(next);
+  await clock.advance(400); assert.equal(scans,2); w.close();
 });

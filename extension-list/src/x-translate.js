@@ -2,7 +2,9 @@
   "use strict";
   const SELECTOR = '[data-testid="tweetText"]';
   const SETTINGS = "lakomics:translation:v1";
-  const CACHE = "lakomics:translation-cache:v2";
+  // The background bumps this key whenever it clears the translation cache.
+  const CACHE_CLEARED = "lakomics:translation-cache-cleared";
+  const OWN_NODES = '.lakomics-translation, .lakomics-translation-toggle, #lakomics-translation-controls';
   const MAX_BATCH_ITEMS = 4;
   const MAX_BATCH_CHARS = 6000;
   const MAX_FAILURES = 3;
@@ -125,12 +127,17 @@
     if (r <= 8 && g <= 8 && b <= 8) return "lights-out";
     return "dim";
   }
+  // Scans run often; rendered nodes are rewritten only when the page theme actually changes.
+  let lastTheme = null;
   function applyTheme() {
     const theme = detectTheme();
+    if (theme === lastTheme) return theme;
+    lastTheme = theme;
     if (ui?.host) ui.host.dataset.theme = theme;
     for (const node of rendered.values()) node.dataset.theme = theme;
     return theme;
   }
+  const currentTheme = () => lastTheme ?? applyTheme();
   const PENDING_DELAY_MS = 250, COLLAPSE_MIN_HEIGHT = 44;
   function removeResult(element) {
     rendered.get(element)?.remove();
@@ -148,7 +155,7 @@
       if (card && card.dataset.error !== "true") return;
       removeResult(element);
       const node = document.createElement("div");
-      node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = detectTheme();
+      node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = currentTheme();
       node.setAttribute("aria-hidden", "true"); node.textContent = "번역 중…";
       element.after(node); rendered.set(element, node);
     }, PENDING_DELAY_MS);
@@ -190,7 +197,7 @@
   function showWaiting(element, text) {
     removeResult(element);
     const node = document.createElement("div");
-    node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = detectTheme();
+    node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = currentTheme();
     node.setAttribute("aria-hidden", "true"); node.textContent = text;
     element.after(node); rendered.set(element, node);
   }
@@ -199,7 +206,7 @@
     const node = document.createElement("div");
     node.className = "lakomics-translation";
     node.dataset.error = String(error);
-    node.dataset.theme = detectTheme();
+    node.dataset.theme = currentTheme();
     node.setAttribute("lang", "ko");
     if (error) node.setAttribute("role", "status");
     const links = new Map(snapshot.links.map(link => [link.token, link]));
@@ -455,6 +462,19 @@
       });
     }
   }
+  // X mutates the page constantly (timestamps, counters, media, hover cards); only changes that
+  // add, remove, or edit tweet text need a rescan.
+  const touchesTweetText = node => node.nodeType === 1 && !node.matches(OWN_NODES)
+    && (node.matches(SELECTOR) || node.querySelector(SELECTOR) !== null);
+  function relevantMutation(record) {
+    const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+    if (!target || target.closest(OWN_NODES)) return false;
+    if (target.closest(SELECTOR)) return true;
+    if (record.type !== "childList") return false;
+    for (const node of record.addedNodes) if (touchesTweetText(node)) return true;
+    for (const node of record.removedNodes) if (touchesTweetText(node)) return true;
+    return false;
+  }
   function scan(immediate = false) {
     for (const element of observed) {
       if (!element.isConnected) {
@@ -592,7 +612,7 @@
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[SETTINGS]) void refresh();
-      else if (changes[CACHE]?.newValue?.length === 0) {
+      else if (changes[CACHE_CLEARED]) {
         reset();
         if (enabled && hasApiKey && !blocked) scan();
       }
@@ -613,8 +633,7 @@
     }, { rootMargin: `${BEHIND_SCREENS * 100}% 0px ${AHEAD_SCREENS * 100}% 0px` });
     let scanTimer = null;
     new MutationObserver(records => {
-      if (!records.some(record => !record.target.closest?.('.lakomics-translation, .lakomics-translation-toggle, #lakomics-translation-controls')
-        && (record.type !== "childList" || [...record.addedNodes, ...record.removedNodes].some(node => !node.matches?.('.lakomics-translation, .lakomics-translation-toggle'))))) return;
+      if (!records.some(relevantMutation)) return;
       if (scanTimer !== null) return;
       scanTimer = setTimeout(() => { scanTimer = null; scan(); }, 200);
     }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["lang", "href"] });
