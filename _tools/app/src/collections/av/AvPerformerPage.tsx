@@ -1,8 +1,7 @@
 import { Skeleton } from "../../shared/ui/Skeleton";
-import { ArrowLeftIcon, ArrowTopRightOnSquareIcon, ChevronDownIcon, EllipsisHorizontalIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, CameraIcon, ChevronDownIcon, EllipsisHorizontalIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { displayDate } from "../../shared/displayDate";
 import { Button } from "../../shared/ui/Button";
 import { IconButton } from "../../shared/ui/IconButton";
@@ -11,7 +10,8 @@ import { usePrivacy } from "../../privacy/PrivacyContext";
 import { avError } from "../avClient";
 import type { AvGateway, AvPerformerPage as PerformerData, AvWorkCard } from "../avTypes";
 import { AvPortrait } from "./AvPortrait";
-import { AvPerformerProfile, safeProfileUrl } from "./AvPerformerProfile";
+import { AvPerformerProfile } from "./AvPerformerProfile";
+import { AvPerformerLibraryStats } from "./AvPerformerLibraryStats";
 import { AvPortraitPicker } from "./AvPortraitPicker";
 import { LightCase } from "../case/LightCase";
 import { CollectionList, useCollectionView } from "../CollectionList";
@@ -102,7 +102,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   return <article className="av-performer-page" aria-label="AV 배우 상세">
     <div className="av-performer-page__topline">
       <Button size="icon" variant="ghost" aria-label="작품으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>
-      <b>{page.person.displayName}</b><span>AV › 배우</span>
+      <span>AV › 배우</span>
       <Menu label="배우 관리" align="end" triggerClassName="av-performer-page__manage" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
         { id: "portrait", label: "사진 바꾸기", onSelect: () => setPickerOpen(true), disabled: stale },
         { id: "memo", label: "메모 편집", onSelect: () => { setMemo(page.person.memo ?? ""); setMemoEditing(true); }, disabled: stale },
@@ -112,35 +112,28 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
     {error && <p role="alert">{error}</p>}
     <div className="av-performer-page__body" inert={stale || undefined} aria-busy={stale}>
       <header className="av-performer-page__header">
-        <div className="av-performer-page__portrait"><AvPortrait portrait={page.person.portrait} name={page.person.displayName} size="performer" /></div>
+        <div className="av-performer-page__portrait">
+          <AvPortrait portrait={page.person.portrait} name={page.person.displayName} size="performer" />
+          <Button size="sm" variant="quiet" className="av-performer-page__portrait-change" title={`사진 출처: ${source.label}`} onClick={() => setPickerOpen(true)}><CameraIcon aria-hidden="true" />사진 바꾸기</Button>
+        </div>
         <div className="av-performer-page__identity">
-          <h1>{page.person.displayName}</h1>
-          {page.person.nameJa && <p className="av-performer-page__name-ja" lang="ja">{page.person.nameJa}</p>}
-          <div className="av-performer-page__source-line"><span>{source.label}</span>
-            {source.url && safeProfileUrl(source.url) && <Button size="sm" variant="ghost" onClick={() => void openUrl(source.url!).catch(() => setSourceError("원본 링크를 열지 못했습니다."))} aria-label="대표 이미지 출처 열기"><ArrowTopRightOnSquareIcon aria-hidden="true" />원본</Button>}
-          </div>
-          <div className="av-performer-page__actions">
+          <div className="av-performer-page__name-row">
+            <h1>{page.person.displayName}</h1>
             <IconButton pop label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} icon={StarIcon} activeIcon={StarSolidIcon} active={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={() => void toggleFavorite()} />
-            <Button onClick={() => setPickerOpen(true)}>사진 바꾸기</Button>
           </div>
+          {page.person.nameJa && <p className="av-performer-page__name-ja" lang="ja">{page.person.nameJa}</p>}
           {sourceError && <p className="av-profile__quiet" role="status">{sourceError}</p>}
         </div>
         <section className="av-performer-page__facts" aria-label="프로필 정보">
-          <SectionLabel title="프로필" />
-          <dl className="av-performer-page__summary">
-            <div><dt>내 작품</dt><dd className="numeric">{page.stats.workCount.toLocaleString()}편 · 단독 {page.works.filter(work => work.solo).length}</dd></div>
-            <div><dt>발매 기간</dt><dd className="numeric">{releaseRange(page.stats.firstRelease, page.stats.lastRelease)}</dd></div>
-            <div><dt>내 별점 평균</dt><dd className="numeric">{page.stats.averageScore === null ? "—" : page.stats.averageScore.toFixed(1)}</dd></div>
-            {page.person.fanzaActressId && <div><dt>FANZA</dt><dd className="numeric">{page.person.fanzaActressId}</dd></div>}
-            {page.person.wikidataId && <div><dt>Wikidata</dt><dd className="numeric">{page.person.wikidataId}</dd></div>}
-          </dl>
-          <AvPerformerProfile displayName={page.person.displayName} nameJa={page.person.nameJa} personId={page.person.id} api={api} onOpenSettings={onOpenSettings} />
+          <AvPerformerProfile compact displayName={page.person.displayName} nameJa={page.person.nameJa} personId={page.person.id} api={api} onOpenSettings={onOpenSettings} />
         </section>
         <section className="av-performer-page__memo" aria-label="내 메모">
-          <SectionLabel title="내 메모" actions={!memoEditing && <Button size="icon" variant="ghost" aria-label="배우 메모 편집" onClick={() => { setMemo(page.person.memo ?? ""); setMemoEditing(true); }}><PencilIcon aria-hidden="true" /></Button>} />
+          <SectionLabel title="메모" actions={!memoEditing && <Button size="icon" variant="ghost" aria-label="배우 메모 편집" onClick={() => { setMemo(page.person.memo ?? ""); setMemoEditing(true); }}><PencilIcon aria-hidden="true" /></Button>} />
           {memoEditing ? <><textarea className="ui-text-input" autoFocus aria-label="배우 메모" maxLength={2000} value={memo} onChange={event => setMemo(event.target.value)} /><div className="av-performer-page__memo-actions"><Button size="sm" disabled={busy} onClick={() => setMemoEditing(false)}>취소</Button><Button size="sm" variant="primary" disabled={busy} onClick={() => void saveMemo()}>저장</Button></div></> : <button type="button" className="av-performer-page__memo-text" onClick={() => { setMemo(page.person.memo ?? ""); setMemoEditing(true); }}>{page.person.memo || "메모 쓰기"}</button>}
         </section>
+        <AvPerformerLibraryStats workCount={page.stats.workCount} soloCount={page.works.filter(work => work.solo).length} firstRelease={page.stats.firstRelease} lastRelease={page.stats.lastRelease} averageScore={page.stats.averageScore} />
       </header>
+      <div className="av-performer-page__main collection-browser__list-scroll">
       <section aria-labelledby="av-performer-works">
         <div className="av-performer-page__tools">
           <h2 id="av-performer-works">작품</h2><span className="numeric">{works.length}</span>
@@ -160,15 +153,12 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
         {page.coPerformers.length > 0 && <section><SectionLabel as="h2" title="자주 함께 나온 배우" count={page.coPerformers.length} /><div className="av-performer-page__co">{page.coPerformers.map(co => <Button variant="ghost" key={co.id} onClick={() => onOpenPerformer?.(co.id)} className="av-performer-page__co-card" aria-label={`${co.displayName} ${co.count}편`} data-person-id={co.id}><AvPortrait portrait={co.portrait} name={co.displayName} size={40} /><span><b>{co.displayName}</b><small>{co.count}편</small></span></Button>)}</div></section>}
         {page.labels.length > 0 && <section><SectionLabel as="h2" title="레이블" count={page.labels.length} /><div className="av-performer-page__labels">{page.labels.map(label => <Badge key={label.name}>{label.name} <span className="numeric">{label.count}</span></Badge>)}</div></section>}
       </div>
+      </div>
     </div>
     {pickerOpen && !stale && <AvPortraitPicker currentPortrait={page.person.portrait} personId={page.person.id} personName={page.person.displayName} wikidataId={page.person.wikidataId} api={api} onClose={() => setPickerOpen(false)} onSaved={portrait => { setPage(value => value ? { ...value, person: { ...value.person, portrait } } : value); setPickerOpen(false); }} />}
   </article>;
 }
 
-function releaseRange(first: string | null, last: string | null) {
-  const start = displayDate(first), end = displayDate(last);
-  return start && end ? `${start}–${end}` : start || end || "—";
-}
 function compareRelease(left: string | null, right: string | null, sort: WorkSort) {
   if (!left && !right) return 0;
   if (!left) return 1;
@@ -183,7 +173,7 @@ function WorkTile({ work, current, selected, privacyMode, onPick, onOpenCollecti
     if (event.key === "Enter") { event.preventDefault(); onOpenCollection?.(work.collectionId); }
   }} aria-label={`${work.name}${work.productCode ? ` ${work.productCode}` : ""}`}>
     <LightCase data={{ title: work.name, platform: "av", front: artwork(work.frontArtworkId), spine: artwork(work.spineArtworkId), privacy: privacyMode }} selected={selected} />
-    <span className="collection-card__meta"><span className="av-performer-page__code"><b>{work.productCode ?? work.name}</b>{current && <Badge>이 작품</Badge>}</span><span className="av-performer-page__date">{displayDate(work.releaseDate)}{!work.solo && " · 공동 출연"}{privacyMode && " · 비공개"}</span></span>
+    <span className="collection-card__meta"><span className="av-performer-page__code"><b>{work.productCode ?? work.name}</b></span><span className="av-performer-page__date">{[displayDate(work.releaseDate), !work.solo && "공동 출연", current && "이 작품", privacyMode && "비공개"].filter(Boolean).join(" · ")}</span></span>
   </button>;
 }
 

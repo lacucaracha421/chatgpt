@@ -320,6 +320,7 @@ Status: `IN PROGRESS` — user 2026-10-07: AV first, then book import. The 1B pl
 5. Unfence AV link apply (inbox → work) as createWork + artwork + setAvDetails + setAvCredits.
 - 2026-10-08: step 3b tablet memo/favourite editing through `setPerson` is in source (device check pending). Tablet portrait (cover crop via `setPersonPortrait`) waits for the performer page redesign.
 - **Performer page redesign (user 2026-10-08):** the user found the portrait too small, minor stats too prominent and the work cases too large, and wants a performer-centred profile. Variant A of `docs/prototypes/av-performer-20261008/` chosen: a fixed left column (large portrait, name, favourite, body facts, quiet links, memo, one-line library stats; IDs and portrait source moved off the page), smaller cases on the right; the tablet folds the column into a portrait-plus-facts row. The role filter reads 전체 · 단독 · 공동 출연 (was 공연).
+  Done 2026-10-08 (PC native window checked on a test library; tablet 0.9.45 installed and approved by the user): links collapse again (접기), the stats line reads `내 작품 N편 · 단독 N · 발매 …` with the average only when scored, 이 작품 moved to the date line, and 사진 바꾸기 shows on hover/focus only. Known small gaps: two official links both read 공식.
 
 ## USER-REQ-20261007 — Tablet 더보기 and one combined 휴지통
 

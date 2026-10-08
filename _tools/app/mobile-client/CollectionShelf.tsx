@@ -16,7 +16,7 @@ export type ShelfLayout = 'grid' | 'shelf' | 'bookcase';
 export type ShelfView = {layout: ShelfLayout; perRow: number};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
-const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
+export const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
 /** Every type starts on the shelf; stored user choices take precedence. */
 const fallbackView = (): ShelfView => ({layout: 'shelf', perRow: SHELF_PER_ROW.fallback});
 

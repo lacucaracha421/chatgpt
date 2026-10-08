@@ -15,7 +15,7 @@ import {useShelfPutDown} from '../src/collections/useShelfPutDown';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import {TabletMangaShelf} from './CollectionMangaShelf';
 import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
-import {AvPerformerScreen} from './AvPerformer';
+import {AvPerformerScreen, avPerformerView} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
 import {AuthorityQueue, CollectionWorkForm, type WorkForm} from './CollectionAuthorityForms';
 import {useProviderStatus} from './CollectionProviders';
@@ -746,7 +746,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     </Overlay>
-    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={viewOf('av').perRow} order={performerOrder} authority={edits.authority}
+    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={avPerformerView(viewOf('av')).perRow} order={performerOrder} authority={edits.authority}
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
     </>, work: workView}}/>}
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
@@ -757,7 +757,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <div role="radiogroup" aria-label="정렬 순서">{([['newest','발매일 최신순'],['oldest','발매일 오래된순']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={performerOrder===value} onClick={()=>setPerformerOrder(value)}>{label}<span className="radio-dot"/></button>)}</div>
     </BottomSheet>}
     {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/>{filters.rating!=='all'&&<Button variant="quiet" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</Button>}</BottomSheet>}
-    {sheet==='view'&&<ShelfViewSheet type={performer&&!selected?'av':type} view={viewOf(performer&&!selected?'av':type)} onChange={patch=>patchView(performer&&!selected?'av':type,patch)} onClose={()=>setSheet(null)}/>}
+    {sheet==='view'&&<ShelfViewSheet type={performer&&!selected?'av':type} view={performer&&!selected?avPerformerView(viewOf('av')):viewOf(type)} onChange={patch=>patchView(performer&&!selected?'av':type,patch)} onClose={()=>setSheet(null)}/>}
     {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>
       <div className="collection-cover-stage"><CoverStage key={`${edition}:${coverIndex}:${coverMode}`} item={item} id={covers[coverIndex].id} revision={detail!.revision} label={covers[coverIndex].label} mode={physical?coverMode:'flat'} onFlat={()=>setCoverMode('flat')}/></div>

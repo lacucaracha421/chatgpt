@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -40,24 +41,33 @@ it("uses the local birthday boundary and keeps partial month precision", () => {
   rerender(<ProfileRows profile={profile({ birthDate: "2001-12" })} />);
   expect(screen.getByText("2001.12")).toBeVisible(); expect(screen.queryByText(/만 \d+세/)).toBeNull();
 });
-it("sorts and deduplicates safe links, expands after five, and opens the chosen URL", async () => {
+it("sorts and deduplicates safe links, expands and collapses after five, and opens the chosen URL", async () => {
   const urls = [
     ["Other", "https://other.example"], ["Wikipedia", "https://en.wikipedia.org/wiki/Name"], ["Wikipedia", "https://ja.wikipedia.org/wiki/Name"], ["Studio Profile", "https://studio.example"], ["DMM / FANZA", "https://dmm.example"], ["Instagram", "https://instagram.com/name"], ["Twitter", "https://x.com/name"], ["Twitter", "https://x.com/name"], ["Unsafe", "javascript:alert(1)"],
   ].map(([name, url]) => ({ url, site: { name } }));
   render(<ProfileLinks profile={profile({ urls })} />);
   const links = screen.getByLabelText("배우 링크");
-  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "공식 프로필", "위키 (일본어)", "+2"]);
+  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "공식", "위키", "+2"]);
   fireEvent.click(screen.getByRole("button", { name: "X" })); expect(openUrl).toHaveBeenCalledWith("https://x.com/name");
   fireEvent.click(screen.getByRole("button", { name: "링크 2개 더 보기" }));
-  expect(within(links).getAllByRole("button")).toHaveLength(7); expect(screen.queryByText("Unsafe")).toBeNull();
+  expect(within(links).getAllByRole("button")).toHaveLength(8); expect(screen.queryByText("Unsafe")).toBeNull();
+  const collapse = within(links).getByRole("button", { name: "접기" });
+  expect(collapse).toHaveAttribute("aria-expanded", "true");
+  expect(within(links).getAllByRole("button")[7]).toBe(collapse);
+  fireEvent.click(collapse);
+  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "공식", "위키", "+2"]);
+  expect(within(links).getByRole("button", { name: "링크 2개 더 보기" })).toHaveAttribute("aria-expanded", "false");
 });
 it("shows stored profile immediately then updates the page from background refresh", async () => {
   const pending = deferred<Profile>(); const api = gateway({ refreshPerformerProfile: vi.fn().mockReturnValue(pending.promise) });
   render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" api={api} onBack={vi.fn()} /></PrivacyProvider>);
   expect(await screen.findByText("156 cm")).toBeVisible();
   await waitFor(() => expect(api.refreshPerformerProfile).toHaveBeenCalledWith("p", false));
-  expect(screen.getByRole("button", { name: "StashDB 새로고침" })).toBeDisabled();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "StashDB 프로필" }));
+  expect(screen.getByRole("menuitem", { name: "StashDB 새로고침" })).toHaveAttribute("data-disabled");
   expect(screen.getByText("Name · Alias A · Alias B")).toBeVisible(); expect(screen.queryByText(/Alias D/)).toBeNull();
+  await user.keyboard("{Escape}");
   await act(async () => pending.resolve(profile({ heightCm: 160 })));
   expect(screen.getByText("160 cm")).toBeVisible(); expect(screen.queryByText("156 cm")).toBeNull();
 });
@@ -113,7 +123,32 @@ it("keeps a stored StashDB portrait visible on the performer page", async () => 
   vi.mocked(api.getPerformer).mockResolvedValue({ person: { id: "p", displayName: "배우", nameJa: null, wikidataId: null, fanzaActressId: null, memo: null, portrait: { kind: "stashdb", dataUrl: "data:image/jpeg;base64,stored", width: 1200, height: 1600, sourceUrl: "https://stashdb.org/images/photo" } }, stats: { workCount: 0, firstRelease: null, lastRelease: null, averageScore: null }, works: [], coPerformers: [], labels: [] });
   render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" api={api} onBack={vi.fn()} /></PrivacyProvider>);
   expect(await screen.findByRole("img", { name: "배우 대표 이미지" })).toHaveAttribute("src", "data:image/jpeg;base64,stored");
-  expect(screen.getByRole("button", { name: "대표 이미지 출처 열기" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "사진 바꾸기" })).toBeVisible();
-  expect(screen.getByText("내 별점 평균")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "대표 이미지 출처 열기" })).toBeNull();
+  const change = screen.getByRole("button", { name: "사진 바꾸기" });
+  expect(change).toHaveAttribute("title", "사진 출처: StashDB");
+  expect(screen.getByLabelText("내 서재 통계")).toHaveTextContent(/^내 작품 0편 · 단독 0$/);
+  api.listPortraitSources = vi.fn().mockResolvedValue([]);
+  fireEvent.click(change);
+  const picker = await screen.findByRole("dialog", { name: "배우 대표 이미지" });
+  expect(within(picker).getByLabelText("현재 사진 출처")).toHaveTextContent("StashDB");
+  fireEvent.click(within(picker).getByRole("button", { name: "대표 이미지 출처 열기" }));
+  expect(openUrl).toHaveBeenCalledWith("https://stashdb.org/images/photo");
+});
+
+
+it("keeps refresh, identity selection and settings reachable in the compact profile menu", async () => {
+  const api = gateway({ searchPerformerProfile: vi.fn().mockResolvedValue(profile({ status: "ambiguous", candidates })) });
+  const settings = vi.fn(), user = userEvent.setup();
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerProfile compact personId="p" api={api} onOpenSettings={settings}/></PrivacyProvider>);
+  await waitFor(() => expect(api.refreshPerformerProfile).toHaveBeenCalledWith("p", false));
+  await user.click(screen.getByRole("button", { name: "StashDB 프로필" }));
+  await user.click(screen.getByRole("menuitem", { name: "StashDB 새로고침" }));
+  await waitFor(() => expect(api.refreshPerformerProfile).toHaveBeenCalledWith("p", true));
+  await user.click(screen.getByRole("button", { name: "StashDB 프로필" }));
+  await user.click(screen.getByRole("menuitem", { name: "설정" }));
+  expect(settings).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole("button", { name: "StashDB 프로필" }));
+  await user.click(screen.getByRole("menuitem", { name: "다른 사람으로 바꾸기" }));
+  expect(await screen.findByRole("dialog", { name: "StashDB 배우 고르기" })).toBeVisible();
+  expect(api.searchPerformerProfile).toHaveBeenCalledWith("p");
 });

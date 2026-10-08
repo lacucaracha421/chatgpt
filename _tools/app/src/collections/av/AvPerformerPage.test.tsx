@@ -28,13 +28,17 @@ function gateway(overrides: Partial<AvGateway> = {}): AvGateway {
 function page(api: AvGateway, props: Partial<Parameters<typeof AvPerformerPage>[0]> = {}) {
   return <PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" currentCollectionId="work-0" api={api} onBack={vi.fn()} {...props} /></PrivacyProvider>;
 }
-it("puts identity, facts and editable memo in the header band, retaining metadata and actions", async () => {
+it("centres the profile column on the portrait, identity, facts and editable memo while retaining actions", async () => {
   const api = gateway({ getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: true }), refreshPerformerProfile: vi.fn().mockResolvedValue(profile) });
   const back = vi.fn(); const { container } = render(page(api, { onBack: back }));
   const header = (await screen.findByRole("heading", { name: "배우", level: 1 })).closest("header")!;
   expect(within(header).getByText("日本名")).toBeVisible();
   expect(await within(header).findByText("158 cm")).toBeVisible();
-  expect(within(header).getByText("14편 · 단독 7")).toBeVisible();
+  expect(within(header).getByLabelText("내 서재 통계")).toHaveTextContent("내 작품 14편 · 단독 7 · 발매 2024.1.1–9.30");
+  expect(within(header).getByLabelText("내 서재 통계")).toHaveTextContent("평균 ★4.0");
+  expect(within(header).queryByText("FANZA")).toBeNull();
+  expect(within(header).queryByText("Wikidata")).toBeNull();
+  expect(within(header).getByRole("button", { name: "즐겨찾기" }).parentElement).toHaveClass("av-performer-page__name-row");
   expect(within(header).getByText("기존 메모")).toBeVisible();
   expect(within(header).getByRole("button", { name: "사진 바꾸기" })).toBeVisible();
   fireEvent.click(within(header).getByText("기존 메모"));
@@ -47,11 +51,12 @@ it("puts identity, facts and editable memo in the header band, retaining metadat
   fireEvent.change(within(header).getByRole("textbox"), { target: { value: "취소할 메모" } }); fireEvent.click(within(header).getByRole("button", { name: "취소" }));
   expect(within(header).getByText("바꾼 메모")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "작품으로 돌아가기" })); expect(back).toHaveBeenCalledOnce();
-  expect(container.querySelector(".av-performer-page__layout")).toBeNull();
+  expect(container.querySelector(".av-performer-page__main")).toContainElement(screen.getByRole("group", { name: "배우 작품 선반" }));
 });
 it("uses the shared per-row menu and plank rows without remounting covers; filters solo and joint roles", async () => {
   const { container } = render(page(gateway())); const user = userEvent.setup();
   const shelf = await screen.findByRole("group", { name: "배우 작품 선반" });
+  expect(shelf).toHaveAttribute("data-per-row", "8");
   const first = shelf.querySelector('[data-collection-id="work-0"]'); const cover = first?.querySelector(".cs-front img");
   await user.click(screen.getByRole("button", { name: "보기" }));
   for (let count = 5; count <= 12; count++) {
@@ -72,10 +77,12 @@ it("uses the shared per-row menu and plank rows without remounting covers; filte
   fireEvent.click(screen.getByRole("radio", { name: "전체" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(14);
   expect(container.querySelector(".dvd-case__stage")).toBeNull();
 });
-it("marks the originating work beside its code, turns on click, opens on double-click or Enter, and navigates co-performers", async () => {
+it("marks the originating work on its date line, turns on click, opens on double-click or Enter, and navigates co-performers", async () => {
   const open = vi.fn(), co = vi.fn(); render(page(gateway(), { onOpenCollection: open, onOpenPerformer: co }));
   const work = await screen.findByRole("button", { name: "작품 0 CODE-0" });
-  expect(within(work).getByText("이 작품").parentElement).toContainElement(within(work).getByText("CODE-0"));
+  expect(work.querySelector(".av-performer-page__code")).toHaveTextContent(/^CODE-0$/);
+  expect(work.querySelector(".av-performer-page__date")).toHaveTextContent(/^9.30 · 이 작품$/);
+  expect(work.querySelector(".ui-badge")).toBeNull();
   // The spine mounts after the front cover has had a paint opportunity.
   for (const front of work.querySelectorAll<HTMLImageElement>(".cs-front img, .collection-light-case img")) fireEvent.load(front);
   const realSpine = await waitFor(() => { const found = work.querySelector(".cs-spine img"); expect(found).not.toBeNull(); return found; });
@@ -101,4 +108,21 @@ it("holds the previous performer inert until the next response", async () => {
   expect(screen.getByRole("heading", { name: "배우", level: 1 })).toBeVisible(); expect(shelf.closest("[inert]")).not.toBeNull();
   await act(async () => resolveNext(performer("q")));
   expect(screen.getByRole("heading", { name: "다음 배우", level: 1 })).toBeVisible(); expect(shelf.closest("[inert]")).toBeNull();
+});
+
+
+it("orders joint, current and private metadata on the date line without crowding the code", async () => {
+  render(<PrivacyProvider privacyMode={true} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" currentCollectionId="work-1" api={gateway()} onBack={vi.fn()} /></PrivacyProvider>);
+  const work = await screen.findByRole("button", { name: "작품 1 CODE-1" });
+  expect(work.querySelector(".av-performer-page__code")).toHaveTextContent(/^CODE-1$/);
+  expect(work.querySelector(".av-performer-page__date")).toHaveTextContent(/^9.29 · 공동 출연 · 이 작품 · 비공개$/);
+  const other = screen.getByRole("button", { name: "작품 0 CODE-0" });
+  expect(other.querySelector(".av-performer-page__date")).toHaveTextContent(/^9.30 · 비공개$/);
+});
+
+it("does not start current-work metadata with a separator when there is no date", async () => {
+  const data = performer(); data.works[0]!.releaseDate = null;
+  render(page(gateway({ getPerformer: vi.fn().mockResolvedValue(data) })));
+  const work = await screen.findByRole("button", { name: "작품 0 CODE-0" });
+  expect(work.querySelector(".av-performer-page__date")).toHaveTextContent(/^이 작품$/);
 });

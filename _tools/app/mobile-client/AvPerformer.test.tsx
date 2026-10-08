@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), api: mocks.api, native: mocks.native}));
 vi.mock('./media', () => ({mediaTicket: vi.fn()}));
 import {ApiError} from './transport';
-import {AvPerformerScreen} from './AvPerformer';
+import {AvPerformerScreen, avPerformerView} from './AvPerformer';
 import {AuthorityQueue} from './CollectionAuthorityForms';
 import {useCollectionAuthority} from './useCollectionAuthority';
 import {AUTHORITY_STATUS_PATH, COMMAND_PATH, clearPersonNotice, readCommands, type PersonCommand} from './collectionCommandOutbox';
@@ -162,4 +162,54 @@ describe('tablet performer 즐겨찾기 and 내 메모', () => {
     expect(screen.queryByRole('region', {name: '내 메모'})).toBeNull();
     expect(screen.queryByRole('button', {name: /즐겨찾기/})).toBeNull();
   });
+});
+
+
+it('defaults only the performer shelf to six while preserving an explicit AV view choice', () => {
+  expect(avPerformerView({layout: 'shelf', perRow: 4})).toEqual({layout: 'shelf', perRow: 6});
+  localStorage.setItem('lakomics.mobile.collectionView.av.v1', JSON.stringify({layout: 'shelf', perRow: 4}));
+  expect(avPerformerView({layout: 'shelf', perRow: 4})).toEqual({layout: 'shelf', perRow: 4});
+  localStorage.setItem('lakomics.mobile.collectionView.av.v1', '{');
+  expect(avPerformerView({layout: 'shelf', perRow: 4})).toEqual({layout: 'shelf', perRow: 6});
+});
+
+
+it('collapses expanded profile links back to five on the tablet', async () => {
+  person = {...person!, profile: {aliases: [], birthDate: null, heightCm: null, bandIn: null, waistIn: null, hipIn: null, cup: null, breastType: null, careerStart: null, careerEnd: null,
+    urls: Array.from({length: 7}, (_, i) => ({url: `https://link${i}.example`, site: `Link ${i}`}))}};
+  await open();
+  const links = screen.getByLabelText('배우 링크');
+  expect(within(links).getAllByRole('button')).toHaveLength(6);
+  fireEvent.click(within(links).getByRole('button', {name: '링크 2개 더 보기'}));
+  expect(within(links).getAllByRole('button')).toHaveLength(8);
+  const collapse = within(links).getByRole('button', {name: '접기'});
+  expect(collapse).toHaveAttribute('aria-expanded', 'true');
+  expect(within(links).getAllByRole('button')[7]).toBe(collapse);
+  fireEvent.click(collapse);
+  expect(within(links).getAllByRole('button')).toHaveLength(6);
+  expect(within(links).getByRole('button', {name: '링크 2개 더 보기'})).toHaveAttribute('aria-expanded', 'false');
+});
+
+it('shows current-work text after date and joint credit, keeping the product code separate', async () => {
+  const joint = {...work, av: {...work.av!, people: [...work.av!.people, {id: 'p2', name: '다른 배우', role: 'performer' as const, order: 1}]}};
+  const base = mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async (path: string, signal: unknown, body: PersonCommand) => path.startsWith('/v1/collections?type=av') ? {...listPage, items: [joint]} : base(path, signal, body));
+  render(<AvPerformerScreen personId="p1" currentId="av-a" active privacy={false} perRow={4} order="newest"
+    onOpen={() => {}} onPerformer={() => {}} onSort={() => {}} onView={() => {}}/>);
+  const shelf = await screen.findByRole('group', {name: '배우 작품 선반'});
+  const tile = shelf.querySelector('[data-collection-id="av-a"]')!;
+  expect(tile.querySelector('.tablet-performer__code')).toHaveTextContent(/^LMNS-123$/);
+  expect(tile.querySelector('small.numeric')).toHaveTextContent(/^8.14 · 공동 출연 · 이 작품$/);
+  expect(screen.getByLabelText('내 서재 통계')).toHaveTextContent(/^내 작품 1편 · 단독 0 · 발매 8.14$/);
+});
+
+it('omits missing release dates and averages from tablet stats and current-work metadata', async () => {
+  const undated = {...work, releaseDate: null, av: {...work.av!, releaseDate: null}};
+  const base = mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async (path: string, signal: unknown, body: PersonCommand) => path.startsWith('/v1/collections?type=av') ? {...listPage, items: [undated]} : base(path, signal, body));
+  render(<AvPerformerScreen personId="p1" currentId="av-a" active privacy={false} perRow={4} order="newest"
+    onOpen={() => {}} onPerformer={() => {}} onSort={() => {}} onView={() => {}}/>);
+  const shelf = await screen.findByRole('group', {name: '배우 작품 선반'});
+  expect(shelf.querySelector('small.numeric')).toHaveTextContent(/^이 작품$/);
+  expect(screen.getByLabelText('내 서재 통계')).toHaveTextContent(/^내 작품 1편 · 단독 1$/);
 });

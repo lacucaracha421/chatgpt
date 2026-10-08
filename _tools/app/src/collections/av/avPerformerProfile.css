@@ -1,0 +1,27 @@
+.av-profile { display: grid; gap: var(--space-3); color: var(--color-text); font-size: var(--type-body); }
+.av-profile__aliases { margin: 0; color: var(--color-faint); font-size: var(--type-meta); overflow-wrap: anywhere; }
+.av-profile__rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); margin: 0; }
+.av-profile__rows > div { display: grid; align-content: start; gap: var(--space-1); min-width: 0; }
+.av-profile__rows > .av-profile__career { grid-column: 1 / -1; }
+.av-profile__rows dt, .av-profile__rows small { color: var(--color-faint); font-size: var(--type-meta); }
+.av-profile__rows dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.av-profile__links { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.av-profile__links .ui-button { font-size: var(--type-meta); }
+.av-profile__footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin-top: var(--space-2); color: var(--color-faint); font-size: var(--type-meta); }
+.av-profile__quiet { margin: var(--space-3) 0; color: var(--color-faint); font-size: var(--type-meta); }
+.av-profile__quiet button { padding: 0; background: none; border: 0; color: var(--color-muted); font: inherit; cursor: pointer; }
+.av-profile__footer svg { display: block; width: 14px; height: 14px; }
+.av-profile__footer > span { flex-basis: 100%; }
+.av-profile__change.ui-button { font-size: var(--type-meta); }
+.av-profile button:disabled { opacity: .5; cursor: default; }
+.av-profile__candidates { display: grid; gap: var(--space-3); }
+.av-profile__candidate { display: flex; align-items: center; gap: var(--space-3); }
+.av-profile__candidate > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.av-profile__candidate img { width: 48px; height: 64px; object-fit: cover; border-radius: var(--radius-control); }
+.av-profile__candidate p { margin: var(--space-1) 0; color: var(--color-muted); font-size: var(--type-meta); }
+.av-profile__candidate small { color: var(--color-faint); }
+
+.av-performer-library-stats { margin: 0; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); font-variant-numeric: tabular-nums; }
+
+.av-profile__manage.ui-menu__trigger { justify-self: start; font-size: var(--type-meta); }
+.av-profile__manage svg { width: var(--icon-sm); height: var(--icon-sm); }

@@ -1,11 +1,14 @@
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 import { displayDate, displayDateTime } from "../../shared/displayDate";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import { Button } from "../../shared/ui/Button";
+import { Menu } from "../../shared/ui/Menu";
+import { Badge } from "../../shared/ui/Badge";
+import "./avPerformerProfile.css";
 import { Dialog } from "../../shared/ui/Dialog";
 import type { AvGateway, AvPerformerProfile as Profile, AvProfileCandidate } from "../avTypes";
 
@@ -32,8 +35,8 @@ function linkInfo(link: Profile["urls"][number]) {
   if (name === "twitter" || name === "x" || ["twitter.com", "x.com"].includes(url.hostname)) return { priority: 0, label: "X" };
   if (name === "instagram") return { priority: 1, label: "Instagram" };
   if (name.includes("dmm") || name.includes("fanza")) return { priority: 2, label: "FANZA" };
-  if (["studio profile", "modeling agency"].includes(name)) return { priority: 3, label: "공식 프로필" };
-  if (name === "wikipedia" || url.hostname.endsWith(".wikipedia.org")) return { priority: url.hostname === "ja.wikipedia.org" ? 4 : 5, label: url.hostname === "ja.wikipedia.org" ? "위키 (일본어)" : "위키" };
+  if (["studio profile", "modeling agency"].includes(name)) return { priority: 3, label: "공식" };
+  if (name === "wikipedia" || url.hostname.endsWith(".wikipedia.org")) return { priority: url.hostname === "ja.wikipedia.org" ? 4 : 5, label: "위키" };
   return { priority: 6, label: link.site.name || url.hostname };
 }
 export function ProfileRows({ profile, today = new Date() }: { profile: Profile; today?: Date }) {
@@ -45,28 +48,32 @@ export function ProfileRows({ profile, today = new Date() }: { profile: Profile;
     {profile.birthDate && <div><dt>생년월일</dt><dd>{birthLabel(profile.birthDate, today)}</dd></div>}
     {profile.heightCm !== null && <div><dt>키</dt><dd>{profile.heightCm} cm</dd></div>}
     {measurements && <div><dt>사이즈</dt><dd>{measurements}</dd></div>}
-    {(profile.cup || breast) && <div><dt>가슴</dt><dd>{profile.cup && `${profile.cup}컵`} {breast && <span className="av-profile__pill">{breast}</span>}</dd></div>}
-    {career && <div><dt>활동</dt><dd>{career}</dd></div>}
+    {(profile.cup || breast) && <div><dt>컵</dt><dd>{profile.cup && `${profile.cup}컵`} {breast && <Badge>{breast}</Badge>}</dd></div>}
+    {career && <div className="av-profile__career"><dt>활동</dt><dd>{career}</dd></div>}
   </dl>;
 }
-export function ProfileLinks({ profile }: { profile: Profile }) {
-  const [expanded, setExpanded] = useState(false);
-  const [error, setError] = useState(false);
+function profileDisplayLinks(profile: Pick<Profile, "urls">) {
   const seen = new Set<string>();
-  const links = profile.urls.filter(link => {
+  return profile.urls.filter(link => {
     if (!safeProfileUrl(link.url)) return false;
     const normalized = new URL(link.url).href;
     if (seen.has(normalized)) return false;
     seen.add(normalized); return true;
   }).map(link => ({ ...link, ...linkInfo(link) })).sort((a, b) => a.priority - b.priority);
+}
+export function ProfileLinks({ profile, openLink = openUrl }: { profile: Profile; openLink?: (url: string) => Promise<void> }) {
+  const [expanded, setExpanded] = useState(false);
+  const [error, setError] = useState(false);
+  const links = profileDisplayLinks(profile);
   if (!links.length) return null;
   return <><div className="av-profile__links" aria-label="배우 링크">
-    {(expanded ? links : links.slice(0, 5)).map(link => <button key={link.url} type="button" onClick={() => { void openUrl(link.url).catch(() => setError(true)); }}>{link.label}</button>)}
-    {!expanded && links.length > 5 && <button type="button" aria-expanded={false} aria-label={`링크 ${links.length - 5}개 더 보기`} onClick={() => setExpanded(true)}>+{links.length - 5}</button>}
+    {(expanded ? links : links.slice(0, 5)).map(link => <Button key={link.url} size="sm" variant="quiet" onClick={() => { void openLink(link.url).catch(() => setError(true)); }}>{link.label}</Button>)}
+    {expanded && <Button size="sm" variant="quiet" aria-expanded={true} onClick={() => setExpanded(false)}>접기</Button>}
+    {!expanded && links.length > 5 && <Button size="sm" variant="quiet" aria-expanded={false} aria-label={`링크 ${links.length - 5}개 더 보기`} onClick={() => setExpanded(true)}>+{links.length - 5}</Button>}
   </div>{error && <p className="av-profile__quiet" role="status">링크를 열지 못했습니다.</p>}</>;
 }
 
-export function AvPerformerProfile({ personId, api, onOpenSettings, displayName, nameJa }: { displayName?: string; nameJa?: string | null; personId: string; api: AvGateway; onOpenSettings?: () => void }) {
+export function AvPerformerProfile({ personId, api, onOpenSettings, displayName, nameJa, compact = false }: { compact?: boolean; displayName?: string; nameJa?: string | null; personId: string; api: AvGateway; onOpenSettings?: () => void }) {
   const { privacyMode } = usePrivacy();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -115,11 +122,17 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
   const aliases = [...new Set([profile?.name, ...(profile?.aliases ?? [])].filter((name): name is string => Boolean(name?.trim())).map(name => name.trim()))].filter(name => name !== displayName && name !== nameJa);
   return <div className="av-profile" aria-busy={busy}>
     {profile?.status === "matched" && <>
-      {aliases.length > 0 && <p className="av-profile__aliases">{aliases.slice(0, 3).join(" · ")}</p>}
+      {!compact && aliases.length > 0 && <p className="av-profile__aliases">{aliases.slice(0, 3).join(" · ")}</p>}
       <ProfileRows profile={profile} />
       <ProfileLinks key={`${personId}:${profile.stashdbId}`} profile={profile} />
-      <div className="av-profile__footer"><span>StashDB · {displayDateTime(profile.fetchedAt)} 확인</span><button type="button" disabled={busy} aria-label="StashDB 새로고침" onClick={() => void refresh()}><ArrowPathIcon className={busy ? "av-profile__spinning" : ""} aria-hidden="true" /></button></div>
-      <button type="button" className="av-profile__change" disabled={busy} onClick={() => void refresh(true)}>다른 사람으로 바꾸기</button>
+      {compact ? <Menu label="StashDB 프로필" triggerClassName="av-profile__manage" trigger={<>StashDB<ChevronDownIcon aria-hidden="true" /></>} items={[
+        ...(aliases.length ? [{ id: "aliases", label: aliases.slice(0, 3).join(" · "), disabled: true, onSelect: () => {} }] : []),
+        { id: "checked", label: `${displayDateTime(profile.fetchedAt)} 확인`, disabled: true, onSelect: () => {} },
+        { id: "refresh", label: "StashDB 새로고침", disabled: busy, onSelect: () => void refresh() },
+        { id: "choose", label: "다른 사람으로 바꾸기", disabled: busy, onSelect: () => void refresh(true) },
+        ...(onOpenSettings ? [{ id: "settings", label: "설정", onSelect: onOpenSettings }] : []),
+      ]} /> : <div className="av-profile__footer"><span>StashDB · {displayDateTime(profile.fetchedAt)} 확인</span><Button size="icon" variant="ghost" disabled={busy} aria-label="StashDB 새로고침" onClick={() => void refresh()}><ArrowPathIcon className={busy ? "av-profile__spinning" : ""} aria-hidden="true" /></Button>
+      <Button size="sm" variant="quiet" className="av-profile__change" disabled={busy} onClick={() => void refresh(true)}>다른 사람으로 바꾸기</Button></div>}
     </>}
     {profile?.status === "ambiguous" && <p className="av-profile__quiet">StashDB에서 여러 명이 찾아졌어요 · <button type="button" disabled={busy} onClick={() => setCandidates(profile.candidates)}>고르기</button></p>}
     {profile?.status === "none" && <p className="av-profile__quiet">StashDB에서 못 찾았어요 · <button type="button" disabled={busy} onClick={() => void refresh()}>다시 찾기</button></p>}

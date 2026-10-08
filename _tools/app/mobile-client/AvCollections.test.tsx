@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom/vitest';
 import {workImageLoads} from './workImageLoads.test-helper';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -52,9 +53,9 @@ describe('tablet AV collections',()=>{
     fireEvent.click(mio);
     const profile=await screen.findByRole('region',{name:'프로필 정보'});
     expect(screen.getByRole('heading',{level:1,name:'하야세 미오'})).toBeTruthy();
-    expect(profile.textContent).toContain('2편 · 단독 1');
-    expect(profile.textContent).toContain('8.14');
-    expect(profile.textContent).toContain('4.0');
+    expect(screen.getByLabelText('내 서재 통계')).toHaveTextContent('내 작품 2편 · 단독 1');
+    expect(screen.getByLabelText('내 서재 통계')).toHaveTextContent('발매 8.14');
+    expect(screen.getByLabelText('내 서재 통계')).toHaveTextContent('평균 ★4.0');
     expect(screen.getByRole('button',{name:'아마노 린 1편'})).toBeTruthy();
     expect(screen.getByRole('region',{name:'레이블'}).textContent).toContain('루미너스·프리미엄');
     fireEvent.click(screen.getByRole('radio',{name:'단독'}));
@@ -184,6 +185,25 @@ describe('tablet AV collections',()=>{
     expect(JSON.parse(localStorage.getItem('lakomics.mobile.avLookupRecent')!)).toHaveLength(5);
   });
 
+  it.each([null, 4])('keeps the performer shelf and view sheet in sync (saved rows: %s)', async saved => {
+    if (saved === null) localStorage.removeItem('lakomics.mobile.collectionView.av.v1');
+    render(<Collections {...props}/>);
+    await openAv();
+    await screen.findByText('오후의 창가');
+    fireEvent.click(screen.getByRole('tab', {name: '배우별'}));
+    fireEvent.click(await screen.findByRole('button', {name: /하야세 미오/}));
+    const shelf = await screen.findByRole('group', {name: '배우 작품 선반'});
+    expect(shelf).toHaveAttribute('data-per-row', String(saved ?? 6));
+    expect(within(shelf).getByText('LMNS-123')).toBeTruthy();
+    const tile = shelf.querySelector('[data-collection-id="av-a"]');
+    fireEvent.click(screen.getByRole('button', {name: '보기'}));
+    const slider = await screen.findByRole('slider', {name: '한 줄에'});
+    expect(slider).toHaveValue(String(saved ?? 6));
+    fireEvent.change(slider, {target: {value: '8'}});
+    expect(shelf).toHaveAttribute('data-per-row', '8');
+    expect(shelf.querySelector('[data-collection-id="av-a"]')).toBe(tile);
+  });
+
   describe('the published person on the performer page',()=>{
     const mioPerson={id:'p1',memo:'첫 작품부터 좋았다\n두 번째 줄',favorite:true,
       profile:{source:'stashdb',name:'Hayase Mio',aliases:[],birthDate:'2000-03-04',heightCm:158,bandIn:34,waistIn:23,hipIn:34,cup:'E',breastType:'NATURAL',careerStart:2021,careerEnd:null,
@@ -207,32 +227,35 @@ describe('tablet AV collections',()=>{
       const profile=await screen.findByRole('region',{name:'프로필 정보'});
       expect(mocks.api.mock.calls.some(([path])=>path==='/v1/collections/people/p1')).toBe(true);
       expect(screen.getByRole('img',{name:'즐겨찾기한 배우'})).toBeTruthy();
-      expect(screen.getByText('Wikimedia Commons · Photographer · CC BY-SA 4.0')).toBeTruthy();
+      expect(screen.getByTitle('사진 출처: Wikimedia Commons · Photographer · CC BY-SA 4.0')).toHaveClass('tablet-performer__portrait');
+      expect(screen.queryByText('Wikimedia Commons · Photographer · CC BY-SA 4.0')).toBeNull();
       const rows=Object.fromEntries([...profile.querySelectorAll('dl > div')].map(row=>[row.querySelector('dt')?.textContent,row.querySelector('dd')?.textContent]));
       expect(rows['생년월일']).toMatch(/^2000\.3\.4 만 \d+세$/);
       expect(rows['키']).toBe('158 cm');
       expect(rows['사이즈']).toBe('B86 (E) W58 H86');
-      expect(rows['가슴']).toContain('자연');
+      expect(rows['컵']).toContain('자연');
       expect(rows['활동']).toMatch(/^2021 – 현역/);
       // One button per safe, distinct link; it opens the browser.
       const links=within(screen.getByLabelText('배우 링크')).getAllByRole('button');
-      expect(links.map(link=>link.textContent)).toEqual(['Twitter']);
+      expect(links.map(link=>link.textContent)).toEqual(['X']);
       fireEvent.click(links[0]!);
       expect(mocks.native).toHaveBeenCalledWith('openExternal',{url:'https://x.com/mio'});
       const memo=screen.getByRole('region',{name:'내 메모'});
       expect(memo.querySelector('p')?.textContent).toBe('첫 작품부터 좋았다\n두 번째 줄');
       expect(within(memo).queryByRole('button')).toBeNull();expect(within(memo).queryByRole('textbox')).toBeNull();
+      expect(memo.closest('header')).toBeNull();
+      expect(screen.getByLabelText('내 서재 통계').closest('.tablet-performer__identity')).not.toBeNull();
     });
 
     it('leaves the person parts out on a 404 from an older server, keeping the derived page',async()=>{
       withPerson(()=>Promise.reject(Object.assign(new Error('없음'),{status:404})));
       await openMio();
       const profile=await screen.findByRole('region',{name:'프로필 정보'});
-      expect(profile.textContent).toContain('2편 · 단독 1');
+      expect(screen.getByLabelText('내 서재 통계')).toHaveTextContent('내 작품 2편 · 단독 1');
       expect(screen.queryByRole('img',{name:'즐겨찾기한 배우'})).toBeNull();
       expect(screen.queryByRole('region',{name:'내 메모'})).toBeNull();
       expect(screen.queryByLabelText('배우 링크')).toBeNull();
-      expect(profile.querySelectorAll('dl')).toHaveLength(1);
+      expect(profile.querySelectorAll('dl')).toHaveLength(0);
       expect(screen.queryByRole('alert')).toBeNull();
     });
 

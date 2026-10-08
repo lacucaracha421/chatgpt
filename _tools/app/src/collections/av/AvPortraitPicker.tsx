@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { SectionLabel } from "../../shared/ui/SectionLabel";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
@@ -138,6 +139,10 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
 
   const previewPortrait: AvPortrait | null = sourceKind === "crop" && selected ? { kind: "crop", artworkId: selected.artworkId, revision: selected.revision, rect } : sourceKind === "stashdb" && stashdb ? { kind: "stashdb", ...stashdb } : sourceKind === "commons" && commons ? { kind: "commons", ...commons } : null;
   return <Dialog open title={`${personName} 대표 이미지`} variant="wide" onClose={() => { if (!busy) onClose(); }}>
+    {currentPortrait && <div className="av-profile__quiet" aria-label="현재 사진 출처">
+      {currentPortrait.kind === "commons" ? `Wikimedia Commons · ${currentPortrait.author ?? "저작자 미상"} · ${currentPortrait.license ?? "라이선스 미상"}` : currentPortrait.kind === "stashdb" ? "StashDB" : "표지에서 자름"}
+      {currentPortrait.kind !== "crop" && safeProfileUrl(currentPortrait.sourceUrl) && <Button size="sm" variant="quiet" aria-label="대표 이미지 출처 열기" onClick={() => void openUrl(currentPortrait.sourceUrl).catch(() => setError("원본 링크를 열지 못했습니다."))}>원본</Button>}
+    </div>}
     <div className="av-portrait-picker">
       <nav className="av-portrait-picker__sources" aria-label="대표 이미지 출처">
         <SourceButton disabled={busy} active={sourceKind === "stashdb"} onClick={() => { sourceChosen.current = true; setSourceKind("stashdb"); }} title="StashDB" detail={profile?.status === "matched" ? `${profile.images.length}장` : "프로필 사진"} />
@@ -178,7 +183,7 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
           {commons && <>
             {!privacyMode && <img src={commons.dataUrl} alt={`${personName} 공용 사진 미리보기`} />}
             <dl><div><dt>파일</dt><dd>{commons.fileName}</dd></div><div><dt>저작자</dt><dd>{commons.author ?? "알 수 없음"}</dd></div><div><dt>라이선스</dt><dd>{commons.license ?? "표시 정보 없음"}</dd></div><div><dt>Wikidata</dt><dd>{wikidataId ?? "없음"}</dd></div></dl>
-            <p>배우 페이지에 저작자와 라이선스를 작게 표시합니다.</p>
+            <p>사진 출처는 사진 바꾸기 버튼과 이 창에서 확인할 수 있습니다.</p>
           </>}
         </div>}
         {sourceKind === "none" && <div className="av-portrait-picker__none"><Portrait portrait={null} name={personName} size="performer" /><p>사진 없이 이름 첫 글자를 사용합니다.</p></div>}
