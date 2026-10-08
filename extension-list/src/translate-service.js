@@ -30,6 +30,9 @@
   const SINGLE_TIMEOUT_MS = 12000, BATCH_TIMEOUT_MS = 18000;
   const RETRY_DELAY_MS = 300;
   const DEFAULT_RATE_LIMIT_MS = 1500;
+  // A longer cooldown is handed back to the page instead of slept through here: a sleeping
+  // worker holds its queue slot and may be stopped by the browser mid-wait.
+  const MAX_INLINE_COOLDOWN_MS = 3000;
   let initialized, settings, cache, generation = 0, activeJobs = 0, persistTimer = null;
   const cooldownUntil = new Map();
   const jobs = [], activeControllers = new Set();
@@ -127,6 +130,11 @@
     for (let attempt = 0; attempt < chain.length; attempt += 1) {
       const model = chain[attempt], sameModelNext = chain[attempt + 1] === model;
       if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };
+      const coolingMs = (cooldownUntil.get(model) || 0) - Date.now();
+      if (coolingMs > MAX_INLINE_COOLDOWN_MS) {
+        last = { ok: false, code: "http_429", retryAfterMs: coolingMs };
+        continue;
+      }
       if (!await awaitCooldown(model, epoch)) return { ok: false, code: "disabled" };
       // A sub model without a saved key is skipped; it never hides the main model's failure.
       if (!keyFor(model)) {

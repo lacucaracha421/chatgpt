@@ -12,6 +12,11 @@
   let maxInFlight = 2;
   const SHOW_MORE = '[data-testid="tweet-text-show-more-link"]';
   const EXPAND_WAIT_MS = 1500;
+  // A reply that never comes would hold a request slot (and its "번역 중…" lines) until the
+  // page is reloaded; past this the request counts as a transient failure.
+  const SEND_TIMEOUT_MS = 75000;
+  // Transient failures retry by themselves this many times, then on viewport re-entry.
+  const AUTO_RETRY_DELAYS_MS = [4000, 15000];
   let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true, inFlight = 0;
   let initialSettings = null;
   // requested holds elements whose request (or queued fallback) is outstanding, so the
@@ -24,8 +29,11 @@
 
   function send(message) {
     return new Promise(resolve => {
-      try { chrome.runtime.sendMessage(message, result => resolve(chrome.runtime.lastError ? { ok: false, code: "worker_failed" } : result)); }
-      catch { resolve({ ok: false, code: "worker_failed" }); }
+      let settled = false;
+      const finish = result => { if (!settled) { settled = true; clearTimeout(timer); resolve(result); } };
+      const timer = setTimeout(() => finish({ ok: false, code: "worker_failed" }), SEND_TIMEOUT_MS);
+      try { chrome.runtime.sendMessage(message, result => finish(chrome.runtime.lastError ? { ok: false, code: "worker_failed" } : result)); }
+      catch { finish({ ok: false, code: "worker_failed" }); }
     });
   }
   function source(element) {
@@ -164,6 +172,28 @@
     });
     sync(); node.after(toggle); toggles.set(element, toggle);
   }
+  // An error card offers "다시 시도" so a failed post never needs a page reload.
+  function addRetry(element, node) {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "lakomics-translation-toggle lakomics-translation-retry";
+    button.textContent = "다시 시도";
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      if (!enabled || !hasApiKey || blocked) return;
+      failures.delete(element); completed.delete(element); removeResult(element);
+      pending.add(element); fastLanePending = true;
+      schedule(true);
+    });
+    node.after(button); toggles.set(element, button);
+  }
+  // A request waiting out a rate limit says so instead of an endless "번역 중…".
+  function showWaiting(element, text) {
+    removeResult(element);
+    const node = document.createElement("div");
+    node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = detectTheme();
+    node.setAttribute("aria-hidden", "true"); node.textContent = text;
+    element.after(node); rendered.set(element, node);
+  }
   function render(element, snapshot, text, error = false) {
     removeResult(element);
     const node = document.createElement("div");
@@ -199,13 +229,14 @@
     element.after(node);
     rendered.set(element, node);
     if (!error) collapseOriginal(element, node);
+    else addRetry(element, node);
   }
-  function failure(code, retryable = false) {
+  function failure(code, retryable = false, autoRetry = false) {
     if (code === "http_401" || code === "api_key_missing") return "번역 API 키를 확인하세요";
     if (code === "http_402") return "번역 API 잔액을 확인하세요";
     if (code === "http_403") return "번역 API 접근 권한을 확인하세요";
     if (code === "http_429") return "번역 요청 한도 · 잠시 후 자동 재시도";
-    if (isTransientFailure(code)) return "번역 연결 실패 · 다시 보이면 재시도";
+    if (isTransientFailure(code)) return autoRetry ? "번역 연결 실패 · 곧 자동 재시도" : "번역 연결 실패 · 다시 보이면 재시도";
     return retryable ? "번역 실패 · 다시 보이면 재시도" : "번역 실패 · 자동 번역을 껐다 켜면 재시도";
   }
   function setNotice(text = "", kind = "") {
@@ -293,7 +324,10 @@
       const record = { signature: candidate.snapshot.signature, code: "http_429", attempts,
         nextAttemptAt: attempts < MAX_FAILURES ? Date.now() + delay : Infinity };
       failures.set(candidate.element, record);
-      if (attempts < MAX_FAILURES) retry.push({ candidate, record });
+      if (attempts < MAX_FAILURES) {
+        retry.push({ candidate, record });
+        showWaiting(candidate.element, "요청 한도 · 잠시 후 자동 재시도");
+      }
       else {
         const message = "번역 요청 한도 · 자동 재시도 중단";
         render(candidate.element, candidate.snapshot, message, true);
@@ -333,9 +367,21 @@
       // Transient failures retry whenever the post re-enters the viewport; any other
       // failure gets one such retry before it is parked until translation is reset.
       const retryOnReentry = !isTransientFailure(code) && attempts < 2;
-      failures.set(candidate.element, { signature: candidate.snapshot.signature, code, attempts, nextAttemptAt: Infinity, retryOnReentry });
-      notice = failure(code, retryOnReentry);
+      const autoRetryMs = isTransientFailure(code) ? AUTO_RETRY_DELAYS_MS[attempts - 1] : undefined;
+      const next = { signature: candidate.snapshot.signature, code, attempts, nextAttemptAt: Infinity, retryOnReentry };
+      failures.set(candidate.element, next);
+      notice = failure(code, retryOnReentry, autoRetryMs !== undefined);
       render(candidate.element, candidate.snapshot, notice, true);
+      if (autoRetryMs !== undefined) {
+        setTimeout(() => {
+          // Only the same failure of the same text is retried; success, edits, a reset or
+          // the user's own retry replace the record first.
+          if (failures.get(candidate.element) !== next || !current(candidate, requestEpoch) || !hasApiKey) return;
+          next.nextAttemptAt = 0;
+          pending.add(candidate.element);
+          schedule();
+        }, autoRetryMs);
+      }
     }
     setNotice(notice || failure(code), "warning");
     return "failed";

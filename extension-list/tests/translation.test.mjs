@@ -940,3 +940,75 @@ test('one X tab uses the request slots the selected model allows',async()=>{
   w.eval(content); await clock.advance(500);
   assert.equal(maxActive,4); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,16); w.close();
 });
+
+test('a transient failure retries by itself twice, then waits for re-entry',async()=>{
+  let requests=0;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Flaky post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1; return {ok:false,code:'timeout'};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(600);
+  assert.equal(requests,1);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 곧 자동 재시도');
+  await clock.advance(4500); assert.equal(requests,2);
+  await clock.advance(15500); assert.equal(requests,3);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 다시 보이면 재시도');
+  await clock.advance(60000); assert.equal(requests,3,'no endless automatic retries'); w.close();
+});
+
+test('"다시 시도" re-requests a parked failure at once without a reload',async()=>{
+  let requests=0, succeed=false;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Parked post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1;
+    return succeed ? {ok:true,text:'다시 성공',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'다시 성공'}))} : {ok:false,code:'invalid_translation'};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(600);
+  const retry=w.document.querySelector('.lakomics-translation-retry');
+  assert.equal(retry.textContent,'다시 시도');
+  let bubbled=false; w.document.body.addEventListener('click',()=>{bubbled=true;});
+  succeed=true; retry.click(); await clock.advance(400);
+  assert.equal(bubbled,false,'the button never opens the post');
+  assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'다시 성공');
+  assert.equal(w.document.querySelector('.lakomics-translation-retry'),null); w.close();
+});
+
+test('a reply that never comes frees its slot after the watchdog and retries',async()=>{
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Lost reply</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0;
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
+    else if(++requests>1) callback({ok:true,text:'복구됨',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'복구됨'}))});
+  }},storage:{onChanged:{addListener(){}}}};
+  w.eval(content); await clock.advance(1000);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 중…');
+  await clock.advance(75000);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 곧 자동 재시도');
+  await clock.advance(4500);
+  assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'복구됨'); w.close();
+});
+
+test('a long rate-limit cooldown is handed back at once and a sub model answers meanwhile',async()=>{
+  let calls=0;
+  const f=fixture({'lakomics:translation:v1':{enabled:true,apiKey:'or-key',model:'google/gemini-3.1-flash-lite',fallbackModel:'google/gemma-4-26b-a4b-it'}},
+    async(_url,init)=>{
+      calls+=1;
+      return JSON.parse(init.body).model==='google/gemini-3.1-flash-lite'
+        ? {ok:false,status:429,headers:{get(name){return name.toLowerCase()==='retry-after'?'30':null;}}}
+        : {ok:true,json:async()=>({choices:[{message:{content:'보조 번역'}}]})};
+    });
+  const first=await f.handle({type:'translation:request',text:'One'});
+  assert.equal(first.ok,true); assert.equal(first.text,'보조 번역');
+  const started=Date.now();
+  const second=await f.handle({type:'translation:request',text:'Two'});
+  assert.ok(Date.now()-started<1000,'the cooling main model is not slept through');
+  assert.equal(second.ok,true); assert.equal(calls,3,'the cooling model is skipped, not called again');
+});
