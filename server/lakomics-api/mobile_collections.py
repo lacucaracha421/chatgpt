@@ -505,7 +505,12 @@ def public_person(db, person_id, library_id=None, *, entity=False):
         if row is not None and entity:
             import collection_authority
             return {"person": collection_authority.person_entity(db, library_id, row)}
-    return None if row is None else {"person": json.loads(row["payload"])}
+    if row is None:
+        return None
+    payload = json.loads(row["payload"])
+    # Relay identity is additive authority metadata, not the legacy text profile.
+    payload.pop("stashdbId", None)
+    return {"person": payload}
 
 
 def register_collections(app, get_db, require_auth, storage, bucket, presign_get, presign_put,

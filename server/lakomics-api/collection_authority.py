@@ -120,13 +120,14 @@ AV_DETAILS = "setAvDetails"
 AV_CREDITS = "setAvCredits"
 PERSON = "setPerson"
 PERSON_PORTRAIT = "setPersonPortrait"
+PERSON_PROFILE = "setPersonProfile"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT)
+                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -139,6 +140,7 @@ COMMAND_KEYS = {
     AV_CREDITS: {"workId", "credits", "people", "expectedRevision"},
     PERSON: {"personId", "changes", "expected"},
     PERSON_PORTRAIT: {"personId", "portrait", "expectedRevision"},
+    PERSON_PROFILE: {"personId", "stashdbId", "expectedRevision"},
     DELETE: {"workId", "expectedRevision"},
     RESTORE: {"workId", "expectedRevision"},
     PURGE: {"workId", "expectedRevision"},
@@ -1479,10 +1481,8 @@ def apply_command_batch(db, *, library_id, epoch, operation_id, request_payload,
     return result
 
 
-def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
-                  entity, now):
-    """Execute one typed command inside the caller's ``BEGIN IMMEDIATE``."""
-    asset_visibility.install(db)
+def command_preflight(db, *, library_id, epoch, contract_version, command_type, operation_id, entity):
+    """Validate authority and replay identity, also before provider I/O outside a transaction."""
     row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
     if row["epoch"] != epoch:
         fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH,
@@ -1498,8 +1498,21 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
     if receipt is not None:
         if receipt["payload_digest"] != payload_sha:
             fail(409, "operationConflict", "같은 작업 ID가 다른 내용으로 이미 사용되었습니다.")
-        return json.loads(receipt["result_payload"])
+        return row, payload_sha, json.loads(receipt["result_payload"])
+    return row, payload_sha, None
+
+
+def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
+                  entity, now, prepared_profile=None):
+    """Execute one typed command inside the caller's ``BEGIN IMMEDIATE``."""
+    asset_visibility.install(db)
+    row, payload_sha, cached = command_preflight(db, library_id=library_id, epoch=epoch,
+        contract_version=contract_version, command_type=command_type, operation_id=operation_id, entity=entity)
+    if cached is not None:
+        return cached
     ctx = Context(db, row, command_type=command_type, operation_id=operation_id, now=now)
+    if command_type == PERSON_PROFILE:
+        return _set_person_profile(ctx, entity, payload_sha, prepared_profile)
     handler = HANDLERS[command_type]
     return handler(ctx, entity, payload_sha)
 
@@ -1749,6 +1762,31 @@ def _set_person(ctx, entity, payload_sha):
     if current != expected:
         conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
     payload.update(changes)
+    ctx.db.execute("UPDATE collection_authority_people SET payload=?,entity_revision=entity_revision+1"
+                   " WHERE library_id=? AND person_id=?", [encode(payload), ctx.library_id, row["person_id"]])
+    _publish_person(ctx, row["person_id"])
+    return _finish(ctx, payload_sha, row["person_id"], personChanged=True,
+                   person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, row["person_id"])))
+
+
+def _set_person_profile(ctx, entity, payload_sha, prepared_profile):
+    row = _person_row(ctx, entity["personId"])
+    payload = json.loads(row["payload"])
+    desired = None
+    if entity["stashdbId"] is not None:
+        if prepared_profile is None or prepared_profile.get("stashdbId") != entity["stashdbId"]:
+            fail(503, "providerUnavailable", "서버에서 프로필을 먼저 조회해야 합니다.")
+        desired = prepared_profile["profile"]
+    # Refresh is a real fetch, but identical data is a no-op even at an older revision.
+    if payload.get("profile") == desired and payload.get("stashdbId") == entity["stashdbId"]:
+        return _finish(ctx, payload_sha, row["person_id"], person=person_entity(ctx.db, ctx.library_id, row))
+    if row["entity_revision"] != entity["expectedRevision"]:
+        conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
+    payload["profile"] = desired
+    payload["stashdbId"] = entity["stashdbId"]
+    from mobile_collections import MAX_PERSON_BYTES
+    if len(encode(payload).encode()) > MAX_PERSON_BYTES:
+        fail(413, "providerResponseTooLarge", "인물 프로필 크기가 허용 범위를 초과했습니다.")
     ctx.db.execute("UPDATE collection_authority_people SET payload=?,entity_revision=entity_revision+1"
                    " WHERE library_id=? AND person_id=?", [encode(payload), ctx.library_id, row["person_id"]])
     _publish_person(ctx, row["person_id"])
@@ -2479,7 +2517,7 @@ HANDLERS = {
     TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
     VOLUME_RANGE: _volume_range, RECORD_RELEASE: _record_release, ACK_RELEASE: _ack_release,
     AV_DETAILS: _set_av_details, AV_CREDITS: _set_av_credits,
-    PERSON: _set_person, PERSON_PORTRAIT: _set_person_portrait,
+    PERSON: _set_person, PERSON_PORTRAIT: _set_person_portrait, PERSON_PROFILE: _set_person_profile,
 }
 
 
@@ -2610,6 +2648,13 @@ def parse_command(body):
         entity.update(personId=require_id(body["personId"]), changes=changes, expected=expected)
     elif command_type == PERSON_PORTRAIT:
         entity.update(personId=require_id(body["personId"]), portrait=_portrait_input(body["portrait"]),
+                      expectedRevision=_revision(body["expectedRevision"], minimum=1))
+    elif command_type == PERSON_PROFILE:
+        stashdb_id = body["stashdbId"]
+        if stashdb_id is not None and (not isinstance(stashdb_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", stashdb_id)):
+            fail(422, "providerIdentityInvalid", "StashDB 인물 ID가 올바르지 않습니다.")
+        entity.update(personId=require_id(body["personId"]), stashdbId=stashdb_id,
                       expectedRevision=_revision(body["expectedRevision"], minimum=1))
     elif command_type == AV_DETAILS:
         changes, expected = _av_fields(body["changes"]), _av_fields(body["expected"])
@@ -3985,6 +4030,11 @@ def register(app, get_db, require_client, require_publisher):
             raise HTTPException(401, "Unauthorized")
         library_id, epoch, contract_version, operation_id, command_type, entity = parse_command(body)
         now = now_iso()
+        if command_type == PERSON_PROFILE:
+            import av_stashdb
+            return await run_in_threadpool(av_stashdb.apply_profile_command, get_db,
+                library_id=library_id, epoch=epoch, contract_version=contract_version,
+                operation_id=operation_id, command_type=command_type, entity=entity, now=now)
         return await transaction(lambda db: apply_command(
             db, library_id=library_id, epoch=epoch, contract_version=contract_version,
             command_type=command_type, operation_id=operation_id, entity=entity, now=now))

@@ -914,9 +914,14 @@ startup_mobile_collections = register_collections(
 
 import work_providers
 
-work_providers.register(
+provider_relay = work_providers.register(
     app, get_db, _home_client, lambda: _s3, lambda: R2_BUCKET,
 )
+
+import av_stashdb
+
+av_stashdb.register(app, get_db, _home_client, lambda: _s3, lambda: R2_BUCKET,
+                   provider_relay=provider_relay)
 
 from mobile_characters import register_characters
 

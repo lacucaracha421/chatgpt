@@ -628,13 +628,13 @@ class WorkProviderTests(unittest.TestCase):
         return self.fixture.ok(result)
 
     def test_status_configured_only_and_client_publisher_auth(self):
-        self.assertEqual(self.ok(self.get("status")), {"tmdb": False, "igdb": False})
+        self.assertEqual(self.ok(self.get("status")), {"tmdb": False, "igdb": False, "stashdb": False})
         os.environ[wp.IGDB_ID_ENV] = "only-id"
         self.assertFalse(self.ok(self.get("status"))["igdb"])
         self.keys()
         for headers in (self.auth, self.fixture.publisher, fixtures.AUTH):
             reply = self.client.get("/v1/providers/status", headers=headers)
-            self.assertEqual(self.ok(reply), {"tmdb": True, "igdb": True})
+            self.assertEqual(self.ok(reply), {"tmdb": True, "igdb": True, "stashdb": False})
             self.assertNotIn("fixture", reply.text)
         for headers in ({}, {"Authorization": "Bearer invalid"}):
             self.assertEqual(self.client.get("/v1/providers/status", headers=headers).status_code, 401)

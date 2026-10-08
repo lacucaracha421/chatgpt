@@ -68,7 +68,8 @@ def credential(name):
 
 def configured():
     return {"tmdb": credential(TMDB_KEY_ENV) is not None,
-            "igdb": bool(credential(IGDB_ID_ENV) and credential(IGDB_SECRET_ENV))}
+            "igdb": bool(credential(IGDB_ID_ENV) and credential(IGDB_SECRET_ENV)),
+            "stashdb": credential("LAKOMICS_STASHDB_API_KEY") is not None}
 
 
 def require_keys(provider):
@@ -153,7 +154,7 @@ def status_error(status):
 
 class Relay:
     def __init__(self):
-        self.locks = {name: threading.Lock() for name in ("tmdb", "igdb", "artwork")}
+        self.locks = {name: threading.Lock() for name in ("tmdb", "igdb", "stashdb", "artwork")}
         self.next_request = {name: 0.0 for name in self.locks}
         self.token_lock = threading.Lock()
         self.token = None
