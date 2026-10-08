@@ -50,6 +50,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "home_av_pick.register.<locals>.startup",
             "library_artists.register.<locals>.startup",
             "mobile_collections.register_collections.<locals>.startup_collections",
+            "av_inbox.Worker.start",
             "mobile_characters.register_characters.<locals>.startup",
             "sync_status.register_sync_status.<locals>.startup",
             "change_signal.WriteSignal.reset",
@@ -64,6 +65,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "capture_routes.InboxReclaimer.stop",
             "prune_catalog_artifacts.AutoPruner.stop",
             "mobile_catalog_refresh.RefreshWorker.shutdown",
+            "av_inbox.Worker.stop",
             "app.shutdown_image_thumbnails",
         ]
         calls = []

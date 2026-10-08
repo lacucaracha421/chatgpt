@@ -158,6 +158,9 @@ class AvLookupTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM av_lookup_requests").fetchone()[0], 3)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM av_lookup_requests WHERE received_at=?",
                                         (old,)).fetchone()[0], 1)
+            # Closed items retain the legacy 30-day pruning and sequence guarantee.
+            # Actionable server candidates must survive until reviewed.
+            db.execute("UPDATE av_inbox SET status='dismissed'")
             # Expire everything, including the highest sequence.
             db.execute("UPDATE av_lookup_requests SET received_at=?", (old,))
             db.commit()

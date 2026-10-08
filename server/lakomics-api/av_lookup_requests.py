@@ -1,4 +1,4 @@
-"""Small, append-only product-code inbox for the paired collector and PC."""
+"""Compatible collector intake and publisher feed for the durable AV inbox."""
 import hashlib
 import json
 import threading
@@ -36,6 +36,8 @@ def startup(get_db):
     with get_db() as db:
         db.executescript(DDL)
         db.commit()
+    import av_inbox
+    av_inbox.startup(get_db)
 
 
 class LookupRequest(BaseModel):
@@ -90,7 +92,7 @@ def receipt(row):
             "receivedAt": row["received_at"]}
 
 
-def insert(get_db, body):
+def insert(get_db, body, wake=None):
     digest = hashlib.sha256(json.dumps(body.model_dump(), sort_keys=True,
                                       separators=(",", ":")).encode()).hexdigest()
     now = datetime.now(timezone.utc)
@@ -100,17 +102,24 @@ def insert(get_db, body):
                               (body.requestId,)).fetchone()
         if existing is not None:
             if existing["body_sha256"] != digest:
+                db.rollback()
                 raise HTTPException(409, detail={"code": "avLookupConflict"})
+            db.rollback()
             return receipt(existing)
         cursor = db.execute(
             "INSERT INTO av_lookup_requests(request_id,product_code,source_url,body_sha256,received_at) "
             "VALUES(?,?,?,?,?)", (body.requestId, body.productCode, body.sourceUrl, digest, now.isoformat()))
+        import av_inbox
+        av_inbox.seed(db, body.requestId, body.productCode)
         # Insert first: retaining the new maximum prevents sequence reuse after pruning.
         db.execute("DELETE FROM av_lookup_requests WHERE sequence IN "
-                   "(SELECT sequence FROM av_lookup_requests WHERE received_at < ? "
-                   "ORDER BY received_at LIMIT ?)",
+                   "(SELECT sequence FROM av_lookup_requests WHERE received_at < ? AND NOT EXISTS "
+                   "(SELECT 1 FROM av_inbox i WHERE i.request_id=av_lookup_requests.request_id "
+                   "AND i.status NOT IN ('dismissed','applied')) ORDER BY received_at LIMIT ?)",
                    ((now - timedelta(days=RETENTION_DAYS)).isoformat(), PRUNE_BATCH))
         db.commit()
+        if wake is not None:
+            wake()
         return {"requestId": body.requestId, "sequence": cursor.lastrowid, "receivedAt": now.isoformat()}
 
 
@@ -133,6 +142,11 @@ def register(app, get_db, require_capture_client, require_publisher, require_cli
 
     lifecycle(app).on_startup(setup)
 
+    def wake_inbox():
+        worker = getattr(app.state, "av_inbox_worker", None)
+        if worker is not None:
+            worker.wake()
+
     @app.post("/v1/av-lookups")
     async def create(request: Request, authorization: str | None = Header(default=None)):
         principal = await run_in_threadpool(require_av_lookup_client, authorization)
@@ -146,7 +160,7 @@ def register(app, get_db, require_capture_client, require_publisher, require_cli
             body = LookupRequest.model_validate_json(bytes(raw))
         except ValidationError:
             raise HTTPException(422, detail={"code": "invalidAvLookupRequest"})
-        return await run_in_threadpool(insert, get_db, body)
+        return await run_in_threadpool(insert, get_db, body, wake_inbox)
 
     @app.get("/v1/av-lookups")
     def listing(after: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=100),

@@ -923,6 +923,11 @@ import av_stashdb
 av_stashdb.register(app, get_db, _home_client, lambda: _s3, lambda: R2_BUCKET,
                    provider_relay=provider_relay)
 
+import av_inbox
+
+av_inbox.register(app, get_db, _home_client, lambda: _s3, lambda: R2_BUCKET,
+                  relay=provider_relay)
+
 from mobile_characters import register_characters
 
 startup_mobile_characters = register_characters(
