@@ -817,3 +817,70 @@ test('the main tweet is recognized by its own timestamp link when X drops the fo
   w.eval(content); await clock.advance(200);
   assert.equal(clicks,1); assert.deepEqual(sent,[]); w.close();
 });
+
+const claudeAnswer = (text, stop='end_turn') => ({ok:true,json:async()=>({content:[{type:'thinking',thinking:''},{type:'text',text}],stop_reason:stop})});
+const claudeSettings = (extra={}) => ({'lakomics:translation:v1':{enabled:true,apiKey:'or-key',anthropicApiKey:'ant-key',model:'anthropic:claude-haiku-5-5',fallbackModel:'',...extra}});
+
+test('Claude models call the Anthropic Messages API directly with their own key',async()=>{
+  const f=fixture(claudeSettings(),async()=>claudeAnswer('안녕하세요 [[LINK_0]]'));
+  const settings=await f.handle({type:'translation:settings'});
+  assert.equal(settings.provider,'anthropic'); assert.equal(settings.hasApiKey,true);
+  assert.equal(settings.hasOpenRouterKey,true); assert.equal(settings.hasAnthropicKey,true);
+  assert.equal(JSON.stringify(settings).includes('ant-key'),false);
+  const result=await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'});
+  assert.equal(result.ok,true); assert.equal(result.text,'안녕하세요 [[LINK_0]]');
+  const call=f.calls[0];
+  assert.equal(call.url,'https://api.anthropic.com/v1/messages');
+  assert.equal(call.init.headers['x-api-key'],'ant-key'); assert.equal(call.init.headers['anthropic-version'],'2023-06-01');
+  assert.equal(call.init.headers.authorization,undefined);
+  const body=JSON.parse(call.init.body);
+  assert.equal(body.model,'claude-haiku-5-5'); assert.match(body.system,/natural Korean/);
+  assert.deepEqual(body.messages,[{role:'user',content:'Hello [[LINK_0]]'}]);
+  assert.deepEqual(body.thinking,{type:'disabled'});
+  for (const field of ['temperature','reasoning','provider','response_format']) assert.equal(field in body,false);
+});
+
+test('Claude batches use structured output and Sonnet runs at low effort',async()=>{
+  const f=fixture(claudeSettings({model:'anthropic:claude-sonnet-5-5'}),async()=>claudeAnswer(JSON.stringify({translations:[{id:'a',text:'안녕'},{id:'b',text:'좋은 아침'}]})));
+  const result=await f.handle({type:'translation:request-batch',items:[{id:'a',text:'Hello'},{id:'b',text:'Good morning'}]});
+  assert.equal(result.ok,true); assert.deepEqual(result.items.map(item=>item.text),['안녕','좋은 아침']);
+  const body=JSON.parse(f.calls[0].init.body);
+  assert.equal(body.model,'claude-sonnet-5-5'); assert.equal('thinking' in body,false);
+  assert.equal(body.output_config.effort,'low'); assert.equal(body.output_config.format.type,'json_schema');
+  assert.deepEqual(body.output_config.format.schema.required,['translations']);
+});
+
+test('a missing Anthropic key stops Claude without calling it, and a Claude cut-off is not cached',async()=>{
+  const missing=fixture(claudeSettings({anthropicApiKey:''}));
+  assert.equal((await missing.handle({type:'translation:settings'})).hasApiKey,false);
+  assert.equal((await missing.handle({type:'translation:request',text:'Hello'})).code,'api_key_missing');
+  assert.equal(missing.calls.length,0);
+  const cut=fixture(claudeSettings(),async()=>claudeAnswer('안녕하','max_tokens'));
+  const cutResult=await cut.handle({type:'translation:request',text:'Hello'});
+  assert.equal(cutResult.ok,false); assert.equal(cutResult.code,'invalid_translation');
+});
+
+test('a Claude main model can fall back to an OpenRouter sub model with its key',async()=>{
+  const f=fixture(claudeSettings({fallbackModel:'google/gemini-3.1-flash-lite'}),async url=>url.includes('anthropic')
+    ? {ok:false,status:529,headers:{get:()=>null}}
+    : {ok:true,json:async()=>({choices:[{message:{content:'번역됨'}}]})});
+  const result=await f.handle({type:'translation:request',text:'Hello'});
+  assert.equal(result.ok,true); assert.equal(result.text,'번역됨');
+  assert.deepEqual(f.calls.map(call=>call.url),['https://api.anthropic.com/v1/messages','https://openrouter.ai/api/v1/chat/completions']);
+  assert.equal(f.calls[1].init.headers.authorization,'Bearer or-key');
+});
+
+test('saving an Anthropic key keeps the OpenRouter key',async()=>{
+  const f=fixture(legacy);
+  await f.handle({type:'translation:update',anthropicApiKey:'  new-ant  '});
+  const stored=f.memory['lakomics:translation:v1'];
+  assert.equal(stored.anthropicApiKey,'new-ant'); assert.equal(stored.apiKey,'fixture-key');
+});
+
+test('a sub model without its key never hides the main model failure',async()=>{
+  const f=fixture(claudeSettings({anthropicApiKey:'',model:'google/gemini-3.1-flash-lite',fallbackModel:'anthropic:claude-haiku-5-5'}),
+    async()=>({ok:false,status:503,headers:{get:()=>null}}));
+  const result=await f.handle({type:'translation:request',text:'Hello'});
+  assert.equal(result.ok,false); assert.equal(result.code,'http_503');
+  assert.equal(f.calls.every(call=>call.url.includes('openrouter')),true);
+});

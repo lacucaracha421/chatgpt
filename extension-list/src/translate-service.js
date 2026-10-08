@@ -9,7 +9,12 @@
     { id: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", reasoning: { enabled: false } },
     { id: "google/gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite", reasoning: { effort: "minimal" } },
     { id: "google/gemma-4-26b-a4b-it", label: "Gemma 4 26B A4B", reasoning: { enabled: false } },
+    // Claude goes to the Anthropic API directly with its own key. Haiku 5.5 can turn thinking
+    // off; Sonnet 5.5 cannot, so it runs at the lowest effort. Neither accepts sampling values.
+    { id: "anthropic:claude-haiku-5-5", label: "Claude Haiku 5.5 (Anthropic)", provider: "anthropic", thinking: { type: "disabled" } },
+    { id: "anthropic:claude-sonnet-5-5", label: "Claude Sonnet 5.5 (Anthropic)", provider: "anthropic", effort: "low" },
   ]);
+  const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
   const MODEL_BY_ID = new Map(MODELS.map(model => [model.id, model]));
   const DEFAULT_MODEL = MODELS[0].id, DEFAULT_FALLBACK = "google/gemma-4-26b-a4b-it";
   const MAX_CONCURRENT = 2;
@@ -31,6 +36,7 @@
       const current = stored[SETTINGS] || {};
       settings = {
         apiKey: typeof current.apiKey === "string" ? current.apiKey.trim() : String(legacy.openrouterApiKey || "").trim(),
+        anthropicApiKey: typeof current.anthropicApiKey === "string" ? current.anthropicApiKey.trim() : "",
         enabled: typeof current.enabled === "boolean" ? current.enabled : stored.xTranslateEnabled !== false && legacy.autoTranslate === true,
         model: MODEL_BY_ID.has(current.model) ? current.model : DEFAULT_MODEL,
       };
@@ -43,10 +49,30 @@
   }
   // The sub model answers when the main model fails; "" turns it off.
   function validFallback(value, model) { return MODEL_BY_ID.has(value) && value !== model ? value : ""; }
+  function isAnthropic(model) { return MODEL_BY_ID.get(model)?.provider === "anthropic"; }
+  function keyFor(model) { return isAnthropic(model) ? settings.anthropicApiKey : settings.apiKey; }
   function publicSettings() {
     const model = MODEL_BY_ID.get(settings.model) || MODEL_BY_ID.get(DEFAULT_MODEL);
-    return { enabled: settings.enabled === true, hasApiKey: Boolean(settings.apiKey), model: model.id, modelLabel: model.label,
+    return { enabled: settings.enabled === true, hasApiKey: Boolean(keyFor(model.id)), model: model.id, modelLabel: model.label,
+      provider: isAnthropic(model.id) ? "anthropic" : "openrouter",
+      hasOpenRouterKey: Boolean(settings.apiKey), hasAnthropicKey: Boolean(settings.anthropicApiKey),
       fallbackModel: settings.fallbackModel, models: MODELS.map(({ id, label }) => ({ id, label })) };
+  }
+  // The OpenRouter-shaped body as an Anthropic Messages request: system text apart, no
+  // sampling or OpenRouter routing fields, and the batch JSON Schema as structured output.
+  function anthropicBody(body, model) {
+    const meta = MODEL_BY_ID.get(model);
+    const system = body.messages.filter(item => item.role === "system").map(item => item.content).join("\n\n");
+    const schema = body.response_format?.json_schema?.schema;
+    const outputConfig = { ...(meta.effort ? { effort: meta.effort } : {}), ...(schema ? { format: { type: "json_schema", schema } } : {}) };
+    return { model: model.slice("anthropic:".length), max_tokens: body.max_tokens, ...(system ? { system } : {}),
+      messages: body.messages.filter(item => item.role !== "system"),
+      ...(meta.thinking ? { thinking: meta.thinking } : {}), ...(Object.keys(outputConfig).length ? { output_config: outputConfig } : {}) };
+  }
+  // Anthropic's answer in the chat-completions shape the rest of this file reads.
+  function asChatCompletion(data) {
+    const text = (Array.isArray(data?.content) ? data.content : []).filter(block => block?.type === "text").map(block => block.text).join("");
+    return { choices: [{ message: { content: text }, finish_reason: data?.stop_reason === "max_tokens" ? "length" : data?.stop_reason }] };
   }
   function invalidate() {
     generation += 1;
@@ -96,18 +122,30 @@
       const model = chain[attempt], sameModelNext = chain[attempt + 1] === model;
       if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };
       if (!await awaitCooldown(model, epoch)) return { ok: false, code: "disabled" };
+      // A sub model without a saved key is skipped; it never hides the main model's failure.
+      if (!keyFor(model)) {
+        if (attempt === 0) last = { ok: false, code: "api_key_missing" };
+        continue;
+      }
+      const anthropic = isAnthropic(model);
       const controller = new AbortController();
       activeControllers.add(controller);
       let timedOut = false;
       const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
       try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        const response = await fetch(anthropic ? ANTHROPIC_URL : "https://openrouter.ai/api/v1/chat/completions", {
           method: "POST", credentials: "omit", redirect: "error", signal: controller.signal,
-          headers: { "content-type": "application/json", authorization: `Bearer ${settings.apiKey}` },
-          body: JSON.stringify(makeBody(model)),
+          headers: anthropic
+            ? { "content-type": "application/json", "x-api-key": settings.anthropicApiKey, "anthropic-version": "2023-06-01",
+              "anthropic-dangerous-direct-browser-access": "true" }
+            : { "content-type": "application/json", authorization: `Bearer ${settings.apiKey}` },
+          body: JSON.stringify(anthropic ? anthropicBody(makeBody(model), model) : makeBody(model)),
         });
         if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };
-        if (response.ok) return { ok: true, data: await response.json(), model };
+        if (response.ok) {
+          const data = await response.json();
+          return { ok: true, data: anthropic ? asChatCompletion(data) : data, model };
+        }
         const code = `http_${response.status}`;
         if ([401, 402, 403].includes(response.status)) return { ok: false, code };
         if (response.status === 429) {
@@ -167,7 +205,7 @@
   }
   async function translateSingle(text, epoch, preferFallback = false) {
     if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };
-    if (!settings.apiKey) return { ok: false, code: "api_key_missing" };
+    if (!keyFor(settings.model)) return { ok: false, code: "api_key_missing" };
     if (typeof text !== "string" || !text.trim() || text.length > 12000) return { ok: false, code: "invalid_text" };
     if (cache.has(text)) return translatedResult(cache.get(text));
     const messages = [
@@ -216,7 +254,7 @@
   }
   async function translateBatch(items, epoch) {
     if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };
-    if (!settings.apiKey) return { ok: false, code: "api_key_missing" };
+    if (!keyFor(settings.model)) return { ok: false, code: "api_key_missing" };
     if (!Array.isArray(items) || items.length < 1 || items.length > MAX_BATCH_ITEMS) return { ok: false, code: "invalid_batch" };
     const ids = new Set(); let chars = 0;
     for (const item of items) {
@@ -266,6 +304,7 @@
       invalidate();
       settings = {
         apiKey: typeof message.apiKey === "string" ? message.apiKey.trim() : settings.apiKey,
+        anthropicApiKey: typeof message.anthropicApiKey === "string" ? message.anthropicApiKey.trim() : settings.anthropicApiKey,
         enabled: typeof message.enabled === "boolean" ? message.enabled : settings.enabled,
         model: nextModel,
         fallbackModel: validFallback(Object.hasOwn(message, "fallbackModel") ? message.fallbackModel : settings.fallbackModel, nextModel),

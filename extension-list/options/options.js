@@ -128,7 +128,8 @@
     // The sub model answers when the main model fails or times out; it cannot equal the main model.
     $("translation-fallback").replaceChildren(new Option("사용 안 함", ""), ...(result.models || []).filter(model => model.id !== result.model).map(model => new Option(model.label, model.id)));
     $("translation-fallback").value = result.fallbackModel || "";
-    $("translation-key").placeholder = result.hasApiKey ? "API 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
+    $("translation-key").placeholder = result.hasOpenRouterKey ? "OpenRouter 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
+    $("translation-anthropic-key").placeholder = result.hasAnthropicKey ? "Anthropic 키 저장됨 · 변경할 키 입력" : "Anthropic API 키 (Claude 모델용)";
   }
   $("translation-model").onchange = async () => {
     const result = await send({ type: "translation:update", model: $("translation-model").value });
@@ -148,6 +149,13 @@
     event.preventDefault();
     const result = await send({ type: "translation:update", apiKey: $("translation-key").value });
     $("translation-key").value = "";
+    $("translation-status").textContent = result?.ok ? "저장됨" : "API 키 저장 실패";
+    await translationSettings();
+  };
+  $("translation-anthropic-key-form").onsubmit = async event => {
+    event.preventDefault();
+    const result = await send({ type: "translation:update", anthropicApiKey: $("translation-anthropic-key").value });
+    $("translation-anthropic-key").value = "";
     $("translation-status").textContent = result?.ok ? "저장됨" : "API 키 저장 실패";
     await translationSettings();
   };

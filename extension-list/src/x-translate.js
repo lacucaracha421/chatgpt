@@ -201,8 +201,8 @@
   }
   function failure(code, retryable = false) {
     if (code === "http_401" || code === "api_key_missing") return "번역 API 키를 확인하세요";
-    if (code === "http_402") return "OpenRouter 잔액을 확인하세요";
-    if (code === "http_403") return "OpenRouter API 접근 권한을 확인하세요";
+    if (code === "http_402") return "번역 API 잔액을 확인하세요";
+    if (code === "http_403") return "번역 API 접근 권한을 확인하세요";
     if (code === "http_429") return "번역 요청 한도 · 잠시 후 자동 재시도";
     if (isTransientFailure(code)) return "번역 연결 실패 · 다시 보이면 재시도";
     return retryable ? "번역 실패 · 다시 보이면 재시도" : "번역 실패 · 자동 번역을 껐다 켜면 재시도";
@@ -460,7 +460,7 @@
     blocked = false;
     ui.toggle.checked = enabled;
     if (settings.modelLabel) ui.model.textContent = settings.modelLabel;
-    setNotice(hasApiKey ? "" : "설정에서 OpenRouter API 키를 입력하세요", hasApiKey ? "" : "error");
+    setNotice(hasApiKey ? "" : `설정에서 ${settings.provider === "anthropic" ? "Anthropic" : "OpenRouter"} API 키를 입력하세요`, hasApiKey ? "" : "error");
     if (enabled && hasApiKey) scan(true);
     else updateControlState();
   }
