@@ -52,7 +52,10 @@ export type PortraitRect = { x: number; y: number; w: number; h: number };
 export type AvStashdbPreview = { dataUrl: string; width: number; height: number; sourceUrl: string };
 export type AvProfileImage = { id: string; url: string; width: number; height: number };
 export type AvProfileCandidate = { stashdbId: string; name: string; aliases: string[]; birthDate: string | null; imageUrl: string | null };
+export type AvStashdbStatus = { configured: boolean; routed?: boolean; supported?: boolean };
 export type AvPerformerProfile = {
+  pending?: boolean;
+  syncIssue?: boolean;
   personId: string; source: "stashdb"; status: "matched" | "none" | "ambiguous";
   stashdbId: string | null; name: string | null; aliases: string[]; birthDate: string | null;
   heightCm: number | null; bandIn: number | null; waistIn: number | null; hipIn: number | null;
@@ -62,7 +65,10 @@ export type AvPerformerProfile = {
   candidates: AvProfileCandidate[]; fetchedAt: string;
 };
 export interface AvGateway {
-  getStashdbCredentialStatus(): Promise<{ configured: boolean }>;
+  getStashdbCredentialStatus(): Promise<AvStashdbStatus>;
+  getStashdbProfileDetail(personId: string): Promise<AvPerformerProfile | null>;
+  previewStashdbImage(url: string): Promise<string>;
+  subscribeProfilesChanged?(handler: () => void): () => void;
   getPerformerProfile(personId: string): Promise<AvPerformerProfile | null>;
   refreshPerformerProfile(personId: string, force: boolean): Promise<AvPerformerProfile | null>;
   searchPerformerProfile(personId: string): Promise<AvPerformerProfile>;

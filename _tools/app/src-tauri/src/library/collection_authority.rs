@@ -43,6 +43,7 @@ const COMMANDS: &[&str] = &[
     "setAvCredits",
     "setPerson",
     "setPersonPortrait",
+    "setPersonProfile",
 ];
 
 include!("collection_authority_people.rs");
@@ -274,7 +275,7 @@ pub(crate) struct CollectionTrashPage {
 
 fn pending_restore(db: &Connection, work: &str, revision: i64) -> Result<bool, LibraryError> {
     Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM collection_authority_outbox o JOIN collection_authority_sync s ON s.singleton=1 AND o.library_id=s.library_id AND o.epoch=s.epoch AND o.contract_version=s.contract_version WHERE o.command_type='restoreWork' AND json_extract(o.payload,'$.workId')=?1 AND (o.state IN ('pending','blocked') OR (o.state='accepted' AND json_extract(o.payload,'$.expectedRevision')=?2)))",
+        "SELECT EXISTS(SELECT 1 FROM collection_authority_outbox o JOIN collection_authority_sync s ON s.singleton=1 AND o.library_id=s.library_id AND o.epoch=s.epoch AND o.contract_version=s.contract_version WHERE o.command_type='restoreWork' AND json_extract(o.payload,'$.workId')=?1 AND (o.state IN ('pending','blocked') OR (o.state='accepted' AND json_extract(o.payload,'$.expectedRevision')>=?2)))",
         params![work, revision], |row| row.get(0),
     )?)
 }
@@ -406,12 +407,17 @@ impl Library {
             return Err(LibraryError::CollectionAuthorityMismatch);
         }
         if !pending_restore(&tx, work, revision)? {
+            // The trash list supplies a confirmed revision. Earlier queued person
+            // edits also republish trashed works, so include their FIFO bumps.
+            let confirmed: i64 = tx.query_row("SELECT entity_revision FROM collection_authority_revisions WHERE section='works' AND entity_key=?1", [json!([work]).to_string()], |r| r.get(0)).optional()?.unwrap_or(0);
+            let predicted = predicted_collection_revision(&tx, "works", &json!([work]).to_string())?;
+            let expected_revision = revision + (predicted - confirmed);
             enqueue_collection_command(
                 &tx,
                 &status,
                 "restoreWork",
                 work,
-                json!({"workId":work,"expectedRevision":revision}),
+                json!({"workId":work,"expectedRevision":expected_revision}),
             )?;
         }
         // Keep the work in trash until the authority's receipt/change projects it.
@@ -1500,14 +1506,27 @@ pub(crate) fn predicted_collection_revision(
                 _ => {}
             }
         } else if section == "works"
-            && matches!(command, "setPerson" | "setPersonPortrait")
+            && matches!(
+                command,
+                "setPerson" | "setPersonPortrait" | "setPersonProfile"
+            )
             && state["avCredits"]
                 .as_array()
                 .is_some_and(|c| c.iter().any(|c| c["personId"] == body["personId"]))
         {
-            // The server republishes every work crediting a changed person. Person
-            // commands are queued only for a predicted change.
-            predicted += 1;
+            let changed = if command == "setPersonProfile" {
+                let mut person = predicted_person_before(
+                    db,
+                    text(&body, "personId")?,
+                    Some(text(&body, "operationId")?),
+                )?;
+                predict_person_profile(db, &mut person, &body)?
+            } else {
+                true
+            };
+            if changed {
+                predicted += 1;
+            }
         } else if section == "works"
             && matches!(command, "setAvDetails" | "setAvCredits")
             && key("works", &body)? == entity_key
@@ -2657,6 +2676,7 @@ fn core_command(command: &str) -> bool {
 /// A receipt confirms earlier commands, but must not erase newer optimistic core
 /// edits while their immutable payloads wait for delivery. Never change revision caches.
 fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> {
+    prune_profile_predictions(tx)?;
     let rows=tx.prepare("SELECT payload,created_at FROM collection_authority_outbox WHERE state='pending' ORDER BY seq")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
     for (raw, created_at) in rows {
         let body: Value =
@@ -3085,6 +3105,21 @@ impl Library {
         if blob.size_bytes > 16 * 1024 * 1024 {
             return Err(LibraryError::InvalidWorkArtwork);
         }
+        // Relay preparation already confirmed this blob on the server. The marker is
+        // local upload bookkeeping, never a field in the immutable command payload.
+        if is_portrait
+            && self.connection()?.query_row(
+                "SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?1)",
+                [relay_portrait_marker(
+                    &body["libraryId"],
+                    &body["epoch"],
+                    &blob.sha256,
+                )],
+                |r| r.get::<_, bool>(0),
+            )?
+        {
+            return Ok(());
+        }
         let mut bytes = Vec::new();
         if is_portrait {
             bytes = self.connection()?.query_row(
@@ -3178,6 +3213,7 @@ impl Library {
             return Ok(false);
         }
         ensure_collection_write_ready(&*self.connection()?, status)?;
+        prune_profile_predictions(&*self.connection()?)?;
         let mut sent = false;
         for _ in 0..50 {
             let row=self.connection()?.query_row("SELECT seq,payload,attempts,retry_at,state FROM collection_authority_outbox WHERE state IN ('pending','blocked') ORDER BY seq LIMIT 1",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?))).optional()?;
@@ -3255,6 +3291,12 @@ impl Library {
                         || receipt["authorityCursor"].as_i64().is_none()
                     {
                         return Err(LibraryError::InvalidCloudResponse);
+                    }
+                    if body["commandType"] == "setPersonProfile" {
+                        tx.execute(
+                            "DELETE FROM notes_state WHERE key=?1",
+                            [profile_prediction_key(text(&body, "operationId")?)],
+                        )?;
                     }
                     // Apply confirmed states but do not jump the feed cursor: unrelated
                     // remote rows before this receipt still have to be received.

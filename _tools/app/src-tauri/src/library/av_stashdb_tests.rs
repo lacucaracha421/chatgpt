@@ -323,3 +323,336 @@ fn av_stashdb_preview_cannot_survive_profile_change_or_discard() {
         Err(AvError::Stale)
     ));
 }
+
+struct RelayFake<'a> {
+    lib: &'a Library,
+    status: Value,
+    replies: RefCell<Vec<(u16, Value)>>,
+    calls: RefCell<Vec<(String, Option<Value>)>>,
+    image: Vec<u8>,
+    during: Option<Box<dyn Fn() + 'a>>,
+}
+impl StashdbRelay for RelayFake<'_> {
+    fn request(&self, path: &str, body: Option<&Value>, _: usize) -> Result<HttpResponse, AvError> {
+        self.lib
+            .connection()
+            .unwrap()
+            .query_row("SELECT 1", [], |_| Ok(()))
+            .unwrap();
+        self.calls.borrow_mut().push((path.into(), body.cloned()));
+        if let Some(during) = &self.during {
+            during();
+        }
+        let (status, bytes) = if path == "/v1/providers/status" {
+            (200, serde_json::to_vec(&self.status).unwrap())
+        } else if path.starts_with("/v1/providers/stashdb/image?") {
+            (200, self.image.clone())
+        } else {
+            let (status, value) = self.replies.borrow_mut().remove(0);
+            (status, serde_json::to_vec(&value).unwrap())
+        };
+        Ok(HttpResponse {
+            status,
+            bytes,
+            content_type: Some("image/jpeg".into()),
+        })
+    }
+}
+fn relay_profile(id: &str) -> Value {
+    let performer: Performer =
+        serde_json::from_value(performer(id, "日本名", json!([]), Value::Null)).unwrap();
+    let mut value = serde_json::to_value(performer.validate().unwrap().matched("p")).unwrap();
+    value["images"] = json!([{"id":"photo","url":format!("/v1/providers/stashdb/image?stashdbId={id}&imageId=photo"),"width":2,"height":3}]);
+    value["imageUrl"] = value["images"][0]["url"].clone();
+    value
+}
+fn active_setup() -> (tempfile::TempDir, Library) {
+    use crate::library::collection_authority::tests::{adopt, fixture, work};
+    let (dir, lib, status) = fixture();
+    let mut work = work("av", 1);
+    work["type"] = json!("av");
+    work["details"]["av"] = json!({"genres":[]});
+    work["avPeople"] = json!([{"personId":"p","displayName":"Name","nameJa":"日本名","entityRevision":1,"memo":null,"favorite":false,"stashdbId":null,"profile":null,"portraitSelection":null}]);
+    work["avCredits"] = json!([{"personId":"p","name":"Name","nameJa":"日本名","role":"performer","order":0,"creditName":null,"portraitCrop":null}]);
+    adopt(&lib, &status, json!({"works":[work]}));
+    (dir, lib)
+}
+fn relay_fake(lib: &Library, replies: Vec<(u16, Value)>) -> RelayFake<'_> {
+    RelayFake {
+        lib,
+        status: json!({"stashdb":true}),
+        replies: RefCell::new(replies),
+        calls: RefCell::new(vec![]),
+        image: vec![],
+        during: None,
+    }
+}
+#[test]
+fn av_stashdb_relay_search_choose_refresh_clear_and_local_dismiss() {
+    use crate::library::collection_authority::tests::provider_commands;
+    let (_dir, lib) = active_setup();
+    let state = AvProfileState::default();
+    assert!(lib.stashdb_routed().unwrap());
+    let relay = relay_fake(
+        &lib,
+        vec![
+            (
+                200,
+                json!({"items":[relay_profile("one")],"status":"matched","matchedId":"one"}),
+            ),
+            (200, relay_profile("one")),
+        ],
+    );
+    let found = lib
+        .search_av_performer_profile_relay_with("p", &relay)
+        .unwrap();
+    assert_eq!(found.candidates[0].stashdb_id, "one");
+    assert!(lib.get_av_performer_profile("p").unwrap().is_none());
+    let pending = lib
+        .queue_av_performer_profile_relay_with("p", Some("one"), &state, &relay)
+        .unwrap();
+    assert!(pending.pending);
+    assert!(pending.stashdb_id.is_none());
+    let before = provider_commands(&lib);
+    assert_eq!(before[0]["stashdbId"], "one");
+    assert_eq!(before[0]["expectedRevision"], 1);
+    assert!(before[0].get("profile").is_none());
+    lib.dismiss_av_performer_profile_routed("p", &state)
+        .unwrap();
+    assert_eq!(provider_commands(&lib), before);
+    assert!(
+        lib.refresh_av_performer_profile_relay_with("p", false, &state, &relay)
+            .unwrap()
+            .unwrap()
+            .pending
+    );
+    assert!(matches!(
+        lib.refresh_av_performer_profile_relay_with("p", true, &state, &relay),
+        Err(AvError::StashdbRelay("av_stashdb_identity_required", _))
+    ));
+    lib.queue_av_performer_profile_relay_with("p", None, &state, &relay)
+        .unwrap();
+    let bodies = provider_commands(&lib);
+    assert_eq!(bodies[1]["stashdbId"], Value::Null);
+    assert_eq!(bodies[1]["expectedRevision"], 2);
+    assert!(relay
+        .calls
+        .borrow()
+        .iter()
+        .all(|(path, _)| path.starts_with("/v1/providers/")));
+    let (_dir, inactive) = setup();
+    assert!(!inactive.stashdb_routed().unwrap());
+}
+#[test]
+fn av_stashdb_relay_old_server_and_not_configured_leave_everything_unchanged() {
+    use crate::library::collection_authority::tests::provider_commands;
+    let (_dir, lib) = active_setup();
+    let state = AvProfileState::default();
+    let mut relay = relay_fake(&lib, vec![]);
+    relay.status = json!({"tmdb":true});
+    assert!(!lib.stashdb_status_with(&relay).unwrap().supported);
+    assert!(matches!(
+        lib.queue_av_performer_profile_relay_with("p", None, &state, &relay),
+        Err(AvError::StashdbRelay("av_stashdb_unsupported", _))
+    ));
+    relay.status = json!({"stashdb":false});
+    assert!(matches!(
+        lib.search_av_performer_profile_relay_with("p", &relay),
+        Err(AvError::StashdbRelay("av_stashdb_not_configured", _))
+    ));
+    relay.status = json!({"stashdb":true});
+    relay
+        .replies
+        .borrow_mut()
+        .push((404, json!({"detail":"Not Found"})));
+    assert!(matches!(
+        lib.queue_av_performer_profile_relay_with("p", Some("one"), &state, &relay),
+        Err(AvError::StashdbRelay("av_stashdb_unsupported", _))
+    ));
+    assert!(provider_commands(&lib).is_empty());
+    assert!(lib.get_av_performer_profile("p").unwrap().is_none());
+    for path in [
+        "https://stashdb.org/images/photo",
+        "//evil.invalid/v1/providers/stashdb/image?stashdbId=x&imageId=y",
+        "/v1/providers/stashdb/image?stashdbId=one&imageId=..%2Fsecret",
+        "/v1/providers/stashdb/image?stashdbId=one&imageId=photo&extra=x",
+    ] {
+        assert!(relay_image_path(path).is_err());
+    }
+}
+#[test]
+fn av_stashdb_relay_http_uses_client_auth_status_and_redacts_errors() {
+    let (client, requests) = CloudClient::home_test_client(vec![
+        json!({"stashdb":true}),
+        relay_profile("one"),
+        json!({"prepared":true}),
+        json!({"tmdb":true}),
+    ]);
+    let relay = (client, "client-token".into());
+    assert!(relay_status(&relay).unwrap().configured);
+    assert_eq!(
+        relay_detail(&relay, "p", "one")
+            .unwrap()
+            .stashdb_id
+            .as_deref(),
+        Some("one")
+    );
+    relay_json(
+        &relay,
+        "/v1/providers/stashdb/portrait",
+        Some(&json!({"stashdbId":"one","imageId":"photo"})),
+    )
+    .unwrap();
+    assert!(!relay_status(&relay).unwrap().supported);
+    let requests = requests.lock().unwrap();
+    for request in requests.iter() {
+        let wire = String::from_utf8_lossy(request).to_ascii_lowercase();
+        assert!(wire.contains("authorization: bearer client-token"));
+        assert!(!wire.contains("apikey"));
+        assert!(!wire.contains("stashdb.org"));
+    }
+    assert!(String::from_utf8_lossy(&requests[0]).starts_with("GET /v1/providers/status "));
+    assert!(
+        String::from_utf8_lossy(&requests[2]).starts_with("POST /v1/providers/stashdb/portrait ")
+    );
+    let error = relay_response(HttpResponse {
+        status: 503,
+        bytes: json!({"detail":{"code":"providerNotConfigured","message":"secret-key"}})
+            .to_string()
+            .into_bytes(),
+        content_type: None,
+    })
+    .err()
+    .unwrap();
+    assert!(matches!(
+        error,
+        AvError::StashdbRelay("av_stashdb_not_configured", _)
+    ));
+    assert!(!format!("{error:?}").contains("secret-key"));
+}
+
+#[test]
+fn av_stashdb_relay_portrait_prepares_manifest_preserves_optimistic_bytes_and_stale_guard() {
+    use crate::library::collection_authority::tests::provider_commands;
+    let (_dir, lib) = active_setup();
+    let portraits = AvPortraitState::default();
+    lib.connection().unwrap().execute("UPDATE collection_authority_people_cache SET payload=json_set(payload,'$.stashdbId','one') WHERE person_id='p'",[]).unwrap();
+    lib.connection().unwrap().execute("INSERT INTO collection_person_profiles(person_id,source,status,stashdb_id,name,fetched_at) VALUES('p','stashdb','matched','one','Name','now')",[]).unwrap();
+    let manifest = json!({"original":{"sha256":"a".repeat(64),"sizeBytes":42,"contentType":"image/jpeg"},"width":2,"height":3,"attribution":{"source":"stashdb","sourceUrl":"https://stashdb.org/images/photo","license":null,"author":null}});
+    let mut relay = relay_fake(
+        &lib,
+        vec![
+            (200, relay_profile("one")),
+            (200, manifest.clone()),
+            (200, relay_profile("one")),
+            (200, manifest.clone()),
+        ],
+    );
+    let mut image = Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 3)
+        .write_to(&mut image, image::ImageFormat::Png)
+        .unwrap();
+    relay.image = image.into_inner();
+    let preview = lib
+        .preview_av_stashdb_portrait_relay_with("p", "photo", &portraits, &relay)
+        .unwrap();
+    assert_eq!((preview.width, preview.height), (2, 3));
+    assert!(matches!(
+        lib.use_av_stashdb_portrait_relay_with("p", &portraits, &relay)
+            .unwrap(),
+        AvPortrait::Stashdb { .. }
+    ));
+    let command = provider_commands(&lib).pop().unwrap();
+    assert_eq!(command["commandType"], "setPersonPortrait");
+    assert_eq!(command["portrait"]["original"], manifest["original"]);
+    assert_eq!(command["expectedRevision"], 1);
+    assert_eq!(
+        lib.connection()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM collection_authority_portrait_blobs WHERE sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert!(lib.get_av_performer("p").unwrap().person.portrait.is_some());
+    let post = relay
+        .calls
+        .borrow()
+        .iter()
+        .find(|(p, _)| p == "/v1/providers/stashdb/portrait")
+        .unwrap()
+        .1
+        .clone()
+        .unwrap();
+    assert_eq!(post, json!({"stashdbId":"one","imageId":"photo"}));
+    lib.preview_av_stashdb_portrait_relay_with("p", "photo", &portraits, &relay)
+        .unwrap();
+    relay.during = Some(Box::new(|| portraits.discard(&lib, "p")));
+    assert!(matches!(
+        lib.use_av_stashdb_portrait_relay_with("p", &portraits, &relay),
+        Err(AvError::Stale)
+    ));
+    assert_eq!(provider_commands(&lib).len(), 1);
+}
+
+impl StashdbRelay for (CloudClient, String) {
+    fn request(
+        &self,
+        path: &str,
+        body: Option<&Value>,
+        limit: usize,
+    ) -> Result<HttpResponse, AvError> {
+        Ok(self.0.stashdb_relay_request(path, body, &self.1, limit)?)
+    }
+}
+
+#[test]
+fn av_stashdb_active_cached_provider_urls_never_become_automatic_portraits() {
+    let (_dir, lib) = active_setup();
+    lib.connection().unwrap().execute("INSERT INTO collection_person_profiles(person_id,source,status,stashdb_id,name,images_json,fetched_at) VALUES('p','stashdb','matched','one','Name',?1,'now')",[relay_profile("one")["images"].to_string().replace("/v1/providers/stashdb/image?stashdbId=one&imageId=photo","https://stashdb.org/images/photo")]).unwrap();
+    let profile = lib.get_av_performer_profile("p").unwrap().unwrap();
+    assert!(profile.images.is_empty());
+    assert_eq!(profile.stashdb_id.as_deref(), Some("one"));
+    assert!(lib.get_av_performer("p").unwrap().person.portrait.is_none());
+}
+
+#[test]
+fn av_stashdb_relay_refresh_uses_saved_identity_and_clear_works_without_server_key() {
+    use crate::library::collection_authority::tests::provider_commands;
+    let (_dir, library) = active_setup();
+    library.connection().unwrap().execute("UPDATE collection_authority_people_cache SET payload=json_set(payload,'$.stashdbId','one') WHERE person_id='p'",[]).unwrap();
+    library.connection().unwrap().execute("INSERT INTO collection_person_profiles(person_id,source,status,stashdb_id,name,fetched_at) VALUES('p','stashdb','matched','one','Name','now')",[]).unwrap();
+    let state = AvProfileState::default();
+    let mut relay = relay_fake(&library, vec![(200, relay_profile("one"))]);
+    library
+        .refresh_av_performer_profile_relay_with("p", false, &state, &relay)
+        .unwrap();
+    assert!(relay.calls.borrow().is_empty());
+    let result = library
+        .refresh_av_performer_profile_relay_with("p", true, &state, &relay)
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.stashdb_id.as_deref(), Some("one"));
+    assert!(result.pending);
+    relay.status = json!({"stashdb":false});
+    library
+        .queue_av_performer_profile_relay_with("p", None, &state, &relay)
+        .unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(commands[0]["stashdbId"], "one");
+    assert_eq!(commands[1]["stashdbId"], Value::Null);
+    assert_eq!(commands[1]["expectedRevision"], 2);
+    assert_ne!(commands[0]["operationId"], commands[1]["operationId"]);
+    assert_eq!(
+        library
+            .get_av_performer_profile("p")
+            .unwrap()
+            .unwrap()
+            .stashdb_id
+            .as_deref(),
+        Some("one")
+    );
+}

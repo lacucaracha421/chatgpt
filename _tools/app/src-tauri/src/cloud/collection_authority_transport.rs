@@ -217,3 +217,53 @@ mod tests {
         }
     }
 }
+
+impl CloudClient {
+    /// Provider reads share the API origin and credentials. Never follow redirects.
+    pub(crate) fn stashdb_relay_request(
+        &self,
+        path: &str,
+        body: Option<&Value>,
+        token: &str,
+        limit: usize,
+    ) -> Result<crate::library::av_link::provider::HttpResponse, LibraryError> {
+        if path != "/v1/providers/status" && !path.starts_with("/v1/providers/stashdb/") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let agent = self.coded_agent()?;
+        let endpoint = self.endpoint(path)?;
+        let mut response = if let Some(body) = body {
+            agent
+                .post(endpoint)
+                .header("Authorization", bearer(token)?)
+                .send_json(body)
+        } else {
+            agent
+                .get(endpoint)
+                .header("Authorization", bearer(token)?)
+                .call()
+        }
+        .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_owned);
+        let mut bytes = Vec::new();
+        response
+            .body_mut()
+            .as_reader()
+            .take(limit as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        if bytes.len() > limit {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(crate::library::av_link::provider::HttpResponse {
+            status,
+            bytes,
+            content_type,
+        })
+    }
+}

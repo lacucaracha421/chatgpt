@@ -18,7 +18,7 @@ function gateway(overrides: Partial<AvGateway> = {}): AvGateway {
 function panel(api: AvGateway, personId = "p", privacy = false) {
   return <PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()}><AvPerformerProfile personId={personId} api={api} /></PrivacyProvider>;
 }
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
+function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((r, fail) => { resolve = r; reject = fail; }); return { promise, resolve, reject }; }
 
 it("renders birthday age, centimetres, natural breasts and career; omits missing fields", () => {
   const { rerender } = render(<ProfileRows profile={profile()} today={new Date(2026, 8, 28)} />);
@@ -151,4 +151,137 @@ it("keeps refresh, identity selection and settings reachable in the compact prof
   await user.click(screen.getByRole("menuitem", { name: "다른 사람으로 바꾸기" }));
   expect(await screen.findByRole("dialog", { name: "StashDB 배우 고르기" })).toBeVisible();
   expect(api.searchPerformerProfile).toHaveBeenCalledWith("p");
+});
+
+it("keeps cached rows and shows server key state without PC settings when routed", async () => {
+  const settings=vi.fn();const api=gateway({ getStashdbCredentialStatus:vi.fn().mockResolvedValue({configured:false,routed:true,supported:true}) });
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerProfile personId="p" api={api} onOpenSettings={settings}/></PrivacyProvider>);
+  expect(await screen.findByText("서버에 StashDB 키가 설정되지 않았습니다.")).toBeVisible();expect(screen.getByText("156 cm")).toBeVisible();
+  expect(screen.queryByRole("button",{name:"설정"})).toBeNull();expect(api.refreshPerformerProfile).not.toHaveBeenCalled();
+});
+it("shows an old server message and preserves the existing profile", async () => {
+  const api=gateway({getStashdbCredentialStatus:vi.fn().mockResolvedValue({configured:false,routed:true,supported:false})});render(panel(api));
+  expect(await screen.findByText("서버가 아직 StashDB 조회를 지원하지 않습니다.")).toBeVisible();expect(screen.getByText("156 cm")).toBeVisible();expect(screen.getByRole("button",{name:"StashDB 새로고침"})).toBeDisabled();
+});
+it("dismisses routed candidates locally and swaps queued text only after confirmation", async () => {
+  let changed:()=>void=()=>{};
+  const api=gateway({getStashdbCredentialStatus:vi.fn().mockResolvedValue({configured:true,routed:true,supported:true}),searchPerformerProfile:vi.fn().mockResolvedValue(profile({status:"ambiguous",candidates:[{...candidates[0],imageUrl:"/v1/providers/stashdb/image?stashdbId=a&imageId=photo"}]})),previewStashdbImage:vi.fn().mockResolvedValue("data:image/jpeg;base64,AA=="),choosePerformerProfile:vi.fn().mockResolvedValue(profile({pending:true})),dismissPerformerProfile:vi.fn().mockResolvedValue(profile({status:"none"})),subscribeProfilesChanged:handler=>{changed=handler;return()=>{};}});
+  render(panel(api));await screen.findByText("156 cm");await waitFor(()=>expect(api.refreshPerformerProfile).not.toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button",{name:"다른 사람으로 바꾸기"}));await screen.findByRole("dialog");
+  await waitFor(()=>expect(api.previewStashdbImage).toHaveBeenCalled());expect(screen.getByRole("dialog").querySelector("img")).toHaveAttribute("src","data:image/jpeg;base64,AA==");
+  fireEvent.click(screen.getByRole("button",{name:"아무도 아님"}));await waitFor(()=>expect(screen.queryByRole("dialog")).toBeNull());expect(screen.getByText("156 cm")).toBeVisible();
+  fireEvent.click(screen.getByRole("button",{name:"다른 사람으로 바꾸기"}));await screen.findByRole("dialog");fireEvent.click(screen.getByRole("button",{name:"이 사람"}));
+  expect(await screen.findByText("StashDB 변경을 서버에 반영할 예정입니다.")).toBeVisible();expect(screen.getByText("156 cm")).toBeVisible();
+  vi.mocked(api.getPerformerProfile).mockResolvedValue(profile({heightCm:170}));await act(async()=>changed());expect(await screen.findByText("170 cm")).toBeVisible();expect(screen.queryByText("156 cm")).toBeNull();
+});
+it("requires a search choice for a staged profile without identity",async()=>{
+  const api=gateway({getStashdbCredentialStatus:vi.fn().mockResolvedValue({configured:true,routed:true,supported:true}),getPerformerProfile:vi.fn().mockResolvedValue(profile({stashdbId:null}))});render(panel(api));
+  expect(await screen.findByText("StashDB 배우를 검색에서 다시 선택해 주세요.")).toBeVisible();expect(screen.getByRole("button",{name:"StashDB 새로고침"})).toBeDisabled();expect(screen.getByRole("button",{name:"다른 사람으로 바꾸기"})).toBeEnabled();
+});
+
+it("keeps confirmed text while a routed clear waits and reports a profile conflict",async()=>{
+  let changed:()=>void=()=>{};
+  const api=gateway({getStashdbCredentialStatus:vi.fn().mockResolvedValue({configured:true,routed:true,supported:true}),clearPerformerProfile:vi.fn().mockResolvedValue(undefined),subscribeProfilesChanged:handler=>{changed=handler;return()=>{};}});
+  render(panel(api));await screen.findByText("156 cm");
+  vi.mocked(api.getPerformerProfile).mockResolvedValue(profile({pending:true}));fireEvent.click(screen.getByRole("button",{name:"StashDB 연결 해제"}));
+  expect(api.clearPerformerProfile).not.toHaveBeenCalled();
+  fireEvent.click(within(screen.getByRole("dialog", {name:"StashDB 연결 해제"})).getByRole("button", {name:"연결 해제"}));
+  expect(await screen.findByText("StashDB 변경을 서버에 반영할 예정입니다.")).toBeVisible();expect(screen.getByText("156 cm")).toBeVisible();
+  vi.mocked(api.getPerformerProfile).mockResolvedValue(profile({syncIssue:true}));await act(async()=>changed());expect(await screen.findByText("StashDB 변경을 반영하지 못했습니다. 동기화 상태에서 충돌 또는 실패를 확인해 주세요.")).toBeVisible();expect(screen.getByText("156 cm")).toBeVisible();
+  vi.mocked(api.getPerformerProfile).mockResolvedValue(null);await act(async()=>changed());await waitFor(()=>expect(screen.queryByText("156 cm")).toBeNull());expect(screen.getByRole("button",{name:"StashDB 배우 찾기"})).toBeEnabled();
+});
+
+
+it.each([false, true])("keeps the previous person's profile inert until the new profile loads (compact=%s)", async compact => {
+  const next = deferred<Profile | null>();
+  const api = gateway({
+    getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: true, routed: true, supported: true }),
+    getPerformerProfile: vi.fn().mockImplementation(id => id === "p" ? Promise.resolve(profile({ urls: [{ url: "https://x.com/old", site: { name: "X" } }] })) : next.promise),
+    clearPerformerProfile: vi.fn(),
+  });
+  const view = (personId: string) => <PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerProfile personId={personId} api={api} compact={compact} /></PrivacyProvider>;
+  const { rerender } = render(view("p"));
+  await screen.findByText("156 cm");
+  if (compact) {
+    await userEvent.setup().click(screen.getByRole("button", { name: "StashDB 프로필" }));
+    expect(screen.getByRole("menuitem", { name: "다른 사람으로 바꾸기" })).toBeEnabled();
+  }
+  rerender(view("q"));
+  expect(screen.getByText("156 cm")).toBeVisible();
+  expect(screen.getByText("156 cm").closest(".av-profile")).toHaveAttribute("inert");
+  expect(screen.queryByRole("menuitem")).toBeNull();
+  for (const button of screen.getAllByRole("button")) {
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+  }
+  expect(openUrl).not.toHaveBeenCalled();
+  expect(api.refreshPerformerProfile).not.toHaveBeenCalled();
+  expect(api.searchPerformerProfile).not.toHaveBeenCalled();
+  expect(api.clearPerformerProfile).not.toHaveBeenCalled();
+  await act(async () => next.resolve(profile({ personId: "q", heightCm: 170 })));
+  expect(screen.queryByText("156 cm")).toBeNull();
+  expect(screen.getByText("170 cm")).toBeVisible();
+  expect(screen.getByText("170 cm").closest(".av-profile")).not.toHaveAttribute("inert");
+  if (compact) {
+    await userEvent.setup().click(screen.getByRole("button", { name: "StashDB 프로필" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "다른 사람으로 바꾸기" }));
+  } else {
+    fireEvent.click(screen.getByRole("button", { name: "다른 사람으로 바꾸기" }));
+  }
+  expect(api.searchPerformerProfile).toHaveBeenCalledWith("q");
+});
+
+it("removes the previous person's profile when the new person's load fails", async () => {
+  const next = deferred<Profile | null>();
+  const api = gateway({
+    getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: true, routed: true, supported: true }),
+    getPerformerProfile: vi.fn().mockImplementation(id => id === "p" ? Promise.resolve(profile()) : next.promise),
+  });
+  const { rerender } = render(panel(api));
+  await screen.findByText("156 cm");
+  rerender(panel(api, "q"));
+  expect(screen.getByText("156 cm")).toBeVisible();
+  await act(async () => next.reject(new Error("local read failed")));
+  expect(screen.getByText("StashDB 프로필을 불러오지 못했습니다.")).toBeVisible();
+  expect(screen.queryByText("156 cm")).toBeNull();
+  expect(screen.queryByRole("button", { name: "다른 사람으로 바꾸기" })).toBeNull();
+  expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+});
+
+it.each([false, true])("hides clear in direct mode (compact=%s)", async compact => {
+  const api = gateway({ clearPerformerProfile: vi.fn() });
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerProfile personId="p" api={api} compact={compact} /></PrivacyProvider>);
+  await screen.findByText("156 cm");
+  if (compact) await userEvent.setup().click(screen.getByRole("button", { name: "StashDB 프로필" }));
+  expect(screen.queryByText("StashDB 연결 해제")).toBeNull();
+  expect(api.clearPerformerProfile).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("confirms routed clear, allows cancellation, and closes confirmation on person change (compact=%s)", async compact => {
+  const api = gateway({
+    getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: true, routed: true, supported: true }),
+    getPerformerProfile: vi.fn().mockImplementation(id => Promise.resolve(profile({ personId: id }))),
+    clearPerformerProfile: vi.fn().mockResolvedValue(undefined),
+  });
+  const view = (personId: string) => <PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerProfile personId={personId} api={api} compact={compact} /></PrivacyProvider>;
+  const { rerender } = render(view("p"));
+  await screen.findByText("156 cm");
+  const requestClear = async () => {
+    if (compact) {
+      await userEvent.setup().click(screen.getByRole("button", { name: "StashDB 프로필" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "StashDB 연결 해제" }));
+    } else fireEvent.click(screen.getByRole("button", { name: "StashDB 연결 해제" }));
+  };
+  await requestClear();
+  expect(api.clearPerformerProfile).not.toHaveBeenCalled();
+  fireEvent.click(within(screen.getByRole("dialog", { name: "StashDB 연결 해제" })).getByRole("button", { name: "취소" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(api.clearPerformerProfile).not.toHaveBeenCalled();
+  await requestClear();
+  rerender(view("q"));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(api.clearPerformerProfile).not.toHaveBeenCalled();
+  await requestClear();
+  fireEvent.click(within(screen.getByRole("dialog", { name: "StashDB 연결 해제" })).getByRole("button", { name: "연결 해제" }));
+  await waitFor(() => expect(api.clearPerformerProfile).toHaveBeenCalledExactlyOnceWith("q"));
 });

@@ -3912,3 +3912,471 @@ fn collection_authority_people_reconcile_runs_once_resumes_and_waits_for_missing
     assert_eq!(l.reconcile_av_people_with(&s, &|_| Ok(Some(json!({"person":{"id":"q","memo":null}})))).unwrap(), 0);
     assert_eq!(count(&l, "collection_authority_outbox"), 2);
 }
+
+fn stashdb_person(revision: i64, id: Option<&str>) -> Value {
+    let mut person = server_person(revision, "remote memo");
+    person["stashdbId"] = json!(id);
+    if id.is_some() {
+        person["profile"] = json!({"source":"stashdb","name":"Provider Name","aliases":["Alias"],"birthDate":"2000-01","heightCm":165,"bandIn":34,"waistIn":23,"hipIn":33,"cup":"E","breastType":"NATURAL","careerStart":2020,"careerEnd":null,"urls":[{"url":"https://example.com","site":"Studio"}]});
+    }
+    person
+}
+#[test]
+fn collection_authority_stashdb_profile_fifo_receipt_feed_and_clear_projection() {
+    let (_dir, l, s) = people_fixture(true);
+    l.save_av_person_memo("p", Some("queued memo".into()))
+        .unwrap();
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        let status = collection_write_status(&tx).unwrap();
+        enqueue_person_profile(&tx, &status, "p", Some("stash-one")).unwrap();
+        enqueue_person_profile(&tx, &status, "p", Some("stash-one")).unwrap();
+        enqueue_person_portrait(
+            &tx,
+            &status,
+            "p",
+            json!({"kind":"crop","artworkId":"art","rect":{"x":0.1,"y":0.1,"w":0.5,"h":0.5}}),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let bodies = provider_commands(&l);
+    assert_eq!(bodies[1]["expectedRevision"], 2);
+    assert_eq!(bodies[2]["expectedRevision"], 3);
+    assert_eq!(bodies[3]["expectedRevision"], 4);
+    assert_eq!(
+        predicted_collection_revision(
+            &l.connection().unwrap(),
+            "works",
+            &json!(["av"]).to_string()
+        )
+        .unwrap(),
+        5
+    );
+    assert_eq!(
+        l.get_av_performer_profile("p").unwrap().unwrap().status,
+        "matched"
+    );
+    let before = provider_commands(&l);
+    l.flush_collection_outbox_with(&s, &|_| Ok(CollectionDelivery::Retry), 0)
+        .unwrap();
+    assert_eq!(provider_commands(&l), before);
+    l.connection().unwrap().execute("UPDATE collection_authority_outbox SET state='accepted' WHERE command_type='setPerson'",[]).unwrap();
+    l.flush_collection_outbox_with(
+        &s,
+        &|body| {
+            Ok(CollectionDelivery::Accepted(person_receipt(
+                &s,
+                body,
+                stashdb_person(
+                    body["expectedRevision"].as_i64().unwrap() + 1,
+                    Some("stash-one"),
+                ),
+                1,
+            )))
+        },
+        5000,
+    )
+    .unwrap();
+    let p = l.get_av_performer_profile("p").unwrap().unwrap();
+    assert_eq!(p.stashdb_id.as_deref(), Some("stash-one"));
+    assert_eq!(p.height_cm, Some(165));
+    assert_eq!(p.urls[0].site.name, "Studio");
+    assert!(p.images.is_empty());
+    let mut av = work("av", 20);
+    av["type"] = json!("av");
+    av["details"]["av"] = json!({"genres":[]});
+    av["avPeople"] = json!([stashdb_person(20, Some("stash-two"))]);
+    av["avCredits"] = json!([{"personId":"p","name":"Display","nameJa":null,"role":"performer","order":0,"creditName":null,"portraitCrop":null}]);
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        let generation = local(&tx).unwrap().unwrap().generation;
+        apply_entities(&tx, &json!({"works":[av]}), &generation, NOW).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(
+        l.get_av_performer_profile("p")
+            .unwrap()
+            .unwrap()
+            .stashdb_id
+            .as_deref(),
+        Some("stash-two")
+    );
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &stashdb_person(1, Some("stale")), NOW).unwrap();
+        enqueue_person_profile(&tx, &s, "p", None).unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(
+        l.get_av_performer_profile("p")
+            .unwrap()
+            .unwrap()
+            .stashdb_id
+            .as_deref(),
+        Some("stash-two")
+    );
+    l.flush_collection_outbox_with(
+        &s,
+        &|body| {
+            Ok(CollectionDelivery::Accepted(person_receipt(
+                &s,
+                body,
+                stashdb_person(21, None),
+                2,
+            )))
+        },
+        9000,
+    )
+    .unwrap();
+    assert!(l.get_av_performer_profile("p").unwrap().is_none());
+}
+#[test]
+fn collection_authority_stashdb_manifest_queues_portrait_without_upload() {
+    let (_dir, l, s) = people_fixture(true);
+    let portrait = json!({"kind":"image","original":{"sha256":"a".repeat(64),"sizeBytes":42,"contentType":"image/jpeg"},"width":1200,"height":1600,"attribution":{"source":"stashdb","sourceUrl":"https://stashdb.org/images/photo","license":null,"author":null}});
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        enqueue_person_profile(&tx, &s, "p", Some("one")).unwrap();
+        enqueue_relay_person_portrait(&tx, &s, "p", portrait.clone(), None).unwrap();
+        tx.commit().unwrap();
+    }
+    let body = provider_commands(&l).pop().unwrap();
+    assert_eq!(body["commandType"], "setPersonPortrait");
+    assert_eq!(body["portrait"], portrait);
+    assert_eq!(body["expectedRevision"], 2);
+    assert_eq!(body.as_object().unwrap().len(), 8);
+    l.upload_collection_command_artwork_with(
+        &body,
+        &|_, _| panic!("relay portrait must not upload"),
+        &|_| panic!("relay blob was already confirmed"),
+    )
+    .unwrap();
+    let mut invalid = portrait;
+    invalid["width"] = json!(1601);
+    let mut db = l.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    assert!(enqueue_relay_person_portrait(&tx, &s, "p", invalid, None).is_err());
+}
+
+#[test]
+fn collection_authority_stashdb_optimistic_portrait_survives_prior_receipt_and_downloads_confirmed_bytes(
+) {
+    let (_dir, l, s) = people_fixture(true);
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &stashdb_person(1, Some("one")), NOW).unwrap();
+        tx.commit().unwrap();
+    }
+    l.save_av_person_memo("p", Some("queued memo".into()))
+        .unwrap();
+    let image = image::DynamicImage::new_rgb8(2, 3);
+    let mut preview = Vec::new();
+    let mut confirmed = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut preview, 88)
+        .encode_image(&image)
+        .unwrap();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut confirmed, 95)
+        .encode_image(&image)
+        .unwrap();
+    assert_ne!(preview, confirmed);
+    let portrait = json!({"kind":"image","original":{"sha256":portrait_digest(&confirmed),"sizeBytes":confirmed.len(),"contentType":"image/jpeg"},"width":2,"height":3,"attribution":{"source":"stashdb","sourceUrl":"https://stashdb.org/images/photo","license":null,"author":null}});
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        enqueue_relay_person_portrait(&tx, &s, "p", portrait.clone(), Some(&preview)).unwrap();
+        receive_person(&tx, &stashdb_person(2, Some("one")), NOW).unwrap();
+        reapply_pending_core_edits(&tx).unwrap();
+        tx.commit().unwrap();
+    }
+    let read = || {
+        l.connection()
+            .unwrap()
+            .query_row(
+                "SELECT image_bytes FROM collection_person_portraits WHERE person_id='p'",
+                [],
+                |r| r.get::<_, Vec<u8>>(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(read(), preview);
+    let mut remote = stashdb_person(3, Some("one"));
+    remote["portraitSelection"] = portrait;
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &remote, NOW).unwrap();
+        tx.execute(
+            "UPDATE collection_authority_outbox SET state='accepted'",
+            [],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    assert_eq!(read(), preview);
+    assert_eq!(
+        l.materialize_person_portraits_with(&s, &|_| Ok(confirmed.clone()))
+            .unwrap(),
+        1
+    );
+    assert_eq!(read(), confirmed);
+}
+#[test]
+fn collection_authority_stashdb_profile_conflict_retains_text_and_reports_sync_issue() {
+    let (_dir, l, s) = people_fixture(true);
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &stashdb_person(1, Some("one")), NOW).unwrap();
+        enqueue_person_profile(&tx, &s, "p", Some("two")).unwrap();
+        tx.commit().unwrap();
+    }
+    l.flush_collection_outbox_with(&s,&|_|Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"person":stashdb_person(2,Some("remote"))}}))),0).unwrap();
+    let profile = l.get_av_performer_profile("p").unwrap().unwrap();
+    assert_eq!(profile.stashdb_id.as_deref(), Some("one"));
+    assert!(profile.sync_issue);
+    assert!(!profile.pending);
+}
+
+#[test]
+fn collection_authority_stashdb_empty_clear_is_a_fifo_noop() {
+    let (_dir, library, status) = people_fixture(true);
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    enqueue_person_profile(&tx, &status, "p", None).unwrap();
+    enqueue_person_portrait(
+        &tx,
+        &status,
+        "p",
+        json!({"kind":"crop","artworkId":"art","rect":{"x":0.1,"y":0.1,"w":0.5,"h":0.5}}),
+    )
+    .unwrap();
+    assert_eq!(predicted_person(&tx, "p").unwrap()["entityRevision"], 2);
+    assert_eq!(
+        predicted_collection_revision(&tx, "works", &json!(["av"]).to_string()).unwrap(),
+        2
+    );
+    tx.commit().unwrap();
+    drop(db);
+    assert_eq!(provider_commands(&library)[1]["expectedRevision"], 1);
+}
+
+#[test]
+fn collection_authority_stashdb_staged_text_without_identity_stays_readable() {
+    let (_dir, library, _) = people_fixture(true);
+    let mut staged = stashdb_person(2, Some("one"));
+    staged["stashdbId"] = Value::Null;
+    {
+        let mut db = library.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &staged, NOW).unwrap();
+        tx.commit().unwrap();
+    }
+    let profile = library.get_av_performer_profile("p").unwrap().unwrap();
+    assert_eq!(profile.status, "matched");
+    assert_eq!(profile.height_cm, Some(165));
+    assert!(profile.stashdb_id.is_none());
+    assert!(library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT stashdb_id FROM collection_person_profiles WHERE person_id='p'",
+            [],
+            |r| r.get::<_, Option<String>>(0)
+        )
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn collection_authority_stashdb_unchanged_refresh_does_not_break_the_next_portrait_cas() {
+    let (_dir, library, status) = people_fixture(true);
+    let confirmed = stashdb_person(1, Some("one"));
+    {
+        let mut db = library.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        receive_person(&tx, &confirmed, NOW).unwrap();
+        enqueue_person_profile_snapshot(
+            &tx,
+            &status,
+            "p",
+            Some("one"),
+            Some(&confirmed["profile"]),
+        )
+        .unwrap();
+        enqueue_person_portrait(
+            &tx,
+            &status,
+            "p",
+            json!({"kind":"crop","artworkId":"art","rect":{"x":0.1,"y":0.1,"w":0.5,"h":0.5}}),
+        )
+        .unwrap();
+        assert_eq!(predicted_person(&tx, "p").unwrap()["entityRevision"], 2);
+        assert_eq!(
+            predicted_collection_revision(&tx, "works", &json!(["av"]).to_string()).unwrap(),
+            2
+        );
+        tx.commit().unwrap();
+    }
+    let commands = provider_commands(&library);
+    assert_eq!(commands[1]["expectedRevision"], 1);
+    assert!(commands[0].get("profile").is_none());
+    library
+        .flush_collection_outbox_with(
+            &status,
+            &|body| {
+                let mut person = confirmed.clone();
+                let mut receipt = person_receipt(&status, body, person.clone(), 1);
+                if body["commandType"] == "setPersonProfile" {
+                    receipt["changed"] = json!(false);
+                } else {
+                    person["entityRevision"] = json!(2);
+                    person["portraitSelection"] = body["portrait"].clone();
+                    receipt["person"] = person;
+                }
+                Ok(CollectionDelivery::Accepted(receipt))
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM notes_state WHERE key LIKE 'stashdbProfilePrediction:%'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn collection_authority_stashdb_noop_refresh_after_new_credits_uses_the_confirmed_person() {
+    let (_dir, library, status) = people_fixture(true);
+    let confirmed = stashdb_person(1, Some("one"));
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    receive_person(&tx, &confirmed, NOW).unwrap();
+    tx.execute("UPDATE collection_authority_revisions SET payload=json_set(payload,'$.avCredits',json('[]'),'$.avPeople',json('[]')) WHERE section='works' AND work_id='av'",[]).unwrap();
+    enqueue_collection_command(&tx, &status, "setAvCredits", "av", json!({"workId":"av","expectedRevision":1,"people":[],"credits":[{"personId":"p","role":"performer","creditName":null,"order":0}]})).unwrap();
+    enqueue_person_profile_snapshot(&tx, &status, "p", Some("one"), Some(&confirmed["profile"]))
+        .unwrap();
+    assert_eq!(predicted_person(&tx, "p").unwrap()["entityRevision"], 1);
+    assert_eq!(
+        predicted_collection_revision(&tx, "works", &json!(["av"]).to_string()).unwrap(),
+        2
+    );
+    tx.commit().unwrap();
+}
+
+
+#[test]
+fn collection_authority_stashdb_old_server_person_preserves_local_profile_bytes() {
+    let (_dir, library, _) = people_fixture(true);
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    receive_person(&tx, &stashdb_person(1, Some("local-choice")), NOW).unwrap();
+    // Include local photos/candidates and raw JSON whitespace, not just identity.
+    tx.execute("UPDATE collection_person_profiles SET aliases_json='[ \"Local alias\" ]',images_json='[ {\"id\":\"photo\",\"url\":\"https://stashdb.org/images/photo\",\"width\":10,\"height\":20} ]',candidates_json='[ {\"stashdbId\":\"candidate\",\"name\":\"Local candidate\",\"aliases\":[],\"birthDate\":null,\"imageUrl\":null} ]',fetched_at='local timestamp' WHERE person_id='p'", []).unwrap();
+    let snapshot = |db: &Connection| {
+        db.query_row("SELECT * FROM collection_person_profiles WHERE person_id='p'", [], |r| {
+            (0..r.as_ref().column_count()).map(|i| r.get::<_, rusqlite::types::Value>(i)).collect::<Result<Vec<_>, _>>()
+        }).unwrap()
+    };
+    let before = snapshot(&tx);
+    let mut old = server_person(2, "tablet memo");
+    assert!(old.get("stashdbId").is_none());
+    receive_person(&tx, &old, "new timestamp").unwrap();
+    assert_eq!(snapshot(&tx), before);
+    old["entityRevision"] = json!(3);
+    old["profile"] = stashdb_person(3, Some("staged"))["profile"].clone();
+    receive_person(&tx, &old, "another timestamp").unwrap();
+    assert_eq!(snapshot(&tx), before);
+    tx.commit().unwrap();
+}
+
+#[test]
+fn collection_authority_stashdb_new_server_set_and_clear_project_identity() {
+    let (_dir, library, _) = people_fixture(true);
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    receive_person(&tx, &stashdb_person(2, Some("chosen")), NOW).unwrap();
+    let row: (String, String, i64, String, String) = tx.query_row(
+        "SELECT stashdb_id,status,height_cm,images_json,candidates_json FROM collection_person_profiles WHERE person_id='p'",
+        [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+    ).unwrap();
+    assert_eq!(row, ("chosen".into(), "matched".into(), 165, "[]".into(), "[]".into()));
+    receive_person(&tx, &stashdb_person(3, None), NOW).unwrap();
+    assert_eq!(tx.query_row("SELECT count(*) FROM collection_person_profiles WHERE person_id='p'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    tx.commit().unwrap();
+    drop(db);
+    assert!(library.get_av_performer_profile("p").unwrap().is_none());
+}
+
+#[test]
+fn collection_authority_stashdb_profile_bumps_trashed_work_before_restore() {
+    let (_dir, library, status) = people_fixture(true);
+    {
+        let mut db = library.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        let raw: String = tx.query_row("SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id='av'", [], |r| r.get(0)).unwrap();
+        let mut av: Value = serde_json::from_str(&raw).unwrap();
+        av["entityRevision"] = json!(7);
+        av["lifecycle"] = json!("trashed");
+        av["trashedAt"] = json!(NOW);
+        let generation = local(&tx).unwrap().unwrap().generation;
+        apply_entities(&tx, &json!({"works":[av]}), &generation, NOW).unwrap();
+        enqueue_person_profile(&tx, &status, "p", Some("chosen")).unwrap();
+        assert_eq!(predicted_collection_revision(&tx, "works", &json!(["av"]).to_string()).unwrap(), 8);
+        tx.commit().unwrap();
+    }
+    library.restore_collection_work("av", 7, status.library_id.as_deref().unwrap(), 1).unwrap();
+    library.restore_collection_work("av", 7, status.library_id.as_deref().unwrap(), 1).unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(commands.len(), 2);
+    assert_eq!(commands[0]["commandType"], "setPersonProfile");
+    assert_eq!(commands[1]["commandType"], "restoreWork");
+    assert_eq!(commands[1]["expectedRevision"], 8);
+    // Acceptance must still deduplicate a stale click from the same trash list.
+    library.connection().unwrap().execute("UPDATE collection_authority_outbox SET state='accepted'", []).unwrap();
+    library.restore_collection_work("av", 7, status.library_id.as_deref().unwrap(), 1).unwrap();
+    assert_eq!(provider_commands(&library).len(), 2);
+}
+
+#[test]
+fn collection_authority_stashdb_profile_predictions_are_pruned_after_drop_or_discard() {
+    for disposition in ["serverDrop", "userDiscard", "blockedDiscard"] {
+        let (_dir, library, status) = people_fixture(true);
+        let confirmed = stashdb_person(1, Some("one"));
+        {
+            let mut db = library.connection().unwrap();
+            let tx = db.transaction().unwrap();
+            receive_person(&tx, &confirmed, NOW).unwrap();
+            enqueue_person_profile_snapshot(&tx, &status, "p", Some("one"), Some(&confirmed["profile"])).unwrap();
+            tx.execute("INSERT INTO notes_state(key,value) VALUES('unrelatedPrediction','keep')", []).unwrap();
+            tx.commit().unwrap();
+        }
+        let hints = || library.connection().unwrap().query_row("SELECT count(*) FROM notes_state WHERE key GLOB 'stashdbProfilePrediction:*'", [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(hints(), 1);
+        if disposition == "serverDrop" {
+            library.flush_collection_outbox_with(&status, &|_| Ok(CollectionDelivery::Dropped(json!({"code":"personNotFound"}))), 0).unwrap();
+        } else {
+            if disposition == "blockedDiscard" {
+                library.flush_collection_outbox_with(&status, &|_| Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict"}))), 0).unwrap();
+                assert_eq!(hints(), 1, "blocked intents may still be retried");
+            }
+            library.connection().unwrap().execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='userDiscarded'", []).unwrap();
+            library.flush_collection_outbox_with(&status, &|_| panic!("discarded intent must not be sent"), 0).unwrap();
+        }
+        assert_eq!(hints(), 0, "{disposition}");
+        assert_eq!(library.connection().unwrap().query_row("SELECT value FROM notes_state WHERE key='unrelatedPrediction'", [], |r| r.get::<_, String>(0)).unwrap(), "keep");
+    }
+}

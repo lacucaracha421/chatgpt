@@ -1,8 +1,12 @@
+import { libraryGateway } from "../library/client";
 import { invoke } from "@tauri-apps/api/core";
 import type { AvCommonsPreview, AvGateway, LocalArtworkPreview, PortraitRect } from "./avTypes";
 
 export const avGateway: AvGateway = {
-  getStashdbCredentialStatus: () => invoke("get_stashdb_credential_status"),
+  getStashdbCredentialStatus: () => invoke("get_av_stashdb_status"),
+  getStashdbProfileDetail: personId => invoke("get_av_stashdb_profile_detail", { personId }),
+  previewStashdbImage: url => invoke("preview_av_stashdb_image", { url }),
+  subscribeProfilesChanged: handler => libraryGateway.subscribeCollectionsChanged?.(handler) ?? (() => {}),
   getPerformerProfile: personId => invoke("get_av_performer_profile", { personId }),
   refreshPerformerProfile: (personId, force) => invoke("refresh_av_performer_profile", { personId, force }),
   searchPerformerProfile: personId => invoke("search_av_performer_profile", { personId }),

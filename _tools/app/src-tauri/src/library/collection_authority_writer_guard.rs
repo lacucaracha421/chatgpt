@@ -225,7 +225,10 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
     ("library/av_portrait.rs", "set_av_portrait_crop"),
     ("library/av_portrait.rs", "clear_av_portrait"),
     ("library/av_portrait.rs", "use_av_commons_portrait"),
-    ("library/av_portrait.rs", "use_av_stashdb_portrait"),
+    (
+        "library/av_portrait.rs",
+        "use_av_stashdb_portrait_relay_with",
+    ),
     ("library/home_data.rs", "set_av_favorite"),
 ];
 
@@ -255,6 +258,7 @@ const FENCED_FUNCTIONS: &[(&str, &str)] = &[
     // AV link and StashDB profile writes remain fenced.
     ("library/av_link/apply.rs", "apply_people"),
     ("library/av_link/apply.rs", "apply_av_link"),
+    ("library/av_portrait.rs", "use_av_stashdb_portrait"),
     ("library/av_stashdb.rs", "save"),
     ("library/av_stashdb.rs", "clear_av_performer_profile"),
 ];
@@ -314,7 +318,8 @@ fn remaining_source(file: &str, source: &str) -> String {
                 || body.contains("enqueue_av_changes(")
                 || body.contains("enqueue_person_changes(")
                 || body.contains("enqueue_person_portrait(")
-                || body.contains("enqueue_stored_person_portrait("),
+                || body.contains("enqueue_stored_person_portrait(")
+                || body.contains("enqueue_relay_person_portrait("),
             "{f}::{name} lost transactional outbox"
         );
         ranges.push(range);

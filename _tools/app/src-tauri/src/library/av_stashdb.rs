@@ -38,6 +38,10 @@ pub struct AvPerformerProfile {
     pub images: Vec<ProfileImage>,
     pub candidates: Vec<ProfileCandidate>,
     pub fetched_at: String,
+    #[serde(default)]
+    pub pending: bool,
+    #[serde(default)]
+    pub sync_issue: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileUrl {
@@ -155,6 +159,8 @@ fn empty(person: &str, status: &str) -> AvPerformerProfile {
         images: vec![],
         candidates: vec![],
         fetched_at: Utc::now().to_rfc3339(),
+        pending: false,
+        sync_issue: false,
     }
 }
 fn normalize(name: &str) -> String {
@@ -354,10 +360,38 @@ impl Library {
     ) -> Result<Option<AvPerformerProfile>, AvError> {
         let c = self.connection()?;
         require_person(&c, person)?;
-        Ok(c.query_row("SELECT source,status,stashdb_id,name,aliases_json,birth_date,height_cm,band_in,waist_in,hip_in,cup,breast_type,career_start,career_end,urls_json,images_json,candidates_json,fetched_at FROM collection_person_profiles WHERE person_id=?1", [person], |r| Ok(AvPerformerProfile {
+        let mut profile = c.query_row("SELECT source,status,stashdb_id,name,aliases_json,birth_date,height_cm,band_in,waist_in,hip_in,cup,breast_type,career_start,career_end,urls_json,images_json,candidates_json,fetched_at FROM collection_person_profiles WHERE person_id=?1", [person], |r| Ok(AvPerformerProfile {
             person_id: person.into(),source:r.get(0)?,status:r.get(1)?,stashdb_id:r.get(2)?,name:r.get(3)?,
-            aliases:array(r,4)?,birth_date:r.get(5)?,height_cm:r.get(6)?,band_in:r.get(7)?,waist_in:r.get(8)?,hip_in:r.get(9)?,cup:r.get(10)?,breast_type:r.get(11)?,career_start:r.get(12)?,career_end:r.get(13)?,urls:array(r,14)?,images:array(r,15)?,candidates:array(r,16)?,fetched_at:r.get(17)?,
-        })).optional()?)
+            aliases:array(r,4)?,birth_date:r.get(5)?,height_cm:r.get(6)?,band_in:r.get(7)?,waist_in:r.get(8)?,hip_in:r.get(9)?,cup:r.get(10)?,breast_type:r.get(11)?,career_start:r.get(12)?,career_end:r.get(13)?,urls:array(r,14)?,images:array(r,15)?,candidates:array(r,16)?,fetched_at:r.get(17)?,pending:false,sync_issue:false,
+        })).optional()?;
+        if super::collection_authority::collection_authority_active(&c)? {
+            // Older cached profiles may still contain provider URLs. Active readers
+            // can only receive relay photos; text remains available offline.
+            if let Some(profile) = profile.as_mut() {
+                let confirmed_text:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_people_cache p JOIN collection_authority_sync s ON s.library_id=p.library_id AND s.epoch=p.epoch WHERE p.person_id=?1 AND json_type(p.payload,'$.profile')='object')",[person],|r|r.get(0))?;
+                if confirmed_text {
+                    profile.status = "matched".into();
+                }
+                profile.images.retain(|i| relay_image_path(&i.url).is_ok());
+                for candidate in &mut profile.candidates {
+                    if candidate
+                        .image_url
+                        .as_ref()
+                        .is_some_and(|u| relay_image_path(u).is_err())
+                    {
+                        candidate.image_url = None;
+                    }
+                }
+            }
+            let pending: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE state='pending' AND command_type='setPersonProfile' AND json_extract(payload,'$.personId')=?1)",[person],|r|r.get(0))?;
+            let issue: bool = c.query_row("SELECT COALESCE((SELECT state IN ('blocked','dropped') FROM collection_authority_outbox WHERE command_type='setPersonProfile' AND json_extract(payload,'$.personId')=?1 ORDER BY seq DESC LIMIT 1),0)",[person],|r|r.get(0))?;
+            if pending || issue {
+                let profile = profile.get_or_insert_with(|| empty(person, "none"));
+                profile.pending = pending;
+                profile.sync_issue = issue;
+            }
+        }
+        Ok(profile)
     }
     pub(crate) fn refresh_av_performer_profile_with(
         &self,
@@ -514,6 +548,8 @@ impl Library {
         })
     }
 }
+include!("av_stashdb_relay.rs");
+
 #[cfg(test)]
 #[path = "av_stashdb_tests.rs"]
 mod tests;

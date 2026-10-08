@@ -25,3 +25,5 @@
 
 .av-profile__manage.ui-menu__trigger { justify-self: start; font-size: var(--type-meta); }
 .av-profile__manage svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+.av-profile__candidate > .av-stashdb-image { display: block; flex: none; width: 48px; height: 64px; }

@@ -28,10 +28,13 @@ enum PendingImage {
     Commons(CommonsImage),
     Stashdb(StashdbImage),
 }
+#[derive(Clone)]
 struct StashdbImage {
     preview: AvStashdbPreview,
     bytes: Vec<u8>,
     image_id: String,
+    stashdb_id: Option<String>,
+    authority: Option<super::collection_authority::CollectionAuthorityStatus>,
 }
 struct Pending {
     generation: uuid::Uuid,
@@ -59,7 +62,7 @@ pub(super) fn require_person(c: &Connection, id: &str) -> Result<(), AvError> {
         Err(AvError::Invalid)
     }
 }
-fn data_url(mime: &str, bytes: &[u8]) -> String {
+pub(crate) fn data_url(mime: &str, bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = format!("data:{mime};base64,");
     output.reserve(bytes.len().div_ceil(3) * 4);
@@ -102,6 +105,9 @@ pub(super) fn portrait(c: &Connection, person: &str) -> Result<Option<AvPortrait
         Some("commons") => Ok(Some(AvPortrait::Commons {preview:c.query_row("SELECT image_bytes,mime,file_name,author,license,license_url,source_url FROM collection_person_portraits WHERE person_id=?1",[person],|r|Ok(AvCommonsPreview{data_url:data_url(&r.get::<_,String>(1)?,&r.get::<_,Vec<u8>>(0)?),file_name:r.get(2)?,author:r.get(3)?,license:r.get(4)?,license_url:r.get(5)?,source_url:r.get(6)?}))?})),
         // Stored portraits are explicit choices. Only an unchosen performer uses the matched profile.
         None => {
+            if super::collection_authority::collection_authority_active(c)? {
+                return Ok(None);
+            }
             let images: Option<String> = c.query_row(
                 "SELECT images_json FROM collection_person_profiles WHERE person_id=?1 AND source='stashdb' AND status='matched'",
                 [person], |r| r.get(0),
@@ -355,6 +361,8 @@ impl Library {
                 preview,
                 bytes,
                 image_id: image_id.into(),
+                stashdb_id: None,
+                authority: None,
             })
         })();
         let mut pending = state
@@ -381,6 +389,7 @@ impl Library {
         person: &str,
         state: &AvPortraitState,
     ) -> Result<AvPortrait, AvError> {
+        super::collection_authority::fence_collection_operation(&*self.connection()?)?;
         let mut pending = state
             .0
             .lock()
@@ -550,3 +559,176 @@ fn fetch_commons(http: &impl HttpClient, qid: &str) -> Result<Option<CommonsImag
 #[cfg(test)]
 #[path = "av_portrait_tests.rs"]
 mod tests;
+
+impl Library {
+    pub(crate) fn preview_av_stashdb_portrait_relay_with(
+        &self,
+        person: &str,
+        image_id: &str,
+        state: &AvPortraitState,
+        relay: &impl super::av_stashdb::StashdbRelay,
+    ) -> Result<AvStashdbPreview, AvError> {
+        let key = (self.root().to_path_buf(), person.to_owned());
+        let generation = uuid::Uuid::new_v4();
+        state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                key.clone(),
+                Pending {
+                    generation,
+                    image: None,
+                },
+            );
+        let result = (|| {
+            let authority =
+                super::collection_authority::collection_write_status(&*self.connection()?)?;
+            if !authority.active {
+                return Err(AvError::Invalid);
+            }
+            let profile = self
+                .stashdb_profile_detail_with(person, relay)?
+                .ok_or(AvError::Invalid)?;
+            let stashdb_id = profile.stashdb_id.ok_or_else(|| {
+                AvError::StashdbRelay(
+                    "av_stashdb_identity_required",
+                    "StashDB 배우를 검색에서 다시 선택해 주세요.",
+                )
+            })?;
+            let image = profile
+                .images
+                .into_iter()
+                .find(|i| i.id == image_id)
+                .ok_or(AvError::Invalid)?;
+            let raw = super::av_stashdb::relay_image(relay, &image.url)?;
+            let decoded = image::load_from_memory(&raw).map_err(|_| AvError::Image)?;
+            let decoded = if decoded.width() > 1600 || decoded.height() > 1600 {
+                decoded.resize(1600, 1600, image::imageops::FilterType::Lanczos3)
+            } else {
+                decoded
+            };
+            let rgb = decoded.to_rgb8();
+            let mut bytes = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 88)
+                .encode_image(&rgb)
+                .map_err(|_| AvError::Image)?;
+            if bytes.len() > MAX_IMAGE_BYTES {
+                return Err(AvError::Image);
+            }
+            let preview = AvStashdbPreview {
+                data_url: data_url("image/jpeg", &bytes),
+                width: rgb.width(),
+                height: rgb.height(),
+                source_url: image.url,
+            };
+            Ok(StashdbImage {
+                preview,
+                bytes,
+                image_id: image_id.into(),
+                stashdb_id: Some(stashdb_id),
+                authority: Some(authority),
+            })
+        })();
+        let mut pending = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.get(&key).is_none_or(|p| p.generation != generation) {
+            return Err(AvError::Stale);
+        }
+        match result {
+            Ok(image) => {
+                let preview = image.preview.clone();
+                pending.get_mut(&key).unwrap().image = Some(PendingImage::Stashdb(image));
+                Ok(preview)
+            }
+            Err(error) => {
+                pending.remove(&key);
+                Err(error)
+            }
+        }
+    }
+    pub(crate) fn use_av_stashdb_portrait_relay_with(
+        &self,
+        person: &str,
+        state: &AvPortraitState,
+        relay: &impl super::av_stashdb::StashdbRelay,
+    ) -> Result<AvPortrait, AvError> {
+        let key = (self.root().to_path_buf(), person.to_owned());
+        let (generation, image) = {
+            let pending = state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let p = pending.get(&key).ok_or(AvError::Invalid)?;
+            let Some(PendingImage::Stashdb(image)) = &p.image else {
+                return Err(AvError::Invalid);
+            };
+            (p.generation, image.clone())
+        };
+        let id = image.stashdb_id.as_deref().ok_or(AvError::Stale)?;
+        if self
+            .get_av_performer_profile(person)?
+            .and_then(|p| p.stashdb_id)
+            .as_deref()
+            != Some(id)
+        {
+            return Err(AvError::Stale);
+        }
+        let body = serde_json::json!({"stashdbId":id,"imageId":image.image_id});
+        // No library connection or pending-state mutex spans the server preparation.
+        let mut manifest =
+            super::av_stashdb::relay_json(relay, "/v1/providers/stashdb/portrait", Some(&body))?;
+        manifest["kind"] = serde_json::json!("image");
+        let mut pending = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.get(&key).is_none_or(|p| p.generation != generation) {
+            return Err(AvError::Stale);
+        }
+        let mut c = self.connection()?;
+        let tx = c.transaction()?;
+        let status = super::collection_authority::collection_write_status(&tx)?;
+        if image
+            .authority
+            .as_ref()
+            .is_none_or(|before| !super::av_stashdb::relay_authority_matches(before, &status))
+        {
+            return Err(AvError::Stale);
+        }
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT stashdb_id FROM collection_person_profiles WHERE person_id=?1",
+                [person],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        if current.as_deref() != Some(id) {
+            return Err(AvError::Stale);
+        }
+        require_person(&tx, person)?;
+        // Keep optimistic bytes in the portrait projection, never under the server's
+        // digest (the server may have encoded different bytes).
+        tx.execute(
+            "DELETE FROM collection_person_portraits WHERE person_id=?1",
+            [person],
+        )?;
+        tx.execute("INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at) VALUES(?1,'stashdb',?2,'image/jpeg',?3,?4,?5,?6,?7)",params![person,image.bytes,image.preview.width,image.preview.height,image.image_id,image.preview.source_url,chrono::Utc::now().to_rfc3339()])?;
+        super::collection_authority::enqueue_relay_person_portrait(
+            &tx,
+            &status,
+            person,
+            manifest,
+            Some(&image.bytes),
+        )?;
+        tx.commit()?;
+        pending.remove(&key);
+        self.publication_inputs.signal(&[9]);
+        Ok(AvPortrait::Stashdb {
+            preview: image.preview,
+        })
+    }
+}

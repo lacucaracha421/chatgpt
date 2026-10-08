@@ -17,6 +17,8 @@ pub enum AvError {
     Stale,
     #[error("선택한 이미지가 변경되었거나 읽을 수 없습니다. 다시 선택해 주세요.")]
     Image,
+    #[error("{1}")]
+    StashdbRelay(&'static str, &'static str),
     #[error(transparent)]
     Library(#[from] super::error::LibraryError),
     #[error(transparent)]

@@ -1,3 +1,4 @@
+import { AvStashdbImage } from "./AvStashdbImage";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SectionLabel } from "../../shared/ui/SectionLabel";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
@@ -8,7 +9,7 @@ import { Dialog } from "../../shared/ui/Dialog";
 import { Button } from "../../shared/ui/Button";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import { avError } from "../avClient";
-import type { AvCommonsPreview, AvStashdbPreview, AvPerformerProfile, AvGateway, AvPortrait, AvPortraitSource, PortraitRect } from "../avTypes";
+import type { AvCommonsPreview, AvStashdbPreview, AvPerformerProfile, AvGateway, AvPortrait, AvPortraitSource, PortraitRect, AvStashdbStatus } from "../avTypes";
 import { safeProfileUrl } from "./AvPerformerProfile";
 import { AvPortrait as Portrait } from "./AvPortrait";
 import "./avPortraitPicker.css";
@@ -49,7 +50,9 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
   const [rect, setRect] = useState<PortraitRect>(() => initialRect(null));
   const [baseRect, setBaseRect] = useState<PortraitRect>(() => initialRect(null));
   const [zoom, setZoom] = useState(1);
+  const [stashdbStatus, setStashdbStatus] = useState<AvStashdbStatus | null>(null);
   const [stashdbConfigured, setStashdbConfigured] = useState<boolean | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [profile, setProfile] = useState<AvPerformerProfile | null>(null);
   const [stashdb, setStashdb] = useState<AvStashdbPreview | null>(null);
   const [stashdbId, setStashdbId] = useState<string | null>(null);
@@ -66,10 +69,13 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
   useEffect(() => {
     let active = true;
     setError(null); setProfile(null); setStashdb(null); setStashdbId(null);
-    setStashdbConfigured(null);
+    setStashdbConfigured(null); setStashdbStatus(null); setProfileLoading(true);
     void Promise.all([api.getPerformerProfile(personId), api.getStashdbCredentialStatus()]).then(([value, status]) => {
-      if (active) { setStashdbConfigured(status.configured); setProfile(status.configured ? value : null); if (!sourceChosen.current) setSourceKind(defaultPortraitSource(currentPortrait, value, status.configured)); }
-    }, () => { if (active) setError("StashDB 사진 목록을 불러오지 못했습니다."); });
+      if (active) { setStashdbConfigured(status.configured); setStashdbStatus(status); setProfile(status.configured ? value : null); if (!sourceChosen.current && !status.routed) setSourceKind(defaultPortraitSource(currentPortrait, value, status.configured)); }
+      if (active && status.routed && status.configured && status.supported !== false) {
+        void api.getStashdbProfileDetail(personId).then(detail => { if (active) { setProfile(detail); if (!sourceChosen.current) setSourceKind(defaultPortraitSource(currentPortrait,detail,status.configured)); } },reason => {if (active) setError(avError(reason));}).finally(() => { if (active) setProfileLoading(false); });
+      } else if (active) setProfileLoading(false);
+    }, reason => { if (active) { setError(avError(reason)); setProfileLoading(false); } });
     void api.listPortraitSources(personId).then(value => {
       if (!active) return;
       const ordered = [...(value ?? [])].sort((a, b) => Number(b.solo) - Number(a.solo));
@@ -93,8 +99,8 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
   useEffect(() => {
     if (sourceKind !== "stashdb" || !stashdbId) { setStashdb(null); setStashdbLoading(false); return; }
     let active = true;
-    setStashdb(null); setStashdbLoading(true); setError(null);
-    void api.previewStashdbPortrait(personId, stashdbId).then(value => { if (active) setStashdb(value); }, () => { if (active) setError("사진을 불러오지 못했습니다. 다시 선택해 주세요."); })
+    setStashdbLoading(true); setError(null);
+    void api.previewStashdbPortrait(personId, stashdbId).then(value => { if (active) setStashdb(value); }, reason => { if (active) setError(avError(reason)); })
       .finally(() => { if (active) setStashdbLoading(false); });
     return () => { active = false; };
   }, [api, personId, sourceKind, stashdbId, stashdbRequest]);
@@ -137,7 +143,7 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
     finally { setBusy(false); }
   }
 
-  const previewPortrait: AvPortrait | null = sourceKind === "crop" && selected ? { kind: "crop", artworkId: selected.artworkId, revision: selected.revision, rect } : sourceKind === "stashdb" && stashdb ? { kind: "stashdb", ...stashdb } : sourceKind === "commons" && commons ? { kind: "commons", ...commons } : null;
+  const previewPortrait: AvPortrait | null = sourceKind === "crop" && selected ? { kind: "crop", artworkId: selected.artworkId, revision: selected.revision, rect } : sourceKind === "stashdb" ? stashdb ? { kind: "stashdb", ...stashdb } : currentPortrait?.kind === "stashdb" ? currentPortrait : null : sourceKind === "commons" && commons ? { kind: "commons", ...commons } : null;
   return <Dialog open title={`${personName} 대표 이미지`} variant="wide" onClose={() => { if (!busy) onClose(); }}>
     {currentPortrait && <div className="av-profile__quiet" aria-label="현재 사진 출처">
       {currentPortrait.kind === "commons" ? `Wikimedia Commons · ${currentPortrait.author ?? "저작자 미상"} · ${currentPortrait.license ?? "라이선스 미상"}` : currentPortrait.kind === "stashdb" ? "StashDB" : "표지에서 자름"}
@@ -168,14 +174,14 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
           <div className="av-portrait-picker__crop-controls"><label htmlFor="av-portrait-zoom">확대</label><input id="av-portrait-zoom" type="range" min="1" max="3" step=".1" value={zoom} onChange={event => changeZoom(Number(event.target.value))} /><Button size="sm" onClick={resetCrop}>처음 위치</Button><span>틀을 끌어 얼굴에 맞추세요 · 3:4 고정</span></div>
         </>}
         {sourceKind === "stashdb" && <>
-          {profile?.status === "matched" ? <div className="av-portrait-picker__stashdb-grid" aria-label="StashDB 사진 목록">
-            {profile.images.filter(image => safeProfileUrl(image.url)).map(image => <button key={image.id} type="button" disabled={busy} className={image.id === stashdbId ? "is-selected" : ""} aria-pressed={image.id === stashdbId} aria-label={`StashDB 사진 ${image.width}×${image.height} ${image.id}`} onClick={() => { setStashdb(null); setStashdbLoading(true); setStashdbId(image.id); setStashdbRequest(value => value + 1); }}>
-              {!privacyMode ? <img src={image.url} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span>비공개</span>}
+          {profile?.status === "matched" && (!stashdbStatus?.routed || profile.stashdbId) ? <div className="av-portrait-picker__stashdb-grid" aria-label="StashDB 사진 목록">
+            {profile.images.filter(image => stashdbStatus?.routed || safeProfileUrl(image.url)).map(image => <button key={image.id} type="button" disabled={busy} className={image.id === stashdbId ? "is-selected" : ""} aria-pressed={image.id === stashdbId} aria-label={`StashDB 사진 ${image.width}×${image.height} ${image.id}`} onClick={() => { setStashdbLoading(true); setStashdbId(image.id); setStashdbRequest(value => value + 1); }}>
+              {!privacyMode ? <AvStashdbImage url={image.url} routed={!!stashdbStatus?.routed} api={api} onError={reason => setError(avError(reason))} /> : <span>비공개</span>}
               <small>{image.width}×{image.height}</small>
             </button>)}
-            {profile.images.length === 0 && <p>등록된 사진이 없어요.</p>}
-          </div> : <p className="av-portrait-picker__empty">{stashdbConfigured === false ? "StashDB 키가 없어요. 설정에서 키를 등록해 주세요." : "StashDB 프로필이 연결되면 사진을 고를 수 있어요"}</p>}
-          <BusyLabel busy={!!(stashdbLoading)}><p role="status">사진을 불러오는 중…</p></BusyLabel>
+            {!profileLoading && profile.images.length === 0 && <p>등록된 사진이 없어요.</p>}
+          </div> : !profileLoading && <p className="av-portrait-picker__empty">{stashdbStatus?.routed && stashdbStatus.supported === false ? "서버가 아직 StashDB 조회를 지원하지 않습니다." : stashdbConfigured === false ? stashdbStatus?.routed ? "서버에 StashDB 키가 설정되지 않았습니다." : "StashDB 키가 없어요. 설정에서 키를 등록해 주세요." : stashdbStatus?.routed && profile?.status === "matched" && !profile.stashdbId ? "StashDB 배우를 검색에서 다시 선택해 주세요." : "StashDB 프로필이 연결되면 사진을 고를 수 있어요"}</p>}
+          <BusyLabel busy={profileLoading || stashdbLoading}><p role="status">사진을 불러오는 중…</p></BusyLabel>
         </>}
         {sourceKind === "commons" && <div className="av-portrait-picker__commons">
           <BusyLabel busy={!!(commonsLoading)}><p role="status">위키미디어 공용 사진을 불러오는 중…</p></BusyLabel>

@@ -100,3 +100,36 @@ it("ignores an older preview response and permits retrying the same image", asyn
   await waitFor(() => expect(client.previewStashdbPortrait).toHaveBeenCalledTimes(3));
   await waitFor(() => expect(screen.getByRole("button", { name: "이 사진으로" })).toBeEnabled());
 });
+
+it("shows the routed server key and old server messages instead of PC settings",async()=>{
+  const client=api();vi.mocked(client.getStashdbCredentialStatus).mockResolvedValue({configured:false,routed:true,supported:true});
+  const props={personId:"person-1",personName:"배우",api:client,onClose:vi.fn(),onSaved:vi.fn()};
+  const view=render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPortraitPicker {...props}/></PrivacyProvider>);
+  fireEvent.click(screen.getByRole("button",{name:/StashDB/}));expect(await screen.findByText("서버에 StashDB 키가 설정되지 않았습니다.")).toBeVisible();
+  view.unmount();vi.mocked(client.getStashdbCredentialStatus).mockResolvedValue({configured:false,routed:true,supported:false});
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPortraitPicker {...props}/></PrivacyProvider>);fireEvent.click(screen.getByRole("button",{name:/StashDB/}));expect(await screen.findByText("서버가 아직 StashDB 조회를 지원하지 않습니다.")).toBeVisible();
+});
+it("loads routed detail and authenticated photos then saves through the existing portrait action",async()=>{
+  const client=api();vi.mocked(client.getStashdbCredentialStatus).mockResolvedValue({configured:true,routed:true,supported:true});
+  client.getStashdbProfileDetail=vi.fn().mockResolvedValue({status:"matched",stashdbId:"one",images:[{id:"photo",url:"/v1/providers/stashdb/image?stashdbId=one&imageId=photo",width:2,height:3}]});
+  client.previewStashdbImage=vi.fn().mockResolvedValue("data:image/jpeg;base64,AA==");client.previewStashdbPortrait=vi.fn().mockResolvedValue({dataUrl:"data:image/jpeg;base64,AA==",width:2,height:3,sourceUrl:"/v1/providers/stashdb/image?stashdbId=one&imageId=photo"});client.useStashdbPortrait=vi.fn().mockResolvedValue({kind:"stashdb",dataUrl:"data:image/jpeg;base64,AA==",width:2,height:3,sourceUrl:"/v1/providers/stashdb/image?stashdbId=one&imageId=photo"});
+  const saved=vi.fn();render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPortraitPicker personId="person-1" personName="배우" api={client} onClose={vi.fn()} onSaved={saved}/></PrivacyProvider>);
+  const photo=await screen.findByRole("button",{name:"StashDB 사진 2×3 photo"});await waitFor(()=>expect(photo.querySelector("img")).toHaveAttribute("src","data:image/jpeg;base64,AA=="));
+  fireEvent.click(photo);await waitFor(()=>expect(screen.getByRole("button",{name:"이 사진으로"})).toBeEnabled());fireEvent.click(screen.getByRole("button",{name:"이 사진으로"}));await waitFor(()=>expect(saved).toHaveBeenCalledWith(expect.objectContaining({kind:"stashdb"})));expect(client.useStashdbPortrait).toHaveBeenCalledWith("person-1");
+});
+
+it("retains the selected photo while another routed preview is pending",async()=>{
+  const client=api();vi.mocked(client.getStashdbCredentialStatus).mockResolvedValue({configured:true,routed:true,supported:true});
+  client.getStashdbProfileDetail=vi.fn().mockResolvedValue({status:"matched",stashdbId:"one",images:[{id:"first",url:"/v1/providers/stashdb/image?stashdbId=one&imageId=first",width:2,height:3},{id:"second",url:"/v1/providers/stashdb/image?stashdbId=one&imageId=second",width:2,height:3}]});
+  client.previewStashdbImage=vi.fn().mockResolvedValue("data:image/jpeg;base64,AA==");
+  client.previewStashdbPortrait=vi.fn().mockResolvedValueOnce({dataUrl:"data:image/jpeg;base64,first",width:2,height:3,sourceUrl:"/first"}).mockImplementationOnce(()=>new Promise(()=>{}));
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPortraitPicker personId="person-1" personName="배우" api={client} onClose={vi.fn()} onSaved={vi.fn()}/></PrivacyProvider>);
+  fireEvent.click(await screen.findByRole("button",{name:"StashDB 사진 2×3 first"}));await waitFor(()=>expect(screen.getByRole("img",{name:"배우 대표 이미지"})).toHaveAttribute("src","data:image/jpeg;base64,first"));
+  fireEvent.click(screen.getByRole("button",{name:"StashDB 사진 2×3 second"}));expect(screen.getByRole("img",{name:"배우 대표 이미지"})).toHaveAttribute("src","data:image/jpeg;base64,first");expect(screen.getByRole("button",{name:"이 사진으로"})).toBeDisabled();expect(screen.queryByText("사진을 불러오는 중…")).toBeNull();
+});
+
+it("keeps the existing routed photo visible while detail is loading",async()=>{
+  const client=api();vi.mocked(client.getStashdbCredentialStatus).mockResolvedValue({configured:true,routed:true,supported:true});client.getStashdbProfileDetail=vi.fn().mockImplementation(()=>new Promise(()=>{}));
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPortraitPicker personId="person-1" personName="배우" currentPortrait={{kind:"stashdb",dataUrl:"data:image/jpeg;base64,current",width:2,height:3,sourceUrl:"/current"}} api={client} onClose={vi.fn()} onSaved={vi.fn()}/></PrivacyProvider>);
+  expect(screen.getByRole("img",{name:"배우 대표 이미지"})).toHaveAttribute("src","data:image/jpeg;base64,current");expect(screen.getByRole("button",{name:"이 사진으로"})).toBeDisabled();await waitFor(()=>expect(client.getStashdbProfileDetail).toHaveBeenCalled());expect(screen.getByRole("img",{name:"배우 대표 이미지"})).toHaveAttribute("src","data:image/jpeg;base64,current");
+});

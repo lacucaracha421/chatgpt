@@ -118,7 +118,60 @@ fn confirmed_person(db: &Connection, person: &str) -> Result<Option<Value>, Libr
         .transpose()
 }
 
+// The relay detail is a read-only prediction, never a submitted profile. If the
+// provider changes again before delivery, ordinary revision conflicts remain visible.
+fn predict_person_profile(
+    db: &Connection,
+    state: &mut Value,
+    body: &Value,
+) -> Result<bool, LibraryError> {
+    let hint: Option<String> = db
+        .query_row(
+            "SELECT value FROM notes_state WHERE key=?1",
+            [profile_prediction_key(text(body, "operationId")?)],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let hint: Option<Value> = hint
+        .map(|raw| serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse))
+        .transpose()?;
+    let changed = if body["stashdbId"].is_null() {
+        !state["stashdbId"].is_null() || !state["profile"].is_null()
+    } else if let Some(profile) = hint.as_ref() {
+        state["stashdbId"] != body["stashdbId"] || state["profile"] != *profile
+    } else {
+        true
+    };
+    state["stashdbId"] = body["stashdbId"].clone();
+    state["profile"] = hint.unwrap_or(Value::Null);
+    Ok(changed)
+}
+fn profile_prediction_key(operation: &str) -> String {
+    format!("stashdbProfilePrediction:{operation}")
+}
+
+fn prune_profile_predictions(db: &Connection) -> Result<(), LibraryError> {
+    // Blocked intents can be retried; discarded, dropped and accepted intents
+    // (or deleted outbox rows) no longer need their local prediction snapshots.
+    db.execute(
+        "DELETE FROM notes_state WHERE key GLOB 'stashdbProfilePrediction:*'
+         AND NOT EXISTS(SELECT 1 FROM collection_authority_outbox o
+             WHERE notes_state.key='stashdbProfilePrediction:' || o.operation_id
+             AND o.state IN ('pending','blocked'))",
+        [],
+    )?;
+    Ok(())
+}
+
 fn predicted_person(db: &Connection, person: &str) -> Result<Value, LibraryError> {
+    predicted_person_before(db, person, None)
+}
+
+fn predicted_person_before(
+    db: &Connection,
+    person: &str,
+    before: Option<&str>,
+) -> Result<Value, LibraryError> {
     let mut value = confirmed_person(db, person)?;
     let rows = db
         .prepare(
@@ -129,6 +182,9 @@ fn predicted_person(db: &Connection, person: &str) -> Result<Value, LibraryError
     for raw in rows {
         let body: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if before.is_some_and(|operation| body["operationId"] == operation) {
+            break;
+        }
         if body["commandType"] == "setAvCredits" && value.is_none() {
             if let Some(p) = body["people"]
                 .as_array()
@@ -157,6 +213,9 @@ fn predicted_person(db: &Connection, person: &str) -> Result<Value, LibraryError
         } else if body["commandType"] == "setPersonPortrait" {
             changed = state["portraitSelection"] != body["portrait"];
             state["portraitSelection"] = body["portrait"].clone();
+        }
+        if body["commandType"] == "setPersonProfile" {
+            changed = predict_person_profile(db, state, &body)?;
         }
         if changed {
             state["entityRevision"] = json!(integer(state, "entityRevision")? + 1);
@@ -226,13 +285,20 @@ fn project_person_portrait(
         tx.execute("INSERT INTO collection_person_portraits(person_id,kind,artwork_id,x,y,w,h,updated_at) VALUES(?1,'crop',?2,?3,?4,?5,?6,?7)",
             params![person,text(choice,"artworkId")?,sql_value(&r["x"])?,sql_value(&r["y"])?,sql_value(&r["w"])?,sql_value(&r["h"])?,now])?;
     } else if choice["kind"] == "image" {
-        let bytes: Option<Vec<u8>> = tx
+        let mut bytes: Option<Vec<u8>> = tx
             .query_row(
                 "SELECT bytes FROM collection_authority_portrait_blobs WHERE sha256=?1",
                 [text(&choice["original"], "sha256")?],
                 |r| r.get(0),
             )
             .optional()?;
+        if bytes.is_none() {
+            let l = local(tx)?.ok_or(LibraryError::CollectionAuthorityNotAdopted)?;
+            // A prior memo/profile receipt may reproject the old confirmed portrait.
+            // Replay the prepared preview from its own digest, never the server SHA.
+            bytes = tx.query_row("SELECT b.bytes FROM notes_state n JOIN collection_authority_portrait_blobs b ON b.sha256=n.value WHERE n.key=?1",
+                [relay_portrait_marker(&json!(l.id.library), &json!(l.id.epoch), text(&choice["original"], "sha256")?)], |r|r.get(0)).optional()?;
+        }
         // Keep the existing picture until the confirmed bytes have arrived.
         let Some(bytes) = bytes else {
             return Ok(());
@@ -302,6 +368,7 @@ fn receive_person(tx: &Transaction<'_>, person: &Value, now: &str) -> Result<(),
     tx.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,name_ja=excluded.name_ja",
         params![id,text(person,"displayName")?,sql_value(&person["nameJa"])?,now])?;
     project_person_fields(tx, id, person, now)?;
+    project_person_profile(tx, id, person, now)?;
     project_person_portrait(tx, id, &person["portraitSelection"], now)?;
     Ok(())
 }
@@ -538,4 +605,143 @@ impl Library {
         }
         Ok(count)
     }
+}
+
+/// Only confirmed receipts/feed project provider text; candidates and photos are read-only.
+fn project_person_profile(
+    tx: &Transaction<'_>,
+    person: &str,
+    value: &Value,
+    now: &str,
+) -> Result<(), LibraryError> {
+    // Older servers publish text profiles without owning the StashDB identity.
+    // Only the additive identity key authorizes replacing the local provider row.
+    if value.get("stashdbId").is_none() {
+        return Ok(());
+    }
+    let Some(profile) = value.get("profile") else {
+        return Ok(());
+    };
+    if profile.is_null() {
+        tx.execute(
+            "DELETE FROM collection_person_profiles WHERE person_id=?1",
+            [person],
+        )?;
+        return Ok(());
+    }
+    let urls: Vec<Value> = profile["urls"]
+        .as_array()
+        .ok_or(LibraryError::InvalidCloudResponse)?
+        .iter()
+        .map(|u| json!({"url":u["url"],"site":{"name":u["site"]}}))
+        .collect();
+    // The legacy table requires an ID for 'matched'. Authority staging may contain
+    // confirmed text without an identity; the reader restores its display state
+    // from the confirmed cache, while keeping stashdb_id genuinely null.
+    tx.execute("INSERT OR REPLACE INTO collection_person_profiles
+        (person_id,source,status,stashdb_id,name,aliases_json,birth_date,height_cm,band_in,waist_in,hip_in,cup,breast_type,career_start,career_end,urls_json,images_json,candidates_json,fetched_at)
+        VALUES(?1,'stashdb',CASE WHEN ?2 IS NULL THEN 'none' ELSE 'matched' END,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'[]','[]',?15)",
+        params![person,sql_value(&value["stashdbId"])?,text(profile,"name")?,profile["aliases"].to_string(),
+        sql_value(&profile["birthDate"])?,sql_value(&profile["heightCm"])?,sql_value(&profile["bandIn"])?,
+        sql_value(&profile["waistIn"])?,sql_value(&profile["hipIn"])?,sql_value(&profile["cup"])?,
+        sql_value(&profile["breastType"])?,sql_value(&profile["careerStart"])?,sql_value(&profile["careerEnd"])?,json!(urls).to_string(),now])?;
+    Ok(())
+}
+
+pub(crate) fn enqueue_person_profile(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    person: &str,
+    stashdb_id: Option<&str>,
+) -> Result<(), LibraryError> {
+    enqueue_person_profile_snapshot(tx, status, person, stashdb_id, None)
+}
+
+pub(crate) fn enqueue_person_profile_snapshot(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    person: &str,
+    stashdb_id: Option<&str>,
+    profile_hint: Option<&Value>,
+) -> Result<(), LibraryError> {
+    if !status.active {
+        return Err(LibraryError::CollectionAuthorityNotAdopted);
+    }
+    safe_id(person)?;
+    if let Some(id) = stashdb_id {
+        safe_id(id)?;
+    }
+    let state = predicted_person(tx, person)?;
+    let operation = enqueue_collection_command(
+        tx,
+        status,
+        "setPersonProfile",
+        person,
+        json!({"personId":person,"stashdbId":stashdb_id,"expectedRevision":integer(&state,"entityRevision")?}),
+    )?;
+    if let Some(profile) = profile_hint {
+        tx.execute(
+            "INSERT INTO notes_state(key,value) VALUES(?1,?2)",
+            params![profile_prediction_key(&operation), profile.to_string()],
+        )?;
+    }
+    Ok(())
+}
+
+fn relay_portrait_marker(library: &Value, epoch: &Value, sha: &str) -> String {
+    format!(
+        "stashdbRelayPortrait:{}:{}:{}",
+        library.as_str().unwrap_or(""),
+        epoch,
+        sha
+    )
+}
+
+pub(crate) fn enqueue_relay_person_portrait(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    person: &str,
+    portrait: Value,
+    optimistic_bytes: Option<&[u8]>,
+) -> Result<(), LibraryError> {
+    let id = status
+        .identity(tx)?
+        .ok_or(LibraryError::CollectionAuthorityNotAdopted)?;
+    let blob = portrait_blob(&portrait["original"])?;
+    if portrait["kind"] != "image"
+        || blob.content_type != "image/jpeg"
+        || blob.sha256.len() != 64
+        || !blob.sha256.bytes().all(|b| b.is_ascii_hexdigit())
+        || blob.size_bytes == 0
+        || blob.size_bytes > PORTRAIT_BYTE_LIMIT as u64
+        || !(1..=1600).contains(&integer(&portrait, "width")?)
+        || !(1..=1600).contains(&integer(&portrait, "height")?)
+        || portrait["attribution"]["source"] != "stashdb"
+    {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    let preview_sha = if let Some(bytes) = optimistic_bytes {
+        if bytes.len() > PORTRAIT_BYTE_LIMIT
+            || image::guess_format(bytes).ok() != Some(image::ImageFormat::Jpeg)
+        {
+            return Err(LibraryError::InvalidWorkArtwork);
+        }
+        let sha = portrait_digest(bytes);
+        tx.execute(
+            "INSERT OR IGNORE INTO collection_authority_portrait_blobs(sha256,bytes) VALUES(?1,?2)",
+            params![sha, bytes],
+        )?;
+        sha
+    } else {
+        "1".into()
+    };
+    tx.execute(
+        "INSERT OR REPLACE INTO notes_state(key,value) VALUES(?1,?2)",
+        params![
+            relay_portrait_marker(&json!(id.library), &json!(id.epoch), &blob.sha256,),
+            preview_sha
+        ],
+    )?;
+    enqueue_person_portrait(tx, status, person, portrait)?;
+    Ok(())
 }
