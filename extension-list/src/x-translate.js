@@ -350,10 +350,23 @@
       schedule();
     }, delay);
   }
+  // A key rejection blocks the tab, but the provider sometimes rejects a valid key for a moment;
+  // one quiet recheck follows, and a later success allows another.
+  const AUTH_RECHECK_MS = 30000;
+  let authRecheckAvailable = true;
   function blockFor(code) {
     blocked = true;
     pending.clear();
     setNotice(failure(code), "error");
+    if (!authRecheckAvailable || code === "api_key_missing") return;
+    authRecheckAvailable = false;
+    const blockedEpoch = epoch;
+    setTimeout(() => {
+      if (!blocked || blockedEpoch !== epoch) return;
+      blocked = false;
+      setNotice("", "");
+      scan(true);
+    }, AUTH_RECHECK_MS);
   }
   function handleTopFailure(candidates, result, requestEpoch) {
     const code = result?.code;
@@ -399,6 +412,7 @@
     else render(candidate.element, candidate.snapshot, text);
     completed.set(candidate.element, candidate.snapshot.signature);
     failures.delete(candidate.element);
+    authRecheckAvailable = true;
     setNotice("", "");
   }
   function handleItem(candidate, item, requestEpoch) {

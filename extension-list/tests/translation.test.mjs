@@ -1066,3 +1066,30 @@ test('page churn outside post text does not rescan, while new or edited post tex
   w.document.getElementById('feed').append(next);
   await clock.advance(400); assert.equal(scans,2); w.close();
 });
+
+test('a rejected sub model key never hides or replaces the Claude answer',async()=>{
+  const urls=[];
+  const f=fixture(claudeSettings({fallbackModel:'google/gemini-3.1-flash-lite'}),async url=>{
+    urls.push(url);
+    if(url.includes('openrouter')) return {ok:false,status:401,headers:{get(){return null;}}};
+    return urls.length===1 ? {ok:false,status:529,headers:{get(){return null;}}} : claudeAnswer('클로드 번역');
+  });
+  assert.equal((await f.handle({type:'translation:request',text:'Overloaded post'})).code,'http_529');
+  assert.equal((await f.handle({type:'translation:request',text:'Invalid earlier',fallback:true})).text,'클로드 번역');
+});
+
+test('a key rejection blocks the tab, then one quiet recheck resumes translation',async()=>{
+  let requests=0;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Valid key post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests++; return requests===1 ? {ok:false,code:'http_401'} : {ok:true,text:'다시 번역됨'};
+  });
+  const clock=fakeTimers(w), element=w.document.querySelector('div');
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(400);
+  assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation[data-error="false"]'),null);
+  await clock.advance(30500);
+  assert.equal(requests,2);
+  assert.equal(w.document.querySelector('.lakomics-translation[data-error="false"]')?.textContent,'다시 번역됨'); w.close();
+});

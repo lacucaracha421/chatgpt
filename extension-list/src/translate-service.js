@@ -180,7 +180,12 @@
           return { ok: true, data: anthropic ? asChatCompletion(data) : data, model };
         }
         const code = `http_${response.status}`;
-        if ([401, 402, 403].includes(response.status)) return { ok: false, code };
+        if ([401, 402, 403].includes(response.status)) {
+          // A rejected sub model key never hides the main model's answer or failure.
+          if (model === settings.model) return { ok: false, code };
+          if (attempt === 0) last = { ok: false, code };
+          continue;
+        }
         if (response.status === 429) {
           const retryMs = retryAfterMs(response);
           cooldownUntil.set(model, Math.max(cooldownUntil.get(model) || 0, Date.now() + retryMs));
