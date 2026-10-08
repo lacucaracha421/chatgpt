@@ -47,7 +47,7 @@
 - Use the smallest relevant method: `ponytail` for scope, `systematic-debugging` for nontrivial failures, `verification-before-completion` for claims, `lakomics-development` for component-specific work. `ponytail-review` is an optional read-only complexity review, not correctness approval.
 - Delegate only substantive independent investigation or implementation; trivial edits and tightly coupled changes stay inline unless the user explicitly delegates them. Parallel implementation requires disjoint write sets; serialize overlapping work. Workers and reviewers never delegate further.
 - The controller owns scope, integration, and final claims. Brief each worker with a bounded goal, context, exact read/write scope, constraints, acceptance criteria, and required evidence.
-- Implementation workers are Codex CLI (`codex exec`): `gpt-6.1-sol` — medium for simple work (mechanical, clearly specified small edits, data-file, documentation; a trial from 2026-09-30 that replaces `gpt-5.6-luna` xhigh for now), high for everything else including debugging, xhigh for high data-loss risk or after one failure. Sol is also consulted read-only as a peer of the controller (debugging, risky approaches and diffs), not as a supervisor. The host's instructions own the exact command and difficulty criteria. Confirm the actual model from command output; report an unavailable model instead of substituting one.
+- Worker routing (user, 2026-10-08): design work (mockups, UI/visual direction, layout and styling decisions) goes to a Claude Opus subagent at high effort; everything else (implementation, debugging, documentation, data files, lookups) goes to Codex CLI (`codex exec`) `gpt-6.1-sol` at medium, escalating once to high after a failure. If the Codex quota runs out, continue with a Claude Sonnet subagent at high effort and say so in the report. Sol is also consulted read-only as a peer of the controller (debugging, risky approaches and diffs), not as a supervisor. The host's instructions own the exact command. Confirm the actual model from command output; report an unavailable model instead of substituting one.
 
 ## Verification
 
@@ -72,7 +72,7 @@
 
 ## References and records
 
-- Always apply the user's portable working preferences in `docs/agents/user-preferences.md` (Korean messages, no flash/pop-in, test cadence, Codex quota rule).
+- Always apply the user's portable working preferences in `docs/agents/user-preferences.md` (Korean messages, no flash/pop-in, test cadence, worker routing).
 - Start at `docs/README.md` and read only what is relevant: product terms `CONTEXT.md`; UI `DESIGN.md` and `docs/agents/pc-design-reference.md`; architecture, the relevant Accepted ADRs in `docs/adr/`; implementation/review/performance `docs/agents/implementation.md`.
 - Before substantial Works/Collection work, read `docs/agents/lakomics-works-handoff-v2.md`, `docs/agents/pc-design-reference.md`, and `docs/agents/works-viewer-design.md`. Historical prototypes are references, not code to copy.
 - Current sources, migrations, and contracts define implementation; the backlog defines intended work. Stale memory and historical plans are not instructions; do not resurrect retired plans.

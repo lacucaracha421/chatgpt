@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>배우 페이지 A안</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="mock.css">
+<style>
+/* Variant A: profile column on the left (stays put while the works scroll), works on the right. */
+.a-page { display: grid; grid-template-columns: 360px minmax(0, 1fr); align-items: start; }
+.a-side { position: sticky; top: 0; display: grid; gap: var(--space-4); padding: var(--space-6); border-right: 1px solid var(--color-border); min-height: calc(900px - var(--toolbar-height)); align-content: start; background: var(--color-sidebar); }
+.a-id { display: grid; gap: var(--space-1); }
+.a-id .name-row .fav { margin-left: auto; }
+.a-side .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.a-side .fact--wide { grid-column: 1 / -1; }
+.a-main { display: grid; gap: var(--space-6); padding: var(--space-2) var(--space-6) var(--space-8); min-width: 0; }
+.a-main .shelf { --per-row: 8; }
+.a-related { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-8); }
+
+/* Tablet A: the same column folds into an identity row above the works. */
+.ta-page { display: grid; gap: var(--space-6); padding: var(--space-6); }
+.ta-id { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+.ta-id .right { display: grid; gap: var(--space-4); align-content: start; }
+.ta-id .name-row .fav { margin-left: auto; margin-right: calc(var(--space-3) * -1); }
+.ta-id .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ta-id .fact--wide { grid-column: 1 / -1; }
+.ta-page .shelf { --per-row: 6; }
+.ta-page .works-bar { gap: var(--space-3); }
+.ta-related { display: grid; gap: var(--space-6); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>A안 · 왼쪽 프로필 기둥</h1>
+    <p class="lead">배우는 왼쪽 기둥에 고정되고 <b>큰 사진 → 이름 → 신체 정보 → 링크 → 메모</b> 순으로 읽힙니다. 오른쪽은 작품만 스크롤됩니다. 내 서재 통계는 기둥 맨 아래 한 줄, FANZA·Wikidata ID와 사진 출처 줄은 화면에서 빼고 사진 위 버튼의 툴팁 / 사진 바꾸기 창으로 옮깁니다. 점선 아래는 스크롤해야 보이는 부분입니다. <a href="index.html" style="color:var(--color-accent)">← 비교 페이지</a></p>
+  </header>
+
+  <!-- ================= PC ================= -->
+  <section class="shot">
+    <h2>PC <small>1440 × 900</small></h2>
+    <div class="frame frame--pc">
+      <div class="fold" data-label="900px"></div>
+      <div class="pc-shell">
+        <nav class="rail"><span><i data-icon="home"></i></span><span><i data-icon="photo"></i></span><span class="on"><i data-icon="film"></i></span><span><i data-icon="book"></i></span><span style="margin-top:auto;margin-bottom:12px"><i data-icon="cog"></i></span></nav>
+        <div>
+          <div class="topline">
+            <button class="cbtn cbtn--icon" type="button" aria-label="뒤로"><i data-icon="back"></i></button>
+            <span class="crumb">AV · <b>배우</b></span>
+            <button class="cbtn push" type="button"><i data-icon="dots"></i>배우 관리</button>
+          </div>
+          <div class="a-page">
+            <aside class="a-side">
+              <div class="portrait" data-portrait="#6b5257,#24262b">
+                <button class="portrait__change" type="button" title="사진 출처: StashDB · 바꾸려면 누르세요"><i data-icon="camera"></i>사진 바꾸기</button>
+              </div>
+              <div class="a-id">
+                <div class="name-row"><h1>하나세 미오</h1><button class="fav" type="button" aria-label="즐겨찾기 해제" aria-pressed="true"><i data-icon="star"></i></button></div>
+                <p class="name-ja">花瀬 澪</p>
+              </div>
+              <dl class="facts">
+                <div class="fact"><dt>생년월일</dt><dd class="num">1999.4.12<small>27세</small></dd></div>
+                <div class="fact"><dt>키</dt><dd class="num">158cm</dd></div>
+                <div class="fact"><dt>사이즈</dt><dd class="num">86 · 58 · 85</dd></div>
+                <div class="fact"><dt>컵</dt><dd>F</dd></div>
+                <div class="fact fact--wide"><dt>활동</dt><dd class="num">2019 – 현재<small>7년째</small></dd></div>
+              </dl>
+              <div class="links links--first">
+                <button class="link" type="button">X<i data-icon="out"></i></button>
+                <button class="link" type="button">Instagram<i data-icon="out"></i></button>
+                <button class="link" type="button">FANZA<i data-icon="out"></i></button>
+                <button class="link" type="button">공식<i data-icon="out"></i></button>
+                <button class="link" type="button">위키<i data-icon="out"></i></button>
+              </div>
+              <div class="memo">
+                <div class="ui-section-label"><span class="ui-section-label__title">메모</span><span class="ui-section-label__rule"></span></div>
+                <p>단독작 위주로 모으는 중. 2024년 이후 S1 작품이 좋음.</p>
+              </div>
+              <p class="lib">내 작품 <b class="num">20</b><span class="dot">·</span>단독 <b class="num">14</b><span class="dot">·</span><span class="num">2024.7 – 9.12</span><span class="dot">·</span>평균 ★<b class="num">4.1</b></p>
+            </aside>
+
+            <main class="a-main">
+              <div>
+                <div class="works-bar">
+                  <h2>작품</h2><span class="count num">20</span>
+                  <div class="ctrls">
+                    <div class="ui-segmented" role="radiogroup" aria-label="역할">
+                      <span class="ui-segmented__thumb"></span>
+                      <button class="ui-segmented__cell" data-segmented-active="true" type="button"><span class="ui-segmented__content"><span class="ui-segmented__label">전체</span></span></button>
+                      <button class="ui-segmented__cell" type="button"><span class="ui-segmented__content"><span class="ui-segmented__label">단독 <span class="ui-segmented__count">14</span></span></span></button>
+                      <button class="ui-segmented__cell" type="button"><span class="ui-segmented__content"><span class="ui-segmented__label">공동 출연 <span class="ui-segmented__count">6</span></span></span></button>
+                    </div>
+                    <button class="cbtn" type="button"><i data-icon="sort" data-small></i>발매일</button>
+                    <button class="cbtn cbtn--icon" type="button" aria-label="보기"><i data-icon="view"></i></button>
+                  </div>
+                </div>
+                <div class="shelf" data-shelf="20" style="margin-top:var(--space-3)"></div>
+              </div>
+              <div class="a-related">
+                <div class="block">
+                  <div class="ui-section-label"><span class="ui-section-label__title">자주 함께 나온 배우</span><span class="ui-section-label__rule"></span></div>
+                  <div class="costars" data-costars="5"></div>
+                </div>
+                <div class="block">
+                  <div class="ui-section-label"><span class="ui-section-label__title">레이블</span><span class="ui-section-label__rule"></span></div>
+                  <div class="labels" data-labels></div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Tablet ================= -->
+  <section class="shot">
+    <h2>태블릿 세로 <small>800 × 1280 · 같은 조각, 터치 크기만 다름</small></h2>
+    <div class="frame frame--tab">
+      <div class="fold" data-label="1280px"></div>
+      <div class="tab-top">
+        <button class="cbtn cbtn--icon" type="button" aria-label="뒤로"><i data-icon="back"></i></button>
+        <span class="t">배우</span>
+        <button class="cbtn cbtn--icon push" type="button" aria-label="배우 관리"><i data-icon="dots"></i></button>
+      </div>
+      <div class="ta-page">
+        <div class="ta-id">
+          <div class="portrait" data-portrait="#6b5257,#24262b">
+            <button class="portrait__change" type="button"><i data-icon="camera"></i>사진 바꾸기</button>
+          </div>
+          <div class="right">
+            <div>
+              <div class="name-row"><h1>하나세 미오</h1><button class="fav" type="button" aria-pressed="true" aria-label="즐겨찾기 해제"><i data-icon="star"></i></button></div>
+              <p class="name-ja">花瀬 澪</p>
+            </div>
+            <dl class="facts">
+              <div class="fact"><dt>생년월일</dt><dd class="num">1999.4.12<small>27세</small></dd></div>
+              <div class="fact"><dt>키</dt><dd class="num">158cm</dd></div>
+              <div class="fact"><dt>사이즈</dt><dd class="num">86 · 58 · 85</dd></div>
+              <div class="fact"><dt>컵</dt><dd>F</dd></div>
+              <div class="fact fact--wide"><dt>활동</dt><dd class="num">2019 – 현재<small>7년째</small></dd></div>
+            </dl>
+            <div class="links links--first">
+              <button class="link" type="button">X<i data-icon="out"></i></button>
+              <button class="link" type="button">Instagram<i data-icon="out"></i></button>
+              <button class="link" type="button">FANZA<i data-icon="out"></i></button>
+              <button class="link" type="button">공식<i data-icon="out"></i></button>
+              <button class="link" type="button">위키<i data-icon="out"></i></button>
+            </div>
+            <p class="lib">내 작품 <b class="num">20</b><span class="dot">·</span>단독 <b class="num">14</b><span class="dot">·</span>평균 ★<b class="num">4.1</b></p>
+          </div>
+        </div>
+        <div class="memo">
+          <div class="ui-section-label"><span class="ui-section-label__title">메모</span><span class="ui-section-label__rule"></span></div>
+          <p>단독작 위주로 모으는 중. 2024년 이후 S1 작품이 좋음.</p>
+        </div>
+        <div>
+          <div class="works-bar">
+            <h2>작품</h2><span class="count num">20</span>
+            <div class="ctrls">
+              <div class="ui-segmented" role="radiogroup" aria-label="역할">
+                <span class="ui-segmented__thumb"></span>
+                <button class="ui-segmented__cell" data-segmented-active="true" type="button"><span class="ui-segmented__content"><span class="ui-segmented__label">전체</span></span></button>
+                <button class="ui-segmented__cell" type="button"><span class="ui-segmented__content"><span class="ui-segmented__label">단독</span></span></button>
+                <button class="ui-segmented__cell" type="button"><span class="ui-segmented__content"><span class="ui-segmented__label">공동 출연</span></span></button>
+              </div>
+              <button class="cbtn cbtn--icon" type="button" aria-label="정렬" style="width:44px;height:44px"><i data-icon="sort"></i></button>
+            </div>
+          </div>
+          <div class="shelf" data-shelf="20" style="margin-top:var(--space-3)"></div>
+        </div>
+        <div class="ta-related">
+          <div class="block">
+            <div class="ui-section-label"><span class="ui-section-label__title">자주 함께 나온 배우</span><span class="ui-section-label__rule"></span></div>
+            <div class="costars" data-costars="5"></div>
+          </div>
+          <div class="block">
+            <div class="ui-section-label"><span class="ui-section-label__title">레이블</span><span class="ui-section-label__rule"></span></div>
+            <div class="labels" data-labels></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<script src="mock.js"></script>
+</body>
+</html>

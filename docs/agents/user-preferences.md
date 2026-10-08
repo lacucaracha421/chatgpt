@@ -14,7 +14,7 @@ Status: current. Portable preferences the user stated in earlier sessions, for a
 
 ## Workers and runs
 
-- Implementation goes to the Codex worker when one is available (see the host's instructions). **If the Codex quota runs out, stop and tell the user; do not silently switch implementation to another model.**
+- Worker routing (user, 2026-10-08): design work → a Claude Opus subagent at high effort; everything else → the Codex worker `gpt-6.1-sol` at medium (see the host's instructions for the command). **If the Codex quota runs out, continue with a Claude Sonnet subagent at high effort and tell the user in the report.**
 - Keep test runs short: compile check plus the directly related tests for small fixes; no tests for purely visual edits. Run the full desktop suite and `npm run mobile:test` once per batch **before every commit** — scoped checks alone have broken the other client before.
 - Do not start a release build after every fix; build when the user asks or a batch is ready to try.
 - Watch long background jobs (builds, test suites, workers) for errors and report failures immediately; never mask an exit code.
