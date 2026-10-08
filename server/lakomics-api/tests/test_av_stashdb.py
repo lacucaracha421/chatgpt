@@ -2,6 +2,10 @@
 import io
 import json
 import os
+import threading
+import time
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 import uuid
 from urllib.error import HTTPError, URLError
@@ -40,7 +44,10 @@ class StashDBTests(unittest.TestCase):
         self.fixture.ready()
         self.fixture.av_person()
         for patch in (mock.patch.dict(os.environ, {av.KEY_ENV: "mock-only-secret"}, clear=True),
-                      mock.patch.object(wp.time, "sleep"), mock.patch.object(av, "relay", wp.Relay())):
+                      mock.patch.object(wp.time, "sleep"), mock.patch.object(av, "relay", wp.Relay()),
+                      mock.patch.object(av, "detail_cache", OrderedDict()),
+                      mock.patch.object(av, "preview_cache", OrderedDict()),
+                      mock.patch.object(av, "preview_bytes", 0)):
             patch.start()
             self.addCleanup(patch.stop)
         http = mock.patch.object(wp._opener, "open", side_effect=AssertionError("Unmocked outbound HTTP"))
@@ -71,6 +78,7 @@ class StashDBTests(unittest.TestCase):
         self.assertNotIn("mock-only-secret", reply.text)
 
     def photo(self, response=None, row=None):
+        av.detail_cache.clear()  # This helper deliberately supplies a new provider snapshot.
         self.open.side_effect = [Response({"data": {"findPerformer": row or performer()}}),
                                  response or Response(png(), "image/png")]
         return self.client.post(av.PREFIX + "/portrait", headers=self.auth,
@@ -221,6 +229,7 @@ class StashDBTests(unittest.TestCase):
     def test_proxy_origin_only_auth_and_server_resolved_image(self):
         for url, key in (("https://stashdb.org/images/photo", "mock-only-secret"),
                          ("https://cdn.stashdb.org/images/ab/cd/photo", None)):
+            av.detail_cache.clear()
             row = performer(images=[{"id": "photo", "url": url, "width": 2, "height": 3}])
             self.open.side_effect = [Response({"data": {"findPerformer": row}}), Response(png(), "image/png")]
             reply = self.get("/image", stashdbId="one", imageId="photo")
@@ -284,3 +293,113 @@ class StashDBTests(unittest.TestCase):
         with mock.patch.object(fake_s3, "fail_put", True):
             self.code(self.photo(Response(png((7, 9)), "image/png")), 502, "providerArtworkStorageUnavailable")
         self.assertIsNone(self.fixture.person()["portraitSelection"])
+
+    def test_detail_and_search_seed_image_and_portrait_cache(self):
+        for suffix, field, value, params in (
+                ("/performers/one", "findPerformer", performer(), {}),
+                ("/search", "searchPerformer", [performer()], {"query": "name"})):
+            av.detail_cache.clear()
+            self.response(value, field)
+            self.assertEqual(self.get(suffix, **params).status_code, 200)
+            self.open.side_effect = lambda *a, **k: Response(png(), "image/png")
+            self.open.reset_mock()
+            for _ in range(2):
+                self.assertEqual(self.get("/image", stashdbId="one", imageId="photo").status_code, 200)
+            reply = self.client.post(av.PREFIX + "/portrait", headers=self.auth,
+                                     json={"stashdbId": "one", "imageId": "photo"})
+            self.assertEqual(reply.status_code, 200, reply.text)
+            self.assertEqual(self.open.call_count, 3)
+            self.assertTrue(all(call.args[0].data is None for call in self.open.call_args_list))
+
+    def test_cold_images_reuse_detail_ttl_and_profile_refresh_is_fresh(self):
+        self.open.side_effect = [Response({"data": {"findPerformer": performer()}}),
+                                 Response(png(), "image/png"), Response(png(), "image/png")]
+        for _ in range(2):
+            self.assertEqual(self.get("/image", stashdbId="one", imageId="photo").status_code, 200)
+        self.assertEqual(self.open.call_count, 3)
+        self.response(performer(name="Fresh"))
+        self.assertEqual(self.fixture.ok(self.command())["person"]["profile"]["name"], "Fresh")
+        with av.cache_lock:
+            _, value = av.detail_cache["one"]
+            av.detail_cache["one"] = (time.monotonic() - 1, value)
+        self.open.side_effect = [Response({"data": {"findPerformer": performer(images=[])}})]
+        self.code(self.get("/image", stashdbId="one", imageId="photo"), 404, "providerNotFound")
+
+    def test_detail_cache_entry_bound(self):
+        with mock.patch.object(av, "MAX_DETAIL_ENTRIES", 2):
+            for id_ in ("one", "two", "three"):
+                av.cache_performer(av.normalize(performer(id_)))
+            self.assertEqual(list(av.detail_cache), ["two", "three"])
+
+    def test_four_image_downloads_overlap_without_graphql_lock_and_fifth_is_busy(self):
+        av.cache_performer(av.normalize(performer()))
+        started = threading.Barrier(5)
+        release = threading.Event()
+        def download(*args, **kwargs):
+            started.wait(timeout=5)
+            if not release.wait(timeout=5):
+                raise AssertionError("Image lane did not release")
+            return png(), "image/png"
+        av.relay.locks["stashdb"].acquire()
+        try:
+            with mock.patch.object(wp, "outbound", side_effect=download), ThreadPoolExecutor(4) as pool:
+                pending = [pool.submit(self.get, "/image", stashdbId="one", imageId="photo") for _ in range(4)]
+                try:
+                    started.wait(timeout=5)
+                    self.code(self.get("/image", stashdbId="one", imageId="photo"), 429, "providerBusy")
+                finally:
+                    release.set()
+                self.assertEqual([future.result().status_code for future in pending], [200] * 4)
+        finally:
+            av.relay.locks["stashdb"].release()
+        self.open.assert_not_called()
+
+    def test_preview_jpeg_dimensions_cache_and_full_size_preserved(self):
+        original = png((800, 1200))
+        self.open.side_effect = [Response({"data": {"findPerformer": performer()}}),
+                                 Response(original, "image/png")]
+        params = {"stashdbId": "one", "imageId": "photo", "size": "preview"}
+        first = self.get("/image", **params)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.headers["content-type"], "image/jpeg")
+        with Image.open(io.BytesIO(first.content)) as image:
+            self.assertEqual(image.format, "JPEG")
+            self.assertEqual(image.size, (267, 400))
+        self.assertLess(len(first.content), len(original))
+        self.open.reset_mock()
+        self.assertEqual(self.get("/image", **params).content, first.content)
+        self.open.assert_not_called()
+        self.response(performer())
+        self.assertEqual(self.get("/performers/one").status_code, 200)
+        self.open.reset_mock()
+        self.assertEqual(self.get("/image", **params).content, first.content)
+        self.open.assert_not_called()
+        self.open.side_effect = [Response(original, "image/png")]
+        self.assertEqual(self.get("/image", stashdbId="one", imageId="photo").content, original)
+        self.assertEqual(self.get("/image", **{**params, "size": "full"}).status_code, 422)
+        self.response(performer(images=[]))
+        self.assertEqual(self.get("/performers/one").status_code, 200)
+        self.code(self.get("/image", **params), 404, "providerNotFound")
+        self.assertNotIn(("one", "photo"), av.preview_cache)
+
+    def test_preview_lru_byte_bound_and_replacement(self):
+        with mock.patch.object(av, "MAX_PREVIEW_BYTES", 8):
+            av.cache_preview(("one", "a"), b"aaaa")
+            av.cache_preview(("one", "b"), b"bbbb")
+            self.assertEqual(av.cached_preview(("one", "a")), b"aaaa")
+            av.cache_preview(("one", "c"), b"cccc")
+            self.assertEqual(list(av.preview_cache), [("one", "a"), ("one", "c")])
+            av.cache_preview(("one", "a"), b"a")
+            self.assertEqual(av.preview_bytes, 5)
+            av.cache_preview(("one", "oversized"), b"x" * 9)
+            self.assertEqual(av.preview_bytes, 5)
+            self.assertEqual(av.preview_bytes, sum(map(len, av.preview_cache.values())))
+
+    def test_cached_images_still_require_configured_key_and_auth(self):
+        av.cache_performer(av.normalize(performer()))
+        av.cache_preview(("one", "photo"), b"cached")
+        params = {"stashdbId": "one", "imageId": "photo", "size": "preview"}
+        self.assertEqual(self.client.get(av.PREFIX + "/image", params=params).status_code, 401)
+        os.environ.pop(av.KEY_ENV)
+        self.code(self.get("/image", **params), 503, "providerNotConfigured")
+        self.open.assert_not_called()
