@@ -145,7 +145,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
         <div className="av-performer-page__tools">
           <h2 id="av-performer-works">작품</h2><span className="numeric">{works.length}</span>
           <div className="av-performer-page__controls">
-            <SegmentedControl label="역할" value={filter} onChange={setFilter} options={[{ value: "all", label: "전체" }, { value: "solo", label: "단독" }, { value: "joint", label: "공연" }]} />
+            <SegmentedControl label="역할" value={filter} onChange={setFilter} options={[{ value: "all", label: "전체" }, { value: "solo", label: "단독" }, { value: "joint", label: "공동 출연" }]} />
             <Menu label="정렬" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<>정렬 {sort === "newest" ? "최신순" : "오래된순"}<ChevronDownIcon aria-hidden="true" /></>} items={[
               { id: "newest", label: "발매일 최신순", group: "release", selected: sort === "newest", onSelect: () => setSort("newest") },
               { id: "oldest", label: "발매일 오래된순", group: "release", selected: sort === "oldest", onSelect: () => setSort("oldest") },
@@ -183,7 +183,7 @@ function WorkTile({ work, current, selected, privacyMode, onPick, onOpenCollecti
     if (event.key === "Enter") { event.preventDefault(); onOpenCollection?.(work.collectionId); }
   }} aria-label={`${work.name}${work.productCode ? ` ${work.productCode}` : ""}`}>
     <LightCase data={{ title: work.name, platform: "av", front: artwork(work.frontArtworkId), spine: artwork(work.spineArtworkId), privacy: privacyMode }} selected={selected} />
-    <span className="collection-card__meta"><span className="av-performer-page__code"><b>{work.productCode ?? work.name}</b>{current && <Badge>이 작품</Badge>}</span><span className="av-performer-page__date">{displayDate(work.releaseDate)}{!work.solo && " · 공연"}{privacyMode && " · 비공개"}</span></span>
+    <span className="collection-card__meta"><span className="av-performer-page__code"><b>{work.productCode ?? work.name}</b>{current && <Badge>이 작품</Badge>}</span><span className="av-performer-page__date">{displayDate(work.releaseDate)}{!work.solo && " · 공동 출연"}{privacyMode && " · 비공개"}</span></span>
   </button>;
 }
 

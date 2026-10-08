@@ -5,7 +5,7 @@ import {outboxConnection} from './outboxConnection';
 import {api, errorText} from './transport';
 import {AUTHORITY_STATUS_PATH, COMMAND_EVENT, authorityIdentity, confirmedWork, createdWork, dropWork, enqueueCommand, enqueueCommands, flushCommands,
   optimisticWork, readCommands, reconcileCommands, replaceCommand, sameAuthority,
-  type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
+  type AuthorityCommand, type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
 import {normalizeCollectionEdit, sameEditValue, type CollectionEditField, type CollectionEditValue, type OwnedVolumesValue} from './collectionEditOutbox';
 import type {CollectionSummary} from './collectionModel';
 import type {AvOverlay} from './avEditModel';
@@ -62,7 +62,7 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void, o
   const pending = scoped.some(row => row.state === 'pending');
   usePendingRetry(active, pending, flush);
   useEffect(() => { if (active && pending) void flush(); }, [active, pending, flush, identity?.epoch]);
-  const enqueue = useCallback((command: WorkCommand, label?: string) => {
+  const enqueue = useCallback((command: AuthorityCommand, label?: string) => {
     if (!identity) throw new Error('작품을 편집할 수 없습니다. 연결을 확인해 주세요.');
     const result = enqueueCommand(identity, command, label); void flush(); return result;
   }, [identity?.libraryId, identity?.epoch, flush]);

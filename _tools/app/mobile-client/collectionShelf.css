@@ -120,3 +120,12 @@
 .mobile-collections .ui-section-bar__trailing > .ui-button svg { width: 20px; height: 20px; }
 .mobile-collections .collection-shortcuts__label { display: none; }
 .mobile-collections .collection-shortcuts__divider { margin-inline: var(--space-1); }
+.tablet-performer__title { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.tablet-performer__title .ui-icon-button { flex: none; min-width: var(--touch-target); min-height: var(--touch-target); }
+.tablet-performer__memo-text { display: block; width: 100%; min-height: var(--touch-target); padding: var(--space-2) 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
+.tablet-performer__memo-text:disabled { cursor: default; opacity: .6; }
+.tablet-performer__memo-empty { color: var(--color-faint); }
+.tablet-performer__edits { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-2); }
+.tablet-performer__edits:empty { display: none; }
+.tablet-performer__edits .ui-button { min-height: var(--touch-target); }
+.tablet-performer__edit-note { margin: 0; color: var(--color-muted); font-size: var(--type-meta); }

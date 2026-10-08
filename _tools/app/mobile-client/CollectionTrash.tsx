@@ -23,7 +23,7 @@ export type TrashItem = {workId: string; type: CollectionKind; name: string; tra
 export function lifecycleIntents(authority: Authority) {
   const latest = new Map<string, CommandIntent>();
   [...authority.acknowledgements, ...authority.rows].filter(row => isLifecycle(row.command) && row.state !== 'conflict')
-    .sort((a, b) => a.createdAt - b.createdAt).forEach(row => latest.set(row.command.workId, row));
+    .sort((a, b) => a.createdAt - b.createdAt).forEach(row => latest.set(row.command.workId!, row));
   return latest;
 }
 

@@ -2,7 +2,8 @@ import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection'
 import {api, ApiError, errorText} from './transport';
 import type {CollectionDetail, CollectionKind, CollectionSummary} from './collectionModel';
 import {SAVE_FAILED} from './collectionEditOutbox';
-import {avCredits, avValue, canonicalAvCredits, emptyAv, sameAvValue, validateAvCredits, validateAvDetails, type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson, type AvOverlay} from './avEditModel';
+import {avCredits, avValue, canonicalAvCredits, emptyAv, normalizePersonMemo, sameAvValue, validateAvCredits, validateAvDetails, validatePersonFields, AV_INPUT_ERROR,
+  type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson, type AvOverlay, type PersonFields, type PersonKey, type PersonValues} from './avEditModel';
 
 export const AUTHORITY_STATUS_PATH = '/v1/collections/authority/status';
 export const COMMAND_PATH = '/v1/collections/authority/commands';
@@ -28,14 +29,19 @@ export type WorkCommand =
   | {commandType: 'deleteWork' | 'restoreWork'; workId: string; expectedRevision: number}
   | {commandType: 'setOwnershipTracking'; workId: string; editionIndex: number; count: number; expectedCount: number | null; expectedRevision: null}
   | {commandType: 'setReleaseSubscription'; workId: string; enabled: boolean; expectedEnabled: boolean; expectedRevision: null};
-export type Command = AuthorityIdentity & WorkCommand & {operationId: string};
+/** A person command has no work: its queue order and label belong to the person. */
+export type PersonCommand = {commandType: 'setPerson'; personId: string; workId?: never; changes: PersonFields; expected: PersonFields};
+export type AuthorityCommand = WorkCommand | PersonCommand;
+export type Command = AuthorityIdentity & AuthorityCommand & {operationId: string};
 /**
  * `label` names the work for queue rows whose work is not on screen (a delete or restore);
  * `lastError` is why the last delivery attempt did not reach the server.
  */
 export type ConflictWork = {name: string; fields: Fields; entityRevision?: number; details?: {av?: CollectionSummary['av']}; avCredits?: AvCredit[]};
+/** The server's person in a `setPerson` conflict (`current.person`). */
+export type ConflictPerson = {personId?: string; memo?: string | null; favorite?: boolean; entityRevision?: number};
 export type CommandIntent = {command: Command; label?: string; avOverlay?: AvOverlay; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
-  state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: ConflictWork}}};
+  state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: ConflictWork; person?: ConflictPerson}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
   const value = reply as Partial<AuthorityIdentity> & {active?: boolean} | null;
   return value?.active === true && typeof value.libraryId === 'string' && /^[a-f0-9]{32}$/.test(value.libraryId)
@@ -47,7 +53,8 @@ export function readCommands(connection = outboxConnection()): CommandIntent[] {
   try {
     const key = outboxKey(KEY, connection), rows: unknown = key ? JSON.parse(localStorage.getItem(key) ?? '[]') : [];
     return Array.isArray(rows) ? rows.filter(row => row?.command && typeof row.command.operationId === 'string'
-      && typeof row.command.workId === 'string' && authorityIdentity({...row.command, active: true})
+      && (typeof row.command.workId === 'string' || row.command.commandType === 'setPerson' && typeof row.command.personId === 'string')
+      && authorityIdentity({...row.command, active: true})
       && ['pending', 'conflict', 'accepted'].includes(row.state)) : [];
   } catch { return []; }
 }
@@ -57,7 +64,7 @@ function write(rows: CommandIntent[], connection = outboxConnection()) {
   try { localStorage.setItem(key, JSON.stringify(rows)); } catch { throw new Error(SAVE_FAILED); }
   if (connection === outboxConnection()) window.dispatchEvent(new Event(COMMAND_EVENT));
 }
-export const isLifecycle = (command: WorkCommand) => command.commandType === 'deleteWork' || command.commandType === 'restoreWork';
+export const isLifecycle = (command: AuthorityCommand) => command.commandType === 'deleteWork' || command.commandType === 'restoreWork';
 /** When this app run began: a queued row from an earlier run is not "being sent right now". */
 export const SESSION_STARTED_AT = Date.now();
 /**
@@ -66,7 +73,7 @@ export const SESSION_STARTED_AT = Date.now();
  * the queue's 대기 row, so an undelivered delete is never silent.
  */
 export const lifecycleInFlight = (row: CommandIntent) => row.state === 'pending' && row.attempts === 0 && !row.lastError && row.createdAt >= SESSION_STARTED_AT;
-export function enqueueCommand(identity: AuthorityIdentity, command: WorkCommand, label?: string): CommandIntent {
+export function enqueueCommand(identity: AuthorityIdentity, command: AuthorityCommand, label?: string): CommandIntent {
   validateAvCommand(command);
   const intent: CommandIntent = {command: {...identity, ...command, operationId: crypto.randomUUID()},
     ...(label ? {label} : {}), createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'};
@@ -108,7 +115,7 @@ export function dropWork(identity: AuthorityIdentity, workId: string, connection
   write(readCommands(connection).filter(row => !sameAuthority(row.command, identity) || row.command.workId !== workId), connection);
 }
 /** A conflict proves rejection. A replacement payload always receives a fresh operation ID. */
-export function replaceCommand(operationId: string, command: WorkCommand | null, avOverlay?: AvOverlay) {
+export function replaceCommand(operationId: string, command: AuthorityCommand | null, avOverlay?: AvOverlay) {
   const rows = readCommands(), index = rows.findIndex(row => row.command.operationId === operationId);
   if (index < 0 || rows[index].state !== 'conflict') return;
   if (command) {
@@ -122,8 +129,12 @@ export function replaceCommand(operationId: string, command: WorkCommand | null,
   return command ? rows[index] : undefined;
 }
 const inFlight = new Map<string, Promise<void>>();
-function validateAvCommand(command: WorkCommand) {
-  if (command.commandType === 'setAvDetails') {
+function validateAvCommand(command: AuthorityCommand) {
+  if (command.commandType === 'setPerson') {
+    if (typeof command.personId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.personId)) throw new Error(AV_INPUT_ERROR);
+    validatePersonFields(command.changes); validatePersonFields(command.expected);
+    if (!sameAvValue(Object.keys(command.changes).sort(), Object.keys(command.expected).sort())) throw new Error(AV_INPUT_ERROR);
+  } else if (command.commandType === 'setAvDetails') {
     validateAvDetails(command.changes); validateAvDetails(command.expected);
     if (!Object.keys(command.changes).length || !sameAvValue(Object.keys(command.changes).sort(), Object.keys(command.expected).sort())) throw new Error('AV 입력을 확인해 주세요.');
   } else if (command.commandType === 'setAvCredits') validateAvCredits(command.credits, command.people, command.expectedRevision);
@@ -153,8 +164,8 @@ async function deliver(connection: string) {
     const rows = readCommands(connection), index = rows.findIndex(row => row.command.operationId === snapshot.command.operationId);
     const row = rows[index];
     if (!row || !sameAuthority(row.command, identity) || row.state !== 'pending' || row.nextAttemptAt > Date.now()) continue;
-    // FIFO per work: a create, a failed send, or an unresolved conflict blocks its later edits.
-    if (rows.slice(0, index).some(earlier => sameAuthority(earlier.command, identity) && earlier.command.workId === row.command.workId && earlier.state !== 'accepted')) {
+    // FIFO per work (or person): a create, a failed send, or an unresolved conflict blocks its later edits.
+    if (rows.slice(0, index).some(earlier => sameAuthority(earlier.command, identity) && entityKey(earlier.command) === entityKey(row.command) && earlier.state !== 'accepted')) {
       // A waiting delete or restore says why, so its work is shown again instead of hidden.
       if (isLifecycle(row.command) && !row.lastError) changeIntent(connection, row.command.operationId, stored => { stored.lastError = '이 작품의 앞선 변경을 먼저 보내야 합니다.'; });
       continue;
@@ -184,9 +195,11 @@ async function deliver(connection: string) {
       // acknowledgement they just observed, and the queue lets it go.
       if (isLifecycle(row.command)) write(readCommands(connection).filter(stored => stored.command.operationId !== row.command.operationId), connection);
     } catch (error) {
-      const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: ConflictWork}}} | null)?.detail : null;
+      const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: ConflictWork; person?: ConflictPerson}}} | null)?.detail : null;
       const code = detail?.code;
-      if (code === 'workDeleted') { dropWork(identity, row.command.workId, connection); continue; }
+      if (code === 'workDeleted' && row.command.commandType !== 'setPerson') { dropWork(identity, row.command.workId, connection); continue; }
+      // The server has no such person: no retry can succeed, so its queued edits go, with a note.
+      if (code === 'personNotFound' && row.command.commandType === 'setPerson') { dropPerson(identity, row.command.personId, connection, row.label); continue; }
       if (error instanceof ApiError && error.status !== null && error.status >= 400 && error.status < 500 && ![401, 403, 408, 429].includes(error.status)) {
         changeIntent(connection, row.command.operationId, stored => {
           stored.state = 'conflict'; stored.conflict = {code: code ?? 'commandRejected', current: detail?.current};
@@ -197,6 +210,19 @@ async function deliver(connection: string) {
       return;
     }
   }
+}
+/** The queue order of a command: per work, or per person for `setPerson`. */
+const entityKey = (command: AuthorityCommand) => command.commandType === 'setPerson' ? `person:${command.personId}` : `work:${command.workId}`;
+const personNotices = new Map<string, string>();
+export const PERSON_NOT_FOUND = (name?: string) => `서버에 ${name ? `${name} ` : '이 '}배우 정보가 없어 변경을 보내지 못했습니다.`;
+/** Why this person's queued edits were dropped, until the page that shows it is closed. */
+export const personNotice = (personId: string) => personNotices.get(personId);
+export function clearPersonNotice(personId: string) {
+  if (personNotices.delete(personId)) window.dispatchEvent(new Event(COMMAND_EVENT));
+}
+function dropPerson(identity: AuthorityIdentity, personId: string, connection: string, label?: string) {
+  personNotices.set(personId, PERSON_NOT_FOUND(label));
+  write(readCommands(connection).filter(row => !sameAuthority(row.command, identity) || row.command.commandType !== 'setPerson' || row.command.personId !== personId), connection);
 }
 function retryLater(connection: string, operationId: string, reason: string) {
   changeIntent(connection, operationId, stored => {
@@ -288,4 +314,53 @@ export function createdWork(row: CommandIntent): CollectionDetail | null {
   const command = row.command;
   return command.commandType === 'createWork' ? {id: command.workId, type: command.type, name: command.name,
     showcase: false, ...command.fields, volumes: [], artworks: [], createdAt: new Date(row.createdAt).toISOString()} : null;
+}
+
+const personKeys: PersonKey[] = ['memo', 'favorite'];
+const isPersonRow = (row: CommandIntent, personId: string): row is CommandIntent & {command: Command & PersonCommand} =>
+  row.command.commandType === 'setPerson' && row.command.personId === personId;
+/** A confirmed read plus this device's accepted intents that the read may predate (each only on its exact expected value). */
+export function confirmedPerson(person: PersonValues, personId: string, rows: CommandIntent[]): PersonValues {
+  const next = {...person};
+  for (const row of rows) if (row.state === 'accepted' && isPersonRow(row, personId))
+    for (const key of personKeys) if (key in row.command.changes && next[key] === row.command.expected[key]) (next as Record<PersonKey, unknown>)[key] = row.command.changes[key];
+  return next;
+}
+/** What the page shows: queued and refused intents over the confirmed values, in queue order. */
+export function optimisticPerson(person: PersonValues, personId: string, rows: CommandIntent[]): PersonValues {
+  const next = {...person};
+  for (const row of rows) if (row.state !== 'accepted' && isPersonRow(row, personId)) Object.assign(next, row.command.changes);
+  return next;
+}
+/**
+ * The `setPerson` that turns the shown person into `desired`, or null when nothing changes. Expected
+ * values are the confirmed values with this person's earlier unsent intents applied in queue order,
+ * since the server applies those first.
+ */
+export function personCommand(personId: string, confirmed: PersonValues, rows: CommandIntent[], desired: PersonFields): PersonCommand | null {
+  const base = optimisticPerson(confirmed, personId, rows);
+  const changes: PersonFields = {}, expected: PersonFields = {};
+  for (const key of personKeys) {
+    if (!(key in desired)) continue;
+    const value = key === 'memo' ? normalizePersonMemo(desired.memo) : desired.favorite;
+    const previous = key === 'memo' ? normalizePersonMemo(base.memo) : base.favorite;
+    if (value !== previous) { (changes as Record<PersonKey, unknown>)[key] = value; (expected as Record<PersonKey, unknown>)[key] = previous; }
+  }
+  return Object.keys(changes).length ? {commandType: 'setPerson', personId, changes, expected} : null;
+}
+/** 덮어쓰기 for a refused `setPerson`: the same wish, expected from the server's current person. */
+export function rebasePersonCommand(row: CommandIntent): PersonCommand | null {
+  const command = row.command, current = row.conflict?.current?.person;
+  if (command.commandType !== 'setPerson' || !current) return null;
+  const expected: PersonFields = {};
+  for (const key of personKeys) if (key in command.changes) (expected as Record<PersonKey, unknown>)[key] = key === 'memo' ? normalizePersonMemo(current.memo) : current.favorite === true;
+  return {commandType: 'setPerson', personId: command.personId, changes: command.changes, expected};
+}
+/** Accepted person intents retire once a read contains them or began after their acknowledgement. */
+export function reconcilePerson(identity: AuthorityIdentity, personId: string, person: PersonValues, readStartedAt?: number) {
+  const rows = readCommands();
+  const next = rows.filter(row => !(row.state === 'accepted' && sameAuthority(row.command, identity) && isPersonRow(row, personId)
+    && (readStartedAt !== undefined && readStartedAt > (row.acceptedAt ?? Infinity)
+      || personKeys.every(key => !(key in row.command.changes) || (row.command as PersonCommand).changes[key] === (key === 'memo' ? normalizePersonMemo(person.memo) : person.favorite)))));
+  if (next.length !== rows.length) write(next);
 }

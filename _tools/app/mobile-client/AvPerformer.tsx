@@ -1,21 +1,43 @@
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useEffect, useMemo, useState} from 'react';
-import {ArrowsUpDownIcon, ChevronDownIcon, Squares2X2Icon} from '@heroicons/react/24/outline';
+import {ArrowsUpDownIcon, ChevronDownIcon, PencilIcon, Squares2X2Icon, StarIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolidIcon} from '@heroicons/react/24/solid';
 import {CollectionList} from '../src/collections/CollectionList';
 import {ProfileRows, safeProfileUrl} from '../src/collections/av/AvPerformerProfile';
 import type {AvPerformerProfile} from '../src/collections/avTypes';
 import {displayDate} from '../src/shared/displayDate';
-import {Badge, Button, EmptyState, SectionLabel, SegmentedControl, Skeleton} from './ui';
+import {Badge, Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel, SegmentedControl, Skeleton} from './ui';
 import {PersonPortrait, performersOf} from './AvCollections';
 import {ShelfTile} from './CollectionShelf';
 import {allWorks} from './collectionReleasesModel';
-import {api, errorText, native} from './transport';
+import {api, ApiError, errorText, native} from './transport';
+import {AuthorityQueue} from './CollectionAuthorityForms';
+import {clearPersonNotice, confirmedPerson, optimisticPerson, personCommand, personNotice, reconcilePerson} from './collectionCommandOutbox';
+import {normalizePersonMemo, personMemoLength, PERSON_MEMO_LIMIT, PERSON_MEMO_TOO_LONG, type PersonFields, type PersonValues} from './avEditModel';
+import type {useCollectionAuthority} from './useCollectionAuthority';
 import {personPath, personReply, type AvPerson, type CollectionPerson, type CollectionPersonProfile, type CollectionSummary} from './collectionModel';
 
 type RoleFilter = 'all' | 'solo' | 'joint';
 type ReleaseOrder = 'newest' | 'oldest';
 type PerformerShelf = {works: CollectionSummary[]; revision: string};
+type Authority = ReturnType<typeof useCollectionAuthority>;
+/** The person read: `readAt` is when the read began, so acknowledgements after it ask for another read. */
+type PersonRead = {id: string; person: CollectionPerson | null; readAt: number};
+
+/** 내 메모 for a performer (PC: the memo editor on the performer page), as the tablet's memo sheet. */
+function PersonMemoSheet({initial, onClose, onSave}: {initial: string; onClose(): void; onSave(value: string): void}) {
+  const [draft, setDraft] = useState(initial);
+  const length = personMemoLength(draft), over = length > PERSON_MEMO_LIMIT;
+  return <Dialog open title="내 메모" onClose={onClose}><DialogDescription className="sr-only">이 배우에 대한 메모를 씁니다. PC와 함께 씁니다.</DialogDescription>
+    <div className="library-sheet collection-memo-sheet">
+      <textarea aria-label="배우 메모" value={draft} onChange={event => setDraft(event.target.value)} rows={8}/>
+      <p className={`collection-memo-counter numeric${over ? ' is-over' : ''}`} aria-live="polite">{length.toLocaleString()} / {PERSON_MEMO_LIMIT.toLocaleString()}</p>
+      {over && <p role="alert">{PERSON_MEMO_TOO_LONG}</p>}
+      <Button variant="primary" disabled={over} onClick={() => onSave(draft)}>저장</Button>
+      <Button variant="ghost" onClick={onClose}>취소</Button>
+    </div>
+  </Dialog>;
+}
 
 /** Release order with undated works last, as on the PC performer page. */
 function byRelease(order: ReleaseOrder) {
@@ -60,27 +82,41 @@ function releaseRange(dates: string[]) {
  * with the portrait, the name and the 프로필 counts derived from the published works, then the
  * works on the shared shelf (역할, 정렬, 보기), 자주 함께 나온 배우 and 레이블. An upgraded server
  * also publishes the person (`/v1/collections/people/{id}`): the favourite mark, the portrait's
- * source, the StashDB profile rows and links, and 내 메모, all read-only. On a 404 (an older server
- * or PC) those parts are simply absent. The page waits for that reply, and a switch to another
+ * source, the StashDB profile rows and links, and 내 메모. With the collection authority active,
+ * 즐겨찾기 and 내 메모 are edited here through `setPerson` (optimistic, queued in the command
+ * outbox); otherwise they stay read-only. On a 404 (an older server or PC) those parts are simply absent. The page waits for that reply, and a switch to another
  * performer keeps the shown page (inert) until the next one is ready, so nothing pops in.
  */
-export function AvPerformerScreen({personId, currentId, active, privacy, perRow, onOpen, onPerformer, onSort, onView, order}: {
-  personId: string; currentId: string | null; active: boolean; privacy: boolean; perRow: number; order: ReleaseOrder;
+export function AvPerformerScreen({personId, currentId, active, privacy, perRow, onOpen, onPerformer, onSort, onView, order, authority}: {
+  personId: string; currentId: string | null; active: boolean; privacy: boolean; perRow: number; order: ReleaseOrder; authority?: Authority;
   onOpen(id: string, order: string[]): void; onPerformer(id: string): void; onSort(): void; onView(): void;
 }) {
   const stripWheel=useHorizontalWheel();
   const [shelf, setShelf] = useState<PerformerShelf | null>(null), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
   const [role, setRole] = useState<RoleFilter>('all'), [picked, setPicked] = useState<string | null>(null);
   // The published person of `id`; null when the server has none (404, an older server) or the read failed.
-  const [person, setPerson] = useState<{id: string; person: CollectionPerson | null} | null>(null);
+  const [person, setPerson] = useState<PersonRead | null>(null);
+  const [memoOpen, setMemoOpen] = useState(false), [editError, setEditError] = useState('');
+  // This device's latest acknowledged change to the shown person: a read that began before it is re-read.
+  const acknowledged = Math.max(0, ...(authority?.acknowledgements ?? []).map(row => row.command.commandType === 'setPerson' && row.command.personId === personId ? row.acceptedAt ?? 0 : 0));
+  const stale = person?.id === personId && acknowledged >= person.readAt;
   useEffect(() => {
-    if (!active || person?.id === personId) return;
-    const controller = new AbortController();
-    void api<unknown>(personPath(personId), controller.signal).then(reply => personReply(reply, personId), () => null).then(value => {
-      if (!controller.signal.aborted) setPerson({id: personId, person: value});
+    if (!active || person?.id === personId && !stale) return;
+    const controller = new AbortController(), readAt = Date.now(), again = stale;
+    // A re-read keeps the shown person on a failure; only a definite 404 removes it.
+    void api<unknown>(personPath(personId), controller.signal).then(reply => personReply(reply, personId),
+      reason => again && !(reason instanceof ApiError && reason.status === 404) ? undefined : null).then(value => {
+      if (controller.signal.aborted || value === undefined) return;
+      setPerson({id: personId, person: value, readAt});
     });
     return () => controller.abort();
-  }, [active, personId, person?.id]);
+  }, [active, personId, person?.id, stale]);
+  useEffect(() => { setMemoOpen(false); setEditError(''); }, [personId]);
+  const identity = authority?.identity;
+  const read = person?.id === personId ? person.person : null;
+  useEffect(() => {
+    if (identity && read && person) reconcilePerson(identity, personId, {memo: normalizePersonMemo(read.memo), favorite: read.favorite === true}, person.readAt);
+  }, [identity, read, person, personId]);
   // The page shows the performer whose person reply is in; a newer one waits behind it.
   const shownId = person?.id ?? personId;
   useEffect(() => {
@@ -117,12 +153,29 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   const published = person.person, waiting = shownId !== personId;
   const source = published && portraitSourceText(published, page.person.portraitCrop, shelf!.works);
   const links = published?.profile ? profileLinks(published.profile) : [];
-  const memo = published?.memo?.trim();
+  // 즐겨찾기 and 내 메모 are edited only against a confirmed server person with the authority active;
+  // the shown values are that person with this device's acknowledged and queued changes over it.
+  const editable = !!identity && !!published && !waiting;
+  const confirmed: PersonValues | null = published && authority ? confirmedPerson({memo: normalizePersonMemo(published.memo), favorite: published.favorite === true}, shownId, authority.acknowledgements) : null;
+  const values: PersonValues | null = confirmed && authority ? optimisticPerson(confirmed, shownId, authority.rows) : null;
+  const refused = !!authority?.rows.some(row => row.state === 'conflict' && row.command.commandType === 'setPerson' && row.command.personId === shownId);
+  const memo = values ? values.memo : published?.memo?.trim();
+  const notice = personNotice(shownId);
+  const save = (desired: PersonFields) => {
+    if (!editable || !authority || !confirmed || refused) return false;
+    try {
+      const command = personCommand(shownId, confirmed, authority.rows, desired);
+      if (command) authority.enqueue(command, page.person!.name);
+      setEditError(''); return true;
+    } catch (reason) { setEditError(errorText(reason)); return false; }
+  };
   return <article className="tablet-performer" aria-label="AV 배우" aria-busy={waiting} inert={waiting || undefined}>
     <header className="tablet-performer__band">
       <PersonPortrait person={page.person} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} size="large"/>
       <div className="tablet-performer__identity">
-        <h1>{page.person.name}{published?.favorite && <span className="tablet-performer__favorite" role="img" aria-label="즐겨찾기한 배우"><StarSolidIcon aria-hidden="true"/></span>}</h1>
+        <div className="tablet-performer__title"><h1>{page.person.name}{!editable && published?.favorite && <span className="tablet-performer__favorite" role="img" aria-label="즐겨찾기한 배우"><StarSolidIcon aria-hidden="true"/></span>}</h1>
+          {editable && values && <IconButton pop className="tablet-performer__favorite-toggle" label={values.favorite ? '즐겨찾기 해제' : '즐겨찾기'} icon={StarIcon} activeIcon={StarSolidIcon} active={values.favorite}
+            disabled={refused} onClick={() => save({favorite: !values.favorite})}/>}</div>
         {page.person.nameJa && <p lang="ja">{page.person.nameJa}</p>}
         {source && <small className="tablet-performer__source">{source}</small>}
       </div>
@@ -135,7 +188,17 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
         {published?.profile && <ProfileRows profile={sharedProfile(published.id, published.profile)}/>}
         {links.length > 0 && <div className="tablet-performer__links" aria-label="배우 링크">{links.map(link => <Button key={link.url} variant="secondary" onClick={() => { void native('openExternal', {url: link.url}).catch(() => {}); }}>{link.label}</Button>)}</div>}
       </section>
-      {memo && <section className="tablet-performer__memo" aria-label="내 메모"><SectionLabel title="내 메모"/><p>{memo}</p></section>}
+      {editable ? <section className="tablet-performer__memo" aria-label="내 메모">
+        <SectionLabel title="내 메모" actions={<Button size="icon" variant="ghost" aria-label="배우 메모 편집" disabled={refused} onClick={() => setMemoOpen(true)}><PencilIcon aria-hidden="true"/></Button>}/>
+        <button type="button" className="tablet-performer__memo-text" disabled={refused} onClick={() => setMemoOpen(true)}>{memo || <span className="tablet-performer__memo-empty">메모 쓰기</span>}</button>
+      </section> : memo && <section className="tablet-performer__memo" aria-label="내 메모"><SectionLabel title="내 메모"/><p>{memo}</p></section>}
+      {(editable || notice) && <div className="tablet-performer__edits">
+        {editable && <AuthorityQueue authority={authority!} personId={shownId} onForm={() => {}}/>}
+        {refused && <p className="tablet-performer__edit-note">충돌을 정리한 뒤 다시 편집할 수 있습니다.</p>}
+        {editError && <p role="alert">{editError}</p>}
+        {notice && <div className="inline-error" role="alert"><span>{notice}</span><Button variant="ghost" onClick={() => clearPersonNotice(shownId)}>닫기</Button></div>}
+      </div>}
+      {memoOpen && editable && <PersonMemoSheet initial={memo ?? ''} onClose={() => setMemoOpen(false)} onSave={value => { if (save({memo: value})) setMemoOpen(false); }}/>}
     </header>
     <section className="tablet-performer__works" aria-labelledby="tablet-performer-works">
       <div className="collection-type-header">
@@ -145,10 +208,10 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
           <button className="filter-chip" onClick={onView}><Squares2X2Icon aria-hidden="true"/>보기<ChevronDownIcon aria-hidden="true"/></button>
         </div>
       </div>
-      <SegmentedControl label="역할" value={role} onChange={setRole} options={[{value: 'all', label: '전체'}, {value: 'solo', label: '단독'}, {value: 'joint', label: '공연'}]} fullWidth/>
+      <SegmentedControl label="역할" value={role} onChange={setRole} options={[{value: 'all', label: '전체'}, {value: 'solo', label: '단독'}, {value: 'joint', label: '공동 출연'}]} fullWidth/>
       <CollectionList items={shown} view={{layout: 'shelf', perRow, grouping: 'sort'}} label="배우 작품 선반" onPick={setPicked} windowRows pickedId={picked}
         render={work => <ShelfTile item={work} revision={shelf!.revision} active={active} privacy={privacy} picked={picked === work.id} onTap={tap}
-          extra={<>{work.id === currentId && <Badge>이 작품</Badge>}<small className="numeric">{[displayDate(work.av?.releaseDate ?? work.releaseDate), page.solo(work) ? null : '공연'].filter(Boolean).join(' · ')}</small></>}/>}/>
+          extra={<>{work.id === currentId && <Badge>이 작품</Badge>}<small className="numeric">{[displayDate(work.av?.releaseDate ?? work.releaseDate), page.solo(work) ? null : '공동 출연'].filter(Boolean).join(' · ')}</small></>}/>}/>
     </section>
     {page.coPerformers.length > 0 && <section className="tablet-performer__related" aria-label="자주 함께 나온 배우"><SectionLabel as="h2" title="자주 함께 나온 배우" count={page.coPerformers.length}/>
       <div className="tablet-performer__co">{page.coPerformers.map(({person, count}) => <Button key={person.id} variant="ghost" className="tablet-work-person" aria-label={`${person.name} ${count}편`} onClick={() => onPerformer(person.id)}>

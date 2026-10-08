@@ -69,3 +69,21 @@ export function validateAvCredits(credits: AvCredit[], people: AvNewPerson[], re
     newIds.add(person.personId);
   }
 }
+/** `setPerson`: the person's 내 메모 and 즐겨찾기, edited by field CAS (PC `AvPerformerPage`). */
+export const PERSON_MEMO_LIMIT = limits.personMemo;
+export const PERSON_MEMO_TOO_LONG = `메모는 ${limits.personMemo.toLocaleString()}자까지 쓸 수 있습니다.`;
+export type PersonKey = 'memo' | 'favorite';
+export type PersonValues = {memo: string | null; favorite: boolean};
+export type PersonFields = Partial<PersonValues>;
+/** The server's memo normalization: trimmed, blank is no memo. */
+export const normalizePersonMemo = (text: string | null | undefined) => text?.trim() || null;
+export const personMemoLength = (text: string) => length(text.trim());
+export function validatePersonFields(fields: PersonFields) {
+  const keys = Object.keys(fields);
+  if (!keys.length || keys.some(key => key !== 'memo' && key !== 'favorite')) invalid();
+  if ('favorite' in fields && typeof fields.favorite !== 'boolean') invalid();
+  if ('memo' in fields) {
+    const memo = fields.memo;
+    if (memo !== null && (typeof memo !== 'string' || memo !== memo.trim() || !memo || length(memo) > limits.personMemo)) invalid();
+  }
+}

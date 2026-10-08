@@ -67,8 +67,8 @@ it("uses the shared per-row menu and plank rows without remounting covers; filte
   await user.keyboard("{Escape}");
   fireEvent.click(screen.getByRole("radio", { name: "단독" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(7);
   expect(shelf.querySelector('[data-collection-id="work-1"]')).toBeNull();
-  fireEvent.click(screen.getByRole("radio", { name: "공연" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(7);
-  expect(within(shelf).getAllByText(/· 공연/)).toHaveLength(7);
+  fireEvent.click(screen.getByRole("radio", { name: "공동 출연" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(7);
+  expect(within(shelf).getAllByText(/· 공동 출연/)).toHaveLength(7);
   fireEvent.click(screen.getByRole("radio", { name: "전체" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(14);
   expect(container.querySelector(".dvd-case__stage")).toBeNull();
 });
