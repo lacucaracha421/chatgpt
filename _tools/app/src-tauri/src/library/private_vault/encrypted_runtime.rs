@@ -54,6 +54,9 @@ use crate::library::{
 /// runtime's private session state and write lock).
 #[path = "encrypted_files.rs"]
 mod files;
+/// User folders (a child module for the same reason).
+#[path = "encrypted_folders.rs"]
+mod folders;
 
 const MAX_TITLE_CHARS: usize = 200;
 const MAX_PAGE_SIZE: u32 = 500;
@@ -102,6 +105,7 @@ impl VaultKeyStore for OsVaultKeyStore {
 pub(crate) struct VideoFacts {
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub duration_ms: Option<u64>,
     /// In-memory WebP poster; never written to disk.
     pub poster: Option<Vec<u8>>,
 }
@@ -134,6 +138,7 @@ impl VideoInspector for NativeVideoInspector {
         VideoFacts {
             width: Some(probe.width).filter(|value| *value > 0),
             height: Some(probe.height).filter(|value| *value > 0),
+            duration_ms: Some(probe.duration_ms).filter(|value| *value > 0),
             poster,
         }
     }
@@ -189,6 +194,8 @@ struct Session {
     /// newer than that backup are unknown to it, so nothing is deleted or saved in this
     /// session (`Session::writable`).
     from_backup_index: bool,
+    /// Videos whose duration backfill failed in this session; not probed again until unlock.
+    duration_probe_failed: HashSet<String>,
 }
 
 impl Session {
@@ -430,6 +437,22 @@ fn item_kind(kind: VaultItemKind) -> EncryptedVaultItemKind {
         VaultItemKind::Image => EncryptedVaultItemKind::Image,
         VaultItemKind::Video => EncryptedVaultItemKind::Video,
     }
+}
+
+/// Digits naming the object a thumbnail is served from, so a changed thumbnail gets a new
+/// `/vault-thumbnail/<id>/v<n>` URL and the WebView never shows the image it kept for the old one.
+fn thumbnail_revision(item: &VaultItem) -> Option<String> {
+    let object_id = item
+        .thumbnail_object_id
+        .as_deref()
+        .or(item.poster_object_id.as_deref())?;
+    // FNV-1a: stable across runs, unlike the std hasher.
+    let hash = object_id
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    Some(hash.to_string())
 }
 
 fn original_mime(item: &VaultItem) -> &'static str {
@@ -804,10 +827,20 @@ impl Library {
             .as_ref()
             .ok_or(LibraryError::EncryptedVaultLocked)?;
         let limit = query.limit.clamp(1, MAX_PAGE_SIZE) as u64;
+        let folders = query
+            .folder_id
+            .as_deref()
+            .map(|folder| folders::folder_with_descendants(&session.index, folder));
         let matching = || {
             session.index.items.iter().rev().filter(|item| {
                 item.trashed_at.is_some() == query.trashed
                     && query.kind.is_none_or(|kind| item_kind(item.kind) == kind)
+                    && (!query.unfiled_only || item.folder_id.is_none())
+                    && folders.as_ref().is_none_or(|folders| {
+                        item.folder_id
+                            .as_deref()
+                            .is_some_and(|folder| folders.contains(folder))
+                    })
             })
         };
         let total_count = matching().count() as u64;
@@ -825,7 +858,10 @@ impl Library {
                 imported_at: item.imported_at.clone(),
                 has_thumbnail: item.thumbnail_object_id.is_some()
                     || item.poster_object_id.is_some(),
+                thumbnail_revision: thumbnail_revision(item),
+                duration_ms: item.duration_ms,
                 trashed_at: item.trashed_at.clone(),
+                folder_id: item.folder_id.clone(),
             })
             .collect::<Vec<_>>();
         let end = query.offset.saturating_add(items.len() as u64);
@@ -1205,11 +1241,14 @@ impl Library {
         let legacy_thumbnail = legacy
             .and_then(|entry| entry.custom_thumbnail.as_deref())
             .and_then(|relative| read_legacy_thumbnail(source_root, relative));
-        let (width, height, generated) = match kind {
-            VaultItemKind::Image => image_facts(path),
+        let (width, height, generated, duration_ms) = match kind {
+            VaultItemKind::Image => {
+                let (width, height, generated) = image_facts(path);
+                (width, height, generated, None)
+            }
             VaultItemKind::Video => {
                 let facts = self.encrypted_vault.env.video.inspect(path);
-                (facts.width, facts.height, facts.poster)
+                (facts.width, facts.height, facts.poster, facts.duration_ms)
             }
         };
         let Ok(mut file) = File::open(path) else {
@@ -1264,6 +1303,8 @@ impl Library {
             trashed_at: None,
             content_sha256: Some(content_sha256.clone()),
             thumbnail_sha256: None,
+            folder_id: None,
+            duration_ms,
         };
         {
             let mut state = self.encrypted_vault.state();
@@ -1576,6 +1617,7 @@ impl Library {
             index,
             generation: state.generation,
             from_backup_index,
+            duration_probe_failed: HashSet::new(),
         });
         state.located = Some(Located { root, vault_id });
         state.auto_unlock_tried = Some(vault_id);
@@ -1839,6 +1881,7 @@ pub(crate) mod test_support {
             VideoFacts {
                 width: Some(64),
                 height: Some(36),
+                duration_ms: Some(2_500),
                 poster: crate::library::ingestion::encode_thumbnail_webp(&frame).ok(),
             }
         }
@@ -1889,6 +1932,8 @@ mod tests {
             offset,
             limit,
             trashed: false,
+            folder_id: None,
+            unfiled_only: false,
         }
     }
 

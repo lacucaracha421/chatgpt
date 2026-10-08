@@ -65,6 +65,8 @@ import type {
   EncryptedVaultImportJob,
   EncryptedVaultImportProgress,
   EncryptedVaultImportReport,
+  EncryptedVaultDurationFill,
+  EncryptedVaultFolder,
   EncryptedVaultItemPage,
   EncryptedVaultSidecarCleanupPreview,
   EncryptedVaultSidecarCleanupResult,
@@ -650,6 +652,24 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   getEncryptedVaultExportStatus: () => invoke<EncryptedVaultExportJob | null>("encrypted_vault_export_status"),
   listEncryptedVaultItems: (query) => invoke<EncryptedVaultItemPage>("list_encrypted_vault_items", { query }),
   setEncryptedVaultTitle: (itemId, title) => invoke<void>("set_encrypted_vault_title", { itemId, title }),
+  listEncryptedVaultFolders: () => invoke<EncryptedVaultFolder[]>("list_encrypted_vault_folders"),
+  setEncryptedVaultThumbnailFromFrame: (itemId, timeMs) =>
+    invoke<void>("set_encrypted_vault_thumbnail_from_frame", { itemId, timeMs }),
+  setEncryptedVaultThumbnailImage: (itemId, image) =>
+    invoke<void>("set_encrypted_vault_thumbnail_image", { itemId, image: Array.from(image) }),
+  recordEncryptedVaultVideoDurations: (durations) =>
+    invoke<number>("record_encrypted_vault_video_durations", { durations }),
+  fillEncryptedVaultVideoDurations: () =>
+    invoke<EncryptedVaultDurationFill>("fill_encrypted_vault_video_durations"),
+  setVideoThumbnailFromFrame: (assetId, timeMs) =>
+    invoke<AssetSummary>("set_video_thumbnail_from_frame", { assetId, timeMs }),
+  createEncryptedVaultFolder: (name, parentId) =>
+    invoke<EncryptedVaultFolder>("create_encrypted_vault_folder", { name, parentId }),
+  renameEncryptedVaultFolder: (folderId, name) => invoke<void>("rename_encrypted_vault_folder", { folderId, name }),
+  moveEncryptedVaultFolder: (folderId, parentId) => invoke<void>("move_encrypted_vault_folder", { folderId, parentId }),
+  deleteEncryptedVaultFolder: (folderId) => invoke<void>("delete_encrypted_vault_folder", { folderId }),
+  moveEncryptedVaultItemsToFolder: (itemIds, folderId) =>
+    invoke<number>("move_encrypted_vault_items_to_folder", { itemIds, folderId }),
   previewEncryptedVaultSidecarCleanup: () =>
     invoke<EncryptedVaultSidecarCleanupPreview>("preview_encrypted_vault_sidecar_cleanup"),
   applyEncryptedVaultSidecarCleanup: () =>

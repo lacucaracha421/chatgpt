@@ -2,15 +2,23 @@
   "use strict";
   const SELECTOR = '[data-testid="tweetText"]';
   const SETTINGS = "lakomics:translation:v1";
-  const CACHE = "lakomics:translation-cache:v2";
+  // The background bumps this key whenever it clears the translation cache.
+  const CACHE_CLEARED = "lakomics:translation-cache-cleared";
+  const OWN_NODES = '.lakomics-translation, .lakomics-translation-toggle, #lakomics-translation-controls';
   const MAX_BATCH_ITEMS = 4;
   const MAX_BATCH_CHARS = 6000;
   const MAX_FAILURES = 3;
   const RETRY_DELAY_CAP_MS = 60000;
   const RETRY_DELAY_DEFAULT_MS = 1500;
-  const MAX_IN_FLIGHT = 2;
+  // Requests in flight from this tab; the background raises it for models with higher limits.
+  let maxInFlight = 2;
   const SHOW_MORE = '[data-testid="tweet-text-show-more-link"]';
   const EXPAND_WAIT_MS = 1500;
+  // A reply that never comes would hold a request slot (and its "번역 중…" lines) until the
+  // page is reloaded; past this the request counts as a transient failure.
+  const SEND_TIMEOUT_MS = 75000;
+  // Transient failures retry by themselves this many times, then on viewport re-entry.
+  const AUTO_RETRY_DELAYS_MS = [4000, 15000];
   let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true, inFlight = 0;
   let initialSettings = null;
   // requested holds elements whose request (or queued fallback) is outstanding, so the
@@ -23,8 +31,11 @@
 
   function send(message) {
     return new Promise(resolve => {
-      try { chrome.runtime.sendMessage(message, result => resolve(chrome.runtime.lastError ? { ok: false, code: "worker_failed" } : result)); }
-      catch { resolve({ ok: false, code: "worker_failed" }); }
+      let settled = false;
+      const finish = result => { if (!settled) { settled = true; clearTimeout(timer); resolve(result); } };
+      const timer = setTimeout(() => finish({ ok: false, code: "worker_failed" }), SEND_TIMEOUT_MS);
+      try { chrome.runtime.sendMessage(message, result => finish(chrome.runtime.lastError ? { ok: false, code: "worker_failed" } : result)); }
+      catch { finish({ ok: false, code: "worker_failed" }); }
     });
   }
   function source(element) {
@@ -116,12 +127,17 @@
     if (r <= 8 && g <= 8 && b <= 8) return "lights-out";
     return "dim";
   }
+  // Scans run often; rendered nodes are rewritten only when the page theme actually changes.
+  let lastTheme = null;
   function applyTheme() {
     const theme = detectTheme();
+    if (theme === lastTheme) return theme;
+    lastTheme = theme;
     if (ui?.host) ui.host.dataset.theme = theme;
     for (const node of rendered.values()) node.dataset.theme = theme;
     return theme;
   }
+  const currentTheme = () => lastTheme ?? applyTheme();
   const PENDING_DELAY_MS = 250, COLLAPSE_MIN_HEIGHT = 44;
   function removeResult(element) {
     rendered.get(element)?.remove();
@@ -139,7 +155,7 @@
       if (card && card.dataset.error !== "true") return;
       removeResult(element);
       const node = document.createElement("div");
-      node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = detectTheme();
+      node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = currentTheme();
       node.setAttribute("aria-hidden", "true"); node.textContent = "번역 중…";
       element.after(node); rendered.set(element, node);
     }, PENDING_DELAY_MS);
@@ -163,12 +179,34 @@
     });
     sync(); node.after(toggle); toggles.set(element, toggle);
   }
+  // An error card offers "다시 시도" so a failed post never needs a page reload.
+  function addRetry(element, node) {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "lakomics-translation-toggle lakomics-translation-retry";
+    button.textContent = "다시 시도";
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      if (!enabled || !hasApiKey || blocked) return;
+      failures.delete(element); completed.delete(element); removeResult(element);
+      pending.add(element); fastLanePending = true;
+      schedule(true);
+    });
+    node.after(button); toggles.set(element, button);
+  }
+  // A request waiting out a rate limit says so instead of an endless "번역 중…".
+  function showWaiting(element, text) {
+    removeResult(element);
+    const node = document.createElement("div");
+    node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = currentTheme();
+    node.setAttribute("aria-hidden", "true"); node.textContent = text;
+    element.after(node); rendered.set(element, node);
+  }
   function render(element, snapshot, text, error = false) {
     removeResult(element);
     const node = document.createElement("div");
     node.className = "lakomics-translation";
     node.dataset.error = String(error);
-    node.dataset.theme = detectTheme();
+    node.dataset.theme = currentTheme();
     node.setAttribute("lang", "ko");
     if (error) node.setAttribute("role", "status");
     const links = new Map(snapshot.links.map(link => [link.token, link]));
@@ -198,13 +236,14 @@
     element.after(node);
     rendered.set(element, node);
     if (!error) collapseOriginal(element, node);
+    else addRetry(element, node);
   }
-  function failure(code, retryable = false) {
+  function failure(code, retryable = false, autoRetry = false) {
     if (code === "http_401" || code === "api_key_missing") return "번역 API 키를 확인하세요";
-    if (code === "http_402") return "OpenRouter 잔액을 확인하세요";
-    if (code === "http_403") return "OpenRouter API 접근 권한을 확인하세요";
+    if (code === "http_402") return "번역 API 잔액을 확인하세요";
+    if (code === "http_403") return "번역 API 접근 권한을 확인하세요";
     if (code === "http_429") return "번역 요청 한도 · 잠시 후 자동 재시도";
-    if (isTransientFailure(code)) return "번역 연결 실패 · 다시 보이면 재시도";
+    if (isTransientFailure(code)) return autoRetry ? "번역 연결 실패 · 곧 자동 재시도" : "번역 연결 실패 · 다시 보이면 재시도";
     return retryable ? "번역 실패 · 다시 보이면 재시도" : "번역 실패 · 자동 번역을 껐다 켜면 재시도";
   }
   function setNotice(text = "", kind = "") {
@@ -292,7 +331,10 @@
       const record = { signature: candidate.snapshot.signature, code: "http_429", attempts,
         nextAttemptAt: attempts < MAX_FAILURES ? Date.now() + delay : Infinity };
       failures.set(candidate.element, record);
-      if (attempts < MAX_FAILURES) retry.push({ candidate, record });
+      if (attempts < MAX_FAILURES) {
+        retry.push({ candidate, record });
+        showWaiting(candidate.element, "요청 한도 · 잠시 후 자동 재시도");
+      }
       else {
         const message = "번역 요청 한도 · 자동 재시도 중단";
         render(candidate.element, candidate.snapshot, message, true);
@@ -308,10 +350,23 @@
       schedule();
     }, delay);
   }
+  // A key rejection blocks the tab, but the provider sometimes rejects a valid key for a moment;
+  // one quiet recheck follows, and a later success allows another.
+  const AUTH_RECHECK_MS = 30000;
+  let authRecheckAvailable = true;
   function blockFor(code) {
     blocked = true;
     pending.clear();
     setNotice(failure(code), "error");
+    if (!authRecheckAvailable || code === "api_key_missing") return;
+    authRecheckAvailable = false;
+    const blockedEpoch = epoch;
+    setTimeout(() => {
+      if (!blocked || blockedEpoch !== epoch) return;
+      blocked = false;
+      setNotice("", "");
+      scan(true);
+    }, AUTH_RECHECK_MS);
   }
   function handleTopFailure(candidates, result, requestEpoch) {
     const code = result?.code;
@@ -332,9 +387,21 @@
       // Transient failures retry whenever the post re-enters the viewport; any other
       // failure gets one such retry before it is parked until translation is reset.
       const retryOnReentry = !isTransientFailure(code) && attempts < 2;
-      failures.set(candidate.element, { signature: candidate.snapshot.signature, code, attempts, nextAttemptAt: Infinity, retryOnReentry });
-      notice = failure(code, retryOnReentry);
+      const autoRetryMs = isTransientFailure(code) ? AUTO_RETRY_DELAYS_MS[attempts - 1] : undefined;
+      const next = { signature: candidate.snapshot.signature, code, attempts, nextAttemptAt: Infinity, retryOnReentry };
+      failures.set(candidate.element, next);
+      notice = failure(code, retryOnReentry, autoRetryMs !== undefined);
       render(candidate.element, candidate.snapshot, notice, true);
+      if (autoRetryMs !== undefined) {
+        setTimeout(() => {
+          // Only the same failure of the same text is retried; success, edits, a reset or
+          // the user's own retry replace the record first.
+          if (failures.get(candidate.element) !== next || !current(candidate, requestEpoch) || !hasApiKey) return;
+          next.nextAttemptAt = 0;
+          pending.add(candidate.element);
+          schedule();
+        }, autoRetryMs);
+      }
     }
     setNotice(notice || failure(code), "warning");
     return "failed";
@@ -345,6 +412,7 @@
     else render(candidate.element, candidate.snapshot, text);
     completed.set(candidate.element, candidate.snapshot.signature);
     failures.delete(candidate.element);
+    authRecheckAvailable = true;
     setNotice("", "");
   }
   function handleItem(candidate, item, requestEpoch) {
@@ -385,7 +453,7 @@
   // at once. After new posts come into view, the one nearest the viewport centre goes
   // alone first so the post being read appears first.
   function drain() {
-    while (inFlight < MAX_IN_FLIGHT && enabled && hasApiKey && !blocked) {
+    while (inFlight < maxInFlight && enabled && hasApiKey && !blocked) {
       const requestEpoch = epoch;
       let work = null;
       while (!work && fallbacks.length) {
@@ -407,6 +475,19 @@
         drain();
       });
     }
+  }
+  // X mutates the page constantly (timestamps, counters, media, hover cards); only changes that
+  // add, remove, or edit tweet text need a rescan.
+  const touchesTweetText = node => node.nodeType === 1 && !node.matches(OWN_NODES)
+    && (node.matches(SELECTOR) || node.querySelector(SELECTOR) !== null);
+  function relevantMutation(record) {
+    const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+    if (!target || target.closest(OWN_NODES)) return false;
+    if (target.closest(SELECTOR)) return true;
+    if (record.type !== "childList") return false;
+    for (const node of record.addedNodes) if (touchesTweetText(node)) return true;
+    for (const node of record.removedNodes) if (touchesTweetText(node)) return true;
+    return false;
   }
   function scan(immediate = false) {
     for (const element of observed) {
@@ -457,10 +538,11 @@
     reset();
     enabled = settings.enabled;
     hasApiKey = settings.hasApiKey;
+    maxInFlight = Number.isInteger(settings.concurrency) && settings.concurrency > 0 ? Math.min(settings.concurrency, 6) : 2;
     blocked = false;
     ui.toggle.checked = enabled;
     if (settings.modelLabel) ui.model.textContent = settings.modelLabel;
-    setNotice(hasApiKey ? "" : "설정에서 OpenRouter API 키를 입력하세요", hasApiKey ? "" : "error");
+    setNotice(hasApiKey ? "" : `설정에서 ${settings.provider === "anthropic" ? "Anthropic" : "OpenRouter"} API 키를 입력하세요`, hasApiKey ? "" : "error");
     if (enabled && hasApiKey) scan(true);
     else updateControlState();
   }
@@ -544,7 +626,7 @@
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[SETTINGS]) void refresh();
-      else if (changes[CACHE]?.newValue?.length === 0) {
+      else if (changes[CACHE_CLEARED]) {
         reset();
         if (enabled && hasApiKey && !blocked) scan();
       }
@@ -565,8 +647,7 @@
     }, { rootMargin: `${BEHIND_SCREENS * 100}% 0px ${AHEAD_SCREENS * 100}% 0px` });
     let scanTimer = null;
     new MutationObserver(records => {
-      if (!records.some(record => !record.target.closest?.('.lakomics-translation, .lakomics-translation-toggle, #lakomics-translation-controls')
-        && (record.type !== "childList" || [...record.addedNodes, ...record.removedNodes].some(node => !node.matches?.('.lakomics-translation, .lakomics-translation-toggle'))))) return;
+      if (!records.some(relevantMutation)) return;
       if (scanTimer !== null) return;
       scanTimer = setTimeout(() => { scanTimer = null; scan(); }, 200);
     }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["lang", "href"] });

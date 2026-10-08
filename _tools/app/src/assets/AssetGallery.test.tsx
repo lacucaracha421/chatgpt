@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetGallery } from "./AssetGallery";
+
+// URL selection is tested here; the in-memory vault thumbnail cache has its own tests.
+vi.mock("./vaultThumbnailCache", () => ({ useVaultThumbnailSrc: (url: string | null) => url }));
 import { GalleryViewMenu } from "./GalleryViewMenu";
 import { useState } from "react";
 import { readFileSync } from "node:fs";
@@ -516,9 +519,16 @@ describe("AssetGallery", () => {
     expect(sources()).toEqual(mounted);
     fireEvent.load(document.querySelector('img[src$="/v12"]')!);
     expect(sources()[0]).toBe("http://lakomics.localhost/thumbnail/asset-0/v12");
-    second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={items} />);
+    const vaultItems = [asset(0), asset(1)];
+    second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={vaultItems} />);
     fireEvent.load(document.querySelector('img[src$="/vault-thumbnail/asset-0"]')!);
     expect(sources()[0]).toBe("http://lakomics.localhost/vault-thumbnail/asset-0");
+    // A changed vault thumbnail reloads only that tile.
+    second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={[{ ...vaultItems[0]!, thumbnailRevision: "7" }, vaultItems[1]!]} />);
+    fireEvent.load(document.querySelector('img[src$="/vault-thumbnail/asset-0/v7"]')!);
+    expect(sources()[0]).toBe("http://lakomics.localhost/vault-thumbnail/asset-0/v7");
+    expect(document.querySelector('img[src$="/vault-thumbnail/asset-1"]')).not.toBeNull();
+    expect(document.querySelector('img[src*="/vault-thumbnail/asset-1/"]')).toBeNull();
   });
 
   it("versions video posters and hover scrub frames with the content revision", () => {

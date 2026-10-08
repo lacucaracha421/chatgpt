@@ -2348,6 +2348,8 @@ mod encrypted_vault_tests {
                     offset: 0,
                     limit: 1,
                     trashed: false,
+                    folder_id: None,
+                    unfiled_only: false,
                 })
                 .unwrap()
                 .items[0]

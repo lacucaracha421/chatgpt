@@ -48,14 +48,17 @@ function translationWindow(html, handleMessage) {
   return w;
 }
 function fixture(initial={}, fetcher) {
-  const memory = structuredClone(initial), calls = [];
+  const memory = structuredClone(initial), calls = [], gets = [], sets = [];
   const context = vm.createContext({ AbortController, setTimeout, clearTimeout,
-    chrome:{storage:{local:{async get(){return structuredClone(memory);},async set(v){Object.assign(memory,structuredClone(v));},async remove(keys){keys.forEach(k=>delete memory[k]);}}}},
+    chrome:{storage:{local:{async get(keys){gets.push(keys); return structuredClone(memory);},async set(v){sets.push(Object.keys(v)); Object.assign(memory,structuredClone(v));},async remove(keys){keys.forEach(k=>delete memory[k]);}}}},
     fetch:async(url,init)=>{calls.push({url,init}); return fetcher ? fetcher(url,init) : {ok:true,json:async()=>({choices:[{message:{content:'안녕하세요 [[LINK_0]]'}}]})};},
   });
   vm.runInContext(service,context);
-  return {memory,calls,handle:message=>context.LakomicsTranslation.handle(message)};
+  return {memory,calls,gets,sets,handle:message=>context.LakomicsTranslation.handle(message)};
 }
+const SHARD='lakomics:translation-cache:v3:';
+const shardKeys=memory=>Object.keys(memory).filter(key=>key.startsWith(SHARD));
+const cachedTexts=memory=>shardKeys(memory).flatMap(key=>memory[key].map(([text])=>text));
 const legacy = {'xtranslate:gm:oit.settings.v2':{provider:'ollama',openrouterApiKey:'fixture-key',ollamaApiKey:'retired',autoTranslate:true},'xtranslate:gm:oit.cache.v2':{old:'cache'}};
 
 test('migration preserves OpenRouter key and automatic preference, removes retired settings without exposing keys',async()=>{
@@ -469,7 +472,7 @@ test('a cache clear removes parked failures and requests the visible post again'
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome.storage.onChanged.addListener=fn=>{changed=fn;};
   w.eval(content); await clock.advance(400);
-  changed({'lakomics:translation-cache:v2':{newValue:[]}},'local'); await clock.advance(400);
+  changed({'lakomics:translation-cache-cleared':{newValue:1}},'local'); await clock.advance(400);
   assert.equal(requests,2); w.close();
 });
 
@@ -816,4 +819,277 @@ test('the main tweet is recognized by its own timestamp link when X drops the fo
   let clicks=0; w.document.getElementById('more').addEventListener('click',()=>{clicks+=1;});
   w.eval(content); await clock.advance(200);
   assert.equal(clicks,1); assert.deepEqual(sent,[]); w.close();
+});
+
+const claudeAnswer = (text, stop='end_turn') => ({ok:true,json:async()=>({content:[{type:'thinking',thinking:''},{type:'text',text}],stop_reason:stop})});
+const claudeSettings = (extra={}) => ({'lakomics:translation:v1':{enabled:true,apiKey:'or-key',anthropicApiKey:'ant-key',model:'anthropic:claude-haiku-5-5',fallbackModel:'',...extra}});
+
+test('Claude models call the Anthropic Messages API directly with their own key',async()=>{
+  const f=fixture(claudeSettings(),async()=>claudeAnswer('안녕하세요 [[LINK_0]]'));
+  const settings=await f.handle({type:'translation:settings'});
+  assert.equal(settings.provider,'anthropic'); assert.equal(settings.hasApiKey,true);
+  assert.equal(settings.hasOpenRouterKey,true); assert.equal(settings.hasAnthropicKey,true);
+  assert.equal(JSON.stringify(settings).includes('ant-key'),false);
+  const result=await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'});
+  assert.equal(result.ok,true); assert.equal(result.text,'안녕하세요 [[LINK_0]]');
+  const call=f.calls[0];
+  assert.equal(call.url,'https://api.anthropic.com/v1/messages');
+  assert.equal(call.init.headers['x-api-key'],'ant-key'); assert.equal(call.init.headers['anthropic-version'],'2023-06-01');
+  assert.equal(call.init.headers.authorization,undefined);
+  const body=JSON.parse(call.init.body);
+  assert.equal(body.model,'claude-haiku-5-5'); assert.match(body.system,/natural Korean/);
+  assert.deepEqual(body.messages,[{role:'user',content:'Hello [[LINK_0]]'}]);
+  assert.deepEqual(body.thinking,{type:'disabled'});
+  for (const field of ['temperature','reasoning','provider','response_format']) assert.equal(field in body,false);
+});
+
+test('Claude batches use structured output and Sonnet runs at low effort',async()=>{
+  const f=fixture(claudeSettings({model:'anthropic:claude-sonnet-5-5'}),async()=>claudeAnswer(JSON.stringify({translations:[{id:'a',text:'안녕'},{id:'b',text:'좋은 아침'}]})));
+  const result=await f.handle({type:'translation:request-batch',items:[{id:'a',text:'Hello'},{id:'b',text:'Good morning'}]});
+  assert.equal(result.ok,true); assert.deepEqual(result.items.map(item=>item.text),['안녕','좋은 아침']);
+  const body=JSON.parse(f.calls[0].init.body);
+  assert.equal(body.model,'claude-sonnet-5-5'); assert.deepEqual(body.thinking,{type:'between_tools'});
+  assert.equal(body.output_config.effort,'low'); assert.equal(body.output_config.format.type,'json_schema');
+  assert.deepEqual(body.output_config.format.schema.required,['translations']);
+});
+
+test('a missing Anthropic key stops Claude without calling it, and a Claude cut-off is not cached',async()=>{
+  const missing=fixture(claudeSettings({anthropicApiKey:''}));
+  assert.equal((await missing.handle({type:'translation:settings'})).hasApiKey,false);
+  assert.equal((await missing.handle({type:'translation:request',text:'Hello'})).code,'api_key_missing');
+  assert.equal(missing.calls.length,0);
+  const cut=fixture(claudeSettings(),async()=>claudeAnswer('안녕하','max_tokens'));
+  const cutResult=await cut.handle({type:'translation:request',text:'Hello'});
+  assert.equal(cutResult.ok,false); assert.equal(cutResult.code,'invalid_translation');
+});
+
+test('a Claude main model can fall back to an OpenRouter sub model with its key',async()=>{
+  const f=fixture(claudeSettings({fallbackModel:'google/gemini-3.1-flash-lite'}),async url=>url.includes('anthropic')
+    ? {ok:false,status:529,headers:{get:()=>null}}
+    : {ok:true,json:async()=>({choices:[{message:{content:'번역됨'}}]})});
+  const result=await f.handle({type:'translation:request',text:'Hello'});
+  assert.equal(result.ok,true); assert.equal(result.text,'번역됨');
+  assert.deepEqual(f.calls.map(call=>call.url),['https://api.anthropic.com/v1/messages','https://openrouter.ai/api/v1/chat/completions']);
+  assert.equal(f.calls[1].init.headers.authorization,'Bearer or-key');
+});
+
+test('saving an Anthropic key keeps the OpenRouter key',async()=>{
+  const f=fixture(legacy);
+  await f.handle({type:'translation:update',anthropicApiKey:'  new-ant  '});
+  const stored=f.memory['lakomics:translation:v1'];
+  assert.equal(stored.anthropicApiKey,'new-ant'); assert.equal(stored.apiKey,'fixture-key');
+});
+
+test('a sub model without its key never hides the main model failure',async()=>{
+  const f=fixture(claudeSettings({anthropicApiKey:'',model:'google/gemini-3.1-flash-lite',fallbackModel:'anthropic:claude-haiku-5-5'}),
+    async()=>({ok:false,status:503,headers:{get:()=>null}}));
+  const result=await f.handle({type:'translation:request',text:'Hello'});
+  assert.equal(result.ok,false); assert.equal(result.code,'http_503');
+  assert.equal(f.calls.every(call=>call.url.includes('openrouter')),true);
+});
+
+test('Claude models allow four requests in flight; other models keep two',async()=>{
+  for (const [settings,expected] of [[claudeSettings(),4],[legacy,2]]) {
+    let active=0,maxActive=0; const releases=[];
+    const f=fixture(settings,async()=>{
+      active+=1; maxActive=Math.max(maxActive,active);
+      return new Promise(resolve=>releases.push(()=>{active-=1; resolve(claudeAnswer('번역됨'));}));
+    });
+    assert.equal((await f.handle({type:'translation:settings'})).concurrency,expected);
+    const jobs=Array.from({length:6},(_,i)=>f.handle({type:'translation:request',text:`Post ${i}`}));
+    await new Promise(resolve=>setTimeout(resolve,20)); assert.equal(maxActive,expected);
+    while(releases.length) { releases.shift()(); await new Promise(resolve=>setTimeout(resolve,5)); }
+    await Promise.all(jobs);
+  }
+});
+
+test('the old single cache moves into shards once and later wakes read only what they need',async()=>{
+  const old=Array.from({length:40},(_,i)=>[`old ${i}`,`오래됨 ${i}`]);
+  const f=fixture({...legacy,'lakomics:translation-cache:v2':old});
+  assert.equal((await f.handle({type:'translation:request',text:'old 7'})).text,'오래됨 7');
+  assert.equal(f.calls.length,0);
+  assert.equal(f.memory['lakomics:translation-cache:v2'],undefined);
+  assert.equal(f.memory['lakomics:translation:storage-v3'],true);
+  assert.deepEqual(cachedTexts(f.memory).sort(),old.map(([text])=>text).sort());
+  assert.equal(shardKeys(f.memory).length>1,true);
+  // A restarted worker reads settings and single shards, never the whole storage area.
+  const again=fixture(structuredClone(f.memory));
+  assert.equal((await again.handle({type:'translation:request',text:'old 9'})).text,'오래됨 9');
+  assert.equal(again.calls.length,0);
+  assert.equal(again.gets.some(keys=>keys===null||keys===undefined),false);
+  assert.equal(again.sets.length,0,'unchanged settings are not rewritten');
+});
+
+test('the cache keeps recently used translations and writes only the touched shard after a burst',async()=>{
+  const f=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
+  assert.equal((await f.handle({type:'translation:request',text:'new a'})).text,'새 번역');
+  assert.equal((await f.handle({type:'translation:request',text:'new a'})).text,'새 번역');
+  assert.equal(f.calls.length,1);
+  const before=f.sets.length;
+  assert.deepEqual(cachedTexts(f.memory),[],'not written yet');
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  assert.deepEqual(f.sets.slice(before),[[shardKeys(f.memory)[0]]]);
+  assert.deepEqual(cachedTexts(f.memory),['new a']);
+});
+
+test('a full shard evicts its least recently used entry',async()=>{
+  // Fill one shard past its limit with texts that hash to the same shard.
+  const probe=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'번역'}}]})}));
+  await probe.handle({type:'translation:request',text:'seed'}); await new Promise(resolve=>setTimeout(resolve,1700));
+  const target=shardKeys(probe.memory)[0];
+  const same=[]; for(let i=0;same.length<96;i++){
+    const text=`post ${i}`;
+    let hash=2166136261; for(let j=0;j<text.length;j++) hash=Math.imul(hash^text.charCodeAt(j),16777619);
+    if(SHARD+((hash>>>0)%16)===target) same.push(text);
+  }
+  const stored=same.slice(0,94).map(text=>[text,`옛 ${text}`]);
+  const f=fixture({...legacy,'lakomics:translation:storage-v3':true,[target]:stored},async()=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
+  assert.equal((await f.handle({type:'translation:request',text:same[0]})).text,`옛 ${same[0]}`);
+  assert.equal((await f.handle({type:'translation:request',text:same[94]})).text,'새 번역');
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  const texts=f.memory[target].map(([text])=>text);
+  assert.equal(texts.length,94); assert.equal(texts.includes(same[0]),true); assert.equal(texts.includes(same[1]),false);
+  assert.deepEqual(texts.slice(-2),[same[0],same[94]]);
+});
+
+test('clearing the cache cancels a pending write and announces the clear',async()=>{
+  const f=fixture(legacy);
+  assert.equal((await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'})).ok,true);
+  assert.equal((await f.handle({type:'translation:clear'})).ok,true);
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  assert.deepEqual(cachedTexts(f.memory),[]);
+  assert.equal(typeof f.memory['lakomics:translation-cache-cleared'],'number');
+});
+
+test('one X tab uses the request slots the selected model allows',async()=>{
+  const html=Array.from({length:16},(_,i)=>`<div data-testid="tweetText" lang="en">Concurrent post ${i}</div>`).join('');
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  let active=0,maxActive=0;
+  for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  const finish=(callback,result)=>{active+=1; maxActive=Math.max(maxActive,active); w.setTimeout(()=>{active-=1; callback(result);},120);};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true,concurrency:4});
+    else if(message.type==='translation:request') finish(callback,{ok:true,text:'빠른 번역'});
+    else if(message.type==='translation:request-batch') finish(callback,{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`번역 ${item.id}`}))});
+  }},storage:{onChanged:{addListener(){}}}};
+  w.eval(content); await clock.advance(500);
+  assert.equal(maxActive,4); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,16); w.close();
+});
+
+test('a transient failure retries by itself twice, then waits for re-entry',async()=>{
+  let requests=0;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Flaky post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1; return {ok:false,code:'timeout'};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(600);
+  assert.equal(requests,1);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 곧 자동 재시도');
+  await clock.advance(4500); assert.equal(requests,2);
+  await clock.advance(15500); assert.equal(requests,3);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 다시 보이면 재시도');
+  await clock.advance(60000); assert.equal(requests,3,'no endless automatic retries'); w.close();
+});
+
+test('"다시 시도" re-requests a parked failure at once without a reload',async()=>{
+  let requests=0, succeed=false;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Parked post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1;
+    return succeed ? {ok:true,text:'다시 성공',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'다시 성공'}))} : {ok:false,code:'invalid_translation'};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(600);
+  const retry=w.document.querySelector('.lakomics-translation-retry');
+  assert.equal(retry.textContent,'다시 시도');
+  let bubbled=false; w.document.body.addEventListener('click',()=>{bubbled=true;});
+  succeed=true; retry.click(); await clock.advance(400);
+  assert.equal(bubbled,false,'the button never opens the post');
+  assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'다시 성공');
+  assert.equal(w.document.querySelector('.lakomics-translation-retry'),null); w.close();
+});
+
+test('a reply that never comes frees its slot after the watchdog and retries',async()=>{
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Lost reply</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0;
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
+    else if(++requests>1) callback({ok:true,text:'복구됨',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'복구됨'}))});
+  }},storage:{onChanged:{addListener(){}}}};
+  w.eval(content); await clock.advance(1000);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 중…');
+  await clock.advance(75000);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 곧 자동 재시도');
+  await clock.advance(4500);
+  assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'복구됨'); w.close();
+});
+
+test('a long rate-limit cooldown is handed back at once and a sub model answers meanwhile',async()=>{
+  let calls=0;
+  const f=fixture({'lakomics:translation:v1':{enabled:true,apiKey:'or-key',model:'google/gemini-3.1-flash-lite',fallbackModel:'google/gemma-4-26b-a4b-it'}},
+    async(_url,init)=>{
+      calls+=1;
+      return JSON.parse(init.body).model==='google/gemini-3.1-flash-lite'
+        ? {ok:false,status:429,headers:{get(name){return name.toLowerCase()==='retry-after'?'30':null;}}}
+        : {ok:true,json:async()=>({choices:[{message:{content:'보조 번역'}}]})};
+    });
+  const first=await f.handle({type:'translation:request',text:'One'});
+  assert.equal(first.ok,true); assert.equal(first.text,'보조 번역');
+  const started=Date.now();
+  const second=await f.handle({type:'translation:request',text:'Two'});
+  assert.ok(Date.now()-started<1000,'the cooling main model is not slept through');
+  assert.equal(second.ok,true); assert.equal(calls,3,'the cooling model is skipped, not called again');
+});
+
+test('page churn outside post text does not rescan, while new or edited post text does',async()=>{
+  const w=translationWindow('<article><div data-testid="tweetText" lang="en">First post</div><time>1m</time></article><div id="feed"></div>',
+    ()=>({ok:true,enabled:false,hasApiKey:true}));
+  const clock=fakeTimers(w); w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(400);
+  let scans=0; const query=w.document.querySelectorAll.bind(w.document);
+  w.document.querySelectorAll=selector=>{ if(selector==='[data-testid="tweetText"]') scans++; return query(selector); };
+  w.document.querySelector('time').textContent='2m';
+  w.document.querySelector('article').setAttribute('href','/status/1');
+  w.document.getElementById('feed').append(w.document.createElement('span'));
+  await clock.advance(400); assert.equal(scans,0);
+  w.document.querySelector('[data-testid="tweetText"]').firstChild.data='First post, edited';
+  await clock.advance(400); assert.equal(scans,1);
+  const next=w.document.createElement('article'); next.innerHTML='<div data-testid="tweetText" lang="en">Second post</div>';
+  w.document.getElementById('feed').append(next);
+  await clock.advance(400); assert.equal(scans,2); w.close();
+});
+
+test('a rejected sub model key never hides or replaces the Claude answer',async()=>{
+  const urls=[];
+  const f=fixture(claudeSettings({fallbackModel:'google/gemini-3.1-flash-lite'}),async url=>{
+    urls.push(url);
+    if(url.includes('openrouter')) return {ok:false,status:401,headers:{get(){return null;}}};
+    return urls.length===1 ? {ok:false,status:529,headers:{get(){return null;}}} : claudeAnswer('클로드 번역');
+  });
+  assert.equal((await f.handle({type:'translation:request',text:'Overloaded post'})).code,'http_529');
+  assert.equal((await f.handle({type:'translation:request',text:'Invalid earlier',fallback:true})).text,'클로드 번역');
+});
+
+test('a key rejection blocks the tab, then one quiet recheck resumes translation',async()=>{
+  let requests=0;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Valid key post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests++; return requests===1 ? {ok:false,code:'http_401'} : {ok:true,text:'다시 번역됨'};
+  });
+  const clock=fakeTimers(w), element=w.document.querySelector('div');
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(400);
+  assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation[data-error="false"]'),null);
+  await clock.advance(30500);
+  assert.equal(requests,2);
+  assert.equal(w.document.querySelector('.lakomics-translation[data-error="false"]')?.textContent,'다시 번역됨'); w.close();
 });

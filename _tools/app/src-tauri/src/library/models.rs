@@ -1480,6 +1480,12 @@ pub struct EncryptedVaultQuery {
     /// Lists the vault trash instead of the gallery.
     #[serde(default)]
     pub trashed: bool,
+    /// Only items in this folder or its descendants.
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    /// Only items in no folder.
+    #[serde(default)]
+    pub unfiled_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1494,8 +1500,44 @@ pub struct EncryptedVaultItemSummary {
     pub original_file_name: String,
     pub imported_at: String,
     pub has_thumbnail: bool,
+    /// Changes whenever the thumbnail does; versions the thumbnail URL.
+    pub thumbnail_revision: Option<String>,
     /// Set while the item is in the vault trash.
     pub trashed_at: Option<String>,
+    pub folder_id: Option<String>,
+    /// Video length when known.
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultDuration {
+    pub id: String,
+    pub duration_ms: u64,
+}
+
+/// One step of filling in the length of vault videos imported before it was recorded.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultDurationFill {
+    /// The videos whose length was filled in by this step.
+    pub filled: Vec<EncryptedVaultDuration>,
+    /// Videos still without a length that were not tried yet in this session.
+    pub remaining: u64,
+}
+
+/// A user folder of the unlocked vault (names exist only in its encrypted index).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultFolder {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub created_at: String,
+    /// Items directly in the folder, trash excluded.
+    pub item_count: u64,
+    /// Items in the folder and its descendants, trash excluded.
+    pub total_item_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

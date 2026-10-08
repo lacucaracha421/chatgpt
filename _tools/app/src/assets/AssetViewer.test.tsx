@@ -481,3 +481,22 @@ it("paints the info dock above the absolutely positioned zoom backdrop", async (
   expect(css).toMatch(/\.asset-viewer__backdrop \{[^}]*position: absolute;/);
   expect(css).toMatch(/\.asset-viewer__dock \{[^}]*position: relative;[^}]*z-index: 1;/);
 });
+
+it("offers 이 프레임을 썸네일로 on a video and passes the current playback time", async () => {
+  const onSetVideoThumbnail = vi.fn();
+  const items = [videoAsset("video", "video.webm"), asset("b", "b.png")];
+  const { container, rerender } = render(<AssetViewer items={items} activeId="video" onActiveIdChange={vi.fn()} onClose={vi.fn()} onSetVideoThumbnail={onSetVideoThumbnail} />);
+  const video = container.ownerDocument.querySelector("video")!;
+  Object.defineProperty(video, "currentTime", { configurable: true, writable: true, value: 12.3456 });
+  fireEvent.contextMenu(container.ownerDocument.querySelector("[data-viewer-media]")!);
+  await userEvent.click(await screen.findByRole("menuitem", { name: "이 프레임을 썸네일로" }));
+  expect(onSetVideoThumbnail).toHaveBeenCalledWith(items[0], 12_346);
+
+  // Images, privacy mode and hosts without the handler get no menu.
+  for (const props of [{ activeId: "b" }, { privacyMode: true }, { onSetVideoThumbnail: undefined }]) {
+    rerender(<AssetViewer items={items} activeId="video" onActiveIdChange={vi.fn()} onClose={vi.fn()} onSetVideoThumbnail={onSetVideoThumbnail} {...props} />);
+    const surface = container.ownerDocument.querySelector("[data-viewer-media]");
+    if (surface) fireEvent.contextMenu(surface);
+    expect(screen.queryByRole("menuitem", { name: "이 프레임을 썸네일로" })).not.toBeInTheDocument();
+  }
+});

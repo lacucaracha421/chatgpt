@@ -460,6 +460,13 @@ impl From<LibraryError> for CommandError {
             LibraryError::EncryptedVaultImportRunning => "encrypted_vault_import_running",
             LibraryError::EncryptedVaultReadOnly => "encrypted_vault_read_only",
             LibraryError::InvalidEncryptedVaultTitle => "invalid_encrypted_vault_title",
+            LibraryError::InvalidEncryptedVaultFolderName => "invalid_encrypted_vault_folder_name",
+            LibraryError::EncryptedVaultFolderNotFound => "encrypted_vault_folder_not_found",
+            LibraryError::DuplicateEncryptedVaultFolderName => {
+                "duplicate_encrypted_vault_folder_name"
+            }
+            LibraryError::EncryptedVaultFolderCycle => "encrypted_vault_folder_cycle",
+            LibraryError::EncryptedVaultFolderHasChildren => "encrypted_vault_folder_has_children",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
             LibraryError::UnsafeMangaRoot(_) => "unsafe_manga_root",
@@ -3509,6 +3516,162 @@ pub async fn set_encrypted_vault_title(
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
+}
+
+/// "이 프레임을 썸네일로" for a library video.
+#[tauri::command]
+pub async fn set_video_thumbnail_from_frame(
+    asset_id: String,
+    time_ms: u64,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::AssetSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_video_thumbnail_from_frame(&asset_id, time_ms))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Fills in the length of a few vault videos imported before it was recorded.
+#[tauri::command]
+pub async fn fill_encrypted_vault_video_durations(
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultDurationFill, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.fill_encrypted_vault_video_durations(|item_id, work| {
+            crate::extension_api::with_vault_stream(&library, item_id, work)
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+/// "이 프레임을 썸네일로" for a vault video: the frame is read through a decrypting loopback
+/// stream of its own, never from a plaintext file.
+#[tauri::command]
+pub async fn set_encrypted_vault_thumbnail_from_frame(
+    item_id: String,
+    time_ms: u64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.set_encrypted_vault_thumbnail_from_frame(&item_id, time_ms, |item_id, work| {
+            crate::extension_api::with_vault_stream(&library, item_id, work)
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+/// "이 프레임을 썸네일로" for a vault video when the viewer captured the frame itself
+/// (`image` is any decodable image; it is re-encoded like other vault thumbnails).
+#[tauri::command]
+pub async fn set_encrypted_vault_thumbnail_image(
+    item_id: String,
+    image: Vec<u8>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_encrypted_vault_thumbnail(&item_id, &image))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Stores vault video lengths the viewer measured itself (FFprobe could not read them).
+#[tauri::command]
+pub async fn record_encrypted_vault_video_durations(
+    durations: Vec<crate::library::models::EncryptedVaultDuration>,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.record_encrypted_vault_video_durations(&durations))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_encrypted_vault_folders(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::models::EncryptedVaultFolder>, CommandError> {
+    current_required(state)?
+        .list_encrypted_vault_folders()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn create_encrypted_vault_folder(
+    name: String,
+    parent_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultFolder, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.create_encrypted_vault_folder(&name, parent_id.as_deref())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn rename_encrypted_vault_folder(
+    folder_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.rename_encrypted_vault_folder(&folder_id, &name))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn move_encrypted_vault_folder(
+    folder_id: String,
+    parent_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.move_encrypted_vault_folder(&folder_id, parent_id.as_deref())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn delete_encrypted_vault_folder(
+    folder_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.delete_encrypted_vault_folder(&folder_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn move_encrypted_vault_items_to_folder(
+    item_ids: Vec<String>,
+    folder_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.move_encrypted_vault_items_to_folder(&item_ids, folder_id.as_deref())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]

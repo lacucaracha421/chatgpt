@@ -24,6 +24,7 @@ import { assetThumbnailUrl, assetUrl, thumbnailUrl, vaultAssetUrl, vaultPlayback
 import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { AssetVideoTileMedia } from "./AssetVideoTileMedia";
+import { useVaultThumbnailSrc } from "./vaultThumbnailCache";
 import { useGalleryEvent } from "./useGalleryEvent";
 import "../styles/tokens.css";
 
@@ -35,6 +36,8 @@ const QUICK_PREVIEW_GAP = 8;
 const QUICK_PREVIEW_MARGIN = 12;
 const DATE_HEADING_HEIGHT = 44;
 const EMPTY_SELECTION: ReadonlySet<string> = new Set();
+/** Holds an image tile's place while its vault thumbnail loads into memory. */
+const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 
 type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect; boundary: DOMRect | null };
 
@@ -82,12 +85,14 @@ type AssetGalleryProps = {
   onMoveFocus?: (delta: number, extend: boolean) => void;
   onOpen?: (asset: AssetSummary) => void;
   onRetryVideo?: (asset: AssetSummary) => void;
+  /** A video tile learned its length from the video itself while previewing. */
+  onVideoDurationKnown?: (asset: AssetSummary, durationMs: number) => void;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onVideoDurationKnown, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const masked = useAssetMasks();
   void _metadataVisible;
   const sourceAssets = useMemo(() => new Map(items.map(asset => [asset.id, asset])), [items]);
@@ -98,6 +103,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const tileEvents = {
     onToggleFavorite: useGalleryEvent(onToggleFavorite),
     onRetryVideo: useGalleryEvent(onRetryVideo),
+    onVideoDurationKnown: useGalleryEvent(onVideoDurationKnown),
     onSelectionGesture: useGalleryEvent(onSelectionGesture),
     onFocusAsset: useGalleryEvent(onFocusAsset),
     onOpen: useGalleryEvent(onOpen),
@@ -496,7 +502,7 @@ function isTextEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favoritesView, onToggleFavorite, height, selected, hasSelection, focused, focusVisible, captionLabel, privacyMode: requestedPrivacy, thumbnailCacheKey, mediaSource, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onFocusAsset, onOpen, onDoubleOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; width: number; favoritesView: boolean; onToggleFavorite?: (asset: AssetSummary) => void; height: number; selected: boolean; hasSelection: boolean; focused: boolean; focusVisible: boolean; captionLabel?: string | null; privacyMode: boolean; thumbnailCacheKey?: string | number; mediaSource: "library" | "vault"; activePreview: boolean; onRequestPreview(id: string): void; onReleasePreview(id: string): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onFocusAsset?: (asset: AssetSummary, preserveSelection?: boolean) => void; onOpen?: (asset: AssetSummary) => void; onDoubleOpen?: (asset: AssetSummary) => void; onPointerDragStart?: (id: string, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
+const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favoritesView, onToggleFavorite, height, selected, hasSelection, focused, focusVisible, captionLabel, privacyMode: requestedPrivacy, thumbnailCacheKey, mediaSource, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onVideoDurationKnown, onSelectionGesture, onFocusAsset, onOpen, onDoubleOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; width: number; favoritesView: boolean; onToggleFavorite?: (asset: AssetSummary) => void; height: number; selected: boolean; hasSelection: boolean; focused: boolean; focusVisible: boolean; captionLabel?: string | null; privacyMode: boolean; thumbnailCacheKey?: string | number; mediaSource: "library" | "vault"; activePreview: boolean; onRequestPreview(id: string): void; onReleasePreview(id: string): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onVideoDurationKnown?: AssetGalleryProps["onVideoDurationKnown"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onFocusAsset?: (asset: AssetSummary, preserveSelection?: boolean) => void; onOpen?: (asset: AssetSummary) => void; onDoubleOpen?: (asset: AssetSummary) => void; onPointerDragStart?: (id: string, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
   const masked = useAssetMasks();
   const privacyMode = masked(sourceAsset, requestedPrivacy);
   // Preserve the existing display-width asset passed to media and action handlers.
@@ -505,9 +511,11 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
   const creatorKey = asset.creatorHandle?.replace(/^@+/, "") || asset.creatorUrl || "";
   // A caption the view supplies (the artist's own name on an artist page) wins over the account handle.
   const metadataLabel = (captionLabel ?? (creatorKey ? artistHandle({ keys: [creatorKey] }) : asset.creatorName?.trim())) ?? "";
+  const rawThumbnail = asset.media.kind === "image" || tileHasThumbnail(asset, mediaSource) ? tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource) : null;
+  const thumbnail = useVaultThumbnailSrc(rawThumbnail, mediaSource === "vault" && !privacyMode);
   return <div role="option" data-asset-id={asset.id} data-focused={focusVisible ? "true" : undefined} className="asset-gallery__asset ui-selectable-media" style={{ width: asset.width, height }} aria-label={alt} aria-description={[metadataLabel, collectedDate(asset.collectedAt).full].filter(Boolean).join(" · ")} aria-selected={selected} tabIndex={focused ? 0 : -1} onFocus={event => { if (event.target === event.currentTarget) onFocusAsset?.(asset, true); }} onClick={(event) => { const gesture = { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }; if (onFocusAsset && !gesture.toggle && !gesture.range) onFocusAsset(asset); else onSelectionGesture?.(asset, gesture); }} onDoubleClick={() => onDoubleOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.(asset.id, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
     <div className="asset-gallery__image" style={{ height }}>
-    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileHasThumbnail(asset, mediaSource) ? tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource) : null} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <StableImage src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
+    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={thumbnail} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} onDurationKnown={onVideoDurationKnown ? (durationMs) => onVideoDurationKnown(asset, durationMs) : undefined} /> : <StableImage src={thumbnail ?? TRANSPARENT_PIXEL} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
     {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
     </div>
     {selected && <span className="ui-selection-check" aria-hidden="true" />}
@@ -517,7 +525,8 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
 
 
 export function tileThumbnailUrl(asset: AssetSummary, cacheKey?: string | number, mediaSource: "library" | "vault" = "library") {
-  if (mediaSource === "vault") return vaultThumbnailUrl(asset.id, cacheKey);
+  // A vault item carries a revision only after its thumbnail changed, so just that tile reloads.
+  if (mediaSource === "vault") return vaultThumbnailUrl(asset.id, asset.thumbnailRevision ?? cacheKey);
   return asset.thumbnailRevision ? assetThumbnailUrl(asset) : thumbnailUrl(asset.id, cacheKey);
 }
 

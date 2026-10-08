@@ -10,9 +10,9 @@ import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
-type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; /** `null`: the Asset has no thumbnail, so no still image is requested. */ thumbnailSrc?: string | null; playbackSrc?: string; compactBadge?: boolean; durationVisible?: boolean };
+type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; /** `null`: the Asset has no thumbnail, so no still image is requested. */ thumbnailSrc?: string | null; playbackSrc?: string; compactBadge?: boolean; durationVisible?: boolean; /** The video itself reported its length while previewing. */ onDurationKnown?(durationMs: number): void };
 
-export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode:requestedPrivacy = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true }: Props) {
+export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode:requestedPrivacy = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true, onDurationKnown }: Props) {
   const privacyMode=useAssetMask(asset,requestedPrivacy);
   const videoRef = useRef<HTMLVideoElement>(null);
   /** Detaches the gallery-cell leave listener armed while the pointer is on the cell's own controls. */
@@ -121,6 +121,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     setScrubbing(false);
   };
   const durationSeconds = videoDuration;
+  // An unknown length (0) shows "—", not "0:00", until the video itself reports one.
+  const shownDurationMs = asset.media.durationMs || Math.round(videoDuration * 1_000) || null;
   const scrubRatio = previewRatio ?? playedRatio;
   const scrubWithKeyboard = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const durationMs = Math.max(0, asset.media.durationMs);
@@ -170,9 +172,9 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       aria-label={`${alt} 미리보기`}
       onTimeUpdate={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); }}
       onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); if (videoShown) setPreviewRatio(null); } }}
-      onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setVideoDuration(d); }}
+      onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) { setVideoDuration(d); onDurationKnown?.(Math.round(d * 1_000)); } }}
     />}
-    {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(asset.media.durationMs)}` : formatDuration(asset.media.durationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
+    {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(shownDurationMs)}` : formatDuration(shownDurationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
     <div
       className="video-tile__scrub"
       tabIndex={0}

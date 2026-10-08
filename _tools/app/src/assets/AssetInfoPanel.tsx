@@ -157,7 +157,7 @@ export function AssetInfoPanel({
     if (key && onOpenArtist) onOpenArtist(key); else if (asset.creatorUrl) void openUrl(asset.creatorUrl);
   };
 
-  const duration = asset.media.kind === "video" ? formatDuration(asset.media.durationMs) : "";
+  const duration = asset.media.kind === "video" ? formatDuration(asset.media.durationMs || null) : "";
   // A library Asset without a thumbnail revision has no still (a video without a poster).
   const hasStill = asset.thumbnailRevision !== null;
   return <div ref={rootRef} className="asset-info-panel" onKeyDown={handleEscape}>

@@ -890,8 +890,23 @@ export type CreatedEncryptedVault = { status: EncryptedVaultStatus; recoveryKey:
 
 export type EncryptedVaultItemKind = "image" | "video";
 
-/** `trashed`: list the vault trash instead of the gallery. */
-export type EncryptedVaultQuery = { kind: EncryptedVaultItemKind | null; offset: number; limit: number; trashed?: boolean };
+/**
+ * `trashed`: list the vault trash instead of the gallery. `folderId`: only that folder and its
+ * descendants. `unfiledOnly`: only items in no folder.
+ */
+export type EncryptedVaultQuery = { kind: EncryptedVaultItemKind | null; offset: number; limit: number; trashed?: boolean; folderId?: string | null; unfiledOnly?: boolean };
+
+/** A user folder of the unlocked vault; its name exists only in the encrypted index. */
+export type EncryptedVaultFolder = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: string;
+  /** Items directly in the folder, trash excluded. */
+  itemCount: number;
+  /** Items in the folder and its descendants, trash excluded. */
+  totalItemCount: number;
+};
 
 export type EncryptedVaultItem = {
   id: string;
@@ -903,9 +918,17 @@ export type EncryptedVaultItem = {
   originalFileName: string;
   importedAt: string;
   hasThumbnail: boolean;
+  /** Changes whenever the thumbnail does; versions the thumbnail URL. */
+  thumbnailRevision?: string | null;
   /** Set while the item is in the vault trash. */
   trashedAt?: string | null;
+  folderId?: string | null;
+  /** Video length; null for images and for older videos not measured yet. */
+  durationMs?: number | null;
 };
+
+/** One background step that measures older vault videos missing a length. */
+export type EncryptedVaultDurationFill = { filled: { id: string; durationMs: number }[]; remaining: number };
 
 export type EncryptedVaultItemPage = { items: EncryptedVaultItem[]; totalCount: number; nextOffset: number | null };
 
@@ -1603,7 +1626,24 @@ export interface LibraryGateway {
   exportEncryptedVaultItems?(itemIds: string[], destination: string, onProgress?: (progress: EncryptedVaultExportProgress) => void): Promise<EncryptedVaultExportProgress>;
   getEncryptedVaultExportStatus?(): Promise<EncryptedVaultExportJob | null>;
   listEncryptedVaultItems?(query: EncryptedVaultQuery): Promise<EncryptedVaultItemPage>;
+  /** "이 프레임을 썸네일로" for a library video (this PC only; the cloud keeps the previous one). */
+  setVideoThumbnailFromFrame?(assetId: string, timeMs: number): Promise<AssetSummary>;
   setEncryptedVaultTitle?(itemId: string, title: string | null): Promise<void>;
+  listEncryptedVaultFolders?(): Promise<EncryptedVaultFolder[]>;
+  /** "이 프레임을 썸네일로" for a vault video; the frame is read through the decrypting stream. */
+  setEncryptedVaultThumbnailFromFrame?(itemId: string, timeMs: number): Promise<void>;
+  /** A frame the viewer captured itself (any image bytes); re-encoded like other vault thumbnails. */
+  setEncryptedVaultThumbnailImage?(itemId: string, image: Uint8Array): Promise<void>;
+  fillEncryptedVaultVideoDurations?(): Promise<EncryptedVaultDurationFill>;
+  /** Stores lengths the viewer measured itself for videos the backend could not read. */
+  recordEncryptedVaultVideoDurations?(durations: { id: string; durationMs: number }[]): Promise<number>;
+  createEncryptedVaultFolder?(name: string, parentId: string | null): Promise<EncryptedVaultFolder>;
+  renameEncryptedVaultFolder?(folderId: string, name: string): Promise<void>;
+  moveEncryptedVaultFolder?(folderId: string, parentId: string | null): Promise<void>;
+  /** Refused while the folder has child folders; its items move to the parent folder. */
+  deleteEncryptedVaultFolder?(folderId: string): Promise<void>;
+  /** `folderId: null` takes the items out of every folder. Returns how many changed. */
+  moveEncryptedVaultItemsToFolder?(itemIds: string[], folderId: string | null): Promise<number>;
   previewEncryptedVaultSidecarCleanup?(): Promise<EncryptedVaultSidecarCleanupPreview>;
   applyEncryptedVaultSidecarCleanup?(): Promise<EncryptedVaultSidecarCleanupResult>;
   getMangaRoot(): Promise<string | null>;

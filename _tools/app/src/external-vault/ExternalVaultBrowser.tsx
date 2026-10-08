@@ -7,10 +7,13 @@ import { AssetViewer } from "../assets/AssetViewer";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "../assets/selection";
 import { commandErrorMessage } from "../library/errorMessage";
 import type {
-  AssetSummary, EncryptedVaultImportReport, EncryptedVaultItem,
+  AssetSummary, EncryptedVaultFolder, EncryptedVaultImportReport, EncryptedVaultItem,
   EncryptedVaultItemKind, EncryptedVaultStatus, LibraryGateway,
 } from "../library/types";
-import { ArrowUpTrayIcon, ArrowUturnLeftIcon, DocumentPlusIcon, FilmIcon, FolderArrowDownIcon, LockClosedIcon, PencilIcon, PhotoIcon, Squares2X2Icon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import { ArrowRightCircleIcon, ArrowUpTrayIcon, ArrowUturnLeftIcon, DocumentPlusIcon, FilmIcon, FolderArrowDownIcon, LockClosedIcon, PencilIcon, PhotoIcon, Squares2X2Icon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import { ChromeContribution } from "../layout/WorkspaceChrome";
+import { pointerDragReducer, type InternalDragPayload, type PointerDragAction, type PointerDragState } from "../shared/interaction/pointerDrag";
+import { VaultFolderPicker, VaultFolderSidebar, type VaultDropTarget, type VaultScope } from "./VaultFolderSidebar";
 import type { ComponentType, SVGProps } from "react";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
@@ -18,6 +21,10 @@ import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
+import { vaultPlaybackUrl } from "../assets/mediaUrl";
+import { clearVaultThumbnailCache } from "../assets/vaultThumbnailCache";
+import { captureVideoFrame } from "../video/captureVideoFrame";
+import { readVideoDuration } from "../video/readVideoDuration";
 import { vaultErrorMessage } from "./vaultErrors";
 import { dismissVaultExport, reattachVaultExport, startVaultExport, useVaultExportJob, vaultExportProgressText, vaultExportResultText } from "./vaultExportJob";
 import { dismissVaultImport, reattachVaultImport, startVaultFileImport, startVaultImport, useVaultImportJob, vaultImportProgressText } from "./vaultImportJob";
@@ -88,7 +95,15 @@ function VaultUnlockPanel({ gateway, remembered, onStatusChange }: { gateway: Li
 function VaultGallery({ gateway, status, onStatusChange, onContentChanged, privacyMode }: { gateway: LibraryGateway; status: EncryptedVaultStatus; onStatusChange: (status: EncryptedVaultStatus) => void; onContentChanged?: () => void; privacyMode: boolean }) {
   const listItems = gateway.listEncryptedVaultItems!;
   const [filter, setFilter] = useState<Filter>("all");
+  const [scope, setScope] = useState<VaultScope>({ kind: "all" });
+  const [folders, setFolders] = useState<EncryptedVaultFolder[]>([]);
+  const [folderDialog, setFolderDialog] = useState<FolderDialog | null>(null);
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<PointerDragState>({ phase: "idle" });
+  const dragStateRef = useRef<PointerDragState>({ phase: "idle" });
+  const [dropTarget, setDropTarget] = useState<VaultDropTarget>(null);
   const [items, setItems] = useState<AssetSummary[]>([]);
+  const [itemFolders, setItemFolders] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -111,13 +126,28 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   const trashedCount = status.trashedCount ?? null;
   /** Opened from the backup index: viewing and export only; the backend refuses every change. */
   const readOnly = Boolean(status.backupIndex);
+  const foldersSupported = Boolean(gateway.listEncryptedVaultFolders);
+  const scopeKey = scope.kind === "folder" ? `folder:${scope.folderId}` : scope.kind;
+
+  const loadFolders = useCallback(async () => {
+    if (!gateway.listEncryptedVaultFolders) return;
+    try {
+      const next = await gateway.listEncryptedVaultFolders();
+      setFolders(next);
+      setScope((current) => current.kind === "folder" && !next.some((folder) => folder.id === current.folderId) ? { kind: "all" } : current);
+    } catch (cause) {
+      setError(commandErrorMessage(cause, "폴더 목록을 불러오지 못했습니다."));
+    }
+  }, [gateway]);
+  useEffect(() => { void loadFolders(); }, [loadFolders]);
 
   const loadFirst = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const page = await listItems({ kind, offset: 0, limit: PAGE_SIZE, ...(trashView ? { trashed: true } : {}) });
+      const page = await listItems({ kind, offset: 0, limit: PAGE_SIZE, ...scopeFilter(scope, trashView) });
       setItems(page.items.map(toAssetSummary));
+      setItemFolders(new Map(page.items.map((item) => [item.id, item.folderId ?? null])));
       setNextOffset(page.nextOffset);
       setTotalCount(page.totalCount);
     } catch (cause) {
@@ -128,7 +158,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     } finally {
       setLoading(false);
     }
-  }, [kind, listItems, trashView]);
+  }, [kind, listItems, trashView, scope]);
 
   useEffect(() => { void loadFirst(); }, [loadFirst]);
   const itemIds = useMemo(() => items.map((item) => item.id), [items]);
@@ -137,14 +167,98 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   const loadNext = useCallback(async () => {
     if (nextOffset === null) return;
     try {
-      const page = await listItems({ kind, offset: nextOffset, limit: PAGE_SIZE, ...(trashView ? { trashed: true } : {}) });
+      const page = await listItems({ kind, offset: nextOffset, limit: PAGE_SIZE, ...scopeFilter(scope, trashView) });
       setItems((current) => [...current, ...page.items.map(toAssetSummary)]);
+      setItemFolders((current) => new Map([...current, ...page.items.map((item) => [item.id, item.folderId ?? null] as const)]));
       setNextOffset(page.nextOffset);
       setTotalCount(page.totalCount);
     } catch (cause) {
       setError(commandErrorMessage(cause, "다음 항목을 불러오지 못했습니다."));
     }
-  }, [kind, listItems, nextOffset, trashView]);
+  }, [kind, listItems, nextOffset, trashView, scope]);
+
+  // Videos imported before lengths were recorded show "—"; measure them a few at a time in the
+  // background and patch the shown tiles in place. The backend skips videos it could not read.
+  const durationFill = useRef<"idle" | "running" | "done">("idle");
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    // Decrypted thumbnails stay in memory only while the vault view is open.
+    return () => { mounted.current = false; clearVaultThumbnailCache(); };
+  }, []);
+  const needsDurations = !readOnly && Boolean(gateway.fillEncryptedVaultVideoDurations)
+    && items.some((item) => item.media.kind === "video" && !item.media.durationMs);
+  useEffect(() => {
+    const fill = gateway.fillEncryptedVaultVideoDurations;
+    if (!needsDurations || !fill || durationFill.current !== "idle") return;
+    durationFill.current = "running";
+    void (async () => {
+      try {
+        let previous = Number.POSITIVE_INFINITY;
+        while (mounted.current) {
+          const step = await fill();
+          if (!mounted.current) break;
+          applyLengths(step.filled);
+          // Each step fills or gives up on its videos, so `remaining` shrinks; stop if it does not.
+          if (step.remaining === 0 || step.remaining >= previous) break;
+          previous = step.remaining;
+        }
+      } catch {
+        // Lengths are a convenience; the tiles keep showing "—".
+      }
+      durationFill.current = mounted.current ? "done" : "idle";
+      if (mounted.current) setBackendLengthsDone(true);
+    })();
+  }, [gateway, needsDurations]);
+
+  // Videos FFprobe could not read: the WebView reads their length from the metadata itself,
+  // a few at a time, and the backend stores it so the next launch shows it too.
+  const [backendLengthsDone, setBackendLengthsDone] = useState(false);
+  const [measureRound, setMeasureRound] = useState(0);
+  const measuredIds = useRef(new Set<string>());
+  const measuring = useRef(false);
+  useEffect(() => {
+    const record = gateway.recordEncryptedVaultVideoDurations;
+    if (!backendLengthsDone || !record || readOnly || measuring.current) return;
+    const pending = items.filter((item) => item.media.kind === "video" && !item.media.durationMs && !measuredIds.current.has(item.id)).slice(0, 8);
+    if (pending.length === 0) return;
+    measuring.current = true;
+    void (async () => {
+      const found: { id: string; durationMs: number }[] = [];
+      for (const item of pending) {
+        if (!mounted.current) break;
+        measuredIds.current.add(item.id);
+        const durationMs = await readVideoDuration(vaultPlaybackUrl(item.id)).catch(() => null);
+        if (durationMs) found.push({ id: item.id, durationMs });
+      }
+      if (found.length > 0 && mounted.current) {
+        applyLengths(found);
+        await record(found).catch(() => 0);
+      }
+      measuring.current = false;
+      if (mounted.current) setMeasureRound((round) => round + 1);
+    })();
+  }, [backendLengthsDone, gateway, items, measureRound, readOnly]);
+
+  /** A tile preview or the viewer played a video whose length was still unknown: keep it. */
+  const observedLengths = useRef(new Set<string>());
+  function recordObservedLength(asset: AssetSummary, durationMs: number) {
+    const record = gateway.recordEncryptedVaultVideoDurations;
+    if (!record || readOnly || durationMs <= 0 || observedLengths.current.has(asset.id)) return;
+    const known = items.find((item) => item.id === asset.id);
+    if (!known || known.media.kind !== "video" || known.media.durationMs) return;
+    observedLengths.current.add(asset.id);
+    applyLengths([{ id: asset.id, durationMs }]);
+    void record([{ id: asset.id, durationMs }]).catch(() => observedLengths.current.delete(asset.id));
+  }
+
+  function applyLengths(lengths: { id: string; durationMs: number }[]) {
+    if (lengths.length === 0) return;
+    const byId = new Map(lengths.map((entry) => [entry.id, entry.durationMs]));
+    setItems((current) => current.map((item) => item.media.kind === "video" && byId.has(item.id)
+      ? { ...item, media: { ...item.media, durationMs: byId.get(item.id)! } }
+      : item));
+  }
 
   // The import lives outside this view; refresh when one ends (also one that ended while
   // the view was closed is already in the first load) and, while it runs, the first page.
@@ -154,7 +268,8 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     seenCompletions.current = completions;
     onContentChanged?.();
     void loadFirst();
-  }, [completions, loadFirst, onContentChanged]);
+    void loadFolders();
+  }, [completions, loadFirst, loadFolders, onContentChanged]);
   const lastLiveRefresh = useRef(Date.now());
   const liveRefreshAllowed = useRef(true);
   liveRefreshAllowed.current = items.length <= PAGE_SIZE && viewerId === null && !trashView;
@@ -175,6 +290,132 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     setViewerId(null);
     setConfirm(null);
   }
+
+  function changeScope(next: VaultScope) {
+    setScope(next);
+    if (trashView) setFilter("all");
+    setSelection(emptySelection());
+    setViewerId(null);
+    setConfirm(null);
+  }
+
+  /** Runs a folder command; returns an error message (shown inline) or null. */
+  async function folderCommand(action: () => Promise<unknown>, fallback: string) {
+    try {
+      await action();
+      await loadFolders();
+      return null;
+    } catch (cause) {
+      return vaultChangeErrorMessage(cause, fallback);
+    }
+  }
+
+  async function createFolder(name: string, parentId: string | null) {
+    const call = gateway.createEncryptedVaultFolder;
+    if (!call) return null;
+    return folderCommand(() => call(name, parentId), "폴더를 만들지 못했습니다.");
+  }
+
+  async function renameFolder(folderId: string, name: string) {
+    const call = gateway.renameEncryptedVaultFolder;
+    if (!call) return null;
+    return folderCommand(() => call(folderId, name), "폴더 이름을 바꾸지 못했습니다.");
+  }
+
+  async function deleteFolder(folder: EncryptedVaultFolder) {
+    const call = gateway.deleteEncryptedVaultFolder;
+    if (!call || readOnly) return;
+    setError(null);
+    const failure = await folderCommand(() => call(folder.id), "폴더를 삭제하지 못했습니다.");
+    if (failure) { setError(failure); return; }
+    if (scope.kind === "folder" && scope.folderId === folder.id) changeScope(folder.parentId ? { kind: "folder", folderId: folder.parentId } : { kind: "all" });
+    else void loadFirst();
+    setMessage({ text: folder.itemCount > 0
+      ? `'${folder.name}' 폴더를 삭제했습니다. 안의 ${folder.itemCount.toLocaleString()}개는 ${folder.parentId ? "상위 폴더로" : "미분류로"} 옮겼습니다.`
+      : `'${folder.name}' 폴더를 삭제했습니다.` });
+  }
+
+  async function moveFolder(folderId: string, parentId: string | null) {
+    const call = gateway.moveEncryptedVaultFolder;
+    if (!call) return;
+    setBusy(true);
+    setFolderError(null);
+    const failure = await folderCommand(() => call(folderId, parentId), "폴더를 옮기지 못했습니다.");
+    setBusy(false);
+    if (failure) { setFolderError(failure); return; }
+    setFolderDialog(null);
+    void loadFirst();
+  }
+
+  /** Puts items in a folder (`null`: out of every folder) and refreshes what this view shows. */
+  async function moveItemsToFolder(ids: string[], folderId: string | null) {
+    const call = gateway.moveEncryptedVaultItemsToFolder;
+    if (!call || readOnly || busy || ids.length === 0) return false;
+    setBusy(true);
+    setError(null);
+    setFolderError(null);
+    try {
+      const count = await call(ids, folderId);
+      const target = folderId === null ? "미분류" : `'${folders.find((folder) => folder.id === folderId)?.name ?? "폴더"}'`;
+      setMessage({ text: count > 0 ? `${count.toLocaleString()}개를 ${target}${folderId === null ? "로" : " 폴더로"} 옮겼습니다.` : "이미 그 폴더에 있습니다." });
+      setSelection(emptySelection());
+      await Promise.all([loadFolders(), loadFirst()]);
+      return true;
+    } catch (cause) {
+      const failure = vaultChangeErrorMessage(cause, "폴더로 옮기지 못했습니다.");
+      if (folderDialog) setFolderError(failure); else setError(failure);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function transitionDrag(action: PointerDragAction) {
+    const next = pointerDragReducer(dragStateRef.current, action);
+    dragStateRef.current = next;
+    setDragState(next);
+    return next;
+  }
+
+  /** Vault items move only between vault folders: never a native drag out (it would write plaintext). */
+  function dropTargetAt(x: number, y: number): VaultDropTarget {
+    const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-vault-folder-id]");
+    if (!element) return null;
+    const folderId = element.dataset.vaultFolderId ?? "";
+    return { folderId: folderId === "" ? null : folderId };
+  }
+
+  const galleryDrag = foldersSupported && !trashView && !readOnly ? {
+    onPointerDragStart: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => {
+      if (payload.kind !== "assets") return;
+      transitionDrag({ type: "arm", payload, x: event.clientX, y: event.clientY });
+      setDropTarget(null);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    onPointerDragMove: (event: React.PointerEvent<HTMLElement>) => {
+      const next = transitionDrag({ type: "move", x: event.clientX, y: event.clientY });
+      if (next.phase !== "dragging") return;
+      event.preventDefault();
+      setDropTarget(dropTargetAt(event.clientX, event.clientY));
+    },
+    onPointerDragEnd: (event: React.PointerEvent<HTMLElement>) => {
+      const current = dragStateRef.current;
+      const target = current.phase === "dragging" ? dropTargetAt(event.clientX, event.clientY) : null;
+      transitionDrag({ type: "finish" });
+      setDropTarget(null);
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      if (target && current.phase === "dragging" && current.payload.kind === "assets") void moveItemsToFolder(current.payload.assetIds, target.folderId);
+    },
+    onPointerDragCancel: (event: React.PointerEvent<HTMLElement>) => {
+      transitionDrag({ type: "cancel" });
+      setDropTarget(null);
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    },
+  } : {};
+  useEffect(() => {
+    document.body.classList.toggle("is-pointer-dragging", dragState.phase === "dragging");
+    return () => document.body.classList.remove("is-pointer-dragging");
+  }, [dragState.phase]);
 
   async function importFolder() {
     if (importing || !gateway.importIntoEncryptedVault) return;
@@ -230,6 +471,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
       setSelection(emptySelection());
       done(count);
       onContentChanged?.();
+      void loadFolders();
       return true;
     } catch (cause) {
       setError(vaultChangeErrorMessage(cause, fallback));
@@ -275,6 +517,32 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     if (ok) setConfirm(null);
   }
 
+  async function setThumbnailFromFrame(asset: AssetSummary, timeMs: number) {
+    const call = gateway.setEncryptedVaultThumbnailFromFrame;
+    if (!call || readOnly || busy) return;
+    setBusy(true);
+    setError(null);
+    setMessage({ text: "썸네일을 만드는 중입니다…" });
+    try {
+      // The viewer's own decoded frame is fastest; the backend capture is the fallback where
+      // this WebView cannot read the frame.
+      const captured = gateway.setEncryptedVaultThumbnailImage
+        ? await captureVideoFrame(vaultPlaybackUrl(asset.id), timeMs).catch(() => null)
+        : null;
+      if (captured) await gateway.setEncryptedVaultThumbnailImage!(asset.id, new Uint8Array(await captured.arrayBuffer()));
+      else await call(asset.id, timeMs);
+      // Vault thumbnails are never cached by the server; a new revision reloads only this item's images.
+      const revision = Date.now();
+      setItems((current) => current.map((item) => item.id === asset.id ? { ...item, thumbnailRevision: String(revision) } : item));
+      setMessage({ text: "이 프레임을 썸네일로 지정했습니다." });
+    } catch (cause) {
+      setMessage(null);
+      setError(vaultChangeErrorMessage(cause, "썸네일을 바꾸지 못했습니다."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function trashFromViewer(asset: AssetSummary) {
     const index = items.findIndex((item) => item.id === asset.id);
     const neighbor = items[index + 1] ?? items[index - 1] ?? null;
@@ -301,6 +569,12 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     setSelection((current) => applySelectionGesture(current, itemIds, asset.id, gesture));
   const askDelete = (ids: string[]) => { if (ids.length > 0 && !readOnly) setConfirm({ kind: "delete", ids }); };
   const selectedLabel = selectedIds.length > 0 ? ` ${selectedIds.length.toLocaleString()}개` : "";
+  function openMoveItems(ids: string[]) {
+    if (ids.length === 0 || readOnly) return;
+    const current = new Set(ids.map((id) => itemFolders.get(id) ?? null));
+    setFolderError(null);
+    setFolderDialog({ kind: "items", ids, currentId: current.size === 1 ? [...current][0] : undefined });
+  }
 
   const contextItems: ContextMenuItem[] = trashView
     ? [
@@ -309,11 +583,15 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     ]
     : [
       { id: "export", label: "내보내기", disabled: exporting, onSelect: () => void exportItems(selectedIds) },
+      ...(foldersSupported ? [{ id: "move", label: "폴더로 이동…", disabled: busy || readOnly, onSelect: () => openMoveItems(selectedIds) }] : []),
       { id: "title", label: "제목 변경", disabled: !single || readOnly, onSelect: () => setTitleEditorOpen(true) },
       { id: "trash", label: "휴지통으로", destructive: true, disabled: busy || readOnly, onSelect: () => void trash(selectedIds) },
     ];
 
   return <section className="external-vault-browser" aria-label="비밀">
+    {foldersSupported && <ChromeContribution title="비밀" spec={{ navigation: <VaultFolderSidebar folders={folders} scope={trashView ? { kind: "all" } : scope} onScopeChange={changeScope}
+      totalCount={status.itemCount ?? null} readOnly={readOnly} dropTarget={dropTarget} onCreate={createFolder} onRename={renameFolder}
+      onDelete={(folder) => void deleteFolder(folder)} onMove={(folder) => { setFolderError(null); setFolderDialog({ kind: "folder", folder }); }} /> }} />}
     <header className="external-vault-browser__toolbar">
       <div className="external-vault-browser__filters" role="group" aria-label="미디어 필터">
         {(["all", "image", "video"] as const).map((value) => {
@@ -335,6 +613,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
         </> : <>
           {selectedIds.length > 0 && <>
             <ToolbarAction label={showExporting ? "내보내는 중…" : `내보내기${selectedLabel}`} title="PC로 내보내기" count={exporting ? 0 : selectedIds.length} Icon={ArrowUpTrayIcon} disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)} />
+            {foldersSupported && <ToolbarAction label={`폴더로 이동${selectedLabel}`} title="폴더로 이동" Icon={ArrowRightCircleIcon} disabled={busy || readOnly} onClick={() => openMoveItems(selectedIds)} />}
             <ToolbarAction label="휴지통으로" Icon={TrashIcon} disabled={busy || readOnly || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)} />
           </>}
           <ToolbarAction label="제목 변경" Icon={PencilIcon} disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)} />
@@ -372,7 +651,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
           if (!target) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }}>
-        <AssetGallery items={items} layout="masonry" scopeKey={`external-vault:${filter}`} totalCount={totalCount}
+        <AssetGallery items={items} layout="masonry" onVideoDurationKnown={recordObservedLength} scopeKey={`external-vault:${filter}:${scopeKey}`} totalCount={totalCount}
           mediaSource="vault" metadataVisible={!privacyMode} captionLabel={(asset) => asset.title || asset.originalName}
           privacyMode={privacyMode}
           selectedAssetIds={selection.ids} focusAssetId={selection.focusId}
@@ -382,11 +661,22 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
           onDeleteSelection={() => { if (readOnly) return; if (trashView) askDelete(selectedIds); else void trash(selectedIds); }}
           onClearSelection={() => setSelection(emptySelection())}
           hasNextPage={nextOffset !== null} onLoadNextPage={() => void loadNext()}
-          onOpen={(asset) => setViewerId(asset.id)} />
+          onOpen={(asset) => setViewerId(asset.id)} {...galleryDrag} />
       </div></ContextMenu>}
+    {dragState.phase === "dragging" && dragState.payload.kind === "assets" && <div className="ui-drag-layer" style={{ transform: `translate(${dragState.x + 12}px, ${dragState.y + 12}px)` }} aria-hidden="true">
+      {`${dragState.payload.assetIds.length.toLocaleString()}개 · 폴더로 이동`}
+    </div>}
+    {folderDialog?.kind === "items" && <VaultFolderPicker title={`${folderDialog.ids.length.toLocaleString()}개를 폴더로 이동`} folders={folders} currentId={folderDialog.currentId ?? null}
+      noneLabel="폴더에서 빼기 (미분류)" busy={busy} error={folderError} onClose={() => setFolderDialog(null)}
+      onPick={(folderId) => void moveItemsToFolder(folderDialog.ids, folderId).then((ok) => { if (ok) setFolderDialog(null); })} />}
+    {folderDialog?.kind === "folder" && <VaultFolderPicker title={`'${folderDialog.folder.name}' 폴더 이동`} folders={folders} currentId={folderDialog.folder.parentId}
+      excludeId={folderDialog.folder.id} noneLabel="최상위" busy={busy} error={folderError} onClose={() => setFolderDialog(null)}
+      onPick={(parentId) => void moveFolder(folderDialog.folder.id, parentId)} />}
     {active && <AssetViewer items={items} activeId={active} onActiveIdChange={setViewerId} onClose={() => setViewerId(null)} privacyMode={privacyMode} mediaSource="vault"
       onTrash={trashView || readOnly || !gateway.trashEncryptedVaultItems ? undefined : trashFromViewer}
-      onExport={trashView || !gateway.exportEncryptedVaultItems ? undefined : (asset) => void exportItems([asset.id])} />}
+      onExport={trashView || !gateway.exportEncryptedVaultItems ? undefined : (asset) => void exportItems([asset.id])}
+      onVideoDurationKnown={recordObservedLength}
+      onSetVideoThumbnail={trashView || readOnly || !gateway.setEncryptedVaultThumbnailFromFrame ? undefined : (asset, timeMs) => void setThumbnailFromFrame(asset, timeMs)} />}
     {titleEditorOpen && single && !readOnly && <TitleEditor asset={single} gateway={gateway}
       onClose={() => setTitleEditorOpen(false)} onChanged={() => void loadFirst()} />}
     {confirm && <Dialog open title={confirm.kind === "empty" ? "휴지통 비우기" : "영구 삭제"} onClose={() => { if (!busy) setConfirm(null); }}>
@@ -409,6 +699,15 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
 }
 
 type Confirmation = { kind: "delete"; ids: string[] } | { kind: "empty" };
+
+/** The trash lists every trashed item; folders scope only the gallery. */
+function scopeFilter(scope: VaultScope, trashView: boolean) {
+  if (trashView) return { trashed: true };
+  if (scope.kind === "folder") return { folderId: scope.folderId };
+  return scope.kind === "unfiled" ? { unfiledOnly: true } : {};
+}
+/** `currentId` is undefined when the selected items are in different folders. */
+type FolderDialog = { kind: "items"; ids: string[]; currentId?: string | null } | { kind: "folder"; folder: EncryptedVaultFolder };
 
 const MEDIA_EXTENSIONS = ["jpg", "jpeg", "jfif", "png", "webp", "gif", "mp4", "webm", "mov"].flatMap((value) => [value, value.toUpperCase()]);
 
@@ -471,8 +770,10 @@ function toAssetSummary(item: EncryptedVaultItem): AssetSummary {
     collectedAt: item.importedAt, favorite: false, sourceUrl: null, sourcePublishedAt: null,
     creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null,
     importBatchId: null, originalModifiedAt: item.importedAt,
+    // Without it a reload would fall back to the bare URL, whose old image the WebView may still show.
+    ...(item.thumbnailRevision ? { thumbnailRevision: item.thumbnailRevision } : {}),
     media: item.kind === "video"
-      ? { kind: "video", durationMs: 0, preparationState: "ready", scrubFrameCount: 0 }
+      ? { kind: "video", durationMs: item.durationMs ?? 0, preparationState: "ready", scrubFrameCount: 0 }
       : { kind: "image" },
   };
 }

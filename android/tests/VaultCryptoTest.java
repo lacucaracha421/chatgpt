@@ -166,6 +166,26 @@ public final class VaultCryptoTest {
             rejects(()->VaultCrypto.index(reader.range(0,(int)reader.length)));
         }
         String indexText=new String(index,StandardCharsets.UTF_8);
+        String folderIndex=indexText.replaceFirst("\"formatVersion\":\\s*1","\"formatVersion\":2,\"folders\":[{\"id\":\"f\",\"name\":\"여행\",\"parentId\":null,\"createdAt\":\"2026-10-07T00:00:00Z\"}]")
+            .replaceFirst("\"id\":\\s*\"fixture-1\"","\"folderId\":\"f\",\"id\":\"fixture-1\"");
+        check(!folderIndex.equals(indexText));
+        List<VaultCrypto.Item> foldered=VaultCrypto.index(VaultCrypto.utf8(folderIndex));
+        check(foldered.size()==2 && foldered.get(0).title.equals("사용자 지정 제목"));
+        VaultCrypto.Index parsedFolders=VaultCrypto.parse(VaultCrypto.utf8(folderIndex));
+        check(parsedFolders.folders.size()==1 && parsedFolders.folders.get(0).name.equals("여행") && parsedFolders.folders.get(0).parentId==null);
+        check("f".equals(parsedFolders.items.get(0).folderId) && parsedFolders.items.get(1).folderId==null);
+        check(VaultCrypto.parse(VaultCrypto.utf8(indexText)).folders.isEmpty());
+        // Lengths the PC recorded are read; an index without them still opens.
+        check(parsedFolders.items.get(0).durationMs==0);
+        VaultCrypto.Index timed=VaultCrypto.parse(VaultCrypto.utf8(folderIndex.replaceFirst("\"folderId\":\"f\"","\"folderId\":\"f\",\"durationMs\":61000")));
+        check(timed.items.get(0).durationMs==61000);
+        rejects(()->VaultCrypto.parse(VaultCrypto.utf8(folderIndex.replaceFirst("\"folderId\":\"f\"","\"folderId\":\"f\",\"durationMs\":-1"))));
+        // Folders are a version 2 feature and must be consistent, as on the PC.
+        rejects(()->VaultCrypto.parse(VaultCrypto.utf8(folderIndex.replaceFirst("\"formatVersion\":2","\"formatVersion\":1"))));
+        rejects(()->VaultCrypto.parse(VaultCrypto.utf8(folderIndex.replaceFirst("\"folderId\":\"f\"","\"folderId\":\"missing\""))));
+        rejects(()->VaultCrypto.parse(VaultCrypto.utf8(folderIndex.replaceFirst("\"parentId\":null","\"parentId\":\"f\""))));
+        rejects(()->VaultCrypto.parse(VaultCrypto.utf8(folderIndex.replaceFirst("\"parentId\":null","\"parentId\":\"nowhere\""))));
+        rejects(()->VaultCrypto.index(VaultCrypto.utf8(folderIndex.replaceFirst("\"formatVersion\":2","\"formatVersion\":3"))));
         rejects(()->VaultCrypto.index(VaultCrypto.utf8(indexText.replace(items.get(0).object,"../../etc/passwd"))));
         for(String id:new String[]{"abc","0303030303030303030303030303030G","AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","../030303030303030303030303030303","03030303030303030303030303030303/"})rejects(()->VaultCrypto.objectId(id));
         byte[] extended=Arrays.copyOf(video,video.length+1);

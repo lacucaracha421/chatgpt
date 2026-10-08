@@ -257,3 +257,22 @@ it("keeps the scrub frame, not the first frame, until a scrubbed video is on scr
   fireEvent.playing(media);
   expect(media).toHaveAttribute("data-shown");
 });
+
+it("shows an unknown length as a dash, not 0:00", () => {
+  const unknown = video();
+  unknown.media = { ...unknown.media, durationMs: 0 };
+  const { container } = render(<VideoTileMedia asset={unknown} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  expect(container.querySelector(".video-tile__duration")).toHaveTextContent("—");
+});
+
+it("reports the length the video itself gives while previewing", () => {
+  const known = vi.fn();
+  const { container, rerender } = render(<VideoTileMedia asset={video()} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} onDurationKnown={known} />);
+  fireEvent.pointerEnter(container.querySelector(".video-tile")!);
+  act(() => vi.advanceTimersByTime(160));
+  rerender(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} onDurationKnown={known} />);
+  const media = container.querySelector("video")!;
+  Object.defineProperty(media, "duration", { configurable: true, value: 75.4 });
+  fireEvent(media, new Event("durationchange"));
+  expect(known).toHaveBeenCalledWith(75_400);
+});

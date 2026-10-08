@@ -33,6 +33,7 @@ final class PrivateVault {
     private VaultCrypto.Header header;
     private byte[] master;
     private List<VaultCrypto.Item> items = Collections.emptyList();
+    private List<VaultCrypto.Folder> folders = Collections.emptyList();
     private final Map<String,String> media = new HashMap<>();
     private final Set<String> thumbnails = new HashSet<>();
     private String nonce, message = "";
@@ -160,13 +161,13 @@ final class PrivateVault {
             master=key;
         }
         try {
-            List<VaultCrypto.Item> loaded;
+            VaultCrypto.Index loaded;
             try {loaded=readIndex(dir,"index.bin",attempt);}
             catch(VaultCrypto.Unsupported|VaultCrypto.IndexTooLarge e){throw e;}
             catch(VaultCrypto.Invalid|FileNotFoundException e){loaded=readIndex(dir,"index.prev.bin",attempt);}
             synchronized(this){
                 if(attempt!=epoch || cancellation.isCanceled() || master==null)throw new VaultCrypto.Invalid("보관함이 잠겼습니다");
-                items=loaded;media.clear();thumbnails.clear();
+                items=loaded.items;folders=loaded.folders;media.clear();thumbnails.clear();
                 for(VaultCrypto.Item item:items)if(!item.trashed){
                     media.put(item.object,item.mime);
                     if(item.thumbnail!=null){thumbnails.add(item.thumbnail);media.putIfAbsent(item.thumbnail,"image/webp");}
@@ -177,7 +178,7 @@ final class PrivateVault {
             }
         } catch(Exception e){lockIfCurrent(attempt,e instanceof VaultCrypto.IndexTooLarge?e.getMessage():e instanceof IOException?"USB를 읽을 수 없어 잠겼습니다":"보관함을 열 수 없어 잠겼습니다");throw e;}
     }
-    private List<VaultCrypto.Item> readIndex(Uri dir,String name,long version) throws Exception {
+    private VaultCrypto.Index readIndex(Uri dir,String name,long version) throws Exception {
         Uri document=required(dir,name);
         try(VaultStream stream=open(document,VaultCrypto.INDEX_ID,2,version)) {
             byte[] plain=new byte[VaultCrypto.androidIndexLength(stream.reader.length)];
@@ -190,7 +191,7 @@ final class PrivateVault {
                         System.arraycopy(chunk,0,plain,offset,chunk.length);offset+=chunk.length;
                     } finally {VaultCrypto.wipe(chunk);}
                 }
-                return VaultCrypto.index(plain);
+                return VaultCrypto.parse(plain);
             } finally {VaultCrypto.wipe(plain);}
         }
     }
@@ -238,15 +239,19 @@ final class PrivateVault {
             String base="https://app.lakomics.local/vault/"+nonce+"/";
             String thumb=item.thumbnail!=null?item.thumbnail:item.poster;
             list.put(new JSONObject().put("id",item.id).put("title",item.title).put("kind",item.kind).put("url",base+item.object).put("thumbnail",thumb==null?JSONObject.NULL:base+thumb)
-                .put("width",item.width>0?item.width:JSONObject.NULL).put("height",item.height>0?item.height:JSONObject.NULL));
+                .put("width",item.width>0?item.width:JSONObject.NULL).put("height",item.height>0?item.height:JSONObject.NULL)
+                .put("durationMs",item.durationMs>0?item.durationMs:JSONObject.NULL).put("folderId",item.folderId==null?JSONObject.NULL:item.folderId));
         }
-        return state.put("items",list);
+        JSONArray folderList=new JSONArray();
+        if(unlocked)for(VaultCrypto.Folder folder:folders)
+            folderList.put(new JSONObject().put("id",folder.id).put("name",folder.name).put("parentId",folder.parentId==null?JSONObject.NULL:folder.parentId));
+        return state.put("items",list).put("folders",folderList);
     }
     private synchronized void unavailable(String reason){vaultDir=null;objectsDir=null;header=null;lock(reason);}
     private synchronized void unavailableIfCurrent(long version,String reason){if(version==epoch)unavailable(reason);}
     private synchronized void lockIfCurrent(long version,String reason){if(version==epoch)lock(reason);}
     synchronized void lock(String reason) {
-        epoch++;unlocked=false;nonce=null;if(master!=null){synchronized(master){VaultCrypto.wipe(master);}}master=null;items=Collections.emptyList();media.clear();thumbnails.clear();
+        epoch++;unlocked=false;nonce=null;if(master!=null){synchronized(master){VaultCrypto.wipe(master);}}master=null;items=Collections.emptyList();folders=Collections.emptyList();media.clear();thumbnails.clear();
         for(VaultStream stream:new ArrayList<>(streams)){stream.ended=true;stream.revoke();closes.execute(()->{try{stream.reader.close();}catch(IOException ignored){}});}
         streams.clear();
         message=reason;

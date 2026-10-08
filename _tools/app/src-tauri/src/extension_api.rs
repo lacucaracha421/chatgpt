@@ -349,6 +349,49 @@ fn internal_vault_playback_response(library: Option<&Library>, item_id: &str, ra
     Response::new(StatusCode(status), headers, Box::new(reader), Some(data_length), None)
 }
 
+/// Serves one unlocked vault video to FFmpeg or FFprobe from a loopback port that lives only
+/// for `work`, behind an unguessable path. The tools then never queue behind viewer playback on
+/// the shared API workers, where a paused video can hold a worker for as long as the WebView
+/// keeps its connection open. `work` is not called when no port can be bound.
+pub(crate) fn with_vault_stream(library: &Library, item_id: &str, work: &mut dyn FnMut(&str)) {
+    const WORKERS: usize = 4;
+    let Ok(server) = Server::http("127.0.0.1:0") else { return };
+    let Some(port) = server.server_addr().to_ip().map(|address| address.port()) else { return };
+    let path = format!("/{}/{item_id}", Uuid::new_v4().simple());
+    let done = std::sync::atomic::AtomicBool::new(false);
+    thread::scope(|scope| {
+        for _ in 0..WORKERS {
+            scope.spawn(|| {
+                while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                    let request = match server.recv_timeout(std::time::Duration::from_millis(50)) {
+                        Ok(Some(request)) => request,
+                        Ok(None) => continue,
+                        Err(_) => break,
+                    };
+                    let response = if request.method().as_str() == "GET" && request.url() == path {
+                        let range = request_header(&request, "Range");
+                        internal_vault_playback_response(Some(library), item_id, range.as_deref())
+                    } else {
+                        internal_empty_response(404, None)
+                    };
+                    // The tool has exited by the time `work` returns, so a body still being
+                    // written fails on the closed socket instead of blocking this scope.
+                    let _ = request.respond(response);
+                }
+            });
+        }
+        // Stops the workers even if `work` panics, so the scope can end.
+        struct Stop<'a>(&'a std::sync::atomic::AtomicBool);
+        impl Drop for Stop<'_> {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let _stop = Stop(&done);
+        work(&format!("http://127.0.0.1:{port}{path}"));
+    });
+}
+
 struct VaultPlaybackReader {
     library: Library,
     item_id: String,
@@ -1147,6 +1190,62 @@ mod tests {
     }
 
     #[test]
+    fn a_private_vault_stream_serves_one_item_only_while_its_work_runs() {
+        use std::io::{Read as _, Write as _};
+        use crate::library::models::{EncryptedVaultItemKind, EncryptedVaultQuery};
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let vault = temp.path().join("vault");
+        let source = temp.path().join("source");
+        std::fs::create_dir(&vault).unwrap();
+        std::fs::create_dir(&source).unwrap();
+        let video = (0..3_000_000_u32).map(|value| (value % 241) as u8).collect::<Vec<_>>();
+        std::fs::write(source.join("clip.mp4"), &video).unwrap();
+        library.create_encrypted_vault(&vault, "correct horse", false).unwrap();
+        library.import_into_encrypted_vault(&source, &mut |_| {}).unwrap();
+        let video_id = library.list_encrypted_vault_items(EncryptedVaultQuery { kind: Some(EncryptedVaultItemKind::Video), offset: 0, limit: 1, trashed: false, folder_id: None, unfiled_only: false }).unwrap().items[0].id.clone();
+        fn get(address: &str, path: &str, range: Option<&str>) -> (String, Vec<u8>) {
+            let mut stream = std::net::TcpStream::connect(address).unwrap();
+            let range = range.map(|value| format!("Range: {value}\r\n")).unwrap_or_default();
+            // HTTP/1.0 keeps the body unchunked for this bare client.
+            write!(stream, "GET {path} HTTP/1.0\r\nHost: {address}\r\n{range}\r\n").unwrap();
+            let mut response = Vec::new();
+            stream.read_to_end(&mut response).unwrap();
+            let split = response.windows(4).position(|window| window == b"\r\n\r\n").unwrap();
+            (String::from_utf8_lossy(&response[..split]).into_owned(), response[split + 4..].to_vec())
+        }
+
+        let mut served = false;
+        with_vault_stream(&library, &video_id, &mut |url| {
+            let rest = url.strip_prefix("http://").unwrap();
+            let (address, path) = rest.split_at(rest.find('/').unwrap());
+            // Busy readers do not hold up the tool: several ranges are served at once.
+            let parallel = std::thread::scope(|scope| {
+                let handles = (0..3).map(|_| scope.spawn(|| get(address, path, Some("bytes=2000000-")))).collect::<Vec<_>>();
+                handles.into_iter().map(|handle| handle.join().unwrap()).collect::<Vec<_>>()
+            });
+            for (head, body) in parallel {
+                assert!(head.starts_with("HTTP/1.0 206"), "{head}");
+                assert_eq!(body, &video[2_000_000..]);
+            }
+            let (head, body) = get(address, path, None);
+            assert!(head.starts_with("HTTP/1.0 200"), "{head}");
+            assert_eq!(body, video);
+            // Only the exact unguessable path is served.
+            let other = path.replace(&video_id, "00000000-0000-4000-8000-000000000009");
+            assert!(get(address, &other, None).0.starts_with("HTTP/1.0 404"));
+            assert!(get(address, &format!("/{video_id}"), None).0.starts_with("HTTP/1.0 404"));
+            served = true;
+        });
+        assert!(served);
+        // A failing tool does not leave the stream's workers running.
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_vault_stream(&library, &video_id, &mut |_| panic!("tool failed"));
+        }));
+        assert!(failed.is_err());
+    }
+
+    #[test]
     fn internal_vault_playback_streams_decrypted_ranges_only_while_unlocked() {
         use std::io::Read as _;
         use crate::library::models::{EncryptedVaultItemKind, EncryptedVaultQuery};
@@ -1162,7 +1261,7 @@ mod tests {
         image::RgbImage::from_pixel(8, 6, image::Rgb([1, 2, 3])).save(source.join("picture.png")).unwrap();
         library.create_encrypted_vault(&vault, "correct horse", false).unwrap();
         library.import_into_encrypted_vault(&source, &mut |_| {}).unwrap();
-        let id_of = |kind| library.list_encrypted_vault_items(EncryptedVaultQuery { kind: Some(kind), offset: 0, limit: 1, trashed: false }).unwrap().items[0].id.clone();
+        let id_of = |kind| library.list_encrypted_vault_items(EncryptedVaultQuery { kind: Some(kind), offset: 0, limit: 1, trashed: false, folder_id: None, unfiled_only: false }).unwrap().items[0].id.clone();
         let video_id = id_of(EncryptedVaultItemKind::Video);
         let image_id = id_of(EncryptedVaultItemKind::Image);
         fn has(response: &InternalPlaybackResponse, name: &'static str, value: &str) -> bool { response.headers().iter().any(|h| h.field.equiv(name) && h.value.as_str() == value) }

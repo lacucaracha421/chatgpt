@@ -88,3 +88,37 @@ Vault screens set `FLAG_SECURE` (no screenshots or recents preview); on API 33+ 
 - Android follows the same format rules as the PC, with no Android-specific variant: header limits, AAD strings, HKDF info, nonce and AAD layout, final-chunk flag, length derivation, last-chunk authentication, recovery-key parsing, strict object ids, rejection of unknown index versions and tolerance of unknown JSON fields.
 - A golden fixture vault produced by the PC implementation is opened by both the PC and Android tests; any format change must keep both passing.
 - Real OTG/SAF random access, exFAT, unlock time, video seeking, unplug-to-lock, `FLAG_SECURE` and Keystore behaviour after reboot are device acceptance items; JVM and fixture tests do not prove them.
+
+## Amendment (2026-10-07): User folders
+
+The PC vault view gets user folders, managed like Assets folders (ADR-0013/0030), in its previously empty index column.
+
+### Model
+
+- Folders exist only inside the encrypted index: `VaultIndex.folders` holds `{ id, name, parentId, createdAt }` and an item names at most one folder with `folderId`. Folder names are vault metadata like titles; they never reach `vault.json`, the main library database or the cloud.
+- Folders nest through `parentId`. Sibling names are unique ignoring case; names are 1–100 characters without control characters. A folder lists its own items and those of its descendants. Moving a folder into itself or a descendant is refused.
+- Deleting a folder is refused while it has child folders; its items move to its parent folder, or become unfiled at the top level. No item is deleted. Existing items start unfiled; the import's original relative path does not create folders.
+- Trash and restore keep an item's folder. The trash view is not scoped by folders.
+- Folder changes follow the title rules: write lock, refused in a session opened from `index.prev.bin`, and the previous folders are restored when the save fails.
+
+### Index format version 2
+
+- An index is saved as version 2 only while it holds a folder or a `folderId`; otherwise it stays version 1, so a vault that never used folders still opens in older builds.
+- Version 1 readers reject version 2 (`UnsupportedFormat`) instead of opening it and silently dropping folders on their next save. Every PC and tablet build that may open a vault with folders must be updated first.
+- Loading checks that folder ids are unique, parents exist, there is no cycle and every `folderId` names a folder; a version 1 index carrying folders is corrupt. Saving refuses an inconsistent index.
+- The tablet reader accepts versions 1 and 2. It browses the PC's folders read-only (전체, 미분류, and a folder with its subfolders, as on the PC) and checks folder consistency like the PC; folders are created and filled only on the PC. It also shows the video lengths the PC recorded.
+
+## Amendment (2026-10-07): Video thumbnail from a viewer frame
+
+- "이 프레임을 썸네일로" in the shared viewer makes the current frame a vault video's custom thumbnail (`thumbnailObjectId`, `thumbnailSha256`). ffmpeg reads the frame from the existing loopback vault-playback stream, which decrypts ranges in memory; no plaintext file is written. The frame is re-encoded like other vault thumbnails and stored as a new encrypted object.
+- The viewer captures the frame itself first: a hidden player of its own reads `/vault-playback/<id>` with CORS, which the media protocol grants only to the app's own origins and only for vault video responses, and the frame bytes are sent to the backend as an image. When the WebView cannot read the frame, FFmpeg takes it instead through a private loopback stream that exists only for that run.
+- The generated poster is kept. The replaced custom thumbnail object is deleted unless another item still references it; anything left behind is removed by orphan cleanup. The action is refused while an import runs and in a session opened from the backup index. No format change: the tablet already prefers `thumbnailObjectId`.
+
+## Amendment (2026-10-07): Video length
+
+- Vault items gain an optional `durationMs`, recorded by FFprobe when a video is imported. Videos imported earlier are measured in the background while the vault is open on the PC: a few at a time, FFprobe reads each through the loopback vault-playback stream (no plaintext file), and the lengths found are stored with one index save. A video that cannot be probed is not tried again until the next unlock, and a session opened from the backup index measures nothing.
+- No format change: the field is optional, older PC builds and the tablet ignore it, and an older PC build that saves the index only drops lengths that are measured again later. Tiles show "—" instead of "0:00" while a length is unknown.
+
+## Amendment (2026-10-07): Thumbnails kept in memory
+
+- The vault view keeps decrypted thumbnails in memory (object URLs) while it is open, so moving between folders does not decrypt every thumbnail again. The media protocol still serves them with `no-store`, so they never reach the WebView's disk cache; the memory copy is dropped when the vault view closes or locks. The view reads them with `fetch`, which the media protocol allows only for the app's own origins on `/vault-thumbnail/`.
