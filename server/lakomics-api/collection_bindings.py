@@ -185,6 +185,7 @@ from starlette.concurrency import run_in_threadpool
 
 import collection_authority
 import conditional
+import kakao_bind_worker
 
 PREFIX = "/v1/collections/bindings"
 KAKAO_KEY_ENV = "LAKOMICS_KAKAO_REST_KEY"
@@ -265,8 +266,11 @@ def kakao_key():
     return key
 
 
-def capabilities():
-    return {"version": 1, "mangadexSearch": True, "kakaoSearch": kakao_key() is not None, "bindRequests": True}
+def capabilities(db=None):
+    result = {"version": 1, "mangadexSearch": True, "kakaoSearch": kakao_key() is not None, "bindRequests": True}
+    if kakao_bind_worker.features(db):
+        result["kakaoApply"] = True
+    return result
 
 
 # --- outbound HTTP ---------------------------------------------------------------------
@@ -1063,7 +1067,8 @@ def _state(db):
 def status_head(db):
     """Request-log head for ``/v1/sync/status`` ``publisherLogs.bindings`` (as ``/log`` reports it)."""
     current = _state(db)
-    oldest = db.execute("SELECT MIN(sequence) FROM collection_binding_requests WHERE state='pending'").fetchone()[0]
+    oldest = db.execute("SELECT MIN(sequence) FROM collection_binding_requests WHERE state='pending'"
+                        + kakao_bind_worker.pc_clause(db)).fetchone()[0]
     return {"logEpoch": current["log_epoch"], "last": current["sequence"], "oldestPending": oldest}
 
 
@@ -1075,7 +1080,8 @@ def status_signal(db):
 
 
 def _request(row):
-    return {"requestId": row["sequence"], "operationId": row["operation_id"], "collectionId": row["collection_id"],
+    return {**({"executor": "server"} if "executor" in row.keys() and row["executor"] == "server" else {}),
+            "requestId": row["sequence"], "operationId": row["operation_id"], "collectionId": row["collection_id"],
             "provider": row["provider"], "choice": json.loads(row["choice_json"]),
             "expected": None if row["expected_json"] is None else json.loads(row["expected_json"]),
             "state": row["state"],
@@ -1097,6 +1103,60 @@ def _retain(db, now):
     db.execute("""DELETE FROM collection_binding_requests WHERE state<>'pending' AND sequence NOT IN
         (SELECT sequence FROM collection_binding_requests WHERE state<>'pending'
          ORDER BY sequence DESC LIMIT ?)""", (RESOLVED_MAX,))
+
+
+def store_request(db, *, operation_id, collection_id, provider, choice_json, expected_json, digest):
+    """Persist validated intent; one transaction pins its executor and enqueue observation."""
+    db.execute("BEGIN IMMEDIATE")
+    existing = db.execute("SELECT * FROM collection_binding_requests WHERE operation_id=?",
+                          (operation_id,)).fetchone()
+    if existing is not None:
+        db.rollback()
+        if existing["payload_digest"] != digest:
+            fail(409, "operationConflict", "다른 내용으로 연결 요청을 재사용할 수 없습니다.")
+        return {"version": 1, "request": _request(existing)}
+    server = provider == "kakao" and kakao_bind_worker.enabled()
+    try:
+        pin = kakao_bind_worker.capture(db, collection_id,
+              None if expected_json is None else json.loads(expected_json)) if server else None
+    except kakao_bind_worker.Refused as error:
+        db.rollback()
+        fail(503, error.code, error.message)
+    kind = _collection_type(db, collection_id)
+    if kind is None:
+        db.rollback()
+        fail(404, "collectionNotFound", "컬렉션을 찾을 수 없습니다.")
+    if kind != "manga":
+        db.rollback()
+        fail(409, "collectionNotManga", "만화 작품만 MangaDex·카카오에 연결할 수 있습니다.")
+    moment = now_utc()
+    now = moment.isoformat()
+    pending = db.execute("""SELECT sequence FROM collection_binding_requests
+        WHERE collection_id=? AND provider=? AND state='pending' ORDER BY sequence DESC""",
+                         (collection_id, provider)).fetchall()
+    if not pending and db.execute("SELECT COUNT(*) FROM collection_binding_requests WHERE state='pending'"
+                                  ).fetchone()[0] >= MAX_PENDING:
+        db.rollback()
+        fail(409, "bindRequestLimit", "PC에 적용되지 않은 연결 요청이 너무 많습니다. PC를 켜 주세요.")
+    for row in pending:
+        db.execute("UPDATE collection_binding_requests SET state='superseded',updated_at=?,resolved_at=?"
+                   " WHERE sequence=?", (now, now, row["sequence"]))
+    sequence = _state(db)["sequence"] + 1
+    db.execute("UPDATE collection_binding_state SET sequence=? WHERE singleton=1", (sequence,))
+    db.execute("""INSERT INTO collection_binding_requests(sequence,operation_id,payload_digest,collection_id,
+        provider,choice_json,expected_json,state,reason_code,reason_message,replaces,created_at,updated_at,
+        resolved_at) VALUES(?,?,?,?,?,?,?,'pending',NULL,NULL,?,?,?,NULL)""",
+               (sequence, operation_id, digest, collection_id, provider, choice_json,
+                expected_json, pending[0]["sequence"] if pending else None, now, now))
+    if server:
+        db.execute("UPDATE collection_binding_requests SET executor='server',library_id=?,authority_epoch=?,"
+                   "binding_precondition=? WHERE sequence=?", (*pin, sequence))
+    _retain(db, moment)
+    row = db.execute("SELECT * FROM collection_binding_requests WHERE sequence=?", (sequence,)).fetchone()
+    db.commit()
+    if server:
+        kakao_bind_worker.wake()
+    return {"version": 1, "request": _request(row)}
 
 
 def register(app, get_db, require_client, require_publisher):
@@ -1161,7 +1221,8 @@ def register(app, get_db, require_client, require_publisher):
         require_client(authorization)
         with get_db() as db:
             seen = _state(db)["publisher_seen_at"]
-        return {**capabilities(), "publisherSeenAt": seen}
+            result = capabilities(db)
+        return {**result, "publisherSeenAt": seen}
 
     # Query/path values are parsed by hand (not FastAPI validation) so every refusal on
     # these routes has the documented ``{code, message}`` shape and auth runs first.
@@ -1202,44 +1263,9 @@ def register(app, get_db, require_client, require_publisher):
         expected_json = None if command.expected is None else _encode(command.expected.model_dump())
         digest = hashlib.sha256(_encode(command.model_dump()).encode()).hexdigest()
         with get_db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            existing = db.execute("SELECT * FROM collection_binding_requests WHERE operation_id=?",
-                                  (command.operationId,)).fetchone()
-            if existing is not None:
-                db.rollback()
-                if existing["payload_digest"] != digest:
-                    fail(409, "operationConflict", "다른 내용으로 연결 요청을 재사용할 수 없습니다.")
-                return {"version": 1, "request": _request(existing)}
-            kind = _collection_type(db, command.collectionId)
-            if kind is None:
-                db.rollback()
-                fail(404, "collectionNotFound", "컬렉션을 찾을 수 없습니다.")
-            if kind != "manga":
-                db.rollback()
-                fail(409, "collectionNotManga", "만화 작품만 MangaDex·카카오에 연결할 수 있습니다.")
-            moment = now_utc()
-            now = moment.isoformat()
-            pending = db.execute("""SELECT sequence FROM collection_binding_requests
-                WHERE collection_id=? AND provider=? AND state='pending' ORDER BY sequence DESC""",
-                                 (command.collectionId, command.provider)).fetchall()
-            if not pending and db.execute("SELECT COUNT(*) FROM collection_binding_requests WHERE state='pending'"
-                                          ).fetchone()[0] >= MAX_PENDING:
-                db.rollback()
-                fail(409, "bindRequestLimit", "PC에 적용되지 않은 연결 요청이 너무 많습니다. PC를 켜 주세요.")
-            for row in pending:
-                db.execute("UPDATE collection_binding_requests SET state='superseded',updated_at=?,resolved_at=?"
-                           " WHERE sequence=?", (now, now, row["sequence"]))
-            sequence = _state(db)["sequence"] + 1
-            db.execute("UPDATE collection_binding_state SET sequence=? WHERE singleton=1", (sequence,))
-            db.execute("""INSERT INTO collection_binding_requests(sequence,operation_id,payload_digest,collection_id,
-                provider,choice_json,expected_json,state,reason_code,reason_message,replaces,created_at,updated_at,
-                resolved_at) VALUES(?,?,?,?,?,?,?,'pending',NULL,NULL,?,?,?,NULL)""",
-                       (sequence, command.operationId, digest, command.collectionId, command.provider, choice_json,
-                        expected_json, pending[0]["sequence"] if pending else None, now, now))
-            _retain(db, moment)
-            row = db.execute("SELECT * FROM collection_binding_requests WHERE sequence=?", (sequence,)).fetchone()
-            db.commit()
-            return {"version": 1, "request": _request(row)}
+            return store_request(db, operation_id=command.operationId, collection_id=command.collectionId,
+                                 provider=command.provider, choice_json=choice_json,
+                                 expected_json=expected_json, digest=digest)
 
     @app.post(PREFIX + "/requests")
     async def post_request(request: Request, authorization: str | None = Header(default=None)):
@@ -1310,7 +1336,7 @@ def register(app, get_db, require_client, require_publisher):
             rows = db.execute("SELECT * FROM collection_binding_requests WHERE sequence>? ORDER BY sequence LIMIT ?",
                               (after, limit + 1)).fetchall()
             oldest = db.execute("SELECT MIN(sequence) FROM collection_binding_requests WHERE state='pending'"
-                                ).fetchone()[0]
+                                + kakao_bind_worker.pc_clause(db)).fetchone()[0]
             db.rollback()
             moment = now_utc()
             seen = current["publisher_seen_at"]
@@ -1325,7 +1351,7 @@ def register(app, get_db, require_client, require_publisher):
         return conditional.json_response({
             "version": 1, "logEpoch": epoch, "after": after, "lastSequence": last, "oldestPendingSequence": oldest,
             "nextCursor": rows[-1]["sequence"] if rows else after, "hasMore": more,
-            "items": [_request(r) for r in rows]}, if_none_match)
+            "items": [_request(r) for r in rows if "executor" not in r.keys() or r["executor"] == "pc"]}, if_none_match)
 
     def invalid_result():
         fail(422, "invalidBindResult", "연결 결과를 확인할 수 없습니다.")
@@ -1340,6 +1366,9 @@ def register(app, get_db, require_client, require_publisher):
             if row is None:
                 db.rollback()
                 fail(404, "bindRequestNotFound", "연결 요청을 찾을 수 없습니다.")
+            if "executor" in row.keys() and row["executor"] == "server":
+                db.rollback()
+                fail(409, "bindExecutorMismatch", "서버가 처리하는 연결 요청입니다.")
             if row["state"] in ("pending", "superseded"):
                 moment = now_utc()
                 now = moment.isoformat()

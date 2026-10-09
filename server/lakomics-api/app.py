@@ -972,8 +972,11 @@ import collection_releases
 import mobile_catalog
 import mobile_characters
 import mobile_collections
+import kakao_bind_worker
 import notes
 import similarity_review
+
+kakao_bind_worker.register(app, get_db)
 
 
 def publisher_log_heads(db):

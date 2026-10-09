@@ -331,6 +331,31 @@ def plan_refresh(*, stored_config, external_id, items, checked_at, existing_sour
                      gating, previous_checked_at)
 
 
+def plan_bind(*, choice, items, checked_at, stored_config, existing_sources, existing_slots):
+    """Delayed selection: anchor first, otherwise a unique fingerprint; quiet baseline.
+
+    Display hints never enter the planner. Coincident selections become one group.
+    Legacy single-group choices are normalized by the request boundary.
+    """
+    groups = bindings.grouped_kakao(items)
+    keys = [(group["candidate"]["groupFingerprint"], group["memberIds"]) for group in groups]
+    picked, seen = [], set()
+    for selected in choice["groups"]:
+        index = refind_group(selected["anchorItemId"], selected["groupFingerprint"], [], keys)
+        if index is None:
+            raise Ambiguous()
+        if index in seen:
+            next(pick for pick in picked if pick["series"] is groups[index])["known"].append(selected["anchorItemId"])
+            continue
+        seen.add(index)
+        picked.append({"anchor": groups[index]["candidate"]["anchorItemId"],
+                       "known": [selected["anchorItemId"]], "series": groups[index]})
+    if not picked:
+        raise Ambiguous()
+    return reconcile(stored_config, choice["query"], picked, checked_at, existing_sources, existing_slots,
+                     {"releaseWatch": False, "tracksOwnership": False}, None)
+
+
 def reconcile(stored_config, query, picked, checked_at, existing_sources, existing_slots, gating,
               previous_checked_at):
     """``reconcile_aladin_at``: groups ordered by lowest volume (then fingerprint), the first
