@@ -48,6 +48,7 @@ import {LinkIcon} from '@heroicons/react/24/outline';
 import {SegmentedControl} from '../src/shared/ui/SegmentedControl';
 import {ReleaseCalendar} from './ReleaseCalendar';
 import {CreateWorkButton,SearchButton,TopBar,TopBarSearch} from './TopBar';
+import {FindButton} from './FindContext';
 import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSectionShade} from './SectionShade';
@@ -618,14 +619,20 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
 
   // The type switch is the list's first row; scrolled away, the top bar pulls it down as a shade.
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
-  // Shortcuts and view controls share the section bar's right group on both surfaces.
-  const shortcuts=<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}>{showcaseAll?<SparklesSolidIcon aria-hidden="true"/>:<SparklesIcon aria-hidden="true"/>}<span className="collection-shortcuts__label">쇼케이스</span></Button>
-    {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
-    {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
-    {tab==='manga'&&kakaoUnlinked>0&&<Button variant="quiet" size="sm" aria-label={`연결 점검 ${kakaoUnlinked}`} onClick={()=>setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true"/><span className="collection-shortcuts__label">연결 점검</span><span className="numeric collection-shortcuts__count">{kakaoUnlinked}</span></Button>}
+  // The type's own shortcuts sit in the section bar's right group on both surfaces; the controls
+  // every type shares (쇼케이스, 정렬, 내 별점, 보기) live in the top bar, so the bar's segment
+  // keeps one width on every type.
+  const calendarShortcut=(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>;
+  const newsShortcut=tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>;
+  const reviewShortcut=tab==='manga'&&kakaoUnlinked>0&&<Button variant="quiet" size="sm" aria-label={`연결 점검 ${kakaoUnlinked}`} onClick={()=>setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true"/><span className="collection-shortcuts__label">연결 점검</span><span className="numeric collection-shortcuts__count">{kakaoUnlinked}</span></Button>;
+  const shortcuts=(calendarShortcut||newsShortcut||reviewShortcut)?<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}{reviewShortcut}</div>:undefined;
+  const viewTools=<div className="collection-top-tools">
+    <IconButton label="쇼케이스" icon={SparklesIcon} activeIcon={SparklesSolidIcon} active={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}/>
+    <IconButton label="정렬" icon={ArrowsUpDownIcon} onClick={()=>setSheet('sort')}/>
+    <IconButton label="내 별점" icon={StarIcon} activeIcon={StarSolid} active={filters.rating!=='all'} onClick={()=>setSheet('rating')}/>
+    <IconButton label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/>
   </div>;
-  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true"/><Button variant="quiet" size="sm" aria-label="정렬" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="내 별점" aria-pressed={filters.rating!=='all'} onClick={()=>setSheet('rating')}><StarIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="보기" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/></Button></>},{active:live&&!selected&&!overlayOpen&&!performer});
+  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:shortcuts},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
@@ -637,8 +644,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
         ?<TopBarSearch title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
-        </form></TopBarSearch>
-        :<TopBar find={tab==='av'} barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{tab==='av'&&<Button variant="ghost" onClick={()=>setAvInboxOpen(true)}>품번 보내기</Button>}{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>}/>;
+        </form>{viewTools}</TopBarSearch>
+        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{viewTools}{tab==='av'?<><FindButton/><Button variant="ghost" onClick={()=>setAvInboxOpen(true)}>품번 보내기</Button></>:<SearchButton onClick={()=>setSearchOpen(true)}/>}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>}/>;
   const showAvLoading=useDelayedBusy(main.busy&&!main.committed);
   const showDetailLoading=useDelayedBusy(!!selected&&!item&&!detailError);
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
@@ -707,7 +714,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <div ref={setBindHost} className="collection-bind-host"/>
   </>;
   // Direct entries use the app's Home-to-work readiness gate, without mounting a shelf.
-  const workView = <>{header}
+  // The retained work view carries the bar only while a work is open: a hidden second copy of the
+  // shelf's bar would take the section shade's pull (its barRef) away from the visible one.
+  const workView = <>{directWork||selected?header:null}
     <div ref={detailRef} className="collection-detail" aria-busy={!!selected&&!item&&!detailError} style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item||showDetailLoading?(showDetailLoading&&!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
       :item.type==='manga'
         ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)} initialVolumeId={openedVolume?.id===item.id?openedVolume.volumeId:null}

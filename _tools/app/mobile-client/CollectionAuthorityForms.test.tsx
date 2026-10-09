@@ -94,9 +94,13 @@ describe('activation-gated tablet forms', () => {
     expect(plus.closest('.top-bar')).not.toBeNull();
     expect(plus.textContent).toBe('');
     expect(screen.queryByRole('button', {name: '검색'}) !== null).toBe(kind !== 'av');
-    const shortcuts = screen.getByRole('group', {name: '컬렉션 바로가기'});
-    expect(within(shortcuts).queryByRole('button', {name: '새 작품'})).toBeNull();
-    expect(within(shortcuts).queryByRole('button', {name: /에서 .* 추가/})).toBeNull();
+    // AV has no type shortcuts; the others keep only their own shortcuts in the section bar.
+    const shortcuts = screen.queryByRole('group', {name: '컬렉션 바로가기'});
+    expect(shortcuts === null).toBe(kind === 'av');
+    if (shortcuts) {
+      expect(within(shortcuts).queryByRole('button', {name: '새 작품'})).toBeNull();
+      expect(within(shortcuts).queryByRole('button', {name: /에서 .* 추가/})).toBeNull();
+    }
     fireEvent.click(plus);
     const dialog = screen.getByRole('dialog', {name: '새 컬렉션'});
     expect(within(dialog).getAllByRole('textbox').map(input => input.getAttribute('id'))).toHaveLength(2);

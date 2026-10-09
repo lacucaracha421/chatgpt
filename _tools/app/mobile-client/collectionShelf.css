@@ -139,14 +139,23 @@
   .tablet-performer__controls { flex-wrap: wrap; }
 }
 
-/* The shortcuts and controls travel together in the section shade. */
-.mobile-collections .ui-section-bar { flex-wrap: nowrap; gap: 0; }
-.mobile-collections .ui-section-bar > .ui-segmented { flex: 1 1 auto; width: auto; overflow-x: auto; }
+/* The type switch keeps one width on every type (60% of the row), whatever shortcuts the type
+   has; they sit at the row's right end and travel with it into the section shade. The controls
+   every type shares live in the top bar (.collection-top-tools). */
+.mobile-collections .ui-section-bar { flex-wrap: nowrap; gap: var(--space-2); }
+.mobile-collections .ui-section-bar > .ui-segmented { flex: 0 1 60%; width: auto; overflow-x: auto; }
 .mobile-collections .ui-section-bar__trailing { gap: 0; }
 .mobile-collections .ui-section-bar__trailing .ui-button { min-width: 44px; min-height: 44px; height: 44px; padding-inline: var(--space-2); }
 .mobile-collections .ui-section-bar__trailing > .ui-button svg { width: 20px; height: 20px; }
 .mobile-collections .collection-shortcuts__label { display: none; }
-.mobile-collections .collection-shortcuts__divider { margin-inline: var(--space-1); }
+/* A type's shortcut fades in when switching to it, so it never pops in beside the still segment. */
+.mobile-collections .collection-shortcuts > .ui-button { animation: collection-shortcut-in 160ms var(--ease-standard); }
+@keyframes collection-shortcut-in { from { opacity: 0; } }
+.collection-top-tools { display: flex; align-items: center; gap: 2px; margin-right: var(--space-2); }
+.top-bar.is-search .collection-top-tools { margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .mobile-collections .collection-shortcuts > .ui-button { animation: none; }
+}
 .tablet-performer__title { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .tablet-performer__title > h1 { min-width: 0; }
 .tablet-performer__title .ui-icon-button { flex: none; min-width: var(--touch-target); min-height: var(--touch-target); }

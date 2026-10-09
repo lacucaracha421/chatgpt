@@ -193,6 +193,8 @@
 
 /* Tablet collections A: the type switch is the list's first row (SectionShade.tsx) and the page reads as sections. */
 .mobile-collections .motion-stage__view > .collection-scroll{padding-inline:24px}
+/* The pulled shade lines its bar up with the list's own first row. */
+.mobile-collections{--section-shade-gutter:24px}
 .collection-shelf{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 32px)/5);gap:8px;overflow-x:auto;margin:8px 0 8px;padding:0 0 4px;scrollbar-width:none}
 .collection-shelf::-webkit-scrollbar{display:none}
 .collection-shelf>.collection-showcase-tile{width:auto;min-width:0}

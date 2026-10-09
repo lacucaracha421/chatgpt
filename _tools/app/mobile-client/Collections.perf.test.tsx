@@ -252,7 +252,7 @@ it('bounds shelf cases after prefetch, picking and opening showcase',async()=>{
   await act(async()=>{await vi.advanceTimersByTimeAsync(60_000);});
   const countRenders=mocks.caseRenders-start;
   start=mocks.caseRenders;
-  fireEvent.click(view.container.querySelector('.collection-shortcuts button[aria-label="쇼케이스"]')!);
+  fireEvent.click(view.container.querySelector('.collection-top-tools button[aria-label="쇼케이스"]')!);
   await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
   const open=count(),openRenders=mocks.caseRenders-start;
   // Past the sheet's spring rise (the deferred body's fallback when no transitionend arrives).
