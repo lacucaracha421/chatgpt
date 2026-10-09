@@ -104,6 +104,10 @@ pub(crate) struct DecisionEntry {
     pub trash_asset_id: Option<String>,
     /// For `withdrawn`: the sequence of the decision it takes back.
     pub withdraws: Option<i64>,
+    /// The server already carried this decision out (the discarded image is in Library Trash
+    /// through the Asset authority): the PC only records it. Absent on older servers.
+    #[serde(default)]
+    pub server_applied: bool,
     pub basis: DecisionBasis,
     pub created_at: String,
 }
@@ -260,6 +264,7 @@ mod tests {
                 _ => None,
             },
             withdraws,
+            server_applied: false,
             basis: DecisionBasis {
                 feed_revision: "f".repeat(64),
                 a_sha256: "a".repeat(64),

@@ -76,6 +76,8 @@ LIFECYCLE_COMMAND_TYPES = (TRASH_ASSET, RESTORE_ASSET, TOMBSTONE_ASSET)
 CLIENT_COMMAND_TYPES = (TRASH_ASSET, RESTORE_ASSET)
 #: A client trash of an Asset that a pending similarity decision keeps (see apply_command).
 CODE_SIMILARITY_KEEPS_ASSET = "similarityDecisionKeepsAsset"
+#: A PC trash of an Asset a not-yet-consumed server-applied similarity decision keeps.
+CODE_SIMILARITY_KEPT_BY_TABLET = "similarityKeptByTabletDecision"
 
 ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
 COMMAND_KEYS = ENVELOPE_KEYS | {"assetId", "expectedEntityRevision"}
@@ -692,6 +694,15 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
         if review_id is not None:
             fail(409, CODE_SIMILARITY_KEEPS_ASSET,
                  "유사 이미지 검토에서 남기기로 한 이미지입니다. PC가 반영한 뒤 다시 시도해 주세요.",
+                 assetId=asset_id, reviewId=review_id, lifecycle=lifecycle)
+
+    if command_type == TRASH_ASSET and publisher:
+        # The tablet's decision (already applied here) kept this image; the PC decided the other
+        # way. Only one image of the pair may reach the trash, so the PC rolls its trash back.
+        review_id = similarity_review.server_kept_review(db, library_id, asset_id)
+        if review_id is not None:
+            fail(409, CODE_SIMILARITY_KEPT_BY_TABLET,
+                 "태블릿에서 남기기로 한 이미지라 휴지통으로 보낼 수 없습니다.",
                  assetId=asset_id, reviewId=review_id, lifecycle=lifecycle)
 
     next_revision = revision + 1

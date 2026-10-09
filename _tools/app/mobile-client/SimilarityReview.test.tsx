@@ -15,7 +15,8 @@ vi.mock('./media',()=>({
 import {ApiError} from './transport';
 import {mediaTicket,warmThumbnail} from './media';
 import {SimilarityReview,SimilarityReviewEntry} from './SimilarityReview';
-import {commitSimilarityDecision,readSimilarityIntents} from './similarityReviewOutbox';
+import {commitSimilarityDecision,confirmSimilarityIntent,readSimilarityIntents} from './similarityReviewOutbox';
+import {flushSimilarityReview} from './similarityReviewDelivery';
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 const LIBRARY='e'.repeat(32),SHA='a'.repeat(64),REV='f'.repeat(64);
@@ -98,6 +99,54 @@ describe('similarity review screen',()=>{
     for(let i=0;i<7;i++){await waitFor(()=>expect(screen.getByRole('button',{name:/둘 다 보관/}).hasAttribute('disabled')).toBe(false));choose(/둘 다 보관/);}
     for(let i=0;i<5;i++)choose(/되돌리기/);
     expect(screen.queryByRole('button',{name:/되돌리기/})).toBeNull();
+  });
+  it('with server apply, labels the move and offers undo only while the decision is unsent, never as a withdrawal',async()=>{
+    install(feed({features:['similarityServerApply'],counts:{open:3,pendingPc:0,skipped:0}}));mount();
+    await screen.findByLabelText('A 정보');
+    expect(screen.getByText('선택한 결정은 5초 뒤 바로 반영됩니다. 버린 이미지는 휴지통에서 복원할 수 있습니다.')).toBeTruthy();
+    vi.useFakeTimers();
+    choose(/A 유지 · B 휴지통/);
+    expect(screen.getByText('A 유지 · B 휴지통으로 보냄')).toBeTruthy();
+    expect(screen.getByText('1 / 3 · 전송 대기 1')).toBeTruthy();
+    // Inside the window the undo removes the unsent decision.
+    choose(/되돌리기/);
+    expect(readSimilarityIntents()).toEqual({});
+    expect(screen.queryByRole('button',{name:/되돌리기/})).toBeNull();
+    choose(/둘 다 보관/);
+    expect(screen.getByRole('button',{name:/되돌리기/})).toBeTruthy();
+    // Past the window a decision that is still queued (offline, or deferred by the server) can be undone.
+    act(()=>{vi.advanceTimersByTime(5100);});
+    expect(screen.getByRole('button',{name:/되돌리기/})).toBeTruthy();
+    // Once the server settled it (it left the queue) there is nothing to undo any more.
+    const held=readSimilarityIntents()['r1']!;
+    act(()=>{confirmSimilarityIntent(held);});
+    expect(screen.queryByRole('button',{name:/되돌리기/})).toBeNull();
+    expect(readSimilarityIntents()['r1:withdrawn']).toBeUndefined();
+  });
+  it('with server apply, undo during a send in flight is refused with a restore hint and queues no withdrawal',async()=>{
+    install(feed({features:['similarityServerApply'],counts:{open:3,pendingPc:0,skipped:0}}));mount();
+    await screen.findByLabelText('A 정보');
+    choose(/둘 다 보관/);
+    // The send starts and its outcome is not known yet.
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.startsWith('/v1/library/similarity/review?'))return feed({features:['similarityServerApply']});
+      return new Promise(()=>{});
+    });
+    act(()=>{void flushSimilarityReview(undefined,()=>Date.now()+6000).catch(()=>{});});
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path==='/v1/library/similarity/review/decisions')).toBe(true));
+    choose(/되돌리기/);
+    expect(await screen.findByText('이미 전송되어 되돌릴 수 없습니다. 휴지통에서 복원해 주세요.')).toBeTruthy();
+    expect(screen.queryByRole('button',{name:/되돌리기/})).toBeNull();
+    expect(readSimilarityIntents()['r1'].decision).toBe('keep_both');
+    expect(readSimilarityIntents()['r1:withdrawn']).toBeUndefined();
+  });
+  it('without the server feature a legacy server keeps the PC wording and undo after sending',async()=>{
+    install(feed());mount();
+    await screen.findByLabelText('A 정보');
+    expect(screen.queryByText('선택한 결정은 5초 뒤 바로 반영됩니다. 버린 이미지는 휴지통에서 복원할 수 있습니다.')).toBeNull();
+    choose(/둘 다 보관/);
+    expect(screen.getByText('둘 다 보관으로 저장')).toBeTruthy();
+    expect(screen.getByText('1 / 3 · PC 반영 대기 1')).toBeTruthy();
   });
   it('zooms both images together, loads originals, and Back resets zoom before closing',async()=>{
     install(feed());const {back,onClose}=mount();

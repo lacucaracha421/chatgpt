@@ -7,7 +7,9 @@
  *    was never sent is simply removed.
  * 3. **Undo after sending** queues a `withdrawn` intent under its own key, so a new decision
  *    on the same review cannot replace the withdrawal. Delivery sends oldest first, so the
- *    withdrawal reaches the server before the new decision.
+ *    withdrawal reaches the server before the new decision. When the server applies decisions
+ *    itself (`similarityServerApply`) a sent decision is already in effect: undo exists only
+ *    before sending, and afterwards the image is restored from Library Trash.
  * 4. **Removed on a matching receipt.** A receipt for a replaced id is ignored.
  *
  * At most {@link SIMILARITY_OUTBOX_LIMIT} intents wait at once. Committing throws when the
@@ -42,6 +44,8 @@ export const SIMILARITY_OUTBOX_LIMIT = 500;
 export const SIMILARITY_SEND_DELAY_MS = 5000;
 export const SIMILARITY_SAVE_FAILED = '기기에 저장하지 못했습니다.';
 export const SIMILARITY_OUTBOX_FULL = '전송을 기다리는 검토가 너무 많습니다. 연결된 뒤 다시 시도해 주세요.';
+/** The server feature: a sent decision moves the discarded image to Library Trash at once. */
+export const SIMILARITY_SERVER_APPLY = 'similarityServerApply';
 /** Fired after the durable queue changes, so every screen re-reads it. */
 export const SIMILARITY_REVIEW_EVENT = 'lakomics-similarity-review';
 
@@ -125,10 +129,12 @@ export function reissueSimilarityIntent(expected: SimilarityIntent, operationId:
 /**
  * Undo one decision. An intent that never left the device is removed (`removed`); one the
  * server may already hold (sent, or being sent right now) is followed by a `withdrawn`
- * intent that is sent at once (`withdrawn`). Throws like {@link commitSimilarityDecision}.
+ * intent that is sent at once (`withdrawn`). With `serverApply` only an intent that never left
+ * the device can be undone; one the server may hold stays (`sent`: restore it from Library
+ * Trash). Throws like {@link commitSimilarityDecision}.
  */
 export function undoSimilarityDecision(made: SimilarityIntent, inFlight: (operationId: string) => boolean = () => false,
-  operationId: () => string = () => crypto.randomUUID(), now = Date.now()): 'removed' | 'withdrawn' {
+  operationId: () => string = () => crypto.randomUUID(), now = Date.now(), serverApply = false): 'removed' | 'withdrawn' | 'sent' {
   const intents = readSimilarityIntents();
   const key = intentKey(made.reviewId, made.decision);
   const queued = intents[key]?.operationId === made.operationId;
@@ -137,6 +143,7 @@ export function undoSimilarityDecision(made: SimilarityIntent, inFlight: (operat
     if (!write(intents)) throw new Error(SIMILARITY_SAVE_FAILED);
     return 'removed';
   }
+  if (serverApply) return 'sent';
   if (queued) {
     // Its outcome is unknown: never resend it, and withdraw whatever the server recorded.
     delete intents[key];

@@ -9,8 +9,8 @@ import {Button, EmptyState, IconButton} from './ui';
 import {ApiError, api, errorText} from './transport';
 import {decodeImage, loadThumbnail, mediaTicket, warmThumbnail} from './media';
 import {sizeLabel} from './ViewerInfo';
-import {commitSimilarityDecision, queuedSimilarity, trashedBy, undoSimilarityDecision,
-  SIMILARITY_REVIEW_EVENT, type SimilarityChoice, type SimilarityIntent} from './similarityReviewOutbox';
+import {commitSimilarityDecision, intentKey, queuedSimilarity, readSimilarityIntents, trashedBy, undoSimilarityDecision,
+  SIMILARITY_REVIEW_EVENT, SIMILARITY_SERVER_APPLY, type SimilarityChoice, type SimilarityIntent} from './similarityReviewOutbox';
 import {flushSimilarityReview, isSimilarityInFlight, similarityPath, type SimilarityCounts, type SimilarityFeed,
   type SimilarityItem, type SimilaritySide} from './similarityReviewDelivery';
 import {useSimilarityReviewCount} from './useSimilarityReview';
@@ -26,10 +26,11 @@ const FLICKER_MS = 500;
 export type CompareView = {scale: number; x: number; y: number};
 export const FIT: CompareView = {scale: 1, x: 0.5, y: 0.5};
 
-const CHOICES: {decision: SimilarityChoice; label: string; saved: string}[] = [
-  {decision: 'keep_existing', label: 'A 유지 · B 휴지통', saved: 'A 유지 · B 휴지통으로 저장'},
-  {decision: 'replace_existing', label: 'B 유지 · A 휴지통', saved: 'B 유지 · A 휴지통으로 저장'},
-  {decision: 'keep_both', label: '둘 다 보관', saved: '둘 다 보관으로 저장'},
+/** `saved`: queued for the PC; `moved`: the server applies it right after the undo window. */
+const CHOICES: {decision: SimilarityChoice; label: string; saved: string; moved: string}[] = [
+  {decision: 'keep_existing', label: 'A 유지 · B 휴지통', saved: 'A 유지 · B 휴지통으로 저장', moved: 'A 유지 · B 휴지통으로 보냄'},
+  {decision: 'replace_existing', label: 'B 유지 · A 휴지통', saved: 'B 유지 · A 휴지통으로 저장', moved: 'B 유지 · A 휴지통으로 보냄'},
+  {decision: 'keep_both', label: '둘 다 보관', saved: '둘 다 보관으로 저장', moved: '둘 다 보관으로 정리'},
 ];
 
 type Undo = {item: SimilarityItem; intent: SimilarityIntent; hidden: SimilarityItem[]};
@@ -226,15 +227,19 @@ function MetaStrip({side, other, name, recommended}: {side: SimilaritySide; othe
 }
 
 /**
- * Full-screen similarity review: one historical pair at a time. The PC applies every
- * decision; until then the original files and galleries are unchanged, and the image that
- * is not kept goes to Library Trash only when the PC applies the decision.
+ * Full-screen similarity review: one historical pair at a time. By default the PC applies
+ * every decision; until then the original files and galleries are unchanged, and the image
+ * that is not kept goes to Library Trash only when the PC applies the decision. When the
+ * server advertises `similarityServerApply` it moves the image to Library Trash itself right
+ * after the 5 s undo window: the undo button then exists only inside that window, and a sent
+ * decision is restored from Library Trash.
  */
 export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: MutableRefObject<(() => boolean) | null>}) {
   const [privacy] = usePrivacyMode();
   const [state, setState] = useState<State>({phase: 'loading'});
   const [queue, setQueue] = useState<SimilarityItem[]>([]);
   const [counts, setCounts] = useState<SimilarityCounts | null>(null);
+  const [serverApply, setServerApply] = useState(false);
   const [library, setLibrary] = useState<{id: string; revision: string} | null>(null);
   const [total, setTotal] = useState(0);
   const [reviewed, setReviewed] = useState(0);
@@ -290,6 +295,7 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
       if (feed?.version !== 1 || !Array.isArray(feed.items)) throw new Error('유사 이미지 검토 응답을 확인할 수 없습니다.');
       cursor.current = feed.hasMore ? feed.nextCursor : null;
       setCounts(feed.counts);
+      setServerApply(Array.isArray(feed.features) && feed.features.includes(SIMILARITY_SERVER_APPLY));
       if (feed.libraryId && feed.revision) setLibrary({id: feed.libraryId, revision: feed.revision});
       if (restart) setTotal(feed.counts.open);
       setQueue(current => {
@@ -343,11 +349,33 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     setQueue(rest => rest.filter(row => row.reviewId !== item.reviewId && !hidden.includes(row)));
   }, [queue, library]);
 
+  // Server apply: undo exists only while the decision has not been sent. It stays through the 5 s
+  // window and while a send is deferred or offline (the intent is still in the queue), and goes as
+  // soon as the server settled it (the queue changed and no longer holds that intent).
+  useEffect(() => {
+    if (!serverApply) return;
+    const prune = () => {
+      const queuedNow = readSimilarityIntents();
+      setUndo(stack => {
+        const kept = stack.filter(step => queuedNow[intentKey(step.intent.reviewId, step.intent.decision)]?.operationId === step.intent.operationId);
+        return kept.length === stack.length ? stack : kept;
+      });
+    };
+    prune();
+    window.addEventListener(SIMILARITY_REVIEW_EVENT, prune);
+    return () => window.removeEventListener(SIMILARITY_REVIEW_EVENT, prune);
+  }, [serverApply, undo]);
+
   const revert = useCallback(() => {
     const last = undo[undo.length - 1];
     if (!last) return;
     try {
-      const outcome = undoSimilarityDecision(last.intent, isSimilarityInFlight);
+      const outcome = undoSimilarityDecision(last.intent, isSimilarityInFlight, undefined, undefined, serverApply);
+      if (outcome === 'sent') {
+        setNotice('이미 전송되어 되돌릴 수 없습니다. 휴지통에서 복원해 주세요.');
+        setUndo(stack => stack.slice(0, -1));
+        return;
+      }
       if (outcome === 'withdrawn') void flushSimilarityReview().catch(() => {});
     } catch (reason) { setNotice(errorText(reason)); return; }
     done.current.delete(last.item.reviewId);
@@ -358,9 +386,12 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
       const ids = new Set(back.map(item => item.reviewId));
       return [...back, ...rest.filter(row => !ids.has(row.reviewId))];
     });
-  }, [undo]);
+  }, [undo, serverApply]);
 
   const pending = (counts?.pendingPc ?? 0) + queued;
+  const waitingText = serverApply
+    ? `${queued > 0 ? ` · 전송 대기 ${queued}` : ''}${(counts?.pendingPc ?? 0) > 0 ? ` · PC 반영 대기 ${counts!.pendingPc}` : ''}`
+    : pending > 0 ? ` · PC 반영 대기 ${pending}` : '';
   const lastUndo = undo[undo.length - 1];
   const showB = compare === 'flicker' && (held || (auto && phase));
   const ready = state.phase === 'ready' && state.ready;
@@ -368,7 +399,7 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     <header className="review-bar">
       <IconButton label="검토 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
       <div className="review-title"><h1>유사 이미지 검토</h1>
-        {ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{pending > 0 && ` · PC 반영 대기 ${pending}`}{(counts?.skipped ?? 0) > 0 && ` · 건너뜀 ${counts!.skipped}`}</p>}
+        {ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{waitingText}{(counts?.skipped ?? 0) > 0 && ` · 건너뜀 ${counts!.skipped}`}</p>}
       </div>
       {ready && current && <IconButton label={compare ? '나란히 보기' : '한 화면에서 비교'} icon={Square2StackIcon} active={!!compare} onClick={() => { setCompare(value => value ? null : 'flicker'); setAuto(false); setHeld(false); }}/>}
     </header>
@@ -378,7 +409,7 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
       <Button onClick={() => { setState({phase: 'loading'}); void load(true); }}>다시 시도</Button>
     </EmptyState>}
     {state.phase === 'ready' && !state.ready && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 유사 이미지 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 검토할 수 있습니다."/>}
-    {ready && !current && <EmptyState className="review-empty" title="모두 검토했습니다" hint={pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 버린 이미지가 휴지통으로 갑니다.` : 'PC가 새 유사 이미지를 찾으면 여기에 나타납니다.'}/>}
+    {ready && !current && <EmptyState className="review-empty" title="모두 검토했습니다" hint={pending > 0 ? (serverApply ? `전송 대기 ${pending}개 · 전송되면 바로 반영되고 버린 이미지는 휴지통으로 갑니다.` : `PC 반영 대기 ${pending}개 · PC가 반영하면 버린 이미지가 휴지통으로 갑니다.`) : 'PC가 새 유사 이미지를 찾으면 여기에 나타납니다.'}/>}
     {ready && current && <div className="similarity-body" data-mode={compare ? 'compare' : 'side'}>
       {compare
         ? <div className="similarity-compare">
@@ -410,10 +441,10 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
           {choice.label}{current?.recommendation === choice.decision && <span className="similarity-badge">권장</span>}
         </Button>)}
       </div>
-      <p className="hint">PC가 반영하기 전까지 원본은 바뀌지 않습니다. 버린 이미지는 휴지통으로 갑니다.</p>
+      <p className="hint">{serverApply ? '선택한 결정은 5초 뒤 바로 반영됩니다. 버린 이미지는 휴지통에서 복원할 수 있습니다.' : 'PC가 반영하기 전까지 원본은 바뀌지 않습니다. 버린 이미지는 휴지통으로 갑니다.'}</p>
     </footer>}
     {lastUndo && <div className="review-snackbar similarity-snackbar" role="status">
-      <span>{CHOICES.find(choice => choice.decision === lastUndo.intent.decision)?.saved}</span>
+      <span>{serverApply ? CHOICES.find(choice => choice.decision === lastUndo.intent.decision)?.moved : CHOICES.find(choice => choice.decision === lastUndo.intent.decision)?.saved}</span>
       <Button variant="ghost" onClick={revert}><ArrowUturnLeftIcon aria-hidden="true"/>되돌리기</Button>
     </div>}
   </div>;

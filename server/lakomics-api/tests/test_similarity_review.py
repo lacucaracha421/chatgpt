@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import os
 import unittest
 import uuid
 from pathlib import Path
@@ -365,6 +366,191 @@ class SimilarityReviewTests(unittest.TestCase):
         self.assertEqual(self.client.post(REVIEW + '/decisions', headers=self.auth,
                                           content=b'{' + b' ' * 9000 + b'}').status_code, 413)
 
+    # --- Server apply (LAKOMICS_SIMILARITY_SERVER_APPLY) -------------------------------------
+
+    def server_apply(self, on=True):
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        if on:
+            os.environ[similarity_review.SERVER_APPLY_ENV] = '1'
+        else:
+            os.environ.pop(similarity_review.SERVER_APPLY_ENV, None)
+
+    def trash_changes(self):
+        with api_app.get_db() as db:
+            return db.execute("SELECT COUNT(*) FROM asset_authority_changes WHERE command_type='trashAsset'").fetchone()[0]
+
+    def test_switch_off_keeps_the_pc_path_even_with_an_active_asset_authority(self):
+        self.server_apply(False)
+        _, digest = self.with_asset_authority()
+        self.assertEqual(self.read()['features'], [])
+        sent = self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertTrue(sent.json()['pendingPc'])
+        self.assertNotIn('serverApplied', sent.json())
+        self.assertEqual(self.state_of('s1'), 'normal')
+        self.assertEqual(self.read()['counts']['pendingPc'], 1)
+        entry = self.log().json()
+        self.assertEqual((entry['features'], entry['items'][0]['serverApplied']), ([], False))
+        # Undo after sending still works.
+        self.assertEqual(self.decide(self.command('r1', 'withdrawn', a_sha=digest('a'), b_sha=digest('s1'))).status_code, 200)
+
+    def test_switch_on_without_an_active_asset_authority_changes_nothing(self):
+        self.server_apply()
+        self.adopt()
+        self.assertEqual(self.read()['features'], [])
+        sent = self.decide(self.command('r1', 'keep_existing'))
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertTrue(sent.json()['pendingPc'])
+        self.assertFalse(self.log().json()['items'][0]['serverApplied'])
+        self.assertEqual(self.decide(self.command('r1', 'withdrawn')).status_code, 200)
+
+    def test_switch_on_trashes_the_discarded_image_at_once_and_idempotently(self):
+        self.server_apply()
+        _, digest = self.with_asset_authority()
+        self.assertEqual(self.read()['features'], ['similarityServerApply'])
+        request = self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1'))
+        sent = self.decide(request)
+        self.assertEqual(sent.status_code, 200, sent.text)
+        body = sent.json()
+        self.assertEqual((body['pendingPc'], body['serverApplied'], body['trashAssetId']), (False, True, 's1'))
+        # The lifecycle is carried out: s1 is in Library Trash, the kept image is untouched.
+        self.assertEqual((self.state_of('s1'), self.state_of('a')), ('trash', 'normal'))
+        self.assertEqual(self.trash_changes(), 1)
+        # Nothing is left for the PC, and r1 / r2 (which holds s1) leave the queue.
+        page = self.read()
+        self.assertEqual(page['counts']['pendingPc'], 0)
+        self.assertEqual([i['reviewId'] for i in page['items']], ['r3'])
+        # A response-lost retry returns the receipt and does not trash a second time.
+        self.assertEqual(self.decide(request).json(), body)
+        self.assertEqual(self.trash_changes(), 1)
+        self.assertEqual(self.code(self.decide({**request, 'decision': 'keep_both'})), 'operationConflict')
+        # The log tells the PC the server already applied the entry.
+        log = self.log().json()
+        self.assertEqual(log['features'], ['similarityServerApply'])
+        self.assertEqual([(i['sequence'], i['serverApplied'], i['trashAssetId']) for i in log['items']], [(1, True, 's1')])
+        self.assertEqual(self.read()['decisionCursor'], 1)
+
+    def test_switch_on_replace_existing_and_keep_both(self):
+        self.server_apply()
+        _, digest = self.with_asset_authority()
+        replace = self.decide(self.command('r3', 'replace_existing', a_sha=digest('s2'), b_sha=digest('s3')))
+        self.assertEqual(replace.status_code, 200, replace.text)
+        self.assertEqual((self.state_of('s2'), self.state_of('s3')), ('trash', 'normal'))
+        both = self.decide(self.command('r1', 'keep_both', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual(both.status_code, 200, both.text)
+        self.assertEqual((both.json()['serverApplied'], both.json()['trashAssetId']), (True, None))
+        self.assertEqual((self.state_of('a'), self.state_of('s1')), ('normal', 'normal'))
+        self.assertEqual(self.trash_changes(), 1)
+        self.assertEqual([i['serverApplied'] for i in self.log().json()['items']], [True, True])
+
+    def test_switch_on_refuses_a_late_withdraw_and_leaves_the_trash_restorable(self):
+        self.server_apply()
+        _, digest = self.with_asset_authority()
+        self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        late = self.decide(self.command('r1', 'withdrawn', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual((late.status_code, self.code(late)), (409, 'similarityDecisionApplied'))
+        self.assertEqual(self.state_of('s1'), 'trash')
+        self.assertEqual(len(self.log().json()['items']), 1)
+        # Restore from Library Trash works, and the kept image is no longer fenced.
+        self.assertEqual(self.lifecycle('restoreAsset', 's1').status_code, 200)
+        self.assertEqual(self.state_of('s1'), 'normal')
+        self.assertEqual(self.lifecycle('trashAsset', 'a').status_code, 200)
+
+    def test_switch_on_failed_lifecycle_leaves_no_log_entry_and_no_trash(self):
+        self.server_apply()
+        _, digest = self.with_asset_authority()
+        with mock.patch('asset_authority._save_receipt', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual(self.state_of('s1'), 'normal')
+        self.assertEqual((self.trash_changes(), self.log().json()['items']), (0, []))
+        self.assertEqual(self.read()['decisionCursor'], 0)
+        # An image already in the trash refuses the decision cleanly instead of half-applying.
+        self.assertEqual(self.lifecycle('trashAsset', 's1').status_code, 200)
+        stale = self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual(self.code(stale), 'similarityAssetChanged')
+        self.assertEqual(self.log().json()['items'], [])
+
+    def test_a_decision_made_before_the_switch_is_still_left_to_the_pc(self):
+        _, digest = self.with_asset_authority()
+        before = self.decide(self.command('r3', 'replace_existing', a_sha=digest('s2'), b_sha=digest('s3')))
+        self.assertTrue(before.json()['pendingPc'])
+        self.server_apply()
+        after = self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertTrue(after.json()['serverApplied'])
+        self.assertEqual((self.state_of('s2'), self.state_of('s1')), ('normal', 'trash'))
+        self.assertEqual([i['serverApplied'] for i in self.log().json()['items']], [False, True])
+        self.assertEqual(self.read()['counts']['pendingPc'], 1)
+
+    def test_switch_on_discarding_an_image_an_owed_decision_keeps_is_refused_cleanly(self):
+        _, digest = self.with_asset_authority()
+        # r3 keep_existing keeps s2 (the PC still owes the trash of s3).
+        self.assertTrue(self.decide(self.command('r3', 'keep_existing', a_sha=digest('s2'), b_sha=digest('s3'))).json()['pendingPc'])
+        self.server_apply()
+        # r2 keep_existing would trash s2 on the server: refused, nothing logged, nothing trashed.
+        refused = self.decide(self.command('r2', 'keep_existing', a_sha=digest('s1'), b_sha=digest('s2')))
+        self.assertEqual((refused.status_code, self.code(refused)), (409, 'similarityDecisionKeepsAsset'))
+        self.assertEqual((self.state_of('s2'), self.state_of('s1')), ('normal', 'normal'))
+        self.assertEqual((self.trash_changes(), len(self.log().json()['items'])), (0, 1))
+        self.assertEqual(self.read()['decisionCursor'], 1)
+        # Keeping s2 and trashing s1 is not in conflict and is applied at once.
+        fine = self.decide(self.command('r2', 'replace_existing', a_sha=digest('s1'), b_sha=digest('s2')))
+        self.assertEqual(fine.status_code, 200, fine.text)
+        self.assertEqual(self.state_of('s1'), 'trash')
+
+    def test_a_pc_trash_of_an_image_a_server_applied_decision_keeps_is_refused_until_the_pc_consumed_it(self):
+        self.server_apply()
+        body, digest = self.with_asset_authority()
+        # The tablet keeps `a` and trashes s1; the PC decided the other way and now trashes `a`.
+        self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        refused = self.lifecycle('trashAsset', 'a', headers=self.publisher)
+        self.assertEqual((refused.status_code, refused.json()['detail']['code']), (409, 'similarityKeptByTabletDecision'))
+        self.assertEqual(refused.json()['detail']['reviewId'], 'r1')
+        self.assertEqual(self.state_of('a'), 'normal')
+        # The discarded image is already trashed (idempotent for the PC), restores are never refused,
+        # and a signed-in client keeps its own right to trash.
+        self.assertEqual(self.lifecycle('trashAsset', 's1', headers=self.publisher).status_code, 200)
+        self.assertEqual(self.lifecycle('restoreAsset', 's1', headers=self.publisher).status_code, 200)
+        # keep_both holds no claim.
+        self.decide(self.command('r3', 'keep_both', a_sha=digest('s2'), b_sha=digest('s3')))
+        self.assertEqual(self.lifecycle('trashAsset', 's3', headers=self.publisher).status_code, 200)
+        # Once the PC consumed the entry (its feed cursor passed it) the fence is gone.
+        body.update(baseRevision=self.read()['revision'], decisionCursor=2, generatedAt='later')
+        body['items'] = [i for i in body['items'] if i['reviewId'] not in ('r1', 'r2', 'r3')]
+        self.assertEqual(self.put_feed(body).status_code, 200)
+        self.assertEqual(self.lifecycle('trashAsset', 'a', headers=self.publisher).status_code, 200)
+        self.assertEqual(self.state_of('a'), 'trash')
+
+    def test_a_tablet_decision_after_the_pc_trashed_the_kept_image_is_refused(self):
+        self.server_apply()
+        _, digest = self.with_asset_authority()
+        # The PC discarded s1 first; the tablet then tries to keep s1 and trash `a`.
+        self.assertEqual(self.lifecycle('trashAsset', 's1', headers=self.publisher).status_code, 200)
+        late = self.decide(self.command('r1', 'replace_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual(self.code(late), 'similarityAssetChanged')
+        self.assertEqual(self.state_of('a'), 'normal')
+        self.assertEqual(self.log().json()['items'], [])
+
+    def test_withdraw_is_decided_by_the_decision_not_by_the_current_switch(self):
+        _, digest = self.with_asset_authority()
+        owed = self.decide(self.command('r3', 'replace_existing', a_sha=digest('s2'), b_sha=digest('s3')))
+        self.assertTrue(owed.json()['pendingPc'])
+        self.server_apply()
+        # A decision the PC still owes can be withdrawn even while the switch is on.
+        undo = self.decide(self.command('r3', 'withdrawn', a_sha=digest('s2'), b_sha=digest('s3')))
+        self.assertEqual(undo.status_code, 200, undo.text)
+        self.assertEqual((undo.json()['withdraws'], undo.json()['pendingPc']), (1, True))
+        self.assertNotIn('serverApplied', undo.json())
+        self.assertEqual([i['serverApplied'] for i in self.log().json()['items']], [False, False])
+        # A server-applied decision cannot, also after the switch was turned off again.
+        self.assertEqual(self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1'))).status_code, 200)
+        self.server_apply(False)
+        late = self.decide(self.command('r1', 'withdrawn', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual((late.status_code, self.code(late)), (409, 'similarityDecisionApplied'))
+        self.assertEqual(self.state_of('s1'), 'trash')
+
     def test_publisher_only_ordered_log(self):
         self.adopt()
         one = self.decide(self.command('r1', 'keep_existing')).json()
@@ -374,6 +560,7 @@ class SimilarityReviewTests(unittest.TestCase):
         self.assertEqual(page['items'][0] | {'createdAt': None}, {
             'sequence': 1, 'operationId': one['operationId'], 'reviewId': 'r1', 'decision': 'keep_existing',
             'aAssetId': 'a', 'bAssetId': 's1', 'trashAssetId': 's1', 'withdraws': None,
+            'serverApplied': False,
             'basis': {'feedRevision': self.read()['revision'], 'aSha256': SHA, 'bSha256': SHA}, 'createdAt': None})
         rest = self.log(after=1).json()
         self.assertEqual([(i['operationId'], i['decision'], i['withdraws']) for i in rest['items']],

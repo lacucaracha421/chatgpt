@@ -59,6 +59,14 @@ struct OpenReviewRow {
     created_at: String,
 }
 
+/// What recording a server-applied mobile decision found on this PC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServerAppliedRecord {
+    Recorded,
+    /// The user already resolved this review the other way here.
+    Conflict,
+}
+
 struct StoredReview {
     historical: bool,
     existing_asset_id: Option<String>,
@@ -246,6 +254,82 @@ impl Library {
             _ => return Err(LibraryError::SimilarityReviewConflict),
         }
         Ok(())
+    }
+
+    /// Record a mobile decision the server already carried out (it moved the discarded image
+    /// to Library Trash itself, and the PC learns that through its Asset sync). The historical
+    /// review of exactly this pair is marked resolved, so the PC stops offering it - an open
+    /// one, and a stale one too (the server's trash can reach this PC first and mark the pair
+    /// stale; left stale, a restore and a rescan would offer the same pair again) unless another
+    /// non-stale row already holds the pair. Nothing is trashed, merged or queued here, so a
+    /// later restore from Library Trash is never undone. A review the user already resolved
+    /// differently is a [`ServerAppliedRecord::Conflict`]; a changed, missing or incoming
+    /// review is left as it is.
+    pub(crate) fn record_server_applied_similarity_review(
+        &self,
+        review_id: &str,
+        existing_id: &str,
+        candidate_id: &str,
+        decision: SimilarityDecision,
+    ) -> Result<ServerAppliedRecord, LibraryError> {
+        let _trash_guard = self
+            .trash_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let review = match self.load_stored_review(review_id) {
+            Ok(review) => review,
+            Err(LibraryError::SimilarityReviewNotFound) => {
+                return Ok(ServerAppliedRecord::Recorded)
+            }
+            Err(error) => return Err(error),
+        };
+        let requested = decision_name(decision);
+        if !review.historical
+            || review.existing_asset_id.as_deref() != Some(existing_id)
+            || review.candidate_asset_id.as_deref() != Some(candidate_id)
+        {
+            return Ok(ServerAppliedRecord::Recorded);
+        }
+        let mut connection = self.connection()?;
+        match review.status.as_str() {
+            "resolved" if review.decision.as_deref() == Some(requested) => {}
+            "resolved" => return Ok(ServerAppliedRecord::Conflict),
+            "open" => {
+                let transaction = connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                match resolve_review(&transaction, review_id, requested) {
+                    Ok(()) => {}
+                    Err(LibraryError::SimilarityReviewConflict) => {
+                        return Ok(ServerAppliedRecord::Recorded)
+                    }
+                    Err(error) => return Err(error),
+                }
+                transaction.commit()?;
+            }
+            "stale" => {
+                let transaction = connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let held_elsewhere: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM similarity_reviews
+                     WHERE id != ?1 AND status != 'stale'
+                       AND min(existing_asset_id, candidate_asset_id) = min(?2, ?3)
+                       AND max(existing_asset_id, candidate_asset_id) = max(?2, ?3))",
+                    params![review_id, existing_id, candidate_id],
+                    |row| row.get(0),
+                )?;
+                if !held_elsewhere {
+                    transaction.execute(
+                        "UPDATE similarity_reviews
+                         SET status = 'resolved', decision = ?2, resolved_at = ?3
+                         WHERE id = ?1 AND status = 'stale'",
+                        params![review_id, requested, chrono::Utc::now().to_rfc3339()],
+                    )?;
+                }
+                transaction.commit()?;
+            }
+            _ => {}
+        }
+        Ok(ServerAppliedRecord::Recorded)
     }
 
     pub(crate) fn cleanup_resolving_similarity_reviews(&self) -> Result<(), LibraryError> {

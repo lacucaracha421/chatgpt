@@ -60,6 +60,19 @@ describe('similarity review outbox',()=>{
     expect(readSimilarityIntents()['r3']).toBeUndefined();
     expect(readSimilarityIntents()['r3:withdrawn'].decision).toBe('withdrawn');
   });
+  it('with server apply, undo exists only before sending and never queues a withdrawal',()=>{
+    const unsent=decide('r1');
+    expect(undoSimilarityDecision(unsent,undefined,undefined,5000,true)).toBe('removed');
+    expect(readSimilarityIntents()).toEqual({});
+    const sentOne=decide('r2');localStorage.clear();
+    expect(undoSimilarityDecision(sentOne,undefined,undefined,5000,true)).toBe('sent');
+    expect(readSimilarityIntents()).toEqual({});
+    const flying=decide('r3');
+    expect(undoSimilarityDecision(flying,id=>id===flying.operationId,undefined,5000,true)).toBe('sent');
+    // The in-flight decision stays queued: its receipt (or refusal) is still to come.
+    expect(readSimilarityIntents()['r3'].operationId).toBe(flying.operationId);
+    expect(readSimilarityIntents()['r3:withdrawn']).toBeUndefined();
+  });
   it('refuses more than the outbox limit',()=>{
     const intents=Object.fromEntries(Array.from({length:SIMILARITY_OUTBOX_LIMIT},(_,i)=>[`x${i}`,{libraryId:LIBRARY,reviewId:`x${i}`,decision:'keep_both',basis:{feedRevision:REV,aSha256:SHA,bSha256:SHA},aAssetId:'a',bAssetId:'b',operationId:`op${i}`,createdAt:i,notBefore:i}]));
     localStorage.setItem(outboxKey('lakomics.similarity.review.outbox.v1')!,JSON.stringify(intents));
@@ -115,8 +128,19 @@ describe('similarity review delivery',()=>{
     expect(byKey['gone'].outcome).toBe('rejected');
     expect(byKey['busy'].outcome).toBe('deferred');
     expect(byKey['applied:withdrawn'].message).toContain('휴지통에서 복원');
+    expect(byKey['applied:withdrawn'].outcome).toBe('rejected');
     expect(byKey['reused'].outcome).toBe('confirmed');
     expect(Object.keys(readSimilarityIntents())).toEqual(['busy']);
+  });
+});
+
+describe('similarity review delivery with server apply',()=>{
+  it('sends a decision once and treats the kept-image refusal of an older pending decision as deferred',async()=>{
+    decide('r1','keep_existing','a','b',0);decide('r2','keep_existing','c','d',0);
+    install(body=>body.reviewId==='r2'?refused('similarityDecisionKeepsAsset'):{operationId:body.operationId,serverApplied:true,pendingPc:false},{...ready,features:['similarityServerApply']});
+    const report=await flushSimilarityReview(undefined,later);
+    expect(Object.fromEntries(report.outcomes.map(o=>[o.key,o.outcome]))).toEqual({r1:'confirmed',r2:'deferred'});
+    expect(Object.keys(readSimilarityIntents())).toEqual(['r2']);
   });
 });
 

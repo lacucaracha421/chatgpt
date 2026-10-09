@@ -21,6 +21,16 @@
 //!   `decide_similarity_review` runs its own transactions, so each entry's receipt and cursor
 //!   step are written afterwards; a crash in between re-delivers the entry, and the same
 //!   decision on an already resolved review is `Ok`, which records `applied`.
+//! * **Server-applied entries** (`serverApplied: true`, the server's immediate apply switch):
+//!   the server already moved the discarded image to Library Trash through the Asset
+//!   authority. The PC never applies such an entry again (no local trash, no lifecycle
+//!   command, so a user restore stays restored); it only marks the matching open pair
+//!   resolved (an open or stale one) so it is not offered again, records `applied` and
+//!   advances the cursor; a pair the user already resolved the other way here is recorded as
+//!   `skipped:conflict` (the server's result stands: the PC's own trash of the
+//!   kept image is refused with `similarityKeptByTabletDecision` and rolled back). The trash
+//!   itself reaches this PC through the ordinary Asset sync. Entries logged before the switch
+//!   was on (`serverApplied: false`) are applied as above.
 //! * Deterministic outcomes (`skipped:resolvedOnPc|stale|changed|assetGone|withdrawn`)
 //!   advance the cursor and are reported in the next feed PUT; only transport/DB errors,
 //!   malformed pages and receipt divergences hold it.
@@ -39,6 +49,7 @@ use super::{
     models::{SimilarityDecision, SimilarityDecisionRequest},
     similarity::{
         classifications_for_assets, load_asset_summaries, provenance_rank, review_format,
+        ServerAppliedRecord,
     },
     Library,
 };
@@ -487,7 +498,26 @@ impl Library {
                     break;
                 }
             }
-            let result = if withdrawn.contains(&item.sequence) {
+            let result = if item.server_applied && item.decision != "withdrawn" {
+                // The server already moved the discarded image to Library Trash (the Asset sync
+                // brings that here). Never apply it again: a user restore must stay restored.
+                let Some(decision) = decision_kind(&item.decision) else {
+                    return Err(LibraryError::SimilarityReviewInvalid);
+                };
+                match self.record_server_applied_similarity_review(
+                    &item.review_id,
+                    &item.a_asset_id,
+                    &item.b_asset_id,
+                    decision,
+                )? {
+                    ServerAppliedRecord::Recorded => Outcome::Applied,
+                    // The user decided this pair the other way here first. The server's
+                    // result stands (its trash reaches this PC through the Asset sync and the
+                    // PC's own trash of the kept image is refused and rolled back); the
+                    // skipped report makes the clash visible.
+                    ServerAppliedRecord::Conflict => Outcome::Skipped("conflict"),
+                }
+            } else if withdrawn.contains(&item.sequence) {
                 Outcome::Skipped("withdrawn")
             } else if item.decision == "withdrawn" {
                 // Nothing left to take back here: its target was skipped above, or was

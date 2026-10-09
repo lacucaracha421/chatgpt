@@ -37,6 +37,8 @@ export type SimilarityItem = {
 export type SimilarityFeed = {
   version: 1; ready: boolean; libraryId: string | null; revision: string | null; generatedAt: string | null;
   counts: SimilarityCounts; items: SimilarityItem[]; nextCursor: string | null; hasMore: boolean;
+  /** Server features; `similarityServerApply`: a sent decision is applied at once (no undo after sending). */
+  features?: string[];
 };
 
 export function similarityPath(params: {cursor?: string | null; limit?: number}) {
@@ -57,13 +59,13 @@ export type SimilarityReport = {
 const REJECTED: Record<string, string> = {
   similarityReviewMissing: 'PC에서 이미 정리된 검토라 반영하지 못했습니다.',
   similarityAssetChanged: '이미지가 바뀌었거나 정리되어 검토를 반영하지 못했습니다.',
-  similarityDecisionApplied: 'PC가 이미 반영했습니다. 휴지통에서 복원해 주세요.',
+  similarityDecisionApplied: '이미 반영된 결정입니다. 휴지통에서 복원해 주세요.',
   invalidSimilarityReviewDecision: '서버가 이 검토를 받지 않았습니다.',
 };
 /** Already true on the server: nothing left to send. */
 const SETTLED = new Set(['similarityDecisionWithdrawn']);
-/** Waits for the PC to apply or for a withdrawal to arrive first. */
-const DEFERRED = new Set(['pendingSimilarityDecision', 'similarityAssetPendingTrash']);
+/** Waits for the PC to apply or for a withdrawal to arrive first (or for the kept image of an older pending decision). */
+const DEFERRED = new Set(['pendingSimilarityDecision', 'similarityAssetPendingTrash', 'similarityDecisionKeepsAsset']);
 
 const inFlight = new Set<string>();
 /** Whether this operation is being sent right now (its outcome is not known yet). */

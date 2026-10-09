@@ -2,10 +2,21 @@
 
 Perceptual similarity stays PC analysis (ADR-0007). The PC publishes the open historical
 pairs it found, mobile devices record a decision per pair, and the PC applies each one
-through its own `decide_similarity_review`. The server never trashes, merges or deletes
-anything: the image that is not kept reaches Library Trash only when the PC applies the
-decision and its lifecycle command propagates (ADR-0038). Until then galleries are
+through its own `decide_similarity_review`. By default the server never trashes, merges or
+deletes anything: the image that is not kept reaches Library Trash only when the PC applies
+the decision and its lifecycle command propagates (ADR-0038). Until then galleries are
 unchanged; only this review queue hides decided pairs.
+
+Server apply (``LAKOMICS_SIMILARITY_SERVER_APPLY``, default OFF, and only while the Asset
+authority is active): the decision route moves the image that is not kept to Library Trash
+itself, through the Asset authority lifecycle command (``asset_authority.apply_command``), in
+the same transaction as the decision log entry. The entry is marked in
+``mobile_similarity_review_server_applied`` and the log tells the PC (``serverApplied``) to
+record the review as resolved without applying or trashing anything again; the PC learns the
+trash through its ordinary Asset sync. The feature is advertised as ``similarityServerApply``
+in the ``features`` of the review feed and of the decision log. Undo after sending is not
+offered then: a ``withdrawn`` command is refused (``similarityDecisionApplied``) and the
+image is restored from Library Trash. With the switch off nothing here changes.
 
 Everything stays inactive until a PC adopts the feature with its first feed PUT (which
 carries `decisionCursor`); before that the mobile read answers `ready: false` and the
@@ -17,6 +28,8 @@ A pending decision is the newest decision for a review above the applied cursor 
 import base64
 import hashlib
 import json
+import os
+import uuid as uuid_module
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
@@ -28,6 +41,10 @@ from starlette.concurrency import run_in_threadpool
 import authority
 
 PREFIX = "/v1/library/similarity/review"
+SERVER_APPLY_ENV = "LAKOMICS_SIMILARITY_SERVER_APPLY"
+SERVER_APPLY_FEATURE = "similarityServerApply"
+# Namespace of the lifecycle operation ids derived from decision operation ids.
+LIFECYCLE_NAMESPACE = uuid_module.UUID("3b1c8e52-7a4d-4f06-9e2b-1d6a5c0f8b47")
 MAX_CURSOR = 9_007_199_254_740_991
 MAX_FEED_BYTES = 8 * 1024 * 1024
 MAX_ITEMS = 5_000
@@ -65,10 +82,16 @@ CREATE INDEX IF NOT EXISTS mobile_similarity_review_decisions_review
  ON mobile_similarity_review_decisions(review_id, sequence);
 CREATE TABLE IF NOT EXISTS mobile_similarity_review_skipped (
  sequence INTEGER PRIMARY KEY, reason TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS mobile_similarity_review_server_applied (
+ sequence INTEGER PRIMARY KEY, lifecycle_operation_id TEXT, applied_at TEXT NOT NULL);
 """
 
 # The newest decision per review above the applied cursor, when it is not a withdrawal.
-PENDING = """SELECT d.* FROM mobile_similarity_review_decisions d
+# ``server_applied`` marks a decision the server already carried out (nothing is left for
+# the PC to apply; the review is only hidden until the PC's cursor has passed it).
+PENDING = """SELECT d.*, (s.sequence IS NOT NULL) AS server_applied
+    FROM mobile_similarity_review_decisions d
+    LEFT JOIN mobile_similarity_review_server_applied s ON s.sequence=d.sequence
     WHERE d.sequence>? AND d.decision!='withdrawn'
     AND d.sequence=(SELECT MAX(l.sequence) FROM mobile_similarity_review_decisions l
                     WHERE l.review_id=d.review_id)"""
@@ -165,6 +188,29 @@ def trash_target(decision, a_asset_id, b_asset_id):
     return {"keep_existing": b_asset_id, "replace_existing": a_asset_id}.get(decision)
 
 
+def switch_on():
+    return os.environ.get(SERVER_APPLY_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def server_apply_owner(db, library_id=None):
+    """The active Asset authority row when the server applies decisions itself, else None.
+
+    Needs the switch and an active Asset authority (for ``library_id`` when given): without
+    the authority the server has no lifecycle to carry out, so the PC path stays in charge.
+    """
+    if not switch_on():
+        return None
+    owner = authority.active_domain(db, "assets")
+    if owner is None or (library_id is not None and owner["libraryId"] != library_id):
+        return None
+    return owner
+
+
+def features(db, library_id=None):
+    """The ``features`` advertised with the review feed and the decision log."""
+    return [SERVER_APPLY_FEATURE] if server_apply_owner(db, library_id) is not None else []
+
+
 def pending_decisions(db, current=None):
     current = current if current is not None else state(db)
     if current is None:
@@ -172,9 +218,14 @@ def pending_decisions(db, current=None):
     return db.execute(PENDING, (current["feed_cursor"],)).fetchall()
 
 
+def pending_pc_decisions(db, current=None):
+    """Pending decisions the PC still has to carry out (the server applied none of these)."""
+    return [row for row in pending_decisions(db, current) if not row["server_applied"]]
+
+
 def pending_trash_assets(db):
     """Assets a pending similarity decision will trash (for the Library Trash mirror check)."""
-    return {row["trash_asset_id"] for row in pending_decisions(db) if row["trash_asset_id"]}
+    return {row["trash_asset_id"] for row in pending_pc_decisions(db) if row["trash_asset_id"]}
 
 
 def pending_kept_review(db, library_id, asset_id):
@@ -191,9 +242,32 @@ def pending_kept_review(db, library_id, asset_id):
     current = state(db)
     if current is None or current["library_id"] != library_id:
         return None
-    for row in pending_decisions(db, current):
+    for row in pending_pc_decisions(db, current):
         trash = row["trash_asset_id"]
         if trash and trash != asset_id and asset_id in (row["a_asset_id"], row["b_asset_id"]):
+            return row["review_id"]
+    return None
+
+
+def server_kept_review(db, library_id, asset_id):
+    """The review whose server-applied decision, not yet consumed by the PC, keeps ``asset_id``.
+
+    The tablet's decision already trashed the partner image. A PC that decided the same pair the
+    other way (and so queued a trash of this very image) must not take the second image to the
+    Library Trash too: ``asset_authority`` refuses that publisher trash with
+    ``similarityKeptByTabletDecision`` until the PC has consumed the entry (its feed cursor
+    passed it), and the PC rolls its local trash back. ``keep_both`` keeps no claim.
+    """
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                  " AND name='mobile_similarity_review_server_applied'").fetchone() is None:
+        return None
+    current = state(db)
+    if current is None or current["library_id"] != library_id:
+        return None
+    for row in pending_decisions(db, current):
+        trash = row["trash_asset_id"]
+        if row["server_applied"] and trash and trash != asset_id \
+                and asset_id in (row["a_asset_id"], row["b_asset_id"]):
             return row["review_id"]
     return None
 
@@ -328,7 +402,7 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
     def empty():
         return {"version": 1, "ready": False, "libraryId": None, "revision": None, "generatedAt": None,
                 "decisionCursor": 0, "appliedDecisionCursor": 0,
-                "counts": {"open": 0, "pendingPc": 0, "skipped": 0},
+                "counts": {"open": 0, "pendingPc": 0, "skipped": 0}, "features": [],
                 "items": [], "nextCursor": None, "hasMore": False}
 
     def read_feed(limit, cursor):
@@ -346,7 +420,9 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                 fail(409, "similarityReviewChanged", "검토 목록이 변경되었습니다. 처음부터 다시 불러옵니다.")
             pending = pending_decisions(db, current)
             decided = json.dumps(sorted({row["review_id"] for row in pending}))
-            trashed = json.dumps(sorted({row["trash_asset_id"] for row in pending if row["trash_asset_id"]}))
+            owed = [row for row in pending if not row["server_applied"]]
+            # A server-applied trash is already in effect (visible_assets); only what the PC still owes hides pairs.
+            trashed = json.dumps(sorted({row["trash_asset_id"] for row in owed if row["trash_asset_id"]}))
             base = FEED_FROM  # see FEED_FROM for the overlay and the join order
             params = [decided, trashed, trashed]
             total = db.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
@@ -368,7 +444,8 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             return {"version": 1, "ready": True, "libraryId": current["library_id"],
                     "revision": current["feed_revision"], "generatedAt": current["generated_at"],
                     "decisionCursor": current["last_sequence"], "appliedDecisionCursor": current["feed_cursor"],
-                    "counts": {"open": total, "pendingPc": len(pending), "skipped": skipped},
+                    "counts": {"open": total, "pendingPc": len(owed), "skipped": skipped},
+                    "features": features(db, current["library_id"]),
                     "items": items,
                     "nextCursor": encode_cursor(current["feed_revision"], rows[-1]["position"]) if more else None,
                     "hasMore": more}
@@ -381,6 +458,20 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
         if set(request.query_params.keys()) - {"limit", "cursor"}:
             raise HTTPException(422, "Invalid similarity review request")
         return read_feed(limit, cursor)
+
+    def server_trash(db, owner, asset_id, operation_id):
+        """Move ``asset_id`` to Library Trash through the Asset authority, inside the caller's transaction."""
+        import asset_authority  # imports this module, so it cannot be imported at the top
+        row = asset_authority.state_row(db, owner["libraryId"], asset_id)
+        if row is None or row[0] != asset_authority.NORMAL:
+            fail(409, "similarityAssetChanged", "이미지가 바뀌었거나 정리되어 검토를 반영할 수 없습니다.")
+        lifecycle_operation = str(uuid_module.uuid5(LIFECYCLE_NAMESPACE, operation_id))
+        asset_authority.apply_command(
+            db, library_id=owner["libraryId"], epoch=owner["epoch"], contract_version=owner["contractVersion"],
+            command_type=asset_authority.TRASH_ASSET, operation_id=lifecycle_operation,
+            entity={"assetId": asset_id, "expectedEntityRevision": row[1]},
+            now=asset_authority.now_iso(), publisher=False)
+        return lifecycle_operation
 
     def apply(command):
         try:
@@ -404,6 +495,8 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             if command.basis.feedRevision != current["feed_revision"]:
                 fail(409, "similarityReviewChanged", "검토 목록이 바뀌었습니다. 새로고침해 주세요.")
             pending = {row["review_id"]: row for row in pending_decisions(db, current)}
+            owed = [row for row in pending.values() if not row["server_applied"]]
+            owner = server_apply_owner(db, command.libraryId)
             withdraws = None
             if command.decision == "withdrawn":
                 # Undo after sending. Only a decision the PC has not consumed yet can be
@@ -415,6 +508,10 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                     if latest is not None and latest["decision"] == "withdrawn" and latest["sequence"] > current["feed_cursor"]:
                         fail(409, "similarityDecisionWithdrawn", "이미 취소한 결정입니다.")
                     fail(409, "similarityDecisionApplied", "PC가 이미 반영했습니다. 휴지통에서 복원해 주세요.")
+                if target["server_applied"]:
+                    # The server already moved the image to Library Trash (whatever the switch says
+                    # now): no undo, restore from the trash.
+                    fail(409, "similarityDecisionApplied", "이미 반영된 결정입니다. 휴지통에서 복원해 주세요.")
                 a_id, b_id, withdraws = target["a_asset_id"], target["b_asset_id"], target["sequence"]
             else:
                 item = db.execute("SELECT * FROM mobile_similarity_review_items WHERE review_id=?",
@@ -428,7 +525,7 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                     fail(409, "similarityAssetChanged", "이미지가 바뀌었거나 정리되어 검토를 반영할 수 없습니다.")
                 if command.reviewId in pending:
                     fail(409, "pendingSimilarityDecision", "이 검토의 결정이 PC 반영을 기다리고 있습니다.")
-                trashed = {row["trash_asset_id"] for row in pending.values() if row["trash_asset_id"]}
+                trashed = {row["trash_asset_id"] for row in owed if row["trash_asset_id"]}
                 if a_id in trashed or b_id in trashed:
                     fail(409, "similarityAssetPendingTrash", "다른 검토에서 휴지통으로 보낼 이미지가 포함되어 있습니다.")
             sequence = current["last_sequence"] + 1
@@ -438,12 +535,27 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             result = {"version": 1, "operationId": command.operationId, "libraryId": command.libraryId,
                       "reviewId": command.reviewId, "decision": command.decision, "sequence": sequence,
                       "trashAssetId": trash, "withdraws": withdraws, "pendingPc": True}
-            db.execute("INSERT INTO mobile_similarity_review_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                       (sequence, command.operationId, payload_digest, command.reviewId, command.decision,
-                        a_id, b_id, trash, withdraws, command.basis.feedRevision, command.basis.aSha256,
-                        command.basis.bSha256, datetime.now(timezone.utc).isoformat(), json.dumps(result)))
-            db.execute("UPDATE mobile_similarity_review_state SET last_sequence=? WHERE singleton=1", (sequence,))
-            db.commit()
+            lifecycle_operation = None
+            # A withdrawal only takes back a decision the PC still owes; it is never server-applied.
+            serve = owner is not None and command.decision != "withdrawn"
+            try:
+                if serve:
+                    # Server apply: the trash, the log entry and its marker commit together or not at all.
+                    if trash is not None:
+                        lifecycle_operation = server_trash(db, owner, trash, command.operationId)
+                    result = {**result, "pendingPc": False, "serverApplied": True}
+                db.execute("INSERT INTO mobile_similarity_review_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                           (sequence, command.operationId, payload_digest, command.reviewId, command.decision,
+                            a_id, b_id, trash, withdraws, command.basis.feedRevision, command.basis.aSha256,
+                            command.basis.bSha256, datetime.now(timezone.utc).isoformat(), json.dumps(result)))
+                if serve:
+                    db.execute("INSERT INTO mobile_similarity_review_server_applied VALUES(?,?,?)",
+                               (sequence, lifecycle_operation, datetime.now(timezone.utc).isoformat()))
+                db.execute("UPDATE mobile_similarity_review_state SET last_sequence=? WHERE singleton=1", (sequence,))
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
             return result
 
     @app.post(PREFIX + "/decisions")
@@ -470,16 +582,19 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             current = check_library(db, libraryId)
             if after > (current["last_sequence"] if current else 0):
                 fail(409, "similarityReviewCursorRejected", "유사 이미지 검토 동기화 위치를 확인해 주세요.")
-            rows = db.execute("SELECT * FROM mobile_similarity_review_decisions WHERE sequence>? ORDER BY sequence LIMIT ?",
-                              (after, limit + 1)).fetchall()
+            rows = db.execute("""SELECT d.*, (s.sequence IS NOT NULL) AS server_applied
+                FROM mobile_similarity_review_decisions d
+                LEFT JOIN mobile_similarity_review_server_applied s ON s.sequence=d.sequence
+                WHERE d.sequence>? ORDER BY d.sequence LIMIT ?""", (after, limit + 1)).fetchall()
             more = len(rows) > limit
             rows = rows[:limit]
-            return {"version": 1, "libraryId": libraryId, "after": after,
+            return {"version": 1, "libraryId": libraryId, "after": after, "features": features(db, libraryId),
                     "nextCursor": rows[-1]["sequence"] if rows else after, "hasMore": more,
                     "items": [{"sequence": r["sequence"], "operationId": r["operation_id"],
                                "reviewId": r["review_id"], "decision": r["decision"],
                                "aAssetId": r["a_asset_id"], "bAssetId": r["b_asset_id"],
                                "trashAssetId": r["trash_asset_id"], "withdraws": r["withdraws"],
+                               "serverApplied": bool(r["server_applied"]),
                                "basis": {"feedRevision": r["feed_revision"], "aSha256": r["a_sha256"],
                                          "bSha256": r["b_sha256"]},
                                "createdAt": r["created_at"]} for r in rows]}

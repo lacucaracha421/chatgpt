@@ -112,6 +112,7 @@ fn entry(sequence: i64, review: &str, decision: &str, a: &str, b: &str) -> Decis
             _ => None,
         },
         withdraws: None,
+        server_applied: false,
         basis: DecisionBasis {
             feed_revision: "f".repeat(64),
             a_sha256: sha(a),
@@ -308,6 +309,219 @@ fn each_decision_moves_the_right_image_to_trash_and_queues_its_lifecycle_command
             1
         );
     }
+}
+
+#[test]
+fn a_server_applied_decision_is_recorded_without_trashing_or_queueing_anything() {
+    for (decision, kind) in [
+        ("keep_existing", SimilarityDecision::KeepExisting),
+        ("replace_existing", SimilarityDecision::ReplaceExisting),
+        ("keep_both", SimilarityDecision::KeepBoth),
+    ] {
+        let f = fixture();
+        eligible(&f, &["a", "b"]);
+        review(&f, "r1", "a", "b", "historical", "open", 1);
+        f.library
+            .adopt_similarity_review_library(ENDPOINT, &f.id)
+            .unwrap();
+        let mut served = entry(1, "r1", decision, "a", "b");
+        served.server_applied = true;
+        let page = [served];
+        let outcome = f
+            .library
+            .apply_similarity_review_page(ENDPOINT, &f.id, &page, &HashSet::new())
+            .unwrap();
+        assert_eq!((outcome.applied, outcome.skipped), (1, 0), "{decision}");
+        // The pair is resolved (never offered again) but nothing was trashed or queued here:
+        // the server owns the lifecycle, so a restore from Library Trash is never re-trashed.
+        assert_eq!(
+            review_state(&f, "r1"),
+            ("resolved".into(), Some(decision.into()))
+        );
+        assert_eq!(
+            (status(&f, "a"), status(&f, "b")),
+            ("normal".into(), "normal".into())
+        );
+        assert!(outbox(&f).is_empty(), "{decision}");
+        assert_eq!(receipts(&f), [(1, "applied".to_string())]);
+        assert_eq!(cursor(&f), 1);
+        // A replay is a no-op, and a later local decision on the resolved review is idempotent.
+        let again = f
+            .library
+            .apply_similarity_review_page(ENDPOINT, &f.id, &page, &HashSet::new())
+            .unwrap();
+        assert_eq!(again.already_consumed, 1);
+        assert!(outbox(&f).is_empty());
+        f.library
+            .record_server_applied_similarity_review("r1", "a", "b", kind)
+            .unwrap();
+        assert_eq!(
+            review_state(&f, "r1"),
+            ("resolved".into(), Some(decision.into()))
+        );
+    }
+}
+
+#[test]
+fn a_server_applied_decision_leaves_a_changed_or_missing_review_alone() {
+    let f = fixture();
+    eligible(&f, &["a", "b", "c", "d"]);
+    // A different pair than the server's, and a review that does not exist here.
+    review(&f, "r2", "c", "d", "historical", "open", 2);
+    f.library
+        .adopt_similarity_review_library(ENDPOINT, &f.id)
+        .unwrap();
+    let mut second = entry(1, "r2", "keep_existing", "d", "c"); // the pair is c/d on the PC
+    second.server_applied = true;
+    let mut gone = entry(2, "missing", "keep_both", "a", "b");
+    gone.server_applied = true;
+    let outcome = f
+        .library
+        .apply_similarity_review_page(ENDPOINT, &f.id, &[second, gone], &HashSet::new())
+        .unwrap();
+    assert_eq!((outcome.applied, outcome.skipped), (2, 0));
+    assert_eq!(review_state(&f, "r2").0, "open");
+    assert!(outbox(&f).is_empty());
+    assert_eq!(cursor(&f), 2);
+}
+
+#[test]
+fn a_pair_the_user_resolved_the_other_way_is_a_reported_conflict_and_nothing_else_moves() {
+    let f = fixture();
+    eligible(&f, &["a", "b"]);
+    // The user kept B here (keep_existing on the PC's b-side view is not the point: the
+    // review is resolved with another decision than the tablet's).
+    review(&f, "r1", "a", "b", "historical", "resolved", 1);
+    f.library
+        .adopt_similarity_review_library(ENDPOINT, &f.id)
+        .unwrap();
+    let mut served = entry(1, "r1", "replace_existing", "a", "b");
+    served.server_applied = true;
+    let outcome = f
+        .library
+        .apply_similarity_review_page(ENDPOINT, &f.id, &[served], &HashSet::new())
+        .unwrap();
+    assert_eq!((outcome.applied, outcome.skipped), (0, 1));
+    assert_eq!(receipts(&f), [(1, "skipped:conflict".to_string())]);
+    assert_eq!(
+        review_state(&f, "r1"),
+        ("resolved".into(), Some("keep_both".into())),
+        "the user's own resolution is not overwritten"
+    );
+    assert!(outbox(&f).is_empty());
+    assert_eq!(cursor(&f), 1);
+    // Same decision on a resolved review is not a conflict.
+    let g = fixture();
+    eligible(&g, &["a", "b"]);
+    review(&g, "r1", "a", "b", "historical", "resolved", 1);
+    g.library
+        .adopt_similarity_review_library(ENDPOINT, &g.id)
+        .unwrap();
+    let mut same = entry(1, "r1", "keep_both", "a", "b");
+    same.server_applied = true;
+    let outcome = g
+        .library
+        .apply_similarity_review_page(ENDPOINT, &g.id, &[same], &HashSet::new())
+        .unwrap();
+    assert_eq!((outcome.applied, outcome.skipped), (1, 0));
+}
+
+#[test]
+fn a_stale_pair_is_resolved_so_a_restore_and_rescan_do_not_offer_it_again() {
+    let f = fixture();
+    eligible(&f, &["a", "b", "e", "g"]);
+    // The server's trash reached this PC first and made the pair stale.
+    review(&f, "r1", "a", "b", "historical", "stale", 1);
+    // Another non-stale row already holds the pair e/g: the stale one must stay stale.
+    review(&f, "r5", "e", "g", "historical", "stale", 2);
+    review(&f, "r6", "g", "e", "historical", "open", 3);
+    f.library
+        .adopt_similarity_review_library(ENDPOINT, &f.id)
+        .unwrap();
+    let mut first = entry(1, "r1", "keep_existing", "a", "b");
+    first.server_applied = true;
+    let mut second = entry(2, "r5", "keep_existing", "e", "g");
+    second.server_applied = true;
+    let outcome = f
+        .library
+        .apply_similarity_review_page(ENDPOINT, &f.id, &[first, second], &HashSet::new())
+        .unwrap();
+    assert_eq!((outcome.applied, outcome.skipped), (2, 0));
+    assert_eq!(
+        review_state(&f, "r1"),
+        ("resolved".into(), Some("keep_existing".into()))
+    );
+    assert_eq!(review_state(&f, "r5").0, "stale");
+    assert_eq!(review_state(&f, "r6").0, "open");
+    assert!(outbox(&f).is_empty());
+    // The historical scan skips a pair that has any non-stale review (its "known" check), so
+    // after a restore and a rescan nothing new is created for the resolved pair.
+    let known: bool = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM similarity_reviews
+             WHERE min(existing_asset_id, candidate_asset_id) = min('a', 'b')
+               AND max(existing_asset_id, candidate_asset_id) = max('a', 'b')
+               AND status != 'stale')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(known);
+    // Nor is it offered in the feed.
+    assert!(
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM similarity_reviews WHERE id='r1' AND status='open'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap()
+            == 0
+    );
+}
+
+#[test]
+fn a_page_mixes_server_applied_and_pc_applied_decisions() {
+    let f = fixture();
+    f.library
+        .use_machine_settings(f.temp.path().join("machine.json"));
+    f.library.set_cloud_sync_hold(ENDPOINT, true).unwrap();
+    eligible(&f, &["a", "b", "c", "d"]);
+    review(&f, "r1", "a", "b", "historical", "open", 1);
+    review(&f, "r2", "c", "d", "historical", "open", 2);
+    f.library
+        .adopt_similarity_review_library(ENDPOINT, &f.id)
+        .unwrap();
+    // Decided before the switch (the PC still owes it), then one the server applied.
+    let before = entry(1, "r1", "keep_existing", "a", "b");
+    let mut after = entry(2, "r2", "keep_existing", "c", "d");
+    after.server_applied = true;
+    let outcome = f
+        .library
+        .apply_similarity_review_page(ENDPOINT, &f.id, &[before, after], &HashSet::new())
+        .unwrap();
+    assert_eq!(outcome.applied, 2);
+    assert_eq!(
+        (
+            status(&f, "a"),
+            status(&f, "b"),
+            status(&f, "c"),
+            status(&f, "d")
+        ),
+        (
+            "normal".into(),
+            "trash".into(),
+            "normal".into(),
+            "normal".into()
+        )
+    );
+    assert_eq!(outbox(&f), [("b".to_string(), "trash".to_string())]);
+    assert_eq!(cursor(&f), 2);
 }
 
 #[test]

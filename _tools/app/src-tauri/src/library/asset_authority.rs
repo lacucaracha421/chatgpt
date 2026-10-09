@@ -1023,7 +1023,10 @@ impl Library {
                 Err(LibraryError::AssetAuthorityRejected { code, .. }) => {
                     if !matches!(
                         code.as_str(),
-                        "assetNotFound" | "lifecycleTransitionRefused" | "operationConflict"
+                        "assetNotFound"
+                            | "lifecycleTransitionRefused"
+                            | "operationConflict"
+                            | "similarityKeptByTabletDecision"
                     ) {
                         // Not a definitive answer about this intent: the domain identity moved
                         // under this pass (the next pass's status check re-baselines and
@@ -1034,6 +1037,9 @@ impl Library {
                         result.stopped = true;
                         return Ok(());
                     }
+                    // (`similarityKeptByTabletDecision`: the tablet's server-applied similarity
+                    // decision kept this Asset, so this PC's trash of it is rolled back to the
+                    // confirmed state, as for any refused intent.)
                     // The command handler's definitive coded rejections (server
                     // `asset_authority.apply_command`) end this intent, and lifecycle commands
                     // for different Assets are independent, so it must not stop the queue
@@ -2900,6 +2906,40 @@ mod tests {
         assert_eq!(
             db.query_row("SELECT last_error FROM asset_authority_state WHERE asset_id=?", [ID], |r| r.get::<_, String>(0)).unwrap(),
             "lifecycleRejected:lifecycleTransitionRefused"
+        );
+        assert_eq!(db.query_row("SELECT status FROM assets WHERE id=?", [OTHER], |r| r.get::<_, String>(0)).unwrap(), "trash");
+    }
+
+    #[test]
+    fn a_trash_refused_because_the_tablet_kept_the_asset_is_rolled_back_without_blocking() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let other = second_asset(&library, "normal");
+        library.trash_assets(&[ID.into()]).unwrap();
+        library.trash_assets(&[OTHER.into()]).unwrap();
+        let (client, worker) = command_server(vec![
+            (
+                409,
+                json!({"detail":{"code":"similarityKeptByTabletDecision","assetId":ID,"reviewId":"r1","lifecycle":"normal"}}),
+            ),
+            (200, trash_accepted(&library, &other, 2)),
+        ]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        assert_eq!(worker.join().unwrap().len(), 2, "the queue behind the refusal still runs");
+        assert!(!result.stopped);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT status FROM assets WHERE id=?", [ID], |r| r.get::<_, String>(0)).unwrap(),
+            "normal",
+            "the local trash is undone: the tablet's decision kept this image"
+        );
+        assert_eq!(
+            db.query_row("SELECT last_error FROM asset_authority_state WHERE asset_id=?", [ID], |r| r.get::<_, String>(0)).unwrap(),
+            "lifecycleRejected:similarityKeptByTabletDecision"
         );
         assert_eq!(db.query_row("SELECT status FROM assets WHERE id=?", [OTHER], |r| r.get::<_, String>(0)).unwrap(), "trash");
     }
