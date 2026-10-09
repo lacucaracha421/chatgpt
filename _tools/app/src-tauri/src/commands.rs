@@ -1666,6 +1666,22 @@ pub async fn get_collection_update_status(
         .map_err(CommandError::from)
 }
 
+/// Whether the server owns this provider's new-volume checks (cached authority status only).
+#[tauri::command]
+pub async fn server_release_checks_enabled(provider: String, state: State<'_, AppState>) -> Result<bool, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.server_release_checks_enabled(&provider)).await
+        .map_err(|_| background_task_error())
+}
+
+/// 새로고침 for a server-owned provider: ask the server to check now.
+#[tauri::command]
+pub async fn request_server_release_check(provider: String, state: State<'_, AppState>) -> Result<crate::library::server_release_checks::ServerReleaseCheck, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.request_server_release_check(&provider)).await
+        .map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
 #[tauri::command]
 pub async fn run_collection_updates(provider: String, state: State<'_, AppState>) -> Result<crate::library::collection_updates::CollectionUpdateStatus, CommandError> {
     let library = current_required(state)?;
@@ -1692,6 +1708,15 @@ fn run_release_watch_with_key(
     library: &Library,
     key: Result<String, LibraryError>,
 ) -> Result<ReleaseWatchRunResult, LibraryError> {
+    // The server owns Kakao checks while it advertises so: this legacy loop does nothing.
+    if library.server_release_checks_enabled("kakao") {
+        return Ok(ReleaseWatchRunResult {
+            checked: 0,
+            changed_collections: 0,
+            skipped: 0,
+            stop_reason: None,
+        });
+    }
     match key {
         Ok(key) => library.run_due_kakao_release_watch(&key),
         Err(LibraryError::AladinCredentialNotConfigured) => Ok(ReleaseWatchRunResult {

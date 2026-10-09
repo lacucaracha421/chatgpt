@@ -79,3 +79,27 @@ it("schedules a new failure deadline while the other provider continues", async 
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   expect(run.mock.calls[2][0]).toBe("mangadex");
 });
+
+it("leaves Kakao to the server while it owns the checks, and keeps MangaDex local", async () => {
+  vi.useFakeTimers();
+  const run = vi.fn(async (provider: string) => ({...status, provider: provider as "kakao", checked: 1, startedAt: "run"}));
+  const updateStatus = vi.fn(async (provider: string) => ({...status, provider: provider as "kakao", remaining: 1}));
+  const gateway = {collectionTracking: {
+    serverChecks: vi.fn(async (provider: string) => provider === "kakao"), updateStatus, runUpdates: run,
+  }} as unknown as LibraryGateway;
+  render(<Harness gateway={gateway} changed={vi.fn().mockResolvedValue(undefined)}/>);
+  await act(async () => {});
+  expect(run.mock.calls.map(([provider]) => provider)).toEqual(["mangadex"]);
+  expect(updateStatus.mock.calls.map(([provider]) => provider)).toEqual(["mangadex"]);
+});
+
+it("still checks Kakao locally when the server does not own it", async () => {
+  vi.useFakeTimers();
+  const run = vi.fn(async (provider: string) => ({...status, provider: provider as "kakao", checked: 1, startedAt: "run"}));
+  const gateway = {collectionTracking: {
+    serverChecks: vi.fn(async () => false), updateStatus: vi.fn(async () => ({...status, remaining: 1})), runUpdates: run,
+  }} as unknown as LibraryGateway;
+  render(<Harness gateway={gateway} changed={vi.fn().mockResolvedValue(undefined)}/>);
+  await act(async () => {});
+  expect(run.mock.calls.map(([provider]) => provider)).toEqual(["mangadex", "kakao"]);
+});

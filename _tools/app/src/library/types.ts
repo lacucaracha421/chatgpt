@@ -1319,6 +1319,11 @@ export type CollectionUpdateStatus = {
   stopReason: ReleaseWatchRunResult["stopReason"]; busy: boolean;
   consecutiveFailures?: number; lastFailure?: CollectionUpdateFailure | null;
 };
+/** The server's answer to 새로고침: `local` = it does not check this provider, keep the local check. */
+export type ServerReleaseCheck =
+  | { outcome: "local" }
+  | { outcome: "started"; status: CollectionUpdateStatus }
+  | { outcome: "rateLimited"; retryAfterSeconds: number | null };
 export type ReleaseInboxItem = { collectionId: string; collectionName: string; provider?: CollectionUpdateProvider; event: ReleaseWatchEvent };
 /** One manga Collection's 신간 data (`list_release_board`): the tablet's `releaseSchedule` shape, read from the library. */
 export type ReleaseBoardEntry = {
@@ -1333,6 +1338,10 @@ export type ReleaseBoardEntry = {
   };
 };
 export interface CollectionTrackingGateway {
+  /** Whether the server owns this provider's new-volume checks (the PC then does none itself). */
+  serverChecks?(provider: CollectionUpdateProvider): Promise<boolean>;
+  /** Ask the server to check now; only meaningful while `serverChecks` is true. */
+  requestServerCheck?(provider: CollectionUpdateProvider): Promise<ServerReleaseCheck>;
   runUpdates?(provider: CollectionUpdateProvider): Promise<CollectionUpdateStatus>;
   updateStatus?(provider: CollectionUpdateProvider): Promise<CollectionUpdateStatus>;
   ownershipTracking?(collectionId: string): Promise<number[]>;

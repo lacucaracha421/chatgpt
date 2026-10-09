@@ -233,7 +233,7 @@ impl Library {
         result
     }
 
-    fn authority_client(
+    pub(super) fn authority_client(
         &self,
     ) -> Result<Option<(CloudClient, super::credential::CloudCredential)>, LibraryError> {
         let config = self.cloud_sync_config()?;

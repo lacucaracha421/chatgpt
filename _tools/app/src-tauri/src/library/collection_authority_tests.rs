@@ -2464,7 +2464,7 @@ fn collection_authority_outbox_fifo_receipts_conflicts_drops_and_backoff() {
     adopt(&l, &s, json!({"works":[work("w",1)]}));
     // Later-batch commands keep the explicit blocked-head behavior; core writes
     // instead settle conflicts non-blockingly (covered below).
-    let ids: Vec<_> = ["updateWork", "bindProvider", "addArtwork", "updateWork"]
+    let ids: Vec<_> = ["updateWork", "recordReleaseEvent", "addArtwork", "updateWork"]
         .iter()
         .map(|command| enqueue(&l, &s, command))
         .collect();
@@ -4773,4 +4773,672 @@ fn collection_authority_manual_profile_unsupported_conflict_is_a_definitive_refu
     library.flush_collection_outbox_with(&status,&|_| Ok(CollectionDelivery::Conflict(json!({"code":"unsupportedCollectionCommand"}))),0).unwrap();
     assert_eq!(library.connection().unwrap().query_row("SELECT state FROM collection_authority_outbox ORDER BY seq LIMIT 1",[],|r|r.get::<_,String>(0)).unwrap(),"dropped");
     assert_eq!(library.av_person_profile_state("p").unwrap()["profile"]["heightCm"],160);
+}
+
+fn delivery_accepted(
+    s: &CollectionAuthorityStatus,
+    body: &Value,
+    cursor: i64,
+    entities: Value,
+) -> CollectionDelivery {
+    let mut receipt = envelope(s);
+    receipt["operationId"] = body["operationId"].clone();
+    receipt["commandType"] = body["commandType"].clone();
+    receipt["changed"] = json!(true);
+    receipt["authorityCursor"] = json!(cursor);
+    receipt["entities"] = entities;
+    CollectionDelivery::Accepted(receipt)
+}
+
+fn outbox_rows(l: &Library) -> Vec<(String, String, Option<String>, Option<String>)> {
+    l.connection()
+        .unwrap()
+        .prepare("SELECT command_type,state,drop_reason,conflict_code FROM collection_authority_outbox ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+#[test]
+fn collection_authority_source_revision_conflict_adopts_continues_and_refreshes_once() {
+    let (_temp, l, s) = fixture();
+    let mut second = source();
+    second["volumeNumber"] = json!(2);
+    second["providerItemId"] = json!("isbn2");
+    adopt(&l, &s, json!({"works":[work("w",1)],"volumeSources":[source(), second.clone()]}));
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        for number in [1, 2] {
+            let before = volume_source_state(&tx, "w", number, "kakao").unwrap();
+            tx.execute("UPDATE collection_volume_sources SET title='Local' WHERE volume_number=?1", [number]).unwrap();
+            let after = volume_source_state(&tx, "w", number, "kakao").unwrap();
+            enqueue_volume_source_changes(&tx, &s, &before, after).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    let conflicts = Cell::new(0);
+    let send = |body: &Value| {
+        if body["volumeNumber"] == 1 {
+            conflicts.set(conflicts.get() + 1);
+            let mut current = source();
+            current["title"] = json!("Server");
+            current["entityRevision"] = json!(2 + conflicts.get());
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"volumeSource":current}})))
+        } else {
+            let mut accepted = second.clone();
+            accepted["title"] = json!("Local");
+            accepted["entityRevision"] = json!(2);
+            Ok(delivery_accepted(&s, body, 5, json!({"volumeSources":[accepted]})))
+        }
+    };
+    let refreshes = RefCell::new(Vec::new());
+    let refresh = |body: &Value| {
+        refreshes.borrow_mut().push(body.clone());
+        let mut db = l.connection()?;
+        let tx = db.transaction()?;
+        let before = volume_source_state(&tx, "w", 1, "kakao")?;
+        tx.execute("UPDATE collection_volume_sources SET title='Fresh' WHERE volume_number=1", [])?;
+        let after = volume_source_state(&tx, "w", 1, "kakao")?;
+        enqueue_volume_source_changes(&tx, &s, &before, after)?;
+        tx.commit()?;
+        Ok(())
+    };
+    assert!(l.flush_collection_outbox_with_refresh(&s, &send, 0, &refresh).unwrap());
+    // The conflicted row is dropped, the next command still went out, nothing is blocked.
+    let rows = outbox_rows(&l);
+    assert_eq!(rows[0].1, "dropped");
+    assert_eq!(rows[0].2.as_deref(), Some("revisionConflict"));
+    assert_eq!(rows[1].1, "accepted");
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    // One refetch of the provider, queued against the adopted revision and marked as a retry.
+    assert_eq!(*refreshes.borrow(), vec![json!({"workId":"w","provider":"kakao"})]);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[2].3.as_deref(), Some("providerRefreshRetry"));
+    let queued = provider_commands(&l).pop().unwrap();
+    assert_eq!((queued["title"].clone(), queued["expectedRevision"].clone()), (json!("Fresh"), json!(3)));
+    // A second conflict on the refetched command only adopts and drops it (no loop).
+    assert!(l.flush_collection_outbox_with_refresh(&s, &send, 0, &refresh).unwrap());
+    assert_eq!(refreshes.borrow().len(), 1);
+    assert_eq!(outbox_rows(&l)[2].1, "dropped");
+    assert_eq!(count(&l, "notes_state WHERE key LIKE 'collectionRefreshAfterConflict:%'"), 0);
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    let title: String = l.connection().unwrap().query_row("SELECT title FROM collection_volume_sources WHERE volume_number=1", [], |r| r.get(0)).unwrap();
+    assert_eq!(title, "Server");
+}
+
+#[test]
+fn collection_authority_volume_revision_conflict_adopts_and_reasserts_user_edits() {
+    for (provider, refetches, requeued) in [(None, 0, 1), (Some("kakao"), 0, 1), (Some("mangadex"), 0, 1)] {
+        let (_temp, l, s) = fixture();
+        let mut volume = volume();
+        volume["coverArtworkId"] = Value::Null;
+        volume["sourceProvider"] = json!(provider);
+        adopt(&l, &s, json!({"works":[work("w",1)],"volumes":[volume.clone()]}));
+        {
+            let mut db = l.connection().unwrap();
+            let tx = db.transaction().unwrap();
+            let before = volume_state(&tx, "v").unwrap();
+            tx.execute("UPDATE collection_volumes SET sort_order=9 WHERE id='v'", []).unwrap();
+            let after = volume_state(&tx, "v").unwrap();
+            enqueue_volume_changes(&tx, &s, &before, after).unwrap();
+            tx.commit().unwrap();
+        }
+        let sent = RefCell::new(Vec::new());
+        let send = |body: &Value| {
+            sent.borrow_mut().push(body.clone());
+            if sent.borrow().len() == 1 {
+                let mut current = volume.clone();
+                current["sortOrder"] = json!(5);
+                current["entityRevision"] = json!(3);
+                Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"volume":current}})))
+            } else {
+                let mut accepted = volume.clone();
+                accepted["sortOrder"] = json!(9);
+                accepted["entityRevision"] = json!(4);
+                Ok(delivery_accepted(&s, body, 6, json!({"volumes":[accepted]})))
+            }
+        };
+        let refreshed = Cell::new(0);
+        let refresh = |body: &Value| {
+            assert_eq!(body["provider"], "kakao");
+            refreshed.set(refreshed.get() + 1);
+            Ok(())
+        };
+        l.flush_collection_outbox_with_refresh(&s, &send, 0, &refresh).unwrap();
+        let rows = outbox_rows(&l);
+        assert_eq!(rows[0].1, "dropped");
+        assert_eq!(rows[0].2.as_deref(), Some("revisionConflict"));
+        assert_eq!(refreshed.get(), refetches);
+        assert_eq!(rows.len(), 1 + requeued);
+        assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+        let sort: i64 = l.connection().unwrap().query_row("SELECT sort_order FROM collection_volumes WHERE id='v'", [], |r| r.get(0)).unwrap();
+        // Whatever the volume's source, the PC's own edit is merged onto the server's entity,
+        // re-asserted against the adopted revision, and applies. No local refetch is involved.
+        assert_eq!(sent.borrow()[1]["expectedRevision"], 3);
+        assert_eq!(sent.borrow()[1]["sortOrder"], 9);
+        assert_eq!(rows[1].1, "accepted");
+        assert_eq!(rows[1].3.as_deref(), Some("providerRefreshRetry"));
+        assert_eq!(sort, 9);
+    }
+}
+
+#[test]
+fn collection_authority_bind_behind_a_server_write_is_rederived_and_applies() {
+    let server_binding = |external: &str, revision: i64| {
+        let mut b = binding();
+        b["provider"] = json!("kakao");
+        b["externalId"] = json!(external);
+        b["config"] = Value::Null;
+        b["entityRevision"] = json!(revision);
+        b
+    };
+    let queue_bind = |l: &Library, s: &CollectionAuthorityStatus, external: &str| {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        let input = super::super::models::ExternalBindingInput {
+            provider: "kakao".into(),
+            external_id: external.into(),
+            provider_config_json: None,
+            provider_data_json: None,
+            last_synced_at: None,
+        };
+        enqueue_provider_snapshot(&tx, s, "w", &input).unwrap();
+        tx.commit().unwrap();
+    };
+    // 1. The user's explicit bind still differs from the server's: re-derived, then applied.
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server_binding("book-1", 1)]}));
+    queue_bind(&l, &s, "book-2");
+    let sent = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len() == 1 {
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server_binding("book-1", 2)}})))
+        } else {
+            Ok(delivery_accepted(&s, body, 7, json!({"bindings":[server_binding("book-2", 3)]})))
+        }
+    };
+    assert!(l.flush_collection_outbox_with(&s, &send, 0).unwrap());
+    let sent = sent.borrow();
+    assert_eq!(sent.len(), 2);
+    assert_eq!((sent[0]["expectedRevision"].clone(), sent[1]["expectedRevision"].clone()), (json!(1), json!(2)));
+    assert_eq!(sent[1]["externalId"], "book-2");
+    let rows = outbox_rows(&l);
+    assert_eq!((rows[0].1.as_str(), rows[0].2.as_deref()), ("dropped", Some("revisionConflict")));
+    assert_eq!((rows[1].1.as_str(), rows[1].3.as_deref()), ("accepted", Some("providerBindRetry:1")));
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    let external: String = l.connection().unwrap().query_row("SELECT external_id FROM collection_external_bindings WHERE collection_id='w' AND provider='kakao'", [], |r| r.get(0)).unwrap();
+    assert_eq!(external, "book-2");
+    // 2. The server already holds the user's choice: adopted, nothing queued, not blocked.
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server_binding("book-1", 1)]}));
+    queue_bind(&l, &s, "book-2");
+    l.flush_collection_outbox_with(&s, &|_| Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server_binding("book-2", 2)}}))), 0).unwrap();
+    assert_eq!(outbox_rows(&l).len(), 1);
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    // 3. A server that keeps winning cannot wedge the queue: at most three re-derivations.
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server_binding("book-1", 1)]}));
+    queue_bind(&l, &s, "book-2");
+    let revision = Cell::new(1);
+    l.flush_collection_outbox_with(&s, &|_| {
+        revision.set(revision.get() + 1);
+        Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server_binding("book-1", revision.get())}})))
+    }, 0).unwrap();
+    let rows = outbox_rows(&l);
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().all(|r| r.1 == "dropped"));
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+}
+
+fn server_release_write(rev: i64) -> Value {
+    // A release write on the server bumps the work revision and its derived release state.
+    let mut w = work("w", rev);
+    w["derived"]["releaseEvents"] = json!([{"eventId":"e","provider":"kakao","kind":"new_volume","volumeNumber":3,"previousValue":null,"currentValue":null,"detectedAt":NOW,"readAt":null}]);
+    w["derived"]["unreadReleaseCount"] = json!(1);
+    w
+}
+
+#[test]
+fn collection_authority_delete_behind_a_server_release_write_is_reasserted_not_undone() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)]}));
+    l.delete_collection("w").unwrap();
+    assert!(l.get_collection("w").is_err());
+    let sent = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len() == 1 {
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":server_release_write(2)}})))
+        } else {
+            let mut trashed = server_release_write(3);
+            trashed["lifecycle"] = json!("trashed");
+            trashed["trashedAt"] = json!(NOW);
+            Ok(delivery_accepted(&s, body, 4, json!({"works":[trashed]})))
+        }
+    };
+    assert!(l.flush_collection_outbox_with(&s, &send, 0).unwrap());
+    let sent = sent.borrow();
+    assert_eq!(sent.len(), 2);
+    assert_eq!((sent[0]["expectedRevision"].clone(), sent[1]["expectedRevision"].clone()), (json!(1), json!(2)));
+    let rows = outbox_rows(&l);
+    assert_eq!((rows[0].1.as_str(), rows[0].2.as_deref()), ("dropped", Some("revisionConflict")));
+    assert_eq!((rows[1].1.as_str(), rows[1].3.as_deref()), ("accepted", Some("workIntentRetry:1")));
+    // The work never came back, and nothing is blocked.
+    assert!(l.get_collection("w").is_err());
+    assert_eq!(count(&l, "collection_authority_trash"), 1);
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    // The server already trashed it: nothing is queued and the work stays deleted.
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)]}));
+    l.delete_collection("w").unwrap();
+    let mut trashed = server_release_write(2);
+    trashed["lifecycle"] = json!("trashed");
+    trashed["trashedAt"] = json!(NOW);
+    l.flush_collection_outbox_with(&s, &|_| Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":trashed.clone()}}))), 0).unwrap();
+    assert_eq!(outbox_rows(&l).len(), 1);
+    assert!(l.get_collection("w").is_err());
+}
+
+#[test]
+fn collection_authority_cover_and_range_behind_a_server_write_are_reasserted() {
+    // selectArtwork
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)],"artworks":[art()]}));
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        enqueue_artwork_selection(&tx, &s, "w", "cover", Some("art")).unwrap();
+        tx.commit().unwrap();
+    }
+    let sent = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len() == 1 {
+            let mut w = server_release_write(2);
+            w["selection"]["work"] = json!("someone-elses");
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":w}})))
+        } else {
+            let mut w = server_release_write(3);
+            w["selection"]["work"] = json!("art");
+            Ok(delivery_accepted(&s, body, 5, json!({"works":[w]})))
+        }
+    };
+    assert!(l.flush_collection_outbox_with(&s, &send, 0).unwrap());
+    let sent = sent.borrow();
+    assert_eq!(sent.len(), 2);
+    assert_eq!((sent[1]["artworkId"].clone(), sent[1]["expectedArtworkId"].clone()), (json!("art"), json!("someone-elses")));
+    let rows = outbox_rows(&l);
+    assert_eq!((rows[0].1.as_str(), rows[1].1.as_str(), rows[1].3.as_deref()), ("dropped", "accepted", Some("workIntentRetry:1")));
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    // The server already shows the chosen cover: nothing is queued.
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)],"artworks":[art()]}));
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        enqueue_artwork_selection(&tx, &s, "w", "cover", Some("art")).unwrap();
+        tx.commit().unwrap();
+    }
+    l.flush_collection_outbox_with(&s, &|_| {
+        let mut w = server_release_write(2);
+        w["selection"]["work"] = json!("art");
+        Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":w}})))
+    }, 0).unwrap();
+    assert_eq!(outbox_rows(&l).len(), 1);
+    // setVolumeRange
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)]}));
+    l.set_collection_volume_range("w", Some(2), Some(4), true).unwrap();
+    let sent = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len() == 1 {
+            let mut w = server_release_write(2);
+            w["derived"]["volumeRange"] = json!({"minVolume":3,"maxVolume":5,"hideConnectionPrompt":false});
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":w}})))
+        } else {
+            let mut w = server_release_write(3);
+            w["derived"]["volumeRange"] = json!({"minVolume":2,"maxVolume":4,"hideConnectionPrompt":true});
+            Ok(delivery_accepted(&s, body, 6, json!({"works":[w]})))
+        }
+    };
+    assert!(l.flush_collection_outbox_with(&s, &send, 0).unwrap());
+    let sent = sent.borrow();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1]["expectedRange"], json!({"minVolume":3,"maxVolume":5,"hideConnectionPrompt":false}));
+    assert_eq!((sent[1]["minVolume"].clone(), sent[1]["maxVolume"].clone()), (json!(2), json!(4)));
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    let range = crate::library::collection_volume_range::load(&*l.connection().unwrap(), "w").unwrap();
+    assert_eq!((range.min_volume, range.max_volume), (Some(2), Some(4)));
+}
+
+#[test]
+fn collection_authority_work_intent_retries_are_capped_and_never_block() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)]}));
+    l.set_collection_volume_range("w", Some(2), Some(4), true).unwrap();
+    let revision = Cell::new(1);
+    let sends = Cell::new(0);
+    l.flush_collection_outbox_with(&s, &|_| {
+        sends.set(sends.get() + 1);
+        revision.set(revision.get() + 1);
+        let mut w = server_release_write(revision.get());
+        w["derived"]["volumeRange"] = json!({"minVolume":7,"maxVolume":9,"hideConnectionPrompt":false});
+        Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":w}})))
+    }, 0).unwrap();
+    // The original plus three re-assertions; then the server's state stands.
+    assert_eq!(sends.get(), 4);
+    let rows = outbox_rows(&l);
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().all(|r| r.1 == "dropped"));
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    let range = crate::library::collection_volume_range::load(&*l.connection().unwrap(), "w").unwrap();
+    assert_eq!((range.min_volume, range.max_volume), (Some(7), Some(9)));
+}
+
+fn two_range_edits() -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
+    let (temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)]}));
+    l.set_collection_volume_range("w", Some(2), Some(4), true).unwrap();
+    l.set_collection_volume_range("w", Some(3), Some(5), true).unwrap();
+    (temp, l, s)
+}
+
+#[test]
+fn collection_authority_older_intent_never_wins_behind_a_newer_one_after_server_bumps() {
+    for bumps in [1_i64, 2] {
+        let (_temp, l, s) = two_range_edits();
+        let sent = RefCell::new(Vec::new());
+        let send = |body: &Value| {
+            sent.borrow_mut().push(body.clone());
+            let attempt = sent.borrow().iter().filter(|b| b["minVolume"] == 3).count() as i64;
+            // The server keeps bumping the work (release writes) for the first `bumps` rounds.
+            if body["minVolume"] == 2 || attempt <= bumps {
+                let mut w = server_release_write(1 + sent.borrow().len() as i64);
+                w["derived"]["volumeRange"] = json!({"minVolume":9,"maxVolume":9,"hideConnectionPrompt":false});
+                Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":w}})))
+            } else {
+                let mut w = server_release_write(9);
+                w["derived"]["volumeRange"] = json!({"minVolume":3,"maxVolume":5,"hideConnectionPrompt":true});
+                Ok(delivery_accepted(&s, body, 8, json!({"works":[w]})))
+            }
+        };
+        l.flush_collection_outbox_with(&s, &send, 0).unwrap();
+        let sent = sent.borrow();
+        // The older (2..4) intent is sent exactly once and never re-asserted behind the newer one.
+        assert_eq!(sent.iter().filter(|b| b["minVolume"] == 2).count(), 1);
+        assert_eq!(sent.iter().filter(|b| b["minVolume"] == 3).count() as i64, 1 + bumps);
+        let rows = outbox_rows(&l);
+        assert_eq!(rows[0].1, "dropped");
+        assert_eq!(rows.last().unwrap().1, "accepted");
+        assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+        let range = crate::library::collection_volume_range::load(&*l.connection().unwrap(), "w").unwrap();
+        assert_eq!((range.min_volume, range.max_volume), (Some(3), Some(5)));
+    }
+}
+
+#[test]
+fn collection_authority_two_volume_edits_keep_the_newer_after_a_server_bump() {
+    let (_temp, l, s) = fixture();
+    let mut volume = volume();
+    volume["coverArtworkId"] = Value::Null;
+    adopt(&l, &s, json!({"works":[work("w", 1)],"volumes":[volume.clone()]}));
+    for sort in [9, 10] {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        let before = volume_state(&tx, "v").unwrap();
+        tx.execute("UPDATE collection_volumes SET sort_order=?1 WHERE id='v'", [sort]).unwrap();
+        let after = volume_state(&tx, "v").unwrap();
+        enqueue_volume_changes(&tx, &s, &before, after).unwrap();
+        tx.commit().unwrap();
+    }
+    let sent = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len() <= 2 {
+            let mut current = volume.clone();
+            current["entityRevision"] = json!(4);
+            current["displayLabel"] = json!("server label");
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"volume":current}})))
+        } else {
+            let mut accepted = volume.clone();
+            accepted["sortOrder"] = json!(10);
+            accepted["entityRevision"] = json!(5);
+            Ok(delivery_accepted(&s, body, 9, json!({"volumes":[accepted]})))
+        }
+    };
+    l.flush_collection_outbox_with(&s, &send, 0).unwrap();
+    let sent = sent.borrow();
+    assert_eq!(sent.len(), 3);
+    // Only the newer edit is re-asserted, against the adopted revision, on top of the server's
+    // other fields (its label survives).
+    assert_eq!((sent[2]["sortOrder"].clone(), sent[2]["expectedRevision"].clone()), (json!(10), json!(4)));
+    assert_eq!(sent[2]["displayLabel"], "server label");
+    assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
+    let sort: i64 = l.connection().unwrap().query_row("SELECT sort_order FROM collection_volumes WHERE id='v'", [], |r| r.get(0)).unwrap();
+    assert_eq!(sort, 10);
+}
+
+#[test]
+fn collection_authority_ownership_count_reassert_uses_the_servers_count() {
+    let (_temp, l, s) = fixture();
+    let mut w = work("w", 1);
+    w["derived"]["ownedVolumes"] = json!([{"editionIndex":0,"count":5}]);
+    adopt(&l, &s, json!({"works":[w]}));
+    l.set_owned_volume_count("w", 0, 3).unwrap();
+    let sent = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        let mut w = server_release_write(2 + sent.borrow().len() as i64);
+        if sent.borrow().len() == 1 {
+            w["derived"]["ownedVolumes"] = json!([{"editionIndex":0,"count":6}]);
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":w}})))
+        } else {
+            w["derived"]["ownedVolumes"] = json!([{"editionIndex":0,"count":3}]);
+            Ok(delivery_accepted(&s, body, 4, json!({"works":[w]})))
+        }
+    };
+    l.flush_collection_outbox_with(&s, &send, 0).unwrap();
+    let sent = sent.borrow();
+    assert_eq!(sent.len(), 2);
+    // Expected count is the server's, so the re-assertion applies instead of conflicting again.
+    assert_eq!((sent[1]["count"].clone(), sent[1]["expectedCount"].clone()), (json!(3), json!(6)));
+    assert_eq!(outbox_rows(&l)[1].1, "accepted");
+}
+
+#[test]
+fn collection_authority_unreadable_current_work_leaves_the_previous_behaviour_untouched() {
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w", 1)],"artworks":[art()]}));
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        enqueue_artwork_selection(&tx, &s, "w", "cover", Some("art")).unwrap();
+        tx.commit().unwrap();
+    }
+    let mut bogus = server_release_write(2);
+    bogus["lifecycle"] = json!("bogus");
+    l.flush_collection_outbox_with(&s, &|_| Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"work":bogus.clone()}}))), 0).unwrap();
+    // Nothing was half-applied: the row is not dropped, it blocks as before.
+    assert_eq!(outbox_rows(&l)[0].1, "blocked");
+}
+
+#[test]
+fn collection_authority_config_only_bind_conflict_is_adopted_and_a_bind_with_snapshot_is_rebuilt() {
+    let server_binding = |external: &str, config: Value, revision: i64| {
+        let mut b = binding();
+        b["provider"] = json!("kakao");
+        b["externalId"] = json!(external);
+        b["config"] = config;
+        b["entityRevision"] = json!(revision);
+        b
+    };
+    let input = |external: &str, config: Option<&str>, data: Option<&str>| super::super::models::ExternalBindingInput {
+        provider: "kakao".into(),
+        external_id: external.into(),
+        provider_config_json: config.map(str::to_owned),
+        provider_data_json: data.map(str::to_owned),
+        last_synced_at: None,
+    };
+    // M2: the identity is unchanged, only the config differs: adopt, queue nothing.
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server_binding("book-1", json!({"k":1}), 1)]}));
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        enqueue_provider_snapshot(&tx, &s, "w", &input("book-1", Some("{\"k\":2}"), None)).unwrap();
+        tx.commit().unwrap();
+    }
+    l.flush_collection_outbox_with(&s, &|_| Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server_binding("book-1", json!({"k":3}), 2)}}))), 0).unwrap();
+    assert_eq!(outbox_rows(&l).len(), 1);
+    let config: String = l.connection().unwrap().query_row("SELECT provider_config_json FROM collection_external_bindings WHERE collection_id='w'", [], |r| r.get(0)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&config).unwrap(), json!({"k":3}));
+    // A different identity with a snapshot: the bind is re-asserted, the snapshot composed
+    // for it is dropped and refetched once the bind has been applied.
+    let (_temp, l, s) = fixture();
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server_binding("book-1", Value::Null, 1)]}));
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        enqueue_provider_snapshot(&tx, &s, "w", &input("book-2", None, Some("{\"title\":\"x\"}"))).unwrap();
+        tx.commit().unwrap();
+    }
+    let kinds: Vec<_> = outbox_rows(&l).into_iter().map(|r| r.0).collect();
+    assert_eq!(kinds, vec!["bindProvider", "applyProviderSnapshot"]);
+    let sent = RefCell::new(Vec::new());
+    let refreshed = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len() == 1 {
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server_binding("book-1", Value::Null, 2)}})))
+        } else {
+            Ok(delivery_accepted(&s, body, 5, json!({"bindings":[server_binding("book-2", Value::Null, 3)]})))
+        }
+    };
+    let refresh = |body: &Value| { refreshed.borrow_mut().push(body.clone()); Ok(()) };
+    l.flush_collection_outbox_with_refresh(&s, &send, 0, &refresh).unwrap();
+    assert_eq!(sent.borrow().len(), 2);
+    assert_eq!(sent.borrow()[1]["commandType"], "bindProvider");
+    let rows = outbox_rows(&l);
+    assert_eq!(rows[1].2.as_deref(), Some("dependencyDropped"));
+    assert_eq!(*refreshed.borrow(), vec![json!({"workId":"w","provider":"kakao"})]);
+}
+
+#[test]
+fn collection_authority_deferred_refresh_skips_server_owned_kakao_and_marks_only_its_own_rows() {
+    let setup = |advertised: bool| {
+        let (temp, l, s) = fixture();
+        let mut second = source();
+        second["volumeNumber"] = json!(2);
+        second["providerItemId"] = json!("isbn2");
+        let mut volume = volume();
+        volume["coverArtworkId"] = Value::Null;
+        adopt(&l, &s, json!({"works":[work("w",1)],"volumeSources":[source(), second],"volumes":[volume]}));
+        if advertised {
+            let id = l.library_id().unwrap();
+            l.connection().unwrap().execute(
+                "INSERT INTO notes_state(key,value) VALUES('personProfileFieldsStatus',?1)",
+                [json!({"active":true,"libraryId":id,"epoch":1,"features":["serverReleaseChecks:kakao"]}).to_string()],
+            ).unwrap();
+        }
+        {
+            let mut db = l.connection().unwrap();
+            let tx = db.transaction().unwrap();
+            let before = volume_source_state(&tx, "w", 1, "kakao").unwrap();
+            tx.execute("UPDATE collection_volume_sources SET title='Local' WHERE volume_number=1", []).unwrap();
+            let after = volume_source_state(&tx, "w", 1, "kakao").unwrap();
+            enqueue_volume_source_changes(&tx, &s, &before, after).unwrap();
+            tx.commit().unwrap();
+        }
+        (temp, l, s)
+    };
+    let conflict_first = |s: &CollectionAuthorityStatus, body: &Value| -> Result<CollectionDelivery, LibraryError> {
+        if body["commandType"] == "upsertVolumeSource" && body["title"] == "Local" {
+            let mut current = source();
+            current["entityRevision"] = json!(3);
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"volumeSource":current}})))
+        } else {
+            Ok(delivery_accepted(s, body, 7, json!({})))
+        }
+    };
+    // Server-owned Kakao: adoption is enough, no local refetch.
+    let (_temp, l, s) = setup(true);
+    let calls = Cell::new(0);
+    l.flush_collection_outbox_with_refresh(&s, &|body| conflict_first(&s, body), 0, &|_| { calls.set(calls.get() + 1); Ok(()) }).unwrap();
+    assert_eq!(calls.get(), 0);
+    assert_eq!(count(&l, "notes_state WHERE key LIKE 'collectionRefreshAfterConflict:%'"), 0);
+    // Local checks: the refetch marks the rows it produced and not a user's edit queued meanwhile.
+    let (_temp, l, s) = setup(false);
+    let refresh = |_: &Value| {
+        let mut db = l.connection()?;
+        let tx = db.transaction()?;
+        let before = volume_source_state(&tx, "w", 2, "kakao")?;
+        tx.execute("UPDATE collection_volume_sources SET title='Fresh' WHERE volume_number=2", [])?;
+        let after = volume_source_state(&tx, "w", 2, "kakao")?;
+        enqueue_volume_source_changes(&tx, &s, &before, after)?;
+        let volume_before = volume_state(&tx, "v")?;
+        tx.execute("UPDATE collection_volumes SET sort_order=42 WHERE id='v'", [])?;
+        let volume_after = volume_state(&tx, "v")?;
+        enqueue_volume_changes(&tx, &s, &volume_before, volume_after)?;
+        tx.commit()?;
+        Ok(())
+    };
+    // Keep the refreshed rows pending: nothing is delivered after the conflict.
+    let first = Cell::new(true);
+    let send_once = |body: &Value| {
+        if first.replace(false) { conflict_first(&s, body) } else { Ok(CollectionDelivery::Retry) }
+    };
+    l.flush_collection_outbox_with_refresh(&s, &send_once, 0, &refresh).unwrap();
+    let rows = outbox_rows(&l);
+    let marked: Vec<_> = rows.iter().filter(|r| r.3.as_deref() == Some("providerRefreshRetry")).map(|r| r.0.clone()).collect();
+    assert_eq!(marked, vec!["upsertVolumeSource"]);
+    assert!(rows.iter().any(|r| r.0 == "upsertVolume" && r.3.is_none()));
+}
+
+#[test]
+fn collection_authority_user_mangadex_cover_pick_survives_a_server_bump() {
+    let (_temp, l, s) = fixture();
+    let mut volume = volume();
+    volume["coverArtworkId"] = Value::Null;
+    volume["sourceProvider"] = json!("mangadex");
+    adopt(&l, &s, json!({"works":[work("w",1)],"volumes":[volume.clone()]}));
+    {
+        let mut db = l.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        let before = volume_state(&tx, "v").unwrap();
+        tx.execute("UPDATE collection_volumes SET source_cover_id='picked' WHERE id='v'", []).unwrap();
+        let after = volume_state(&tx, "v").unwrap();
+        enqueue_volume_changes(&tx, &s, &before, after).unwrap();
+        tx.commit().unwrap();
+    }
+    let sent = RefCell::new(Vec::new());
+    let send = |body: &Value| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len() == 1 {
+            let mut current = volume.clone();
+            current["sortOrder"] = json!(5);
+            current["entityRevision"] = json!(3);
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"volume":current}})))
+        } else {
+            let mut accepted = volume.clone();
+            accepted["sortOrder"] = json!(5);
+            accepted["sourceCoverId"] = json!("picked");
+            accepted["entityRevision"] = json!(4);
+            Ok(delivery_accepted(&s, body, 6, json!({"volumes":[accepted]})))
+        }
+    };
+    let refreshed = Cell::new(0);
+    l.flush_collection_outbox_with_refresh(&s, &send, 0, &|_| { refreshed.set(refreshed.get() + 1); Ok(()) }).unwrap();
+    let sent = sent.borrow();
+    assert_eq!(sent.len(), 2);
+    // The user's pick is re-sent on top of the server's other fields; no refetch replaces it.
+    assert_eq!((sent[1]["sourceCoverId"].clone(), sent[1]["sortOrder"].clone(), sent[1]["expectedRevision"].clone()), (json!("picked"), json!(5), json!(3)));
+    assert_eq!(refreshed.get(), 0);
+    assert_eq!(outbox_rows(&l)[1].1, "accepted");
+    let cover: Option<String> = l.connection().unwrap().query_row("SELECT source_cover_id FROM collection_volumes WHERE id='v'", [], |r| r.get(0)).unwrap();
+    assert_eq!(cover.as_deref(), Some("picked"));
 }

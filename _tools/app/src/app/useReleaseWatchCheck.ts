@@ -27,6 +27,8 @@ export function useReleaseWatchCheck(
           for (const provider of ["mangadex", "kakao"] as CollectionUpdateProvider[]) {
             if (!active || getWorkloadProfile().restricted) break;
             try {
+              // The server checks Kakao by itself while it advertises so; MangaDex stays here.
+              if (provider === "kakao" && await api.serverChecks?.(provider)) continue;
               const before = await api.updateStatus(provider);
               if (!active || getWorkloadProfile().restricted) break;
               if (!before.remaining) continue;

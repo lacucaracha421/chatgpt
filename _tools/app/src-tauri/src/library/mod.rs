@@ -131,6 +131,7 @@ mod auto_tags_tests;
 pub(crate) mod character_suggestions;
 pub mod collection_tracking;
 pub(crate) mod collection_updates;
+pub(crate) mod server_release_checks;
 pub mod error;
 mod external_binding;
 pub(crate) mod external_vault;

@@ -9,6 +9,14 @@ pub(crate) enum CollectionDelivery {
     Retry,
 }
 
+/// `POST /v1/collections/release-checks/run`. `Unavailable`: the server has no such check
+/// (switch off, older server, no Kakao key, authority inactive) and the PC checks itself.
+pub(crate) enum ReleaseCheckRun {
+    Started(Value),
+    Unavailable,
+    RateLimited(Option<u64>),
+}
+
 fn definitive_refusal(status: u16, value: Option<Value>) -> Value {
     value.as_ref().map(|v| &v["detail"])
         .filter(|v| v["code"].is_string()).cloned().unwrap_or_else(|| {
@@ -17,6 +25,53 @@ fn definitive_refusal(status: u16, value: Option<Value>) -> Value {
 }
 
 impl CloudClient {
+    /// `GET /v1/collections/release-checks/status`; `None` while the server has the checks off.
+    pub(crate) fn release_checks_status(&self, token: &str) -> Result<Option<Value>, LibraryError> {
+        let mut response = self
+            .coded_agent()?
+            .get(self.endpoint("/v1/collections/release-checks/status")?)
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        match response.status().as_u16() {
+            200 => read_json_bounded(&mut response, 256 * 1024).map(Some),
+            404 => Ok(None),
+            401 | 403 => Err(LibraryError::CloudUnauthorized),
+            _ => Err(LibraryError::CloudRequestUnavailable),
+        }
+    }
+
+    /// Wake the server's release checker for `provider` now.
+    pub(crate) fn release_checks_run(
+        &self,
+        provider: &str,
+        token: &str,
+    ) -> Result<ReleaseCheckRun, LibraryError> {
+        let _permit = self.send_permit()?;
+        let mut response = self
+            .coded_agent()?
+            .post(self.endpoint("/v1/collections/release-checks/run")?)
+            .header("Authorization", bearer(token)?)
+            .send_json(&serde_json::json!({ "provider": provider }))
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        match response.status().as_u16() {
+            200 => read_json_bounded(&mut response, 256 * 1024).map(ReleaseCheckRun::Started),
+            404 | 409 | 503 => Ok(ReleaseCheckRun::Unavailable),
+            429 => {
+                let header = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse::<u64>().ok());
+                let body: Option<Value> = read_json_bounded(&mut response, 64 * 1024).ok();
+                let detail = body.as_ref().and_then(|v| v["detail"]["retryAfter"].as_u64());
+                Ok(ReleaseCheckRun::RateLimited(header.or(detail)))
+            }
+            401 | 403 => Err(LibraryError::CloudUnauthorized),
+            _ => Err(LibraryError::CloudRequestUnavailable),
+        }
+    }
+
     pub(crate) fn collection_authority_read(
         &self,
         path: &str,

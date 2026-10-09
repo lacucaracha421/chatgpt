@@ -110,6 +110,10 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "local-only (stays): release fixtures",
     ),
     (
+        "library/kakao_refresh_tests.rs",
+        "local-only (stays): Kakao refresh parity fixtures",
+    ),
+    (
         "library/collection_updates/tests.rs",
         "local-only (stays): worker fixtures",
     ),

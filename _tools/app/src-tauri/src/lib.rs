@@ -405,6 +405,8 @@ pub fn run() {
             commands::run_due_release_watch,
             commands::run_collection_updates,
             commands::get_collection_update_status,
+            commands::server_release_checks_enabled,
+            commands::request_server_release_check,
             commands::list_ownership_tracking,
             commands::create_collection,
             commands::update_collection,

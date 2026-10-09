@@ -264,6 +264,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   collectionTracking: {
     runUpdates: (provider) => invoke("run_collection_updates", { provider }),
     updateStatus: (provider) => invoke("get_collection_update_status", { provider }),
+    serverChecks: (provider) => invoke("server_release_checks_enabled", { provider }),
+    requestServerCheck: (provider) => invoke("request_server_release_check", { provider }),
     ownershipTracking: (collectionId) => invoke("list_ownership_tracking", { collectionId }),
     setOwnedCount: (collectionId, editionIndex, count) => invoke("set_owned_volume_count", { collectionId, editionIndex, count }),
     listOwnership: (collectionId) => invoke("list_volume_ownership", { collectionId }),

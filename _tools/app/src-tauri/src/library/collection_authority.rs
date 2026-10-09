@@ -2747,6 +2747,125 @@ fn backoff(attempts: i64) -> i64 {
     (5_i64.saturating_mul(1_i64 << attempts.clamp(0, 10))).min(3600)
 }
 
+const BIND_RETRY_MARKER: &str = "providerBindRetry:";
+const BIND_RETRY_LIMIT: i64 = 3;
+const REFRESH_RETRY_MARKER: &str = "providerRefreshRetry";
+const REFRESH_AFTER_CONFLICT: &str = "collectionRefreshAfterConflict:";
+
+/// Commands whose revision conflicts are settled by adoption instead of blocking:
+/// the server (release checker) writes these entities too. Returns the key of the
+/// current entity in the conflict detail and its feed section.
+fn provider_conflict_target(body: &Value) -> Option<(&'static str, &'static str)> {
+    match body["commandType"].as_str()? {
+        "bindProvider" => Some(("binding", "bindings")),
+        "upsertVolumeSource" => Some(("volumeSource", "volumeSources")),
+        "upsertVolume" => Some(("volume", "volumes")),
+        _ => None,
+    }
+}
+
+/// Re-derive a refused explicit bind against the adopted binding: nothing is queued when
+/// the server already holds the same identity and config, otherwise a fresh bind with the
+/// predicted revision is queued (and shown locally) so the user's choice is not lost.
+fn rederive_bind(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    body: &Value,
+    attempt: i64,
+) -> Result<(), LibraryError> {
+    let work = text(body, "workId")?;
+    let provider = text(body, "provider")?;
+    let external = text(body, "externalId")?;
+    let input = super::models::ExternalBindingInput {
+        provider: provider.to_owned(),
+        external_id: external.to_owned(),
+        provider_config_json: optional_json(&body["config"]),
+        provider_data_json: None,
+        last_synced_at: None,
+    };
+    let before: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(seq),0) FROM collection_authority_outbox",
+        [],
+        |r| r.get(0),
+    )?;
+    enqueue_provider_snapshot(tx, status, work, &input)?;
+    let queued = tx.execute(
+        "UPDATE collection_authority_outbox SET conflict_code=?2 WHERE seq>?1 AND command_type='bindProvider'",
+        params![before, format!("{BIND_RETRY_MARKER}{attempt}")],
+    )?;
+    if queued > 0 {
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute("INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,provider_config_json,last_synced_at,created_at,updated_at) VALUES(?1,?2,?3,NULL,?4,NULL,?5,?5) ON CONFLICT(collection_id,provider) DO UPDATE SET external_id=excluded.external_id,provider_config_json=excluded.provider_config_json,updated_at=excluded.updated_at",
+            params![work, provider, external, optional_json(&body["config"]), now])?;
+    }
+    Ok(())
+}
+
+/// Whether a later queued row addresses the same target as `body` (row `seq`). Such a row
+/// was composed on top of this one, so recovering this one behind it would invert them.
+fn superseded_by_later_row(
+    tx: &Transaction<'_>,
+    seq: i64,
+    body: &Value,
+) -> Result<bool, LibraryError> {
+    let (commands, fields): (&[&str], &[&str]) = match body["commandType"].as_str() {
+        Some("upsertVolume") => (&["upsertVolume"], &["volumeId"]),
+        Some("upsertVolumeSource") => {
+            (&["upsertVolumeSource"], &["workId", "volumeNumber", "provider"])
+        }
+        Some("bindProvider") => (&["bindProvider", "unbindProvider"], &["workId", "provider"]),
+        Some("selectArtwork") => (&["selectArtwork"], &["workId", "slot"]),
+        Some("setVolumeRange") => (&["setVolumeRange"], &["workId"]),
+        Some("setReleaseSubscription") => (&["setReleaseSubscription"], &["workId"]),
+        Some("deleteWork" | "restoreWork") => (&["deleteWork", "restoreWork"], &["workId"]),
+        Some("setOwnershipTracking") => (
+            &["setOwnershipTracking", "setVolumeOwnership"],
+            &["workId", "editionIndex"],
+        ),
+        _ => return Ok(false),
+    };
+    let list = commands.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(",");
+    let mut sql = format!("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE seq>?1 AND state IN ('pending','blocked') AND command_type IN ({list})");
+    let mut values = vec![rusqlite::types::Value::Integer(seq)];
+    for (index, field) in fields.iter().enumerate() {
+        sql.push_str(&format!(" AND json_extract(payload,'$.{field}') IS ?{}", index + 2));
+        values.push(sql_value(&body[*field])?);
+    }
+    sql.push(')');
+    Ok(tx.query_row(&sql, rusqlite::params_from_iter(values), |r| r.get(0))?)
+}
+
+/// Mark the volume/source rows a provider refresh just queued, so a conflict on them only
+/// adopts and drops (no refresh loop). Rows of other origins (a user's edit queued meanwhile)
+/// and rows that already carry a marker are left alone.
+fn mark_refresh_rows(
+    db: &Connection,
+    before: i64,
+    work: &str,
+    provider: &str,
+) -> Result<(), LibraryError> {
+    db.execute("UPDATE collection_authority_outbox SET conflict_code=?4 WHERE seq>?1 AND state='pending' AND conflict_code IS NULL AND json_extract(payload,'$.workId')=?2 AND ((command_type='upsertVolumeSource' AND json_extract(payload,'$.provider')=?3) OR (command_type='upsertVolume' AND json_extract(payload,'$.sourceProvider')=?3))",params![before,work,provider,REFRESH_RETRY_MARKER])?;
+    Ok(())
+}
+
+const WORK_RETRY_MARKER: &str = "workIntentRetry:";
+const WORK_RETRY_LIMIT: i64 = 3;
+
+/// Commands that carry a work-level user intent and can lose to a server write on the work.
+fn work_intent_command(body: &Value) -> bool {
+    matches!(
+        body["commandType"].as_str(),
+        Some(
+            "deleteWork"
+                | "restoreWork"
+                | "selectArtwork"
+                | "setVolumeRange"
+                | "setOwnershipTracking"
+                | "setReleaseSubscription"
+        )
+    )
+}
+
 fn core_command(command: &str) -> bool {
     matches!(
         command,
@@ -3366,7 +3485,9 @@ impl Library {
                         // Refetch outside the library lock. The retry is a new immutable operation,
                         // bound to the newly received merge base, and gets exactly one attempt.
                         let work = text(&body, "workId")?;
+                        let before: i64 = self.connection()?.query_row("SELECT COALESCE(MAX(seq),0) FROM collection_authority_outbox",[],|r|r.get(0))?;
                         let refetched = refresh(&body);
+                        mark_refresh_rows(&*self.connection()?, before, work, text(&body, "provider")?)?;
                         self.connection()?.execute(
                             "DELETE FROM notes_state WHERE key=?1",
                             [format!(
@@ -3378,6 +3499,23 @@ impl Library {
                             self.connection()?.execute("UPDATE collection_authority_outbox SET last_error='providerSnapshotRefetchFailed' WHERE seq=?1",[seq])?;
                         }
                     }
+                    sent = true;
+                    continue;
+                }
+                // Work-level intents (delete/restore, cover, range, tracking, subscription) that
+                // lost to a server write: adopt the work and re-assert the same intent.
+                if detail["code"] == "revisionConflict"
+                    && work_intent_command(&body)
+                    && self.recover_work_revision_conflict(status, seq, &body, detail)?
+                {
+                    sent = true;
+                    continue;
+                }
+                // The server is a second writer of bindings, volume sources and volumes.
+                // A revision conflict on those commands adopts the server's entity and drops
+                // the row instead of blocking the whole queue (like providerSnapshotStale).
+                if provider_conflict_target(&body).is_some() && detail["code"] == "revisionConflict" {
+                    self.recover_provider_revision_conflict(status, seq, &body, detail)?;
                     sent = true;
                     continue;
                 }
@@ -3460,7 +3598,302 @@ impl Library {
             }
             tx.commit()?;
         }
+        if self.run_deferred_provider_refreshes(refresh)? {
+            sent = true;
+        }
         Ok(sent)
+    }
+
+    /// Adopt the server's current entity for a refused binding/source/volume command, drop the
+    /// row, and (re-)derive what still matters. Never leaves the FIFO head blocked.
+    fn recover_provider_revision_conflict(
+        &self,
+        status: &CollectionAuthorityStatus,
+        seq: i64,
+        body: &Value,
+        detail: &Value,
+    ) -> Result<(), LibraryError> {
+        let (kind, section) =
+            provider_conflict_target(body).ok_or(LibraryError::InvalidCloudResponse)?;
+        let command = text(body, "commandType")?;
+        let work = text(body, "workId")?;
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let marker: Option<String> = tx.query_row(
+            "SELECT conflict_code FROM collection_authority_outbox WHERE seq=?1",
+            [seq],
+            |r| r.get(0),
+        )?;
+        let generation = local(&tx)?
+            .ok_or(LibraryError::CollectionAuthorityNotAdopted)?
+            .generation;
+        tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='revisionConflict',conflict_detail=?2,updated_at=?3 WHERE seq=?1",params![seq,detail.to_string(),timestamp])?;
+        let current = &detail["current"][kind];
+        let entity_key = key(section, body)?;
+        // What this PC last knew of the entity: the base of the three-way merge below.
+        let base: Value = tx
+            .query_row(
+                "SELECT payload FROM collection_authority_revisions WHERE section=?1 AND entity_key=?2",
+                params![section, entity_key],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or(Value::Null);
+        // A later queued row for the same target was built on the state this one assumed and
+        // recovers on its own conflict (adopting then); re-asserting this one behind it would let
+        // the older intent win. Not adopting keeps the cached base for that row's merge.
+        let superseded = superseded_by_later_row(&tx, seq, body)?;
+        let mut adopted = false;
+        if !superseded
+            && current.is_object()
+            && current["workId"] == body["workId"]
+            && current["entityRevision"].as_i64().is_some_and(|r| r >= 1)
+        {
+            // Best effort: a malformed current entity must not wedge the queue.
+            tx.execute_batch("SAVEPOINT adopt_conflict")?;
+            if apply_entity(&tx, section, current, &generation, &timestamp).is_ok() {
+                tx.execute_batch("RELEASE adopt_conflict")?;
+                adopted = true;
+            } else {
+                tx.execute_batch("ROLLBACK TO adopt_conflict; RELEASE adopt_conflict")?;
+            }
+        }
+        if command == "bindProvider" {
+            let attempt = marker
+                .as_deref()
+                .and_then(|m| m.strip_prefix(BIND_RETRY_MARKER))
+                .and_then(|n| n.parse::<i64>().ok())
+                .unwrap_or(0);
+            // Only a different identity is a user's choice; a config-only difference is the
+            // refresh worker's (or the server checker's) newer binding and is adopted.
+            let identity_differs = !(adopted
+                && current["bound"] == true
+                && current["externalId"] == body["externalId"]);
+            if attempt < BIND_RETRY_LIMIT && !superseded && identity_differs {
+                // Snapshots composed for this bind would run before it; drop them and refetch
+                // once the bind is applied.
+                let dependents = tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='dependencyDropped',updated_at=?4 WHERE state='pending' AND seq>?1 AND command_type='applyProviderSnapshot' AND entity_key=?2 AND json_extract(payload,'$.externalId')=?3",params![seq,entity_key,body["externalId"].as_str().unwrap_or_default(),timestamp])?;
+                rederive_bind(&tx, status, body, attempt + 1)?;
+                if dependents > 0 {
+                    tx.execute("INSERT INTO notes_state(key,value) VALUES(?1,'1') ON CONFLICT(key) DO UPDATE SET value='1'",[format!("{REFRESH_AFTER_CONFLICT}{}",json!([work,body["provider"]]))])?;
+                }
+            }
+        } else if marker.as_deref() != Some(REFRESH_RETRY_MARKER) {
+            // Only source rows from the Kakao/MangaDex refresh are derived data. A volume row can be
+            // a user's pick (a MangaDex cover carries sourceProvider=mangadex): it is merged.
+            let provider = if command == "upsertVolumeSource" {
+                body["provider"].as_str()
+            } else {
+                None
+            };
+            let derived = matches!(provider, Some("kakao" | "mangadex"));
+            if let (true, Some(provider)) = (derived, provider) {
+                // Refetch once the queue has no earlier command for this work.
+                tx.execute("INSERT INTO notes_state(key,value) VALUES(?1,'1') ON CONFLICT(key) DO UPDATE SET value='1'",[format!("{REFRESH_AFTER_CONFLICT}{}",json!([work,provider]))])?;
+            } else if adopted && !superseded {
+                // A user's own volume edit: re-apply only the fields this PC changed onto the
+                // server's current entity, so concurrent edits to other fields survive.
+                let fields: &[&str] = if command == "upsertVolume" {
+                    &["volumeNumber", "editionIndex", "sortOrder", "displayLabel", "coverArtworkId", "sourceProvider", "sourceCoverId", "deleted"]
+                } else {
+                    &["providerItemId", "title", "author", "publisher", "isbn13", "publicationDate", "itemUrl", "data", "deleted"]
+                };
+                let mut entity = body.clone();
+                for envelope_key in ["libraryId", "epoch", "contractVersion", "operationId", "commandType"] {
+                    entity.as_object_mut().map(|o| o.remove(envelope_key));
+                }
+                let mut differs = false;
+                for field in fields {
+                    if !base.is_null() && body[*field] == base[*field] {
+                        entity[*field] = current[*field].clone();
+                    }
+                    differs |= entity[*field] != current[*field];
+                }
+                if differs {
+                    entity["expectedRevision"] =
+                        json!(predicted_collection_revision(&tx, section, &entity_key)?);
+                    let before: i64 = tx.query_row("SELECT COALESCE(MAX(seq),0) FROM collection_authority_outbox",[],|r|r.get(0))?;
+                    enqueue_collection_command(&tx, status, command, &entity_key, entity)?;
+                    tx.execute("UPDATE collection_authority_outbox SET conflict_code=?2 WHERE seq>?1",params![before,REFRESH_RETRY_MARKER])?;
+                }
+            }
+        }
+        reapply_pending_core_edits(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// A work-level intent refused with `revisionConflict` because the server changed the work
+    /// (its release writes bump the work revision). Adopt the server's work, drop the row and
+    /// re-assert the same intent against the new state, unless the server already satisfies it
+    /// or no longer allows it. At most `WORK_RETRY_LIMIT` re-assertions per intent, so a server
+    /// that keeps winning cannot loop the queue. Returns false when the conflict carries no
+    /// work (older server), leaving the previous behaviour in place.
+    fn recover_work_revision_conflict(
+        &self,
+        status: &CollectionAuthorityStatus,
+        seq: i64,
+        body: &Value,
+        detail: &Value,
+    ) -> Result<bool, LibraryError> {
+        let current = &detail["current"]["work"];
+        let command = text(body, "commandType")?;
+        let work = text(body, "workId")?;
+        if !current.is_object()
+            || current["workId"] != body["workId"]
+            || current["entityRevision"].as_i64().is_none_or(|r| r < 1)
+        {
+            return Ok(false);
+        }
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let marker: Option<String> = tx.query_row(
+            "SELECT conflict_code FROM collection_authority_outbox WHERE seq=?1",
+            [seq],
+            |r| r.get(0),
+        )?;
+        let attempt = marker
+            .as_deref()
+            .and_then(|m| m.strip_prefix(WORK_RETRY_MARKER))
+            .and_then(|n| n.parse::<i64>().ok())
+            .unwrap_or(0);
+        let generation = local(&tx)?
+            .ok_or(LibraryError::CollectionAuthorityNotAdopted)?
+            .generation;
+        tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='revisionConflict',conflict_detail=?2,updated_at=?3 WHERE seq=?1",params![seq,detail.to_string(),timestamp])?;
+        // A work this build cannot read is left to the previous behaviour: undo everything.
+        if apply_entity(&tx, "works", current, &generation, &timestamp).is_err() {
+            return Ok(false);
+        }
+        let superseded = superseded_by_later_row(&tx, seq, body)?;
+        selections(&tx)?;
+        let lifecycle = current["lifecycle"].as_str().unwrap_or("live");
+        let entity_key = json!([work]).to_string();
+        let mut reproject = None;
+        let requeue: Option<Value> = match command {
+            _ if attempt >= WORK_RETRY_LIMIT || superseded => None,
+            "deleteWork" => (lifecycle == "live").then(|| json!({"workId":work,"expectedRevision":null})),
+            "restoreWork" => (lifecycle == "trashed").then(|| json!({"workId":work,"expectedRevision":null})),
+            "selectArtwork" => {
+                let slot = text(body, "slot")?;
+                if current["selection"][slot] == body["artworkId"] {
+                    None
+                } else {
+                    reproject = Some((slot.to_owned(), body["artworkId"].as_str().map(str::to_owned)));
+                    Some(json!({"workId":work,"slot":slot,"artworkId":body["artworkId"],"expectedArtworkId":predicted_artwork_slot(&tx, work, slot)?}))
+                }
+            }
+            "setVolumeRange" => {
+                let desired = json!({"minVolume":body["minVolume"],"maxVolume":body["maxVolume"],"hideConnectionPrompt":body["hideConnectionPrompt"]});
+                let served = current["derived"]
+                    .get("volumeRange")
+                    .filter(|v| v.is_object())
+                    .cloned()
+                    .unwrap_or(json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false}));
+                if served == desired {
+                    None
+                } else {
+                    Some(json!({"workId":work,"minVolume":body["minVolume"],"maxVolume":body["maxVolume"],"hideConnectionPrompt":body["hideConnectionPrompt"],"expectedRange":expected_volume_range(&tx, work)?,"expectedRevision":null}))
+                }
+            }
+            "setOwnershipTracking" => {
+                let edition = integer(body, "editionIndex")?;
+                let count = integer(body, "count")?;
+                // Expected count as the server reads it: its derived owned count for the edition
+                // (the local per-volume rows are stale until the feed is pulled).
+                let expected = current["derived"]["ownedVolumes"]
+                    .as_array()
+                    .and_then(|entries| entries.iter().find(|e| e["editionIndex"] == edition))
+                    .and_then(|e| e["count"].as_i64());
+                let (_, rows) = pending_ownership(&tx, work, u8::try_from(edition).map_err(|_| LibraryError::InvalidCloudResponse)?)?;
+                let held: Vec<_> = rows.iter().filter(|(_, row)| row.0 || row.1).collect();
+                let same = expected == Some(count)
+                    && held.iter().zip(1..).all(|((v, row), n)| **v == n && row.0 && !row.1);
+                (!same).then(|| json!({"workId":work,"editionIndex":edition,"count":count,"expectedCount":expected,"expectedRevision":null}))
+            }
+            "setReleaseSubscription" => {
+                let enabled = body["enabled"].as_bool().ok_or(LibraryError::InvalidCloudResponse)?;
+                let served = current["derived"]["releaseWatch"]["enabled"].as_bool().unwrap_or(false);
+                if served == enabled {
+                    None
+                } else {
+                    Some(json!({"workId":work,"enabled":enabled,"expectedEnabled":served,"expectedRevision":null}))
+                }
+            }
+            _ => None,
+        };
+        if let Some(mut entity) = requeue {
+            if matches!(command, "deleteWork" | "restoreWork") {
+                entity["expectedRevision"] = json!(predicted_collection_revision(&tx, "works", &entity_key)?);
+            }
+            let before: i64 = tx.query_row("SELECT COALESCE(MAX(seq),0) FROM collection_authority_outbox",[],|r|r.get(0))?;
+            let key = if command == "setOwnershipTracking" {
+                json!([work, entity["editionIndex"]]).to_string()
+            } else {
+                work.to_owned()
+            };
+            enqueue_collection_command(&tx, status, command, &key, entity)?;
+            tx.execute("UPDATE collection_authority_outbox SET conflict_code=?2 WHERE seq>?1",params![before,format!("{WORK_RETRY_MARKER}{}",attempt + 1)])?;
+            if let Some((slot, art)) = reproject {
+                project_selection(&tx, work, &slot, art.as_deref())?;
+            }
+        } else {
+            // Nothing left to send (the server satisfies the intent, forbids it, or the retry
+            // cap is spent): show the server's work, even at an already cached revision.
+            let rows = tx.prepare("SELECT section,entity_key,payload FROM collection_authority_revisions WHERE work_id=?1 AND section IN ('works','memberships') ORDER BY CASE section WHEN 'works' THEN 0 ELSE 1 END")?
+                .query_map([work], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (section, entity_key, raw) in rows {
+                let value: Value = serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+                tx.execute("DELETE FROM collection_authority_revisions WHERE section=?1 AND entity_key=?2", params![section, entity_key])?;
+                apply_entity(&tx, &section, &value, &generation, &timestamp)?;
+            }
+            selections(&tx)?;
+        }
+        reapply_pending_core_edits(&tx)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Refetch provider data once for works whose Kakao/MangaDex source or volume commands
+    /// were refused as stale, after the queue holds nothing earlier for that work. The new
+    /// commands are marked so a second conflict only adopts and drops (no loop).
+    fn run_deferred_provider_refreshes(
+        &self,
+        refresh: &dyn Fn(&Value) -> Result<(), LibraryError>,
+    ) -> Result<bool, LibraryError> {
+        let pattern = format!("{REFRESH_AFTER_CONFLICT}%");
+        let keys = self
+            .connection()?
+            .prepare("SELECT key FROM notes_state WHERE key LIKE ?1 ORDER BY key")?
+            .query_map([pattern], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut ran = false;
+        for key in keys {
+            let Ok(target) = serde_json::from_str::<Vec<String>>(&key[REFRESH_AFTER_CONFLICT.len()..]) else {
+                self.connection()?.execute("DELETE FROM notes_state WHERE key=?1", [&key])?;
+                continue;
+            };
+            let [work, provider] = <[String; 2]>::try_from(target).unwrap_or_default();
+            let earlier: bool = self.connection()?.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE state IN ('pending','blocked') AND json_extract(payload,'$.workId')=?1 AND command_type IN ('bindProvider','applyProviderSnapshot','upsertVolume','upsertVolumeSource'))",[&work],|r|r.get(0))?;
+            if earlier {
+                continue;
+            }
+            self.connection()?.execute("DELETE FROM notes_state WHERE key=?1", [&key])?;
+            // The server's checker refreshes Kakao while it owns the checks; adopting is enough.
+            if provider == "kakao" && self.server_release_checks_enabled("kakao") {
+                continue;
+            }
+            let before: i64 = self.connection()?.query_row("SELECT COALESCE(MAX(seq),0) FROM collection_authority_outbox",[],|r|r.get(0))?;
+            // Errors (no key, unbound, offline) are not retried: the daily check catches up.
+            let _ = refresh(&json!({"workId":work,"provider":provider}));
+            mark_refresh_rows(&*self.connection()?, before, &work, &provider)?;
+            ran = true;
+        }
+        Ok(ran)
     }
 
     #[cfg(test)]

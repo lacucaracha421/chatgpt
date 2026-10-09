@@ -45,7 +45,7 @@ pub struct CollectionUpdateStatus {
     pub busy: bool,
 }
 
-fn valid_provider(provider: &str) -> Result<&'static str, LibraryError> {
+pub(super) fn valid_provider(provider: &str) -> Result<&'static str, LibraryError> {
     match provider {
         "mangadex" => Ok("mangadex"),
         "kakao" => Ok("kakao"),
@@ -84,7 +84,8 @@ fn due(
 }
 
 impl Library {
-    pub fn collection_update_status(
+    /// The worker status this PC keeps (the local worker's progress), never the server's.
+    pub(crate) fn local_collection_update_status(
         &self,
         provider: &str,
     ) -> Result<CollectionUpdateStatus, LibraryError> {
@@ -131,9 +132,22 @@ impl Library {
         provider: &str,
         key: Result<String, LibraryError>,
     ) -> Result<CollectionUpdateStatus, LibraryError> {
+        self.run_collection_updates_gated(provider, key, &|| self.fetch_release_checks_status())
+    }
+
+    pub(super) fn run_collection_updates_gated(
+        &self,
+        provider: &str,
+        key: Result<String, LibraryError>,
+        fetch: &dyn Fn() -> Result<Option<serde_json::Value>, LibraryError>,
+    ) -> Result<CollectionUpdateStatus, LibraryError> {
         let provider = valid_provider(provider)?;
+        // The server owns this provider's checks: no local work, just its status.
+        if let Some(status) = self.server_collection_update_status_with(provider, fetch)? {
+            return Ok(status);
+        }
         if crate::workload::is_restricted() {
-            return self.collection_update_status(provider);
+            return self.local_collection_update_status(provider);
         }
         self.run_collection_updates_with(provider, |id| {
             if provider == "mangadex" {
@@ -182,7 +196,7 @@ impl Library {
             Err(std::sync::TryLockError::WouldBlock) => {
                 return Ok(CollectionUpdateStatus {
                     busy: true,
-                    ..self.collection_update_status(provider)?
+                    ..self.local_collection_update_status(provider)?
                 })
             }
         };
@@ -190,11 +204,11 @@ impl Library {
             super::collection_authority::collection_write_status(&*self.connection()?),
             Err(LibraryError::CollectionAuthorityNotAdopted)
         ) {
-            return self.collection_update_status(provider);
+            return self.local_collection_update_status(provider);
         }
         let now = chrono::Utc::now();
         let now_text = now.to_rfc3339();
-        let mut status = self.collection_update_status(provider)?;
+        let mut status = self.local_collection_update_status(provider)?;
         if status
             .retry_at
             .as_deref()

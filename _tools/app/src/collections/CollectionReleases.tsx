@@ -23,6 +23,10 @@ import { updateCachedInbox, type ReleaseData } from "./releaseData";
 import "./collectionReleases.css";
 import { createKoreanMatcher } from "../shared/koreanSearch";
 
+/** Follow the server's check after 새로고침: at most this many status reads, one every 1.5 s. */
+const SERVER_CHECK_POLLS = 10;
+const SERVER_CHECK_POLL_MS = 1500;
+
 const STOP_REASON: Record<string, string> = {
   credential_not_configured: "카카오 연결 설정이 필요합니다.", invalid_credential: "카카오 인증 정보를 확인해 주세요.",
   rate_limited: "요청 한도에 도달했습니다.", timed_out: "응답 시간이 초과됐습니다.",
@@ -84,7 +88,13 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
     if (hidden || !api?.updateStatus) return;
     const current = ++generation.current;
     setStatus(null);
-    const load = () => void api.updateStatus?.(provider).then(next => { if (generation.current === current) setStatus(next ?? null); }, () => undefined);
+    // One read at a time; a failed read keeps the numbers on screen (no flip, no blank).
+    let inFlight = false;
+    const load = () => {
+      if (inFlight) return;
+      inFlight = true;
+      void Promise.resolve(api.updateStatus?.(provider)).then(next => { if (generation.current === current) setStatus(next ?? null); }, () => undefined).finally(() => { inFlight = false; });
+    };
     load();
     const timer = setInterval(load, restricted ? 60_000 : 5_000);
     return () => { generation.current++; clearInterval(timer); };
@@ -130,6 +140,36 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
     const current = generation.current;
     setWorking("check"); setMessage(null);
     try {
+      // While the server owns Kakao checks, ask it to check now and follow its progress for a
+      // short, bounded time. `local` (no feature / 404) falls through to the PC's own check.
+      if (provider === "kakao" && api.requestServerCheck && await api.serverChecks?.(provider)) {
+        const answer = await api.requestServerCheck(provider);
+        if (generation.current !== current) return;
+        if (answer.outcome === "rateLimited") {
+          setMessage(answer.retryAfterSeconds ? `신간 확인 요청이 많아 잠시 쉬고 있어요. ${answer.retryAfterSeconds}초 뒤에 다시 눌러 주세요.` : "신간 확인 요청이 많아 잠시 쉬고 있어요. 잠시 후 다시 눌러 주세요.");
+          return;
+        }
+        if (answer.outcome === "started") {
+          setStatus(answer.status);
+          for (let poll = 0; poll < SERVER_CHECK_POLLS; poll++) {
+            await new Promise(resolve => setTimeout(resolve, SERVER_CHECK_POLL_MS));
+            if (generation.current !== current) return;
+            const next = await Promise.resolve(api.updateStatus?.(provider)).catch(() => undefined);
+            if (generation.current !== current) return;
+            if (next) setStatus(next);
+            // The first poll may precede the server's wake; later ones end when it is idle.
+            if (poll >= 1 && !next?.busy) break;
+          }
+          void Promise.resolve(onChanged()).catch(() => undefined);
+          return;
+        }
+        // The cached gate still says the server checks Kakao, yet it declined (409/503): the
+        // local loop would only poll the server's status. Stop with a message instead.
+        if (answer.outcome === "local" && await api.serverChecks?.(provider)) {
+          setMessage("서버가 지금은 신간을 확인하지 못해요. 잠시 후 다시 눌러 주세요.");
+          return;
+        }
+      }
       // Continue small batches while this view remains open; the app's background loop uses the
       // same backend lock and resumes pending work independently.
       do {

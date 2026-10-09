@@ -9,7 +9,7 @@ use crate::library::error::LibraryError;
 
 #[path = "collection_authority_transport.rs"]
 mod collection_authority_transport;
-pub(crate) use collection_authority_transport::CollectionDelivery;
+pub(crate) use collection_authority_transport::{CollectionDelivery, ReleaseCheckRun};
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const METADATA_BACKUP_OBJECT_KEY: &str = "backups/library-metadata.sqlite";

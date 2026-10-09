@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { CollectionSummary, CollectionTrackingGateway, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
+import type { CollectionSummary, CollectionTrackingGateway, CollectionUpdateStatus, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
 import { CollectionReleases } from "./CollectionReleases";
 import { japanReleaseLedger, koreanReleaseLedger, releaseLedgerCounts } from "./releaseLedger";
 import { invalidateReleaseData, resetReleaseDataForTests, useReleaseData, type ReleaseData } from "./releaseData";
@@ -169,4 +169,118 @@ it("keeps a new volume visible when earlier unowned chips overflow", () => {
   const chips = screen.getByLabelText("many 정발 권");
   expect(within(chips).getByText("5권").parentElement).toHaveAttribute("data-chip-kind", "new");
   expect(within(chips).getByLabelText("추가 3권")).toHaveTextContent("+3");
+});
+
+const checkStatus = (over: Partial<CollectionUpdateStatus> = {}): CollectionUpdateStatus => ({
+  provider: "kakao", checked: 0, changedCollections: 0, failed: 0, remaining: 0, requests: 0, elapsedMs: 0, networkMs: 0, throttleMs: 0,
+  startedAt: null, finishedAt: null, retryAt: null, stopReason: null, busy: false, ...over,
+});
+
+it("asks the server to check when it owns Kakao checks, follows it for a bounded time, and does no local check", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-29T16:00:00") });
+  const runUpdates = vi.fn();
+  const updateStatus = vi.fn().mockResolvedValue(checkStatus({ busy: true, remaining: 3 }));
+  const requestServerCheck = vi.fn().mockResolvedValue({ outcome: "started", status: checkStatus({ busy: true, remaining: 3 }) });
+  const { props, wrap, onChanged } = setup({ runUpdates, updateStatus, serverChecks: vi.fn().mockResolvedValue(true), requestServerCheck });
+  render(wrap(<CollectionReleases {...props} />));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(requestServerCheck).toHaveBeenCalledWith("kakao");
+  expect(onChanged).not.toHaveBeenCalled();
+  // The server stays busy, yet following it stops after the bounded number of reads.
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  expect(runUpdates).not.toHaveBeenCalled();
+  expect(requestServerCheck).toHaveBeenCalledTimes(1);
+});
+
+it("stops following the server as soon as it is idle", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-29T16:00:00") });
+  const updateStatus = vi.fn().mockResolvedValue(checkStatus({ finishedAt: "2026-09-29T16:00:02" }));
+  const requestServerCheck = vi.fn().mockResolvedValue({ outcome: "started", status: checkStatus({ busy: true, remaining: 1 }) });
+  const { props, wrap, onChanged } = setup({ runUpdates: vi.fn(), updateStatus, serverChecks: vi.fn().mockResolvedValue(true), requestServerCheck });
+  render(wrap(<CollectionReleases {...props} />));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_100); });
+  expect(onChanged).toHaveBeenCalledTimes(1);
+});
+
+it("shows a calm message when the server rate-limits 새로고침", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-29T16:00:00") });
+  const runUpdates = vi.fn();
+  const requestServerCheck = vi.fn().mockResolvedValue({ outcome: "rateLimited", retryAfterSeconds: 12 });
+  const { props, wrap } = setup({ runUpdates, updateStatus: vi.fn().mockResolvedValue(checkStatus()), serverChecks: vi.fn().mockResolvedValue(true), requestServerCheck });
+  render(wrap(<CollectionReleases {...props} />));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.getByRole("alert")).toHaveTextContent("12초 뒤에 다시 눌러 주세요");
+  expect(runUpdates).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+});
+
+it("falls back to the local check when the server turns out not to check Kakao (404)", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-29T16:00:00") });
+  const runUpdates = vi.fn().mockResolvedValue(checkStatus({ checked: 2 }));
+  const requestServerCheck = vi.fn().mockResolvedValue({ outcome: "local" });
+  const { props, wrap } = setup({ runUpdates, updateStatus: vi.fn().mockResolvedValue(checkStatus()), serverChecks: vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false), requestServerCheck });
+  render(wrap(<CollectionReleases {...props} />));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(requestServerCheck).toHaveBeenCalledTimes(1);
+  expect(runUpdates).toHaveBeenCalledWith("kakao");
+});
+
+it("keeps the local check for MangaDex and for a server that does not own Kakao", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-29T16:00:00") });
+  for (const [provider, owned] of [["mangadex", true], ["kakao", false]] as const) {
+    const runUpdates = vi.fn().mockResolvedValue(checkStatus({ provider }));
+    const requestServerCheck = vi.fn();
+    const { props, wrap } = setup({ runUpdates, updateStatus: vi.fn().mockResolvedValue(checkStatus({ provider })), serverChecks: vi.fn().mockResolvedValue(owned), requestServerCheck });
+    const view = render(wrap(<CollectionReleases {...props} provider={provider} />));
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(runUpdates).toHaveBeenCalledWith(provider);
+    expect(requestServerCheck).not.toHaveBeenCalled();
+    view.unmount();
+  }
+});
+
+it("stops with a message when the server declines although the gate is still cached (409/503)", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-29T16:00:00") });
+  const runUpdates = vi.fn().mockResolvedValue(checkStatus({ remaining: 5 }));
+  const requestServerCheck = vi.fn().mockResolvedValue({ outcome: "local" });
+  const { props, wrap } = setup({ runUpdates, updateStatus: vi.fn().mockResolvedValue(checkStatus()), serverChecks: vi.fn().mockResolvedValue(true), requestServerCheck });
+  render(wrap(<CollectionReleases {...props} />));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(screen.getByRole("alert")).toHaveTextContent("서버가 지금은 신간을 확인하지 못해요");
+  expect(runUpdates).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+});
+
+it("reads the status one at a time and keeps the last numbers when a read fails", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-29T16:00:00") });
+  let release!: (value: CollectionUpdateStatus) => void;
+  const updateStatus = vi.fn()
+    .mockResolvedValueOnce(checkStatus({ checked: 7, remaining: 2 }))
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockImplementation(() => new Promise<CollectionUpdateStatus>(resolve => { release = resolve; }));
+  const { props, wrap } = setup({ runUpdates: vi.fn(), updateStatus });
+  render(wrap(<CollectionReleases {...props} />));
+  await act(async () => {});
+  expect(screen.getByRole("status")).toHaveTextContent("확인 7개 · 남음 2개");
+  await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+  expect(screen.getByRole("status")).toHaveTextContent("확인 7개 · 남음 2개");
+  // The third read never settles: later ticks must not start more reads.
+  await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+  const started = updateStatus.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(updateStatus.mock.calls.length).toBe(started);
+  release(checkStatus({ checked: 8, remaining: 1 }));
 });
