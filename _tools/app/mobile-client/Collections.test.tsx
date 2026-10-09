@@ -38,6 +38,41 @@ const mangaItem=():CollectionDetail=>({...item,type:'manga'});
 const bookcaseLabels=()=>within(screen.getByRole('group',{name:'권별 책장'})).getAllByRole('button').map(button=>button.getAttribute('aria-label'));
 beforeEach(()=>{localStorage.clear();for(const kind of ['game','manga','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));resetReleaseStore();resetMangaShelfDetails();mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
+
+it('shows the server-wide manga review count before later pages and keeps it through filtering',async()=>{
+  const laterPage=new Promise<CollectionPage>(()=>{});
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/status'))return {revision:'r1'};
+    if(path.includes('cursor='))return laterPage;
+    if(path.startsWith('/v1/collections?')){
+      const params=new URL(path,'https://example.invalid').searchParams;
+      if(params.get('type')==='manga'){
+        expect(params.get('kakaoReview')).toBe('true');
+        return {...page,kakaoUnlinkedCount:122,items:params.get('q')?[]:[mangaItem()],nextCursor:params.get('q')?null:'next'};
+      }
+    }
+    return page;
+  });
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  await screen.findByText(item.name);
+  pressTab('만화');
+  await screen.findByRole('button',{name:'연결 점검 122'});
+  fireEvent.change(searchBox(),{target:{value:'없는 작품'}});
+  fireEvent.keyDown(searchBox(),{key:'Enter'});
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('q=')&&path.includes(encodeURIComponent('없는 작품').replace(/%20/g,'+')))).toBe(true));
+  expect(screen.getByRole('button',{name:'연결 점검 122'})).toBeTruthy();
+});
+
+it.each([undefined,-1,1.5])('hides the review shortcut without a valid global count (%s), even with an unlinked visible item',async(kakaoUnlinkedCount)=>{
+  const work={...mangaItem(),kakaoReview:{collectionId:item.id,query:'밤의 도서관',querySource:'name' as const,bound:false,volumes:[],highestOwnedVolume:0,ownedCount:0,partialDismissed:false,groupFingerprints:[],minVolume:null,maxVolume:null,hideConnectionPrompt:false}};
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:{...page,kakaoUnlinkedCount,items:[work]});
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  await screen.findByText(item.name);pressTab('만화');
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('type=manga'))).toBe(true));
+  await act(async()=>{});
+  expect(screen.queryByRole('button',{name:/연결 점검/})).toBeNull();
+});
+
 describe('tab return retention',()=>{
   const listCalls=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/collections?')&&!path.includes('showcase=true'));
   const detailCalls=()=>mocks.api.mock.calls.filter(([path])=>path===`/v1/collections/${item.id}`);

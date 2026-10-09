@@ -22,6 +22,11 @@
 .section-shade-title__now { color:var(--color-muted); font-weight:400; overflow:hidden; text-overflow:ellipsis; }
 .section-shade-title > svg { flex:none; width:1em; height:1em; translate:0 -.05em; color:var(--color-faint); transition:transform 140ms var(--ease-standard); }
 .section-shade-title[aria-expanded=true] > svg { transform:rotate(180deg); }
+/* Chromium stops touch-action ancestor lookup at an overflow container. The clipped
+   title/h1 must reserve vertical pulls too, rather than allowing native pan/cancel. */
+.top-bar h1:has(.section-shade-title),
+.section-shade-title,
+.section-shade-title * { touch-action:pan-x; }
 .section-shade-title__now, .section-shade-title > svg { animation:section-shade-title-in 140ms var(--ease-standard); }
 @keyframes section-shade-title-in { from { opacity:0; } }
 

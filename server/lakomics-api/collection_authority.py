@@ -1156,6 +1156,22 @@ def served_state(db):
             "publishedAt": changed[0] if changed else row["activatedAt"]}
 
 
+def kakao_unlinked_count(db, library_id):
+    """Count the served manga queue from authority state, not stored review projections."""
+    return db.execute("""
+        SELECT COUNT(*) FROM collection_authority_works AS work
+        JOIN collection_authority_projection AS projection ON projection.id=work.work_id
+        WHERE work.library_id=? AND work.type='manga' AND work.lifecycle='live'
+          AND COALESCE(json_extract(work.derived,'$.volumeRange.hideConnectionPrompt'),0)=0
+          AND NOT EXISTS (SELECT 1 FROM collection_authority_bindings AS binding
+              WHERE binding.library_id=work.library_id AND binding.work_id=work.work_id
+                AND binding.provider='kakao' AND binding.bound=1)
+          AND NOT EXISTS (SELECT 1 FROM collection_binding_requests AS request
+              WHERE request.collection_id=work.work_id AND request.provider='kakao'
+                AND request.state='pending')
+        """, [library_id]).fetchone()[0]
+
+
 def finalize_items(db, library_id, items, *, detail=False, today=None, include_review=False):
     """Resolve a page's visible member counts/covers without loading member IDs."""
     if not items:

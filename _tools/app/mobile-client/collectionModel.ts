@@ -73,7 +73,7 @@ export function personReply(reply:unknown,personId:string, connection = outboxCo
   rememberPersonNames([person], connection);
   return person;
 }
-export type CollectionPage = {totalCount?:number;ready:boolean;revision:string|null;publishedAt:string|null;items:CollectionSummary[];nextCursor:string|null;filterVersion?:1};
+export type CollectionPage = {kakaoUnlinkedCount?:number;totalCount?:number;ready:boolean;revision:string|null;publishedAt:string|null;items:CollectionSummary[];nextCursor:string|null;filterVersion?:1};
 export function collectionPath(type:CollectionKind, q:string, showcase:boolean, cursor:string|null, filters?:CollectionFilters) {
   const params = new URLSearchParams({type,q,showcase:String(showcase),limit:showcase?'16':'48'});
   if (cursor) params.set('cursor',cursor);

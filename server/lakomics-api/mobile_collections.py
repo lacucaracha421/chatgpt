@@ -38,6 +38,8 @@ Absent optional fields are never stored, so older payloads and revisions are unc
 Kakao connection review reads opt in with ``?kakaoReview=true`` on collection list
 and detail routes. Authority status advertises ``kakaoReview``; default reads and
 staging verification preserve the legacy payload without this optional block.
+Requested manga lists also return ``kakaoUnlinkedCount`` for the whole served
+library, excluding hidden prompts and pending Kakao requests, regardless of filters.
 """
 from __future__ import annotations
 
@@ -871,11 +873,22 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             total = db.execute(f"SELECT COUNT(*) FROM {source}" + where, parameters).fetchone()[0]
             rows = db.execute(f"SELECT payload FROM {source}" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
             payloads = [json.loads(row["payload"]) for row in rows[:limit]]
+            review_meta = {}
             if active is not None:
                 collection_authority.finalize_items(db, active["libraryId"], payloads, include_review=kakaoReview)
+                if kakaoReview and type == "manga":
+                    review_meta["kakaoUnlinkedCount"] = collection_authority.kakao_unlinked_count(db, active["libraryId"])
+            elif kakaoReview and type == "manga":
+                # A legacy replica can advertise a count only if every manga carries review data.
+                # Absence means unsupported, not a zero-length queue.
+                manga = [json.loads(row[0]) for row in db.execute("SELECT payload FROM mobile_collections WHERE type='manga'")]
+                if revision is not None and all(item.get("kakaoReview") is not None for item in manga):
+                    waiting = {row[0] for row in db.execute("SELECT collection_id FROM collection_binding_requests WHERE provider='kakao' AND state='pending'")}
+                    review_meta["kakaoUnlinkedCount"] = sum(not item["kakaoReview"]["bound"] and not item["kakaoReview"]["hideConnectionPrompt"]
+                                                          and item["id"] not in waiting for item in manga)
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
         return {"ready": revision is not None, "revision": revision, "publishedAt": published, "filterVersion": 1, "totalCount": total,
-                "items": [public_item(payload, include_review=kakaoReview) for payload in payloads], "nextCursor": next_cursor}
+                "items": [public_item(payload, include_review=kakaoReview) for payload in payloads], "nextCursor": next_cursor, **review_meta}
 
     @app.get("/v1/collections/status")
     def publication_status(authorization: str | None = Header(default=None)):

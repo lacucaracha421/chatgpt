@@ -125,6 +125,18 @@ it('leaves a sideways drag and a pull at the top alone',()=>{
   expect(shade()!.classList.contains('is-open')).toBe(false);
 });
 
+it('continues a fast pull when its first move and release land outside the top bar',()=>{
+  render(<Screen/>);
+  scrollTo(300);
+  Object.defineProperty(shade()!,'offsetHeight',{configurable:true,value:40});
+  const title=screen.getByRole('button',{name:'컬렉션 · 게임'});
+  fireEvent.pointerDown(title,{pointerId:1,isPrimary:true,button:0,clientX:50,clientY:10});
+  fireEvent.pointerMove(list(),{pointerId:1,clientX:50,clientY:100});
+  expect(shade()!.classList.contains('is-dragging')).toBe(true);
+  fireEvent.pointerUp(list(),{pointerId:1,clientX:50,clientY:100});
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+});
+
 it('does not count a pull that ends on the title as a tap',()=>{
   render(<Screen/>);
   scrollTo(300);

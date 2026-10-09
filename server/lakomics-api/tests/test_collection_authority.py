@@ -88,6 +88,56 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.ok(self.command('deleteWork', workId='a', expectedRevision=1))
         self.assertFalse(self.ok(self.command('setKakaoPartialDismissed', workId='a', dismissed=True, expectedVolumes=[]))['changed'])
 
+    def test_kakao_unlinked_count_is_global_opt_in_client_read_without_writes(self):
+        self.ready()
+        with api_app.get_db() as db:
+            # Old stored projections contain no review; reads must use authority state.
+            db.execute("UPDATE collection_authority_projection SET payload=json_remove(payload,'$.kakaoReview')")
+            db.commit()
+            before = list(db.iterdump())
+        params = {'type': 'manga', 'kakaoReview': True, 'limit': 1}
+        first = self.ok(self.client.get('/v1/collections', headers=self.auth, params=params))
+        self.assertEqual(first['kakaoUnlinkedCount'], 2)
+        self.assertEqual(len(first['items']), 1)
+        self.assertIn('kakaoReview', first['items'][0])
+        second = self.ok(self.client.get('/v1/collections', headers=self.auth,
+                                        params={**params, 'cursor': first['nextCursor']}))
+        self.assertEqual(second['kakaoUnlinkedCount'], 2)
+        for scope in ({'q': 'missing'}, {'rating': '5'}, {'showcase': True}):
+            read = self.ok(self.client.get('/v1/collections', headers=self.auth, params={**params, **scope}))
+            self.assertEqual(read['kakaoUnlinkedCount'], 2)
+        self.assertNotIn('kakaoUnlinkedCount', self.ok(self.client.get('/v1/collections', headers=self.auth)))
+        self.assertNotIn('kakaoUnlinkedCount', self.ok(self.client.get('/v1/collections', headers=self.auth,
+                                                                      params={'type': 'movie', 'kakaoReview': True})))
+        with api_app.get_db() as db:
+            self.assertEqual(list(db.iterdump()), before)
+
+    def test_kakao_unlinked_count_excludes_bound_hidden_pending_and_trashed(self):
+        self.ready()
+        def count():
+            return self.ok(self.client.get('/v1/collections', headers=self.auth,
+                                          params={'type': 'manga', 'kakaoReview': True}))['kakaoUnlinkedCount']
+        self.assertEqual(count(), 2)
+        self.ok(self.command('setVolumeRange', workId='a', minVolume=None, maxVolume=None,
+                             hideConnectionPrompt=True, expectedRange={'minVolume': None, 'maxVolume': None, 'hideConnectionPrompt': False}, expectedRevision=None))
+        self.assertEqual(count(), 1)
+        self.ok(self.command('bindProvider', headers=self.publisher, workId='s', provider='kakao',
+                             externalId='one', config={'query': '나'}, expectedRevision=0))
+        self.assertEqual(count(), 0)
+        self.ok(self.command('setVolumeRange', workId='a', minVolume=None, maxVolume=None,
+                             hideConnectionPrompt=False, expectedRange={'minVolume': None, 'maxVolume': None, 'hideConnectionPrompt': True}, expectedRevision=None))
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO collection_binding_requests(sequence,operation_id,payload_digest,collection_id,provider,choice_json,state,created_at,updated_at)"
+                       " VALUES(1,'pending-review','digest','a','kakao','{}','pending','now','now')")
+            db.commit()
+        self.assertEqual(count(), 0)
+        with api_app.get_db() as db:
+            db.execute("UPDATE collection_binding_requests SET state='failed'")
+            db.commit()
+        self.assertEqual(count(), 1)
+        self.ok(self.command('deleteWork', workId='a', expectedRevision=self.work('a')['entityRevision']))
+        self.assertEqual(count(), 0)
+
     def test_kakao_review_bind_behind_dismiss_uses_the_next_revision(self):
         self.ready()
         config = {'query': '가', 'groupFingerprint': 'f'}

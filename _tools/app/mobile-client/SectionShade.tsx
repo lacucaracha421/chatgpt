@@ -123,8 +123,9 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
       setOpen(event.type==='pointerup'&&dy>height()/2);
     };
     const click=(event:MouseEvent)=>{if(!swallowClick)return;swallowClick=false;if(event.detail===0)return;event.preventDefault();event.stopPropagation();};
-    element.addEventListener('pointerdown',down);element.addEventListener('pointermove',move);element.addEventListener('pointerup',end);element.addEventListener('pointercancel',end);element.addEventListener('click',click,true);
-    return()=>{element.style.touchAction=touchAction;element.removeEventListener('pointerdown',down);element.removeEventListener('pointermove',move);element.removeEventListener('pointerup',end);element.removeEventListener('pointercancel',end);element.removeEventListener('click',click,true);};
+    // A fast pull can leave the 56px bar before the first move establishes capture.
+    element.addEventListener('pointerdown',down);document.addEventListener('pointermove',move);document.addEventListener('pointerup',end);document.addEventListener('pointercancel',end);element.addEventListener('click',click,true);
+    return()=>{element.style.touchAction=touchAction;element.removeEventListener('pointerdown',down);document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.removeEventListener('pointercancel',end);element.removeEventListener('click',click,true);};
   },[topBar]);
   // While open: a tap outside, Escape and Back close it.
   useEffect(()=>{

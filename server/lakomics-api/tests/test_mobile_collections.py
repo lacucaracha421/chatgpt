@@ -457,6 +457,21 @@ class MobileCollectionsTests(unittest.TestCase):
             parsed = mobile.Collection.model_validate(item)
             self.assertNotIn('kakaoReview', mobile.stored(parsed))
 
+    def test_replica_kakao_count_requires_complete_reviews_and_is_not_page_filtered(self):
+        from kakao_review import validated_review
+        items = [work('a', '가'), work('b', '나'), work('c', '다')]
+        for item in items:
+            item['kakaoReview'] = validated_review(item['id'], item['name'], {}, 0, 0, {})
+        items[2]['kakaoReview']['hideConnectionPrompt'] = True
+        revision = self.publish(items).json()['revision']
+        read = self.listing(type='manga', q='missing', limit=1, kakaoReview=True).json()
+        self.assertEqual(read['items'], [])
+        self.assertEqual(read['kakaoUnlinkedCount'], 2)
+        self.assertNotIn('kakaoUnlinkedCount', self.listing(type='manga').json())
+        items[1].pop('kakaoReview')
+        self.assertEqual(self.publish(items, revision).status_code, 200)
+        self.assertNotIn('kakaoUnlinkedCount', self.listing(type='manga', kakaoReview=True).json())
+
     def test_legacy_payload_and_revision_are_byte_identical(self):
         item = {**work("legacy"), "volumes": [{"id": "volume", "volumeNumber": 2, "editionIndex": 1, "displayLabel": "2권"}]}
         reply = self.publish([item])

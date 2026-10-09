@@ -44,7 +44,6 @@ import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel}
 import {BottomSheet} from './BottomSheet';
 import {Overlay} from './Overlay';
 import {KakaoReviewOverlay, useKakaoReviewQueue} from './KakaoReviewOverlay';
-import {kakaoReviewSegment} from '../src/collections/kakaoReviewModel';
 import {LinkIcon} from '@heroicons/react/24/outline';
 import {SegmentedControl} from '../src/shared/ui/SegmentedControl';
 import {ReleaseCalendar} from './ReleaseCalendar';
@@ -476,8 +475,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // An accepted personal edit changes what the server serves; re-read both views.
   const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
   const kakaoQueue=useKakaoReviewQueue(live&&kakaoReviewOpen,refresh);
-  const kakaoWaiting=new Set(kakaoQueue.requests.filter(request=>request.state==='pending').map(request=>request.collectionId));
-  const kakaoUnlinked=(kakaoReviewOpen?kakaoQueue.items:main.items).filter(work=>{const review=edits.authority.work(work).kakaoReview;return review&&kakaoReviewSegment(review)==='unlinked'&&!kakaoWaiting.has(work.id);}).length;
+  // This is the whole manga library, even while the shelf is filtered or partially loaded.
+  // Older servers cannot supply that count; do not infer it from the visible works.
+  const reviewCount=main.slot==='manga'?main.page?.kakaoUnlinkedCount:undefined;
+  const kakaoUnlinked=Number.isSafeInteger(reviewCount)&&reviewCount!>=0?reviewCount!:0;
   useEffect(()=>{kakaoQueue.items.forEach(work=>edits.authority.reconcile(work));},[kakaoQueue.items,edits.authority.rows]);
   const [workForm,setWorkForm]=useState<WorkForm|null>(null);
   const [avInboxOpen,setAvInboxOpen]=useState(false);
