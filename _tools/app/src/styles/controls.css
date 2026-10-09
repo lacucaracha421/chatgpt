@@ -791,6 +791,15 @@ select.ui-text-input {
 .ui-dialog.ui-dialog:has(>.library-sheet) {
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
+/* Tall review sheets share the same shell; a stacked sheet leaves less space above. */
+.ui-dialog.ui-dialog:has(>.library-sheet--tall) {
+  top:var(--space-8); bottom:0; left:50%; width:100%; max-height:none;
+  border-radius:8px 8px 0 0; padding:var(--space-6); overflow:auto;
+}
+.ui-dialog.ui-dialog:has(>.library-sheet--stacked) { top:var(--space-3); }
+.ui-dialog:has(>.library-sheet--tall)>.ui-dialog__title {
+  margin-top:var(--touch-target); padding-right:var(--touch-target); font-size:var(--type-title);
+}
 .ui-skeleton {
   display: block;
   background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg));

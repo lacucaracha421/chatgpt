@@ -1,0 +1,20 @@
+import {act,cleanup,renderHook,waitFor} from '@testing-library/react';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+const mocks=vi.hoisted(()=>({api:vi.fn(),resume:vi.fn()}));
+vi.mock('./transport',async()=>({...await vi.importActual<typeof import('./transport')>('./transport'),api:mocks.api}));
+vi.mock('./avInboxApply',async()=>({...await vi.importActual<typeof import('./avInboxApply')>('./avInboxApply'),resumeInboxApplies:mocks.resume}));
+import {useCollectionAuthority} from './useCollectionAuthority';
+import {AUTHORITY_STATUS_PATH,COMMAND_PATH,enqueueCommand,readCommands} from './collectionCommandOutbox';
+import {setOutboxConnection} from './outboxConnection';
+import {inboxIdentity} from './avInboxFixtures';
+beforeEach(()=>{localStorage.clear();setOutboxConnection('https://test.example');mocks.api.mockReset();mocks.resume.mockRejectedValue(new Error('받은 품번 저장 실패'));
+  mocks.api.mockImplementation(async(path,_signal,body)=>path===AUTHORITY_STATUS_PATH?{...inboxIdentity,active:true}:body);
+});
+afterEach(()=>{cleanup();vi.restoreAllMocks();});
+it('delivers ordinary commands even when inbox resume throws and reports the inbox failure',async()=>{
+  const hook=renderHook(()=>useCollectionAuthority(true,vi.fn(),true));await waitFor(()=>expect(hook.result.current.identity).toEqual(inboxIdentity));
+  enqueueCommand(inboxIdentity,{commandType:'updateWork',workId:'ordinary',changes:{description:'memo'},expected:{description:null},expectedRevision:null});
+  await act(async()=>{await hook.result.current.flush();});
+  expect(readCommands()[0].state).toBe('accepted');expect(mocks.api.mock.calls.some(([path])=>path===COMMAND_PATH)).toBe(true);
+  expect(hook.result.current.failure).toBe('받은 품번 저장 실패');
+});

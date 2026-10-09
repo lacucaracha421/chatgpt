@@ -103,6 +103,25 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.api("/v1/av-lookups?source=tablet","POST"));
  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/av-lookups",method));
  for(String path:new String[]{"/v1/av-lookups/","/v1/av-lookups/extra","/v1/av-lookups/../collections"})for(String method:new String[]{"GET","POST"})reject(()->NetworkPolicy.api(path,method));
+ String inbox="/v1/av-inbox/0f8c2a6e-3b1d-4c55-9e7a-2d4b6f8a1c3e";
+ for(String path:new String[]{"/v1/av-inbox", "/v1/av-inbox?limit=100&before=2", inbox, inbox+"/jacket"}){
+  pass(()->NetworkPolicy.api(path,"GET"));
+  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ }
+ pass(()->NetworkPolicy.providerImage(inbox+"/jacket"));
+ if(NetworkPolicy.providerImageLimit(inbox+"/jacket")!=8L*1024*1024)throw new AssertionError("Jacket cap");
+ if(NetworkPolicy.providerImageLimit("/v1/providers/stashdb/image?stashdbId=a&imageId=b")!=4L*1024*1024)throw new AssertionError("Preview cap");
+ checks+=2;
+ for(String action:new String[]{"retry","fix-code","dismiss","artwork","applied"}){
+  pass(()->NetworkPolicy.api(inbox+"/"+action,"POST"));
+  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(inbox+"/"+action,method));
+ }
+ for(String path:new String[]{"/v1/av-inbox/",inbox+"/",inbox+"/extra",inbox+"/retry/",inbox+"/../retry","/v1/av-inbox/not-a-uuid","/v1/av-inbox/%2e%2e","/v1/av-inbox/"+"a".repeat(36)}){
+  for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+  reject(()->NetworkPolicy.providerImage(path));
+ }
+ reject(()->NetworkPolicy.providerImage(inbox));
+ reject(()->NetworkPolicy.providerImage(inbox+"/jacket?extra=1"));
  // Personal Collection edits: the device may submit the command, but the edit feed is a
  // publisher-only read of every edit, so GET stays denied with or without a query.
  pass(()->NetworkPolicy.api("/v1/collections/personal-edits","POST"));

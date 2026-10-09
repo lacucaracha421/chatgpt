@@ -1,3 +1,4 @@
+import {INBOX_APPLY_EVENT, readInboxPlans, resumeInboxApplies} from './avInboxApply';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {visibleInterval} from './useVisibleInterval';
 import {usePendingRetry} from './useBookmarks';
@@ -18,8 +19,11 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void, o
   const [rows, setRows] = useState(readCommands);
   const [confirmed, setConfirmed] = useState(() => readCommands().filter(row => row.state === 'accepted'));
   const [failure, setFailure] = useState('');
+  const [inboxPlans, setInboxPlans] = useState(readInboxPlans);
+  const inboxIdentity = useRef<AuthorityIdentity | null>(null);
   const settled = useRef(onSettled); settled.current = onSettled;
   const identity = status?.connection === connection && status.identity.libraryId === library ? status.identity : null;
+  inboxIdentity.current = identity;
   useEffect(() => {
     if (!active || !connection) return;
     const controller = new AbortController();
@@ -42,24 +46,33 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void, o
   useEffect(() => {
     setConfirmed(readCommands().filter(row => row.state === 'accepted'));
     const read = () => {
+      setInboxPlans(readInboxPlans());
       const next = readCommands(); setRows(next);
       // Queue acknowledgement and each screen's read-back have different lifetimes.
       setConfirmed(current => [...current, ...next.filter(row => row.state === 'accepted' && !current.some(previous => previous.command.operationId === row.command.operationId))]);
     };
-    read(); window.addEventListener(COMMAND_EVENT, read);
-    return () => window.removeEventListener(COMMAND_EVENT, read);
+    read(); window.addEventListener(COMMAND_EVENT, read); window.addEventListener(INBOX_APPLY_EVENT, read);
+    return () => { window.removeEventListener(COMMAND_EVENT, read); window.removeEventListener(INBOX_APPLY_EVENT, read); };
   }, [connection]);
   const flush = useCallback(async () => {
     const before = readCommands();
+    let inboxFailure='';
+    const resume=async()=>{try{if(inboxIdentity.current)await resumeInboxApplies(inboxIdentity.current);}catch(error){inboxFailure=errorText(error);}};
     try {
-      await flushCommands(); setFailure('');
+      await resume();
+      await flushCommands();
+      await resume();
+      // Credits become immutable after preceding receipts provide the actual revision.
+      await flushCommands();
+      await resume();
+      setFailure(inboxFailure);
       const after = readCommands();
-      if (before.some(row => row.state !== 'accepted' && (!after.some(next => next.command.operationId === row.command.operationId) || after.some(next => next.command.operationId === row.command.operationId && next.state === 'accepted')))) settled.current();
+      if (after.some(row => row.state === 'accepted' && !before.some(previous => previous.command.operationId === row.command.operationId && previous.state === 'accepted')) || before.some(row => row.state !== 'accepted' && (!after.some(next => next.command.operationId === row.command.operationId) || after.some(next => next.command.operationId === row.command.operationId && next.state === 'accepted')))) settled.current();
     } catch (error) { setFailure(errorText(error)); }
   }, []);
   const scoped = identity ? rows.filter(row => sameAuthority(row.command, identity)) : [];
   const settledRows = identity ? confirmed.filter(row => sameAuthority(row.command, identity)) : [];
-  const pending = scoped.some(row => row.state === 'pending');
+  const pending = scoped.some(row => row.state === 'pending') || inboxPlans.some(plan => identity && sameAuthority(plan.identity, identity) && !['blocked','done'].includes(plan.state));
   usePendingRetry(active, pending, flush);
   useEffect(() => { if (active && pending) void flush(); }, [active, pending, flush, identity?.epoch]);
   const enqueue = useCallback((command: AuthorityCommand, label?: string) => {

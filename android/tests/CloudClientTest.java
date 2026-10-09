@@ -28,6 +28,8 @@ public final class CloudClientTest {
   for(String length:new String[]{"0","2","4","4194305","bad"}){Response c=new Response();c.length=length;reject(()->CloudClient.providerImageBytes(c,null));}
   Response empty=new Response();empty.bytes=new byte[0];reject(()->CloudClient.providerImageBytes(empty,null));
   Response big=new Response();big.bytes=new byte[4*1024*1024+1];reject(()->CloudClient.providerImageBytes(big,null));
+  Response jacket=new Response();jacket.bytes=new byte[4*1024*1024+1];jacket.length=String.valueOf(jacket.bytes.length);CloudClient.providerImageBytes(jacket,null,8L*1024*1024);checks++;
+  Response oversizedJacket=new Response();oversizedJacket.bytes=new byte[8*1024*1024+1];reject(()->CloudClient.providerImageBytes(oversizedJacket,null,8L*1024*1024));
   Response encoded=new Response();encoded.encoding="gzip";reject(()->CloudClient.providerImageBytes(encoded,null));
   Response unknownLength=new Response();CloudClient.providerImageBytes(unknownLength,null);checks++;
   System.out.println("CloudClient: "+checks+" checks passed");

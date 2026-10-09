@@ -1,0 +1,21 @@
+import {afterEach,expect,it,vi} from 'vitest';
+const mocks=vi.hoisted(()=>({native:vi.fn()}));
+vi.mock('./transport',async()=>({...await vi.importActual<typeof import('./transport')>('./transport'),native:mocks.native}));
+import {inboxRowThumbnail} from './avInboxThumbnail';
+import {inboxFixture} from './avInboxFixtures';
+import {setOutboxConnection} from './outboxConnection';
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('serializes jacket downloads and reuses cropped session thumbnails by request and jacket hash',async()=>{
+  setOutboxConnection('https://thumbnail-test.example');let running=0,max=0;
+  mocks.native.mockImplementation(async()=>{running++;max=Math.max(max,running);await Promise.resolve();running--;return {url:'data:image/jpeg;base64,YQ=='};});
+  const drawImage=vi.fn();vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({drawImage} as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype,'toDataURL').mockReturnValue('data:image/webp;base64,cropped');
+  vi.stubGlobal('Image',class {onload=()=>{};set src(_value:string){queueMicrotask(()=>this.onload());}});
+  const detail={...inboxFixture,inbox:{...inboxFixture.inbox,requestId:'thumb-one',id:'thumb-one'}};
+  const other={...detail,inbox:{...detail.inbox,requestId:'thumb-two',id:'thumb-two'}};
+  const signal=new AbortController().signal;
+  expect(await Promise.all([inboxRowThumbnail(detail,signal),inboxRowThumbnail(other,signal)])).toEqual(['data:image/webp;base64,cropped','data:image/webp;base64,cropped']);
+  expect(max).toBe(1);expect(mocks.native).toHaveBeenCalledTimes(2);expect(drawImage).toHaveBeenCalledWith(expect.anything(),422,0,378,538,0,0,120,171);
+  await inboxRowThumbnail({...detail,inbox:{...detail.inbox,fetchedAt:'new timestamp'}},signal);expect(mocks.native).toHaveBeenCalledTimes(2);
+  await inboxRowThumbnail({...detail,candidate:{...detail.candidate!,jacketSha256:'changed'}},signal);expect(mocks.native).toHaveBeenCalledTimes(3);
+});

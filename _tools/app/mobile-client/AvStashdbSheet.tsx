@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {displayDate} from '../src/shared/displayDate';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {BottomSheet} from './BottomSheet';
-import {Button, Dialog, DialogDescription, Field, TextInput} from './ui';
+import {Button, Dialog, DialogDescription, EmptyState, Field, TextInput} from './ui';
 import {outboxConnection} from './outboxConnection';
 import {personRevision, readCommands, sameAuthority, validatePortraitManifest, type PersonRevisionCommand, type PortraitManifest} from './collectionCommandOutbox';
 import type {CollectionPerson} from './collectionModel';
@@ -11,12 +11,12 @@ import {stashdbError, stashdbPreview, stashdbRead, STASHDB_NOT_CONFIGURED, STASH
 import './avStashdb.css';
 
 type Authority = ReturnType<typeof useCollectionAuthority>;
-export function AvStashdbSheet({mode, person, name, privacy, authority, onClose, onPortrait}: {
-  mode: 'profile' | 'portrait'; person: CollectionPerson; name: string; privacy: boolean; authority: Authority;
+export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, onClose, onPortrait}: {
+  mode: 'profile' | 'portrait'; person: CollectionPerson; name: string; nameJa?: string | null; privacy: boolean; authority: Authority;
   onClose(): void; onPortrait(command: PersonRevisionCommand, url: string | null, operationId: string): void;
 }) {
   const [scope] = useState(() => ({connection: outboxConnection(), identity: authority.identity}));
-  const [query, setQuery] = useState(name), [results, setResults] = useState<StashdbPerformer[] | null>(null);
+  const [query, setQuery] = useState(nameJa?.trim() || name), [results, setResults] = useState<StashdbPerformer[] | null>(null);
   const [photos, setPhotos] = useState<StashdbPerformer | null>(null), [urls, setUrls] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState(false), [busy, setBusy] = useState(true), [failure, setFailure] = useState('');
   const [confirm, setConfirm] = useState<'profile' | 'portrait' | null>(null), [retry, setRetry] = useState(0);
@@ -97,7 +97,7 @@ export function AvStashdbSheet({mode, person, name, privacy, authority, onClose,
         <form onSubmit={event => { event.preventDefault(); void search(); }}><Field label="배우 이름"><TextInput value={query} maxLength={200} onChange={event => setQuery(event.target.value)}/></Field><Button type="submit" disabled={busy || !configured || !query.trim()}>검색</Button></form>
         {results && <div className="tablet-stashdb__candidates" aria-label="StashDB 검색 결과">{results.map(candidate => <Button key={candidate.stashdbId} variant="ghost" aria-label={`${candidate.name} ${candidate.aliases.join(" · ")} ${displayDate(candidate.birthDate)}`} disabled={!ready || busy || !configured} onClick={() => act(() => enqueue({commandType: 'setPersonProfile', stashdbId: candidate.stashdbId}))}>
           {!privacy && urls[candidate.stashdbId] && <img src={urls[candidate.stashdbId]} alt=""/>}<span><b>{candidate.name}</b><small>{candidate.aliases.join(' · ')}</small><small>{displayDate(candidate.birthDate)}</small></span>
-        </Button>)}{results.length === 0 && <p>검색 결과가 없습니다.</p>}</div>}
+        </Button>)}{results.length === 0 && <EmptyState inline title="검색 결과 없음"/>}</div>}
         {person.stashdbId && <Button disabled={!ready || busy || !configured} onClick={() => act(() => enqueue({commandType: 'setPersonProfile', stashdbId: person.stashdbId!}))}>새로고침</Button>}
         {(person.stashdbId || person.profile) && <Button disabled={!ready || lock.current} onClick={() => setConfirm('profile')}>연결 해제</Button>}
       </> : <>

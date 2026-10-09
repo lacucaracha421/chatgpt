@@ -1,3 +1,4 @@
+import {setOutboxConnection} from './outboxConnection';
 import '@testing-library/jest-dom/vitest';
 import {workImageLoads} from './workImageLoads.test-helper';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
@@ -27,9 +28,10 @@ const props={active:true,paused:false,backRef:{current:null}};
 const openAv=async()=>fireEvent.click(await screen.findByRole('radio',{name:'AV'}));
 
 beforeEach(()=>{
-    localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
+    localStorage.clear();setOutboxConnection('https://test.example');for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
   mocks.native.mockImplementation(async(_operation,payload)=>({url:`https://example.invalid/${payload.artworkId??'asset'}-${payload.variant}`}));
   mocks.api.mockImplementation(async(path:string)=>{
+    if(path.startsWith('/v1/av-inbox'))return {items:[],hasMore:false,nextBefore:null};
     if(path==='/v1/collections/status')return {revision:'r1'};
     if(path==='/v1/collections/releases')return {revision:1,counts:{unread:0,collections:[]},items:[],nextCursor:null,hasMore:false};
     if(path==='/v1/collections/av-a')return {revision:'r1',item:detail};
@@ -115,11 +117,12 @@ describe('tablet AV collections',()=>{
     });
     render(<Collections {...props}/>);
     await openAv();
+    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'ssis123'}});
     expect(screen.getByText('SSIS-123',{selector:'strong'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'보내기'}));
-    await waitFor(()=>expect(screen.getByText('SSIS-123을 PC로 보냈어요. PC에서 작품을 고르면 여기에 나타나요.')).toBeTruthy());
+    await waitFor(()=>expect(screen.getByText('SSIS-123을 보냈어요. 후보가 준비되면 받은 품번에서 고를 수 있어요.')).toBeTruthy());
     const call=mocks.api.mock.calls.find(([path])=>path==='/v1/av-lookups');
     expect(call?.[2]).toMatchObject({productCode:'SSIS-123',sourceUrl:null});
     expect((call?.[2] as {requestId:string}).requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
@@ -138,13 +141,14 @@ describe('tablet AV collections',()=>{
     });
     render(<Collections {...props}/>);
     await openAv();
+    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'SSIS-001'}});
     fireEvent.click(screen.getByRole('button',{name:'보내기'}));
     await screen.findByText(/오프라인이라 품번을 보내지 못했어요/);
     const retry=screen.getByRole('button',{name:'다시 보내기'});
     fireEvent.click(retry);
-    await screen.findByText(/SSIS-001을 PC로 보냈어요/);
+    await screen.findByText(/SSIS-001을 보냈어요/);
     const calls=mocks.api.mock.calls.filter(([path])=>path==='/v1/av-lookups');
     expect(calls).toHaveLength(2);
     expect((calls[0]![2] as {requestId:string}).requestId).toBe((calls[1]![2] as {requestId:string}).requestId);
@@ -161,6 +165,7 @@ describe('tablet AV collections',()=>{
     });
     render(<Collections {...props}/>);
     await openAv();
+    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'SSIS-001'}});
     fireEvent.click(screen.getByRole('button',{name:'보내기'}));
@@ -172,12 +177,13 @@ describe('tablet AV collections',()=>{
     mocks.api.mockImplementation(async(path:string)=>path==='/v1/av-lookups'?{}:base(path));
     render(<Collections {...props}/>);
     await openAv();
+    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     for(let number=1;number<=6;number++){
       const code=`SSIS-${String(number).padStart(3,'0')}`;
       fireEvent.change(input,{target:{value:code}});
       fireEvent.click(screen.getByRole('button',{name:'보내기'}));
-      await screen.findByText(new RegExp(`${code}을 PC로 보냈어요`));
+      await screen.findByText(new RegExp(`${code}을 보냈어요`));
     }
     const list=screen.getByRole('list',{name:'최근 보낸 품번'});
     expect(list.querySelectorAll('li')).toHaveLength(5);
@@ -390,7 +396,8 @@ describe('tablet AV collections',()=>{
   it('hides empty computed shelves and uses a crop portrait beside initials',async()=>{
     const one=page([avA]);
     mocks.api.mockImplementation(async(path:string)=>{
-      if(path==='/v1/collections/status')return {revision:'r1'};
+      if(path.startsWith('/v1/av-inbox'))return {items:[],hasMore:false,nextBefore:null};
+    if(path==='/v1/collections/status')return {revision:'r1'};
       if(path==='/v1/collections/av-a')return {revision:'r1',item:detail};
       if(path.startsWith('/v1/collections?type=av'))return one;
       return {revision:1,counts:{unread:0,collections:[]},items:[],nextCursor:null,hasMore:false};

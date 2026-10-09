@@ -66,7 +66,7 @@ function recentTime(value: string): string {
   return displayDateTime(value, new Date(), {withTime: true});
 }
 
-export function AvLookupSender() {
+export function AvLookupSender({disabled=false,onSent}:{disabled?:boolean;onSent?():void}={}) {
   const [value, setValue] = useState('');
   const [recent, setRecent] = useState<AvLookupRecent[]>(() => readAvLookupRecent());
   const [feedback, setFeedback] = useState<LookupFeedback | null>(null);
@@ -75,7 +75,7 @@ export function AvLookupSender() {
   const normalized = normalizeProductCode(value);
 
   const send = async () => {
-    if (!normalized || sending) {
+    if (!normalized || sending || disabled) {
       if (!normalized) setFeedback({kind: 'invalid'});
       return;
     }
@@ -93,6 +93,7 @@ export function AvLookupSender() {
       writeAvLookupRecent(next);
       attempt.current = null;
       setFeedback({kind: 'sent', code});
+      onSent?.();
     } catch (reason) {
       setFeedback({kind: lookupError(reason)});
     } finally {
@@ -101,7 +102,7 @@ export function AvLookupSender() {
   };
 
   const message = feedback?.kind === 'sent'
-    ? `${feedback.code}을 PC로 보냈어요. PC에서 작품을 고르면 여기에 나타나요.`
+    ? `${feedback.code}을 보냈어요. 후보가 준비되면 받은 품번에서 고를 수 있어요.`
     : feedback?.kind === 'rate'
       ? '요청이 많아요. 잠시 후 다시 보내 주세요'
       : feedback?.kind === 'invalid'
@@ -111,7 +112,7 @@ export function AvLookupSender() {
           : '';
 
   return <section className="av-lookup-sender" aria-label="품번 보내기">
-    <div className="av-lookup-heading"><div><h2>품번 보내기</h2><p>PC에서 작품을 고를 수 있도록 품번을 보냅니다.</p></div><span className="numeric muted">최근 {recent.length}/5</span></div>
+    <div className="av-lookup-heading"><div><h2>품번 보내기</h2></div><span className="numeric muted">최근 {recent.length}/5</span></div>
     <div className="av-lookup-form">
       <label htmlFor="av-product-code">품번</label>
       <div className="av-lookup-controls">
@@ -121,7 +122,7 @@ export function AvLookupSender() {
           if (attempt.current?.code !== normalizeProductCode(next)) attempt.current = null;
           setFeedback(null);
         }}/>
-        <Button type="button" variant="primary" disabled={!normalized || sending} onClick={() => void send()}><BusyLabel busy={!!(sending)} idle={feedback?.kind === 'offline' || feedback?.kind === 'rate' ? '다시 보내기' : '보내기'}>보내는 중…</BusyLabel></Button>
+        <Button type="button" variant="primary" disabled={disabled || !normalized || sending} onClick={() => void send()}><BusyLabel busy={!!(sending)} idle={feedback?.kind === 'offline' || feedback?.kind === 'rate' ? '다시 보내기' : '보내기'}>보내는 중…</BusyLabel></Button>
       </div>
       {normalized && <p className="av-lookup-preview" aria-live="polite">정규화된 품번: <strong className="numeric">{normalized}</strong></p>}
     </div>

@@ -14,9 +14,9 @@ const photo = {id: 'i1', url: '/v1/providers/stashdb/image?stashdbId=s1&imageId=
 const candidate = {stashdbId: 's1', name: '미오', aliases: ['Mio'], birthDate: '2000-01-01', previewUrl: photo.url, images: [photo]};
 const manifest = {original: {sha256: 'a'.repeat(64), sizeBytes: 123, contentType: 'image/jpeg'}, width: 600, height: 800, attribution: {source: 'stashdb', sourceUrl: null, license: null, author: null}};
 const close = vi.fn(), portrait = vi.fn();
-function open(mode: 'profile' | 'portrait' = 'profile', privacy = false) {
+function open(mode: 'profile' | 'portrait' = 'profile', privacy = false, nameJa?: string | null) {
   const authority = {identity, rows: [], acknowledgements: [], enqueue: (command: Parameters<typeof enqueueCommand>[1], label: string) => enqueueCommand(identity, command, label)} as unknown as ReturnType<typeof useCollectionAuthority>;
-  return render(<AvStashdbSheet mode={mode} person={{id: 'p1', entityRevision: 4, stashdbId: 's1', memo: null, favorite: false, profile: null, portrait: null}} name="하야세 미오" privacy={privacy} authority={authority} onClose={close} onPortrait={portrait}/>);
+  return render(<AvStashdbSheet mode={mode} person={{id: 'p1', entityRevision: 4, stashdbId: 's1', memo: null, favorite: false, profile: null, portrait: null}} name="하야세 미오" nameJa={nameJa} privacy={privacy} authority={authority} onClose={close} onPortrait={portrait}/>);
 }
 beforeEach(() => {
   localStorage.clear(); setOutboxConnection('https://test.example'); close.mockReset(); portrait.mockReset(); mocks.api.mockReset(); mocks.native.mockReset();
@@ -31,6 +31,20 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+it('prefills the Japanese performer name and submits it without editing', async () => {
+  open('profile', false, '早瀬みお');
+  expect(screen.getByLabelText('배우 이름')).toHaveValue('早瀬みお');
+  await waitFor(() => expect(screen.getByRole('button', {name: '검색'})).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', {name: '검색'}));
+  await screen.findByRole('button', {name: /미오 Mio/});
+  expect(mocks.api.mock.calls.some(([path]) => path === `/v1/providers/stashdb/search?query=${encodeURIComponent('早瀬みお')}`)).toBe(true);
+});
+it.each([null, '', '  '])('falls back to the display name for an absent Japanese name (%s)', nameJa => {
+  open('profile', false, nameJa);
+  expect(screen.getByLabelText('배우 이름')).toHaveValue('하야세 미오');
+});
+
 it('searches the editable default name, previews authenticated relay and enqueues the chosen profile', async () => {
   open(); expect(screen.getByLabelText('배우 이름')).toHaveValue('하야세 미오');
   await waitFor(() => expect(screen.getByRole('button', {name: '검색'})).toBeEnabled());

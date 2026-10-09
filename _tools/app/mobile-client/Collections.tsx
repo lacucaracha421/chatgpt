@@ -1,3 +1,4 @@
+import {AvInbox} from './AvInbox';
 import {AreaSwitch} from '../src/shared/motion/AreaSwitch';
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
@@ -54,7 +55,7 @@ import {api, errorText} from './transport';
 import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkMissing, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
-import {AvCast, AvLookupSender, AvPerformerShelves, AvRelatedWorks, AvViewTabs, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
+import {AvCast, AvPerformerShelves, AvRelatedWorks, AvViewTabs, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import './library.css';
 import './Collections.css';
@@ -465,6 +466,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // An accepted personal edit changes what the server serves; re-read both views.
   const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
   const [workForm,setWorkForm]=useState<WorkForm|null>(null);
+  const [avInboxOpen,setAvInboxOpen]=useState(false);
   // 작품 관리 (the detail's ⋯) and the 휴지통 shortcut.
   const [manage,setManage]=useState<ManageSheet>(null);
   const [avRetry,setAvRetry]=useState<import('./collectionCommandOutbox').CommandIntent|undefined>();
@@ -617,7 +619,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
-        :<TopBar find={tab==='av'} barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>}/>;
+        :<TopBar find={tab==='av'} barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{tab==='av'&&<Button variant="ghost" onClick={()=>setAvInboxOpen(true)}>품번 보내기</Button>}{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>}/>;
   const showAvLoading=useDelayedBusy(main.busy&&!main.committed);
   const showDetailLoading=useDelayedBusy(!!selected&&!item&&!detailError);
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
@@ -705,7 +707,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       {sections.inline}
       <AuthorityQueue authority={edits.authority} onForm={setWorkForm}/>
       {listTab==='av'?<>
-      <AvLookupSender/>
+      <AvInbox active={active&&!paused&&listTab==='av'} authority={edits.authority} items={main.items} open={avInboxOpen} onOpen={()=>setAvInboxOpen(true)} onClose={()=>setAvInboxOpen(false)}/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:(main.busy&&!main.committed)||showAvLoading?showAvLoading&&<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
         <AvViewTabs view={avView} onView={chooseAvView}/>

@@ -50,3 +50,22 @@ it('travels the entire sheet height and shares the opacity-only reduced-motion r
   expect(sheet).toContain('--surface-y: 100%');
   expect(motion).toContain('translate: none !important; scale: none !important; transition: opacity var(--motion-micro)');
 });
+
+it('closes a tall inbox sheet from the header button or a downward header swipe', () => {
+  vi.stubGlobal('PointerEvent', MouseEvent);
+  const close = vi.fn();
+  render(<BottomSheet tall title="받은 품번 1" headerActions={<button>후보 차례로 보기 1</button>} onClose={close}><p>품번 보내기</p></BottomSheet>);
+  screen.getByRole('button', {name: '받은 품번 1 닫기'}).click();
+  expect(close).toHaveBeenCalledTimes(1);
+  const grab = document.querySelector('.bottom-sheet-drag-area')!;
+  grab.dispatchEvent(new MouseEvent('pointerdown', {bubbles:true, clientX:100, clientY:10}));
+  grab.dispatchEvent(new MouseEvent('pointerup', {bubbles:true, clientX:100, clientY:100}));
+  expect(close).toHaveBeenCalledTimes(2);
+});
+
+it('keeps tall sheets centered without overriding slide-up motion',()=>{
+  const css=readFileSync('src/styles/controls.css','utf8');
+  const tall=css.match(/\.ui-dialog\.ui-dialog:has\(>\.library-sheet--tall\)\s*\{([^}]+)\}/)![1];
+  expect(tall).toContain('left:50%');expect(tall).not.toMatch(/transform\s*:/);
+  expect(readFileSync('mobile-client/library.css','utf8')).toContain('--surface-y: 100%');
+});

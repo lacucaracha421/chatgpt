@@ -231,7 +231,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
       {notice && <div className="inline-error" role="alert"><span>{notice}</span><Button variant="ghost" onClick={() => clearPersonNotice(shownId)}>닫기</Button></div>}
     </div>}
     {memoOpen && editable && <PersonMemoSheet initial={memo ?? ''} onClose={() => setMemoOpen(false)} onSave={value => { if (save({memo: value})) setMemoOpen(false); }}/>}
-    {stashSheet && editable && published && <AvStashdbSheet mode={stashSheet} person={published} name={page.person.name} privacy={hidePhotos} authority={authority!} onClose={() => setStashSheet(null)} onPortrait={(command: PersonRevisionCommand, url, operationId) => {
+    {stashSheet && editable && published && <AvStashdbSheet mode={stashSheet} person={published} name={page.person.name} nameJa={page.person.nameJa} privacy={hidePhotos} authority={authority!} onClose={() => setStashSheet(null)} onPortrait={(command: PersonRevisionCommand, url, operationId) => {
       if (command.commandType === 'setPersonPortrait') setPortraitWish({personId: shownId, operationId, url, digest: command.portrait?.original.sha256 ?? null});
     }}/>}
     <section className="tablet-performer__works" aria-labelledby="tablet-performer-works">

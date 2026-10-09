@@ -14,14 +14,14 @@ export type Fields = Record<string, string | number | boolean | null>;
 export type Provider = 'tmdb' | 'igdb';
 export type ProviderApply = {operation: 'create' | 'connect' | 'refresh'; provider: Provider; externalId: string; workId: string; type?: 'movie' | 'game'};
 export type BlobReceipt = {sha256: string; sizeBytes: number; contentType: string};
-export type ArtworkReceipt = {provider: Provider; providerImageId: string; original: BlobReceipt; width: number; height: number};
+export type ArtworkReceipt = {provider: string; providerImageId: string; original: BlobReceipt; width: number; height: number};
 /** The relay's reply: an older server sends no thumbnail. */
 export type ArtworkReply = ArtworkReceipt & {thumbnail?: BlobReceipt | null};
-export type CommandReceipt = AuthorityIdentity & {operationId: string; commandType: string; authorityCursor?: number; changed?: boolean; person?: CollectionPerson};
+export type CommandReceipt = AuthorityIdentity & {operationId: string; commandType: string; authorityCursor?: number; changed?: boolean; entities?: {works?: {workId: string; entityRevision: number}[]}; person?: CollectionPerson};
 export type WorkCommand =
   | ({commandType: 'providerApply'} & ProviderApply)
-  | ({commandType: 'addArtwork'; workId: string; artworkId: string; kind: string; language: null; thumbnail: BlobReceipt | null} & ArtworkReceipt)
-  | {commandType: 'selectArtwork'; workId: string; slot: 'work' | 'hero' | 'backdrop'; artworkId: string | null; expectedArtworkId: string | null}
+  | ({commandType: 'addArtwork'; workId: string; artworkId: string; kind: string; language: string | null; thumbnail: BlobReceipt | null} & ArtworkReceipt)
+  | {commandType: 'selectArtwork'; workId: string; slot: 'work' | 'hero' | 'backdrop' | 'spine' | 'back'; artworkId: string | null; expectedArtworkId: string | null}
   | {commandType: 'createWork'; workId: string; type: CollectionKind; name: string; legacyKind: null; fields: Fields; binding: null}
   | {commandType: 'updateWork'; workId: string; changes: Fields; expected: Fields; expectedRevision: number | null}
   | {commandType: 'setAvDetails'; workId: string; changes: AvDetailFields; expected: AvDetailFields}
@@ -48,7 +48,7 @@ export type Command = AuthorityIdentity & AuthorityCommand & {operationId: strin
 export type ConflictWork = {name: string; fields: Fields; entityRevision?: number; details?: {av?: CollectionSummary['av']}; avCredits?: AvCredit[]};
 /** The server's person in a `setPerson` conflict (`current.person`). */
 export type ConflictPerson = {personId?: string; memo?: string | null; favorite?: boolean; entityRevision?: number};
-export type CommandIntent = {command: Command; label?: string; avOverlay?: AvOverlay; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
+export type CommandIntent = {inboxId?: string; command: Command; label?: string; avOverlay?: AvOverlay; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
   state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: ConflictWork; person?: ConflictPerson}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
   const value = reply as Partial<AuthorityIdentity> & {active?: boolean} | null;
@@ -102,6 +102,24 @@ export function enqueueCommands(identity: AuthorityIdentity, commands: WorkComma
     createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'}));
   intents.forEach(intent => validateAvCommand(intent.command));
   write([...readCommands(), ...intents]); return intents;
+}
+/** Immutable inbox operations can be recovered after a crash between plan and queue writes. */
+export function enqueueInboxCommands(inboxId: string, commands: Command[], connection = outboxConnection()) {
+  const rows = readCommands(connection);
+  for (const command of commands) {
+    validateAvCommand(command);
+    const prior = rows.find(row => row.command.operationId === command.operationId);
+    if (prior && JSON.stringify(prior.command) !== JSON.stringify(command)) throw new Error(SAVE_FAILED);
+    if (!prior) rows.push({inboxId, command, createdAt: Date.now(), attempts: 0, nextAttemptAt: 0, state: 'pending'});
+  }
+  write(rows, connection);
+}
+/** Completed applies release their pinned receipt rows after acknowledgement. */
+export function releaseInboxCommands(inboxId: string, connection = outboxConnection()) {
+  write(readCommands(connection).filter(row => row.inboxId !== inboxId), connection);
+}
+export function discardInboxCommands(inboxId:string,connection=outboxConnection()){
+  write(readCommands(connection).filter(row=>row.inboxId!==inboxId||row.state==='accepted'),connection);
 }
 export function providerApplyBody(command: Command & {commandType: 'providerApply'}) {
   const {libraryId, epoch, operation, provider, externalId, workId, type} = command;
@@ -214,7 +232,7 @@ async function deliver(connection: string) {
     } catch (error) {
       const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: ConflictWork; person?: ConflictPerson}}} | null)?.detail : null;
       const code = detail?.code;
-      if (code === 'workDeleted' && !isPersonCommand(row.command)) { dropWork(identity, row.command.workId, connection); continue; }
+      if (code === 'workDeleted' && !row.inboxId && !isPersonCommand(row.command)) { dropWork(identity, row.command.workId, connection); continue; }
       // The server has no such person: no retry can succeed, so its queued edits go, with a note.
       if (code === 'personNotFound' && isPersonCommand(row.command)) { dropPerson(identity, row.command.personId, connection, row.label); continue; }
       if (error instanceof ApiError && error.status !== null && error.status >= 400 && error.status < 500 && ![401, 403, 408, 429].includes(error.status)) {
@@ -250,7 +268,7 @@ function retryLater(connection: string, operationId: string, reason: string) {
 export function reconcileCommands(identity: AuthorityIdentity, item: CollectionSummary, source: 'list' | 'detail' = 'list', readStartedAt?: number) {
   const rows = readCommands();
   const next = rows.filter((row, index) => {
-    if (!sameAuthority(row.command, identity) || row.command.workId !== item.id || row.state !== 'accepted') return true;
+    if (row.inboxId || !sameAuthority(row.command, identity) || row.command.workId !== item.id || row.state !== 'accepted') return true;
     const command = row.command;
     if (command.commandType === 'providerApply') return command.operation === 'create' ? source !== 'list'
       : source !== 'detail' || readStartedAt === undefined || readStartedAt < (row.acceptedAt ?? Infinity);

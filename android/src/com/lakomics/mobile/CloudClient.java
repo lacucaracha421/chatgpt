@@ -25,7 +25,7 @@ final class CloudClient {
   try{
    prepare(c,signal);c.setRequestProperty("Authorization","Bearer "+connection.getString("token"));
    c.setRequestProperty("Accept","image/jpeg, image/png, image/webp");c.setRequestProperty("Accept-Encoding","identity");
-   byte[] bytes=providerImageBytes(c,signal);reusable=true;
+   byte[] bytes=providerImageBytes(c,signal,NetworkPolicy.providerImageLimit(path));reusable=true;
    return new JSONObject().put("url","data:"+providerImageMime(c)+";base64,"+java.util.Base64.getEncoder().encodeToString(bytes));
   }finally{if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
  }
@@ -35,10 +35,13 @@ final class CloudClient {
   return type;
  }
  static byte[] providerImageBytes(HttpURLConnection c,CancellationSignal signal)throws Exception{
+  return providerImageBytes(c,signal,4L*1024*1024);
+ }
+ static byte[] providerImageBytes(HttpURLConnection c,CancellationSignal signal,long max)throws Exception{
   int status=c.getResponseCode();if(status!=200)throw new HttpFailure(status,null);
   providerImageMime(c);
   String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
-  long max=4*1024*1024,expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
+  long expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
   ByteArrayOutputStream out=new ByteArrayOutputStream();
   try(InputStream in=c.getInputStream()){MediaTransfer.copy(in,out,max,expected,System.nanoTime()+MediaTransfer.DEADLINE_NANOS,signal==null?null:signal::throwIfCanceled);}
   return out.toByteArray();

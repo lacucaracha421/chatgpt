@@ -8,6 +8,7 @@ import type {CollectionDetail, CollectionKind} from './collectionModel';
 import {createdWork, isPersonCommand, discardLifecycle, isLifecycle, lifecycleInFlight, rebasePersonCommand, replaceCommand, retryCommandNow, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {errorText} from './transport';
+import {readInboxPlans, cancelInboxPlan} from './avInboxApply';
 import './collectionAuthority.css';
 
 type Authority = ReturnType<typeof useCollectionAuthority>;
@@ -109,10 +110,11 @@ export function AuthorityQueue({authority, workId, personId, item, onForm, onAvE
   if (personId) return <>{authority.rows.filter(row => row.state !== 'accepted' && isPersonCommand(row.command) && row.command.personId === personId)
     .map(row => <PersonQueueRow key={row.command.operationId} row={row} authority={authority} named={false}/>)}</>;
   // The shelf lists the rows whose work it cannot open: creations, provider adds, deletes and restores.
-  const rows = authority.rows.filter(row => row.state !== 'accepted' && (workId ? row.command.workId === workId : row.command.commandType === 'createWork'
+  const paused=workId?readInboxPlans().filter(p=>p.workId===workId&&p.state==='blocked'&&p.identity.libraryId===authority.identity!.libraryId&&p.identity.epoch===authority.identity!.epoch):[];
+  const rows = authority.rows.filter(row => !row.inboxId && row.state !== 'accepted' && (workId ? row.command.workId === workId : row.command.commandType === 'createWork'
     || row.command.commandType === 'providerApply' && row.command.operation === 'create' || row.command.commandType === 'deleteWork' || row.command.commandType === 'restoreWork'
     || person(row) && (row.state === 'conflict' || !!row.lastError)));
-  return <>{rows.map(row => person(row) ? <PersonQueueRow key={row.command.operationId} row={row} authority={authority} named/> : <div key={row.command.operationId} className="collection-authority-queue"><Badge>{row.state === 'conflict' ? '충돌' : '대기'}</Badge>
+  return <>{paused.map(plan=><div key={plan.id} className="collection-authority-queue"><Badge>멈춤</Badge><small className="collection-authority-queue__reason">받은 품번 · {plan.error??'다른 기기의 변경과 겹침'}</small><Button variant="ghost" onClick={()=>{cancelInboxPlan(plan.id);void authority.flush();}}>적용 취소</Button></div>)}{rows.map(row => person(row) ? <PersonQueueRow key={row.command.operationId} row={row} authority={authority} named/> : <div key={row.command.operationId} className="collection-authority-queue"><Badge>{row.state === 'conflict' ? '충돌' : '대기'}</Badge>
     {!workId && <span>{row.command.commandType === 'createWork' ? row.command.name : row.command.commandType === 'providerApply' ? `${row.command.provider.toUpperCase()}에서 추가`
       : row.command.commandType === 'deleteWork' ? `${row.label ?? '작품'} 삭제` : row.command.commandType === 'restoreWork' ? `${row.label ?? '작품'} 되살리기` : ''}</span>}
     {row.state === 'conflict' && <>{(row.command.commandType==='createWork'||row.command.commandType==='updateWork'&&Object.keys(row.command.changes).some(key=>!['description','myScore','showcase','status','ownedPlatform'].includes(key)))&&<Button variant="ghost" onClick={() => {
