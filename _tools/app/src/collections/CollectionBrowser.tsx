@@ -325,10 +325,7 @@ export function CollectionBrowser({
     </Button>}
     {typeFilter === "manga" && unlinkedCount > 0 && <Button variant="quiet" size="sm" aria-label={`연결 점검 ${unlinkedCount}`} onClick={() => setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true" /><span className="collection-shortcuts__label">연결 점검</span><span className="collection-shortcuts__count">{unlinkedCount}</span></Button>}
   </div>;
-  const avCount = avInbox.items.length;
-  const typeOptions = TYPES.map(value => value === "av" && avCount > 0
-    ? { value, label: TYPE_LABEL[value], count: avCount, ariaLabel: `AV, 받은 품번 ${avCount.toLocaleString()}개` }
-    : { value, label: TYPE_LABEL[value] });
+  const typeOptions = TYPES.map(value => ({ value, label: TYPE_LABEL[value] }));
 
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
     <h3>{filtered ? "검색 결과" : "전체"}<span className="collection-browser__total" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span></h3>

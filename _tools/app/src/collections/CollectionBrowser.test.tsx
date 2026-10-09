@@ -214,15 +214,15 @@ describe("CollectionBrowser", () => {
 
   });
 
-  it("shows the received-code count on the AV section and the ledger only in the AV library", async () => {
+  it("shows no count on the AV section and the ledger only in the AV library", async () => {
     const avLinkApi = {
       listInbox: vi.fn().mockResolvedValue([{ id: "inbox-1", requestId: "request-1", productCode: "SSIS-001", normalizedCode: "SSIS-001", sourceUrl: null,
         receivedAt: "2026-09-27T05:02:00Z", status: "fetching", attempts: 1, lastError: null, fetchedAt: null, collectionId: null, collectionName: null }]),
       pendingCount: vi.fn(), getCandidate: vi.fn(), retry: vi.fn(), fixCode: vi.fn(), dismiss: vi.fn(), apply: vi.fn(),
     } as unknown as AvLinkApi;
     renderBrowser({ collections: [], typeFilter: "game", showcase: false, avLinkApi });
-    const av = await screen.findByRole("radio", { name: "AV, 받은 품번 1개" });
-    expect(av.querySelector(".ui-segmented__label")).toHaveTextContent("AV 1");
+    const av = await screen.findByRole("radio", { name: "AV" });
+    expect(av.querySelector(".ui-segmented__label")).toHaveTextContent(/^AV$/);
     expect(screen.queryByRole("region", { name: "받은 품번" })).not.toBeInTheDocument();
     cleanup();
 
