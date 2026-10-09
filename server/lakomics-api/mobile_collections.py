@@ -509,7 +509,8 @@ def public_person(db, person_id, library_id=None, *, entity=False):
         return None
     payload = json.loads(row["payload"])
     # Relay identity is additive authority metadata, not the legacy text profile.
-    payload.pop("stashdbId", None)
+    for key in ("stashdbId", "stashdbProfile", "profileOverrides", "profileBaseNames"):
+        payload.pop(key, None)
     return {"person": payload}
 
 

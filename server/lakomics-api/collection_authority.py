@@ -121,13 +121,14 @@ AV_CREDITS = "setAvCredits"
 PERSON = "setPerson"
 PERSON_PORTRAIT = "setPersonPortrait"
 PERSON_PROFILE = "setPersonProfile"
+PERSON_PROFILE_FIELDS = "setPersonProfileFields"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE)
+                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE, PERSON_PROFILE_FIELDS)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -141,6 +142,7 @@ COMMAND_KEYS = {
     PERSON: {"personId", "changes", "expected"},
     PERSON_PORTRAIT: {"personId", "portrait", "expectedRevision"},
     PERSON_PROFILE: {"personId", "stashdbId", "expectedRevision"},
+    PERSON_PROFILE_FIELDS: {"personId", "changes", "expected"},
     DELETE: {"workId", "expectedRevision"},
     RESTORE: {"workId", "expectedRevision"},
     PURGE: {"workId", "expectedRevision"},
@@ -874,7 +876,7 @@ def av_work_entity(db, library_id, state):
             continue
         payload = json.loads(row["payload"])
         name, name_ja = av_person_identity(db, library_id, person_id, payload)
-        people.append({**payload, "personId": person_id, "displayName": name, "nameJa": name_ja,
+        people.append({**payload, **_profile_metadata(payload), "personId": person_id, "displayName": name, "nameJa": name_ja,
                        "entityRevision": row["entity_revision"],
                        "portraitSelection": person_portrait_selection(db, library_id, row),
                        "portraitImage": None if row["portrait_image"] is None else json.loads(row["portrait_image"])})
@@ -1717,10 +1719,15 @@ def person_portrait_selection(db, library_id, row):
     return None
 
 
+def _profile_metadata(payload):
+    import av_person_profile
+    return av_person_profile.metadata(payload)
+
+
 def person_entity(db, library_id, row):
     payload = json.loads(row["payload"])
     name, name_ja = av_person_identity(db, library_id, row["person_id"], payload)
-    return {**payload, "personId": row["person_id"], "displayName": name, "nameJa": name_ja,
+    return {**payload, **_profile_metadata(payload), "personId": row["person_id"], "displayName": name, "nameJa": name_ja,
             "entityRevision": row["entity_revision"],
             "portraitSelection": person_portrait_selection(db, library_id, row),
             "portraitImage": None if row["portrait_image"] is None else json.loads(row["portrait_image"])}
@@ -1769,6 +1776,74 @@ def _set_person(ctx, entity, payload_sha):
                    person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, row["person_id"])))
 
 
+def _propagate_person_names(ctx, person_id, name, name_ja, previous):
+    if (name, name_ja) == previous:
+        return
+    # Repair all stored name copies, including trash and tombstones; publication
+    # below bumps only non-tombstoned works, once each. Preserve creditName.
+    rows = ctx.db.execute("SELECT DISTINCT w.* FROM collection_authority_works w,json_each(w.av_credits) c"
+                          " WHERE w.library_id=? AND json_extract(c.value,'$.personId')=?",
+                          [ctx.library_id, person_id]).fetchall()
+    for work in rows:
+        credits = json.loads(work["av_credits"])
+        for credit in credits:
+            if credit["personId"] == person_id:
+                credit.update(name=name, nameJa=name_ja)
+        ctx.db.execute("UPDATE collection_authority_works SET av_credits=? WHERE library_id=? AND work_id=?",
+                       [encode(credits), ctx.library_id, work["work_id"]])
+
+
+def _set_person_profile_fields(ctx, entity, payload_sha):
+    import av_person_profile as profile
+    row = _person_row(ctx, entity["personId"])
+    payload = json.loads(row["payload"])
+    name, name_ja = av_person_identity(ctx.db, ctx.library_id, row["person_id"], payload)
+    overrides = payload.get("profileOverrides", {})
+    effective = payload.get("profile") or {}
+    current = {k: {"value": name if k == "displayName" else name_ja if k == "nameJa" else effective.get(k),
+                   "overridden": k in overrides} for k in entity["changes"]}
+    desired_overrides = dict(overrides)
+    for key, value in entity["changes"].items():
+        if value == profile.RESET:
+            desired_overrides.pop(key, None)
+        else:
+            desired_overrides[key] = value
+    # Establishing manual ownership counts as a change even at the same value.
+    if desired_overrides == overrides:
+        return _finish(ctx, payload_sha, row["person_id"], person=person_entity(ctx.db, ctx.library_id, row))
+    if current != entity["expected"]:
+        conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
+    payload.update(profile.metadata(payload))
+    name_fields = set(entity["changes"]) & profile.NAME_FIELDS
+    if any(key in desired_overrides for key in name_fields):
+        payload.setdefault("profileBaseNames", {"displayName": name, "nameJa": name_ja})
+    payload["profileOverrides"] = desired_overrides
+    payload["profile"] = profile.merged(payload)
+    merged = payload["profile"] or {}
+    start, end = merged.get("careerStart"), merged.get("careerEnd")
+    if (set(entity["changes"]) & {"careerStart", "careerEnd"}
+            and start is not None and end is not None and end < start):
+        fail(422, "invalidCollectionCommand", "활동 종료 연도가 시작 연도보다 빠릅니다.")
+    desired_name, desired_name_ja = (profile.names(payload)
+                                   if name_fields and "profileBaseNames" in payload else (name, name_ja))
+    desired_name = desired_name if "displayName" in entity["changes"] else name
+    desired_name_ja = desired_name_ja if "nameJa" in entity["changes"] else name_ja
+    if "displayName" in payload:
+        payload["displayName"] = desired_name
+    if "nameJa" in payload:
+        payload["nameJa"] = desired_name_ja
+    from mobile_collections import MAX_PERSON_BYTES
+    if len(encode(payload).encode()) > MAX_PERSON_BYTES:
+        fail(413, "collectionPayloadTooLarge", "인물 프로필 크기가 허용 범위를 초과했습니다.")
+    ctx.db.execute("UPDATE collection_authority_people SET payload=?,display_name=?,name_ja=?,"
+                   "entity_revision=entity_revision+1 WHERE library_id=? AND person_id=?",
+                   [encode(payload), desired_name, desired_name_ja, ctx.library_id, row["person_id"]])
+    _propagate_person_names(ctx, row["person_id"], desired_name, desired_name_ja, (name, name_ja))
+    _publish_person(ctx, row["person_id"])
+    return _finish(ctx, payload_sha, row["person_id"], personChanged=True,
+                   person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, row["person_id"])))
+
+
 def _set_person_profile(ctx, entity, payload_sha, prepared_profile):
     row = _person_row(ctx, entity["personId"])
     payload = json.loads(row["payload"])
@@ -1778,11 +1853,14 @@ def _set_person_profile(ctx, entity, payload_sha, prepared_profile):
             fail(503, "providerUnavailable", "서버에서 프로필을 먼저 조회해야 합니다.")
         desired = prepared_profile["profile"]
     # Refresh is a real fetch, but identical data is a no-op even at an older revision.
-    if payload.get("profile") == desired and payload.get("stashdbId") == entity["stashdbId"]:
+    if _profile_metadata(payload)["stashdbProfile"] == desired and payload.get("stashdbId") == entity["stashdbId"]:
         return _finish(ctx, payload_sha, row["person_id"], person=person_entity(ctx.db, ctx.library_id, row))
     if row["entity_revision"] != entity["expectedRevision"]:
         conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
-    payload["profile"] = desired
+    import av_person_profile
+    payload.update(_profile_metadata(payload))
+    payload["stashdbProfile"] = desired
+    payload["profile"] = av_person_profile.merged(payload)
     payload["stashdbId"] = entity["stashdbId"]
     from mobile_collections import MAX_PERSON_BYTES
     if len(encode(payload).encode()) > MAX_PERSON_BYTES:
@@ -2517,6 +2595,7 @@ HANDLERS = {
     TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
     VOLUME_RANGE: _volume_range, RECORD_RELEASE: _record_release, ACK_RELEASE: _ack_release,
     AV_DETAILS: _set_av_details, AV_CREDITS: _set_av_credits,
+    PERSON_PROFILE_FIELDS: _set_person_profile_fields,
     PERSON: _set_person, PERSON_PORTRAIT: _set_person_portrait, PERSON_PROFILE: _set_person_profile,
 }
 
@@ -2645,6 +2724,10 @@ def parse_command(body):
         changes, expected = _person_fields(body["changes"]), _person_fields(body["expected"])
         if set(changes) != set(expected):
             fail()
+        entity.update(personId=require_id(body["personId"]), changes=changes, expected=expected)
+    elif command_type == PERSON_PROFILE_FIELDS:
+        import av_person_profile
+        changes, expected = av_person_profile.parse(body["changes"], body["expected"])
         entity.update(personId=require_id(body["personId"]), changes=changes, expected=expected)
     elif command_type == PERSON_PORTRAIT:
         entity.update(personId=require_id(body["personId"]), portrait=_portrait_input(body["portrait"]),
@@ -3903,8 +3986,8 @@ def register(app, get_db, require_client, require_publisher):
         def read(db):
             row = authority.active_domain(db, DOMAIN)
             if row is None:
-                return {"active": False, "domain": DOMAIN}
-            return {"active": True, "domain": DOMAIN, "libraryId": row["libraryId"],
+                return {"active": False, "domain": DOMAIN, "features": ["personProfileFields"]}
+            return {"active": True, "domain": DOMAIN, "features": ["personProfileFields"], "libraryId": row["libraryId"],
                     "epoch": row["epoch"], "contractVersion": row["contractVersion"],
                     "cursor": row["cursor"], "activatedAt": row["activatedAt"],
                     "revision": projection_revision(row["libraryId"], row["epoch"], row["cursor"]),
