@@ -1,7 +1,7 @@
 use rusqlite::{params, OptionalExtension};
 
 use super::{
-    aladin::{self, AladinItem},
+    aladin::AladinItem,
     aladin_flow::StoredAladinSource,
     collection::require_collection,
     error::LibraryError,
@@ -83,39 +83,17 @@ pub(super) fn event_kind_str(kind: ReleaseWatchEventKind) -> &'static str {
 }
 
 impl Library {
-    pub fn run_due_release_watch(
-        &self,
-        ttb_key: &str,
-    ) -> Result<ReleaseWatchRunResult, LibraryError> {
-        let checked_at = chrono::Utc::now().to_rfc3339();
-        self.run_due_release_watch_with(&checked_at, |query| {
-            aladin::search(ttb_key, query).map(|outcome| outcome.items)
-        })
-    }
-
     pub fn run_due_kakao_release_watch(
         &self,
         key: &str,
     ) -> Result<ReleaseWatchRunResult, LibraryError> {
-        self.run_due_book_release_watch_with("kakao", &chrono::Utc::now().to_rfc3339(), |query| {
+        self.run_due_book_release_watch_with(&chrono::Utc::now().to_rfc3339(), |query| {
             super::kakao_books::search(key, query).map(|outcome| outcome.items)
         })
     }
 
-    fn run_due_release_watch_with<F>(
-        &self,
-        checked_at: &str,
-        fetch: F,
-    ) -> Result<ReleaseWatchRunResult, LibraryError>
-    where
-        F: FnMut(&str) -> Result<Vec<AladinItem>, LibraryError>,
-    {
-        self.run_due_book_release_watch_with("aladin", checked_at, fetch)
-    }
-
     fn run_due_book_release_watch_with<F>(
         &self,
-        provider: &'static str,
         checked_at: &str,
         mut fetch: F,
     ) -> Result<ReleaseWatchRunResult, LibraryError>
@@ -149,7 +127,7 @@ impl Library {
                  ORDER BY COALESCE(last_checked_at, ''), collection_id",
             )?;
             let rows = statement
-                .query_map([provider], |row| {
+                .query_map(["kakao"], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -174,7 +152,7 @@ impl Library {
                 break;
             }
             let query = match self
-                .book_flow(provider)
+                .book_flow()
                 .get_aladin_connection(&collection_id)
             {
                 Ok(Some(connection)) => connection.query,
@@ -202,7 +180,7 @@ impl Library {
                     continue;
                 }
             };
-            match self.book_flow(provider).refresh_aladin_items_at(
+            match self.book_flow().refresh_aladin_items_at(
                 &collection_id,
                 items,
                 checked_at,
@@ -245,7 +223,7 @@ impl Library {
         let authority = super::collection_authority::collection_write_status(&transaction)?;
         if authority.active {
             let current = release_watch_status(&transaction, collection_id)?;
-            if enabled && !transaction.query_row("SELECT EXISTS(SELECT 1 FROM collection_external_bindings WHERE collection_id=?1 AND provider IN ('kakao','aladin'))",[collection_id],|r|r.get::<_,bool>(0))? { return Err(LibraryError::ReleaseWatchRequiresAladinBinding); }
+            if enabled && !transaction.query_row("SELECT EXISTS(SELECT 1 FROM collection_external_bindings WHERE collection_id=?1 AND provider = 'kakao')",[collection_id],|r|r.get::<_,bool>(0))? { return Err(LibraryError::ReleaseWatchRequiresAladinBinding); }
             let pending:Option<String>=transaction.query_row("SELECT payload FROM collection_authority_outbox WHERE command_type='setReleaseSubscription' AND entity_key=?1 AND state IN ('pending','blocked') ORDER BY seq DESC LIMIT 1",[collection_id],|r|r.get(0)).optional()?;
             let expected = pending
                 .as_deref()
@@ -283,7 +261,7 @@ impl Library {
             let mut statement = transaction.prepare(
                 "SELECT id, event_kind, volume_number, previous_value, current_value, detected_at
                  FROM release_watch_events
-                 WHERE collection_id = ?1 AND read_at IS NULL
+                 WHERE collection_id = ?1 AND read_at IS NULL AND provider IN ('kakao', 'mangadex')
                  ORDER BY detected_at, rowid",
             )?;
             let events = statement
@@ -323,7 +301,7 @@ impl Library {
                     event.previous_value, event.current_value, event.detected_at
              FROM release_watch_events AS event
              JOIN collections AS collection ON collection.id = event.collection_id
-             WHERE event.read_at IS NULL
+             WHERE event.read_at IS NULL AND event.provider IN ('kakao', 'mangadex')
              ORDER BY event.detected_at, event.rowid",
         )?;
         let events = statement
@@ -344,7 +322,7 @@ fn stop_reason(error: &LibraryError) -> Option<ReleaseWatchRunStopReason> {
     }
 }
 
-/// Subscribe (Kakao binding preferred, else Aladin) or unsubscribe one manga Collection.
+/// Subscribe or unsubscribe the Kakao binding of one manga Collection.
 /// Returns whether a subscription row changed. Enabling without a binding is
 /// `ReleaseWatchRequiresAladinBinding`. Shared by the PC toggle and mobile personal edits.
 pub(super) fn write_release_watch(
@@ -362,9 +340,7 @@ pub(super) fn write_release_watch(
              FROM collection_external_bindings AS binding
              JOIN collections AS collection ON collection.id = binding.collection_id
              WHERE binding.collection_id = ?1
-               AND binding.provider = CASE WHEN EXISTS (
-                   SELECT 1 FROM collection_external_bindings WHERE collection_id = ?1 AND provider = 'kakao'
-               ) THEN 'kakao' ELSE 'aladin' END
+               AND binding.provider = 'kakao'
                AND collection.type = 'manga'
              ON CONFLICT(collection_id, provider) DO NOTHING",
             [collection_id],
@@ -376,7 +352,7 @@ pub(super) fn write_release_watch(
     } else {
         Ok(connection.execute(
             "DELETE FROM release_watch_subscriptions
-             WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')",
+             WHERE collection_id = ?1 AND provider = 'kakao'",
             [collection_id],
         )? > 0)
     }
@@ -389,7 +365,7 @@ fn subscription_exists(
     Ok(connection.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM release_watch_subscriptions
-            WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')
+            WHERE collection_id = ?1 AND provider = 'kakao'
          )",
         [collection_id],
         |row| row.get(0),
@@ -404,8 +380,8 @@ fn release_watch_status(
         .query_row(
             "SELECT last_checked_at
              FROM release_watch_subscriptions
-             WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')
-             ORDER BY CASE provider WHEN 'kakao' THEN 0 ELSE 1 END LIMIT 1",
+             WHERE collection_id = ?1 AND provider = 'kakao'
+             LIMIT 1",
             [collection_id],
             |row| row.get::<_, Option<String>>(0),
         )
@@ -538,16 +514,16 @@ mod tests {
             .id
     }
 
-    fn connect_aladin(library: &Library, collection_id: &str) {
-        connect_aladin_with(library, collection_id, "item-1", "던전밥");
+    fn connect_kakao(library: &Library, collection_id: &str) {
+        connect_kakao_with(library, collection_id, "item-1", "던전밥");
     }
 
-    fn connect_aladin_with(library: &Library, collection_id: &str, item_id: &str, query: &str) {
+    fn connect_kakao_with(library: &Library, collection_id: &str, item_id: &str, query: &str) {
         library
             .upsert_collection_external_binding(
                 collection_id,
                 ExternalBindingInput {
-                    provider: "aladin".into(),
+                    provider: "kakao".into(),
                     external_id: item_id.into(),
                     provider_config_json: Some(format!(
                         r#"{{"version":1,"query":"{query}","groupFingerprint":"","knownItemIds":[]}}"#
@@ -575,6 +551,7 @@ mod tests {
     }
 
     fn subscribe_at(library: &Library, collection_id: &str, checked_at: Option<&str>) {
+        library.set_owned_volume_count(collection_id, 0, 0).unwrap();
         library
             .set_release_watch_enabled(collection_id, true)
             .unwrap();
@@ -598,7 +575,7 @@ mod tests {
                     collection_id, volume_number, provider, provider_item_id, title,
                     author, publisher, isbn13, publication_date, item_url,
                     provider_data_json, created_at, updated_at
-                 ) VALUES (?1, 1, 'aladin', ?2, ?3, '작가', '출판사', ?4,
+                 ) VALUES (?1, 1, 'kakao', ?2, ?3, '작가', '출판사', ?4,
                     NULL, NULL, ?5, 't', 't')",
                 params![
                     collection_id,
@@ -623,7 +600,7 @@ mod tests {
         ] {
             let collection_id = create_collection(&library, query, CollectionType::Manga);
             let item_id = format!("item-{query}");
-            connect_aladin_with(&library, &collection_id, &item_id, query);
+            connect_kakao_with(&library, &collection_id, &item_id, query);
             subscribe_at(&library, &collection_id, checked_at);
             if has_source {
                 seed_source(&library, &collection_id, &item_id, query);
@@ -632,7 +609,7 @@ mod tests {
         let mut calls = Vec::new();
 
         let result = library
-            .run_due_release_watch_with("2026-08-22T12:00:00Z", |query| {
+            .run_due_book_release_watch_with("2026-08-22T12:00:00Z", |query| {
                 calls.push(query.to_owned());
                 Ok(vec![runner_item(&format!("item-{query}"), query)])
             })
@@ -651,7 +628,7 @@ mod tests {
         let library = Library::open(temp.path()).unwrap();
         for query in ["broken", "later"] {
             let collection_id = create_collection(&library, query, CollectionType::Manga);
-            connect_aladin_with(&library, &collection_id, &format!("item-{query}"), query);
+            connect_kakao_with(&library, &collection_id, &format!("item-{query}"), query);
             subscribe_at(
                 &library,
                 &collection_id,
@@ -665,7 +642,7 @@ mod tests {
         let mut calls = Vec::new();
 
         let result = library
-            .run_due_release_watch_with("2026-08-22T12:00:00Z", |query| {
+            .run_due_book_release_watch_with("2026-08-22T12:00:00Z", |query| {
                 calls.push(query.to_owned());
                 if query == "broken" {
                     Err(LibraryError::AmbiguousAladinBinding)
@@ -715,7 +692,7 @@ mod tests {
         let mut collection_ids = Vec::new();
         for query in ["first", "later"] {
             let collection_id = create_collection(&library, query, CollectionType::Manga);
-            connect_aladin_with(&library, &collection_id, &format!("item-{query}"), query);
+            connect_kakao_with(&library, &collection_id, &format!("item-{query}"), query);
             subscribe_at(&library, &collection_id, None);
             collection_ids.push(collection_id);
         }
@@ -723,7 +700,7 @@ mod tests {
             let mut calls = 0;
 
             let result = library
-                .run_due_release_watch_with("2026-08-22T12:00:00Z", |_query| {
+                .run_due_book_release_watch_with("2026-08-22T12:00:00Z", |_query| {
                     calls += 1;
                     Err(failure())
                 })
@@ -742,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn subscription_requires_aladin_and_toggle_is_idempotent() {
+    fn subscription_requires_kakao_and_toggle_is_idempotent() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let collection_id = create_collection(&library, "Dungeon Meshi", CollectionType::Manga);
@@ -764,7 +741,7 @@ mod tests {
             Err(LibraryError::ReleaseWatchRequiresAladinBinding)
         ));
 
-        connect_aladin(&library, &collection_id);
+        connect_kakao(&library, &collection_id);
         for _ in 0..2 {
             let enabled = library
                 .set_release_watch_enabled(&collection_id, true)
@@ -793,7 +770,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let collection_id = create_collection(&library, "Astral Chain", CollectionType::Game);
-        connect_aladin(&library, &collection_id);
+        connect_kakao(&library, &collection_id);
 
         assert!(matches!(
             library.set_release_watch_enabled(&collection_id, true),
@@ -849,7 +826,7 @@ mod tests {
         future.item_id = "item-1".into();
         future.base_title = "던전밥".into();
         let result = library
-            .run_due_book_release_watch_with("kakao", "2026-09-25T00:00:00Z", |_| Ok(vec![future.clone()]))
+            .run_due_book_release_watch_with("2026-09-25T00:00:00Z", |_| Ok(vec![future.clone()]))
             .unwrap();
         assert_eq!(result.checked, 1);
         assert!(dirty());
@@ -868,7 +845,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let collection_id = create_collection(&library, "Dungeon Meshi", CollectionType::Manga);
-        connect_aladin(&library, &collection_id);
+        connect_kakao(&library, &collection_id);
         library
             .set_release_watch_enabled(&collection_id, true)
             .unwrap();

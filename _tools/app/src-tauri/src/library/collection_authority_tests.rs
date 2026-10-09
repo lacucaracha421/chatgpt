@@ -932,7 +932,7 @@ fn kakao_review_dismissal_queues_authority_config_and_projects_fifo_undo() {
         item_id:id.into(), title:format!("던전밥 {volume}"), author:None, publisher:Some("출판".into()), isbn13:None,
         publication_date:None, item_url:None, volume_number:volume, base_title:"던전밥".into(), snapshot_json:"{}".into(),
     }).collect();
-    library.book_flow("kakao").refresh_aladin_items_at("w",items,NOW).unwrap();
+    library.book_flow().refresh_aladin_items_at("w",items,NOW).unwrap();
     assert!(library.list_kakao_reviews().unwrap()[0].partial_dismissed);
     library.set_kakao_partial_dismissed("w", false).unwrap();
     assert!(!library.list_kakao_reviews().unwrap()[0].partial_dismissed);

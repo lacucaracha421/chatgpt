@@ -1,32 +1,6 @@
-use std::{
-    io::Read,
-    net::{SocketAddr, TcpStream},
-    time::Duration,
-    sync::LazyLock,
-};
+use std::sync::LazyLock;
 
 use regex::Regex;
-use serde::Deserialize;
-use ureq::unversioned::{
-    resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver},
-    transport::{DefaultConnector, NextTimeout},
-};
-use url::Url;
-
-use super::error::LibraryError;
-
-const SEARCH_URL: &str = "https://www.aladin.co.kr/ttb/api/ItemSearch.aspx";
-const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
-const MAX_SEARCH_PAGES: u64 = 10;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-const ADDRESS_PROBE_TIMEOUT: Duration = Duration::from_millis(300);
-
-#[derive(Debug)]
-enum AladinTransportError {
-    Timeout,
-    HttpStatus(u16),
-    Unavailable,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedVolumeProduct {
@@ -46,57 +20,6 @@ pub(crate) struct AladinItem {
     pub volume_number: i64,
     pub base_title: String,
     pub snapshot_json: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AladinItemPayload {
-    item_id: serde_json::Value,
-    title: String,
-    author: Option<String>,
-    publisher: Option<String>,
-    isbn13: Option<String>,
-    #[serde(rename = "pubDate")]
-    publication_date: Option<String>,
-    #[serde(rename = "link")]
-    item_url: Option<String>,
-}
-
-struct ParsedSearchPage {
-    items: Vec<AladinItem>,
-    unparsed_count: u64,
-    total_results: u64,
-    items_per_page: u64,
-    raw_item_count: u64,
-}
-
-#[derive(Debug, Default)]
-struct ReachableResolver {
-    inner: DefaultResolver,
-}
-
-impl Resolver for ReachableResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        config: &ureq::config::Config,
-        timeout: NextTimeout,
-    ) -> Result<ResolvedSocketAddrs, ureq::Error> {
-        let mut addresses = self.inner.resolve(uri, config, timeout)?;
-        prioritize_reachable_address(&mut addresses, |address| {
-            TcpStream::connect_timeout(address, ADDRESS_PROBE_TIMEOUT).is_ok()
-        });
-        Ok(addresses)
-    }
-}
-
-fn prioritize_reachable_address(
-    addresses: &mut [SocketAddr],
-    mut is_reachable: impl FnMut(&SocketAddr) -> bool,
-) {
-    if let Some(index) = addresses.iter().position(&mut is_reachable) {
-        addresses.rotate_left(index);
-    }
 }
 
 /// How one product title reads as a volume of a series. Mirrored by
@@ -311,200 +234,6 @@ pub(crate) struct SearchOutcome {
     pub unparsed_count: u64,
 }
 
-#[cfg(test)]
-pub(crate) fn parse_search(json: &str) -> Result<Vec<AladinItem>, LibraryError> {
-    Ok(parse_search_page(json)?.items)
-}
-
-fn parse_search_page(json: &str) -> Result<ParsedSearchPage, LibraryError> {
-    let envelope: serde_json::Value =
-        serde_json::from_str(json).map_err(|_| LibraryError::InvalidAladinResponse)?;
-    if let Some(code) = envelope.get("errorCode") {
-        let code = code
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| code.to_string());
-        if !code.trim_matches('"').is_empty() && code.trim_matches('"') != "0" {
-            return Err(LibraryError::InvalidAladinCredential);
-        }
-    }
-    let Some(raw_items) = envelope.get("item") else {
-        return Ok(ParsedSearchPage {
-            items: Vec::new(),
-            unparsed_count: 0,
-            total_results: 0,
-            items_per_page: 0,
-            raw_item_count: 0,
-        });
-    };
-    let raw_items = raw_items
-        .as_array()
-        .ok_or(LibraryError::InvalidAladinResponse)?;
-    let mut items = Vec::new();
-    let mut unparsed_count = 0;
-    for raw in raw_items {
-        let payload: AladinItemPayload =
-            serde_json::from_value(raw.clone()).map_err(|_| LibraryError::InvalidAladinResponse)?;
-        let Some((volume_number, base_title)) = classify_product(&payload.title).into_volume()
-        else {
-            unparsed_count += 1;
-            continue;
-        };
-        let item_id = match payload.item_id {
-            serde_json::Value::Number(value) => value.to_string(),
-            serde_json::Value::String(value) if !value.trim().is_empty() => value,
-            _ => return Err(LibraryError::InvalidAladinResponse),
-        };
-        items.push(AladinItem {
-            item_id,
-            title: payload.title,
-            author: non_empty(payload.author),
-            publisher: non_empty(payload.publisher),
-            isbn13: non_empty(payload.isbn13),
-            publication_date: non_empty(payload.publication_date),
-            item_url: non_empty(payload.item_url),
-            volume_number,
-            base_title,
-            snapshot_json: serde_json::to_string(raw)
-                .map_err(|_| LibraryError::InvalidAladinResponse)?,
-        });
-    }
-    let raw_item_count = raw_items.len() as u64;
-    Ok(ParsedSearchPage {
-        items,
-        unparsed_count,
-        total_results: envelope
-            .get("totalResults")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(raw_item_count),
-        items_per_page: envelope
-            .get("itemsPerPage")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(raw_item_count),
-        raw_item_count,
-    })
-}
-
-pub(crate) fn search(ttb_key: &str, query: &str) -> Result<SearchOutcome, LibraryError> {
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(REQUEST_TIMEOUT))
-        .build();
-    let agent = ureq::Agent::with_parts(
-        config,
-        DefaultConnector::default(),
-        ReachableResolver::default(),
-    );
-    search_with(ttb_key, query, move |url, parameters| {
-        let mut url = Url::parse(url).map_err(|_| AladinTransportError::Unavailable)?;
-        url.query_pairs_mut()
-            .extend_pairs(parameters.iter().copied());
-        let mut response = agent
-            .get(url.as_str())
-            .header(
-                "User-Agent",
-                format!("Lakomics/{}", env!("CARGO_PKG_VERSION")),
-            )
-            .call()
-            .map_err(|error| match error {
-                ureq::Error::StatusCode(code) => AladinTransportError::HttpStatus(code),
-                ureq::Error::Timeout(_) => AladinTransportError::Timeout,
-                _ => AladinTransportError::Unavailable,
-            })?;
-        let mut bytes = Vec::new();
-        response
-            .body_mut()
-            .as_reader()
-            .take((MAX_JSON_BYTES + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|error| {
-                if error.kind() == std::io::ErrorKind::TimedOut {
-                    AladinTransportError::Timeout
-                } else {
-                    AladinTransportError::Unavailable
-                }
-            })?;
-        if bytes.len() > MAX_JSON_BYTES {
-            return Err(AladinTransportError::Unavailable);
-        }
-        String::from_utf8(bytes).map_err(|_| AladinTransportError::Unavailable)
-    })
-}
-
-fn search_with<F>(ttb_key: &str, query: &str, mut fetch: F) -> Result<SearchOutcome, LibraryError>
-where
-    F: FnMut(&str, &[(&str, &str)]) -> Result<String, AladinTransportError>,
-{
-    let query = query.trim();
-    if query.chars().count() < 2 {
-        return Err(LibraryError::InvalidAladinQuery);
-    }
-    if ttb_key.trim().is_empty() {
-        return Err(LibraryError::InvalidAladinCredential);
-    }
-    let normalized = normalize_search_query(query);
-    for search_target in ["Book", "eBook"] {
-        let mut outcome = search_query_pages(ttb_key, query, search_target, &mut fetch)?;
-        if outcome.items.is_empty() && normalized != query && normalized.chars().count() >= 2 {
-            outcome = search_query_pages(ttb_key, &normalized, search_target, &mut fetch)?;
-        }
-        if !outcome.items.is_empty() {
-            return Ok(outcome);
-        }
-    }
-    Ok(SearchOutcome::default())
-}
-
-fn search_query_pages<F>(
-    ttb_key: &str,
-    query: &str,
-    search_target: &str,
-    fetch: &mut F,
-) -> Result<SearchOutcome, LibraryError>
-where
-    F: FnMut(&str, &[(&str, &str)]) -> Result<String, AladinTransportError>,
-{
-    let mut items = Vec::new();
-    let mut unparsed_count = 0;
-    for page_number in 1..=MAX_SEARCH_PAGES {
-        let start = page_number.to_string();
-        let parameters = [
-            ("ttbkey", ttb_key),
-            ("Query", query),
-            ("QueryType", "Title"),
-            ("MaxResults", "50"),
-            ("start", start.as_str()),
-            ("SearchTarget", search_target),
-            ("output", "js"),
-            ("Version", "20131101"),
-        ];
-        let json = fetch(SEARCH_URL, &parameters).map_err(map_transport_error)?;
-        let page = parse_search_page(&json)?;
-        let is_last_page = page.raw_item_count == 0
-            || page.items_per_page == 0
-            || page_number.saturating_mul(page.items_per_page) >= page.total_results;
-        items.extend(page.items);
-        unparsed_count += page.unparsed_count;
-        if is_last_page {
-            break;
-        }
-    }
-    Ok(SearchOutcome {
-        items,
-        unparsed_count,
-    })
-}
-
-fn map_transport_error(error: AladinTransportError) -> LibraryError {
-    match error {
-        AladinTransportError::Timeout => LibraryError::AladinTimedOut,
-        AladinTransportError::HttpStatus(429) => LibraryError::AladinRateLimited,
-        AladinTransportError::HttpStatus(401 | 403) => LibraryError::InvalidAladinCredential,
-        AladinTransportError::HttpStatus(_) | AladinTransportError::Unavailable => {
-            LibraryError::AladinUnavailable
-        }
-    }
-}
-
 /// The query with punctuation turned into spaces ("공주님, '고문'의 시간입니다" becomes
 /// "공주님 고문 의 시간입니다"): the retry when the provider finds nothing for the exact text.
 /// Mirrored by `collection_bindings.py normalize_search_query`.
@@ -524,32 +253,13 @@ pub(crate) fn normalize_search_query(query: &str) -> String {
         .join(" ")
 }
 
-fn non_empty(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_owned())
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, net::SocketAddr};
-
-    use super::{
-        classify_product, parse_search, parse_volume_product, prioritize_reachable_address,
-        search_with, AladinTransportError, ProductKind,
-    };
-    use crate::library::error::LibraryError;
+    use super::{classify_product, parse_volume_product, normalize_search_query, ProductKind};
 
     #[test]
-    fn puts_a_reachable_address_before_a_blocked_dns_result() {
-        let blocked: SocketAddr = "192.0.2.1:443".parse().unwrap();
-        let reachable: SocketAddr = "192.0.2.2:443".parse().unwrap();
-        let mut addresses = [blocked, reachable];
-
-        prioritize_reachable_address(&mut addresses, |address| *address == reachable);
-
-        assert_eq!(addresses, [reachable, blocked]);
+    fn punctuation_retry_query_is_normalized() {
+        assert_eq!(normalize_search_query("공주님, '고문'의 시간입니다"), "공주님 고문 의 시간입니다");
     }
 
     #[test]
@@ -603,163 +313,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parses_typed_search_items_and_ignores_non_volumes() {
-        let items = parse_search(include_str!("fixtures/aladin_search.json")).unwrap();
-
-        assert_eq!(items.len(), 4);
-        assert_eq!(items[0].item_id, "101");
-        assert_eq!(items[0].base_title, "던전밥");
-        assert_eq!(items[0].volume_number, 1);
-        assert_eq!(items[0].author.as_deref(), Some("쿠이 료코"));
-        assert_eq!(items[0].publisher.as_deref(), Some("소미미디어"));
-        assert_eq!(items[0].isbn13.as_deref(), Some("9780000000001"));
-        assert_eq!(items[0].publication_date.as_deref(), Some("2024-01-10"));
-        assert_eq!(items[3].isbn13, None);
-        assert_eq!(items[3].publication_date, None);
-        assert!(!items[0].snapshot_json.contains("ttbkey"));
-    }
-
-    #[test]
-    fn validates_queries_and_maps_transport_failures_without_leaking_the_key() {
-        let short = search_with("super-secret", " a ", |_, _| {
-            panic!("short queries must not make a request")
-        });
-        assert!(matches!(short, Err(LibraryError::InvalidAladinQuery)));
-
-        let timeout = search_with("super-secret", "던전밥", |_, _| {
-            Err(AladinTransportError::Timeout)
-        });
-        assert!(matches!(&timeout, Err(LibraryError::AladinTimedOut)));
-        assert!(!timeout.unwrap_err().to_string().contains("super-secret"));
-
-        let limited = search_with("super-secret", "던전밥", |_, _| {
-            Err(AladinTransportError::HttpStatus(429))
-        });
-        assert!(matches!(limited, Err(LibraryError::AladinRateLimited)));
-    }
-
-    #[test]
-    fn maps_provider_errors_and_empty_results() {
-        let invalid_key = search_with("super-secret", "던전밥", |_, _| {
-            Ok(r#"{"errorCode":"100","errorMessage":"bad key"}"#.into())
-        });
-        assert!(matches!(
-            invalid_key,
-            Err(LibraryError::InvalidAladinCredential)
-        ));
-
-        let empty = search_with("super-secret", "던전밥", |_, _| Ok("{}".into())).unwrap();
-        assert!(empty.items.is_empty());
-
-        let malformed = search_with("super-secret", "던전밥", |_, _| Ok("not-json".into()));
-        assert!(matches!(
-            malformed,
-            Err(LibraryError::InvalidAladinResponse)
-        ));
-    }
-
-    #[test]
-    fn searches_ebooks_when_the_paper_book_search_is_empty() {
-        let targets = RefCell::new(Vec::new());
-        let items = search_with(
-            "super-secret",
-            "미안하지만 나는 백합이 아니야",
-            |_, parameters| {
-                let target = parameters
-                    .iter()
-                    .find(|(name, _)| *name == "SearchTarget")
-                    .unwrap()
-                    .1;
-                targets.borrow_mut().push(target.to_owned());
-                if target == "eBook" {
-                    Ok(serde_json::json!({
-                        "totalResults": 1,
-                        "startIndex": 1,
-                        "itemsPerPage": 1,
-                        "item": [{
-                            "title": "[고화질] 미안하지만 나는 백합이 아니야 09",
-                            "itemId": 399360954
-                        }]
-                    })
-                    .to_string())
-                } else {
-                    Ok("{}".into())
-                }
-            },
-        )
-        .unwrap()
-        .items;
-
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].item_id, "399360954");
-        assert_eq!(targets.into_inner(), ["Book", "eBook"]);
-    }
-
-    #[test]
-    fn retries_without_punctuation_and_collects_all_search_pages() {
-        let requests = RefCell::new(Vec::new());
-        let items = search_with(
-            "super-secret",
-            "공주님, '고문'의 시간입니다",
-            |_, parameters| {
-                let query = parameters
-                    .iter()
-                    .find(|(name, _)| *name == "Query")
-                    .unwrap()
-                    .1;
-                let start = parameters
-                    .iter()
-                    .find(|(name, _)| *name == "start")
-                    .unwrap()
-                    .1;
-                requests
-                    .borrow_mut()
-                    .push((query.to_owned(), start.to_owned()));
-                let item = match (query, start) {
-                    ("공주님 고문 의 시간입니다", "1") => serde_json::json!([{
-                        "title": "공주님 '고문'의 시간입니다 1",
-                        "itemId": 101
-                    }]),
-                    ("공주님 고문 의 시간입니다", "2") => serde_json::json!([{
-                        "title": "공주님 '고문'의 시간입니다 2",
-                        "itemId": 102
-                    }]),
-                    _ => serde_json::json!([]),
-                };
-                let total_results = if query == "공주님 고문 의 시간입니다" {
-                    2
-                } else {
-                    0
-                };
-                Ok(serde_json::json!({
-                    "totalResults": total_results,
-                    "startIndex": start.parse::<u64>().unwrap(),
-                    "itemsPerPage": 1,
-                    "item": item
-                })
-                .to_string())
-            },
-        )
-        .unwrap()
-        .items;
-
-        assert_eq!(
-            items
-                .iter()
-                .map(|item| item.item_id.as_str())
-                .collect::<Vec<_>>(),
-            ["101", "102"]
-        );
-        assert_eq!(
-            requests.into_inner(),
-            [
-                ("공주님, '고문'의 시간입니다".into(), "1".into()),
-                ("공주님 고문 의 시간입니다".into(), "1".into()),
-                ("공주님 고문 의 시간입니다".into(), "2".into()),
-            ]
-        );
-    }
     #[test]
     fn korean_completion_and_dotted_volume_titles_are_recognized() {
         for (title, number) in [("스틸 볼 런 24(완결)", 24), ("스틸 볼 런. 23", 23)] {
@@ -880,19 +433,19 @@ mod tests {
 
     #[test]
     fn unnumbered_products_are_kept_with_their_cleaned_title() {
-        let items = parse_search(
-            r#"{"item":[
-                {"title":"오타쿠 소설가의 일상 1","itemId":1},
-                {"title":"단편 한 권짜리 이야기","itemId":2},
-                {"title":"던전밥 (일반판)","itemId":3},
-                {"title":"던전밥 박스 세트","itemId":4}
-            ]}"#,
-        )
-        .unwrap();
+        let items: Vec<(i64, String)> = [
+            "오타쿠 소설가의 일상 1",
+            "단편 한 권짜리 이야기",
+            "던전밥 (일반판)",
+            "던전밥 박스 세트",
+        ]
+        .iter()
+        .filter_map(|title| classify_product(title).into_volume())
+        .collect();
         assert_eq!(
             items
                 .iter()
-                .map(|item| (item.volume_number, item.base_title.as_str()))
+                .map(|(number, title)| (*number, title.as_str()))
                 .collect::<Vec<_>>(),
             [
                 (1, "오타쿠 소설가의 일상"),
@@ -900,19 +453,5 @@ mod tests {
                 (super::UNNUMBERED_VOLUME, "던전밥"),
             ]
         );
-    }
-
-    #[test]
-    fn the_search_counts_products_it_leaves_out() {
-        let outcome = search_with("super-secret", "던전밥", |_, _| {
-            Ok(r#"{"totalResults":3,"itemsPerPage":3,"item":[
-                {"title":"던전밥 1권","itemId":1},
-                {"title":"던전밥 박스 세트","itemId":2},
-                {"title":"던전밥 공식 가이드북","itemId":3}
-            ]}"#
-            .into())
-        })
-        .unwrap();
-        assert_eq!((outcome.items.len(), outcome.unparsed_count), (1, 2));
     }
 }

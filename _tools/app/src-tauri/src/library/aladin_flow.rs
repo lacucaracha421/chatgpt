@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    aladin::{self, is_edition_note, is_series_note, AladinItem, SearchOutcome, UNNUMBERED_VOLUME},
+    aladin::{is_edition_note, is_series_note, AladinItem, SearchOutcome, UNNUMBERED_VOLUME},
     collection::require_collection,
     collection_binding_sync::CommitCheck,
     collection_volume_range::load_transaction,
@@ -30,72 +30,41 @@ impl Library {
         &self,
         collection_id: &str,
     ) -> Result<Option<AladinConnection>, LibraryError> {
-        match self.get_kakao_connection(collection_id)? {
-            Some(connection) => Ok(Some(connection)),
-            None => self.get_aladin_connection(collection_id),
-        }
+        self.get_kakao_connection(collection_id)
     }
 
-    pub(super) fn book_flow(&self, provider: &'static str) -> BookFlow<'_> {
+    pub(super) fn book_flow(&self) -> BookFlow<'_> {
         BookFlow {
             library: self,
-            provider,
+            provider: "kakao",
         }
-    }
-    pub fn search_aladin(
-        &self,
-        key: &str,
-        query: &str,
-    ) -> Result<Vec<AladinSeriesCandidate>, LibraryError> {
-        self.book_flow("aladin").search_aladin(key, query)
-    }
-    pub fn apply_aladin(
-        &self,
-        key: &str,
-        request: AladinApplyRequest,
-    ) -> Result<AladinSyncResult, LibraryError> {
-        self.book_flow("aladin").apply_aladin(key, request)
-    }
-    pub fn refresh_aladin(
-        &self,
-        key: &str,
-        collection_id: &str,
-    ) -> Result<AladinSyncResult, LibraryError> {
-        self.book_flow("aladin").refresh_aladin(key, collection_id)
-    }
-    pub fn get_aladin_connection(
-        &self,
-        collection_id: &str,
-    ) -> Result<Option<AladinConnection>, LibraryError> {
-        self.book_flow("aladin")
-            .get_aladin_connection(collection_id)
     }
     pub fn search_kakao(
         &self,
         key: &str,
         query: &str,
     ) -> Result<Vec<AladinSeriesCandidate>, LibraryError> {
-        self.book_flow("kakao").search_aladin(key, query)
+        self.book_flow().search_aladin(key, query)
     }
     pub fn apply_kakao(
         &self,
         key: &str,
         request: AladinApplyRequest,
     ) -> Result<AladinSyncResult, LibraryError> {
-        self.book_flow("kakao").apply_aladin(key, request)
+        self.book_flow().apply_aladin(key, request)
     }
     pub fn refresh_kakao(
         &self,
         key: &str,
         collection_id: &str,
     ) -> Result<AladinSyncResult, LibraryError> {
-        self.book_flow("kakao").refresh_aladin(key, collection_id)
+        self.book_flow().refresh_aladin(key, collection_id)
     }
     pub fn get_kakao_connection(
         &self,
         collection_id: &str,
     ) -> Result<Option<AladinConnection>, LibraryError> {
-        self.book_flow("kakao").get_aladin_connection(collection_id)
+        self.book_flow().get_aladin_connection(collection_id)
     }
     /// [`Self::apply_kakao`] for a pick the tablet made earlier (`collection_binding_sync.rs`):
     /// the same search and apply, tolerating anchor drift (see
@@ -107,7 +76,7 @@ impl Library {
         request: AladinApplyRequest,
         check: CommitCheck<'_>,
     ) -> Result<AladinSyncResult, LibraryError> {
-        let flow = self.book_flow("kakao");
+        let flow = self.book_flow();
         let items = flow.search_items(key, &request.query)?.items;
         flow.apply_requested_items(request, items, Some(check))
     }
@@ -322,10 +291,7 @@ fn valid_selection(request: &AladinApplyRequest) -> bool {
 
 impl BookFlow<'_> {
     fn search_items(&self, key: &str, query: &str) -> Result<SearchOutcome, LibraryError> {
-        match self.provider {
-            "kakao" => super::kakao_books::search(key, query),
-            _ => aladin::search(key, query),
-        }
+        super::kakao_books::search(key, query)
     }
     pub fn search_aladin(
         &self,
@@ -635,13 +601,11 @@ impl BookFlow<'_> {
         if let Some(check) = check {
             check(&transaction)?;
         }
-        if self.provider == "kakao" {
-            let volumes: Vec<i64> = merged.keys().copied().collect();
-            if super::kakao_review::dismissed_for_volumes(&transaction, collection_id, &volumes)? {
-                let mut next: serde_json::Value = serde_json::from_str(&config_json).map_err(|_| LibraryError::InvalidAladinResponse)?;
-                next["reviewDismissedVolumes"] = serde_json::json!(volumes);
-                config_json = next.to_string();
-            }
+        let volumes: Vec<i64> = merged.keys().copied().collect();
+        if super::kakao_review::dismissed_for_volumes(&transaction, collection_id, &volumes)? {
+            let mut next: serde_json::Value = serde_json::from_str(&config_json).map_err(|_| LibraryError::InvalidAladinResponse)?;
+            next["reviewDismissedVolumes"] = serde_json::json!(volumes);
+            config_json = next.to_string();
         }
         let subscription_last_checked_at = transaction
             .query_row(
@@ -659,12 +623,11 @@ impl BookFlow<'_> {
             ignored,
         };
         let mut release_event_count = 0;
-        let tracks_ownership = self.provider != "kakao"
-            || transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1)",
-                [collection_id],
-                |row| row.get::<_, bool>(0),
-            )?;
+        let tracks_ownership = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1)",
+            [collection_id],
+            |row| row.get::<_, bool>(0),
+        )?;
         let volume_range = load_transaction(&transaction, collection_id)?;
         for item in merged.values() {
             let existing = reconcile_source(
@@ -750,16 +713,6 @@ impl BookFlow<'_> {
                  WHERE collection_id = ?2 AND provider = ?3",
                 params![checked_at, collection_id, self.provider],
             )?;
-        }
-        if self.provider == "kakao" && !authority.active {
-            transaction.execute(
-                "INSERT INTO release_watch_subscriptions (collection_id, provider, last_checked_at)
-                 SELECT collection_id, 'kakao', ?2 FROM release_watch_subscriptions
-                 WHERE collection_id = ?1 AND provider = 'aladin'
-                 ON CONFLICT(collection_id, provider) DO NOTHING",
-                params![collection_id, checked_at],
-            )?;
-            transaction.execute("DELETE FROM release_watch_subscriptions WHERE collection_id = ?1 AND provider = 'aladin'", [collection_id])?;
         }
         transaction.commit()?;
         Ok(AladinReconcileOutcome {
@@ -1295,12 +1248,12 @@ mod tests {
         ];
 
         let first = library
-            .book_flow("aladin")
+            .book_flow()
             .apply_aladin_items(request(&work_id, &items), items.clone())
             .unwrap();
         assert_eq!((first.added, first.updated, first.unchanged), (2, 0, 0));
         let second = library
-            .book_flow("aladin")
+            .book_flow()
             .apply_aladin_items(request(&work_id, &items), items.clone())
             .unwrap();
         assert_eq!((second.added, second.updated, second.unchanged), (0, 0, 2));
@@ -1332,7 +1285,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(bindings, vec!["aladin", "mangadex"]);
+        assert_eq!(bindings, vec!["kakao", "mangadex"]);
         type VolumeRow = (i64, u8, Option<String>, Option<String>, Option<String>);
         let volumes: Vec<VolumeRow> = connection
             .prepare(
@@ -1379,7 +1332,7 @@ mod tests {
                 "INSERT INTO collection_volume_sources (
                 collection_id, volume_number, provider, provider_item_id, title,
                 provider_data_json, created_at, updated_at
-             ) VALUES (?1, 1, 'aladin', 'shared-item', '기존 1권', '{}', 't', 't')",
+             ) VALUES (?1, 1, 'kakao', 'shared-item', '기존 1권', '{}', 't', 't')",
                 [&owner_id],
             )
             .unwrap();
@@ -1392,7 +1345,7 @@ mod tests {
             None,
         )];
 
-        let result = library.book_flow("aladin").apply_aladin_items(
+        let result = library.book_flow().apply_aladin_items(
             request(&target_id, &items),
             items,
         );
@@ -1403,7 +1356,7 @@ mod tests {
         let connection = library.connection().unwrap();
         let counts: (i64, i64, i64) = connection.query_row(
             "SELECT
-                (SELECT COUNT(*) FROM collection_external_bindings WHERE collection_id = ?1 AND provider = 'aladin'),
+                (SELECT COUNT(*) FROM collection_external_bindings WHERE collection_id = ?1 AND provider = 'kakao'),
                 (SELECT COUNT(*) FROM collection_volume_sources WHERE collection_id = ?1),
                 (SELECT COUNT(*) FROM collection_volumes WHERE collection_id = ?1)",
             [&target_id],
@@ -1422,7 +1375,7 @@ mod tests {
             item("item-2", "던전밥", 2, "A출판", Some("9782"), None),
         ];
         library
-            .book_flow("aladin")
+            .book_flow()
             .apply_aladin_items(request(&work_id, &initial), initial.clone())
             .unwrap();
         let candidate = group_items(initial.clone()).remove(0);
@@ -1435,7 +1388,7 @@ mod tests {
             }],
         };
         library
-            .book_flow("aladin")
+            .book_flow()
             .refresh_aladin_items(&work_id, config, vec![initial[0].clone()])
             .unwrap();
         let source_count: i64 = library
@@ -1450,7 +1403,7 @@ mod tests {
         assert_eq!(source_count, 2);
 
         let unrelated = vec![item("other", "다른책", 1, "B출판", None, None)];
-        let error = library.book_flow("aladin").refresh_aladin_items(
+        let error = library.book_flow().refresh_aladin_items(
             &work_id,
             ProviderConfig {
                 query: "던전밥".into(),
@@ -1479,9 +1432,10 @@ mod tests {
             Some("2026-08-21"),
         )];
         library
-            .book_flow("aladin")
+            .book_flow()
             .apply_aladin_items(request(&work_id, &initial), initial)
             .unwrap();
+        library.set_owned_volume_count(&work_id, 0, 0).unwrap();
         library.set_release_watch_enabled(&work_id, true).unwrap();
         library
             .set_collection_volume_range(&work_id, Some(1), Some(1), false)
@@ -1516,7 +1470,7 @@ mod tests {
         ];
 
         let first = library
-            .book_flow("aladin")
+            .book_flow()
             .refresh_aladin_items_at(&work_id, refreshed.clone(), "2026-08-22T00:00:00Z")
             .unwrap();
         assert_eq!(first.release_event_count, 2);
@@ -1534,7 +1488,7 @@ mod tests {
         );
 
         let second = library
-            .book_flow("aladin")
+            .book_flow()
             .refresh_aladin_items_at(&work_id, refreshed, "2026-08-22T00:00:00Z")
             .unwrap();
         assert_eq!(second.release_event_count, 0);
@@ -1553,17 +1507,17 @@ mod tests {
     }
 
     #[test]
-    fn unwatched_aladin_reconciliation_creates_no_release_events() {
+    fn unwatched_kakao_reconciliation_creates_no_release_events() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let work_id = create_work(&library, "던전밥");
         let initial = vec![item("item-1", "던전밥", 1, "A출판", Some("9781"), None)];
         library
-            .book_flow("aladin")
+            .book_flow()
             .apply_aladin_items(request(&work_id, &initial), initial)
             .unwrap();
         library
-            .book_flow("aladin")
+            .book_flow()
             .refresh_aladin_items_at(
                 &work_id,
                 vec![
@@ -1599,7 +1553,7 @@ mod tests {
                 "INSERT INTO collection_volume_sources (
                     collection_id, volume_number, provider, provider_item_id, title,
                     provider_data_json, created_at, updated_at
-                 ) VALUES (?1, 2, 'aladin', 'shared-item', '기존 2권', '{}', 't', 't')",
+                 ) VALUES (?1, 2, 'kakao', 'shared-item', '기존 2권', '{}', 't', 't')",
                 [&owner_id],
             )
             .unwrap();
@@ -1612,9 +1566,10 @@ mod tests {
             Some("2026-08-21"),
         )];
         library
-            .book_flow("aladin")
+            .book_flow()
             .apply_aladin_items(request(&target_id, &initial), initial)
             .unwrap();
+        library.set_owned_volume_count(&target_id, 0, 0).unwrap();
         library.set_release_watch_enabled(&target_id, true).unwrap();
         library
             .connection()
@@ -1627,7 +1582,7 @@ mod tests {
             )
             .unwrap();
 
-        let result = library.book_flow("aladin").refresh_aladin_items_at(
+        let result = library.book_flow().refresh_aladin_items_at(
             &target_id,
             vec![
                 item(
@@ -1651,10 +1606,10 @@ mod tests {
             .query_row(
                 "SELECT
                     (SELECT publication_date FROM collection_volume_sources
-                     WHERE collection_id = ?1 AND volume_number = 1 AND provider = 'aladin'),
+                     WHERE collection_id = ?1 AND volume_number = 1 AND provider = 'kakao'),
                     (SELECT COUNT(*) FROM release_watch_events WHERE collection_id = ?1),
                     (SELECT last_checked_at FROM release_watch_subscriptions
-                     WHERE collection_id = ?1 AND provider = 'aladin')",
+                     WHERE collection_id = ?1 AND provider = 'kakao')",
                 [&target_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -1669,112 +1624,18 @@ mod tests {
         );
     }
     #[test]
-    fn kakao_connection_preserves_aladin_sources_volume_ids_and_transfers_watch() {
-        let temp = tempfile::tempdir().unwrap();
-        let library = Library::open(temp.path()).unwrap();
-        let id = create_work(&library, "사용자 작품명");
-        let old = vec![item(
-            "aladin-1",
-            "스틸 볼 런",
-            1,
-            "문학동네",
-            Some("9788954677530"),
-            Some("2020-01-01"),
-        )];
-        library
-            .book_flow("aladin")
-            .apply_aladin_items(request(&id, &old), old)
-            .unwrap();
-        library.set_release_watch_enabled(&id, true).unwrap();
-        let before: String = library
-            .connection()
-            .unwrap()
-            .query_row(
-                "SELECT id FROM collection_volumes WHERE collection_id = ?1",
-                [&id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let newer = vec![item(
-            "isbn13:9788954677530",
-            "스틸 볼 런",
-            1,
-            "문학동네",
-            Some("9788954677530"),
-            Some("2021-01-01"),
-        )];
-        library
-            .book_flow("kakao")
-            .apply_aladin_items(request(&id, &newer), newer.clone())
-            .unwrap();
-        assert!(library.get_aladin_connection(&id).unwrap().is_some());
-        assert!(library.get_kakao_connection(&id).unwrap().is_some());
-        let after: String = library
-            .connection()
-            .unwrap()
-            .query_row(
-                "SELECT id FROM collection_volumes WHERE collection_id = ?1",
-                [&id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(before, after);
-        let sources: i64 = library
-            .connection()
-            .unwrap()
-            .query_row(
-                "SELECT COUNT(*) FROM collection_volume_sources WHERE collection_id = ?1",
-                [&id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(sources, 2);
-        let provider: String = library
-            .connection()
-            .unwrap()
-            .query_row(
-                "SELECT provider FROM release_watch_subscriptions WHERE collection_id = ?1",
-                [&id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(provider, "kakao");
-        assert!(library.take_unread_release_changes(&id).unwrap().is_empty());
-        library.set_owned_volume_count(&id, 0, 1).unwrap();
-        let mut refreshed = newer;
-        refreshed.push(item(
-            "isbn13:new-2",
-            "스틸 볼 런",
-            2,
-            "문학동네",
-            Some("new-2"),
-            Some("2026-10-01"),
-        ));
-        library
-            .book_flow("kakao")
-            .refresh_aladin_items_at(&id, refreshed, "2026-09-06T00:00:00Z")
-            .unwrap();
-        let events = library.take_unread_release_changes(&id).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].volume_number, 2);
-        assert_eq!(events[0].kind, ReleaseWatchEventKind::NewVolume);
-        library.set_release_watch_enabled(&id, false).unwrap();
-        assert!(!library.get_release_watch_status(&id).unwrap().enabled);
-    }
-
-    #[test]
     fn kakao_review_dismissal_survives_refresh_and_undo_but_clears_on_volume_change() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let id = create_work(&library, "던전밥");
         let items = vec![item("one", "던전밥", 1, "A출판", None, None), item("three", "던전밥", 3, "A출판", None, None)];
-        let flow = library.book_flow("kakao");
+        let flow = library.book_flow();
         flow.apply_aladin_items(request(&id, &items), items.clone()).unwrap();
         library.set_kakao_partial_dismissed(&id, true).unwrap();
         assert!(library.list_kakao_reviews().unwrap()[0].partial_dismissed);
         drop(library);
         let library = Library::open(temp.path()).unwrap();
-        let flow = library.book_flow("kakao");
+        let flow = library.book_flow();
         flow.refresh_aladin_items_at(&id, items.clone(), "2026-10-09T00:00:00Z").unwrap();
         assert!(library.list_kakao_reviews().unwrap()[0].partial_dismissed);
         library.set_kakao_partial_dismissed(&id, false).unwrap();
@@ -1796,17 +1657,17 @@ mod tests {
             let library = Library::open(temp.path()).unwrap();
             let id = create_work(&library, "던전밥");
             let initial = vec![item("isbn:one", "던전밥", 1, "A출판", Some("9781"), Some("2020-01-01"))];
-            library.book_flow("kakao").apply_aladin_items(request(&id, &initial), initial.clone()).unwrap();
+            library.book_flow().apply_aladin_items(request(&id, &initial), initial.clone()).unwrap();
             if enabled { library.set_release_watch_enabled(&id, true).unwrap(); }
             if entered { library.set_owned_volume_count(&id, 0, 0).unwrap(); }
             let mut updated = initial;
             updated.push(item("isbn:two", "던전밥", 2, "A출판", Some("9782"), Some("2099-10-01")));
-            let result = library.book_flow("kakao").refresh_aladin_items_at(&id, updated.clone(), "2026-09-13T00:00:00Z").unwrap();
+            let result = library.book_flow().refresh_aladin_items_at(&id, updated.clone(), "2026-09-13T00:00:00Z").unwrap();
             assert_eq!(result.sync_result.added, 1);
             let inbox = library.list_release_inbox().unwrap();
             assert_eq!(inbox.len(), expected, "entered={entered}, enabled={enabled}");
             if expected > 0 { assert_eq!(inbox[0].provider, "kakao"); assert_eq!(inbox[0].event.current_value.as_deref(), Some("2099-10-01")); }
-            library.book_flow("kakao").refresh_aladin_items_at(&id, updated, "2026-09-14T00:00:00Z").unwrap();
+            library.book_flow().refresh_aladin_items_at(&id, updated, "2026-09-14T00:00:00Z").unwrap();
             assert_eq!(library.list_release_inbox().unwrap().len(), expected);
         }
     }
@@ -1886,7 +1747,7 @@ mod tests {
         let items = ghost_items();
         assert_eq!(group_items(items.clone()).len(), 2);
         let result = library
-            .book_flow("kakao")
+            .book_flow()
             .apply_aladin_items(select_all(&id, &items), items.clone())
             .unwrap();
         assert_eq!((result.added, result.ignored), (7, 1));
@@ -1905,13 +1766,13 @@ mod tests {
         // A missing group, a repeated fingerprint or an empty pick is refused.
         let mut partial = select_all(&id, &items);
         partial.groups[1].anchor_item_id = "gone".into();
-        assert!(matches!(library.book_flow("kakao").apply_aladin_items(partial, items.clone()), Err(LibraryError::AmbiguousAladinBinding)));
+        assert!(matches!(library.book_flow().apply_aladin_items(partial, items.clone()), Err(LibraryError::AmbiguousAladinBinding)));
         let mut repeated = select_all(&id, &items);
         repeated.groups[1] = repeated.groups[0].clone();
-        assert!(matches!(library.book_flow("kakao").apply_aladin_items(repeated, items.clone()), Err(LibraryError::AmbiguousAladinBinding)));
+        assert!(matches!(library.book_flow().apply_aladin_items(repeated, items.clone()), Err(LibraryError::AmbiguousAladinBinding)));
         let mut empty = select_all(&id, &items);
         empty.groups.clear();
-        assert!(matches!(library.book_flow("kakao").apply_aladin_items(empty, items), Err(LibraryError::AmbiguousAladinBinding)));
+        assert!(matches!(library.book_flow().apply_aladin_items(empty, items), Err(LibraryError::AmbiguousAladinBinding)));
     }
 
     #[test]
@@ -1923,7 +1784,7 @@ mod tests {
         // The old imprint also lists vol. 7, without an ISBN: the S코믹스 item with one wins.
         items.push(ghost("url:old-7", 7, "소미미디어", None, "2026-07-30"));
         let result = library
-            .book_flow("kakao")
+            .book_flow()
             .apply_aladin_items(select_all(&id, &items), items)
             .unwrap();
         assert_eq!((result.added, result.ignored), (7, 2));
@@ -1937,7 +1798,7 @@ mod tests {
         let id = create_work(&library, "찍히지 않습니다");
         let items = ghost_items();
         library
-            .book_flow("kakao")
+            .book_flow()
             .apply_aladin_items(select_all(&id, &items), items.clone())
             .unwrap();
         library.set_release_watch_enabled(&id, true).unwrap();
@@ -1946,7 +1807,7 @@ mod tests {
         let mut refreshed: Vec<_> = items.into_iter().skip(1).collect();
         refreshed.push(ghost("isbn13:9791138491174", 8, "S코믹스", Some("9791138491174"), "2026-11-20"));
         let outcome = library
-            .book_flow("kakao")
+            .book_flow()
             .refresh_aladin_items_at(&id, refreshed.clone(), "2026-09-26T00:00:00Z")
             .unwrap();
         assert_eq!(outcome.sync_result.added, 1);
@@ -1961,7 +1822,7 @@ mod tests {
         // A group that vanished from the search refuses the refresh.
         let only_first: Vec<_> = refreshed.into_iter().filter(|item| item.volume_number < 7).collect();
         assert!(matches!(
-            library.book_flow("kakao").refresh_aladin_items_at(&id, only_first, "2026-09-27T00:00:00Z"),
+            library.book_flow().refresh_aladin_items_at(&id, only_first, "2026-09-27T00:00:00Z"),
             Err(LibraryError::AmbiguousAladinBinding)
         ));
     }
@@ -1993,7 +1854,7 @@ mod tests {
             )
             .unwrap();
         library
-            .book_flow("kakao")
+            .book_flow()
             .refresh_aladin_items_at(&id, items, "2026-09-26T00:00:00Z")
             .unwrap();
         assert_eq!(kakao_sources(&library, &id), vec![(7, "isbn13:9791138491150".to_owned())]);
@@ -2244,7 +2105,7 @@ mod tests {
         assert_ne!(merged[0].group_fingerprint, old_second);
 
         library
-            .book_flow("kakao")
+            .book_flow()
             .refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z")
             .unwrap();
 
@@ -2279,7 +2140,7 @@ mod tests {
         assert_eq!(groups.len(), 1);
 
         library
-            .book_flow("kakao")
+            .book_flow()
             .refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z")
             .unwrap();
 
@@ -2310,7 +2171,7 @@ mod tests {
             product("item-3", "던전밥 3", Some("작가"), "출판", None, None),
         ];
         library
-            .book_flow("kakao")
+            .book_flow()
             .refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z")
             .unwrap();
         assert_eq!(kakao_sources(&library, &id).len(), 2);
@@ -2319,7 +2180,7 @@ mod tests {
         let unrelated = vec![product("other", "다른책 1", Some("작가"), "출판", None, None)];
         assert!(matches!(
             library
-                .book_flow("kakao")
+                .book_flow()
                 .refresh_aladin_items_at(&id, unrelated, "2026-10-10T00:00:00Z"),
             Err(LibraryError::AmbiguousAladinBinding)
         ));
@@ -2332,8 +2193,8 @@ mod tests {
         let id = create_work(&library, "Series");
         let first = product("part-1", "Series (1부) 1", Some("작가"), "출판", None, None);
         let second = product("part-2", "Series (2부) 1", Some("작가"), "출판", Some("9782"), Some("2030-01-01"));
-        library.book_flow("kakao").apply_aladin_items(request(&id, &[first.clone()]), vec![first.clone()]).unwrap();
-        library.book_flow("kakao").refresh_aladin_items_at(&id, vec![first, second], "2026-10-09T00:00:00Z").unwrap();
+        library.book_flow().apply_aladin_items(request(&id, &[first.clone()]), vec![first.clone()]).unwrap();
+        library.book_flow().refresh_aladin_items_at(&id, vec![first, second], "2026-10-09T00:00:00Z").unwrap();
         assert_eq!(kakao_sources(&library, &id)[0].1, "part-1");
         for note in ["1부", "2부", "part one", "외전", "시즌", "번외", "단편", "리부트", "신장판", "unknown 한글"] {
             let groups = group_items(vec![
@@ -2353,10 +2214,10 @@ mod tests {
             product("plain", "Series", Some("작가"), "A출판", Some("9781"), Some("2030-01-01")),
             product("numbered", "Series 1", Some("작가"), "B출판", None, None),
         ];
-        let result = library.book_flow("kakao").apply_aladin_items(select_all(&id, &items), items.clone()).unwrap();
+        let result = library.book_flow().apply_aladin_items(select_all(&id, &items), items.clone()).unwrap();
         assert_eq!((result.added, result.ignored), (1, 1));
         assert_eq!(kakao_sources(&library, &id)[0].1, "numbered");
-        library.book_flow("kakao").refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z").unwrap();
+        library.book_flow().refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z").unwrap();
         assert_eq!(kakao_sources(&library, &id)[0].1, "numbered");
     }
 
@@ -2370,14 +2231,14 @@ mod tests {
             product("known", "Series 2", None, "출판", None, None),
         ];
         let old_fingerprint = group_items(initial.clone())[0].group_fingerprint.clone();
-        library.book_flow("kakao").apply_aladin_items(request(&id, &initial), initial).unwrap();
+        library.book_flow().apply_aladin_items(request(&id, &initial), initial).unwrap();
         for author in [Some("B"), None] {
             let split = vec![
                 product("anchor", "Series 1", Some("A"), "출판", None, None),
                 product("known", "Series 2", author, "출판", None, None),
                 product("other", "Series 3", Some("B"), "출판", None, None),
             ];
-            library.book_flow("kakao").refresh_aladin_items_at(&id, split, "2026-10-09T00:00:00Z").unwrap();
+            library.book_flow().refresh_aladin_items_at(&id, split, "2026-10-09T00:00:00Z").unwrap();
         }
         let config = ProviderConfig { query: "Series".into(), groups: vec![BoundGroup {
             anchor_item_id: "gone".into(), group_fingerprint: old_fingerprint,
@@ -2387,7 +2248,7 @@ mod tests {
             product("known-a", "Series 2", Some("A"), "출판", None, None),
             product("known-b", "Series 3", Some("B"), "출판", None, None),
         ];
-        library.book_flow("kakao").refresh_aladin_items_with_config_at(&id, config, split, "2026-10-09T00:00:00Z").unwrap();
+        library.book_flow().refresh_aladin_items_with_config_at(&id, config, split, "2026-10-09T00:00:00Z").unwrap();
         assert!(kakao_sources(&library, &id).iter().any(|source| source.1 == "known-a"));
         assert!(!kakao_sources(&library, &id).iter().any(|source| source.1 == "known-b"));
     }
@@ -2408,7 +2269,7 @@ mod tests {
             product("z-2", "Series 2", Some("작가"), "에이템포미디어", None, None),
         ];
         assert_eq!(group_items(fresh.clone()).len(), 1);
-        library.book_flow("kakao").apply_requested_items(request.clone(), fresh, None).unwrap();
+        library.book_flow().apply_requested_items(request.clone(), fresh, None).unwrap();
         let (external, config) = kakao_binding(&library, &id);
         assert_eq!(external, "a-1");
         assert_eq!(config["version"], 1);
@@ -2427,7 +2288,7 @@ mod tests {
         let mut single = request;
         single.collection_id = id2.clone();
         single.groups.retain(|group| group.anchor_item_id == "z-1");
-        library.book_flow("kakao").apply_requested_items(single, groups, None).unwrap();
+        library.book_flow().apply_requested_items(single, groups, None).unwrap();
         assert_eq!(kakao_sources(&library, &id2)[0].1, "z-1");
     }
 }

@@ -17,7 +17,6 @@ pub(crate) use linux::LinuxCredentialBackend as OsCredentialBackend;
 pub(crate) use test_support::IsolatedCredentialBackend as OsCredentialBackend;
 
 const KAKAO_TARGET: &str = "Lakomics/KakaoBooks";
-const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
 const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
 /// Catalog publication/authority-management credential. Deliberately separate
 /// from the general cloud token: publication is a `publisher` operation on the
@@ -424,26 +423,6 @@ mod windows {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn aladin_key_status() -> Result<bool, LibraryError> {
-    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).configured()
-}
-
-#[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn set_aladin_key(value: &str) -> Result<(), LibraryError> {
-    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).set(value)
-}
-
-#[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn delete_aladin_key() -> Result<(), LibraryError> {
-    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).delete()
-}
-
-#[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
-    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).read()
-}
-
 /// This device's own token for the file exchange (보내기/받기). The server refuses the
 /// shared Cloud API token there, because one shared credential cannot keep a device
 /// from reading another device's inbox; library sync keeps using the Cloud API token.
@@ -529,26 +508,6 @@ pub(crate) fn delete_cloud_publisher_token_os() -> Result<(), LibraryError> {
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_cloud_publisher_token_os() -> Result<CloudCredential, LibraryError> {
     super::credential_broker::broker().credential(CredentialTarget::CloudPublisher)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn aladin_key_status() -> Result<bool, LibraryError> {
-    Err(LibraryError::CredentialStoreUnavailable)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn set_aladin_key(_value: &str) -> Result<(), LibraryError> {
-    Err(LibraryError::CredentialStoreUnavailable)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn delete_aladin_key() -> Result<(), LibraryError> {
-    Err(LibraryError::CredentialStoreUnavailable)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
-    Err(LibraryError::CredentialStoreUnavailable)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -700,7 +659,7 @@ mod tests {
         cloud_publisher_token_status_with, read_cloud_api_token, read_cloud_publisher_token,
         read_igdb_credentials_with, read_tmdb_token_with, set_cloud_api_token,
         set_cloud_publisher_token, set_igdb_credentials_with, set_tmdb_token_with,
-        CredentialBackend, CredentialError, CredentialService, ALADIN_TARGET, CLOUD_API_TARGET,
+        CredentialBackend, CredentialError, CredentialService, KAKAO_TARGET, CLOUD_API_TARGET,
         CLOUD_PUBLISHER_TARGET, TMDB_TARGET,
     };
     use crate::library::error::LibraryError;
@@ -770,7 +729,7 @@ mod tests {
     #[test]
     fn stores_replaces_and_deletes_a_trimmed_key_without_exposing_it_in_status() {
         let backend = FakeBackend::default();
-        let service = CredentialService::new(&backend, ALADIN_TARGET);
+        let service = CredentialService::new(&backend, KAKAO_TARGET);
 
         assert!(!service.configured().unwrap());
         service.set("  first-secret  ").unwrap();
@@ -789,7 +748,7 @@ mod tests {
     #[test]
     fn rejects_empty_keys_and_redacts_backend_failures() {
         let backend = FakeBackend::default();
-        let service = CredentialService::new(&backend, ALADIN_TARGET);
+        let service = CredentialService::new(&backend, KAKAO_TARGET);
         assert!(matches!(
             service.set("   "),
             Err(LibraryError::InvalidAladinCredentialValue)
@@ -799,7 +758,7 @@ mod tests {
             values: RefCell::new(HashMap::new()),
             fail: true,
         };
-        let error = CredentialService::new(&failing, ALADIN_TARGET)
+        let error = CredentialService::new(&failing, KAKAO_TARGET)
             .set("must-not-leak")
             .unwrap_err();
         assert!(matches!(error, LibraryError::CredentialStoreFailed));
@@ -822,12 +781,12 @@ mod tests {
     #[test]
     fn isolates_igdb_target_and_deletes_only_igdb_credentials() {
         let backend = FakeBackend::default();
-        let aladin = CredentialService::new(&backend, ALADIN_TARGET);
-        aladin.set("aladin-secret").unwrap();
+        let kakao = CredentialService::new(&backend, KAKAO_TARGET);
+        kakao.set("kakao-secret").unwrap();
         set_igdb_credentials_with(&backend, "client-id", "client-secret").unwrap();
-        assert_eq!(aladin.read().unwrap(), "aladin-secret");
+        assert_eq!(kakao.read().unwrap(), "kakao-secret");
         super::delete_igdb_credentials(&backend).unwrap();
-        assert_eq!(aladin.read().unwrap(), "aladin-secret");
+        assert_eq!(kakao.read().unwrap(), "kakao-secret");
         assert!(matches!(
             read_igdb_credentials_with(&backend),
             Err(LibraryError::IgdbCredentialNotConfigured)

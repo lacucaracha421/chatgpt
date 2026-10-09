@@ -29,8 +29,7 @@ const GAINS = { mangadex: "일본판 권 목록 · 표지 · 원제", kakao: "�
 export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onConnectMangaDex, onRefreshMangaDex, onConnectKakao, onRefreshKakao, hideConnectionPrompt = false }: Props) {
   const [open, setOpen] = useState(false);
   if (mangaDex === undefined || kakao === undefined) return null;
-  const aladin = kakao?.provider === "aladin";
-  const kakaoConnected = Boolean(kakao) && !aladin;
+  const kakaoConnected = Boolean(kakao);
   const synced = (value: string | null | undefined) => value ? `마지막 갱신 ${displayDateTime(value, new Date(), { withTime: true })}` : "아직 갱신 전";
 
   if (hideConnectionPrompt && !kakaoConnected) return <section className="manga-connections is-folded" aria-label="연결">
@@ -49,8 +48,8 @@ export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onC
       </div>
       <div className="manga-connections__row">
         <span className="manga-connections__name">카카오</span>
-        <span className="manga-connections__state">{aladin ? "알라딘 연결" : "미연결"}</span>
-        <Button size="sm" variant="ghost" aria-label={aladin ? "카카오로 재연결" : "카카오 연결"} disabled={kakaoBusy} onClick={onConnectKakao}>{aladin ? "카카오로 재연결" : "카카오 연결"}</Button>
+        <span className="manga-connections__state">미연결</span>
+        <Button size="sm" variant="ghost" aria-label="카카오 연결" disabled={kakaoBusy} onClick={onConnectKakao}>카카오 연결</Button>
       </div>
     </div>}
   </section>;
@@ -88,10 +87,10 @@ export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onC
       <Button size="sm" variant="ghost" aria-label={`${name} 새로고침`} disabled={busy} onClick={provider === "mangadex" ? onRefreshMangaDex : onRefreshKakao}><BusyLabel busy={!!(busy)} idle={"새로고침"}>새로고침 중…</BusyLabel></Button>
     </div>;
     const primary = provider === "kakao";
-    const label = provider === "kakao" && aladin ? "카카오로 재연결" : `${name} 연결`;
+    const label = `${name} 연결`;
     return <button key={provider} type="button" className={`manga-connections__choice${primary ? " is-primary" : ""}`} aria-label={label}
       onClick={provider === "mangadex" ? onConnectMangaDex : onConnectKakao}>
-      <span className="manga-connections__text"><strong>{label}</strong><small>{provider === "kakao" && aladin ? "알라딘 연결 · 기존 신간 확인이 중단됐습니다. 카카오로 다시 연결해 주세요." : GAINS[provider]}</small></span>
+      <span className="manga-connections__text"><strong>{label}</strong><small>{GAINS[provider]}</small></span>
       <ChevronRightIcon aria-hidden="true" />
     </button>;
   };

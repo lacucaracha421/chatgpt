@@ -279,19 +279,6 @@ describe("CollectionOverlay MangaDex flow", () => {
   });
 
 
-  it("explains legacy Aladin reconnection and opens Kakao without refreshing the old provider", async () => {
-    const user = userEvent.setup();
-    const { gateway } = renderOverlay({
-      getBookConnection: vi.fn().mockResolvedValue({ provider: "aladin", anchorItemId: "old-1", query: "던전밥", lastSyncedAt: "t" }),
-    });
-    const reconnect = await screen.findByRole("button", { name: "카카오로 재연결" });
-    expect(reconnect).toHaveTextContent(/기존 신간 확인이 중단됐습니다/);
-    await user.click(reconnect);
-    expect(await screen.findByRole("dialog", { name: "Kakao 연결" })).toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: "카카오 작품 검색" })).toHaveValue("던전밥");
-    expect(gateway.refreshKakao).not.toHaveBeenCalled();
-  });
-
   it("loads an unconnected manga without requesting MangaDex cover sync or showing an error toast", async () => {
     const syncMangaDexVolumeCovers = vi.fn().mockRejectedValue(new Error("MangaDex identity is invalid"));
     const { gateway } = renderOverlay({ syncMangaDexVolumeCovers });

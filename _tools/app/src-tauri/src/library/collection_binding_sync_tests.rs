@@ -181,7 +181,7 @@ impl BindingApplier for Fake {
         let anchors: Vec<_> = request.groups.iter().map(|g| g.anchor_item_id.as_str()).collect();
         self.queued(library, format!("kakao:{}", anchors.join("+")))?;
         library
-            .book_flow("kakao")
+            .book_flow()
             .apply_requested_items(request, kakao_items(), Some(check))
             .map(|_| ())
     }
@@ -477,7 +477,7 @@ fn a_kakao_request_binds_its_group_even_after_the_anchor_drifted() {
     };
     assert!(matches!(
         library
-            .book_flow("kakao")
+            .book_flow()
             .apply_requested_items(request, kakao_items(), None),
         Err(LibraryError::AmbiguousAladinBinding)
     ));
@@ -1006,7 +1006,7 @@ fn a_requested_multi_group_apply_resolves_each_group_and_merges() {
     // The second group's anchor drifted since the tablet picked it.
     request.groups[1].anchor_item_id = "gone".into();
     library
-        .book_flow("kakao")
+        .book_flow()
         .apply_requested_items(request, split_kakao_items(), None)
         .unwrap();
     let volumes: i64 = library

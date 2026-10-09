@@ -56,7 +56,7 @@ it("(b) a watched work with released but unowned volumes is muted; (c) otherwise
 });
 
 it("names unread new volumes from the inbox when the board is unavailable", () => {
-  expect(releaseCaption(work("w", 3), undefined, [item("w", 5, "2026-09-10"), item("w", 7, "2026-09-12"), item("w", 6, null, "aladin")], today)).toEqual({ kind: "new", text: "신간 5–7권", date: "9.12" });
+  expect(releaseCaption(work("w", 3), undefined, [item("w", 5, "2026-09-10"), item("w", 7, "2026-09-12"), item("w", 6, null)], today)).toEqual({ kind: "new", text: "신간 5–7권", date: "9.12" });
   expect(releaseCaption(work("w", 1), undefined, [item("w", 9, "2026-11-20")], today)).toEqual({ kind: "new", text: "신간 알림 1", date: null });
   expect(releaseCaption(work("w", 0), undefined, [], today)).toBeNull();
 });

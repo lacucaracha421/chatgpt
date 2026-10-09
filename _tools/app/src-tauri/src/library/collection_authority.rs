@@ -3292,8 +3292,6 @@ impl Library {
                 "mangadex" => self.refresh_mangadex(work).map(|_| ()),
                 "kakao" => super::credential::read_kakao_key()
                     .and_then(|key| self.refresh_kakao(&key, work).map(|_| ())),
-                "aladin" => super::credential::read_aladin_key()
-                    .and_then(|key| self.refresh_aladin(&key, work).map(|_| ())),
                 _ => Err(LibraryError::InvalidExternalBinding),
             }
         })

@@ -1244,13 +1244,13 @@ pub(crate) mod tests {
         (subscribed, owned, editions)
     }
 
-    fn bind_aladin(library: &Library, id: &str) {
+    fn bind_kakao(library: &Library, id: &str) {
         library
             .connection()
             .unwrap()
             .execute(
                 "INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,last_synced_at,created_at,updated_at)
-                 VALUES(?1,'aladin','x','{}','2026-09-01T00:00:00Z','t','t')",
+                 VALUES(?1,'kakao','x','{}','2026-09-01T00:00:00Z','t','t')",
                 [id],
             )
             .unwrap();
@@ -1259,7 +1259,7 @@ pub(crate) mod tests {
     #[test]
     fn version_two_applies_release_watch_and_owned_volumes_like_the_pc_panel() {
         let (_temp, library) = fixture();
-        bind_aladin(&library, "a");
+        bind_kakao(&library, "a");
         let id = adopt(&library, ENDPOINT);
         mark_published(&library);
         let outcome = library
@@ -1319,7 +1319,7 @@ pub(crate) mod tests {
     #[test]
     fn tracking_receipts_make_replays_harmless_and_refuse_divergence() {
         let (_temp, library) = fixture();
-        bind_aladin(&library, "a");
+        bind_kakao(&library, "a");
         let id = adopt(&library, ENDPOINT);
         let page = [
             entry(1, "a", "releaseWatch", serde_json::json!(true)),
@@ -1350,7 +1350,7 @@ pub(crate) mod tests {
     #[test]
     fn malformed_or_unknown_tracking_entries_fail_the_page_closed() {
         let (_temp, library) = fixture();
-        bind_aladin(&library, "a");
+        bind_kakao(&library, "a");
         let id = adopt(&library, ENDPOINT);
         for (field, value) in [
             ("ownedVolumes", serde_json::json!({"editionIndex":4,"count":1})),
@@ -1383,7 +1383,7 @@ pub(crate) mod tests {
     #[test]
     fn the_pc_panel_marks_the_collection_publication_dirty() {
         let (_temp, library) = fixture();
-        bind_aladin(&library, "a");
+        bind_kakao(&library, "a");
         mark_published(&library);
         library.set_release_watch_enabled("a", true).unwrap();
         assert!(dirty(&library));

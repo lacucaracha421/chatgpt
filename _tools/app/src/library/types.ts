@@ -745,7 +745,7 @@ export type TmdbArtworkReplaceRequest = {
 export type KakaoCredentialStatus = { configured: boolean };
 
 export type BookConnection = {
-  provider?: "aladin" | "kakao";
+  provider?: "kakao";
   anchorItemId: string;
   query: string;
   lastSyncedAt: string | null;
@@ -1319,11 +1319,11 @@ export type CollectionUpdateStatus = {
   stopReason: ReleaseWatchRunResult["stopReason"]; busy: boolean;
   consecutiveFailures?: number; lastFailure?: CollectionUpdateFailure | null;
 };
-export type ReleaseInboxItem = { collectionId: string; collectionName: string; provider?: CollectionUpdateProvider | "aladin"; event: ReleaseWatchEvent };
+export type ReleaseInboxItem = { collectionId: string; collectionName: string; provider?: CollectionUpdateProvider; event: ReleaseWatchEvent };
 /** One manga Collection's 신간 data (`list_release_board`): the tablet's `releaseSchedule` shape, read from the library. */
 export type ReleaseBoardEntry = {
   collectionId: string;
-  /** `enabled`: 신간 알림 is on; `available`: a Kakao/Aladin binding exists. */
+  /** `enabled`: 신간 알림 is on; `available`: a Kakao binding exists. */
   releaseWatch: { enabled: boolean; available: boolean };
   /** Owned volumes per tracked edition (any format); an edition without an entry has no recorded count. */
   ownedVolumes: { editionIndex: number; count: number }[];
