@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -48,6 +48,154 @@ function gateway(initial: ReleaseCalendar, wishlist: ReleaseWishlistItem[] = [])
 function mount(api: ReleaseCalendarGateway, onWishlistChange = vi.fn(), props: { query?: string; onOpenSettings?: () => void } = {}) {
   return render(<LibraryProvider gateway={{ releaseCalendar: api } as unknown as LibraryGateway}><ReleaseCalendarView {...props} onWishlistChange={onWishlistChange} /></LibraryProvider>);
 }
+
+describe("server calendar handover", () => {
+  it("does not discover providers when the server owns a due calendar", async () => {
+    const cached = calendar([{ ...title("igdb:1", "Server title", "2026-10-22", "exact"), watched: false }]);
+    cached.sources[0]!.due = true;
+    const api = gateway(cached);
+    api.serverEnabled = vi.fn().mockResolvedValue(true);
+    api.serverStatus = vi.fn().mockResolvedValue({ version: 1, busy: false, sources: cached.sources });
+    mount(api);
+    await screen.findByText("Server title");
+    await waitFor(() => expect(api.serverStatus).toHaveBeenCalled());
+    expect(api.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each(["rateLimited", "unavailable"] as const)("keeps the calendar and status after %s", async outcome => {
+    const cached = calendar([{ ...title("igdb:1", "Keep title", "2026-10-22", "exact"), watched: false }]);
+    const api = gateway(cached);
+    api.serverEnabled = vi.fn().mockResolvedValue(true);
+    api.serverStatus = vi.fn().mockResolvedValue({ version: 1, busy: false, sources: cached.sources });
+    api.requestServerRun = vi.fn().mockResolvedValue({ outcome, retryAfterSeconds: 12 });
+    mount(api);
+    await screen.findByText("Keep title");
+    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await screen.findByRole("alert");
+    expect(screen.getByText("Keep title")).toBeInTheDocument();
+    expect(api.refresh).not.toHaveBeenCalled();
+    expect(api.requestServerRun).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toContain("잠시");
+  });
+
+  it("stops after two unchanged idle reads and keeps content on a status error", async () => {
+    vi.useFakeTimers();
+    const cached = calendar([{ ...title("igdb:1", "Keep title", "2026-10-22", "exact"), watched: false }]);
+    const api = gateway(cached);
+    api.serverEnabled = vi.fn().mockResolvedValue(true);
+    api.serverStatus = vi.fn().mockResolvedValue({ version: 1, busy: false, finishedAt: "before", sources: cached.sources });
+    api.requestServerRun = vi.fn().mockResolvedValue({ outcome: "queued" });
+    mount(api);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(api.serverStatus).toHaveBeenCalledTimes(4); // initial + before + two idle reads
+    expect(api.calendar).toHaveBeenCalledTimes(2);
+    expect(api.refresh).not.toHaveBeenCalled();
+    vi.mocked(api.serverStatus!).mockRejectedValueOnce(new Error("unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("Keep title")).toBeInTheDocument();
+  });
+
+  it("a status failure blanks source labels without failing the cached calendar", async () => {
+    const cached = calendar([{ ...title("igdb:1", "Offline title", "2026-10-22", "exact"), watched: false }]);
+    const api = gateway(cached);
+    api.serverEnabled = vi.fn().mockResolvedValue(true);
+    api.serverStatus = vi.fn().mockRejectedValue(new Error("status unavailable"));
+    mount(api);
+    await screen.findByText("Offline title");
+    await waitFor(() => expect(api.serverStatus).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/^갱신 /)).toBeNull();
+  });
+
+  it("ends the spinner after idle reads while document revalidation is still pending", async () => {
+    vi.useFakeTimers();
+    const cached = calendar([{ ...title("igdb:1", "Visible title", "2026-10-22", "exact"), watched: false }]);
+    const api = gateway(cached);
+    api.serverEnabled = vi.fn().mockResolvedValue(true);
+    api.serverStatus = vi.fn().mockResolvedValue({ version: 1, busy: false, sources: cached.sources });
+    api.requestServerRun = vi.fn().mockResolvedValue({ outcome: "queued" });
+    api.revalidate = vi.fn(() => new Promise<ReleaseCalendar>(() => {}));
+    mount(api);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(api.revalidate).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+    expect(screen.getByText("Visible title")).toBeInTheDocument();
+  });
+
+  it("falls back to a local refresh when the run response observes OFF", async () => {
+    const cached = calendar([{ ...title("igdb:1", "Keep title", "2026-10-22", "exact"), watched: false }]);
+    const api = gateway(cached);
+    api.serverEnabled = vi.fn().mockResolvedValue(true);
+    api.serverStatus = vi.fn().mockResolvedValue({ version: 1, busy: false, sources: cached.sources });
+    api.requestServerRun = vi.fn().mockResolvedValue({ outcome: "local" });
+    mount(api);
+    await screen.findByText("Keep title");
+    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await waitFor(() => expect(api.refresh).toHaveBeenCalledWith(true));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("replaces cached content after the background notification without blanking it", async () => {
+    const cached = calendar([{ ...title("igdb:1", "Cached title", "2026-10-22", "exact"), watched: false }]);
+    const fresh = calendar([{ ...title("igdb:2", "Fresh title", "2026-10-23", "exact"), watched: false }]);
+    const api = gateway(cached);
+    let notify = () => {};
+    const unsubscribe = vi.fn();
+    api.subscribeChanged = handler => { notify = handler; return unsubscribe; };
+    const mounted = mount(api);
+    await screen.findByText("Cached title");
+    let resolve!: (value: ReleaseCalendar) => void;
+    vi.mocked(api.calendar).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    act(() => notify());
+    expect(screen.getByText("Cached title")).toBeInTheDocument();
+    await act(async () => resolve(fresh));
+    expect(screen.getByText("Fresh title")).toBeInTheDocument();
+    expect(screen.queryByText("Cached title")).toBeNull();
+    mounted.unmount();
+    expect(unsubscribe).toHaveBeenCalled();
+  });
+
+  it("swaps the calendar after the requested server wake completes", async () => {
+    vi.useFakeTimers();
+    const cached = calendar([{ ...title("igdb:1", "Before check", "2026-10-22", "exact"), watched: false }]);
+    const fresh = calendar([{ ...title("igdb:2", "After check", "2026-10-23", "exact"), watched: false }]);
+    const api = gateway(cached);
+    vi.mocked(api.calendar).mockResolvedValueOnce(cached).mockResolvedValue(fresh);
+    api.serverEnabled = vi.fn().mockResolvedValue(true);
+    const before = { version: 1, busy: false, finishedAt: "before", sources: cached.sources };
+    api.serverStatus = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(before)
+      .mockResolvedValue({ ...before, finishedAt: "after", sources: fresh.sources });
+    api.requestServerRun = vi.fn().mockResolvedValue({ outcome: "queued" });
+    mount(api);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    expect(screen.getByText("Before check")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(screen.getByText("After check")).toBeInTheDocument();
+    expect(screen.queryByText("Before check")).toBeNull();
+    expect(api.serverStatus).toHaveBeenCalledTimes(3);
+    expect(api.refresh).not.toHaveBeenCalled();
+  });
+
+  it("returns to local calendar status when the feature is no longer advertised", async () => {
+    const cached = calendar([{ ...title("igdb:1", "Server title", "2026-10-22", "exact"), watched: false }]);
+    const api = gateway(cached);
+    api.serverEnabled = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+    api.serverStatus = vi.fn().mockResolvedValue({ version: 1, busy: false,
+      sources: [{ ...cached.sources[0]!, errorCode: "rate_limited" }] });
+    mount(api);
+    await screen.findByText(/게임 \(IGDB\):/);
+    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await waitFor(() => expect(api.refresh).toHaveBeenCalledWith(true));
+    expect(screen.queryByText(/게임 \(IGDB\):/)).toBeNull();
+    expect(screen.getByText("Server title")).toBeInTheDocument();
+  });
+});
 
 describe("release calendar wording", () => {
   it("keeps today minus seven, drops minus eight, and uses local calendar days across DST", () => {

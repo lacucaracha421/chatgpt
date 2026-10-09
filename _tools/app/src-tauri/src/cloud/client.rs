@@ -10,6 +10,9 @@ use crate::library::error::LibraryError;
 #[path = "collection_authority_transport.rs"]
 mod collection_authority_transport;
 pub(crate) use collection_authority_transport::{CollectionDelivery, ReleaseCheckRun};
+#[path = "release_calendar.rs"]
+mod release_calendar;
+pub(crate) use release_calendar::CalendarRun;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const METADATA_BACKUP_OBJECT_KEY: &str = "backups/library-metadata.sqlite";
@@ -4311,7 +4314,7 @@ impl CloudClient {
             return Err(LibraryError::AssetAuthorityConflict{asset_id:id.into(),current_revision:revision,lifecycle:lifecycle.into()});
         }
         if matches!(status,409|404|422) {
-            let code=value["detail"]["code"].as_str().filter(|code|matches!(*code,"cursorExpired"|"cursorAhead"|"baselineChanged"|"authorityInactive"|"authorityLibraryMismatch"|"authorityContractUnsupported"|"revisionConflict"|"operationConflict"|"lifecycleTransitionRefused"|"assetNotFound" )).unwrap_or("assetAuthorityRejected");
+            let code=value["detail"]["code"].as_str().filter(|code|matches!(*code,"cursorExpired"|"cursorAhead"|"baselineChanged"|"authorityInactive"|"authorityLibraryMismatch"|"authorityContractUnsupported"|"revisionConflict"|"operationConflict"|"lifecycleTransitionRefused"|"similarityKeptByTabletDecision"|"assetNotFound" )).unwrap_or("assetAuthorityRejected");
             return Err(LibraryError::AssetAuthorityRejected{status,code:code.into()});
         }
         Err(LibraryError::CloudRequestUnavailable)

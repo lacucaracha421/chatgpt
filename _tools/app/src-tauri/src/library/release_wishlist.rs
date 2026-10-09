@@ -334,7 +334,11 @@ impl Library {
         today: NaiveDate,
     ) -> Result<WatchItem, LibraryError> {
         let (kind, number, season) = split_id(id)?;
-        let cached = cached_title(&*self.connection()?, id, now)?;
+        let cached = if self.server_release_calendar_enabled() {
+            self.server_calendar_title(id)?
+        } else {
+            cached_title(&*self.connection()?, id, now)?
+        };
         let (title, source) = match cached {
             Some(title) => (title, "calendar"),
             None => {

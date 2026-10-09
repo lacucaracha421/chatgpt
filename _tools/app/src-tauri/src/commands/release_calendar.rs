@@ -1,6 +1,6 @@
 //! 발매 캘린더 and 관심 목록 (game/movie/anime wishlist) commands.
 
-use tauri::State;
+use tauri::{Emitter, State};
 
 use super::{background_task_error, current_required, AppState, CommandError};
 use crate::library::{
@@ -8,16 +8,70 @@ use crate::library::{
     release_wishlist::{WatchItem, WatchRunResult},
 };
 
-/// The cached calendar for today's window; never touches the network.
+#[tauri::command]
+pub async fn server_release_calendar_enabled(
+    state: State<'_, AppState>,
+) -> Result<bool, CommandError> {
+    let library = current_required(state)?;
+    Ok(library.server_release_calendar_enabled())
+}
+
+#[tauri::command]
+pub async fn get_server_release_calendar_status(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.server_release_calendar_status())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn request_server_release_calendar(
+    state: State<'_, AppState>,
+) -> Result<crate::library::server_release_calendar::ServerCalendarRun, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.request_server_release_calendar())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// The local cache or server publication for today's window; no provider requests.
 #[tauri::command]
 pub async fn get_release_calendar(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<ReleaseCalendar, CommandError> {
     let library = current_required(state)?;
+    let refresh = library.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if refresh
+            .refresh_server_calendar_cache(false)
+            .unwrap_or(false)
+        {
+            let _ = app.emit("library://release-calendar-changed", ());
+        }
+    });
     tauri::async_runtime::spawn_blocking(move || library.release_calendar())
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_server_calendar_cache(
+    state: State<'_, AppState>,
+) -> Result<ReleaseCalendar, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.refresh_server_calendar_cache(true)?;
+        library.release_calendar()
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 /// Refresh the providers that are due (at most daily); `force` ignores the daily interval but

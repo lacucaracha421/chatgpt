@@ -19,13 +19,25 @@ export function useReleaseCalendarRefresh() {
   useEffect(() => {
     let active = true;
     void api?.calendar().then(value => { if (active) setCalendar(value); }).catch(() => undefined);
-    return () => { active = false; };
+    const stop = api?.subscribeChanged?.(() => {
+      void api.calendar().then(value => { if (active) setCalendar(value); }).catch(() => undefined);
+    });
+    return () => { stop?.(); active = false; };
   }, [api]);
 
   async function refreshNow() {
     if (!api || busy) return;
     setBusy(true); setMessage(null);
     try {
+      if (await api.serverEnabled?.()) {
+        const result = await api.requestServerRun?.();
+        if (result?.outcome !== "local") {
+          setMessage(result?.outcome === "queued" ? "서버에 발매 정보 확인을 요청했습니다."
+            : result?.outcome === "rateLimited" ? "잠시 후 다시 확인해 주세요."
+            : "서버 발매 캘린더가 잠시 쉬고 있습니다. 잠시 후 다시 시도해 주세요.");
+          return;
+        }
+      }
       const fresh = await api.refreshNow();
       setCalendar(fresh);
       const failed = fresh.sources.filter(source => source.errorCode);

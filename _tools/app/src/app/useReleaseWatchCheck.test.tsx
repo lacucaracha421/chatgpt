@@ -7,6 +7,17 @@ function Harness({ gateway, changed, root = "fixture" }: {gateway: LibraryGatewa
   useReleaseWatchCheck(gateway, root, changed); return null;
 }
 const status: CollectionUpdateStatus = {provider:"mangadex",checked:0,changedCollections:0,failed:0,remaining:0,requests:0,elapsedMs:0,networkMs:0,throttleMs:0,startedAt:null,finishedAt:null,retryAt:null,stopReason:null,busy:false};
+it("keeps PC wishlist checks running with a server-owned calendar", async () => {
+  vi.useFakeTimers();
+  const runDue = vi.fn().mockResolvedValue({ checked: 0, changed: 0, remaining: 0, stopReason: null });
+  const refresh = vi.fn();
+  const gateway = { collectionTracking: { updateStatus: vi.fn().mockResolvedValue(status), runUpdates: vi.fn() },
+    releaseCalendar: { serverEnabled: vi.fn().mockResolvedValue(true), runDue, refresh } } as unknown as LibraryGateway;
+  render(<Harness gateway={gateway} changed={vi.fn().mockResolvedValue(undefined)} />);
+  await act(async () => {});
+  expect(runDue).toHaveBeenCalledTimes(1);
+  expect(refresh).not.toHaveBeenCalled();
+});
 it("continues pending batches and keeps Kakao independent of MangaDex errors", async () => {
   vi.useFakeTimers();
   let calls = 0;

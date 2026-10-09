@@ -42,6 +42,10 @@ Wishlist item = Title + ``{"source": "calendar"|"manual", "addedAt", "muted": bo
    "acknowledgedThrough"}``. Errors: ``422 invalidUpcomingUpload``, ``413
    upcomingUploadTooLarge``, ``409 upcomingIntentCursorRejected`` (cursor beyond the log),
    ``409 homeCoverNotUploaded``.
+   Handover PUT: ``{"version":1,"wishlistOnly":true,"wishlist":[WishItem],
+   "intentCursor":int}`` preserves the calendar under the same transaction. Returns
+   ``503 releaseCalendarUnavailable`` only when disabled or credentials are absent;
+   a draining worker retains ownership and accepts wishlist-only updates.
 2. ``GET /v1/home/upcoming`` (client) - ``{"version": 1, "revision", "publishedAt"|null,
    "generatedAt"|null, "rangeStart"|null, "rangeEnd"|null, "entries", "wishlist", "sources",
    "acknowledgedThrough", "pending": [Intent]}`` with ETag / 304. Before the first
@@ -57,7 +61,9 @@ Wishlist item = Title + ``{"source": "calendar"|"manual", "addedAt", "muted": bo
 4. ``GET /v1/home/upcoming/wishlist/intents?after=<int>&limit=<1-200>`` (publisher) -
    ``{"version": 1, "after", "lastSequence", "acknowledgedThrough", "prunedThrough",
    "nextCursor", "hasMore", "items": [Intent]}``, ETag. Intent = ``{"sequence",
-   "operationId", "action", "itemId", "eventIds": [...]|null, "createdAt"}``. ``409
+   "operationId", "action", "itemId", "eventIds": [...]|null, "createdAt",
+   "title": Title (add only, captured at POST time when available)}``. Legacy intents
+   without a stored title fall back to the current publication. ``409
    upcomingCursorRejected`` when ``after > lastSequence``; ``409 upcomingIntentsExpired``
    (with ``lastSequence``) when ``after < prunedThrough``. The PC applies intents in order
    (unknown ids and no-op changes are fine) and then publishes with ``intentCursor``.
@@ -117,6 +123,8 @@ CREATE TABLE IF NOT EXISTS home_upcoming_receipts(
 
 def startup_db(db):
     db.executescript(DDL)
+    if "title_json" not in {row[1] for row in db.execute("PRAGMA table_info(home_upcoming_intents)")}:
+        db.execute("ALTER TABLE home_upcoming_intents ADD COLUMN title_json TEXT")
     common.startup_db(db)
 
 
@@ -207,6 +215,14 @@ class Upload(Strict):
     intentCursor: int | None = Field(default=None, ge=0, le=MAX_CURSOR)
 
 
+class WishlistUpload(Strict):
+    """PC handover: preserve the latest server calendar inside the write transaction."""
+    version: Literal[1]
+    wishlistOnly: Literal[True]
+    wishlist: list[WishItem] = Field(max_length=MAX_WISHLIST)
+    intentCursor: int = Field(ge=0, le=MAX_CURSOR)
+
+
 class Intent(Strict):
     version: Literal[1]
     operationId: OperationId
@@ -231,10 +247,15 @@ def status_head(db):
             "prunedThrough": state["pruned_through"]}
 
 
-def _intent(row):
-    return {"sequence": row["sequence"], "operationId": row["operation_id"], "action": row["action"],
+def _intent(row, titles=None):
+    result = {"sequence": row["sequence"], "operationId": row["operation_id"], "action": row["action"],
             "itemId": row["item_id"], "eventIds": None if row["event_ids"] is None else json.loads(row["event_ids"]),
             "createdAt": row["created_at"]}
+    if row["action"] == "add":
+        title = json.loads(row["title_json"]) if row["title_json"] else (titles or {}).get(row["item_id"])
+        if title is not None:
+            result["title"] = title
+    return result
 
 
 def _retain(db, now):
@@ -260,27 +281,53 @@ def register(app, get_db, require_client, require_publisher):
         fail(422, "invalidUpcomingUpload", "발매 예정 목록을 확인할 수 없습니다.")
 
     def publish(upload):
-        ids = [item.id for item in upload.entries]
+        wishlist_only = isinstance(upload, WishlistUpload)
+        if wishlist_only:
+            import release_calendar
+            if not (release_calendar.enabled() and release_calendar.credentials_present()):
+                fail(503, "releaseCalendarUnavailable", "서버 발매 캘린더가 잠시 쉬고 있습니다. 잠시 후 다시 시도해 주세요.")
+        ids = [] if wishlist_only else [item.id for item in upload.entries]
         wished = [item.id for item in upload.wishlist]
-        if len(set(ids)) != len(ids) or len(set(wished)) != len(wished) or upload.rangeStart > upload.rangeEnd:
+        if (len(set(ids)) != len(ids) or len(set(wished)) != len(wished)
+                or (not wishlist_only and upload.rangeStart > upload.rangeEnd)):
             invalid_upload()
-        if len({source.provider for source in upload.sources}) != len(upload.sources):
+        if not wishlist_only and len({source.provider for source in upload.sources}) != len(upload.sources):
             invalid_upload()
-        covers = [item.cover for item in (*upload.entries, *upload.wishlist)]
+        covers = [item.cover for item in (upload.wishlist if wishlist_only else (*upload.entries, *upload.wishlist))]
         common.blobs(covers)
-        document = upload.model_dump(exclude={"version", "intentCursor"})
-        digest = hashlib.sha256(encode(document).encode()).hexdigest()
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
             state = _state(db)
+            if wishlist_only:
+                # Even the first handover retains wishlist data; the worker may replace
+                # this empty calendar once every provider has a successful cache.
+                moment = now_utc()
+                document = json.loads(state["document"]) if state["document"] else {
+                    "generatedAt": moment.isoformat(), "rangeStart": moment.date().isoformat(),
+                    "rangeEnd": moment.date().isoformat(), "entries": [], "wishlist": [], "sources": []}
+                document["wishlist"] = [item.model_dump() for item in upload.wishlist]
+                merged = Upload.model_validate({"version": 1, **document})
+                covers = [item.cover for item in (*merged.entries, *merged.wishlist)]
+                ids = [item.id for item in merged.entries]
+            else:
+                document = upload.model_dump(exclude={"version", "intentCursor"})
+            serialized = encode(document)
+            if len(serialized.encode()) > MAX_BODY_BYTES:
+                db.rollback()
+                fail(413, "upcomingUploadTooLarge", "발매 예정 게시 요청이 너무 큽니다.")
+            digest = hashlib.sha256(serialized.encode()).hexdigest()
             cursor = upload.intentCursor
             if ((cursor is None and state["acknowledged_through"] > 0)
                     or (cursor is not None and (cursor < state["acknowledged_through"]
                                                or cursor > state["intent_sequence"]))):
                 db.rollback()
                 fail(409, "upcomingIntentCursorRejected", "발매 예정 요청 위치를 확인해 주세요.")
-            # A valid PC publication takes ownership, including an unchanged upload.
-            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_calendar_owner'").fetchone():
+            # A full PC upload takes ownership; a wishlist-only upload hands the
+            # current calendar to the worker, including an unchanged document.
+            if wishlist_only:
+                db.execute("INSERT INTO release_calendar_owner VALUES(1,?) "
+                           "ON CONFLICT(singleton) DO UPDATE SET digest=excluded.digest", (digest,))
+            elif db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_calendar_owner'").fetchone():
                 db.execute("DELETE FROM release_calendar_owner")
             acknowledged = max(state["acknowledged_through"], cursor or 0)
             changed = digest != state["digest"]
@@ -308,7 +355,9 @@ def register(app, get_db, require_client, require_publisher):
         body = await common.bounded_body(request, MAX_BODY_BYTES, "upcomingUploadTooLarge",
                                          "발매 예정 게시 요청이 너무 큽니다.")
         try:
-            upload = Upload.model_validate_json(body)
+            value = json.loads(body)
+            upload = (WishlistUpload if isinstance(value, dict) and value.get("wishlistOnly") is True
+                      else Upload).model_validate(value)
         except (ValidationError, ValueError):
             invalid_upload()
         return await run_in_threadpool(publish, upload)
@@ -365,9 +414,24 @@ def register(app, get_db, require_client, require_publisher):
             moment = now_utc()
             now = moment.isoformat()
             sequence = state["intent_sequence"] + 1
-            db.execute("INSERT INTO home_upcoming_intents VALUES(?,?,?,?,?,?)",
+            stored_title = None
+            if intent.action == "add":
+                document = json.loads(state["document"]) if state["document"] else {"entries": [], "wishlist": []}
+                candidates = {item["id"]: item for item in document["wishlist"] + document["entries"]}
+                value = candidates.get(intent.itemId)
+                if value is not None:
+                    # Strip wishlist-only fields, retaining the public Title contract.
+                    stored_title = encode({key: value.get(key) for key in Title.model_fields if key in value})
+                else:
+                    previous = db.execute("SELECT title_json FROM home_upcoming_intents WHERE item_id=? "
+                                          "AND action='add' AND title_json IS NOT NULL ORDER BY sequence DESC LIMIT 1",
+                                          (intent.itemId,)).fetchone()
+                    if previous:
+                        stored_title = previous[0]
+            db.execute("INSERT INTO home_upcoming_intents(sequence,operation_id,action,item_id,event_ids,created_at,title_json) "
+                       "VALUES(?,?,?,?,?,?,?)",
                        (sequence, intent.operationId, intent.action, intent.itemId,
-                        None if intent.eventIds is None else json.dumps(intent.eventIds), now))
+                        None if intent.eventIds is None else json.dumps(intent.eventIds), now, stored_title))
             db.execute("UPDATE home_upcoming_state SET intent_sequence=?,revision=revision+1 WHERE singleton=1",
                        (sequence,))
             _retain(db, moment)
@@ -406,13 +470,15 @@ def register(app, get_db, require_client, require_publisher):
                 fail(409, "upcomingIntentsExpired", "오래된 찜 요청이 정리되었습니다.", lastSequence=last)
             rows = db.execute("SELECT * FROM home_upcoming_intents WHERE sequence>? ORDER BY sequence LIMIT ?",
                               (after, limit + 1)).fetchall()
+            document = json.loads(state["document"]) if state["document"] else {"entries": [], "wishlist": []}
+            titles = {item["id"]: item for item in document["wishlist"] + document["entries"]}
             db.rollback()
         more = len(rows) > limit
         rows = rows[:limit]
         return conditional.json_response({
             "version": 1, "after": after, "lastSequence": last, "acknowledgedThrough": state["acknowledged_through"],
             "prunedThrough": pruned, "nextCursor": rows[-1]["sequence"] if rows else after, "hasMore": more,
-            "items": [_intent(row) for row in rows]}, if_none_match)
+            "items": [_intent(row, titles) for row in rows]}, if_none_match)
 
     def startup():
         with get_db() as db:

@@ -71,7 +71,8 @@ def credentials_present():
 
 
 def features():
-    return [FEATURE] if enabled() and credentials_present() and _current and _current.alive() else []
+    # Ownership outlives a draining/restarting thread; run availability is separate.
+    return [FEATURE] if enabled() and credentials_present() else []
 
 
 def startup_db(db):

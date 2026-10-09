@@ -242,7 +242,20 @@ class CalendarRoutes(HomeFixture):
             finally:
                 self.worker.stop()
         self.assertIsNone(self.worker.thread)
-        self.assertNotIn(rc.FEATURE, rc.features())
+        self.assertIn(rc.FEATURE, rc.features())
+        self.assertFalse(self.worker.transport.requests)
+
+    def test_drain_keeps_ownership_and_wishlist_updates_while_run_retries_503(self):
+        body = {"version": 1, "wishlistOnly": True, "wishlist": [wish()], "intentCursor": 0}
+        with mock.patch.object(self.worker, "alive", return_value=False):
+            self.assertIn(rc.FEATURE, collection_authority.advertised_features())
+            self.assertEqual(self.client.post(rc.PREFIX + "/run", headers=self.auth, json={}).status_code, 503)
+            self.ok(self.client.put(home_upcoming.PREFIX, headers=self.publisher, json=body))
+        before = self.ok(self.client.get(home_upcoming.PREFIX, headers=self.auth))
+        with mock.patch.object(self.worker, "alive", return_value=True), mock.patch.object(self.worker, "request"):
+            self.ok(self.client.post(rc.PREFIX + "/run", headers=self.auth, json={}))
+            self.assertFalse(self.ok(self.client.put(home_upcoming.PREFIX, headers=self.publisher, json=body))["changed"])
+        self.assertEqual(self.ok(self.client.get(home_upcoming.PREFIX, headers=self.auth)), before)
         self.assertFalse(self.worker.transport.requests)
 
 

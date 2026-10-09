@@ -252,6 +252,7 @@ impl Library {
         let endpoint = status_watch::endpoint_key(endpoint);
         let mut state = State::load(&*self.connection()?, &endpoint, kind)?;
         let clock = now.timestamp();
+        if kind == "upcoming" { self.server_release_calendar_enabled_at(clock)?; }
         if state.retry_after > clock {
             return Ok(());
         }
@@ -328,6 +329,12 @@ impl Library {
             if !build_due && state.next_build > clock && state.cursor == previous_cursor {
                 return Ok(());
             }
+            if kind == "upcoming" && !self.server_release_calendar_enabled_at(clock)?
+                && !self.local_calendar_publication_ready(now)? {
+                // Intents are already durable; await a fresh local fetch before
+                // reclaiming the server document with a full calendar upload.
+                return Ok(());
+            }
             let (path, mut body, artwork) = match kind {
                 "upcoming" => (
                     "/v1/home/upcoming",
@@ -355,7 +362,7 @@ impl Library {
                     state.generated_at = now.to_rfc3339();
                 }
                 state.save(&*self.connection()?, &endpoint, kind)?;
-                if kind != "avPick" {
+                if kind != "avPick" && body["wishlistOnly"] != true {
                     body["generatedAt"] = json!(state.generated_at);
                 }
                 if let Some((blob, bytes)) = artwork {
@@ -376,6 +383,9 @@ impl Library {
                 }
                 state.revision = reply["revision"].as_i64();
                 state.published_digest = digest;
+                if kind == "upcoming" && body["wishlistOnly"] != true {
+                    self.local_calendar_publication_confirmed()?;
+                }
             }
             state.next_build = clock + BUILD_INTERVAL;
             if kind == "avPick" {
@@ -406,13 +416,6 @@ impl Library {
         today: NaiveDate,
         cursor: i64,
     ) -> Result<Value, LibraryError> {
-        let calendar = self.release_calendar_at(now, today)?;
-        let entries: Vec<_> = calendar
-            .entries
-            .iter()
-            .filter(|v| supported(v.title.kind))
-            .map(|v| title(&v.title))
-            .collect();
         let wishlist: Vec<_> = self.list_release_watch()?.into_iter().filter(|v|supported(v.kind)).map(|v| {
             let mut body = title(&ReleaseTitle {id:v.id, kind:v.kind,provider:v.provider,external_id:v.external_id,
                 title:v.title,original_title:v.original_title,cover:v.cover,platforms:v.platforms,date:v.date,
@@ -425,9 +428,16 @@ impl Library {
                 "currentValue":optional(e.current_value.as_deref(),200),"detectedAt":e.detected_at,"readAt":e.read_at
             })).collect::<Vec<_>>()); body
         }).collect();
-        if entries.len() > 3000 || wishlist.len() > 1000 {
+        if wishlist.len() > 1000 {
             return Err(LibraryError::InvalidCloudResponse);
         }
+        if self.server_release_calendar_enabled_at(now.timestamp())? {
+            return Ok(json!({"version":1,"wishlistOnly":true,"wishlist":wishlist,"intentCursor":cursor}));
+        }
+        let calendar = self.release_calendar_at(now, today)?;
+        let entries: Vec<_> = calendar.entries.iter().filter(|v| supported(v.title.kind))
+            .map(|v| title(&v.title)).collect();
+        if entries.len() > 3000 { return Err(LibraryError::InvalidCloudResponse); }
         Ok(
             json!({"version":1,"rangeStart":calendar.range_start,"rangeEnd":calendar.range_end,
             "entries":entries,"wishlist":wishlist,"intentCursor":cursor,
@@ -491,6 +501,7 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<(), LibraryError> {
+        let server_calendar = self.server_release_calendar_enabled_at(now.timestamp())?;
         let mut db = self.connection()?;
         let tx = db.transaction()?;
         let mut state = State::load(&tx, endpoint, "upcoming")?;
@@ -507,8 +518,21 @@ impl Library {
             )?;
             match item.action.as_str() {
                 "add" => {
-                    // Unknown/expired titles are a specified no-op; never make provider calls in this lane.
-                    if let Some(title) = release_calendar::cached_title(&tx, &item.item_id, now)? {
+                    // The publisher log carries title data from the published snapshot.
+                    // No provider calls, including when a title exists only on the server.
+                    let cached = release_calendar::cached_title(&tx, &item.item_id, now)?;
+                    // OFF prefers the local cache; an unneeded payload is not parsed.
+                    let published = if !server_calendar && cached.is_some() { None } else {
+                        item.title.clone().and_then(|value| {
+                            match serde_json::from_value::<super::server_release_calendar::PublishedTitle>(value)
+                                .map_err(|_| LibraryError::InvalidCloudResponse).and_then(|p| p.into_title()) {
+                                Ok(title) if title.id == item.item_id => Some(title),
+                                _ => { eprintln!("Ignoring malformed calendar intent title at sequence {}", item.sequence); None }
+                            }
+                        })
+                    };
+                    let selected = if server_calendar { published.or(cached) } else { cached.or(published) };
+                    if let Some(title) = selected {
                         if supported(title.kind) {
                             release_wishlist::insert_watch(&tx, &title, "calendar", now, today)?;
                         }
@@ -708,6 +732,8 @@ struct Intent {
     item_id: String,
     event_ids: Option<Vec<String>>,
     created_at: String,
+    #[serde(default)]
+    title: Option<Value>,
 }
 impl IntentPage {
     fn validate(&self, after: i64) -> Result<(), LibraryError> {

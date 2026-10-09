@@ -188,7 +188,7 @@ pub struct CalendarItem {
     pub watched: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarSourceStatus {
     pub provider: String,
@@ -1186,8 +1186,11 @@ impl Library {
         }
     }
 
-    /// The cached calendar for today's window, with watched flags. No network access.
+    /// Today's local cache or server publication, with local watched flags.
     pub fn release_calendar(&self) -> Result<ReleaseCalendar, LibraryError> {
+        if self.server_release_calendar_enabled() {
+            return self.server_calendar();
+        }
         self.release_calendar_at(Utc::now(), chrono::Local::now().date_naive())
     }
 
@@ -1286,9 +1289,24 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<ReleaseCalendar, LibraryError> {
+        self.refresh_release_calendar_gated(transport, mode, now, today, &|| self.server_calendar())
+    }
+
+    pub(super) fn refresh_release_calendar_gated(
+        &self,
+        transport: &dyn ReleaseTransport,
+        mode: RefreshMode,
+        now: DateTime<Utc>,
+        today: NaiveDate,
+        server: &dyn Fn() -> Result<ReleaseCalendar, LibraryError>,
+    ) -> Result<ReleaseCalendar, LibraryError> {
+        // Every caller, including Settings and the hourly wishlist runner, follows the gate.
+        if self.server_release_calendar_enabled_at(now.timestamp())? {
+            return server();
+        }
         let (start, end) = window(today);
         for provider in ["igdb", "tmdb", "tmdb_tv"] {
-            let due = mode == RefreshMode::Immediate || {
+            let due = mode == RefreshMode::Immediate || self.local_calendar_fetch_due(provider, now)? || {
                 let connection = self.connection()?;
                 let cache = read_cache(&connection, provider, now)?;
                 let recently_fetched = cache.fetched_at.is_some_and(|fetched| {

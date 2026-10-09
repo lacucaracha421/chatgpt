@@ -57,7 +57,8 @@ export function useReleaseWatchCheck(
           const result = await gateway.runDueReleaseWatch();
           if (active) await onChanged(result);
         }
-        // Watched games and movies (발매 캘린더 관심 목록); the backend decides which are due.
+        // Wishlist checks stay on PC even with the server calendar enabled. Rust gates
+        // calendar discovery for every caller; do not skip this intent/event lane.
         if (active && gateway.releaseCalendar && !getWorkloadProfile().restricted) {
           try { await gateway.releaseCalendar.runDue(); } catch { /* retried on the hourly pass */ }
         }

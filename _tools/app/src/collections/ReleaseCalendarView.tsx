@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { ReleaseCalendar, ReleaseTitle, ReleaseWishlistEvent, ReleaseWishlistItem } from "../library/types";
+import type { ReleaseCalendar, ReleaseTitle, ReleaseWishlistEvent, ReleaseWishlistItem, ServerCalendarStatus } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { daysUntil, displayDateTime } from "../shared/displayDate";
 import { DDay } from "../shared/ui/DDay";
@@ -23,6 +23,8 @@ type KindFilter = "all" | ReleaseTitle["kind"];
 type Tile = ReleaseTitle & { watched: boolean; unread: ReleaseWishlistEvent[]; released?: boolean };
 
 const PROVIDER_LABEL = { igdb: "IGDB", tmdb: "TMDB", tmdb_tv: "TMDB" } as const;
+const SERVER_POLLS = 10;
+const SERVER_POLL_MS = 1500;
 
 type Props = {
   query?: string;
@@ -71,10 +73,13 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
   useEffect(() => { if (api) lastShown.set(api, { calendar, wishlist }); }, [api, calendar, wishlist]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [serverStatus, setServerStatus] = useState<ServerCalendarStatus | null>(null);
+  const [serverOwned, setServerOwned] = useState(false);
   const [kind, setKind] = useState<KindFilter>("all");
   const [watchOnly, setWatchOnly] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const active = useRef(true);
+  const generation = useRef(0);
   const referenceYear = new Date().getFullYear();
 
   const loadWishlist = useCallback(async () => {
@@ -85,24 +90,37 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
 
   useEffect(() => {
     active.current = true;
+    const current = ++generation.current;
+    const isCurrent = () => active.current && generation.current === current;
     if (!api) return;
     void (async () => {
       try {
         const [cached] = await Promise.all([api.calendar(), loadWishlist()]);
-        if (!active.current) return;
+        if (!isCurrent()) return;
         setCalendar(cached);
-        if (cached.sources.some(source => source.due)) {
+        const serverEnabled = await api.serverEnabled?.();
+        if (!isCurrent()) return;
+        setServerOwned(Boolean(serverEnabled));
+        if (serverEnabled) {
+          const status = await api.serverStatus?.().catch(() => null);
+          if (isCurrent()) setServerStatus(status ?? null);
+        } else if (cached.sources.some(source => source.due)) {
           setRefreshing(true);
           const fresh = await api.refresh(false);
-          if (active.current) setCalendar(fresh);
+          if (isCurrent()) setCalendar(fresh);
         }
       } catch (err) {
-        if (active.current) setError(commandErrorMessage(err, "발매 캘린더를 불러오지 못했습니다."));
+        if (isCurrent()) setError(commandErrorMessage(err, "발매 캘린더를 불러오지 못했습니다."));
       } finally {
-        if (active.current) setRefreshing(false);
+        if (isCurrent()) setRefreshing(false);
       }
     })();
-    return () => { active.current = false; };
+    const stop = api.subscribeChanged?.(() => {
+      void api.calendar().then(value => { if (isCurrent()) setCalendar(value); }).catch(() => undefined);
+      void api.serverStatus?.().then(value => { if (isCurrent()) setServerStatus(value); })
+        .catch(() => { if (isCurrent()) setServerStatus(null); });
+    });
+    return () => { stop?.(); active.current = false; generation.current++; };
   }, [api, loadWishlist]);
 
   const wishById = useMemo(() => new Map((wishlist ?? []).map(item => [item.id, item])), [wishlist]);
@@ -157,13 +175,67 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
 
   async function refreshNow() {
     if (!api || refreshing) return;
+    const current = generation.current;
+    const isCurrent = () => active.current && generation.current === current;
     setRefreshing(true); setError(null);
-    try { const fresh = await api.refresh(true); if (active.current) setCalendar(fresh); }
-    catch (err) { setError(commandErrorMessage(err, "발매 캘린더를 새로고침하지 못했습니다.")); }
-    finally { if (active.current) setRefreshing(false); }
+    try {
+      const serverEnabled = await api.serverEnabled?.();
+      if (!isCurrent()) return;
+      setServerOwned(Boolean(serverEnabled));
+      if (serverEnabled) {
+        const before = await api.serverStatus?.().catch(() => null);
+        if (!isCurrent()) return;
+        setServerStatus(before ?? null);
+        const result = await api.requestServerRun?.();
+        if (!isCurrent()) return;
+        if (result?.outcome === "rateLimited") {
+          setError(result.retryAfterSeconds ? `잠시 후 다시 확인해 주세요. 약 ${result.retryAfterSeconds}초 뒤에 새로고침할 수 있습니다.` : "잠시 후 다시 확인해 주세요.");
+          return;
+        }
+        if (result?.outcome === "local") {
+          setServerOwned(false);
+          const fresh = await api.refresh(true);
+          if (isCurrent()) setCalendar(fresh);
+          return;
+        }
+        if (!result || result.outcome === "unavailable") {
+          setError("서버 발매 캘린더가 잠시 쉬고 있습니다. 잠시 후 다시 시도해 주세요.");
+          return;
+        }
+        // A wake that has no due work may not change finishedAt. Two consecutive
+        // idle reads with identical sources finish the bounded follow-up too.
+        let idle = 0;
+        let previousSources: string | null = null;
+        for (let poll = 0; poll < SERVER_POLLS; poll++) {
+          await new Promise(resolve => setTimeout(resolve, SERVER_POLL_MS));
+          if (!isCurrent()) return;
+          const status = await api.serverStatus?.().catch(() => null);
+          if (!isCurrent()) return;
+          setServerStatus(status ?? null);
+          const sources = status ? JSON.stringify(status.sources) : null;
+          idle = status && !status.busy ? (sources === previousSources ? idle + 1 : 1) : 0;
+          previousSources = sources;
+          if (!status || idle >= 2) break;
+          if (status && !status.busy && status.finishedAt !== before?.finishedAt) break;
+        }
+        if (isCurrent()) {
+          // The worker is idle (or status is unavailable); network revalidation
+          // continues behind the current tiles without prolonging the spinner.
+          setRefreshing(false);
+          const fresh = await (api.revalidate?.() ?? api.calendar()).catch(() => null);
+          if (!fresh) return;
+          if (isCurrent()) setCalendar(fresh);
+        }
+      } else {
+        const fresh = await api.refresh(true);
+        if (isCurrent()) setCalendar(fresh);
+      }
+    }
+    catch (err) { if (isCurrent()) setError(commandErrorMessage(err, "발매 캘린더를 새로고침하지 못했습니다.")); }
+    finally { if (isCurrent()) setRefreshing(false); }
   }
 
-  const sources = calendar?.sources ?? [];
+  const sources = (serverOwned ? serverStatus?.sources : calendar?.sources) ?? [];
   const problems = sources.filter(source => source.errorCode);
   const latest = sources.map(source => source.fetchedAt).filter((value): value is string => Boolean(value)).sort().pop() ?? null;
   const allUnread = (wishlist ?? []).flatMap(item => item.unread);
@@ -176,7 +248,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
       </Button>
       {unreadTotal > 0 && <Badge variant="accent">NEW {unreadTotal}</Badge>}
       <div className="release-calendar__actions">
-        {!refreshing && latest && <span className="release-calendar__updated">갱신 {displayDateTime(latest)}</span>}
+        {(!refreshing || serverOwned) && latest && <span className="release-calendar__updated">갱신 {displayDateTime(latest)}</span>}
         {watchOnly && allUnread.length > 0 && <Button type="button" size="sm" variant="quiet" disabled={Boolean(pending)} onClick={() => void acknowledge("all", allUnread)}>모두 확인</Button>}
         <Button type="button" size="sm" variant="quiet" disabled={refreshing || !api} onClick={() => void refreshNow()}><ArrowPathIcon aria-hidden="true" />새로고침</Button>
       </div>

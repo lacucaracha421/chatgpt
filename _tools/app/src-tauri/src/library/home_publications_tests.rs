@@ -67,6 +67,130 @@ fn now() -> DateTime<Utc> {
         .unwrap()
         .with_timezone(&Utc)
 }
+
+#[test]
+fn server_only_calendar_add_is_applied_and_acknowledged_without_local_cache() {
+    let (_dir, lib) = setup();
+    let fake = Fake::default();
+    let mut add = intent(1, "add", "igdb:1942");
+    add["title"] = title(&game());
+    fake.pages.borrow_mut().push_back(page(0, vec![add]));
+    run(&lib, &fake, "upcoming", 0);
+    let wished = lib.list_release_watch().unwrap();
+    assert_eq!(wished.len(), 1);
+    assert_eq!(wished[0].id, "igdb:1942");
+    assert_eq!(wished[0].title, "젤다");
+    assert_eq!(wished[0].cover.as_deref(), Some("co1"));
+    let request = fake.requests.borrow();
+    let body = request[0].1.as_ref().unwrap();
+    assert_eq!(body["intentCursor"], 1);
+    assert_eq!(body["wishlist"][0]["id"], "igdb:1942");
+}
+
+#[test]
+fn server_calendar_handover_publishes_only_wishlist_and_cursor() {
+    use crate::library::collection_authority::tests::{adopt, fixture, work};
+    let (_dir, lib, status) = fixture();
+    adopt(&lib, &status, json!({"works":[work("w",1)]}));
+    let id = lib.library_id().unwrap();
+    lib.connection().unwrap().execute(
+        "INSERT INTO notes_state(key,value) VALUES('personProfileFieldsStatus',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [json!({"active":true,"libraryId":id,"epoch":1,"features":["serverReleaseCalendar"]}).to_string()],
+    ).unwrap();
+    let fake = Fake::default();
+    let mut add = intent(1, "add", "igdb:1942");
+    add["title"] = title(&game());
+    fake.pages.borrow_mut().push_back(page(0, vec![add]));
+    run(&lib, &fake, "upcoming", 0);
+    let request = fake.requests.borrow();
+    let body = request[0].1.as_ref().unwrap();
+    assert_eq!(body["wishlistOnly"], true);
+    assert_eq!(body["intentCursor"], 1);
+    assert_eq!(body["wishlist"].as_array().unwrap().len(), 1);
+    assert_eq!(body.as_object().unwrap().len(), 4);
+    assert!(body.get("entries").is_none());
+    assert!(body.get("generatedAt").is_none());
+}
+
+#[test]
+fn calendar_switch_off_retains_the_local_intent_title_and_full_publication() {
+    let (_dir, lib) = setup();
+    cache(&lib, &[game()]);
+    let fake = Fake::default();
+    let mut add = intent(1, "add", "igdb:1942");
+    let mut public = title(&game());
+    public["title"] = json!("Server title");
+    add["title"] = public;
+    fake.pages.borrow_mut().push_back(page(0, vec![add]));
+    run(&lib, &fake, "upcoming", 0);
+    assert_eq!(lib.list_release_watch().unwrap()[0].title, "젤다");
+    let requests = fake.requests.borrow();
+    let body = requests[0].1.as_ref().unwrap();
+    assert!(body.get("wishlistOnly").is_none());
+    assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(body["intentCursor"], 1);
+}
+
+#[test]
+fn malformed_intent_title_does_not_stall_later_intents_or_cursor_with_on_and_off() {
+    for server in [false, true] {
+        for cached in [false, true] {
+            use crate::library::collection_authority::tests::{adopt, fixture, work};
+            let (_dir, lib, status) = fixture();
+            if server {
+                adopt(&lib, &status, json!({"works":[work("w",1)]}));
+                let id = lib.library_id().unwrap();
+                lib.connection().unwrap().execute(
+                    "INSERT INTO notes_state(key,value) VALUES('personProfileFieldsStatus',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    [json!({"active":true,"libraryId":id,"epoch":1,"features":["serverReleaseCalendar"]}).to_string()]).unwrap();
+            }
+            if cached { cache(&lib, &[game()]); }
+            let mut add = intent(1, "add", "igdb:1942");
+            add["title"] = json!({"id":"igdb:other","title":false});
+            let next = intent(2, "mute", "igdb:1942");
+            let page: IntentPage = serde_json::from_value(page(0, vec![add, next])).unwrap();
+            lib.apply_home_intents("https://fake.invalid/", &page, now(), now().date_naive()).unwrap();
+            let state = State::load(&*lib.connection().unwrap(), "https://fake.invalid/", "upcoming").unwrap();
+            assert_eq!(state.cursor, 2);
+            let wishlist = lib.list_release_watch().unwrap();
+            assert_eq!(wishlist.len(), usize::from(cached));
+            if cached { assert!(wishlist[0].muted); }
+        }
+    }
+}
+
+#[test]
+fn calendar_real_off_defers_full_publish_then_on_retries_wishlist_digest() {
+    use crate::library::collection_authority::tests::{adopt, fixture, work};
+    let (_dir, lib, authority) = fixture();
+    adopt(&lib, &authority, json!({"works":[work("w",1)]}));
+    let id = lib.library_id().unwrap();
+    let advertise = |enabled: bool| {
+        lib.connection().unwrap().execute(
+            "INSERT INTO notes_state(key,value) VALUES('personProfileFieldsStatus',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [json!({"active":true,"libraryId":id,"epoch":1,"features":if enabled {vec!["serverReleaseCalendar"]} else {vec![]}}).to_string()]).unwrap();
+    };
+    advertise(true);
+    let fake = Fake::default();
+    run(&lib, &fake, "upcoming", 0);
+    assert_eq!(fake.requests.borrow()[0].1.as_ref().unwrap()["wishlistOnly"], true);
+    advertise(false);
+    assert!(lib.server_release_calendar_enabled_at(now().timestamp() + 1).unwrap());
+    assert!(!lib.server_release_calendar_enabled_at(now().timestamp() + 181).unwrap());
+    run(&lib, &fake, "upcoming", BUILD_INTERVAL);
+    assert_eq!(fake.requests.borrow().len(), 1);
+    let fetched = now() + chrono::Duration::seconds(BUILD_INTERVAL + 61);
+    for provider in ["igdb", "tmdb", "tmdb_tv"] {
+        lib.connection().unwrap().execute(
+            "INSERT INTO release_calendar_cache(provider,fetched_at,entries_json) VALUES(?1,?2,'[]')",
+            params![provider, fetched.to_rfc3339()]).unwrap();
+    }
+    run(&lib, &fake, "upcoming", BUILD_INTERVAL + 61);
+    assert!(fake.requests.borrow()[1].1.as_ref().unwrap().get("wishlistOnly").is_none());
+    advertise(true);
+    run(&lib, &fake, "upcoming", BUILD_INTERVAL + 122);
+    assert_eq!(fake.requests.borrow()[2].1.as_ref().unwrap()["wishlistOnly"], true);
+}
 fn setup() -> (tempfile::TempDir, Library) {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::open(dir.path()).unwrap();

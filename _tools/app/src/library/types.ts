@@ -1390,8 +1390,15 @@ export type ReleaseWishlistItem = ReleaseTitle & {
   unread: ReleaseWishlistEvent[];
 };
 export type ReleaseWishlistRunResult = { checked: number; changed: number; remaining: number; stopReason: string | null };
+export type ServerCalendarStatus = { version: 1; busy: boolean; sources: ReleaseCalendarSource[]; finishedAt?: string | null; startedAt?: string | null };
+export type ServerCalendarRun = { outcome: "local" | "queued" | "unavailable" } | { outcome: "rateLimited"; retryAfterSeconds: number | null };
 export interface ReleaseCalendarGateway {
-  /** The cached calendar; no network. */
+  serverEnabled?(): Promise<boolean>;
+  serverStatus?(): Promise<ServerCalendarStatus>;
+  requestServerRun?(): Promise<ServerCalendarRun>;
+  revalidate?(): Promise<ReleaseCalendar>;
+  subscribeChanged?(handler: () => void): () => void;
+  /** Local cache, or the server publication while the calendar feature is advertised. */
   calendar(): Promise<ReleaseCalendar>;
   /** Refresh due providers (at most daily). */
   refresh(force: boolean): Promise<ReleaseCalendar>;

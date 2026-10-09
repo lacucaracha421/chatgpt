@@ -139,7 +139,10 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
     void Promise.all([wishlistRead, releaseRead]).then(results => {
       if (live && results.every(Boolean)) setCalendarRead({ api: calendarApi, root, retry: shelfRetry, visit: visitNumber });
     });
-    return () => { live = false; };
+    const stop = calendarApi.subscribeChanged?.(() => {
+      void calendarApi.calendar().then(value => { if (live) setCalendarSnapshot(value); }).catch(() => undefined);
+    });
+    return () => { stop?.(); live = false; };
   }, [calendarApi, root, shelfRetry, active, visitNumber]);
 
   const [queueRead, setQueueRead] = useState(0);

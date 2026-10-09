@@ -216,7 +216,7 @@ class WorkerTests(unittest.TestCase):
         with self.get_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM release_calendar_state").fetchone()[0], 0)
 
-    def test_feature_requires_live_worker_and_all_credentials(self):
+    def test_feature_requires_switch_and_credentials_but_survives_thread_drain(self):
         with mock.patch.object(rc, "_current", self.worker), mock.patch.object(self.worker, "alive", return_value=True):
             self.assertEqual(rc.features(), [rc.FEATURE])
             with mock.patch.dict(os.environ, {"LAKOMICS_TMDB_API_KEY": ""}):
@@ -224,7 +224,7 @@ class WorkerTests(unittest.TestCase):
                 self.worker.start()
                 self.assertIsNone(self.worker.thread)
             with mock.patch.object(self.worker, "alive", return_value=False):
-                self.assertEqual(rc.features(), [])
+                self.assertEqual(rc.features(), [rc.FEATURE])
 
     def test_failure_retains_cache_and_stops_requests_during_backoff(self):
         self.worker.run_once()
