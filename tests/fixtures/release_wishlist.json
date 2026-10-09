@@ -1,0 +1,746 @@
+{
+  "_format": "Version 1. Ordered raw transport responses, lossless PC SQLite baseline rows, fixed UTC clock and UTC+09 day. Random UUIDs injected only for oracle comparison. expectedWishlistBytes is literal sorted-key compact Unicode JSON; a later Rust adapter can consume the same inputs. No live provider data.",
+  "version": 1,
+  "cases": [
+    {
+      "name": "real-date-move",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "igdb:1",
+            "kind": "game",
+            "provider": "igdb",
+            "external_id": "1",
+            "title": "Game",
+            "original_title": null,
+            "cover": "co1",
+            "platforms_json": "[\"PC\"]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "igdb:1",
+            "region": "worldwide",
+            "platform": "PC",
+            "date": "2026-10-20",
+            "precision": "exact",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "igdb",
+          "response": [
+            {
+              "id": 1,
+              "name": "Game",
+              "cover": {
+                "image_id": "co1"
+              },
+              "release_dates": [
+                {
+                  "platform": {
+                    "id": 6
+                  },
+                  "y": 2026,
+                  "m": 11,
+                  "date_format": {
+                    "format": "YYYYMM"
+                  }
+                }
+              ]
+            }
+          ],
+          "ids": [
+            1
+          ]
+        }
+      ],
+      "eventIds": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "expectedEvents": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "item_id": "igdb:1",
+          "event_kind": "date_changed",
+          "previous_value": "2026-10-20",
+          "current_value": "2026-11",
+          "detected_at": "2026-10-09T00:00:00+00:00",
+          "read_at": null
+        }
+      ],
+      "expectedNextCheckAt": "2026-10-10T00:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg\"},\"date\":\"2026-11-01\",\"events\":[{\"currentValue\":\"2026-11\",\"detectedAt\":\"2026-10-09T00:00:00+00:00\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"date_changed\",\"previousValue\":\"2026-10-20\",\"readAt\":null}],\"id\":\"igdb:1\",\"kind\":\"game\",\"muted\":false,\"originalTitle\":null,\"platforms\":[\"PC\"],\"popularity\":null,\"port\":false,\"precision\":\"month\",\"region\":\"worldwide\",\"releaseType\":null,\"released\":false,\"source\":\"calendar\",\"title\":\"Game\"}]"
+    },
+    {
+      "name": "coarse-narrowed-inside-with-read-history",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "igdb:1",
+            "kind": "game",
+            "provider": "igdb",
+            "external_id": "1",
+            "title": "Game",
+            "original_title": null,
+            "cover": "co1",
+            "platforms_json": "[\"PC\"]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "igdb:1",
+            "region": "worldwide",
+            "platform": "PC",
+            "date": "2026-10-01",
+            "precision": "month",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": [
+          {
+            "id": "historic-read",
+            "item_id": "igdb:1",
+            "event_kind": "date_set",
+            "previous_value": "tbd",
+            "current_value": "2026-10",
+            "detected_at": "2026-10-01T00:00:00Z",
+            "read_at": "2026-10-02T00:00:00Z"
+          }
+        ]
+      },
+      "responses": [
+        {
+          "provider": "igdb",
+          "response": [
+            {
+              "id": 1,
+              "name": "Game",
+              "release_dates": [
+                {
+                  "platform": {
+                    "id": 6
+                  },
+                  "date": 1792454400,
+                  "category": 0
+                }
+              ]
+            }
+          ],
+          "ids": [
+            1
+          ]
+        }
+      ],
+      "eventIds": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "expectedEvents": [
+        {
+          "id": "historic-read",
+          "item_id": "igdb:1",
+          "event_kind": "date_set",
+          "previous_value": "tbd",
+          "current_value": "2026-10",
+          "detected_at": "2026-10-01T00:00:00Z",
+          "read_at": "2026-10-02T00:00:00Z"
+        },
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "item_id": "igdb:1",
+          "event_kind": "date_set",
+          "previous_value": "2026-10",
+          "current_value": "2026-10-20",
+          "detected_at": "2026-10-09T00:00:00+00:00",
+          "read_at": null
+        }
+      ],
+      "expectedNextCheckAt": "2026-10-09T06:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg\"},\"date\":\"2026-10-20\",\"events\":[{\"currentValue\":\"2026-10-20\",\"detectedAt\":\"2026-10-09T00:00:00+00:00\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"date_set\",\"previousValue\":\"2026-10\",\"readAt\":null}],\"id\":\"igdb:1\",\"kind\":\"game\",\"muted\":false,\"originalTitle\":null,\"platforms\":[\"PC\"],\"popularity\":null,\"port\":false,\"precision\":\"exact\",\"region\":\"worldwide\",\"releaseType\":null,\"released\":false,\"source\":\"calendar\",\"title\":\"Game\"}]"
+    },
+    {
+      "name": "coarse-narrowed-outside",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "igdb:1",
+            "kind": "game",
+            "provider": "igdb",
+            "external_id": "1",
+            "title": "Game",
+            "original_title": null,
+            "cover": "co1",
+            "platforms_json": "[\"PC\"]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "igdb:1",
+            "region": "worldwide",
+            "platform": "PC",
+            "date": "2026-10-01",
+            "precision": "month",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "igdb",
+          "response": [
+            {
+              "id": 1,
+              "name": "Game",
+              "release_dates": [
+                {
+                  "platform": {
+                    "id": 6
+                  },
+                  "date": 1793491200,
+                  "category": 0
+                }
+              ]
+            }
+          ],
+          "ids": [
+            1
+          ]
+        }
+      ],
+      "eventIds": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "expectedEvents": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "item_id": "igdb:1",
+          "event_kind": "date_changed",
+          "previous_value": "2026-10",
+          "current_value": "2026-11-01",
+          "detected_at": "2026-10-09T00:00:00+00:00",
+          "read_at": null
+        }
+      ],
+      "expectedNextCheckAt": "2026-10-10T00:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg\"},\"date\":\"2026-11-01\",\"events\":[{\"currentValue\":\"2026-11-01\",\"detectedAt\":\"2026-10-09T00:00:00+00:00\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"date_changed\",\"previousValue\":\"2026-10\",\"readAt\":null}],\"id\":\"igdb:1\",\"kind\":\"game\",\"muted\":false,\"originalTitle\":null,\"platforms\":[\"PC\"],\"popularity\":null,\"port\":false,\"precision\":\"exact\",\"region\":\"worldwide\",\"releaseType\":null,\"released\":false,\"source\":\"calendar\",\"title\":\"Game\"}]"
+    },
+    {
+      "name": "missing-title-reaches-release-day",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "igdb:1",
+            "kind": "game",
+            "provider": "igdb",
+            "external_id": "1",
+            "title": "Game",
+            "original_title": null,
+            "cover": "co1",
+            "platforms_json": "[\"PC\"]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "igdb:1",
+            "region": "worldwide",
+            "platform": "PC",
+            "date": "2026-10-09",
+            "precision": "exact",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "igdb",
+          "response": [],
+          "ids": [
+            1
+          ]
+        }
+      ],
+      "eventIds": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "expectedEvents": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "item_id": "igdb:1",
+          "event_kind": "released",
+          "previous_value": null,
+          "current_value": "2026-10-09",
+          "detected_at": "2026-10-09T00:00:00+00:00",
+          "read_at": null
+        }
+      ],
+      "expectedNextCheckAt": "2026-10-09T06:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg\"},\"date\":\"2026-10-09\",\"events\":[{\"currentValue\":\"2026-10-09\",\"detectedAt\":\"2026-10-09T00:00:00+00:00\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"released\",\"previousValue\":null,\"readAt\":null}],\"id\":\"igdb:1\",\"kind\":\"game\",\"muted\":false,\"originalTitle\":null,\"platforms\":[\"PC\"],\"popularity\":null,\"port\":false,\"precision\":\"exact\",\"region\":\"worldwide\",\"releaseType\":null,\"released\":true,\"source\":\"calendar\",\"title\":\"Game\"}]"
+    },
+    {
+      "name": "frozen-empty-scope-keeps-baseline",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "igdb:1",
+            "kind": "game",
+            "provider": "igdb",
+            "external_id": "1",
+            "title": "Game",
+            "original_title": null,
+            "cover": "co1",
+            "platforms_json": "[\"PC\"]",
+            "tracked_platforms_json": "[]",
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "igdb:1",
+            "region": "worldwide",
+            "platform": "PC",
+            "date": "2026-10-20",
+            "precision": "exact",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "igdb",
+          "response": [
+            {
+              "id": 1,
+              "name": "Ignored",
+              "release_dates": [
+                {
+                  "platform": {
+                    "id": 6
+                  },
+                  "y": 2027,
+                  "category": 2
+                }
+              ]
+            }
+          ],
+          "ids": [
+            1
+          ]
+        }
+      ],
+      "eventIds": [],
+      "expectedEvents": [],
+      "expectedNextCheckAt": "2026-10-09T06:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg\"},\"date\":\"2026-10-20\",\"events\":[],\"id\":\"igdb:1\",\"kind\":\"game\",\"muted\":false,\"originalTitle\":null,\"platforms\":[\"PC\"],\"popularity\":null,\"port\":false,\"precision\":\"exact\",\"region\":\"worldwide\",\"releaseType\":null,\"released\":false,\"source\":\"calendar\",\"title\":\"Game\"}]"
+    },
+    {
+      "name": "fallback-other-platform-tbd",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "igdb:1",
+            "kind": "game",
+            "provider": "igdb",
+            "external_id": "1",
+            "title": "Game",
+            "original_title": null,
+            "cover": "co1",
+            "platforms_json": "[\"Other\"]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "igdb:1",
+            "region": "worldwide",
+            "platform": "Other",
+            "date": null,
+            "precision": "tbd",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "igdb",
+          "response": [
+            {
+              "id": 1,
+              "name": "Game",
+              "release_dates": [
+                {
+                  "platform": {
+                    "id": 99,
+                    "name": "Other"
+                  },
+                  "category": 7
+                }
+              ]
+            }
+          ],
+          "ids": [
+            1
+          ]
+        }
+      ],
+      "eventIds": [],
+      "expectedEvents": [],
+      "expectedNextCheckAt": "2026-10-10T00:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg\"},\"date\":null,\"events\":[],\"id\":\"igdb:1\",\"kind\":\"game\",\"muted\":false,\"originalTitle\":null,\"platforms\":[\"Other\"],\"popularity\":null,\"port\":false,\"precision\":\"tbd\",\"region\":\"worldwide\",\"releaseType\":null,\"released\":false,\"source\":\"calendar\",\"title\":\"Game\"}]"
+    },
+    {
+      "name": "movie-korean-theatrical-over-worldwide",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "tmdb:2",
+            "kind": "movie",
+            "provider": "tmdb",
+            "external_id": "2",
+            "title": "Game",
+            "original_title": null,
+            "cover": "/poster.jpg",
+            "platforms_json": "[]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "tmdb:2",
+            "region": "korea",
+            "platform": "",
+            "date": "2026-10-20",
+            "precision": "exact",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "tmdb",
+          "response": {
+            "id": 2,
+            "title": "Movie",
+            "poster_path": "/poster.jpg",
+            "release_date": "2026-11-01",
+            "release_dates": {
+              "results": [
+                {
+                  "iso_3166_1": "KR",
+                  "release_dates": [
+                    {
+                      "type": 4,
+                      "release_date": "2026-10-01"
+                    },
+                    {
+                      "type": 3,
+                      "release_date": "2026-10-23T00:00:00Z"
+                    },
+                    {
+                      "type": 2,
+                      "release_date": "2026-10-21T00:00:00Z"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "path": "/movie/2",
+          "params": {
+            "language": "ko-KR",
+            "append_to_response": "release_dates"
+          }
+        }
+      ],
+      "eventIds": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "expectedEvents": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "item_id": "tmdb:2",
+          "event_kind": "date_changed",
+          "previous_value": "2026-10-20",
+          "current_value": "2026-10-21",
+          "detected_at": "2026-10-09T00:00:00+00:00",
+          "read_at": null
+        }
+      ],
+      "expectedNextCheckAt": "2026-10-09T06:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://image.tmdb.org/t/p/w342/poster.jpg\"},\"date\":\"2026-10-21\",\"events\":[{\"currentValue\":\"2026-10-21\",\"detectedAt\":\"2026-10-09T00:00:00+00:00\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"date_changed\",\"previousValue\":\"2026-10-20\",\"readAt\":null}],\"id\":\"tmdb:2\",\"kind\":\"movie\",\"muted\":false,\"originalTitle\":null,\"platforms\":[],\"popularity\":null,\"port\":false,\"precision\":\"exact\",\"region\":\"korea\",\"releaseType\":null,\"released\":false,\"source\":\"calendar\",\"title\":\"Movie\"}]"
+    },
+    {
+      "name": "anime-season-generic-label",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "tmdb:tv:3:s2",
+            "kind": "anime",
+            "provider": "tmdb",
+            "external_id": "tv:3:s2",
+            "title": "Game",
+            "original_title": null,
+            "cover": "/poster.jpg",
+            "platforms_json": "[]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "tmdb:tv:3:s2",
+            "region": "JP",
+            "platform": "",
+            "date": null,
+            "precision": "tbd",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "tmdb_tv",
+          "response": {
+            "id": 3,
+            "name": "Anime",
+            "original_name": "Anime",
+            "poster_path": "/poster.jpg",
+            "seasons": [
+              {
+                "season_number": 2,
+                "name": "Season 2",
+                "air_date": "2026-10-23"
+              }
+            ]
+          },
+          "path": "/tv/3",
+          "params": {
+            "language": "ko-KR"
+          }
+        }
+      ],
+      "eventIds": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "expectedEvents": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "item_id": "tmdb:tv:3:s2",
+          "event_kind": "date_set",
+          "previous_value": "tbd",
+          "current_value": "2026-10-23",
+          "detected_at": "2026-10-09T00:00:00+00:00",
+          "read_at": null
+        }
+      ],
+      "expectedNextCheckAt": "2026-10-09T06:00:00+00:00",
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://image.tmdb.org/t/p/w342/poster.jpg\"},\"date\":\"2026-10-23\",\"events\":[{\"currentValue\":\"2026-10-23\",\"detectedAt\":\"2026-10-09T00:00:00+00:00\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"date_set\",\"previousValue\":\"tbd\",\"readAt\":null}],\"id\":\"tmdb:tv:3:s2\",\"kind\":\"anime\",\"muted\":false,\"originalTitle\":null,\"platforms\":[],\"popularity\":null,\"port\":false,\"precision\":\"exact\",\"region\":\"JP\",\"releaseType\":null,\"released\":false,\"source\":\"calendar\",\"title\":\"Anime · 시즌 2\"}]"
+    },
+    {
+      "name": "missing-past-day-30-stops",
+      "now": "2026-10-09T00:00:00+00:00",
+      "day": "2026-10-09",
+      "baseline": {
+        "items": [
+          {
+            "id": "igdb:1",
+            "kind": "game",
+            "provider": "igdb",
+            "external_id": "1",
+            "title": "Game",
+            "original_title": null,
+            "cover": "co1",
+            "platforms_json": "[\"PC\"]",
+            "tracked_platforms_json": null,
+            "source": "calendar",
+            "added_at": "2026-10-09T00:00:00+00:00",
+            "muted": 0,
+            "last_checked_at": "2026-10-09T00:00:00+00:00",
+            "next_check_at": "2026-10-09T00:00:00+00:00",
+            "released_at": null
+          }
+        ],
+        "dates": [
+          {
+            "item_id": "igdb:1",
+            "region": "worldwide",
+            "platform": "PC",
+            "date": "2026-09-08",
+            "precision": "exact",
+            "checked_at": "2026-10-09T00:00:00+00:00"
+          }
+        ],
+        "events": []
+      },
+      "responses": [
+        {
+          "provider": "igdb",
+          "response": [],
+          "ids": [
+            1
+          ]
+        }
+      ],
+      "eventIds": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "expectedEvents": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "item_id": "igdb:1",
+          "event_kind": "released",
+          "previous_value": null,
+          "current_value": "2026-09-08",
+          "detected_at": "2026-10-09T00:00:00+00:00",
+          "read_at": null
+        }
+      ],
+      "expectedNextCheckAt": null,
+      "expectedWishlistBytes": "[{\"addedAt\":\"2026-10-09T00:00:00+00:00\",\"cover\":{\"url\":\"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg\"},\"date\":\"2026-09-08\",\"events\":[{\"currentValue\":\"2026-09-08\",\"detectedAt\":\"2026-10-09T00:00:00+00:00\",\"id\":\"11111111-1111-4111-8111-111111111111\",\"kind\":\"released\",\"previousValue\":null,\"readAt\":null}],\"id\":\"igdb:1\",\"kind\":\"game\",\"muted\":false,\"originalTitle\":null,\"platforms\":[\"PC\"],\"popularity\":null,\"port\":false,\"precision\":\"exact\",\"region\":\"worldwide\",\"releaseType\":null,\"released\":true,\"source\":\"calendar\",\"title\":\"Game\"}]"
+    }
+  ],
+  "scheduleCases": [
+    {
+      "untilDays": 14,
+      "precision": "exact",
+      "hours": 6
+    },
+    {
+      "untilDays": 15,
+      "precision": "exact",
+      "hours": 24
+    },
+    {
+      "untilDays": -30,
+      "precision": "exact",
+      "hours": 6
+    },
+    {
+      "untilDays": -31,
+      "precision": "exact",
+      "hours": null
+    },
+    {
+      "untilDays": -365,
+      "precision": "month",
+      "hours": 24
+    },
+    {
+      "untilDays": null,
+      "precision": "tbd",
+      "hours": 24
+    }
+  ],
+  "transitionCases": [
+    {
+      "previous": [
+        "2026-10-09",
+        "exact"
+      ],
+      "current": [
+        "2026-12-01",
+        "exact"
+      ],
+      "latched": true,
+      "events": [
+        [
+          "date_changed",
+          "2026-10-09",
+          "2026-12-01"
+        ]
+      ]
+    },
+    {
+      "previous": [
+        "2026-12-01",
+        "exact"
+      ],
+      "current": [
+        "2026-10-09",
+        "exact"
+      ],
+      "latched": true,
+      "events": [
+        [
+          "date_changed",
+          "2026-12-01",
+          "2026-10-09"
+        ]
+      ]
+    }
+  ]
+}

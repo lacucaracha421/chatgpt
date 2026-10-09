@@ -12,6 +12,7 @@ import time
 import warnings
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from contextlib import contextmanager
 from http.client import HTTPException as HTTPClientError
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -88,9 +89,10 @@ _opener = build_opener(ProxyHandler({}), NoRedirect())
 
 
 class UpstreamStatus(Exception):
-    def __init__(self, status):
+    def __init__(self, status, retry_after=None):
         super().__init__("provider HTTP status")
         self.status = status
+        self.retry_after = retry_after
 
 
 def outbound(url, *, deadline, limit=MAX_JSON_BYTES, headers=None, body=None, image=False,
@@ -126,8 +128,18 @@ def outbound(url, *, deadline, limit=MAX_JSON_BYTES, headers=None, body=None, im
             return bytes(chunks), mime
     except HTTPError as exc:
         status = exc.code
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        try:
+            retry_after = min(86400, max(0, int(retry_after)))
+        except (TypeError, ValueError):
+            # HTTP-date Retry-After is also valid; never retain headers or URLs.
+            from email.utils import parsedate_to_datetime
+            try:
+                retry_after = min(86400, max(0, (parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds()))
+            except (TypeError, ValueError, OverflowError):
+                retry_after = None
         exc.close()
-        raise UpstreamStatus(status) from None
+        raise UpstreamStatus(status, retry_after) from None
     except TimeoutError:
         fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
     except URLError as exc:
@@ -167,8 +179,41 @@ class Relay:
         self.token = None
         self.token_credentials = None
         self.token_expiry = 0.0
+        self.request_context = threading.local()
+
+    @contextmanager
+    def request_scope(self, provider, *, background=False, budget=None):
+        """Use the existing provider lock/clock; pacing can yield exclusive work.
+
+        Scope ownership is thread-local so a failed reacquisition cannot release
+        another caller's lock. Outbound accounting includes OAuth and 401 retries.
+        """
+        lock = self.locks[provider]
+        acquired = lock.acquire(timeout=0 if background else 0.5)
+        if not acquired:
+            if background:
+                from release_calendar import BudgetExceeded
+                raise BudgetExceeded()
+            fail(429, "providerBusy", "외부 정보 조회가 진행 중입니다. 잠시 후 다시 시도해 주세요.")
+        scope = {"provider": provider, "held": True, "background": background, "budget": budget}
+        previous = getattr(self.request_context, "scope", None)
+        self.request_context.scope = scope
+        try:
+            yield
+        finally:
+            if scope["held"]:
+                lock.release()
+            self.request_context.scope = previous
 
     def paced(self, provider, action):
+        if provider in ("tmdb", "igdb"):
+            try:
+                with self.request_scope(provider):
+                    return action(time.monotonic() + REQUEST_SECONDS)
+            except UpstreamStatus as exc:
+                status_error(exc.status)
+            except (AttributeError, KeyError, TypeError, ValueError, OverflowError, ValidationError):
+                fail(502, "providerInvalidResponse", "외부 서비스의 응답이 올바르지 않습니다.")
         # Briefly wait for a worker request/pacing interval; keep the queue bounded.
         lock = self.locks[provider]
         if not lock.acquire(timeout=0.5 if provider in ("tmdb", "igdb") else 0):
@@ -187,13 +232,49 @@ class Relay:
 
     def json_request(self, provider, url, deadline, *, headers=None, body=None, budget=None):
         interval = 0.25 if provider == "igdb" else 0.1
-        wait = max(0, self.next_request[provider] - time.monotonic())
-        if time.monotonic() + wait >= deadline:
-            fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
-        time.sleep(wait)
+        if provider not in ("igdb", "tmdb"):
+            # Preserve the existing StashDB/artwork callers' outer-lock contract.
+            wait = max(0, self.next_request[provider] - time.monotonic())
+            if time.monotonic() + wait >= deadline:
+                fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
+            time.sleep(wait)
+            self.next_request[provider] = time.monotonic() + interval
+            return self._read_json(provider, url, deadline, headers=headers, body=body, budget=budget)
+        scope = getattr(self.request_context, "scope", None)
+        if scope is None or scope["provider"] != provider:
+            with self.request_scope(provider):
+                return self.json_request(provider, url, deadline, headers=headers, body=body, budget=budget)
+        lock = self.locks[provider]
+        while True:
+            wait = max(0, self.next_request[provider] - time.monotonic())
+            if time.monotonic() + wait >= deadline:
+                fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
+            if wait <= 0:
+                break
+            scope["held"] = False
+            lock.release()
+            time.sleep(wait)
+            acquired = lock.acquire(timeout=0 if scope["background"] else min(0.5, max(0, deadline - time.monotonic())))
+            if not acquired:
+                if scope["background"]:
+                    from release_calendar import BudgetExceeded
+                    raise BudgetExceeded()
+                fail(429, "providerBusy", "외부 정보 조회가 진행 중입니다. 잠시 후 다시 시도해 주세요.")
+            scope["held"] = True
+            # An interactive request may have advanced the clock while we slept.
+        accounting = scope["budget"]
+        if accounting is not None and hasattr(accounting, "outbound"):
+            accounting.outbound()
         self.next_request[provider] = time.monotonic() + interval
+        return self._read_json(provider, url, deadline, headers=headers, body=body, budget=budget, accounting=accounting)
+
+    def _read_json(self, provider, url, deadline, *, headers=None, body=None, budget=None, accounting=None):
         limit = MAX_JSON_BYTES if budget is None else min(MAX_RAW_RESPONSE_BYTES, budget[0])
+        if accounting is not None and hasattr(accounting, "bytes_left"):
+            limit = min(limit, accounting.bytes_left, 4 * 1024 * 1024)
         data, _ = outbound(url, deadline=deadline, limit=limit, headers=headers, body=body)
+        if accounting is not None and hasattr(accounting, "consume"):
+            accounting.consume(len(data))
         if budget is not None:
             budget[0] -= len(data)
         def invalid_constant(value):
@@ -220,16 +301,19 @@ class Relay:
                     and time.monotonic() < self.token_expiry and self.token != rejected):
                 return self.token
             self.token = None
-            value = self.json_request("igdb", TOKEN_URL, deadline,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                body=urlencode({"client_id": credentials[0], "client_secret": credentials[1],
-                                "grant_type": "client_credentials"}).encode())
-            if not isinstance(value, dict):
-                raise ValueError("invalid token")
-            token, expiry = value.get("access_token"), value.get("expires_in")
-            if not isinstance(token, str) or not token or not all(33 <= ord(c) <= 126 for c in token) \
-                    or type(expiry) is not int or expiry <= 0:
-                raise ValueError("invalid token")
+        # Pacing releases the provider lock. Holding token_lock across that yield
+        # would invert lock order against another IGDB caller's token lookup.
+        value = self.json_request("igdb", TOKEN_URL, deadline,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            body=urlencode({"client_id": credentials[0], "client_secret": credentials[1],
+                            "grant_type": "client_credentials"}).encode())
+        if not isinstance(value, dict):
+            raise ValueError("invalid token")
+        token, expiry = value.get("access_token"), value.get("expires_in")
+        if not isinstance(token, str) or not token or not all(33 <= ord(c) <= 126 for c in token) \
+                or type(expiry) is not int or expiry <= 0:
+            raise ValueError("invalid token")
+        with self.token_lock:
             self.token, self.token_credentials = token, credentials
             self.token_expiry = time.monotonic() + max(0, expiry - 60)
             return token

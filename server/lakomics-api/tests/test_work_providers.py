@@ -872,7 +872,11 @@ class WorkProviderTests(unittest.TestCase):
     def test_pacing_and_busy_refusal(self):
         relay = wp.Relay()
         self.responses({}, {})
-        with mock.patch.object(wp.time, "monotonic", return_value=100), mock.patch.object(wp.time, "sleep") as sleep:
+        clock = [100.0]
+        def advance(seconds):
+            clock[0] += seconds
+        with mock.patch.object(wp.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(wp.time, "sleep", side_effect=advance) as sleep:
             relay.json_request("igdb", wp.GAMES_URL, 125)
             relay.json_request("igdb", wp.GAMES_URL, 125)
             self.assertEqual(sleep.call_args.args[0], 0.25)

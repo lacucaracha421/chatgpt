@@ -923,6 +923,10 @@ import release_calendar
 
 release_calendar.register(app, get_db, _home_client, provider_relay)
 
+import release_wishlist
+
+release_wishlist.register(app, get_db, _home_client, require_publisher, provider_relay)
+
 import av_stashdb
 
 av_stashdb.register(app, get_db, _home_client, lambda: _s3, lambda: R2_BUCKET,

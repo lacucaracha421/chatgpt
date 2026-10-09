@@ -6,6 +6,10 @@ release, TMDB Japanese TV anime seasons) and tracks the titles the user wished f
 tablet reads it and files wishlist *intents* (add/remove/mute/unmute/acknowledge) that the PC
 reads from an ordered log, applies locally and acknowledges with its next snapshot
 (``intentCursor``). Until then the tablet overlays its ``pending`` intents on the snapshot.
+The optional ``release_wishlist`` owner (``LAKOMICS_RELEASE_WISHLIST``, default OFF)
+accepts a lossless private seed and then applies the same ordered intents on the server.
+Established ownership fences PC full/wishlistOnly PUTs even while switched OFF;
+OFF preserves private rows and queues intents without application or provider work.
 The optional ``release_calendar`` worker (``LAKOMICS_RELEASE_CALENDAR``, default OFF)
 can replace the calendar portion in this same store. It preserves the latest PC
 wishlist and every intent cursor under the publication transaction; it never applies
@@ -281,6 +285,10 @@ def register(app, get_db, require_client, require_publisher):
         fail(422, "invalidUpcomingUpload", "발매 예정 목록을 확인할 수 없습니다.")
 
     def publish(upload):
+        import release_wishlist
+        with get_db() as db:
+            if release_wishlist.owned(db):
+                fail(409, "serverWishlistOwned", "서버가 찜 목록을 관리하고 있습니다. PC를 업데이트해 주세요.")
         wishlist_only = isinstance(upload, WishlistUpload)
         if wishlist_only:
             import release_calendar
@@ -297,6 +305,9 @@ def register(app, get_db, require_client, require_publisher):
         common.blobs(covers)
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
+            if release_wishlist.owned(db):
+                db.rollback()
+                fail(409, "serverWishlistOwned", "서버가 찜 목록을 관리하고 있습니다. PC를 업데이트해 주세요.")
             state = _state(db)
             if wishlist_only:
                 # Even the first handover retains wishlist data; the worker may replace
@@ -352,6 +363,10 @@ def register(app, get_db, require_client, require_publisher):
     @app.put(PREFIX)
     async def put_upcoming(request: Request, authorization: str | None = Header(default=None)):
         require_publisher(authorization)
+        import release_wishlist
+        with get_db() as db:
+            if release_wishlist.owned(db):
+                fail(409, "serverWishlistOwned", "서버가 찜 목록을 관리하고 있습니다. PC를 업데이트해 주세요.")
         body = await common.bounded_body(request, MAX_BODY_BYTES, "upcomingUploadTooLarge",
                                          "발매 예정 게시 요청이 너무 큽니다.")
         try:
@@ -428,6 +443,14 @@ def register(app, get_db, require_client, require_publisher):
                                           (intent.itemId,)).fetchone()
                     if previous:
                         stored_title = previous[0]
+                import release_wishlist
+                if release_wishlist.enabled() and release_wishlist.owned(db):
+                    try:
+                        release_wishlist.validate_add_capacity(db, intent.itemId,
+                            json.loads(stored_title) if stored_title else None, moment)
+                    except release_wishlist.Rejected as error:
+                        db.rollback()
+                        fail(error.status, error.code, "찜 목록 크기가 허용 범위를 초과했습니다.")
             db.execute("INSERT INTO home_upcoming_intents(sequence,operation_id,action,item_id,event_ids,created_at,title_json) "
                        "VALUES(?,?,?,?,?,?,?)",
                        (sequence, intent.operationId, intent.action, intent.itemId,
@@ -451,7 +474,17 @@ def register(app, get_db, require_client, require_publisher):
             intent = Intent.model_validate_json(body)
         except (ValidationError, ValueError):
             invalid_intent()
-        return await run_in_threadpool(file_intent, intent)
+        result = await run_in_threadpool(file_intent, intent)
+        import release_wishlist
+        worker = getattr(app.state, "release_wishlist_worker", None)
+        if release_wishlist.enabled() and worker is not None:
+            # The accepted UUID receipt survives a projection failure. Never turn a
+            # committed intent into a failed POST merely because application blocked.
+            try:
+                await run_in_threadpool(worker.apply_pending)
+            except Exception:
+                worker.request()
+        return result
 
     @app.get(PREFIX + "/wishlist/intents")
     def intents(after: int = Query(default=0, ge=0, le=MAX_CURSOR), limit: int = Query(default=100, ge=1, le=200),

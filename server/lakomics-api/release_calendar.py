@@ -1,4 +1,4 @@
-"""Dormant IGDB/TMDB calendar builder; wishlist processing remains on the PC.
+"""Dormant IGDB/TMDB calendar builder and shared sequential release daemon.
 
 LAKOMICS_RELEASE_CALENDAR defaults OFF. Enable only after the PC handover ships;
 without a handshake, publish only over a server-owned document or no document.
@@ -6,6 +6,8 @@ One daemon performs sequential bounded
 refreshes. Public entries match release_calendar.rs + home_publications.rs;
 the shared fixture documents the transport contract. Imports of API dependencies
 are deferred so provider parity and scheduling can be checked with plain Python.
+The separately seeded release_wishlist worker can run after each calendar pass;
+its independent switch defaults OFF and starts no additional daemon.
 """
 import calendar
 import hashlib
@@ -311,9 +313,10 @@ def sorted_entries(rows, start, end):
 
 
 class ProviderFailure(Exception):
-    def __init__(self, code):
+    def __init__(self, code, retry_after=None):
         super().__init__(code)
         self.code = code
+        self.retry_after = retry_after
 
 
 class BudgetExceeded(Exception):
@@ -341,23 +344,21 @@ class LiveTransport:
         from fastapi import HTTPException
         budget.take()
         upstream = "igdb" if provider == "igdb" else "tmdb"
-        lock = self.relay.locks[upstream]
-        if not lock.acquire(blocking=False):
-            raise BudgetExceeded()  # Yield to interactive work, without provider failure.
         try:
-            deadline = min(budget.deadline, budget.clock() + 20)
-            if provider == "igdb":
-                result = self.relay.igdb(query, deadline, budget=[MAX_JSON_BYTES])
-            else:
-                path, params = query
-                result = self.relay.tmdb(path, deadline, params=params, budget=[MAX_JSON_BYTES])
+            with self.relay.request_scope(upstream, background=True, budget=budget):
+                deadline = min(budget.deadline, budget.clock() + 20)
+                if provider == "igdb":
+                    result = self.relay.igdb(query, deadline, budget=[MAX_JSON_BYTES])
+                else:
+                    path, params = query
+                    result = self.relay.tmdb(path, deadline, params=params, budget=[MAX_JSON_BYTES])
             if budget.clock() >= budget.deadline:
                 raise BudgetExceeded()
             return result
         except wp.UpstreamStatus as error:
             code = "not_found" if error.status == 404 else "invalid_credential" if error.status in (401, 403) \
                 else "rate_limited" if error.status == 429 else "unavailable"
-            raise ProviderFailure(code) from None
+            raise ProviderFailure(code, getattr(error, "retry_after", None)) from None
         except HTTPException as error:
             code = error.detail.get("code") if isinstance(error.detail, dict) else None
             raise ProviderFailure({"providerNotConfigured": "credential_not_configured",
@@ -365,8 +366,6 @@ class LiveTransport:
                                   .get(code, "invalid_response")) from None
         except (ValueError, TypeError, AttributeError, KeyError, OverflowError):
             raise ProviderFailure("invalid_response") from None
-        finally:
-            lock.release()
 
 
 def igdb_body(start, end, offset):
@@ -527,12 +526,17 @@ class Worker:
         self.lock, self.run_lock = threading.Lock(), threading.Lock()
         self.manual = False
         self.busy = False
+        self.wishlist_worker = None
 
     def alive(self):
         return self.thread is not None and self.thread.is_alive() and not self.stop_event.is_set()
 
     def start(self):
-        if not enabled() or not credentials_present() or self.alive():
+        wishlist_enabled = False
+        if self.wishlist_worker is not None:
+            import release_wishlist
+            wishlist_enabled = release_wishlist.enabled()
+        if (not (enabled() and credentials_present()) and not wishlist_enabled) or self.alive():
             return
         if self.thread is not None and self.thread.is_alive():
             return
@@ -567,6 +571,13 @@ class Worker:
             except Exception:
                 # Do not log transport payloads, credentials or database contents.
                 logging.getLogger(__name__).error("Release calendar wake failed")
+            if self.wishlist_worker is not None and not self.stop_event.is_set():
+                try:
+                    self.wishlist_worker.run_once()
+                except Exception:
+                    logging.getLogger(__name__).error("Release wishlist wake failed")
+            # A bounded intent continuation must not be lost when it requests a wake
+            # during this pass. Provider work remains sequential in this daemon.
             self.wake_event.wait(WAKE_SECONDS)
 
     def rows(self, db, now):

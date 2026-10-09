@@ -4073,7 +4073,8 @@ def advertised_features():
     """Status features; background release features require configured, live workers."""
     import collection_release_checks
     import release_calendar
-    return ["personProfileFields", "kakaoReview", *collection_release_checks.features(), *release_calendar.features()]
+    import release_wishlist
+    return ["personProfileFields", "kakaoReview", *collection_release_checks.features(), *release_calendar.features(), *release_wishlist.features()]
 
 
 def register(app, get_db, require_client, require_publisher):
