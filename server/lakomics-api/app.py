@@ -885,7 +885,8 @@ startup_catalog_duplicates = catalog_duplicates.register(app, get_db, require_cl
 
 # HOME-DASH-001 / ARTIST-001: PC-published Home documents (발매 예정 + wishlist intents,
 # 오늘의 AV 배우) and the artist list, plus the ticket for the Home covers they reference.
-# Startup only creates empty tables.
+# Home publication startup creates empty tables; the optional calendar worker
+# is registered below after the shared provider relay exists (default OFF).
 import home_av_pick
 import home_publications
 import home_upcoming
@@ -917,6 +918,10 @@ import work_providers
 provider_relay = work_providers.register(
     app, get_db, _home_client, lambda: _s3, lambda: R2_BUCKET,
 )
+
+import release_calendar
+
+release_calendar.register(app, get_db, _home_client, provider_relay)
 
 import av_stashdb
 

@@ -140,6 +140,13 @@ def outbound(url, *, deadline, limit=MAX_JSON_BYTES, headers=None, body=None, im
         fail(502, "providerInvalidResponse", "외부 서비스의 응답이 올바르지 않습니다.")
 
 
+def finite_json_float(value):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("nonfinite JSON number")
+    return result
+
+
 def status_error(status):
     if 300 <= status < 400:
         fail(502, "providerRedirectRefused", "외부 서비스의 주소 변경 응답을 허용하지 않습니다.")
@@ -162,9 +169,9 @@ class Relay:
         self.token_expiry = 0.0
 
     def paced(self, provider, action):
-        # Refuse concurrency instead of retaining an unbounded waiting queue.
+        # Briefly wait for a worker request/pacing interval; keep the queue bounded.
         lock = self.locks[provider]
-        if not lock.acquire(blocking=False):
+        if not lock.acquire(timeout=0.5 if provider in ("tmdb", "igdb") else 0):
             fail(429, "providerBusy", "외부 정보 조회가 진행 중입니다. 잠시 후 다시 시도해 주세요.")
         try:
             if provider == "artwork":
@@ -189,7 +196,9 @@ class Relay:
         data, _ = outbound(url, deadline=deadline, limit=limit, headers=headers, body=body)
         if budget is not None:
             budget[0] -= len(data)
-        return json.loads(data)
+        def invalid_constant(value):
+            raise ValueError("nonfinite JSON number")
+        return json.loads(data, parse_constant=invalid_constant, parse_float=finite_json_float)
 
     def tmdb(self, path, deadline, *, params=None, budget=None):
         key = credential(TMDB_KEY_ENV)
@@ -215,6 +224,8 @@ class Relay:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 body=urlencode({"client_id": credentials[0], "client_secret": credentials[1],
                                 "grant_type": "client_credentials"}).encode())
+            if not isinstance(value, dict):
+                raise ValueError("invalid token")
             token, expiry = value.get("access_token"), value.get("expires_in")
             if not isinstance(token, str) or not token or not all(33 <= ord(c) <= 126 for c in token) \
                     or type(expiry) is not int or expiry <= 0:
@@ -223,13 +234,13 @@ class Relay:
             self.token_expiry = time.monotonic() + max(0, expiry - 60)
             return token
 
-    def igdb(self, query, deadline):
+    def igdb(self, query, deadline, *, budget=None):
         token = self.twitch_token(deadline)
         for attempt in range(2):
             try:
                 return self.json_request("igdb", GAMES_URL, deadline,
                     headers={"Client-ID": credential(IGDB_ID_ENV), "Authorization": "Bearer " + token,
-                             "Content-Type": "text/plain"}, body=query.encode())
+                             "Content-Type": "text/plain"}, body=query.encode(), budget=budget)
             except UpstreamStatus as exc:
                 if exc.status != 401 or attempt:
                     raise

@@ -4070,9 +4070,10 @@ def _is_publisher(require_publisher, authorization):
 
 
 def advertised_features():
-    """``features`` of the status route; ``serverReleaseChecks:*`` only while the checker is on."""
+    """Status features; background release features require configured, live workers."""
     import collection_release_checks
-    return ["personProfileFields", "kakaoReview", *collection_release_checks.features()]
+    import release_calendar
+    return ["personProfileFields", "kakaoReview", *collection_release_checks.features(), *release_calendar.features()]
 
 
 def register(app, get_db, require_client, require_publisher):

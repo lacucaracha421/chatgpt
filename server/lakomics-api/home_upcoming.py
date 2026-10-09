@@ -1,12 +1,15 @@
 """Home 발매 예정: the PC's game/movie/anime release calendar and wishlist (HOME-DASH-001, phase 2).
 
-The PC owns both (`_tools/app/src-tauri/src/library/release_calendar.rs`,
+By default the PC owns both (`_tools/app/src-tauri/src/library/release_calendar.rs`,
 `release_wishlist.rs`): it fetches the ~6-month calendar (IGDB games, TMDB movies with a Korean
 release, TMDB Japanese TV anime seasons) and tracks the titles the user wished for. It publishes one full snapshot here; the
 tablet reads it and files wishlist *intents* (add/remove/mute/unmute/acknowledge) that the PC
 reads from an ordered log, applies locally and acknowledges with its next snapshot
 (``intentCursor``). Until then the tablet overlays its ``pending`` intents on the snapshot.
-The server never edits the snapshot. Nothing runs in the background.
+The optional ``release_calendar`` worker (``LAKOMICS_RELEASE_CALENDAR``, default OFF)
+can replace the calendar portion in this same store. It preserves the latest PC
+wishlist and every intent cursor under the publication transaction; it never applies
+or acknowledges wishlist intents. With the switch off there is no background calendar work.
 
 Errors are ``{"detail": {"code", "message"}}`` (401 from the auth guards is
 ``{"detail": "Unauthorized"}``; a client credential on a publisher route is 401 too).
@@ -123,6 +126,28 @@ def now_utc():
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def publish_calendar(db, document, moment):
+    """Worker publication inside BEGIN IMMEDIATE; use the normal contract and cover store."""
+    import release_calendar
+
+    def validate(value):
+        upload = Upload.model_validate({"version": 1, **value})
+        ids = [item.id for item in upload.entries]
+        if len(set(ids)) != len(ids) or upload.rangeStart > upload.rangeEnd:
+            raise ValueError("invalid calendar publication")
+        return upload.model_dump(exclude={"version", "intentCursor"})
+
+    def covers(transaction, values):
+        # replace_cover_refs accepts model instances, not serialized dictionaries.
+        # The preserved wishlist may reference artwork blobs even though provider
+        # calendar entries always use URLs.
+        models = [common.BlobCover.model_validate(value) if isinstance(value, dict) and "sha256" in value
+                  else None for value in values]
+        common.replace_cover_refs(transaction, COVER_OWNER, models)
+
+    return release_calendar.store_calendar(db, document, moment, validate, covers)
 
 
 class Title(Strict):
@@ -254,6 +279,9 @@ def register(app, get_db, require_client, require_publisher):
                                                or cursor > state["intent_sequence"]))):
                 db.rollback()
                 fail(409, "upcomingIntentCursorRejected", "발매 예정 요청 위치를 확인해 주세요.")
+            # A valid PC publication takes ownership, including an unchanged upload.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_calendar_owner'").fetchone():
+                db.execute("DELETE FROM release_calendar_owner")
             acknowledged = max(state["acknowledged_through"], cursor or 0)
             changed = digest != state["digest"]
             if changed:

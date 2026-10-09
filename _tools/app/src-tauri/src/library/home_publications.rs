@@ -778,3 +778,7 @@ impl IntentPage {
 #[cfg(test)]
 #[path = "home_publications_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "release_calendar_fixture_tests.rs"]
+mod release_calendar_fixture_tests;

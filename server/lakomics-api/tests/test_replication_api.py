@@ -51,6 +51,8 @@ class ReplicationStartupTests(unittest.TestCase):
             "library_artists.register.<locals>.startup",
             "mobile_collections.register_collections.<locals>.startup_collections",
             "collection_release_checks.Worker.start",
+            "release_calendar.register.<locals>.startup",
+            "release_calendar.Worker.start",
             "av_inbox.Worker.start",
             "mobile_characters.register_characters.<locals>.startup",
             "sync_status.register_sync_status.<locals>.startup",
@@ -67,6 +69,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "prune_catalog_artifacts.AutoPruner.stop",
             "mobile_catalog_refresh.RefreshWorker.shutdown",
             "collection_release_checks.Worker.stop",
+            "release_calendar.Worker.stop",
             "av_inbox.Worker.stop",
             "app.shutdown_image_thumbnails",
         ]

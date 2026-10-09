@@ -1,0 +1,1466 @@
+{
+  "_format": "Version 1. cases[]: name, rangeStart inclusive, rangeEnd exclusive, responses in exact request order, expectedEntries literal public snapshot entries. An IGDB response has provider=igdb, body (exact APICalypse query), response=array. TMDB responses have provider=tmdb or tmdb_tv (cache lane), path, params (query map), response=object OR error=public error code. A Rust ReleaseTransport adapter returns serialized response or maps error to LibraryError; consume all responses; call fetch_upcoming_games/movies/anime then PC sorting + home publication title projection. No network. _format is metadata, not a JSON comment. expectedEntries excludes generatedAt/sources/wishlist/cursors because those belong to publication state.",
+  "version": 1,
+  "cases": [
+    {
+      "name": "regions precision dedupe ports movies and anime",
+      "today": "2026-10-09",
+      "rangeStart": "2026-10-02",
+      "rangeEnd": "2027-04-10",
+      "responses": [
+        {
+          "provider": "igdb",
+          "body": "fields id,name,hypes,cover.image_id,game_type.type,release_dates.date,release_dates.y,release_dates.m,release_dates.date_format.format,release_dates.category,release_dates.release_region.region,release_dates.region,release_dates.platform.id,release_dates.platform.name,release_dates.status.name,game_localizations.name,game_localizations.region.identifier,game_localizations.region.name; where release_dates.date >= 1790899200 & release_dates.date < 1807315200 & release_dates.platform = (6,167,48,508,130,169,49) & hypes >= 30 & version_parent = null & (parent_game = null | game_type = (8,9)); sort hypes desc; limit 500; offset 0;",
+          "response": [
+            {
+              "id": 1,
+              "name": "Original",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1794700800,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 167
+                  },
+                  "release_region": {
+                    "region": "korea"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1793491200,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1795996800,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 167
+                  },
+                  "release_region": {
+                    "region": "korea"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1792454400,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 999
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                }
+              ],
+              "cover": {
+                "image_id": "co1"
+              },
+              "game_localizations": [
+                {
+                  "name": " 한국 게임 ",
+                  "region": {
+                    "identifier": "KR"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 2,
+              "name": "Port",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1577836800,
+                  "y": 2020,
+                  "m": 1,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1792540800,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 508
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                }
+              ],
+              "cover": {
+                "image_id": "bad-id"
+              }
+            },
+            {
+              "id": 3,
+              "name": "Quarter",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "y": 2026,
+                  "category": 6,
+                  "region": 7,
+                  "platform": {
+                    "id": 130
+                  }
+                }
+              ]
+            },
+            {
+              "id": 4,
+              "name": "Year",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "y": 2027,
+                  "date_format": {
+                    "format": "YYYY"
+                  },
+                  "region": 8,
+                  "platform": {
+                    "id": 169
+                  }
+                }
+              ]
+            },
+            {
+              "id": 5,
+              "name": "Cancelled",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1792886400,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  },
+                  "status": {
+                    "name": "CANCELED"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 6,
+              "name": "Addon",
+              "hypes": 40,
+              "game_type": {
+                "type": "DLC_Addon"
+              },
+              "release_dates": [
+                {
+                  "date": 1792886400,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 7,
+              "name": "Same platform earliest wins",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1577836800,
+                  "y": 2020,
+                  "m": 1,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1793491200,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 8,
+              "name": "Month",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1793404800,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 49
+                  },
+                  "release_region": {
+                    "region": "japan"
+                  },
+                  "date_format": {
+                    "format": "YYYYMM"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 9,
+              "name": "Exclusive end",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1807315200,
+                  "y": 2027,
+                  "m": 4,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 1,
+              "name": "Duplicate",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1796083200,
+                  "y": 2026,
+                  "m": 12,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                }
+              ]
+            },
+            {
+              "id": 10,
+              "name": "Undated",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "platform": {
+                    "id": 6
+                  },
+                  "date_format": {
+                    "format": "TBD"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "provider": "tmdb",
+          "path": "/discover/movie",
+          "params": {
+            "language": "ko-KR",
+            "sort_by": "popularity.desc",
+            "include_adult": "false",
+            "page": "1",
+            "region": "KR",
+            "with_release_type": "2|3",
+            "include_video": "false",
+            "release_date.gte": "2026-10-02",
+            "release_date.lte": "2027-04-09"
+          },
+          "response": {
+            "results": [
+              {
+                "id": 11,
+                "title": " 영화 ",
+                "original_title": "Film",
+                "release_date": "2026-09-01",
+                "popularity": 100,
+                "poster_path": "/poster.jpg"
+              },
+              {
+                "id": 11,
+                "title": "duplicate"
+              },
+              {
+                "id": 12,
+                "title": "Rerelease",
+                "release_date": "2025-10-01"
+              },
+              {
+                "id": 13,
+                "title": "Worldwide fallback",
+                "release_date": "2026-10-12",
+                "popularity": 3
+              }
+            ],
+            "total_pages": 1
+          }
+        },
+        {
+          "provider": "tmdb",
+          "path": "/movie/11/release_dates",
+          "params": {},
+          "response": {
+            "results": [
+              {
+                "iso_3166_1": "KR",
+                "release_dates": [
+                  {
+                    "type": 4,
+                    "release_date": "2026-10-01"
+                  },
+                  {
+                    "type": 3,
+                    "release_date": "2026-10-20T00:00:00Z"
+                  },
+                  {
+                    "type": 2,
+                    "release_date": "2026-10-18"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "provider": "tmdb",
+          "path": "/movie/13/release_dates",
+          "params": {},
+          "response": {
+            "results": []
+          }
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/discover/tv",
+          "params": {
+            "language": "ko-KR",
+            "sort_by": "popularity.desc",
+            "include_adult": "false",
+            "page": "1",
+            "with_origin_country": "JP",
+            "with_genres": "16",
+            "air_date.gte": "2026-10-02",
+            "air_date.lte": "2027-04-09"
+          },
+          "response": {
+            "results": [
+              {
+                "id": 21,
+                "popularity": 10
+              },
+              {
+                "id": 22,
+                "popularity": 100
+              },
+              {
+                "id": 21,
+                "popularity": 20
+              },
+              {
+                "id": 23,
+                "popularity": 5
+              }
+            ],
+            "total_pages": 1
+          }
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/tv/22",
+          "params": {
+            "language": "ko-KR"
+          },
+          "error": "not_found"
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/tv/21",
+          "params": {
+            "language": "ko-KR"
+          },
+          "response": {
+            "id": 21,
+            "name": "애니",
+            "original_name": "Anime",
+            "popularity": 20,
+            "poster_path": "/show.jpg",
+            "seasons": [
+              {
+                "season_number": 0,
+                "air_date": "2026-10-12"
+              },
+              {
+                "season_number": 1,
+                "air_date": "2026-10-12"
+              },
+              {
+                "season_number": 2,
+                "air_date": "2026-10-13",
+                "name": "시즌 2",
+                "poster_path": "/season.jpg"
+              },
+              {
+                "season_number": 3,
+                "air_date": "2026-10-14",
+                "name": "특별한 이야기"
+              },
+              {
+                "season_number": 4,
+                "air_date": null
+              },
+              {
+                "season_number": 5,
+                "air_date": "2026-01-01"
+              },
+              {
+                "season_number": 2,
+                "air_date": "2026-12-01"
+              }
+            ]
+          }
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/tv/23",
+          "params": {
+            "language": "ko-KR"
+          },
+          "response": {
+            "id": 23,
+            "original_name": "Original only",
+            "seasons": [
+              {
+                "season_number": 1,
+                "air_date": "2027-04-10"
+              }
+            ]
+          }
+        }
+      ],
+      "expectedEntries": [
+        {
+          "id": "igdb:8",
+          "kind": "game",
+          "title": "Month",
+          "originalTitle": null,
+          "date": "2026-10-01",
+          "precision": "month",
+          "region": "japan",
+          "platforms": [
+            "Xbox One"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": false
+        },
+        {
+          "id": "igdb:3",
+          "kind": "game",
+          "title": "Quarter",
+          "originalTitle": null,
+          "date": "2026-10-01",
+          "precision": "quarter",
+          "region": "asia",
+          "platforms": [
+            "Switch"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:tv:21:s1",
+          "kind": "anime",
+          "title": "애니",
+          "originalTitle": "Anime",
+          "date": "2026-10-12",
+          "precision": "exact",
+          "region": "JP",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/show.jpg"
+          },
+          "popularity": 20.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:13",
+          "kind": "movie",
+          "title": "Worldwide fallback",
+          "originalTitle": null,
+          "date": "2026-10-12",
+          "precision": "exact",
+          "region": "worldwide",
+          "platforms": [],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 3.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:tv:21:s2",
+          "kind": "anime",
+          "title": "애니 · 시즌 2",
+          "originalTitle": "Anime",
+          "date": "2026-10-13",
+          "precision": "exact",
+          "region": "JP",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/season.jpg"
+          },
+          "popularity": 20.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:tv:21:s3",
+          "kind": "anime",
+          "title": "애니 · 특별한 이야기",
+          "originalTitle": "Anime",
+          "date": "2026-10-14",
+          "precision": "exact",
+          "region": "JP",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/show.jpg"
+          },
+          "popularity": 20.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:11",
+          "kind": "movie",
+          "title": "영화",
+          "originalTitle": "Film",
+          "date": "2026-10-18",
+          "precision": "exact",
+          "region": "korea",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/poster.jpg"
+          },
+          "popularity": 100.0,
+          "port": false
+        },
+        {
+          "id": "igdb:2",
+          "kind": "game",
+          "title": "Port",
+          "originalTitle": null,
+          "date": "2026-10-21",
+          "precision": "exact",
+          "region": "worldwide",
+          "platforms": [
+            "Switch 2"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": true
+        },
+        {
+          "id": "igdb:1",
+          "kind": "game",
+          "title": "한국 게임",
+          "originalTitle": "Original",
+          "date": "2026-11-15",
+          "precision": "exact",
+          "region": "korea",
+          "platforms": [
+            "PC",
+            "PS5"
+          ],
+          "releaseType": null,
+          "cover": {
+            "url": "https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg"
+          },
+          "popularity": 40.0,
+          "port": false
+        },
+        {
+          "id": "igdb:4",
+          "kind": "game",
+          "title": "Year",
+          "originalTitle": null,
+          "date": "2027-01-01",
+          "precision": "year",
+          "region": "worldwide",
+          "platforms": [
+            "Xbox Series"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": false
+        }
+      ]
+    },
+    {
+      "name": "non-object rows null optional lists and ASCII region lowercase",
+      "today": "2026-10-09",
+      "rangeStart": "2026-10-02",
+      "rangeEnd": "2027-04-10",
+      "responses": [
+        {
+          "provider": "igdb",
+          "body": "fields id,name,hypes,cover.image_id,game_type.type,release_dates.date,release_dates.y,release_dates.m,release_dates.date_format.format,release_dates.category,release_dates.release_region.region,release_dates.region,release_dates.platform.id,release_dates.platform.name,release_dates.status.name,game_localizations.name,game_localizations.region.identifier,game_localizations.region.name; where release_dates.date >= 1790899200 & release_dates.date < 1807315200 & release_dates.platform = (6,167,48,508,130,169,49) & hypes >= 30 & version_parent = null & (parent_game = null | game_type = (8,9)); sort hypes desc; limit 500; offset 0;",
+          "response": [
+            {
+              "id": 1,
+              "name": "Original",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1794700800,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 167
+                  },
+                  "release_region": {
+                    "region": "korea"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1793491200,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1795996800,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 167
+                  },
+                  "release_region": {
+                    "region": "korea"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1792454400,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 999
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ],
+              "cover": {
+                "image_id": "co1"
+              },
+              "game_localizations": [
+                {
+                  "name": " 한국 게임 ",
+                  "region": {
+                    "identifier": "KR"
+                  }
+                },
+                null,
+                false
+              ]
+            },
+            {
+              "id": 2,
+              "name": "Port",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1577836800,
+                  "y": 2020,
+                  "m": 1,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1792540800,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 508
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ],
+              "cover": {
+                "image_id": "bad-id"
+              }
+            },
+            {
+              "id": 3,
+              "name": "Quarter",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "y": 2026,
+                  "category": 6,
+                  "region": 7,
+                  "platform": {
+                    "id": 130
+                  },
+                  "release_region": {
+                    "region": "ÄSIA"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 4,
+              "name": "Year",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "y": 2027,
+                  "date_format": {
+                    "format": "YYYY"
+                  },
+                  "region": 8,
+                  "platform": {
+                    "id": 169
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 5,
+              "name": "Cancelled",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1792886400,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  },
+                  "status": {
+                    "name": "CANCELED"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 6,
+              "name": "Addon",
+              "hypes": 40,
+              "game_type": {
+                "type": "DLC_Addon"
+              },
+              "release_dates": [
+                {
+                  "date": 1792886400,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 7,
+              "name": "Same platform earliest wins",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1577836800,
+                  "y": 2020,
+                  "m": 1,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                {
+                  "date": 1793491200,
+                  "y": 2026,
+                  "m": 11,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 8,
+              "name": "Month",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1793404800,
+                  "y": 2026,
+                  "m": 10,
+                  "platform": {
+                    "id": 49
+                  },
+                  "release_region": {
+                    "region": "japan"
+                  },
+                  "date_format": {
+                    "format": "YYYYMM"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 9,
+              "name": "Exclusive end",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1807315200,
+                  "y": 2027,
+                  "m": 4,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 1,
+              "name": "Duplicate",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "date": 1796083200,
+                  "y": 2026,
+                  "m": 12,
+                  "platform": {
+                    "id": 6
+                  },
+                  "release_region": {
+                    "region": "worldwide"
+                  },
+                  "date_format": {
+                    "format": "YYYYMMDD"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            {
+              "id": 10,
+              "name": "Undated",
+              "hypes": 40,
+              "game_type": {
+                "type": "Main Game"
+              },
+              "release_dates": [
+                {
+                  "platform": {
+                    "id": 6
+                  },
+                  "date_format": {
+                    "format": "TBD"
+                  }
+                },
+                null,
+                false,
+                "ignored"
+              ]
+            },
+            null,
+            7,
+            "ignored",
+            {
+              "id": 987,
+              "name": "No dates",
+              "release_dates": null,
+              "game_localizations": null
+            }
+          ]
+        },
+        {
+          "provider": "tmdb",
+          "path": "/discover/movie",
+          "params": {
+            "language": "ko-KR",
+            "sort_by": "popularity.desc",
+            "include_adult": "false",
+            "page": "1",
+            "region": "KR",
+            "with_release_type": "2|3",
+            "include_video": "false",
+            "release_date.gte": "2026-10-02",
+            "release_date.lte": "2027-04-09"
+          },
+          "response": {
+            "results": [
+              {
+                "id": 11,
+                "title": " 영화 ",
+                "original_title": "Film",
+                "release_date": "2026-09-01",
+                "popularity": 100,
+                "poster_path": "/poster.jpg"
+              },
+              {
+                "id": 11,
+                "title": "duplicate"
+              },
+              {
+                "id": 12,
+                "title": "Rerelease",
+                "release_date": "2025-10-01"
+              },
+              {
+                "id": 13,
+                "title": "Worldwide fallback",
+                "release_date": "2026-10-12",
+                "popularity": 3
+              },
+              null,
+              false,
+              "ignored"
+            ],
+            "total_pages": 1
+          }
+        },
+        {
+          "provider": "tmdb",
+          "path": "/movie/11/release_dates",
+          "params": {},
+          "response": {
+            "results": [
+              {
+                "iso_3166_1": "KR",
+                "release_dates": [
+                  {
+                    "type": 4,
+                    "release_date": "2026-10-01"
+                  },
+                  {
+                    "type": 3,
+                    "release_date": "2026-10-20T00:00:00Z"
+                  },
+                  {
+                    "type": 2,
+                    "release_date": "2026-10-18"
+                  },
+                  null,
+                  3
+                ]
+              },
+              null,
+              false,
+              "ignored",
+              {
+                "iso_3166_1": "KR",
+                "release_dates": null
+              }
+            ]
+          }
+        },
+        {
+          "provider": "tmdb",
+          "path": "/movie/13/release_dates",
+          "params": {},
+          "response": {
+            "results": null
+          }
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/discover/tv",
+          "params": {
+            "language": "ko-KR",
+            "sort_by": "popularity.desc",
+            "include_adult": "false",
+            "page": "1",
+            "with_origin_country": "JP",
+            "with_genres": "16",
+            "air_date.gte": "2026-10-02",
+            "air_date.lte": "2027-04-09"
+          },
+          "response": {
+            "results": [
+              {
+                "id": 21,
+                "popularity": 10
+              },
+              {
+                "id": 22,
+                "popularity": 100
+              },
+              {
+                "id": 21,
+                "popularity": 20
+              },
+              {
+                "id": 23,
+                "popularity": 5
+              },
+              null,
+              false,
+              "ignored"
+            ],
+            "total_pages": 1
+          }
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/tv/22",
+          "params": {
+            "language": "ko-KR"
+          },
+          "error": "not_found"
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/tv/21",
+          "params": {
+            "language": "ko-KR"
+          },
+          "response": {
+            "id": 21,
+            "name": "애니",
+            "original_name": "Anime",
+            "popularity": 20,
+            "poster_path": "/show.jpg",
+            "seasons": [
+              {
+                "season_number": 0,
+                "air_date": "2026-10-12"
+              },
+              {
+                "season_number": 1,
+                "air_date": "2026-10-12"
+              },
+              {
+                "season_number": 2,
+                "air_date": "2026-10-13",
+                "name": "시즌 2",
+                "poster_path": "/season.jpg"
+              },
+              {
+                "season_number": 3,
+                "air_date": "2026-10-14",
+                "name": "특별한 이야기"
+              },
+              {
+                "season_number": 4,
+                "air_date": null
+              },
+              {
+                "season_number": 5,
+                "air_date": "2026-01-01"
+              },
+              {
+                "season_number": 2,
+                "air_date": "2026-12-01"
+              },
+              null,
+              7,
+              "ignored"
+            ]
+          }
+        },
+        {
+          "provider": "tmdb_tv",
+          "path": "/tv/23",
+          "params": {
+            "language": "ko-KR"
+          },
+          "response": {
+            "id": 23,
+            "original_name": "Original only",
+            "seasons": [
+              {
+                "season_number": 1,
+                "air_date": "2027-04-10"
+              },
+              null,
+              7,
+              "ignored"
+            ]
+          }
+        }
+      ],
+      "expectedEntries": [
+        {
+          "id": "igdb:8",
+          "kind": "game",
+          "title": "Month",
+          "originalTitle": null,
+          "date": "2026-10-01",
+          "precision": "month",
+          "region": "japan",
+          "platforms": [
+            "Xbox One"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": false
+        },
+        {
+          "id": "igdb:3",
+          "kind": "game",
+          "title": "Quarter",
+          "originalTitle": null,
+          "date": "2026-10-01",
+          "precision": "quarter",
+          "region": "Äsia",
+          "platforms": [
+            "Switch"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:tv:21:s1",
+          "kind": "anime",
+          "title": "애니",
+          "originalTitle": "Anime",
+          "date": "2026-10-12",
+          "precision": "exact",
+          "region": "JP",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/show.jpg"
+          },
+          "popularity": 20.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:13",
+          "kind": "movie",
+          "title": "Worldwide fallback",
+          "originalTitle": null,
+          "date": "2026-10-12",
+          "precision": "exact",
+          "region": "worldwide",
+          "platforms": [],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 3.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:tv:21:s2",
+          "kind": "anime",
+          "title": "애니 · 시즌 2",
+          "originalTitle": "Anime",
+          "date": "2026-10-13",
+          "precision": "exact",
+          "region": "JP",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/season.jpg"
+          },
+          "popularity": 20.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:tv:21:s3",
+          "kind": "anime",
+          "title": "애니 · 특별한 이야기",
+          "originalTitle": "Anime",
+          "date": "2026-10-14",
+          "precision": "exact",
+          "region": "JP",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/show.jpg"
+          },
+          "popularity": 20.0,
+          "port": false
+        },
+        {
+          "id": "tmdb:11",
+          "kind": "movie",
+          "title": "영화",
+          "originalTitle": "Film",
+          "date": "2026-10-18",
+          "precision": "exact",
+          "region": "korea",
+          "platforms": [],
+          "releaseType": null,
+          "cover": {
+            "url": "https://image.tmdb.org/t/p/w342/poster.jpg"
+          },
+          "popularity": 100.0,
+          "port": false
+        },
+        {
+          "id": "igdb:2",
+          "kind": "game",
+          "title": "Port",
+          "originalTitle": null,
+          "date": "2026-10-21",
+          "precision": "exact",
+          "region": "worldwide",
+          "platforms": [
+            "Switch 2"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": true
+        },
+        {
+          "id": "igdb:1",
+          "kind": "game",
+          "title": "한국 게임",
+          "originalTitle": "Original",
+          "date": "2026-11-15",
+          "precision": "exact",
+          "region": "korea",
+          "platforms": [
+            "PC",
+            "PS5"
+          ],
+          "releaseType": null,
+          "cover": {
+            "url": "https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg"
+          },
+          "popularity": 40.0,
+          "port": false
+        },
+        {
+          "id": "igdb:4",
+          "kind": "game",
+          "title": "Year",
+          "originalTitle": null,
+          "date": "2027-01-01",
+          "precision": "year",
+          "region": "worldwide",
+          "platforms": [
+            "Xbox Series"
+          ],
+          "releaseType": null,
+          "cover": null,
+          "popularity": 40.0,
+          "port": false
+        }
+      ]
+    }
+  ]
+}
