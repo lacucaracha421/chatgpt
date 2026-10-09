@@ -52,9 +52,11 @@ class ReplicationStartupTests(unittest.TestCase):
             "mobile_collections.register_collections.<locals>.startup_collections",
             "collection_release_checks.Worker.start",
             "release_calendar.register.<locals>.startup",
+            "release_wishlist.register.<locals>.startup",
             "release_calendar.Worker.start",
             "av_inbox.Worker.start",
             "mobile_characters.register_characters.<locals>.startup",
+            "kakao_bind_worker.Worker.start",
             "sync_status.register_sync_status.<locals>.startup",
             "change_signal.WriteSignal.reset",
             "album_authority.register_album_authority.<locals>.<lambda>",
@@ -71,6 +73,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "collection_release_checks.Worker.stop",
             "release_calendar.Worker.stop",
             "av_inbox.Worker.stop",
+            "kakao_bind_worker.Worker.stop",
             "app.shutdown_image_thumbnails",
         ]
         calls = []

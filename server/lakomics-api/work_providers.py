@@ -246,7 +246,8 @@ class Relay:
                 return self.json_request(provider, url, deadline, headers=headers, body=body, budget=budget)
         lock = self.locks[provider]
         while True:
-            wait = max(0, self.next_request[provider] - time.monotonic())
+            target = self.next_request[provider]
+            wait = max(0, target - time.monotonic())
             if time.monotonic() + wait >= deadline:
                 fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
             if wait <= 0:
@@ -261,7 +262,9 @@ class Relay:
                     raise BudgetExceeded()
                 fail(429, "providerBusy", "외부 정보 조회가 진행 중입니다. 잠시 후 다시 시도해 주세요.")
             scope["held"] = True
-            # An interactive request may have advanced the clock while we slept.
+            if self.next_request[provider] == target:
+                break  # Nobody used the provider while we slept: the interval has passed.
+            # An interactive request advanced the clock while we slept; wait again.
         accounting = scope["budget"]
         if accounting is not None and hasattr(accounting, "outbound"):
             accounting.outbound()
