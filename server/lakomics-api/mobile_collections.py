@@ -59,6 +59,7 @@ from starlette.concurrency import run_in_threadpool
 import authority
 import collection_authority
 import collection_bindings
+import collection_release_checks
 import collection_personal_edits as personal_edits
 import collection_releases
 import head_cache
@@ -585,6 +586,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             # Collections authority tables only; the domain stays inactive until an
             # explicit publisher activation.
             collection_authority.startup_db(db)
+            collection_release_checks.startup_db(db)
             # Cover refs carry the published portraits (feature ``portraitImage``).
             home_publications.startup_db(db)
             db.commit()
@@ -616,6 +618,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                                  collection_source=lambda db: read_table(served(db)))
     collection_bindings.register(app, get_db, reader, publisher)
     collection_authority.register(app, get_db, reader, publisher)
+    collection_release_checks.register(app, get_db, reader)
 
     def head(blob: ArtworkUpload, *, ticket=False, fresh=False):
         key, storage_bucket = artwork_key(blob.sha256), bucket()

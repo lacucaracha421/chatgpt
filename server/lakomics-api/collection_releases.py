@@ -1,7 +1,13 @@
 """Manga Collection release notifications (신간 알림) shared between the PC and mobile.
 
-Decided 2026-09-25: the PC keeps detecting release events (Aladin/Kakao/MangaDex, see
+Decided 2026-09-25: the PC detects release events (Aladin/Kakao/MangaDex, see
 `_tools/app/src-tauri/src/library/release_watch.rs`) and publishes its UNREAD events here.
+Since SERVER-INDEP-001 (2026-10) the server can detect Kakao events itself, daily and without
+the PC (``collection_release_checks.py``, off unless ``LAKOMICS_RELEASE_CHECKS`` is set); with
+the Collections authority active both record events through ``recordReleaseEvent``, which
+treats a change that repeats the LATEST stored event of the same (work, provider, kind, volume)
+(same previous and current value, detected within 30 days of it) as that event whatever event id
+it carries; a real flip back and forth is kept.
 Mobile lists them and confirms (확인) them; read state is shared both ways:
 
 * 확인 on mobile marks the event read at once (it leaves the unread list immediately) and

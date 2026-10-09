@@ -1,5 +1,8 @@
 pub(crate) mod aladin;
 mod aladin_flow;
+#[cfg(test)]
+#[path = "kakao_refresh_tests.rs"]
+mod kakao_refresh_tests;
 pub(crate) mod kakao_review;
 pub(crate) mod album;
 pub(crate) mod album_authority;

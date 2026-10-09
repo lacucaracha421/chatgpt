@@ -3,7 +3,10 @@
 SEARCH runs here, so the tablet can search and pick while the PC is off. APPLYING the
 binding (volumes, covers, release data) stays on the PC: the tablet files a bind
 request, the PC reads the request log when it is on, runs its existing apply command
-and reports the outcome. The server never fetches images and never writes a binding.
+and reports the outcome. The server never fetches images, and nothing on this module's routes
+writes a binding: the only server-side binding writes are the daily new-volume checks of
+works that are already bound to Kakao (``collection_release_checks.py``; off unless
+``LAKOMICS_RELEASE_CHECKS`` is set), which go through the ordinary authority commands.
 
 The candidates mirror the PC exactly so the PC can apply the tablet's pick unchanged:
 
@@ -169,6 +172,7 @@ import threading
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from functools import cmp_to_key
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl, urlsplit
@@ -195,6 +199,7 @@ CACHE_MAX = 32
 MANGADEX_MIN_INTERVAL = 0.25
 PROVIDER_WAIT = 1.0  # seconds a search waits for the provider's single outbound slot
 KAKAO_PAGES_PER_MINUTE = 300  # global Kakao page budget across all clients
+KAKAO_BACKGROUND_PAGES_PER_MINUTE = 120  # the share of it the daily release checks may use
 
 MANGADEX_API = "https://api.mangadex.org/manga"
 MANGADEX_UPLOADS = "https://uploads.mangadex.org"
@@ -269,9 +274,9 @@ def capabilities():
 class Upstream(Exception):
     """``kind``: timeout | status | unavailable | invalid."""
 
-    def __init__(self, kind, status=None):
+    def __init__(self, kind, status=None, retry_after=None):
         super().__init__(kind)
-        self.kind, self.status = kind, status
+        self.kind, self.status, self.retry_after = kind, status, retry_after
 
 
 _client = None
@@ -287,6 +292,21 @@ def _http():
         return _client
 
 
+def _retry_after(headers):
+    """Seconds of a ``Retry-After`` header (delay or HTTP date), clamped to 1..86400, else None."""
+    value = (headers.get("retry-after") or "").strip()
+    if not value:
+        return None
+    try:
+        seconds = int(value)
+    except ValueError:
+        try:
+            seconds = int((parsedate_to_datetime(value) - now_utc()).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return max(1, min(seconds, 86400))
+
+
 def http_get(url, params, headers, max_bytes, timeout, deadline=None):
     """``bytes`` of a successful GET (status 2xx), else raises ``Upstream``. Tests patch this.
 
@@ -299,7 +319,7 @@ def http_get(url, params, headers, max_bytes, timeout, deadline=None):
         with _http().stream("GET", url, params=params, headers={"User-Agent": USER_AGENT, **headers},
                             timeout=httpx.Timeout(timeout, connect=10.0)) as response:
             if not 200 <= response.status_code < 300:
-                raise Upstream("status", response.status_code)
+                raise Upstream("status", response.status_code, _retry_after(response.headers))
             body = bytearray()
             for chunk in response.iter_bytes():
                 body.extend(chunk)
@@ -609,11 +629,15 @@ def kakao_item(raw):
             raise Upstream("invalid") from None
         publication_date = moment.strftime("%Y-%m-%d")
     thumbnail = raw.get("thumbnail")
+    # ``itemUrl`` and ``raw`` (the document as Kakao sent it) are internal: the PC stores them
+    # as the volume source (``kakao_books.rs parse_document``) and the release checks need the
+    # same. ``group_kakao`` copies named fields only, so search replies never carry them.
     return {"itemId": item_id, "title": fields["title"], "author": _nonempty(", ".join(authors)),
             "publisher": _nonempty(fields["publisher"]), "isbn13": isbn13,
             "publicationDate": publication_date, "volumeNumber": parsed[0], "baseTitle": parsed[1],
             "thumbnail": thumbnail if isinstance(thumbnail, str) and re.fullmatch(r"https://\S{1,2000}", thumbnail)
-            else None}
+            else None,
+            "itemUrl": item_url, "raw": raw}
 
 
 def _normalize(value):
@@ -717,12 +741,19 @@ def _prefer(left, right):
     return (left["itemId"] > right["itemId"]) - (left["itemId"] < right["itemId"])
 
 
-def group_kakao(items, unparsed_count=0):
-    """Series candidates exactly as ``aladin_flow.rs grouped_items`` (+ display fields)."""
+def grouped_kakao(items):
+    """The series groups of one search exactly as ``aladin_flow.rs grouped_items``.
+
+    Each group is ``{"candidate", "items", "memberIds"}``: ``candidate`` is the PC's
+    ``AladinSeriesCandidate`` (``unparsedCount`` 0; this is also the stored snapshot shape),
+    ``items`` the one product per volume the group binds (volume order; an unnumbered product
+    keeps ``volumeNumber`` 0 and counts as volume 1), ``memberIds`` every product of the group,
+    duplicates of a volume included (a stored binding is re-found by any of them).
+    """
     groups = {}
     for item, key in zip(items, _group_keys(items)):
         groups.setdefault(key, []).append(item)
-    candidates = []
+    result = []
     for key in sorted(groups):
         members = sorted(groups[key], key=cmp_to_key(_prefer))
         head = members[0]
@@ -732,18 +763,31 @@ def group_kakao(items, unparsed_count=0):
                                                 _normalize(head["publisher"] or ""))).encode()).hexdigest()
         by_volume = {}
         for item in members:
-            number = item["volumeNumber"] or 1
-            by_volume.setdefault(number, {**item, "volumeNumber": number})
+            by_volume.setdefault(max(item["volumeNumber"], 1), item)
         selected = [by_volume[number] for number in sorted(by_volume)]
+        result.append({
+            "candidate": {
+                "anchorItemId": min(item["itemId"] for item in selected),
+                "groupFingerprint": fingerprint, "title": title, "author": author,
+                "publisher": head["publisher"],
+                "volumes": [{"volumeNumber": max(i["volumeNumber"], 1), "providerItemId": i["itemId"],
+                             "title": i["title"], "publicationDate": i["publicationDate"],
+                             "isbn13": i["isbn13"]} for i in selected],
+                "ignoredCount": len(members) - len(selected), "unparsedCount": 0},
+            "items": selected, "memberIds": [m["itemId"] for m in groups[key]]})
+    return result
+
+
+def group_kakao(items, unparsed_count=0):
+    """Series candidates exactly as ``aladin_flow.rs grouped_items`` (+ display fields)."""
+    candidates = []
+    for group in grouped_kakao(items):
+        core, selected = group["candidate"], group["items"]
+        volumes = core["volumes"]
         candidates.append({
-            "anchorItemId": min(item["itemId"] for item in selected),
-            "groupFingerprint": fingerprint, "title": title, "author": author,
-            "publisher": head["publisher"],
-            "volumes": [{"volumeNumber": i["volumeNumber"], "providerItemId": i["itemId"], "title": i["title"],
-                         "publicationDate": i["publicationDate"], "isbn13": i["isbn13"]} for i in selected],
-            "ignoredCount": len(members) - len(selected), "unparsedCount": unparsed_count,
+            **core, "unparsedCount": unparsed_count,
             "volumeCount": len(selected),
-            "firstVolume": selected[0]["volumeNumber"], "lastVolume": selected[-1]["volumeNumber"],
+            "firstVolume": volumes[0]["volumeNumber"], "lastVolume": volumes[-1]["volumeNumber"],
             "knownItemIds": sorted(i["itemId"] for i in selected),
             "thumbnailUrl": next((i["thumbnail"] for i in selected if i["thumbnail"]), None)})
     return candidates
@@ -759,20 +803,37 @@ class PageBudget(Exception):
         self.wait = wait
 
 
-def _crawl_kakao(key, query, deadline):
-    """Every page of one query, deduplicated by item id: ``(items, unparsed_count)``."""
+class SearchCancelled(Exception):
+    """A background crawl was told to stop (server shutdown) between two pages."""
+
+
+def _crawl_kakao(key, query, deadline, *, background=False, stop=None, stats=None):
+    """Every page of one query, deduplicated by item id: ``(items, unparsed_count)``.
+
+    ``background`` draws on the smaller background share of the page budget, ``stop`` is a
+    callable that is true when the crawl must end, ``stats`` (a dict) counts ``requests`` and
+    ``networkMs``.
+    """
     items, seen, unparsed = [], set(), 0
     for page in range(1, KAKAO_MAX_PAGES + 1):
+        if stop is not None and stop():
+            raise SearchCancelled()
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise Upstream("timeout")
-        wait = gate.take_kakao_page()
+        wait = gate.take_kakao_page(background=True) if background else gate.take_kakao_page()
         if wait:
             raise PageBudget(wait)
-        body = http_get(KAKAO_API, [("query", query), ("target", "title"), ("sort", "latest"),
-                                    ("size", str(KAKAO_PAGE_SIZE)), ("page", str(page))],
-                        {"Authorization": f"KakaoAK {key}"}, KAKAO_MAX_BYTES, min(KAKAO_TIMEOUT, remaining),
-                        deadline=deadline)
+        started = time.monotonic()
+        try:
+            body = http_get(KAKAO_API, [("query", query), ("target", "title"), ("sort", "latest"),
+                                        ("size", str(KAKAO_PAGE_SIZE)), ("page", str(page))],
+                            {"Authorization": f"KakaoAK {key}"}, KAKAO_MAX_BYTES, min(KAKAO_TIMEOUT, remaining),
+                            deadline=deadline)
+        finally:
+            if stats is not None:
+                stats["requests"] = stats.get("requests", 0) + 1
+                stats["networkMs"] = stats.get("networkMs", 0) + int((time.monotonic() - started) * 1000)
         if time.monotonic() >= deadline:
             raise Upstream("timeout")
         try:
@@ -796,18 +857,21 @@ def _crawl_kakao(key, query, deadline):
     raise KakaoTooBroad()
 
 
-def search_kakao_items(key, query):
+def search_kakao_items(key, query, *, background=False, stop=None, stats=None):
     """``(items, unparsed_count)``; raises on an unfinished search (PC rule).
 
     A search that finds no usable product is repeated once with the punctuation turned into
     spaces (the PC retry). The whole crawl shares one ``KAKAO_BUDGET`` deadline and every page
-    draws on the global ``KAKAO_PAGES_PER_MINUTE`` budget (``PageBudget`` when it runs out).
+    draws on the global ``KAKAO_PAGES_PER_MINUTE`` budget (``PageBudget`` when it runs out);
+    ``background`` crawls (the daily release checks) may take at most
+    ``KAKAO_BACKGROUND_PAGES_PER_MINUTE`` of it.
     """
     deadline = time.monotonic() + KAKAO_BUDGET
-    items, unparsed = _crawl_kakao(key, query, deadline)
+    options = dict(background=background, stop=stop, stats=stats)
+    items, unparsed = _crawl_kakao(key, query, deadline, **options)
     normalized = normalize_search_query(query)
     if not items and normalized != query and len(normalized) >= 2:
-        items, unparsed = _crawl_kakao(key, normalized, deadline)
+        items, unparsed = _crawl_kakao(key, normalized, deadline, **options)
     return items, unparsed
 
 
@@ -824,6 +888,7 @@ class SearchGate:
         self.provider_locks = {"mangadex": threading.Lock(), "kakao": threading.Lock()}
         self.mangadex_last = 0.0
         self.kakao_pages = deque()
+        self.kakao_background = deque()
 
     def cached(self, key):
         with self.lock:
@@ -858,15 +923,27 @@ class SearchGate:
                     del self.windows[name]
             return 0
 
-    def take_kakao_page(self):
-        """Seconds until a Kakao page may be fetched (0 = taken) - global sliding minute."""
+    def take_kakao_page(self, background=False):
+        """Seconds until a Kakao page may be fetched (0 = taken) - global sliding minute.
+
+        A ``background`` page (the daily release checks) must also fit the smaller background
+        share, so searches a person is waiting for always keep at least the rest of the minute.
+        """
         with self.lock:
             now = self.clock()
-            while self.kakao_pages and now - self.kakao_pages[0] >= 60:
-                self.kakao_pages.popleft()
+            for window in (self.kakao_pages, self.kakao_background):
+                while window and now - window[0] >= 60:
+                    window.popleft()
+            waits = []
             if len(self.kakao_pages) >= KAKAO_PAGES_PER_MINUTE:
-                return max(1, int(60 - (now - self.kakao_pages[0])) + 1)
+                waits.append(max(1, int(60 - (now - self.kakao_pages[0])) + 1))
+            if background and len(self.kakao_background) >= KAKAO_BACKGROUND_PAGES_PER_MINUTE:
+                waits.append(max(1, int(60 - (now - self.kakao_background[0])) + 1))
+            if waits:
+                return max(waits)
             self.kakao_pages.append(now)
+            if background:
+                self.kakao_background.append(now)
             return 0
 
     def mangadex_spacing(self):

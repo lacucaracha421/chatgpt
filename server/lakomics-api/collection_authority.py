@@ -2600,6 +2600,31 @@ def _release_state(ctx, state):
         _bump_work(ctx, state)
 
 
+#: An incoming release event that repeats the latest stored one of the same (work, provider,
+#: kind, volume) - same previous and current value, detected within this many days of it - is
+#: that notification again (``_record_release``).
+RELEASE_DEDUP_DAYS = 30
+
+
+def _release_seen_recently(db, values, detected_ms):
+    """Whether ``values`` repeat the LATEST stored event of the same (work, provider, kind,
+    volume), read or not.
+
+    Only the latest event counts, so a real flip is kept: a date going A -> B, B -> A, A -> B
+    (or upcoming -> released, released -> upcoming, upcoming -> released) is three events, while
+    the same change reported twice (a PC mints a random event id per detection, and the server
+    checker may have seen it first) is one. ``values`` is the stored column order: work, name,
+    provider, kind, volume, previous, current, detectedAt.
+    """
+    work_id, _, provider, kind, volume, previous, current, _ = values
+    latest = db.execute(
+        "SELECT previous_value, current_value, detected_ms FROM collection_release_events"
+        " WHERE collection_id=? AND provider=? AND kind=? AND volume_number=?"
+        " ORDER BY detected_ms DESC, id DESC LIMIT 1", [work_id, provider, kind, volume]).fetchone()
+    return (latest is not None and latest[0] == previous and latest[1] == current
+            and abs(latest[2] - detected_ms) <= RELEASE_DEDUP_DAYS * 86_400_000)
+
+
 def _record_release(ctx, entity, payload_sha):
     import collection_releases as releases
     state = work_state(require_work(ctx, entity["workId"]))
@@ -2612,14 +2637,17 @@ def _record_release(ctx, entity, payload_sha):
               entity["previousValue"], entity["currentValue"], entity["detectedAt"])
     if existing is not None and tuple(existing[key] for key in releases.CONTENT) != values:
         fail(409, "releaseEventExists", "같은 ID의 다른 신간 알림이 이미 있습니다.")
-    if existing is None:
+    detected_ms = int(releases.parse_instant(entity["detectedAt"]).timestamp() * 1000)
+    # The same change reported again under another id (PC builds mint a random event id per
+    # detection, and the server checker may have seen it first) is one notification.
+    if existing is None and not _release_seen_recently(ctx.db, values, detected_ms):
         if ctx.db.execute("SELECT COUNT(*) FROM collection_release_events").fetchone()[0] >= releases.MAX_EVENTS:
             fail(409, "releaseEventLimit", "신간 알림이 너무 많습니다.")
         generation = releases._state(ctx.db)["generation"] or 1
         ctx.db.execute("INSERT INTO collection_release_events(event_id,collection_id,collection_name,provider,kind,"
                        "volume_number,previous_value,current_value,detected_at,detected_ms,generation,read_at,updated_at)"
                        " VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,?)",
-                       [entity["eventId"], *values, int(releases.parse_instant(entity["detectedAt"]).timestamp()*1000), generation, ctx.now])
+                       [entity["eventId"], *values, detected_ms, generation, ctx.now])
         releases._bump(ctx.db)
     _release_state(ctx, state)
     return _finish(ctx, payload_sha, state["workId"])
@@ -4041,6 +4069,12 @@ def _is_publisher(require_publisher, authorization):
     return True
 
 
+def advertised_features():
+    """``features`` of the status route; ``serverReleaseChecks:*`` only while the checker is on."""
+    import collection_release_checks
+    return ["personProfileFields", "kakaoReview", *collection_release_checks.features()]
+
+
 def register(app, get_db, require_client, require_publisher):
     """Register the Collections authority routes. Startup is the caller's (tables only)."""
 
@@ -4066,9 +4100,10 @@ def register(app, get_db, require_client, require_publisher):
 
         def read(db):
             row = authority.active_domain(db, DOMAIN)
+            features = advertised_features()
             if row is None:
-                return {"active": False, "domain": DOMAIN, "features": ["personProfileFields", "kakaoReview"]}
-            return {"active": True, "domain": DOMAIN, "features": ["personProfileFields", "kakaoReview"], "libraryId": row["libraryId"],
+                return {"active": False, "domain": DOMAIN, "features": features}
+            return {"active": True, "domain": DOMAIN, "features": features, "libraryId": row["libraryId"],
                     "epoch": row["epoch"], "contractVersion": row["contractVersion"],
                     "cursor": row["cursor"], "activatedAt": row["activatedAt"],
                     "revision": projection_revision(row["libraryId"], row["epoch"], row["cursor"]),

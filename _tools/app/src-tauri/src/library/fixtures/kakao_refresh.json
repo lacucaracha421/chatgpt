@@ -1,0 +1,705 @@
+{
+ "comment": "Shared by the Kakao refresh in aladin_flow.rs (refresh_aladin_items_with_config_at -> reconcile_aladin_at, with release_watch.rs pending_release_changes) and server/lakomics-api/collection_release_checks.py (plan_refresh): given the same stored binding and the same search result, both must produce exactly the expected config, snapshot, source rows, new slots, events and counts. FORMAT. A case is one refresh of one binding. INPUT: checkedAt = the time of the check (RFC 3339, also detectedAt of every event); previousCheckedAt = the subscription's previous check time or null; gating = what decides whether events are raised: releaseWatch = a release subscription exists, tracksOwnership = the work tracks owned volumes, minVolume/maxVolume = the work's volume range (null = open); binding = {externalId: the stored anchor (the binding's external_id), config: the stored provider_config_json}; existingSources = the stored kakao volume source rows ({volume, providerItemId, title, author, publisher, isbn13, publicationDate, itemUrl}; their raw document `data` is always {\"id\": providerItemId}); existingSlots = volume numbers that already have an edition-0 volume slot; products = the products of the Kakao search in search order, built like product_titles.json / kakao_grouping.json: {id, title (raw product title; volume and base title come from the classification rules), author, publisher, isbn13, date (publication date YYYY-MM-DD), url (canonical item URL or null)}; an AladinItem is built from each with item_id = id, item_url = url and raw document / snapshot_json = {\"id\": id}. EXPECTED: error = null, or \"ambiguousBinding\" when a stored group cannot be re-found (nothing is written; no other expected field is present); externalId = the anchor the binding keeps; config = the new provider_config_json (including reviewDismissedVolumes only when carried over); snapshot = the new provider_data_json (one AladinSeriesCandidate, or {groups: [...]} for several, unparsedCount 0); sources = the source row written for every merged volume in volume order (fields as existingSources plus volumeNumber; data is {\"id\": providerItemId}; title is trimmed); newSlots = merged volumes without an existing slot (a slot is created with sort_order = volume number); events = release events in the order they are raised ({kind, volumeNumber, previousValue, currentValue}); result = {added, updated, unchanged, ignored} as AladinSyncResult. OPTIONAL: an existingSources row may carry `data` (its stored raw document) and a products entry `raw` (the raw document Kakao sent, also the snapshot_json of the AladinItem), and an expected sources row may carry `data`; each defaults to {\"id\": providerItemId} / {\"id\": id}. Use them to pin a change of the raw document alone. Compare JSON values, not text.",
+ "cases": [
+  {
+   "name": "refind_by_anchor_new_date_status",
+   "comment": "The anchor is in the search: found whatever else changed. Volume 1 keeps its date but flips upcoming -> released between the two check times; volume 2 moves its date (still upcoming, so no status change); volume 3 is new.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2"]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null},
+    {"volume": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-20", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1,
+    2
+   ],
+   "products": [
+    {"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-10-05", "url": null},
+    {"id": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-10-25", "url": null},
+    {"id": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "date": "2026-12-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2", "a3"]},
+    "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-10-05", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "publicationDate": "2026-10-25", "isbn13": "9780000000002"}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "publicationDate": "2026-12-01", "isbn13": "9780000000003"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "publicationDate": "2026-12-01", "itemUrl": null}],
+    "newSlots": [3],
+    "events": [{"kind": "release_status_changed", "volumeNumber": 1, "previousValue": "upcoming", "currentValue": "released"}, {"kind": "release_date_changed", "volumeNumber": 2, "previousValue": "2026-10-20", "currentValue": "2026-10-25"}, {"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2026-12-01"}],
+    "result": {"added": 1, "updated": 1, "unchanged": 1, "ignored": 0}
+   }
+  },
+  {
+   "name": "unchanged",
+   "comment": "Everything already stored and nothing flips status: no event, all rows unchanged.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-06T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2"]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null},
+    {"volume": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1,
+    2
+   ],
+   "products": [
+    {"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-10-05", "url": null},
+    {"id": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-10-25", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2"]},
+    "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-10-05", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "publicationDate": "2026-10-25", "isbn13": "9780000000002"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}],
+    "newSlots": [],
+    "events": [],
+    "result": {"added": 0, "updated": 0, "unchanged": 2, "ignored": 0}
+   }
+  },
+  {
+   "name": "refind_by_known_id",
+   "comment": "The anchor left the search and the fingerprint is stale (publisher changed), but a known item id is in exactly one group: that group. The binding keeps its stored anchor as identity; known ids are the union of the old ones and the group's current items.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "x-old",
+    "config": {"version": 1, "query": "봇치 더 록", "groupFingerprint": "287ee2502e5c86c8dd635df0e6de2f5d380200685202967aa76767e9ba5ed993", "knownItemIds": ["k1", "x-old-known"]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "k1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": "9780000000011", "publicationDate": "2026-01-01", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1
+   ],
+   "products": [
+    {"id": "k1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": "9780000000011", "date": "2026-01-01", "url": null},
+    {"id": "k2", "title": "봇치 더 록 2", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": "9780000000012", "date": "2026-02-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "x-old",
+    "config": {"version": 1, "query": "봇치 더 록", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "knownItemIds": ["k1", "k2", "x-old-known"]},
+    "snapshot": {"anchorItemId": "k1", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "title": "봇치 더 록", "author": "하마지 아키", "publisher": "학산문화사", "volumes": [{"volumeNumber": 1, "providerItemId": "k1", "title": "봇치 더 록 1", "publicationDate": "2026-01-01", "isbn13": "9780000000011"}, {"volumeNumber": 2, "providerItemId": "k2", "title": "봇치 더 록 2", "publicationDate": "2026-02-01", "isbn13": "9780000000012"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "k1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": "9780000000011", "publicationDate": "2026-01-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "k2", "title": "봇치 더 록 2", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": "9780000000012", "publicationDate": "2026-02-01", "itemUrl": null}],
+    "newSlots": [2],
+    "events": [{"kind": "new_volume", "volumeNumber": 2, "previousValue": null, "currentValue": "2026-02-01"}],
+    "result": {"added": 1, "updated": 0, "unchanged": 1, "ignored": 0}
+   }
+  },
+  {
+   "name": "refind_by_fingerprint",
+   "comment": "No anchor and no known ids in the search: the one group with the stored fingerprint.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "gone",
+    "config": {"version": 1, "query": "위치 워치", "groupFingerprint": "659334ded6e407caee31080380d5cc5dd2412f38618fd427d27a3479d63a02ca", "knownItemIds": []}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "f1", "title": "위치 워치 1", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "date": "2024-01-01", "url": null},
+    {"id": "f2", "title": "위치 워치 2", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "date": "2024-02-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "gone",
+    "config": {"version": 1, "query": "위치 워치", "groupFingerprint": "659334ded6e407caee31080380d5cc5dd2412f38618fd427d27a3479d63a02ca", "knownItemIds": ["f1", "f2"]},
+    "snapshot": {"anchorItemId": "f1", "groupFingerprint": "659334ded6e407caee31080380d5cc5dd2412f38618fd427d27a3479d63a02ca", "title": "위치 워치", "author": "시노하라 켄타", "publisher": "서울문화사", "volumes": [{"volumeNumber": 1, "providerItemId": "f1", "title": "위치 워치 1", "publicationDate": "2024-01-01", "isbn13": null}, {"volumeNumber": 2, "providerItemId": "f2", "title": "위치 워치 2", "publicationDate": "2024-02-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "f1", "title": "위치 워치 1", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "publicationDate": "2024-01-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "f2", "title": "위치 워치 2", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "publicationDate": "2024-02-01", "itemUrl": null}],
+    "newSlots": [1, 2],
+    "events": [],
+    "result": {"added": 2, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "known_ids_split_narrowed_by_fingerprint",
+   "comment": "Known ids are spread over two groups; the stored fingerprint chooses among those two.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "gone",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "ced9e43fde4b85b7dd1e0190c1d88258164f5e9b38a9a50b8a35e2afb20eb9ff", "knownItemIds": ["s1", "t1"]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "s1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": null, "date": "2024-01-01", "url": null},
+    {"id": "t1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "S코믹스", "isbn13": null, "date": "2024-01-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "gone",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "ced9e43fde4b85b7dd1e0190c1d88258164f5e9b38a9a50b8a35e2afb20eb9ff", "knownItemIds": ["s1", "t1"]},
+    "snapshot": {"anchorItemId": "t1", "groupFingerprint": "ced9e43fde4b85b7dd1e0190c1d88258164f5e9b38a9a50b8a35e2afb20eb9ff", "title": "던전밥", "author": "쿠이 료코", "publisher": "S코믹스", "volumes": [{"volumeNumber": 1, "providerItemId": "t1", "title": "던전밥 1", "publicationDate": "2024-01-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "t1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "S코믹스", "isbn13": null, "publicationDate": "2024-01-01", "itemUrl": null}],
+    "newSlots": [1],
+    "events": [],
+    "result": {"added": 1, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "ambiguous_known_ids_split_stale_fingerprint",
+   "comment": "Known ids are spread over two groups and the fingerprint is stale: the binding cannot be re-found (the PC reports AmbiguousAladinBinding and writes nothing).",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "gone",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "f11bd7de5dc7c7d6144d22f96218a8f315b199d0f027856cf88deef51399065b", "knownItemIds": ["s1", "t1"]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "s1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": null, "date": "2024-01-01", "url": null},
+    {"id": "t1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "S코믹스", "isbn13": null, "date": "2024-01-01", "url": null}
+   ],
+   "expected": {
+    "error": "ambiguousBinding"
+   }
+  },
+  {
+   "name": "ambiguous_nothing_matches",
+   "comment": "Neither anchor, known ids nor fingerprint match any group.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "z1", "title": "다른 책 1", "author": "누군가", "publisher": "어딘가", "isbn13": null, "date": null, "url": null}
+   ],
+   "expected": {
+    "error": "ambiguousBinding"
+   }
+  },
+  {
+   "name": "collapsed_groups",
+   "comment": "A two-group (version 2) binding whose groups the search now merges into one (imprint spelling): both stored groups re-find the same group, which is kept once. The config goes back to version 1, the first stored anchor stays the identity, known ids are the union.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "c1",
+    "config": {"version": 2, "query": "마법소녀를", "groups": [{"anchorItemId": "c1", "groupFingerprint": "930e7d7cdcbfbea0e68c5a5bce649a70a8b13899fe898ac99152e9a25d821491", "knownItemIds": ["c1", "c2"]}, {"anchorItemId": "c3", "groupFingerprint": "a2f618eea9d46eeb88b7ffa704589c091bd495859cf85f1e396a514c25525003", "knownItemIds": ["c3", "c9"]}]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "c1", "title": "마법소녀를 1", "author": "작가", "publisher": "에이템포", "isbn13": "9780000000021", "date": "2024-01-01", "url": null},
+    {"id": "c2", "title": "마법소녀를 2", "author": "작가", "publisher": "에이템포", "isbn13": "9780000000022", "date": "2024-02-01", "url": null},
+    {"id": "c3", "title": "마법소녀를 3", "author": "작가", "publisher": "에이템포미디어", "isbn13": "9780000000023", "date": "2024-03-01", "url": null},
+    {"id": "c4", "title": "마법소녀를 4", "author": "작가", "publisher": "에이템포미디어", "isbn13": "9780000000024", "date": "2024-04-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "c1",
+    "config": {"version": 1, "query": "마법소녀를", "groupFingerprint": "930e7d7cdcbfbea0e68c5a5bce649a70a8b13899fe898ac99152e9a25d821491", "knownItemIds": ["c1", "c2", "c3", "c4", "c9"]},
+    "snapshot": {"anchorItemId": "c1", "groupFingerprint": "930e7d7cdcbfbea0e68c5a5bce649a70a8b13899fe898ac99152e9a25d821491", "title": "마법소녀를", "author": "작가", "publisher": "에이템포", "volumes": [{"volumeNumber": 1, "providerItemId": "c1", "title": "마법소녀를 1", "publicationDate": "2024-01-01", "isbn13": "9780000000021"}, {"volumeNumber": 2, "providerItemId": "c2", "title": "마법소녀를 2", "publicationDate": "2024-02-01", "isbn13": "9780000000022"}, {"volumeNumber": 3, "providerItemId": "c3", "title": "마법소녀를 3", "publicationDate": "2024-03-01", "isbn13": "9780000000023"}, {"volumeNumber": 4, "providerItemId": "c4", "title": "마법소녀를 4", "publicationDate": "2024-04-01", "isbn13": "9780000000024"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "c1", "title": "마법소녀를 1", "author": "작가", "publisher": "에이템포", "isbn13": "9780000000021", "publicationDate": "2024-01-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "c2", "title": "마법소녀를 2", "author": "작가", "publisher": "에이템포", "isbn13": "9780000000022", "publicationDate": "2024-02-01", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "c3", "title": "마법소녀를 3", "author": "작가", "publisher": "에이템포미디어", "isbn13": "9780000000023", "publicationDate": "2024-03-01", "itemUrl": null}, {"volumeNumber": 4, "providerItemId": "c4", "title": "마법소녀를 4", "author": "작가", "publisher": "에이템포미디어", "isbn13": "9780000000024", "publicationDate": "2024-04-01", "itemUrl": null}],
+    "newSlots": [1, 2, 3, 4],
+    "events": [],
+    "result": {"added": 4, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "duplicate_volume_across_groups",
+   "comment": "Two groups that stay apart both offer volume 2: the product with an ISBN and the newer date wins, the other counts as ignored. Groups are ordered by lowest volume; the first group's anchor is the identity; the snapshot is the {groups: [...]} form.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-06T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "e2",
+    "config": {"version": 2, "query": "스틸 볼 런", "groups": [{"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "knownItemIds": ["e2", "e3"]}, {"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "knownItemIds": ["d1", "d2"]}]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "publicationDate": "2024-01-01", "itemUrl": null},
+    {"volume": 2, "providerItemId": "d2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "소미미디어", "isbn13": null, "publicationDate": "2024-02-01", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1,
+    2
+   ],
+   "products": [
+    {"id": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "date": "2024-01-01", "url": null},
+    {"id": "d2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "소미미디어", "isbn13": null, "date": "2024-02-01", "url": null},
+    {"id": "e2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000032", "date": "2024-03-01", "url": null},
+    {"id": "e3", "title": "스틸 볼 런 3", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000033", "date": "2024-04-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "d1",
+    "config": {"version": 2, "query": "스틸 볼 런", "groups": [{"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "knownItemIds": ["d1", "d2"]}, {"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "knownItemIds": ["e2", "e3"]}]},
+    "snapshot": {"groups": [{"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "title": "스틸 볼 런", "author": "아라키", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "publicationDate": "2024-01-01", "isbn13": "9780000000031"}, {"volumeNumber": 2, "providerItemId": "d2", "title": "스틸 볼 런 2", "publicationDate": "2024-02-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0}, {"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "title": "스틸 볼 런", "author": "아라키", "publisher": "S코믹스", "volumes": [{"volumeNumber": 2, "providerItemId": "e2", "title": "스틸 볼 런 2", "publicationDate": "2024-03-01", "isbn13": "9780000000032"}, {"volumeNumber": 3, "providerItemId": "e3", "title": "스틸 볼 런 3", "publicationDate": "2024-04-01", "isbn13": "9780000000033"}], "ignoredCount": 0, "unparsedCount": 0}]},
+    "sources": [{"volumeNumber": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "publicationDate": "2024-01-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "e2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000032", "publicationDate": "2024-03-01", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "e3", "title": "스틸 볼 런 3", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000033", "publicationDate": "2024-04-01", "itemUrl": null}],
+    "newSlots": [3],
+    "events": [{"kind": "release_date_changed", "volumeNumber": 2, "previousValue": "2024-02-01", "currentValue": "2024-03-01"}, {"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2024-04-01"}],
+    "result": {"added": 1, "updated": 1, "unchanged": 1, "ignored": 1}
+   }
+  },
+  {
+   "name": "unnumbered_is_volume_one",
+   "comment": "A product with no volume number is volume 1 of its own one-volume series.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "u1",
+    "config": {"version": 1, "query": "별의 아이", "groupFingerprint": "bc3f0d7e2a47bd78d2382f3f745dc02e7ebca9a39af9912b0620dc8b2f339378", "knownItemIds": ["u1"]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "u1", "title": "별의 아이", "author": "작가", "publisher": "출판", "isbn13": null, "date": "2025-05-05", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "u1",
+    "config": {"version": 1, "query": "별의 아이", "groupFingerprint": "bc3f0d7e2a47bd78d2382f3f745dc02e7ebca9a39af9912b0620dc8b2f339378", "knownItemIds": ["u1"]},
+    "snapshot": {"anchorItemId": "u1", "groupFingerprint": "bc3f0d7e2a47bd78d2382f3f745dc02e7ebca9a39af9912b0620dc8b2f339378", "title": "별의 아이", "author": "작가", "publisher": "출판", "volumes": [{"volumeNumber": 1, "providerItemId": "u1", "title": "별의 아이", "publicationDate": "2025-05-05", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "u1", "title": "별의 아이", "author": "작가", "publisher": "출판", "isbn13": null, "publicationDate": "2025-05-05", "itemUrl": null}],
+    "newSlots": [1],
+    "events": [{"kind": "new_volume", "volumeNumber": 1, "previousValue": null, "currentValue": "2025-05-05"}],
+    "result": {"added": 1, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "unnumbered_never_replaces_numbered_volume_one",
+   "comment": "An unnumbered product with an ISBN and a newer date still loses volume 1 to the numbered one.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "n1",
+    "config": {"version": 1, "query": "마법소녀를", "groupFingerprint": "7c8197f405b2b9cadcc68eb9b35387c616c0e1b88d6e47c905175d822d4b5bce", "knownItemIds": ["n1"]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "p0", "title": "마법소녀를 (일반판)", "author": "작가", "publisher": "출판", "isbn13": "9780000000041", "date": "2030-01-01", "url": null},
+    {"id": "n1", "title": "마법소녀를 1", "author": "작가", "publisher": "출판", "isbn13": null, "date": "2024-01-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "n1",
+    "config": {"version": 1, "query": "마법소녀를", "groupFingerprint": "7c8197f405b2b9cadcc68eb9b35387c616c0e1b88d6e47c905175d822d4b5bce", "knownItemIds": ["n1"]},
+    "snapshot": {"anchorItemId": "n1", "groupFingerprint": "7c8197f405b2b9cadcc68eb9b35387c616c0e1b88d6e47c905175d822d4b5bce", "title": "마법소녀를", "author": "작가", "publisher": "출판", "volumes": [{"volumeNumber": 1, "providerItemId": "n1", "title": "마법소녀를 1", "publicationDate": "2024-01-01", "isbn13": null}], "ignoredCount": 1, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "n1", "title": "마법소녀를 1", "author": "작가", "publisher": "출판", "isbn13": null, "publicationDate": "2024-01-01", "itemUrl": null}],
+    "newSlots": [1],
+    "events": [],
+    "result": {"added": 1, "updated": 0, "unchanged": 0, "ignored": 1}
+   }
+  },
+  {
+   "name": "out_of_range_volumes_make_no_event",
+   "comment": "Volume range 3..4: only those volumes raise events; every volume is still stored.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": 3,
+    "maxVolume": 4
+   },
+   "binding": {
+    "externalId": "r1",
+    "config": {"version": 1, "query": "봇치 더 록", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "knownItemIds": ["r1"]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "r1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "date": "2026-11-01", "url": null},
+    {"id": "r2", "title": "봇치 더 록 2", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "date": "2026-11-01", "url": null},
+    {"id": "r3", "title": "봇치 더 록 3", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "date": "2026-11-01", "url": null},
+    {"id": "r4", "title": "봇치 더 록 4", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "date": "2026-11-01", "url": null},
+    {"id": "r5", "title": "봇치 더 록 5", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "date": "2026-11-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "r1",
+    "config": {"version": 1, "query": "봇치 더 록", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "knownItemIds": ["r1", "r2", "r3", "r4", "r5"]},
+    "snapshot": {"anchorItemId": "r1", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "title": "봇치 더 록", "author": "하마지 아키", "publisher": "학산문화사", "volumes": [{"volumeNumber": 1, "providerItemId": "r1", "title": "봇치 더 록 1", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 2, "providerItemId": "r2", "title": "봇치 더 록 2", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 3, "providerItemId": "r3", "title": "봇치 더 록 3", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 4, "providerItemId": "r4", "title": "봇치 더 록 4", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 5, "providerItemId": "r5", "title": "봇치 더 록 5", "publicationDate": "2026-11-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "r1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "r2", "title": "봇치 더 록 2", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "r3", "title": "봇치 더 록 3", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 4, "providerItemId": "r4", "title": "봇치 더 록 4", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 5, "providerItemId": "r5", "title": "봇치 더 록 5", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}],
+    "newSlots": [1, 2, 3, 4, 5],
+    "events": [{"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2026-11-01"}, {"kind": "new_volume", "volumeNumber": 4, "previousValue": null, "currentValue": "2026-11-01"}],
+    "result": {"added": 5, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "no_ownership_tracking_no_events",
+   "comment": "Kakao alerts only for works with owned-volume tracking; sources and slots are still written.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null},
+    {"volume": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-20", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1,
+    2
+   ],
+   "products": [
+    {"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-10-05", "url": null},
+    {"id": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-10-25", "url": null},
+    {"id": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "date": "2026-12-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2", "a3"]},
+    "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-10-05", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "publicationDate": "2026-10-25", "isbn13": "9780000000002"}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "publicationDate": "2026-12-01", "isbn13": "9780000000003"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "publicationDate": "2026-12-01", "itemUrl": null}],
+    "newSlots": [3],
+    "events": [],
+    "result": {"added": 1, "updated": 1, "unchanged": 1, "ignored": 0}
+   }
+  },
+  {
+   "name": "release_watch_off_no_events",
+   "comment": "No release subscription: no events.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null},
+    {"volume": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-20", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1,
+    2
+   ],
+   "products": [
+    {"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-10-05", "url": null},
+    {"id": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-10-25", "url": null},
+    {"id": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "date": "2026-12-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2", "a3"]},
+    "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-10-05", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "publicationDate": "2026-10-25", "isbn13": "9780000000002"}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "publicationDate": "2026-12-01", "isbn13": "9780000000003"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "publicationDate": "2026-12-01", "itemUrl": null}],
+    "newSlots": [3],
+    "events": [],
+    "result": {"added": 1, "updated": 1, "unchanged": 1, "ignored": 0}
+   }
+  },
+  {
+   "name": "first_check_has_no_status_events",
+   "comment": "The subscription has never been checked (previousCheckedAt null): date changes and new volumes raise events, status changes cannot.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": null,
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null},
+    {"volume": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-20", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1,
+    2
+   ],
+   "products": [
+    {"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-10-05", "url": null},
+    {"id": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-10-25", "url": null},
+    {"id": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "date": "2026-12-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2", "a3"]},
+    "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-10-05", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "publicationDate": "2026-10-25", "isbn13": "9780000000002"}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "publicationDate": "2026-12-01", "isbn13": "9780000000003"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "publicationDate": "2026-12-01", "itemUrl": null}],
+    "newSlots": [3],
+    "events": [{"kind": "release_date_changed", "volumeNumber": 2, "previousValue": "2026-10-20", "currentValue": "2026-10-25"}, {"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2026-12-01"}],
+    "result": {"added": 1, "updated": 1, "unchanged": 1, "ignored": 0}
+   }
+  },
+  {
+   "name": "date_appears_and_disappears",
+   "comment": "A date that appears (null -> date) and one that disappears (date -> null) are date changes; status events need a date on both sides.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": true,
+    "tracksOwnership": true,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "w1",
+    "config": {"version": 1, "query": "위치 워치", "groupFingerprint": "659334ded6e407caee31080380d5cc5dd2412f38618fd427d27a3479d63a02ca", "knownItemIds": ["w1", "w2"]}
+   },
+   "existingSources": [
+    {"volume": 1, "providerItemId": "w1", "title": "위치 워치 1", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "publicationDate": null, "itemUrl": null},
+    {"volume": 2, "providerItemId": "w2", "title": "위치 워치 2", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "publicationDate": "2026-11-11", "itemUrl": null}
+   ],
+   "existingSlots": [
+    1,
+    2
+   ],
+   "products": [
+    {"id": "w1", "title": "위치 워치 1", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "date": "2026-12-24", "url": null},
+    {"id": "w2", "title": "위치 워치 2", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "date": null, "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "w1",
+    "config": {"version": 1, "query": "위치 워치", "groupFingerprint": "659334ded6e407caee31080380d5cc5dd2412f38618fd427d27a3479d63a02ca", "knownItemIds": ["w1", "w2"]},
+    "snapshot": {"anchorItemId": "w1", "groupFingerprint": "659334ded6e407caee31080380d5cc5dd2412f38618fd427d27a3479d63a02ca", "title": "위치 워치", "author": "시노하라 켄타", "publisher": "서울문화사", "volumes": [{"volumeNumber": 1, "providerItemId": "w1", "title": "위치 워치 1", "publicationDate": "2026-12-24", "isbn13": null}, {"volumeNumber": 2, "providerItemId": "w2", "title": "위치 워치 2", "publicationDate": null, "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "w1", "title": "위치 워치 1", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "publicationDate": "2026-12-24", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "w2", "title": "위치 워치 2", "author": "시노하라 켄타", "publisher": "서울문화사", "isbn13": null, "publicationDate": null, "itemUrl": null}],
+    "newSlots": [],
+    "events": [{"kind": "release_date_changed", "volumeNumber": 1, "previousValue": null, "currentValue": "2026-12-24"}, {"kind": "release_date_changed", "volumeNumber": 2, "previousValue": "2026-11-11", "currentValue": null}],
+    "result": {"added": 0, "updated": 2, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "dismissal_carried_over",
+   "comment": "The review dismissal is kept while the volume set is exactly the dismissed one.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"], "reviewDismissedVolumes": [1, 2, 3]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-10-05", "url": null},
+    {"id": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-10-25", "url": null},
+    {"id": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "date": "2026-12-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2", "a3"], "reviewDismissedVolumes": [1, 2, 3]},
+    "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-10-05", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "publicationDate": "2026-10-25", "isbn13": "9780000000002"}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "publicationDate": "2026-12-01", "isbn13": "9780000000003"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "publicationDate": "2026-12-01", "itemUrl": null}],
+    "newSlots": [1, 2, 3],
+    "events": [],
+    "result": {"added": 3, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "dismissal_dropped",
+   "comment": "A new volume appears: the dismissal no longer matches and is dropped.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"], "reviewDismissedVolumes": [1, 2, 3]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-10-05", "url": null},
+    {"id": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-10-25", "url": null},
+    {"id": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "date": "2026-12-01", "url": null},
+    {"id": "a4", "title": "던전밥 4", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000004", "date": "2027-01-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "a1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2", "a3", "a4"]},
+    "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-10-05", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "publicationDate": "2026-10-25", "isbn13": "9780000000002"}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "publicationDate": "2026-12-01", "isbn13": "9780000000003"}, {"volumeNumber": 4, "providerItemId": "a4", "title": "던전밥 4", "publicationDate": "2027-01-01", "isbn13": "9780000000004"}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-10-05", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-10-25", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "a3", "title": "던전밥 3", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000003", "publicationDate": "2026-12-01", "itemUrl": null}, {"volumeNumber": 4, "providerItemId": "a4", "title": "던전밥 4", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000004", "publicationDate": "2027-01-01", "itemUrl": null}],
+    "newSlots": [1, 2, 3, 4],
+    "events": [],
+    "result": {"added": 4, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "item_url_and_authors_are_stored",
+   "comment": "The source row keeps the canonical item URL; an empty author joins the only named author.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {
+    "releaseWatch": false,
+    "tracksOwnership": false,
+    "minVolume": null,
+    "maxVolume": null
+   },
+   "binding": {
+    "externalId": "q1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["q1"]}
+   },
+   "existingSources": [],
+   "existingSlots": [],
+   "products": [
+    {"id": "q1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": null, "date": "2024-01-01", "url": "https://search.daum.net/search?w=bookpage&bookId=1"},
+    {"id": "q2", "title": "던전밥 2", "author": null, "publisher": "소미미디어", "isbn13": null, "date": "2024-02-01", "url": null}
+   ],
+   "expected": {
+    "error": null,
+    "externalId": "q1",
+    "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["q1", "q2"]},
+    "snapshot": {"anchorItemId": "q1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "q1", "title": "던전밥 1", "publicationDate": "2024-01-01", "isbn13": null}, {"volumeNumber": 2, "providerItemId": "q2", "title": "던전밥 2", "publicationDate": "2024-02-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 1, "providerItemId": "q1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": null, "publicationDate": "2024-01-01", "itemUrl": "https://search.daum.net/search?w=bookpage&bookId=1"}, {"volumeNumber": 2, "providerItemId": "q2", "title": "던전밥 2", "author": null, "publisher": "소미미디어", "isbn13": null, "publicationDate": "2024-02-01", "itemUrl": null}],
+    "newSlots": [1, 2],
+    "events": [],
+    "result": {"added": 2, "updated": 0, "unchanged": 0, "ignored": 0}
+   }
+  },
+  {
+   "name": "titles_are_trimmed_in_sources",
+   "comment": "A product title with trailing blanks is stored trimmed in the volume source (so an already stored trimmed row is unchanged) while the snapshot keeps the title as Kakao sent it.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {"releaseWatch": true, "tracksOwnership": true, "minVolume": null, "maxVolume": null},
+   "binding": {"externalId": "a1", "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"]}},
+   "existingSources": [{"providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-09-01", "itemUrl": null, "volume": 1}],
+   "existingSlots": [1],
+   "products": [{"id": "a1", "title": "던전밥 1 ", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-09-01", "url": null}, {"id": "a2", "title": "던전밥 2  ", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "date": "2026-12-01", "url": null}],
+   "expected": {"error": null, "externalId": "a1", "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1", "a2"]}, "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1 ", "publicationDate": "2026-09-01", "isbn13": "9780000000001"}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2  ", "publicationDate": "2026-12-01", "isbn13": "9780000000002"}], "ignoredCount": 0, "unparsedCount": 0}, "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-09-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "a2", "title": "던전밥 2", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000002", "publicationDate": "2026-12-01", "itemUrl": null}], "newSlots": [2], "events": [{"kind": "new_volume", "volumeNumber": 2, "previousValue": null, "currentValue": "2026-12-01"}], "result": {"added": 1, "updated": 0, "unchanged": 1, "ignored": 0}}
+  },
+  {
+   "name": "raw_document_only_change",
+   "comment": "Every stored field matches the search, only the raw document (`data` / provider_data_json) differs: the volume counts as updated, the row is rewritten with the new document, and no release event is raised.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-01T00:00:00Z",
+   "gating": {"releaseWatch": true, "tracksOwnership": true, "minVolume": null, "maxVolume": null},
+   "binding": {"externalId": "a1", "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"]}},
+   "existingSources": [{"providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-09-01", "itemUrl": null, "data": {"id": "a1", "blurb": "old"}, "volume": 1}],
+   "existingSlots": [1],
+   "products": [{"id": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "date": "2026-09-01", "url": null, "raw": {"id": "a1", "blurb": "new"}}],
+   "expected": {"error": null, "externalId": "a1", "config": {"version": 1, "query": "던전밥", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "knownItemIds": ["a1"]}, "snapshot": {"anchorItemId": "a1", "groupFingerprint": "81cce16240ddff89cb3bc1e5f66914065518efd80c728257e1a65f4da8647e5e", "title": "던전밥", "author": "쿠이 료코", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "publicationDate": "2026-09-01", "isbn13": "9780000000001"}], "ignoredCount": 0, "unparsedCount": 0}, "sources": [{"volumeNumber": 1, "providerItemId": "a1", "title": "던전밥 1", "author": "쿠이 료코", "publisher": "소미미디어", "isbn13": "9780000000001", "publicationDate": "2026-09-01", "itemUrl": null, "data": {"id": "a1", "blurb": "new"}}], "newSlots": [], "events": [], "result": {"added": 0, "updated": 1, "unchanged": 0, "ignored": 0}}
+  },
+  {
+   "name": "dismissal_carried_over_two_groups",
+   "comment": "Version 2 binding with two groups: the dismissal of volumes [1, 2, 3] is kept because the merged volume set is exactly that (volume 2 is offered by both groups and counts once).",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-06T00:00:00Z",
+   "gating": {"releaseWatch": true, "tracksOwnership": true, "minVolume": null, "maxVolume": null},
+   "binding": {"externalId": "e2", "config": {"version": 2, "query": "스틸 볼 런", "groups": [{"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "knownItemIds": ["e2", "e3"]}, {"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "knownItemIds": ["d1", "d2"]}], "reviewDismissedVolumes": [1, 2, 3]}},
+   "existingSources": [{"volume": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "publicationDate": "2024-01-01", "itemUrl": null}, {"volume": 2, "providerItemId": "d2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "소미미디어", "isbn13": null, "publicationDate": "2024-02-01", "itemUrl": null}],
+   "existingSlots": [1, 2],
+   "products": [{"id": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "date": "2024-01-01", "url": null}, {"id": "d2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "소미미디어", "isbn13": null, "date": "2024-02-01", "url": null}, {"id": "e2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000032", "date": "2024-03-01", "url": null}, {"id": "e3", "title": "스틸 볼 런 3", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000033", "date": "2024-04-01", "url": null}],
+   "expected": {"error": null, "externalId": "d1", "config": {"version": 2, "query": "스틸 볼 런", "groups": [{"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "knownItemIds": ["d1", "d2"]}, {"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "knownItemIds": ["e2", "e3"]}], "reviewDismissedVolumes": [1, 2, 3]}, "snapshot": {"groups": [{"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "title": "스틸 볼 런", "author": "아라키", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "publicationDate": "2024-01-01", "isbn13": "9780000000031"}, {"volumeNumber": 2, "providerItemId": "d2", "title": "스틸 볼 런 2", "publicationDate": "2024-02-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0}, {"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "title": "스틸 볼 런", "author": "아라키", "publisher": "S코믹스", "volumes": [{"volumeNumber": 2, "providerItemId": "e2", "title": "스틸 볼 런 2", "publicationDate": "2024-03-01", "isbn13": "9780000000032"}, {"volumeNumber": 3, "providerItemId": "e3", "title": "스틸 볼 런 3", "publicationDate": "2024-04-01", "isbn13": "9780000000033"}], "ignoredCount": 0, "unparsedCount": 0}]}, "sources": [{"volumeNumber": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "publicationDate": "2024-01-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "e2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000032", "publicationDate": "2024-03-01", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "e3", "title": "스틸 볼 런 3", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000033", "publicationDate": "2024-04-01", "itemUrl": null}], "newSlots": [3], "events": [{"kind": "release_date_changed", "volumeNumber": 2, "previousValue": "2024-02-01", "currentValue": "2024-03-01"}, {"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2024-04-01"}], "result": {"added": 1, "updated": 1, "unchanged": 1, "ignored": 1}}
+  },
+  {
+   "name": "dismissal_dropped_two_groups",
+   "comment": "Version 2 binding with two groups: the stored dismissal [1, 2] no longer equals the merged volume set [1, 2, 3], so it is dropped from the new config.",
+   "checkedAt": "2026-10-09T00:00:00Z",
+   "previousCheckedAt": "2026-10-06T00:00:00Z",
+   "gating": {"releaseWatch": true, "tracksOwnership": true, "minVolume": null, "maxVolume": null},
+   "binding": {"externalId": "e2", "config": {"version": 2, "query": "스틸 볼 런", "groups": [{"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "knownItemIds": ["e2", "e3"]}, {"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "knownItemIds": ["d1", "d2"]}], "reviewDismissedVolumes": [1, 2]}},
+   "existingSources": [{"volume": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "publicationDate": "2024-01-01", "itemUrl": null}, {"volume": 2, "providerItemId": "d2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "소미미디어", "isbn13": null, "publicationDate": "2024-02-01", "itemUrl": null}],
+   "existingSlots": [1, 2],
+   "products": [{"id": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "date": "2024-01-01", "url": null}, {"id": "d2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "소미미디어", "isbn13": null, "date": "2024-02-01", "url": null}, {"id": "e2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000032", "date": "2024-03-01", "url": null}, {"id": "e3", "title": "스틸 볼 런 3", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000033", "date": "2024-04-01", "url": null}],
+   "expected": {"error": null, "externalId": "d1", "config": {"version": 2, "query": "스틸 볼 런", "groups": [{"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "knownItemIds": ["d1", "d2"]}, {"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "knownItemIds": ["e2", "e3"]}]}, "snapshot": {"groups": [{"anchorItemId": "d1", "groupFingerprint": "61215e0c58d44fa4842583b24930c503c0916182bb5b43ed5d588d64d16255fb", "title": "스틸 볼 런", "author": "아라키", "publisher": "소미미디어", "volumes": [{"volumeNumber": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "publicationDate": "2024-01-01", "isbn13": "9780000000031"}, {"volumeNumber": 2, "providerItemId": "d2", "title": "스틸 볼 런 2", "publicationDate": "2024-02-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0}, {"anchorItemId": "e2", "groupFingerprint": "5975a2a125185fa33ccf9976f0569bffe585e7d2c55074c4f3e1a15eac2f8bad", "title": "스틸 볼 런", "author": "아라키", "publisher": "S코믹스", "volumes": [{"volumeNumber": 2, "providerItemId": "e2", "title": "스틸 볼 런 2", "publicationDate": "2024-03-01", "isbn13": "9780000000032"}, {"volumeNumber": 3, "providerItemId": "e3", "title": "스틸 볼 런 3", "publicationDate": "2024-04-01", "isbn13": "9780000000033"}], "ignoredCount": 0, "unparsedCount": 0}]}, "sources": [{"volumeNumber": 1, "providerItemId": "d1", "title": "스틸 볼 런 1", "author": "아라키", "publisher": "소미미디어", "isbn13": "9780000000031", "publicationDate": "2024-01-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "e2", "title": "스틸 볼 런 2", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000032", "publicationDate": "2024-03-01", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "e3", "title": "스틸 볼 런 3", "author": "아라키", "publisher": "S코믹스", "isbn13": "9780000000033", "publicationDate": "2024-04-01", "itemUrl": null}], "newSlots": [3], "events": [{"kind": "release_date_changed", "volumeNumber": 2, "previousValue": "2024-02-01", "currentValue": "2024-03-01"}, {"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2024-04-01"}], "result": {"added": 1, "updated": 1, "unchanged": 1, "ignored": 1}}
+  }
+ ]
+}

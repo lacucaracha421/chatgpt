@@ -50,3 +50,8 @@ Kakao's real daily quota; the number of MangaDex-bound works and production page
 ## 7. Related: the release calendar
 
 The game/movie/anime release calendar (IGDB, TMDB) is also PC-owned today: `release_calendar.rs` refreshes it at most once per 24 h (`REFRESH_INTERVAL_HOURS`) from the same PC hook and publishes a snapshot to `home_upcoming.py`, which never fetches by itself. The server already holds the TMDB/IGDB keys (`providers.conf`, slice 2 relay in `work_providers.py`), so moving it is the backlog's last SERVER-INDEP item and can reuse this worker.
+
+## 8. Review notes (2026-10-09) that gate slice 2
+
+- The PC does NOT yet recover from a second writer: a `revisionConflict` on queued `bindProvider`, `upsertVolumeSource` or `upsertVolume` marks the outbox row `blocked` and stops all PC Collections sync (`collection_authority.rs` ~3426-3432); only `applyProviderSnapshot` + `providerSnapshotStale` is adopted and retried. Before the switch is turned on, slice 2 must make these provider commands adopt the current entity, drop the row and refetch once (like `providerSnapshotStale`), and route the overlay's per-work Kakao refresh to the server or make it conflict-safe.
+- Slice 1 was changed after review: content de-dup keys on the latest event per (work, provider, kind, volume) so real flips survive; no snapshot/bind write when nothing changed (no daily churn); the feature is advertised only with the switch on, a server Kakao key and a live worker; previous-check time is `max(state, binding.last_synced_at)`; faster wake while works remain due.
