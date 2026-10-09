@@ -12,6 +12,8 @@ import {koreanGenres} from '../src/collections/genreNames';
 import {CollectionList} from '../src/collections/CollectionList';
 import {CaseFacts} from '../src/collections/case/CollectionCase';
 import {moreWorkFacts, workFacts} from '../src/collections/work/workFacts';
+import {withProductCodeCopy} from '../src/collections/work/ProductCodeCopy';
+import {writeClipboard} from './ViewerInfo';
 import {latestKoreanRelease} from '../src/collections/releaseCaption';
 import {ShelfTile, ShelfViewSheet, useShelfViews} from './CollectionShelf';
 import {useShelfPutDown} from '../src/collections/useShelfPutDown';
@@ -41,6 +43,9 @@ import {SparklesIcon as SparklesSolidIcon, StarIcon as StarSolid} from '@heroico
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {Overlay} from './Overlay';
+import {KakaoReviewOverlay, useKakaoReviewQueue} from './KakaoReviewOverlay';
+import {kakaoReviewSegment} from '../src/collections/kakaoReviewModel';
+import {LinkIcon} from '@heroicons/react/24/outline';
 import {SegmentedControl} from '../src/shared/ui/SegmentedControl';
 import {ReleaseCalendar} from './ReleaseCalendar';
 import {CreateWorkButton,SearchButton,TopBar,TopBarSearch} from './TopBar';
@@ -420,6 +425,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [bindHost,setBindHost]=useState<HTMLDivElement|null>(null);
   // 신간: unread counts for the entry badge and manga card badges, and the 신간 screen level (Collections tab only).
   const [releases,setReleases]=useState<ReleaseCounts>(NO_RELEASES),[inboxOpen,setInboxOpen]=useState(false);
+  const [kakaoReviewOpen,setKakaoReviewOpen]=useState(false);
   // The release list revision (moves when the PC publishes events or anything is confirmed). The
   // 신간 screen's last read lives in the shared release store (Home reads the same shelf).
   const [releaseListRevision,setReleaseListRevision]=useState<number|null>(null);
@@ -438,7 +444,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
   const [calendarReply,setCalendarReply]=useState<ReleaseCalendarReply|null>(null);
-  const overlayOpen=showcaseAll||inboxOpen||calendarOpen;
+  const overlayOpen=showcaseAll||inboxOpen||calendarOpen||kakaoReviewOpen;
 
   // Typing searches after a short pause; Enter applies at once.
   useEffect(()=>{const value=query.trim();if(value===search)return;const timer=window.setTimeout(()=>setSearch(value),350);return()=>clearTimeout(timer);},[query,search]);
@@ -469,6 +475,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
   // An accepted personal edit changes what the server serves; re-read both views.
   const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
+  const kakaoQueue=useKakaoReviewQueue(live&&kakaoReviewOpen,refresh);
+  const kakaoWaiting=new Set(kakaoQueue.requests.filter(request=>request.state==='pending').map(request=>request.collectionId));
+  const kakaoUnlinked=(kakaoReviewOpen?kakaoQueue.items:main.items).filter(work=>{const review=edits.authority.work(work).kakaoReview;return review&&kakaoReviewSegment(review)==='unlinked'&&!kakaoWaiting.has(work.id);}).length;
+  useEffect(()=>{kakaoQueue.items.forEach(work=>edits.authority.reconcile(work));},[kakaoQueue.items,edits.authority.rows]);
   const [workForm,setWorkForm]=useState<WorkForm|null>(null);
   const [avInboxOpen,setAvInboxOpen]=useState(false);
   // 작품 관리 (the detail's ⋯) and the 휴지통 shortcut.
@@ -483,7 +493,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // Retire accepted overlays only against the raw server read, never the optimistic display.
   useEffect(()=>{main.items.forEach(work=>edits.authority.reconcile(work));if(detail&&detail.revision!=='local-create')edits.authority.reconcile(detail.item,'detail');},[main.items,detail,edits.authority.identity?.libraryId,edits.authority.identity?.epoch,edits.authority.rows]);
 
-  const detailKey=JSON.stringify([selected,detailRefresh]);
+  const reviewSupported=edits.authority.features.includes('kakaoReview');
+  const detailKey=JSON.stringify([selected,detailRefresh,reviewSupported]);
   const committedDetail=useRef('');
   useEffect(()=>{
     // A step to the previous/next work keeps the shown work (inert) until the next one is ready.
@@ -501,7 +512,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     }
     const controller=new AbortController();setDetailError('');
     const readStartedAt=Date.now();
-    void api<{revision:string;item:CollectionDetail;entityRevision?:number}>(`/v1/collections/${encodeURIComponent(selected)}`,controller.signal).then(async result=>{
+    void api<{revision:string;item:CollectionDetail;entityRevision?:number}>(`/v1/collections/${encodeURIComponent(selected)}${reviewSupported?'?kakaoReview=true':''}`,controller.signal).then(async result=>{
       result={...result,item:(await loadedPerformerNames([result.item]))[0]!};
       if(controller.signal.aborted)return;
       committedDetail.current=detailKey;setDetail({...result,readAt:readStartedAt});
@@ -552,8 +563,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     if(inboxOpen){closeInbox();return true;}
     if(showcaseAll){setShowcaseAll(false);return true;}
     if(calendarOpen){setCalendarOpen(false);return true;}
+    if(kakaoReviewOpen){setKakaoReviewOpen(false);return true;}
     return false;
-  },[workForm,manage,coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,closeWork,closePerformer,closeInbox]);
+  },[workForm,manage,coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,kakaoReviewOpen,closeWork,closePerformer,closeInbox]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
   useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet&&!manage){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet,manage]);
   useEffect(()=>{if(!active){setSheet(null);}},[active]);
@@ -610,6 +622,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}>{showcaseAll?<SparklesSolidIcon aria-hidden="true"/>:<SparklesIcon aria-hidden="true"/>}<span className="collection-shortcuts__label">쇼케이스</span></Button>
     {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
     {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
+    {tab==='manga'&&kakaoUnlinked>0&&<Button variant="quiet" size="sm" aria-label={`연결 점검 ${kakaoUnlinked}`} onClick={()=>setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true"/><span className="collection-shortcuts__label">연결 점검</span><span className="numeric collection-shortcuts__count">{kakaoUnlinked}</span></Button>}
   </div>;
   const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true"/><Button variant="quiet" size="sm" aria-label="정렬" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="내 별점" aria-pressed={filters.rating!=='all'} onClick={()=>setSheet('rating')}><StarIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="보기" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/></Button></>},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
@@ -674,7 +687,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <AuthorityQueue authority={edits.authority} workId={work.id} item={work} onForm={setWorkForm} onAvEdit={row=>{setAvRetry(row);setManage('av');}}/>
     <PersonalRecord item={work} edits={edits} onSheet={setPersonalSheet}/>
     <CollectionPersonal item={work} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
-    <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...workFacts(work,work.av??null),...moreWorkFacts(work,work.av??null,work.series?{status:work.series.status}:null)]}/></section>
+    <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...withProductCodeCopy(workFacts(work,work.av??null),work.av?.productCode,writeClipboard),...moreWorkFacts(work,work.av??null,work.series?{status:work.series.status}:null)]}/></section>
     {work.type==='movie'&&work.overview?.trim()&&<section className="work-info" aria-label="개요"><SectionLabel title="개요"/><p className={`collection-overview ${overview?'':'is-clamped'}`}>{work.overview}</p><Button variant="ghost" className="collection-overview-toggle" aria-expanded={overview} onClick={()=>setOverview(open=>!open)}>{overview?'접기':'더 보기'}</Button></section>}
     {work.type==='movie'&&work.series&&<SeriesDetails item={work} revision={detail?.revision??''} active={active&&!paused}/>}
     {work.type==='movie'&&work.film&&<FilmDetails key={work.id} film={work.film}/>}
@@ -749,6 +762,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <Overlay open={calendarOpen} covered={!live||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>setCalendarOpen(false)}>
       {calendarOpen&&(tab==='game'||tab==='movie')&&<ReleaseCalendar embedded onSnapshot={setCalendarReply} initialKind={tab} onClose={()=>setCalendarOpen(false)}/>}
     </Overlay>
+    <KakaoReviewOverlay open={kakaoReviewOpen} active={live} onClose={()=>setKakaoReviewOpen(false)} queue={kakaoQueue} authority={edits.authority}
+      cover={(work,revision)=><Artwork item={work} id={collectionCover(work)} revision={revision} active={live&&kakaoReviewOpen} label={work.name}/>}/>
     <Overlay open={inboxOpen} covered={!live||!!performer} title="신간" count={releases.unread} onClose={closeInbox}>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}

@@ -22,6 +22,20 @@ function server(command: (body: WorkCommand) => unknown = () => ({}), status: un
 const sent = () => mocks.api.mock.calls.filter(([path]) => path === COMMAND_PATH).map(([, , body]) => body);
 beforeEach(() => { localStorage.clear(); setOutboxConnection(connection); mocks.api.mockReset(); vi.restoreAllMocks(); });
 describe('durable Collection commands', () => {
+  it('keeps connection review intent until replica readback, supports FIFO undo and ignores a changed volume set', async () => {
+    const item: CollectionDetail = {id:'m',name:'Manga',type:'manga',showcase:false,volumes:[],artworks:[],kakaoReview:{collectionId:'m',query:'만화',querySource:'name',bound:true,volumes:[1,3],highestOwnedVolume:3,ownedCount:0,partialDismissed:false,groupFingerprints:[],minVolume:null,maxVolume:null,hideConnectionPrompt:false}};
+    enqueueCommand(identity,{commandType:'setKakaoPartialDismissed',workId:'m',dismissed:true,expectedVolumes:[1,3]});
+    server(); await flushCommands();
+    const accepted=readCommands();
+    expect(confirmedWork(item,accepted).kakaoReview!.partialDismissed).toBe(true);
+    reconcileCommands(identity,item); expect(readCommands()).toHaveLength(1);
+    const changed={...item,kakaoReview:{...item.kakaoReview!,volumes:[1,2,3]}};
+    expect(confirmedWork(changed,accepted).kakaoReview!.partialDismissed).toBe(false);
+    enqueueCommand(identity,{commandType:'setKakaoPartialDismissed',workId:'m',dismissed:false,expectedVolumes:[1,3]});
+    server(); await flushCommands();
+    expect(optimisticWork(item,readCommands()).kakaoReview!.partialDismissed).toBe(false);
+    reconcileCommands(identity,item); expect(readCommands()).toEqual([]);
+  });
   const av: CollectionDetail = {id:'av',name:'AV',type:'av',showcase:false,volumes:[],artworks:[],av:{productCode:'OLD',genres:['old'],people:[{id:'p1',name:'인물',role:'performer',order:0,creditName:null}]}};
   const details: WorkCommand = {commandType:'setAvDetails',workId:av.id,changes:{productCode:'NEW',genres:['new']},expected:{productCode:'OLD',genres:['old']}};
   const credits: WorkCommand = {commandType:'setAvCredits',workId:av.id,credits:[{personId:'p1',role:'director',order:0,creditName:'표기'}],people:[],expectedRevision:4};

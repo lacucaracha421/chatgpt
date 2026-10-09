@@ -318,10 +318,97 @@ class KakaoSearch(Base):
         cases = {"원피스 105": (105, "원피스"), "원피스 제 3 권": (3, "원피스"), "Vol. 7": None,
                  "Dungeon Vol. 7": (7, "Dungeon"), "던전밥 12 (완결)": (12, "던전밥"),
                  "던전밥 3 한정판": (3, "던전밥"), "던전밥 3 (초판 한정판)": (3, "던전밥"),
-                 "던전밥 세트 1": None, "던전밥 1.5": None, "던전밥": None, "던전밥 0": None,
+                 "던전밥 세트 1": (1, "던전밥 세트"),  # "세트" inside a title is not a set product
+                 "던전밥 1.5": None, "던전밥": None, "던전밥 0": None,
                  "던전밥-4": (4, "던전밥"), "Novel 1": None}
         for title, expected in cases.items():
             self.assertEqual(bindings.parse_volume_product(title), expected, title)
+
+    def test_product_titles_match_the_shared_fixture_the_pc_also_reads(self):
+        fixture = json.loads((PC_FIXTURES / "product_titles.json").read_text(encoding="utf-8"))
+        for case in fixture["cases"]:
+            expected = None if case["kind"] == "excluded" else (case["volume"], case["base"])
+            self.assertEqual(bindings.classify_product(case["title"]), expected, case["title"])
+
+    def test_numbered_parsing_ignores_unnumbered_products(self):
+        self.assertIsNone(bindings.parse_volume_product("마법소녀를 (애장판)"))
+        self.assertEqual(bindings.parse_volume_product("마법소녀를 2 (애장판)"), (2, "마법소녀를"))
+
+    def test_excluded_words_are_whole_words(self):
+        for title in ("오타쿠 소설가의 일상 1", "가이드 걸 1", "우리들의 세트 2", "달력소녀 3", "박스 안의 고양이 4"):
+            self.assertIsNotNone(bindings.parse_volume_product(title), title)
+        for title in ("던전밥 1-5권 세트", "던전밥 박스 세트", "던전밥 공식 가이드북", "던전밥 소설판"):
+            self.assertIsNone(bindings.classify_product(title), title)
+
+    def test_groups_match_the_shared_fixture_the_pc_also_reads(self):
+        fixture = json.loads((PC_FIXTURES / "kakao_grouping.json").read_text(encoding="utf-8"))
+        items = []
+        for product in fixture["products"]:
+            number, base = bindings.classify_product(product["title"])
+            items.append({"itemId": product["id"], "title": product["title"], "author": product["author"],
+                          "publisher": product["publisher"], "isbn13": product["isbn13"],
+                          "publicationDate": product["date"], "volumeNumber": number, "baseTitle": base,
+                          "thumbnail": None})
+        groups = bindings.group_kakao(items)
+        self.assertEqual(
+            [{"title": g["title"], "author": g["author"], "publisher": g["publisher"],
+              "fingerprint": g["groupFingerprint"],
+              "volumes": [[v["volumeNumber"], v["providerItemId"]] for v in g["volumes"]],
+              "ignored": g["ignoredCount"]} for g in groups],
+            fixture["groups"])
+
+    def test_empty_author_and_unnumbered_rules(self):
+        def item(item_id, title, author="작가", publisher="출판", isbn13=None, date=None):
+            number, base = bindings.classify_product(title)
+            return {"itemId": item_id, "title": title, "author": author, "publisher": publisher, "isbn13": isbn13,
+                    "publicationDate": date, "volumeNumber": number, "baseTitle": base, "thumbnail": None}
+        [group] = bindings.group_kakao([item("a", "던전밥 1", "쿠이 료코"), item("b", "던전밥 2", None),
+                                         item("c", "던전밥 3", "")])
+        self.assertEqual((group["author"], group["volumeCount"]), ("쿠이 료코", 3))
+        # Two named authors: the author-less product cannot choose.
+        self.assertEqual(len(bindings.group_kakao([item("a", "던전밥 1", "A"), item("b", "던전밥 1", "B"),
+                                                    item("c", "던전밥 2", None)])), 3)
+        # A one-shot is a one-volume series; an unnumbered product never replaces a numbered volume 1.
+        [one] = bindings.group_kakao([item("one", "별의 아이")])
+        self.assertEqual((one["firstVolume"], one["lastVolume"], one["title"]), (1, 1, "별의 아이"))
+        [group] = bindings.group_kakao([item("plain", "마법소녀를 (일반판)", isbn13="9781", date="2030-01-01"),
+                                         item("numbered", "마법소녀를 1")])
+        self.assertEqual([v["providerItemId"] for v in group["volumes"]], ["numbered"])
+        self.assertEqual(group["ignoredCount"], 1)
+        # A different unnumbered title is its own series; imprints stay apart.
+        self.assertEqual(len(bindings.group_kakao([item("v", "마법소녀를 1"), item("x", "마법소녀를 공식 팬 이야기")])), 2)
+        self.assertEqual(len(bindings.group_kakao([item("a", "던전밥 1", publisher="소미미디어"),
+                                                    item("b", "던전밥 2", publisher="S코믹스")])), 2)
+        self.assertEqual(len(bindings.group_kakao([item("a", "던전밥 1", publisher="에이템포"),
+                                                    item("b", "던전밥 2", publisher="에이템포미디어")])), 1)
+
+    def test_search_counts_excluded_products_and_retries_without_punctuation(self):
+        queries = []
+
+        def handler(url, params, headers):
+            queries.append(params["query"])
+            docs = [kakao_book(1, title="공주님 고문의 시간입니다")]
+            if params["query"] != "공주님 고문 의 시간입니다":
+                docs = [dict(kakao_book(2, title="공주님 고문의 시간입니다 박스 세트"))]
+            else:
+                docs.append(dict(kakao_book(3, title="공주님 고문의 시간입니다 공식 가이드북")))
+            return json.dumps({"meta": {"is_end": True}, "documents": docs}).encode()
+        self.http.handlers["dapi.kakao.com"] = handler
+        reply = self.ok(self.client.get(PREFIX + "/search/kakao", params={"query": "공주님, '고문'의 시간입니다"},
+                                        headers=self.auth))
+        self.assertEqual(queries, ["공주님, '고문'의 시간입니다", "공주님 고문 의 시간입니다"])
+        [group] = reply["items"]
+        self.assertEqual((group["volumeCount"], group["unparsedCount"]), (1, 1))
+        # A first search that finds something, or a query without punctuation, is not repeated.
+        queries.clear()
+        self.http.handlers["dapi.kakao.com"] = lambda url, params, headers: (
+            queries.append(params["query"]) or json.dumps({"meta": {"is_end": True}, "documents": []}).encode())
+        self.ok(self.client.get(PREFIX + "/search/kakao", params={"query": "던전밥"}, headers=self.auth))
+        self.assertEqual(queries, ["던전밥"])
+
+    def test_normalize_search_query_matches_the_pc(self):
+        self.assertEqual(bindings.normalize_search_query("공주님, '고문'의 시간입니다"), "공주님 고문 의 시간입니다")
+        self.assertEqual(bindings.normalize_search_query("A & B ~ C??"), "A B C")
 
     def test_isbn_preference(self):
         item = bindings.kakao_item(kakao_book(1, isbn="8954677533 9788954677530"))
@@ -396,6 +483,54 @@ class KakaoSearch(Base):
         deadlines = {deadline for _, deadline in self.http.timeouts}
         self.assertEqual(len(deadlines), 1)  # every page shares the crawl deadline
         self.assertTrue(all(timeout <= 0.1 for timeout, _ in self.http.timeouts))
+
+    def test_retry_shares_deadline_and_requests_use_remaining_budget(self):
+        clock = [100.0]
+        calls = []
+
+        def fetch(url, params, headers, max_bytes, timeout, deadline=None):
+            calls.append((dict(params)["query"], timeout, deadline))
+            if len(calls) == 1:
+                clock[0] += 55.0
+                documents = []
+            else:
+                clock[0] += 5.0
+                documents = [kakao_book(1)]
+            return json.dumps({"meta": {"is_end": True}, "documents": documents}).encode()
+
+        with mock.patch.object(bindings.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(bindings, "http_get", side_effect=fetch), \
+                mock.patch.object(bindings.gate, "take_kakao_page", return_value=0):
+            with self.assertRaises(bindings.Upstream) as caught:
+                bindings.search_kakao_items("key", "Series!")
+        self.assertEqual(caught.exception.kind, "timeout")
+        self.assertEqual(calls, [("Series!", bindings.KAKAO_TIMEOUT, 160.0), ("Series", 5.0, 160.0)])
+
+        calls.clear()
+        clock[0] = 100.0
+
+        def expired(*args, **kwargs):
+            calls.append(1)
+            clock[0] += 60.0
+            return b'{"meta":{"is_end":true},"documents":[]}'
+
+        with mock.patch.object(bindings.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(bindings, "http_get", side_effect=expired), \
+                mock.patch.object(bindings.gate, "take_kakao_page", return_value=0):
+            with self.assertRaises(bindings.Upstream) as caught:
+                bindings.search_kakao_items("key", "Series!")
+        self.assertEqual(caught.exception.kind, "timeout")
+        self.assertEqual(len(calls), 1)
+
+    def test_series_notes_are_preserved_in_titles_and_group_keys(self):
+        for note in ("1부", "2부", "part one", "외전", "시즌", "번외", "단편", "리부트", "신장판", "unknown 한글"):
+            with self.subTest(note=note):
+                title = f"Series ({note})"
+                self.assertEqual(bindings.classify_product(title), (0, title))
+                self.assertNotEqual(bindings._title_key(title), bindings._title_key("Series"))
+        self.assertNotEqual(bindings._title_key("Series (1부)"), bindings._title_key("Series (2부)"))
+        for note in ("Witch Watch", "ウィッチウォッチ"):
+            self.assertEqual(bindings._title_key(f"Series ({note})"), bindings._title_key("Series"))
 
     def test_dates_must_be_rfc3339(self):
         for value in ("2026-09-01", "2026-09-01T00:00:00", "2026-09-01T00:00:00+0900", "２０２６-09-01T00:00:00Z"):
@@ -575,6 +710,18 @@ class BindRequests(Base):
         listing = self.client.get(PREFIX + "/requests", headers=self.auth)
         self.assertEqual(self.client.get(PREFIX + "/requests", headers={**self.auth,
                                          "If-None-Match": listing.headers["ETag"]}).status_code, 304)
+
+    def test_pending_request_pages_do_not_lose_older_requests(self):
+        ids = [self.ok(self.mangadex(collection=c))["request"]["requestId"] for c in ("m1", "m2")]
+        ids.append(self.ok(self.kakao())["request"]["requestId"])
+        first = self.ok(self.client.get(PREFIX + "/requests", params={"state": "pending", "paged": "true", "limit": 2}, headers=self.auth))
+        self.assertEqual([r["requestId"] for r in first["items"]], ids[::-1][:2])
+        self.assertEqual(first["nextCursor"], ids[1])
+        rest = self.ok(self.client.get(PREFIX + "/requests", params={"state": "pending", "paged": "true", "limit": 2, "before": first["nextCursor"]}, headers=self.auth))
+        self.assertEqual([r["requestId"] for r in rest["items"]], ids[:1])
+        self.assertIsNone(rest["nextCursor"])
+        legacy = self.ok(self.client.get(PREFIX + "/requests", headers=self.auth))
+        self.assertNotIn("nextCursor", legacy)
 
     def test_state_transitions_via_publisher_report(self):
         applied = self.ok(self.mangadex())["request"]["requestId"]

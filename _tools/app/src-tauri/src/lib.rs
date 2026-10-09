@@ -422,6 +422,8 @@ pub fn run() {
             commands::set_collection_showcase,
             commands::set_collection_showcase_order,
             commands::set_collection_volume_range,
+            commands::list_kakao_reviews,
+            commands::set_kakao_partial_dismissed,
             commands::get_asset_classifications,
             commands::list_assets,
             commands::refresh_assets,

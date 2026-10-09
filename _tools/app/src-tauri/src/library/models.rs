@@ -1081,7 +1081,12 @@ pub struct AladinSeriesCandidate {
     pub author: Option<String>,
     pub publisher: Option<String>,
     pub volumes: Vec<AladinVolumeCandidate>,
+    /// Products of this series that were a duplicate of a volume already listed.
     pub ignored_count: u64,
+    /// Products of the whole search left out because they are not a volume (sets, guides,
+    /// ranges, unreadable numbers). The same count on every group of one search.
+    #[serde(default)]
+    pub unparsed_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

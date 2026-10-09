@@ -411,32 +411,110 @@ def parse_mangadex(body):
     return [item for item in map(mangadex_item, envelope["data"][:MANGADEX_LIMIT]) if item is not None]
 
 
-# --- Kakao (mirrors library/kakao_books.rs, aladin.rs, aladin_flow.rs) ------------------
+# --- Kakao (mirrors library/kakao_books.rs, aladin.rs, aladin_flow.rs; keep them in step) ---
 
 _RFC3339 = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})")
 _DECIMAL = re.compile(r"\d+\.\d+")
+_EDITION_WORDS = ("초회한정판|초회판|초판|특별한정판|한정판|특별판|애장판|일반판|특장판|리커버판|리커버|완전판|신장판"
+                  "|개정증보판|개정판|통상판|소장판|보급판")
+# A trailing parenthesised note that is an edition marker, not an alt title.
+_EDITION_NOTE_STEMS = ("한정|특전|특별|초회|초판|리커버|애장|완전판|신장|개정|통상|일반판|특장|소장판|보급판"
+                       "|에디션|edition|special|limited")
+_EDITION_NOTE = re.compile("(?:" + _EDITION_NOTE_STEMS + ")", re.IGNORECASE)
+_SERIES_NOTE = re.compile(
+    r"\d+\s*부|외전|시즌|번외|단편|리부트|신장|part|season|side story|extra|reboot|new edition"
+    r"|外伝|番外|短編|新装|シーズン|リブート", re.IGNORECASE)
 _EDITION_SUFFIX = re.compile(
-    r"\s*(?:[-–—]\s*)?(?:\([^)]*(?:특별판|한정판|초판)[^)]*\)|\[[^\]]*(?:특별판|한정판|초판)[^\]]*\]"
-    r"|(?:초판\s*)?(?:한정판|특별판))\s*\Z", re.IGNORECASE)
+    r"\s*(?:[-–—]\s*)?(?:\([^)]*(?:" + _EDITION_NOTE_STEMS + r")[^)]*\)|\[[^\]]*(?:" + _EDITION_NOTE_STEMS
+    + r")[^\]]*\]|(?:(?:초회|초판)\s*)?(?:" + _EDITION_WORDS + r"))\s*\Z", re.IGNORECASE)
 _COMPLETION_SUFFIX = re.compile(r"\s*[\(\[]\s*완결\s*[\)\]]\s*\Z")
+_PART_MARK = re.compile(r"[\(\[]\s*(?:상|중|하)(?:권)?\s*[\)\]]\s*\Z")
+_RANGE = re.compile(r"\d+\s*[~∼～〜]\s*\d+|\d+\s*권?\s*[-–—]\s*\d+\s*권|\d+\s*[-–—]\s*\d+\s*\Z|전\s*\d+\s*권")
 _VOLUME_PATTERNS = (
     re.compile(r"(?:\s|^)(?:제\s*)?(\d+)\s*권\s*\Z", re.IGNORECASE),
     re.compile(r"(?:\s|^)(?:vol(?:ume)?\.?)\s*(\d+)\s*\Z", re.IGNORECASE),
     re.compile(r"(?:\s|-)(\d+)\s*\Z"),
 )
-_EXCLUDED_TERMS = ("세트", "박스", "가이드", "화집", "소설", "캘린더", "달력", "아트북",
-                   "guide", "novel", "calendar", "art book", "box set")
+# Whole-token exclusions (never substrings: "소설가의" is not "소설"); see aladin.rs.
+_EXCLUDED_TOKENS = frozenset((
+    "소설", "소설판", "소설책", "노벨", "라이트노벨", "화집", "화보집", "설정집", "팬북", "아트북",
+    "일러스트북", "일러스트집", "가이드북", "셀렉션", "캘린더", "달력", "박스세트", "guide",
+    "guidebook", "novel", "novels", "calendar", "artbook", "boxset"))
+_EXCLUDED_SUFFIXES = ("가이드북", "설정집", "일러스트북", "일러스트집", "아트북", "화보집", "캘린더", "박스세트", "풀세트")
+_SET_PRECEDERS = frozenset(("박스", "전권", "완결", "합본", "풀", "스페셜", "특별", "한정", "한정판"))
+_BOX_FOLLOWERS = frozenset(("세트", "에디션", "패키지", "한정판", "특별판"))
+_GUIDE_PRECEDERS = frozenset(("공식", "공략", "완전", "비주얼", "캐릭터", "오피셜", "팬", "퍼펙트"))
 
 
-def parse_volume_product(title):
-    """``(volume_number, base_title)`` or None - ``aladin.rs parse_volume_product``."""
-    lower = "".join(ch.lower() if ch.isascii() else ch for ch in title)
-    if any(term in lower for term in _EXCLUDED_TERMS) or _DECIMAL.search(title):
+def _tokens(text):
+    """Runs of letters and digits, lowercased (``aladin.rs is_excluded_product``)."""
+    tokens, current = [], []
+    for ch in text.lower():
+        if ch.isalnum():
+            current.append(ch)
+        elif current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _is_count_token(token):
+    digits = token[1:] if token.startswith("전") else token
+    number = digits[:-1]
+    return digits.endswith("권") and bool(number) and number.isascii() and number.isdigit()
+
+
+def _is_excluded_product(title):
+    tokens = _tokens(title)
+    last = len(tokens) - 1
+    for index, token in enumerate(tokens):
+        previous = tokens[index - 1] if index > 0 else None
+        following = tokens[index + 1] if index < last else None
+        if token in _EXCLUDED_TOKENS or any(token.endswith(suffix) for suffix in _EXCLUDED_SUFFIXES):
+            return True
+        # A set marker only ends the title or follows a count / box word: "우리들의 세트 2" is a series.
+        if token == "세트" and (index == last or (previous is not None and (
+                previous in _SET_PRECEDERS or _is_count_token(previous)))):
+            return True
+        if token == "박스" and (index == last or following in _BOX_FOLLOWERS):
+            return True
+        if token == "가이드" and (index == last or (previous is not None and previous in _GUIDE_PRECEDERS)):
+            return True
+        if (token == "box" and following == "set") or (token == "art" and following == "book"):
+            return True
+        if len(token) > 2 and token.endswith("세트"):
+            return True
+    return False
+
+
+def _strip_trailing_markers(title):
+    """Drops trailing completion and edition markers ("24(완결)", "3권 특별판", "(애장판)")."""
+    current = title.strip()
+    for _ in range(4):
+        stripped = _COMPLETION_SUFFIX.sub("", current, count=1)
+        note = _EDITION_SUFFIX.search(stripped)
+        if note is not None and not _SERIES_NOTE.search(note[0]):
+            stripped = stripped[:note.start()]
+        stripped = stripped.rstrip()
+        if stripped == current:
+            break
+        current = stripped
+    return current
+
+
+def classify_product(title):
+    """``(volume_number, base_title)``; volume 0 is an unnumbered product (grouping makes it
+    volume 1); None when the product is not a volume - ``aladin.rs classify_product``."""
+    if _DECIMAL.search(title):
         return None
-    title = _COMPLETION_SUFFIX.sub("", title, count=1)
-    volume_title = _EDITION_SUFFIX.sub("", title, count=1)
+    cleaned = _strip_trailing_markers(title)
+    if (not cleaned or _RANGE.search(cleaned) or _PART_MARK.search(cleaned)
+            or _is_excluded_product(cleaned)):
+        return None
     for pattern in _VOLUME_PATTERNS:
-        match = pattern.search(volume_title)
+        match = pattern.search(cleaned)
         if match is None:
             continue
         digits = match.group(1)
@@ -445,9 +523,20 @@ def parse_volume_product(title):
         number = int(digits)
         if not 1 <= number <= 999:
             return None
-        base = volume_title[:match.start()].rstrip(" -.").strip()
+        base = cleaned[:match.start()].rstrip(" -.").strip()
         return (number, base) if base else None
-    return None
+    return (0, cleaned)
+
+
+def parse_volume_product(title):
+    """``(volume_number, base_title)`` of a numbered volume, else None."""
+    parsed = classify_product(title)
+    return parsed if parsed is not None and parsed[0] > 0 else None
+
+
+def normalize_search_query(query):
+    """Punctuation turned into spaces - ``aladin.rs normalize_search_query``."""
+    return " ".join("".join(ch if ch.isalnum() or ch.isspace() else " " for ch in query).split())
 
 
 def _form_encode(value):
@@ -493,7 +582,7 @@ def kakao_item(raw):
     if (any(not isinstance(value, str) for value in fields.values()) or not isinstance(authors, list)
             or any(not isinstance(a, str) for a in authors)):
         raise Upstream("invalid")
-    parsed = parse_volume_product(fields["title"])
+    parsed = classify_product(fields["title"])
     if parsed is None:
         return None
     tokens = fields["isbn"].split()
@@ -531,15 +620,91 @@ def _normalize(value):
     return " ".join(value.split()).lower()
 
 
-def _group_key(item):
-    return "\0".join((_normalize(item["baseTitle"]), _normalize(item["author"] or ""),
-                      _normalize(item["publisher"] or "")))
+def _alnum_key(value):
+    """Letters and digits only, lowercased - ``aladin_flow.rs alphanumeric_key``."""
+    return "".join(ch.lower() for ch in value if ch.isalnum())
+
+
+def _trailing_note(text):
+    """``(start, inner)`` of a trailing ``(...)`` / ``[...]`` note when text precedes it."""
+    opener = {")": "(", "]": "["}.get(text[-1:])
+    if opener is None:
+        return None
+    start = text.rfind(opener)
+    if start < 0 or not text[:start].strip():
+        return None
+    return start, text[start + 1:-1]
+
+
+def _title_key(title):
+    text = title.strip()
+    # Only Latin/kana aliases without digits or series markers are dropped. Korean and
+    # unknown notes, parts, side stories, seasons and edition names remain distinct.
+    note = _trailing_note(text)
+    while note is not None and _is_alt_title_note(note[1]):
+        text = text[:note[0]].rstrip()
+        note = _trailing_note(text)
+    return _alnum_key(text)
+
+
+def _is_alt_title_note(note):
+    if _EDITION_NOTE.search(note) or _SERIES_NOTE.search(note):
+        return False
+
+    def letter(ch):
+        return ("a" <= ch <= "z" or "A" <= ch <= "Z" or "\u00c0" <= ch <= "\u024f"
+                or "\u3041" <= ch <= "\u3096" or "\u30a1" <= ch <= "\u30fa" or ch == "ー")
+
+    return any(map(letter, note)) and all(letter(ch) or ch.isspace() or ch in "-.,:;!?'\"·&" for ch in note)
+
+
+def _publisher_key(publisher):
+    text = publisher.strip()
+    for prefix in ("(주)", "㈜", "주식회사"):
+        if text.startswith(prefix):
+            text = text[len(prefix):].lstrip()
+    note = _trailing_note(text)
+    while note is not None:
+        text = text[:note[0]].rstrip()
+        note = _trailing_note(text)
+    # "학산문화사/DCW": an ASCII imprint code after a slash.
+    slash = text.rfind("/")
+    if slash >= 0:
+        tail = text[slash + 1:]
+        if text[:slash].strip() and tail.strip() and all((ch.isascii() and ch.isalnum()) or ch == " " for ch in tail):
+            text = text[:slash].rstrip()
+    key = _alnum_key(text)
+    if key.endswith("미디어") and len(key) - len("미디어") >= 2:
+        key = key[:-len("미디어")]
+    return key
+
+
+def _group_keys(items):
+    """One group key per item: title, author, publisher compared as ``aladin_flow.rs group_keys``."""
+    parts = [(_title_key(item["baseTitle"]), _alnum_key(item["author"] or ""),
+              _publisher_key(item["publisher"] or "")) for item in items]
+    named = {}
+    for title, author, publisher in parts:
+        if author:
+            named.setdefault((title, publisher), set()).add(author)
+    keys = []
+    for title, author, publisher in parts:
+        authors = named.get((title, publisher))
+        if not author and authors is not None and len(authors) == 1:
+            author = next(iter(authors))
+        keys.append("\0".join((title, author, publisher)))
+    return keys
 
 
 def _prefer(left, right):
-    """``compare_duplicate_preference``: volume asc, ISBN first, newest date, item id asc."""
-    if left["volumeNumber"] != right["volumeNumber"]:
-        return -1 if left["volumeNumber"] < right["volumeNumber"] else 1
+    """``compare_duplicate_preference``: volume asc (unnumbered counts as 1, after a numbered
+    one), ISBN first, newest date, item id asc."""
+    lv, rv = max(left["volumeNumber"], 1), max(right["volumeNumber"], 1)
+    if lv != rv:
+        return -1 if lv < rv else 1
+    lu, ru = left["volumeNumber"] == 0, right["volumeNumber"] == 0
+    if lu != ru:
+        return 1 if lu else -1
     if (left["isbn13"] is None) != (right["isbn13"] is None):
         return -1 if left["isbn13"] is not None else 1
     ld, rd = left["publicationDate"], right["publicationDate"]
@@ -552,29 +717,32 @@ def _prefer(left, right):
     return (left["itemId"] > right["itemId"]) - (left["itemId"] < right["itemId"])
 
 
-def group_kakao(items):
+def group_kakao(items, unparsed_count=0):
     """Series candidates exactly as ``aladin_flow.rs grouped_items`` (+ display fields)."""
     groups = {}
-    for item in items:
-        groups.setdefault(_group_key(item), []).append(item)
+    for item, key in zip(items, _group_keys(items)):
+        groups.setdefault(key, []).append(item)
     candidates = []
     for key in sorted(groups):
         members = sorted(groups[key], key=cmp_to_key(_prefer))
         head = members[0]
         title = head["baseTitle"].strip()
-        fingerprint = hashlib.sha256("\0".join((_normalize(title), _normalize(head["author"] or ""),
+        author = next((m["author"] for m in members if m["author"] and m["author"].strip()), None)
+        fingerprint = hashlib.sha256("\0".join((_normalize(title), _normalize(author or ""),
                                                 _normalize(head["publisher"] or ""))).encode()).hexdigest()
         by_volume = {}
         for item in members:
-            by_volume.setdefault(item["volumeNumber"], item)
+            number = item["volumeNumber"] or 1
+            by_volume.setdefault(number, {**item, "volumeNumber": number})
         selected = [by_volume[number] for number in sorted(by_volume)]
         candidates.append({
             "anchorItemId": min(item["itemId"] for item in selected),
-            "groupFingerprint": fingerprint, "title": title, "author": head["author"],
+            "groupFingerprint": fingerprint, "title": title, "author": author,
             "publisher": head["publisher"],
             "volumes": [{"volumeNumber": i["volumeNumber"], "providerItemId": i["itemId"], "title": i["title"],
                          "publicationDate": i["publicationDate"], "isbn13": i["isbn13"]} for i in selected],
-            "ignoredCount": len(members) - len(selected), "volumeCount": len(selected),
+            "ignoredCount": len(members) - len(selected), "unparsedCount": unparsed_count,
+            "volumeCount": len(selected),
             "firstVolume": selected[0]["volumeNumber"], "lastVolume": selected[-1]["volumeNumber"],
             "knownItemIds": sorted(i["itemId"] for i in selected),
             "thumbnailUrl": next((i["thumbnail"] for i in selected if i["thumbnail"]), None)})
@@ -591,14 +759,9 @@ class PageBudget(Exception):
         self.wait = wait
 
 
-def search_kakao_items(key, query):
-    """Every page, deduplicated by item id; raises on an unfinished search (PC rule).
-
-    The whole crawl shares one ``KAKAO_BUDGET`` deadline and every page draws on the
-    global ``KAKAO_PAGES_PER_MINUTE`` budget (``PageBudget`` when it runs out).
-    """
-    items, seen = [], set()
-    deadline = time.monotonic() + KAKAO_BUDGET
+def _crawl_kakao(key, query, deadline):
+    """Every page of one query, deduplicated by item id: ``(items, unparsed_count)``."""
+    items, seen, unparsed = [], set(), 0
     for page in range(1, KAKAO_MAX_PAGES + 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -610,6 +773,8 @@ def search_kakao_items(key, query):
                                     ("size", str(KAKAO_PAGE_SIZE)), ("page", str(page))],
                         {"Authorization": f"KakaoAK {key}"}, KAKAO_MAX_BYTES, min(KAKAO_TIMEOUT, remaining),
                         deadline=deadline)
+        if time.monotonic() >= deadline:
+            raise Upstream("timeout")
         try:
             response = json.loads(body)
             is_end = response["meta"]["is_end"]
@@ -621,12 +786,29 @@ def search_kakao_items(key, query):
             raise Upstream("invalid")
         for raw in documents:
             item = kakao_item(raw)
-            if item is not None and item["itemId"] not in seen:
+            if item is None:
+                unparsed += 1
+            elif item["itemId"] not in seen:
                 seen.add(item["itemId"])
                 items.append(item)
         if is_end:
-            return items
+            return items, unparsed
     raise KakaoTooBroad()
+
+
+def search_kakao_items(key, query):
+    """``(items, unparsed_count)``; raises on an unfinished search (PC rule).
+
+    A search that finds no usable product is repeated once with the punctuation turned into
+    spaces (the PC retry). The whole crawl shares one ``KAKAO_BUDGET`` deadline and every page
+    draws on the global ``KAKAO_PAGES_PER_MINUTE`` budget (``PageBudget`` when it runs out).
+    """
+    deadline = time.monotonic() + KAKAO_BUDGET
+    items, unparsed = _crawl_kakao(key, query, deadline)
+    normalized = normalize_search_query(query)
+    if not items and normalized != query and len(normalized) >= 2:
+        items, unparsed = _crawl_kakao(key, normalized, deadline)
+    return items, unparsed
 
 
 # --- throttling and cache --------------------------------------------------------------
@@ -878,7 +1060,7 @@ def register(app, get_db, require_client, require_publisher):
                                                ("includes[]", "artist")],
                                 {}, MANGADEX_MAX_BYTES, MANGADEX_TIMEOUT))
                         else:
-                            result = group_kakao(search_kakao_items(key, query))
+                            result = group_kakao(*search_kakao_items(key, query))
                     except Upstream as error:
                         result = _upstream_failure(provider, error)
                         # Only deterministic failures are cached; transient ones may retry.
@@ -999,11 +1181,16 @@ def register(app, get_db, require_client, require_publisher):
         query = request.query_params
         collectionId = query.get("collectionId")
         state = query.get("state", "all")
+        paged = query.get("paged") == "true"
+        before = _int_param(query.get("before"), MAX_CURSOR, 1, MAX_CURSOR)
         limit = _int_param(query.get("limit"), 20, 1, 50)
-        if (limit is None or state not in ("all", "pending")
+        if (limit is None or before is None or state not in ("all", "pending")
                 or (collectionId is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", collectionId))):
             invalid_request("연결 요청 목록 요청을 확인할 수 없습니다.")
         clauses, params = [], []
+        if paged:
+            clauses.append("sequence<?")
+            params.append(before)
         if collectionId is not None:
             clauses.append("collection_id=?")
             params.append(collectionId)
@@ -1013,7 +1200,9 @@ def register(app, get_db, require_client, require_publisher):
         with get_db() as db:
             db.execute("BEGIN")
             rows = db.execute(f"SELECT * FROM collection_binding_requests{where} ORDER BY sequence DESC LIMIT ?",
-                              (*params, limit)).fetchall()
+                              (*params, limit + 1 if paged else limit)).fetchall()
+            next_cursor = rows[limit - 1]["sequence"] if paged and len(rows) > limit else None
+            rows = rows[:limit]
             pending = None
             if collectionId is not None:
                 pending = {"mangadex": None, "kakao": None}
@@ -1021,7 +1210,8 @@ def register(app, get_db, require_client, require_publisher):
                         WHERE collection_id=? AND state='pending' ORDER BY sequence""", (collectionId,)):
                     pending[row["provider"]] = _request(row)
             db.rollback()
-        return conditional.json_response({"version": 1, "items": [_request(r) for r in rows], "pending": pending},
+        return conditional.json_response({"version": 1, "items": [_request(r) for r in rows], "pending": pending,
+                                          **({"nextCursor": next_cursor} if paged else {})},
                                          if_none_match)
 
     @app.get(PREFIX + "/log")

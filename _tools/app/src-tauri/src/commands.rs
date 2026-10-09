@@ -1888,6 +1888,16 @@ pub fn set_collection_volume_range(
 }
 
 #[tauri::command]
+pub fn list_kakao_reviews(state: State<'_, AppState>) -> Result<Vec<crate::library::kakao_review::KakaoReview>, CommandError> {
+    current_required(state)?.list_kakao_reviews().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_kakao_partial_dismissed(collection_id: String, dismissed: bool, state: State<'_, AppState>) -> Result<(), CommandError> {
+    current_required(state)?.set_kakao_partial_dismissed(&collection_id, dismissed).map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn set_asset_classification(
     request: SetAssetClassification,
     state: State<'_, AppState>,

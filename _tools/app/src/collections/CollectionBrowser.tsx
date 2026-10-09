@@ -36,6 +36,9 @@ import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { TmdbMovieDialog } from "./TmdbMovieDialog";
 import { CollectionReleases } from "./CollectionReleases";
+import { KakaoReviewScreen, useKakaoReviews } from "./KakaoReviewScreen";
+import { kakaoReviewSegment } from "./kakaoReviewModel";
+import { LinkIcon } from "@heroicons/react/24/outline";
 import { ReleaseCalendarView } from "./ReleaseCalendarView";
 import { groupInbox, localDay, releaseCaption } from "./releaseCaption";
 import { useReleaseData } from "./releaseData";
@@ -55,6 +58,7 @@ type CollectionBrowserProps = {
   releaseProvider?: CollectionUpdateProvider;
   /** The 발매 캘린더 (upcoming games and movies, and the 관심 목록). */
   releaseCalendar?: boolean;
+  kakaoReview?: boolean;
   navigationMemory?: CollectionNavigationMemory;
   collections: CollectionSummary[];
   typeFilter: CollectionType;
@@ -86,6 +90,7 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
 export function CollectionBrowser({
   releaseProvider,
   releaseCalendar = false,
+  kakaoReview = false,
   navigationMemory,
   collections,
   typeFilter,
@@ -109,6 +114,10 @@ export function CollectionBrowser({
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
   const [tmdbOpen, setTmdbOpen] = useState(false);
+  const kakaoReviewOpen = kakaoReview;
+  const setKakaoReviewOpen = (open: boolean) => onViewChange({ kind: "collections", typeFilter, showcase, ...(open ? { kakaoReview: true } : {}) });
+  const kakaoReviews = useKakaoReviews(collections, typeFilter === "manga");
+  const unlinkedCount = (kakaoReviews.reviews ?? []).filter(review => kakaoReviewSegment(review) === "unlinked").length;
   const avInbox = useAvLinkInbox({ api: avLinkApi, poll: typeFilter === "av" && !releaseProvider && !releaseCalendar && !showcase,
     refreshKey: `${typeFilter}:${releaseProvider ?? ""}:${releaseCalendar ? 1 : 0}:${showcase ? 1 : 0}` });
 
@@ -138,7 +147,7 @@ export function CollectionBrowser({
   const typeSwap = useRef({}).current;
   useEffect(() => () => cancelSegmentSwap(typeSwap), [typeSwap]);
   const [pageMemory] = useState<{ scope: string; page: number } | null>(null);
-  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar]);
+  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar, kakaoReviewOpen]);
   useCollectionCoverPerf(stageRef, scope, collections);
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -170,10 +179,10 @@ export function CollectionBrowser({
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
 
   function setTypeFilter(next: CollectionType) {
-    if (next === typeFilter && !releaseProvider && !releaseCalendar) return;
+    if (next === typeFilter && !releaseProvider && !releaseCalendar && !kakaoReviewOpen) return;
     const commit = () => onViewChange({ kind: "collections", typeFilter: next, showcase });
     // These views keep their own motion; a type switch retains Showcase and closes releases.
-    if (releaseProvider || releaseCalendar || showcase) { commit(); return; }
+    if (releaseProvider || releaseCalendar || showcase || kakaoReviewOpen) { commit(); return; }
     // A type switch moves the list in from the side of the chosen type (the shared view swap);
     // the section bar stays still. The old list stays painted until the new one commits.
     const stage = stageRef.current;
@@ -300,7 +309,7 @@ export function CollectionBrowser({
           </>
         );
 
-  const inbox = Boolean(releaseProvider) || releaseCalendar;
+  const inbox = Boolean(releaseProvider) || releaseCalendar || kakaoReviewOpen;
   const libraryView = !inbox && !showcase;
   const shortcuts = <div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
     <Button variant="quiet" size="sm" aria-pressed={showcase} aria-label="쇼케이스" onClick={() => setShowcase(!showcase)}>
@@ -314,6 +323,7 @@ export function CollectionBrowser({
       aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"} onClick={() => openInbox("kakao")}>
       <BellIcon aria-hidden="true" /><span className="collection-shortcuts__label">신간</span>{unreadTotal > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}
     </Button>}
+    {typeFilter === "manga" && unlinkedCount > 0 && <Button variant="quiet" size="sm" aria-label={`연결 점검 ${unlinkedCount}`} onClick={() => setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true" /><span className="collection-shortcuts__label">연결 점검</span><span className="collection-shortcuts__count">{unlinkedCount}</span></Button>}
   </div>;
   const avCount = avInbox.items.length;
   const typeOptions = TYPES.map(value => value === "av" && avCount > 0
@@ -377,7 +387,7 @@ export function CollectionBrowser({
 
   return (
     <section className="collection-browser" aria-label="컬렉션">
-      {(!releaseProvider || releaseCalendar) && <ViewToolbar sectionDrop={sectionDrop}
+      {!kakaoReviewOpen && (!releaseProvider || releaseCalendar) && <ViewToolbar sectionDrop={sectionDrop}
         title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
         titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
         titleAccessory={<>{!inbox && <span className="collection-toolbar__count">{visible.length.toLocaleString()}</span>}{toolbarControls}</>}
@@ -403,6 +413,7 @@ export function CollectionBrowser({
             setEditMode({ kind: "create", type: typeFilter });
           }}
         >
+          {kakaoReviewOpen && <KakaoReviewScreen collections={collections} data={kakaoReviews} coverUrl={collectionCoverUrl} onBack={() => setKakaoReviewOpen(false)} onChanged={onChanged} />}
           {releaseProvider && !releaseCalendar && <CollectionReleases chrome={chrome} onBack={closeInbox} provider={releaseProvider} collections={collections} data={releases.data} loading={releases.loading} error={releases.error}
             query={libraryState.query} coverUrl={collectionCoverUrl} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} onProviderChange={openInbox} />}
           {releaseCalendar && <ReleaseCalendarView query={libraryState.query} onWishlistChange={loadWishlistUnread}

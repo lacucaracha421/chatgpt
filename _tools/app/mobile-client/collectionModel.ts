@@ -13,6 +13,7 @@ export type AvPortraitImage = {sha256:string;sizeBytes:number;contentType:string
 export type AvPerson = ProfilePerson & {id:string;name:string;nameJa?:string|null;creditName?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null;portraitImage?:AvPortraitImage|null};
 export type AvInfo = {productCode?:string|null;titleJa?:string|null;maker?:string|null;label?:string|null;series?:string|null;genres:string[];releaseDate?:string|null;people:AvPerson[]};
 export type CollectionSummary = {
+  kakaoReview?: import('../src/library/types').KakaoReview | null;
   artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null}>;
   id:string; name:string; type:CollectionKind; description?:string|null; overview?:string|null;
   av?:AvInfo|null;
@@ -77,6 +78,7 @@ export function collectionPath(type:CollectionKind, q:string, showcase:boolean, 
   const params = new URLSearchParams({type,q,showcase:String(showcase),limit:showcase?'16':'48'});
   if (cursor) params.set('cursor',cursor);
   if(filters&&!showcase){params.set('sort',filters.sort);params.set('direction',filters.direction);params.set('rating',String(filters.rating));}
+  if(type==='manga')params.set('kakaoReview','true');
   return `/v1/collections?${params}`;
 }
 export function editionVolumes(volumes:CollectionVolume[], edition:number) {

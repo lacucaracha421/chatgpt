@@ -511,7 +511,7 @@ fn live_provider_latency_sample() {
                 let start = Instant::now();
                 let result = super::super::kakao_books::search(&key, query);
                 let after = provider_requests::metrics();
-                println!("kakao query={query} ok={} elapsed_ms={} requests={} network_ms={} throttle_ms={} volumes={}",result.is_ok(),start.elapsed().as_millis(),after.requests-before.requests,after.network_ms-before.network_ms,after.throttle_ms-before.throttle_ms,result.as_ref().map(Vec::len).unwrap_or(0));
+                println!("kakao query={query} ok={} elapsed_ms={} requests={} network_ms={} throttle_ms={} volumes={}",result.is_ok(),start.elapsed().as_millis(),after.requests-before.requests,after.network_ms-before.network_ms,after.throttle_ms-before.throttle_ms,result.as_ref().map(|outcome| outcome.items.len()).unwrap_or(0));
                 if let Err(error) = result {
                     println!("kakao failure={:?}", stop_reason(&error));
                     break;

@@ -114,6 +114,7 @@ MEMBERSHIP = "setMembership"
 TRACK_OWNERSHIP = "setOwnershipTracking"
 RELEASE_SUBSCRIPTION = "setReleaseSubscription"
 VOLUME_RANGE = "setVolumeRange"
+KAKAO_REVIEW = "setKakaoPartialDismissed"
 RECORD_RELEASE = "recordReleaseEvent"
 ACK_RELEASE = "acknowledgeReleaseEvents"
 AV_DETAILS = "setAvDetails"
@@ -128,13 +129,14 @@ PERSON_PROFILE_FIELDS = "setPersonProfileFields"
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                        VOLUME_RANGE, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE, PERSON_PROFILE_FIELDS)
+                        VOLUME_RANGE, KAKAO_REVIEW, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE, PERSON_PROFILE_FIELDS)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
 
 ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
 COMMAND_KEYS = {
+    KAKAO_REVIEW: {"workId", "dismissed", "expectedVolumes"},
     CREATE: {"workId", "type", "name", "legacyKind", "fields", "binding"},
     UPDATE: {"workId", "changes", "expected", "expectedRevision"},
     AV_DETAILS: {"workId", "changes", "expected"},
@@ -1154,7 +1156,7 @@ def served_state(db):
             "publishedAt": changed[0] if changed else row["activatedAt"]}
 
 
-def finalize_items(db, library_id, items, *, detail=False, today=None):
+def finalize_items(db, library_id, items, *, detail=False, today=None, include_review=False):
     """Resolve a page's visible member counts/covers without loading member IDs."""
     if not items:
         return items
@@ -1189,6 +1191,29 @@ def finalize_items(db, library_id, items, *, detail=False, today=None):
             " AND work_id IN (" + ",".join("?" for _ in items) + ")",
             [library_id, *[item["id"] for item in items]])} if volume_ids else set()
     for item in items:
+        # Active installations may have projections stored before this optional feature.
+        # Resolve it from authority state at read time; no backfill or persistent write.
+        item.pop("kakaoReview", None)
+        if include_review and item.get("type") == "manga":
+            import kakao_review
+            row = work_row(db, library_id, item["id"])
+            if row is not None:
+                bindings = db.execute("SELECT provider,config,snapshot FROM collection_authority_bindings"
+                                      " WHERE library_id=? AND work_id=? AND bound=1",
+                                      [library_id, item["id"]]).fetchall()
+                owned = db.execute("SELECT COALESCE(MAX(volume_number),0),COUNT(DISTINCT volume_number)"
+                                   " FROM collection_authority_ownership WHERE library_id=? AND work_id=?"
+                                   " AND (physical=1 OR digital=1)", [library_id, item["id"]]).fetchone()
+                try:
+                    state = work_state(row)
+                    review = kakao_review.validated_review(item["id"], state["name"],
+                        {b["provider"]: {"snapshot": json.loads(b["snapshot"]) if b["snapshot"] else None,
+                                         "config": json.loads(b["config"]) if b["config"] else None}
+                         for b in bindings}, owned[0], owned[1], state["derived"].get("volumeRange") or {})
+                except (ValueError, TypeError, AttributeError, KeyError):
+                    review = None
+                if review is not None:
+                    item["kakaoReview"] = review
         count, first, cover = stats.get(item["id"], (0, None, None))
         item["assetCount"] = count
         item["coverAssetId"] = cover if cover is not None else first
@@ -1206,9 +1231,9 @@ def finalize_items(db, library_id, items, *, detail=False, today=None):
     return items
 
 
-def finalize_item(db, library_id, item, today=None):
+def finalize_item(db, library_id, item, today=None, *, include_review=False):
     """Detail reads also resolve date-dependent volume release status."""
-    return finalize_items(db, library_id, [item], detail=True, today=today)[0]
+    return finalize_items(db, library_id, [item], detail=True, today=today, include_review=include_review)[0]
 
 
 def projection_artwork(db, work_id, artwork_id):
@@ -1364,6 +1389,10 @@ def _require_identity_free(ctx, provider, external_id, work_id):
 
 def _write_binding(ctx, *, work_id, provider, external_id, config, snapshot, values,
                    snapshot_external_id, last_synced_at, bound, existing):
+    if provider == "kakao" and isinstance(config, dict) and "reviewDismissedVolumes" in config:
+        import kakao_review
+        if not kakao_review.dismissal_matches(config, kakao_review.snapshot_volumes(snapshot)):
+            config = {key: value for key, value in config.items() if key != "reviewDismissedVolumes"}
     revision = (existing["entity_revision"] + 1) if existing is not None else 1
     snapshot_text = None if snapshot is None else encode(snapshot)
     values_text = None if values is None else encode(values)
@@ -2075,6 +2104,35 @@ def _bind(ctx, entity, payload_sha):
     return _finish(ctx, payload_sha, f"{work_id}:{provider}")
 
 
+def _kakao_review(ctx, entity, payload_sha):
+    import kakao_review
+    work_id = entity["workId"]
+    row = work_row(ctx.db, ctx.library_id, work_id)
+    if row is None or row["lifecycle"] != "live":
+        return _finish(ctx, payload_sha, f"{work_id}:kakao")
+    state = work_state(row)
+    existing = binding_row(ctx.db, ctx.library_id, work_id, "kakao")
+    if state["type"] != "manga" or existing is None or not existing["bound"]:
+        return _finish(ctx, payload_sha, f"{work_id}:kakao")
+    volumes = kakao_review.snapshot_volumes(json.loads(existing["snapshot"]) if existing["snapshot"] else None)
+    if entity["dismissed"] and volumes != entity["expectedVolumes"]:
+        return _finish(ctx, payload_sha, f"{work_id}:kakao")
+    config = json.loads(existing["config"]) if existing["config"] else {}
+    config = config if isinstance(config, dict) else {}
+    previous = dict(config)
+    if entity["dismissed"]:
+        config["reviewDismissedVolumes"] = volumes
+    else:
+        config.pop("reviewDismissedVolumes", None)
+    if previous != config:
+        _write_binding(ctx, work_id=work_id, provider="kakao", external_id=existing["external_id"],
+                       config=config, snapshot=json.loads(existing["snapshot"]) if existing["snapshot"] else None,
+                       values=json.loads(existing["snapshot_values"]) if existing["snapshot_values"] else None,
+                       snapshot_external_id=existing["snapshot_external_id"], last_synced_at=existing["last_synced_at"],
+                       bound=True, existing=existing)
+    return _finish(ctx, payload_sha, f"{work_id}:kakao")
+
+
 def _unbind(ctx, entity, payload_sha):
     work_id, provider = entity["workId"], entity["provider"]
     state = work_state(require_work(ctx, work_id))
@@ -2593,7 +2651,7 @@ HANDLERS = {
     SELECT_ARTWORK: _select_artwork, UPSERT_VOLUME: _upsert_volume,
     UPSERT_VOLUME_SOURCE: _upsert_source, OWNERSHIP: _ownership, MEMBERSHIP: _membership,
     TRACK_OWNERSHIP: _track_ownership, RELEASE_SUBSCRIPTION: _release_subscription,
-    VOLUME_RANGE: _volume_range, RECORD_RELEASE: _record_release, ACK_RELEASE: _ack_release,
+    VOLUME_RANGE: _volume_range, KAKAO_REVIEW: _kakao_review, RECORD_RELEASE: _record_release, ACK_RELEASE: _ack_release,
     AV_DETAILS: _set_av_details, AV_CREDITS: _set_av_credits,
     PERSON_PROFILE_FIELDS: _set_person_profile_fields,
     PERSON: _set_person, PERSON_PORTRAIT: _set_person_portrait, PERSON_PROFILE: _set_person_profile,
@@ -2803,7 +2861,9 @@ def parse_command(body):
         base = body["baseSnapshotDigest"]
         if base is not None and (not isinstance(base, str) or not HEX_DIGEST_PATTERN.fullmatch(base)):
             fail()
-        details = body["details"]
+        # Existing PC Kakao commands may send an empty details object.
+        # Only TMDB owns nonempty details; normalize the empty sentinel.
+        details = None if provider == "kakao" and body["details"] == {} else body["details"]
         if details is not None and provider != "tmdb":
             fail()
         entity.update(provider=provider, externalId=_external_id(provider, body["externalId"]),
@@ -2863,6 +2923,11 @@ def parse_command(body):
                       editionIndex=_int(body["editionIndex"], low=0, high=255, nullable=False),
                       physical=_bool(body["physical"]), digital=_bool(body["digital"]),
                       expectedRevision=_revision(body["expectedRevision"]))
+    elif command_type == KAKAO_REVIEW:
+        volumes = body["expectedVolumes"]
+        if not isinstance(volumes, list) or len(volumes) > 9999 or any(type(n) is not int or n < 1 for n in volumes) or sorted(set(volumes)) != volumes:
+            fail()
+        entity.update(dismissed=_bool(body["dismissed"]), expectedVolumes=volumes)
     elif command_type == VOLUME_RANGE:
         entity.update(normalize_volume_range({key: body[key] for key in
                       ("minVolume", "maxVolume", "hideConnectionPrompt")}))
@@ -3986,8 +4051,8 @@ def register(app, get_db, require_client, require_publisher):
         def read(db):
             row = authority.active_domain(db, DOMAIN)
             if row is None:
-                return {"active": False, "domain": DOMAIN, "features": ["personProfileFields"]}
-            return {"active": True, "domain": DOMAIN, "features": ["personProfileFields"], "libraryId": row["libraryId"],
+                return {"active": False, "domain": DOMAIN, "features": ["personProfileFields", "kakaoReview"]}
+            return {"active": True, "domain": DOMAIN, "features": ["personProfileFields", "kakaoReview"], "libraryId": row["libraryId"],
                     "epoch": row["epoch"], "contractVersion": row["contractVersion"],
                     "cursor": row["cursor"], "activatedAt": row["activatedAt"],
                     "revision": projection_revision(row["libraryId"], row["epoch"], row["cursor"]),

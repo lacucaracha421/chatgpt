@@ -78,6 +78,7 @@ pub(crate) struct ReplicaFeatures {
     pub people: bool,
     pub portrait_image: bool,
     pub av_credit_name: bool,
+    pub kakao_review: bool,
 }
 impl ReplicaFeatures {
     pub(crate) fn from_status(status: &super::client::CollectionsStatus) -> Self {
@@ -88,6 +89,7 @@ impl ReplicaFeatures {
             people: status.supports_replica_feature("people"),
             portrait_image: status.supports_replica_feature("portraitImage"),
             av_credit_name: status.supports_replica_feature("avCreditName"),
+            kakao_review: status.supports_replica_feature("kakaoReview"),
         }
     }
 }
@@ -139,6 +141,8 @@ pub(crate) struct ReplicaCollection {
     /// Read-only Kakao/MangaDex volume schedule, same gating as the tracking keys.
     #[serde(rename = "releaseSchedule", skip_serializing_if = "Option::is_none")]
     release_schedule: Option<ReleaseSchedulePayload>,
+    #[serde(rename = "kakaoReview", skip_serializing_if = "Option::is_none")]
+    kakao_review: Option<crate::library::kakao_review::KakaoReview>,
     /// PC work record (feature `workRecord`); each omitted when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     status: Option<String>,
@@ -709,6 +713,10 @@ fn snapshot_from_transaction(root: &Path, transaction: &rusqlite::Transaction<'_
                 })
                 .collect();
             let collection = ReplicaCollection {
+                kakao_review: if features.kakao_review && summary.collection_type == crate::library::models::CollectionType::Manga {
+                    crate::library::kakao_review::load(&transaction, &summary.id).ok()
+                        .filter(|review| review.volumes.len() <= 9999 && review.group_fingerprints.len() <= 10)
+                } else { None },
                 series,
                 film,
                 av: None,

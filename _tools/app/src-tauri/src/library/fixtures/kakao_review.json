@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Dungeon Meshi", "highestOwnedVolume": 4, "ownedCount": 3,
+    "bindings": {"mangadex": {"snapshot": {"detail": {"data": {"attributes": {"altTitles": [{"ko": "  던전밥  "}]}}}}}},
+    "range": {}, "expected": {"query": "던전밥", "querySource": "mangadex", "volumes": [], "partialDismissed": false, "groupFingerprints": []}
+  },
+  {
+    "name": "던전밥", "highestOwnedVolume": 0, "ownedCount": 0,
+    "bindings": {"kakao": {"config": {"query": "   ", "groupFingerprint": "edition", "reviewDismissedVolumes": [1, 3]}, "snapshot": {"groups": null, "volumes": [{"volumeNumber": 3}, {"volumeNumber": 1}, {"volumeNumber": 3}, {"volumeNumber": true}, {"volumeNumber": 0}]}}},
+    "range": {}, "expected": {"query": "던전밥", "querySource": "name", "volumes": [1, 3], "partialDismissed": true, "groupFingerprints": ["edition"]}
+  },
+  {
+    "name": "English", "highestOwnedVolume": 4, "ownedCount": 2,
+    "bindings": {"kakao": {"config": {"query": "Stored query", "groups": [{"groupFingerprint": "a"}, {"groupFingerprint": "b"}], "reviewDismissedVolumes": [1, 3]}, "snapshot": {"groups": [{"volumes": [{"volumeNumber": 1}, {"volumeNumber": 2}]}, {"volumes": [{"volumeNumber": 2}, {"volumeNumber": 3}]}]}}},
+    "range": {"hideConnectionPrompt": true}, "expected": {"query": "Stored query", "querySource": "none", "volumes": [1, 2, 3], "partialDismissed": false, "groupFingerprints": ["a", "b"]}
+  },
+  {
+    "name": "English", "highestOwnedVolume": 0, "ownedCount": 0,
+    "bindings": {"kakao": {"config": null, "snapshot": {"volumes": [{"volumeNumber": 1}, {"volumeNumber": 2}]}}},
+    "range": {}, "expected": {"query": "English", "querySource": "none", "volumes": [1, 2], "partialDismissed": false, "groupFingerprints": []}
+  },
+  {
+    "name": "한국어 제목", "highestOwnedVolume": 3, "ownedCount": 1,
+    "bindings": {"kakao": {"config": {"groups": null, "groupFingerprint": "legacy", "reviewDismissedVolumes": []}, "snapshot": {}}},
+    "range": {}, "expected": {"query": "한국어 제목", "querySource": "name", "volumes": [], "partialDismissed": true, "groupFingerprints": ["legacy"]}
+  },
+  {
+    "name": "한국어 제목", "highestOwnedVolume": 0, "ownedCount": 0,
+    "bindings": {"kakao": {"config": {"groups": [], "groupFingerprint": "legacy"}, "snapshot": {"groups": [], "volumes": [{"volumeNumber": 1}]}}},
+    "range": {}, "expected": {"query": "한국어 제목", "querySource": "name", "volumes": [], "partialDismissed": false, "groupFingerprints": []}
+  }
+]

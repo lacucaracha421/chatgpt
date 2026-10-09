@@ -16,6 +16,8 @@ import {
 } from './collectionBindingsModel';
 import {Fold} from './Fold';
 import './collectionBindings.css';
+import {normalizeKakaoTitle} from '../src/collections/kakaoReviewModel';
+import type {ReactNode} from 'react';
 
 const PROVIDERS: BindProvider[] = ['mangadex', 'kakao'];
 export const PUBLISHER_UPDATE_NOTE = 'PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.';
@@ -164,11 +166,12 @@ type Picked = {
  * Kakao may split one series into groups by volume range, so its results are checked (one or
  * more) and joined into one bind; MangaDex stays a single tap.
  */
-export function BindSearchSheet({item, provider, status, connection, onClose, onRequested}: {item: CollectionDetail; provider: BindProvider; status: BindStatus | null; connection: Connection; onClose(): void; onRequested(request: BindRequest): void}) {
+export function BindSearchSheet({item, provider, status, connection, onClose, onRequested, reviewQuery, workCover, onSkip}: {item: CollectionDetail; provider: BindProvider; status: BindStatus | null; connection: Connection; onClose(): void; onRequested(request: BindRequest): void; reviewQuery?: string; workCover?: ReactNode; onSkip?: () => Promise<void>}) {
+  const reviewMode = reviewQuery !== undefined;
   const name = PROVIDER_NAMES[provider];
   const input = useRef<HTMLInputElement>(null), search = useRef<AbortController | null>(null), send = useRef<AbortController | null>(null);
   // MangaDex knows a manga by its original (Japanese) title; Kakao by the Korean edition title.
-  const [initialQuery] = useState(() => (provider === 'mangadex' && item.originalTitle?.trim()) || item.name);
+  const [initialQuery] = useState(() => reviewQuery ?? ((provider === 'mangadex' && item.originalTitle?.trim()) || item.name));
   const [query, setQuery] = useState(initialQuery);
   const [busy, setBusy] = useState(false), [found, setFound] = useState<Found | null>(null), [failure, setFailure] = useState<BindFailure | null>(null);
   const [waitUntil, setWaitUntil] = useState(0), [now, setNow] = useState(() => Date.now());
@@ -186,11 +189,14 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
     if (value.length < 2 || value.length > 100) { setFailure({text: '검색어를 두 글자 이상 100자 이하로 적어 주세요.', retry: false}); return; }
     search.current?.abort();
     const controller = search.current = new AbortController();
-    lastQuery.current = value; setBusy(true); setFailure(null);
+    lastQuery.current = value; setBusy(true); setFailure(null); setPicked(null); setSendFailure(null);
     void api<SearchReply<MangaDexCandidate | KakaoCandidate>>(searchPath(provider, value), controller.signal).then(reply => {
       if (controller.signal.aborted) return;
-      setFound({provider, query: typeof reply.query === 'string' ? reply.query : value, items: Array.isArray(reply.items) ? reply.items : []} as Found);
-      setChecked([]); setBusy(false);
+      const rank = (candidate: KakaoCandidate) => item.kakaoReview?.groupFingerprints.includes(candidate.groupFingerprint) ? 0 : normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(value) ? 1 : 2;
+      const items = Array.isArray(reply.items) ? reply.items : [];
+      setFound({provider, query: typeof reply.query === 'string' ? reply.query : value, items: reviewMode && provider === 'kakao' ? [...items as KakaoCandidate[]].sort((a, b) => rank(a) - rank(b)) : items} as Found);
+      const exact = provider === 'kakao' ? (items as KakaoCandidate[]).filter(candidate => normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(value)) : [];
+      setChecked(reviewMode && provider === 'kakao' ? (items as KakaoCandidate[]).filter(candidate => item.kakaoReview?.groupFingerprints.includes(candidate.groupFingerprint) || (exact.length === 1 && candidate === exact[0])).slice(0, MAX_KAKAO_GROUPS).map(candidate => candidate.groupFingerprint) : []); setBusy(false);
     }, reason => {
       if (controller.signal.aborted) return;
       const next = searchFailure(reason, provider);
@@ -225,17 +231,19 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
     const chosen = orderGroups(kakaoFound.items.filter(candidate => checked.includes(candidate.groupFingerprint)));
     if (chosen.length === 0) return;
     const lead = chosen[0], queryUsed = kakaoFound.query, several = chosen.length > 1;
-    setPicked({operationId: crypto.randomUUID(), title: lead.title,
+    const pick: Picked = {operationId: picked?.operationId ?? crypto.randomUUID(), title: lead.title,
       subtitle: [lead.author, lead.publisher, several ? '' : kakaoVolumes(lead)].filter(Boolean).join(' · '), thumbnail: lead.thumbnailUrl,
       ...(several ? {groups: chosen.map(candidate => ({key: candidate.groupFingerprint, title: candidate.title, range: kakaoVolumes(candidate) || '권수 모름'})), merge: mergeSummary(chosen)} : {}),
-      build: operationId => kakaoCommand(item.id, operationId, queryUsed, chosen, connection)});
+      build: operationId => kakaoCommand(item.id, operationId, queryUsed, chosen, connection)};
+    setPicked(pick);
+    if (reviewMode) confirm(pick);
   };
-  const confirm = () => {
-    if (!picked || sending) return;
+  const confirm = (pick = picked) => {
+    if (!pick || sending) return;
     const controller = send.current = new AbortController();
     setSending(true); setSendFailure(null);
     // A retry after an unknown outcome reuses the operation id, so the server answers idempotently.
-    void fileBindRequest(picked.build(picked.operationId), controller.signal).then(reply => {
+    void fileBindRequest(pick.build(pick.operationId), controller.signal).then(reply => {
       if (controller.signal.aborted) return;
       setSending(false); onRequested(reply.request);
     }, reason => {
@@ -244,13 +252,14 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
     });
   };
 
-  const searchDisabled = busy || unavailable || wait > 0;
+  const searchDisabled = busy || sending || unavailable || wait > 0;
   return <Dialog open title={`${name} 연결`} onClose={onClose}>
     <DialogDescription className="collection-sheet-label">{provider === 'mangadex' ? 'MangaDex에서 작품을 찾아 고르면 PC가 켜질 때 작품 정보와 권별 표지를 가져와요.' : '국내 출판 제목으로 찾으세요. 고르면 PC가 켜질 때 출판사별 권 목록과 발매 정보를 연결해요.'}</DialogDescription>
     <div className="library-sheet bind-sheet">
+      {reviewMode && <div className="book-connect__work">{workCover}<span><strong>{item.name}</strong><small>보유 {item.kakaoReview?.ownedCount ?? 0}권</small></span></div>}
       <form className="bind-search" role="search" onSubmit={submit}>
         <MagnifyingGlassIcon aria-hidden="true"/>
-        <input ref={input} type="search" enterKeyHint="search" aria-label={`${name} 검색어`} value={query} maxLength={100} onChange={event => setQuery(event.target.value)}/>
+        <input ref={input} type="search" enterKeyHint="search" aria-label={`${name} 검색어`} value={query} disabled={sending} maxLength={100} onChange={event => setQuery(event.target.value)}/>
         <Button type="submit" variant="primary" disabled={searchDisabled}><BusyLabel busy={!!(busy)} idle={'검색'}>검색 중…</BusyLabel></Button>
       </form>
       {status?.publisherSeenAt === null && <p className="collection-bindings-note">{PUBLISHER_UPDATE_NOTE}</p>}
@@ -270,7 +279,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
           : found.items.map(candidate => {
             const on = checked.includes(candidate.groupFingerprint), full = !on && checked.length >= MAX_KAKAO_GROUPS;
             return <li key={candidate.groupFingerprint}><label className={`bind-result is-check${on ? ' is-selected' : ''}${full ? ' is-disabled' : ''}`}>
-              <input type="checkbox" checked={on} disabled={full} aria-label={[candidate.title, kakaoVolumes(candidate)].filter(Boolean).join(' ')} onChange={() => toggleKakao(candidate.groupFingerprint)}/>
+              <input type="checkbox" checked={on} disabled={full || busy || sending} aria-label={[candidate.title, kakaoVolumes(candidate)].filter(Boolean).join(' ')} onChange={() => { setPicked(null); setSendFailure(null); toggleKakao(candidate.groupFingerprint); }}/>
               <BindThumb url={candidate.thumbnailUrl} provider="kakao"/>
               <span className="bind-result-text"><strong>{candidate.title}</strong>
                 <small>{[candidate.author, candidate.publisher].filter(Boolean).join(' · ')}</small>
@@ -280,18 +289,20 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
       </ul>}
       {kakaoFound && kakaoFound.items.length > 0 && <p className="hint bind-hint">{KAKAO_GROUPS_HINT}</p>}
       <div className="bind-actions">
+        {onSkip && <Button variant="ghost" disabled={sending} onClick={async () => { setSending(true); try { await onSkip(); onClose(); } catch (reason) { setSendFailure(requestFailure(reason)); setSending(false); } }}>연결 안 함</Button>}
         <Button variant="ghost" onClick={onClose}>닫기</Button>
-        {provider === 'kakao' && kakaoFound && kakaoFound.items.length > 0 && <Button variant="primary" disabled={checked.length === 0} onClick={pickKakao}>{checked.length}개 묶음 연결</Button>}
+        {provider === 'kakao' && kakaoFound && kakaoFound.items.length > 0 && <Button variant="primary" disabled={checked.length === 0 || busy || sending} onClick={pickKakao}>{reviewMode ? '연결 요청' : `${checked.length}개 묶음 연결`}</Button>}
       </div>
     </div>
-    {picked && <Dialog open title="이 작품으로 연결할까요?" onClose={() => { send.current?.abort(); setSending(false); setPicked(null); setSendFailure(null); }}>
+    {reviewMode && sendFailure && <div role="alert" className="bind-message is-error">{sendFailure.text}{sendFailure.retry && <Button disabled={sending} onClick={pickKakao}>다시 시도</Button>}</div>}
+    {picked && !reviewMode && <Dialog open title="이 작품으로 연결할까요?" onClose={() => { send.current?.abort(); setSending(false); setPicked(null); setSendFailure(null); }}>
       <DialogDescription className="collection-sheet-label">PC가 켜지면 {name} 정보를 가져와 적용해요. {provider === 'kakao' ? '작품명과 고른 표지는 그대로예요.' : '내가 고친 값은 덮어쓰지 않아요.'}</DialogDescription>
       <div className="library-sheet bind-confirm">
         <div className="bind-result is-static"><BindThumb url={picked.thumbnail} provider={provider}/><span className="bind-result-text"><strong>{picked.title}</strong>{picked.subtitle && <small>{picked.subtitle}</small>}</span></div>
         {picked.groups && <ul className="bind-groups" aria-label="고른 묶음">{picked.groups.map(group => <li key={group.key}><span>{group.title}</span><span className="numeric">{group.range}</span></li>)}</ul>}
         {picked.merge && <p className="bind-merge numeric">{picked.merge}</p>}
         {sendFailure && <p className="bind-message is-error" role="alert">{sendFailure.text}</p>}
-        <Button variant="primary" disabled={sending || (!!sendFailure && !sendFailure.retry)} onClick={confirm}><BusyLabel busy={!!(sending)} idle={sendFailure?.retry ? '다시 보내기' : '연결 요청'}>보내는 중…</BusyLabel></Button>
+        <Button variant="primary" disabled={sending || (!!sendFailure && !sendFailure.retry)} onClick={() => confirm()}><BusyLabel busy={!!(sending)} idle={sendFailure?.retry ? '다시 보내기' : '연결 요청'}>보내는 중…</BusyLabel></Button>
         <Button variant="ghost" onClick={() => { send.current?.abort(); setSending(false); setPicked(null); setSendFailure(null); }}>취소</Button>
       </div>
     </Dialog>}

@@ -11,6 +11,7 @@ const ALL: ReplicaFeatures = ReplicaFeatures {
     people: true,
     portrait_image: true,
     av_credit_name: true,
+    kakao_review: false,
 };
 const AV_ONLY: ReplicaFeatures = ReplicaFeatures {
     av: true,
@@ -19,7 +20,48 @@ const AV_ONLY: ReplicaFeatures = ReplicaFeatures {
     people: false,
     portrait_image: false,
     av_credit_name: false,
+    kakao_review: false,
 };
+
+#[test]
+fn kakao_review_replica_feature_carries_query_binding_and_range_without_cropping_the_review() {
+    use crate::library::models::ExternalBindingInput;
+    let (_temp, library) = fixture();
+    library.upsert_collection_external_binding("m", ExternalBindingInput {
+        provider: "mangadex".into(), external_id: "dex".into(), provider_config_json: None,
+        provider_data_json: Some(json!({"detail":{"data":{"attributes":{"altTitles":[{"ko":"한국어 제목"}]}}}}).to_string()), last_synced_at: None,
+    }).unwrap();
+    library.upsert_collection_external_binding("m", ExternalBindingInput {
+        provider: "kakao".into(), external_id: "one".into(),
+        provider_config_json: Some(json!({"version":1,"query":"저장 검색어","groupFingerprint":"group","knownItemIds":[]}).to_string()),
+        provider_data_json: Some(json!({"volumes":[{"volumeNumber":1},{"volumeNumber":3}]}).to_string()), last_synced_at: None,
+    }).unwrap();
+    library.set_collection_volume_range("m", Some(2), Some(10), true).unwrap();
+    library.connection().unwrap().execute("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES('m',5,0,1,0)",[]).unwrap();
+    library.set_kakao_partial_dismissed("m", true).unwrap();
+    let old: Value = serde_json::from_str(&body(&library, ALL)).unwrap();
+    assert!(item(&old,"m").get("kakaoReview").is_none());
+    let new: Value = serde_json::from_str(&body(&library, ReplicaFeatures { kakao_review:true, ..ALL })).unwrap();
+    let review = &item(&new,"m")["kakaoReview"];
+    assert_eq!(review["query"],"저장 검색어");
+    assert_eq!(review["querySource"],"mangadex");
+    assert_eq!(review["volumes"],json!([1,3]));
+    assert_eq!(review["highestOwnedVolume"],5);
+    assert_eq!(review["hideConnectionPrompt"],true);
+    assert_eq!(review["partialDismissed"],true);
+    // Optional review cannot reject the complete publication on oversized provider data.
+    let db = library.connection().unwrap();
+    db.execute("UPDATE collection_external_bindings SET provider_config_json=?1 WHERE collection_id='m' AND provider='kakao'",
+        [json!({"query":"가".repeat(2001)}).to_string()]).unwrap();
+    drop(db);
+    let clipped: Value = serde_json::from_str(&body(&library, ReplicaFeatures { kakao_review:true, ..ALL })).unwrap();
+    assert_eq!(item(&clipped,"m")["kakaoReview"]["query"].as_str().unwrap().chars().count(), 2000);
+    library.connection().unwrap().execute("UPDATE collection_external_bindings SET provider_config_json=?1 WHERE collection_id='m' AND provider='kakao'",
+        [json!({"groups":(0..11).map(|n|json!({"groupFingerprint":n.to_string()})).collect::<Vec<_>>()} ).to_string()]).unwrap();
+    let omitted: Value = serde_json::from_str(&body(&library, ReplicaFeatures { kakao_review:true, ..ALL })).unwrap();
+    assert!(item(&omitted,"m").get("kakaoReview").is_none());
+    assert_eq!(omitted["collections"].as_array().unwrap().len(), new["collections"].as_array().unwrap().len());
+}
 
 fn fixture() -> (tempfile::TempDir, Library) {
     let temp = tempfile::tempdir().unwrap();

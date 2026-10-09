@@ -33,6 +33,113 @@ def blob(data):
 class CollectionAuthorityTests(unittest.TestCase):
     tearDown = fixtures.MobileCollectionsTests.tearDown
 
+    def test_kakao_review_client_dismissal_undo_and_snapshot_change(self):
+        self.ready()
+        config = {"version": 1, "query": "던전밥", "groupFingerprint": "group", "knownItemIds": ["one", "three"]}
+        self.ok(self.command('bindProvider', headers=self.publisher, workId='a', provider='kakao',
+                             externalId='one', config=config, expectedRevision=0))
+        snapshot = {"volumes": [{"volumeNumber": 1}, {"volumeNumber": 3}]}
+        receipt = self.ok(self.command('applyProviderSnapshot', headers=self.publisher, workId='a', provider='kakao',
+                                      externalId='one', snapshot=snapshot, values={}, details={}, baseSnapshotDigest=None))
+        operation = str(uuid.uuid4())
+        receipt = self.ok(self.command('setKakaoPartialDismissed', operation_id=operation, workId='a', dismissed=True, expectedVolumes=[1, 3]))
+        self.assertEqual(self.ok(self.command('setKakaoPartialDismissed', operation_id=operation, workId='a', dismissed=True, expectedVolumes=[1, 3])), receipt)
+        read = self.ok(self.client.get('/v1/collections/a', headers=self.auth, params={'kakaoReview': True}))
+        self.assertTrue(read['item']['kakaoReview']['partialDismissed'])
+        self.ok(self.command('setKakaoPartialDismissed', workId='a', dismissed=False, expectedVolumes=[99]))
+        self.assertFalse(self.ok(self.command('setKakaoPartialDismissed', workId='a', dismissed=True, expectedVolumes=[1]))['changed'])
+        self.assertEqual(self.command('setKakaoPartialDismissed', workId='a', dismissed=1, expectedVolumes=[1, 3]).status_code, 422)
+        self.ok(self.command('setKakaoPartialDismissed', workId='a', dismissed=True, expectedVolumes=[1, 3]))
+        with api_app.get_db() as db:
+            binding = ca.binding_row(db, LIBRARY, 'a', 'kakao')
+            base = binding['snapshot_digest']
+        self.ok(self.command('applyProviderSnapshot', headers=self.publisher, workId='a', provider='kakao', externalId='one',
+                             snapshot={"volumes": [{"volumeNumber": n} for n in [1, 2, 3]]}, values={}, details={}, baseSnapshotDigest=base))
+        with api_app.get_db() as db:
+            binding = ca.binding_row(db, LIBRARY, 'a', 'kakao')
+            self.assertNotIn('reviewDismissedVolumes', json.loads(binding['config']))
+
+    def test_kakao_review_is_computed_for_pre_feature_projection_without_writes(self):
+        self.ready()
+        with api_app.get_db() as db:
+            row = db.execute("SELECT payload FROM collection_authority_projection WHERE id='a'").fetchone()
+            payload = json.loads(row[0])
+            payload.pop('kakaoReview', None)
+            stored = ca.encode(payload)
+            db.execute("UPDATE collection_authority_projection SET payload=? WHERE id='a'", [stored])
+            db.commit()
+            before = list(db.iterdump())
+        item = self.ok(self.client.get('/v1/collections/a', headers=self.auth, params={'kakaoReview': True}))['item']
+        self.assertEqual(item['kakaoReview']['collectionId'], 'a')
+        self.assertFalse(item['kakaoReview']['bound'])
+        listing = self.ok(self.client.get('/v1/collections', headers=self.auth, params={'type': 'manga', 'kakaoReview': True}))
+        self.assertTrue(any(item['id'] == 'a' and 'kakaoReview' in item for item in listing['items']))
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT payload FROM collection_authority_projection WHERE id='a'").fetchone()[0], stored)
+            self.assertEqual(list(db.iterdump()), before)
+
+    def test_kakao_review_noops_for_unbound_trashed_and_missing_work(self):
+        self.ready()
+        cursor = self.client.get(PREFIX + '/status', headers=self.auth).json()['cursor']
+        for work_id in ['a', 'missing']:
+            result = self.ok(self.command('setKakaoPartialDismissed', workId=work_id, dismissed=True, expectedVolumes=[]))
+            self.assertFalse(result['changed'])
+            self.assertEqual(result['authorityCursor'], cursor)
+        self.ok(self.command('deleteWork', workId='a', expectedRevision=1))
+        self.assertFalse(self.ok(self.command('setKakaoPartialDismissed', workId='a', dismissed=True, expectedVolumes=[]))['changed'])
+
+    def test_kakao_review_bind_behind_dismiss_uses_the_next_revision(self):
+        self.ready()
+        config = {'query': '가', 'groupFingerprint': 'f'}
+        self.ok(self.command('bindProvider', headers=self.publisher, workId='a', provider='kakao', externalId='one', config=config, expectedRevision=0))
+        self.ok(self.command('applyProviderSnapshot', headers=self.publisher, workId='a', provider='kakao', externalId='one',
+                             snapshot={'volumes': [{'volumeNumber': 1}, {'volumeNumber': 3}]}, values={}, details=None, baseSnapshotDigest=None))
+        dismiss = self.ok(self.command('setKakaoPartialDismissed', workId='a', dismissed=True, expectedVolumes=[1, 3]))
+        revision = dismiss['entities']['bindings'][0]['entityRevision']
+        result = self.ok(self.command('bindProvider', headers=self.publisher, workId='a', provider='kakao', externalId='one', config=config, expectedRevision=revision))
+        self.assertEqual(result['entities']['bindings'][0]['entityRevision'], revision + 1)
+
+    def test_kakao_review_command_validator_accepts_empty_and_rejects_invalid_volume_sets(self):
+        body = {'libraryId': LIBRARY, 'epoch': 1, 'contractVersion': 1, 'operationId': str(uuid.uuid4()),
+                'commandType': 'setKakaoPartialDismissed', 'workId': 'a', 'dismissed': True, 'expectedVolumes': []}
+        self.assertEqual(ca.parse_command(body)[-1]['expectedVolumes'], [])
+        for invalid in [[True], [0], [1, 1], [3, 1], None]:
+            with self.assertRaises(ca.HTTPException) as error:
+                ca.parse_command({**body, 'expectedVolumes': invalid})
+            self.assertEqual(error.exception.status_code, 422)
+
+    def test_kakao_review_bad_data_does_not_reject_public_read(self):
+        self.ready()
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO collection_authority_bindings(library_id,work_id,provider,external_id,config,snapshot,bound,entity_revision,created_at,updated_at)"
+                       " VALUES(?, 'a', 'kakao', 'one', ?, NULL, 1, 1, 'now', 'now')",
+                       [LIBRARY, json.dumps({'query': '가' * 2001, 'groups': [{'groupFingerprint': str(i)} for i in range(11)]})])
+            db.commit()
+        self.assertNotIn('kakaoReview', self.ok(self.client.get('/v1/collections/a', headers=self.auth, params={'kakaoReview': True}))['item'])
+
+    def test_kakao_review_read_is_opt_in_and_client_authenticated(self):
+        self.ready()
+        for headers in (AUTH, self.auth, self.publisher):
+            self.ok(self.client.get('/v1/collections/status', headers=headers))
+            for path, key in (('/v1/collections', 'items'), ('/v1/collections/a', 'item')):
+                legacy = self.ok(self.client.get(path, headers=headers))
+                reviewed = self.ok(self.client.get(path, headers=headers, params={'kakaoReview': True}))
+                before = legacy[key] if key == 'items' else [legacy[key]]
+                after = reviewed[key] if key == 'items' else [reviewed[key]]
+                self.assertTrue(all('kakaoReview' not in item for item in before))
+                self.assertTrue(any('kakaoReview' in item for item in after))
+                self.assertEqual(before, [{k: v for k, v in item.items() if k != 'kakaoReview'} for item in after])
+        for path in ('/v1/collections/status', '/v1/collections', '/v1/collections/a'):
+            self.assertEqual(self.client.get(path, params={'kakaoReview': True}).status_code, 401)
+
+    def test_kakao_review_partial_items_do_not_require_type(self):
+        self.ready()
+        with api_app.get_db() as db:
+            for include_review in (False, True):
+                item = ca.finalize_item(db, LIBRARY, {'id': 'a'}, include_review=include_review)
+                self.assertEqual(item['assetCount'], 2)
+                self.assertNotIn('kakaoReview', item)
+
     def setUp(self):
         fixtures.MobileCollectionsTests.setUp(self)
         api_app.startup_replication()  # committed/collected_at asset columns
@@ -598,7 +705,7 @@ class CollectionAuthorityTests(unittest.TestCase):
 
     def test_inactive_domain_changes_nothing(self):
         self.assertEqual(self.client.get(PREFIX + '/status', headers=self.auth).json(),
-                         {'active': False, 'domain': 'collections', 'features': ['personProfileFields']})
+                         {'active': False, 'domain': 'collections', 'features': ['personProfileFields', 'kakaoReview']})
         for path, params in (('/baseline', {'libraryId': LIBRARY, 'epoch': 1}),
                              ('/changes', {'libraryId': LIBRARY, 'epoch': 1})):
             reply = self.client.get(PREFIX + path, headers=self.auth, params=params)

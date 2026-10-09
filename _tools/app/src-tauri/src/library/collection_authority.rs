@@ -37,6 +37,7 @@ const COMMANDS: &[&str] = &[
     "setOwnershipTracking",
     "setReleaseSubscription",
     "setVolumeRange",
+    "setKakaoPartialDismissed",
     "recordReleaseEvent",
     "acknowledgeReleaseEvents",
     "setAvDetails",
@@ -493,6 +494,19 @@ pub(crate) fn enqueue_provider_snapshot(
                 base["config"] = body["config"].clone();
                 base["bound"] = json!(true);
             }
+            Some("setKakaoPartialDismissed") if provider == "kakao" && base["bound"] == true => {
+                let volumes = super::kakao_review::snapshot_volumes(&base["snapshot"]);
+                if body["dismissed"] == false || body["expectedVolumes"] == json!(volumes) {
+                    let previous = base["config"].clone();
+                    if !base["config"].is_object() { base["config"] = json!({}); }
+                    if body["dismissed"] == true {
+                        base["config"]["reviewDismissedVolumes"] = json!(volumes);
+                    } else if let Some(config) = base["config"].as_object_mut() {
+                        config.remove("reviewDismissedVolumes");
+                    }
+                    if previous != base["config"] { revision += 1; }
+                }
+            }
             Some("applyProviderSnapshot") => {
                 revision += 1;
                 if !base.is_object() {
@@ -500,6 +514,9 @@ pub(crate) fn enqueue_provider_snapshot(
                 }
                 base["externalId"] = body["externalId"].clone();
                 base["snapshot"] = body["snapshot"].clone();
+                if provider == "kakao" && base["config"]["reviewDismissedVolumes"] != json!(super::kakao_review::snapshot_volumes(&base["snapshot"])) {
+                    if let Some(config) = base["config"].as_object_mut() { config.remove("reviewDismissedVolumes"); }
+                }
                 base["values"] = body["values"].clone();
                 base["snapshotDigest"] =
                     json!(Sha256::digest(body["snapshot"].to_string().as_bytes())
@@ -3294,7 +3311,9 @@ impl Library {
         }
         ensure_collection_write_ready(&*self.connection()?, status)?;
         prune_profile_predictions(&*self.connection()?)?;
-        let mut sent = false;
+        // Resolve review intents blocked by a pre-fix server before looking at the FIFO head.
+        let resolved = self.connection()?.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason=conflict_code,updated_at=?1 WHERE command_type='setKakaoPartialDismissed' AND state='blocked' AND conflict_code IN ('kakaoNotBound','workTrashed','revisionConflict','unsupportedCollectionCommand')", [chrono::Utc::now().to_rfc3339()])?;
+        let mut sent = resolved > 0;
         for _ in 0..50 {
             let row=self.connection()?.query_row("SELECT seq,payload,attempts,retry_at,state FROM collection_authority_outbox WHERE state IN ('pending','blocked') ORDER BY seq LIMIT 1",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?))).optional()?;
             let Some((seq, raw, attempts, retry_at, state)) = row else {
@@ -3307,6 +3326,12 @@ impl Library {
                 serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
             let id = status.identity(&*self.connection()?)?.unwrap();
             envelope(&body, &id)?;
+            if body["commandType"] == "setKakaoPartialDismissed"
+                && !status.features.iter().any(|feature| feature == "kakaoReview") {
+                self.connection()?.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='unsupportedCollectionCommand',updated_at=?2 WHERE seq=?1",params![seq,chrono::Utc::now().to_rfc3339()])?;
+                sent = true;
+                continue;
+            }
             // Count the attempt durably before leaving the DB for transport.
             self.connection()?.execute("UPDATE collection_authority_outbox SET attempts=attempts+1,updated_at=?2 WHERE seq=?1",params![seq,chrono::Utc::now().to_rfc3339()])?;
             let result = send(&body);
@@ -3387,6 +3412,12 @@ impl Library {
                     }
                     selections(&tx)?;
                     tx.execute("UPDATE collection_authority_outbox SET state='accepted',receipt=?2,last_error=NULL,updated_at=?3 WHERE seq=?1",params![seq,receipt.to_string(),timestamp])?;
+                    sent = true;
+                }
+                Ok(CollectionDelivery::Conflict(detail) | CollectionDelivery::Dropped(detail))
+                    if body["commandType"] == "setKakaoPartialDismissed"
+                        && matches!(detail["code"].as_str(), Some("kakaoNotBound" | "workTrashed" | "revisionConflict" | "unsupportedCollectionCommand")) => {
+                    tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason=?2,conflict_code=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,text(&detail,"code")?,detail.to_string(),timestamp])?;
                     sent = true;
                 }
                 Ok(CollectionDelivery::Conflict(detail) | CollectionDelivery::Dropped(detail))

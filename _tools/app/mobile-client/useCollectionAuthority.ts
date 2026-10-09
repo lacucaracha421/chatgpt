@@ -138,5 +138,12 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void, o
     observeLibrary: setLibrary,
     work: <T extends CollectionSummary>(item: T) => optimisticWork(confirmedWork(item, settledRows), scoped.filter(row=>row.state!=='accepted')),
     creations: scoped.flatMap(row => { const item = createdWork(row); return item ? [optimisticWork(item, scoped)] : []; }),
-    reconcile: (item: CollectionSummary, source: 'list' | 'detail' = 'list', readStartedAt?: number) => { if (identity) reconcileCommands(identity, item, source, readStartedAt); }};
+    reconcile: (item: CollectionSummary, source: 'list' | 'detail' = 'list', readStartedAt?: number) => {
+      if (!identity) return;
+      reconcileCommands(identity, item, source, readStartedAt);
+      if (item.kakaoReview) setConfirmed(current => {
+        const next = current.filter(row => row.command.workId !== item.id || !sameAuthority(row.command, identity) || row.command.commandType !== 'setKakaoPartialDismissed' || JSON.stringify(row.command.expectedVolumes) === JSON.stringify(item.kakaoReview!.volumes));
+        return next.length === current.length ? current : next;
+      });
+    }};
 }

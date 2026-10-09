@@ -426,7 +426,7 @@ export type AssetView =
   | { kind: "private_vault" }
   | { kind: "settings"; section?: "frequent" | "display" | "library" | "connection" | "catalog" | "vault" | "advanced" }
   | { kind: "manga" }
-  | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean }
+  | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean; kakaoReview?: boolean }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
   /** 내용 검색 result state in the 에셋 area: images ranked by how well they match the typed description. */
   | { kind: "description_search"; query: string; /** Rank even when the "no match" gate says the words are unknown. */ force?: true };
@@ -502,6 +502,14 @@ export type CollectionVolumeRangeInput = {
   minVolume: number | null;
   maxVolume: number | null;
   hideConnectionPrompt: boolean;
+};
+
+export type KakaoReview = {
+  dismissalSupported?: boolean;
+  collectionId: string; query: string; querySource: "name" | "mangadex" | "none";
+  bound: boolean; volumes: number[]; highestOwnedVolume: number; ownedCount: number;
+  partialDismissed: boolean; groupFingerprints: string[];
+  minVolume: number | null; maxVolume: number | null; hideConnectionPrompt: boolean;
 };
 
 export type CreateCollection = {
@@ -765,7 +773,10 @@ export type KakaoSeriesCandidate = {
   author: string | null;
   publisher: string | null;
   volumes: KakaoVolumeCandidate[];
+  /** Duplicates of a volume already listed in this group. */
   ignoredCount: number;
+  /** Products of the whole search left out as not a volume (sets, guides, unreadable numbers). */
+  unparsedCount?: number;
 };
 
 export type KakaoGroupSelection = {
@@ -1608,6 +1619,8 @@ export interface LibraryGateway {
   setCollectionCover(collectionId: string, assetId: string | null): Promise<CollectionSummary>;
   setCollectionShowcase(collectionId: string, showcase: boolean): Promise<CollectionSummary>;
   setCollectionVolumeRange?(collectionId: string, input: CollectionVolumeRangeInput): Promise<CollectionSummary>;
+  listKakaoReviews?(): Promise<KakaoReview[]>;
+  setKakaoPartialDismissed?(collectionId: string, dismissed: boolean): Promise<void>;
   getAssetCollections(assetId: string): Promise<string[]>;
   patchAssetCollections(patch: AssetCollectionPatch): Promise<void>;
   getEncryptedVaultStatus?(): Promise<EncryptedVaultStatus>;

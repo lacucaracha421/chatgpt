@@ -7,6 +7,14 @@ import { KakaoConnectDialog } from "./KakaoConnectDialog";
 
 afterEach(cleanup);
 
+it("preselects only already bound groups when multiple editions exactly match", async () => {
+  const editions = ["bound", "other"].map(groupFingerprint => ({...candidates[0], groupFingerprint}));
+  const gateway = {searchKakao: vi.fn().mockResolvedValue(editions)} as unknown as LibraryGateway;
+  render(<LibraryProvider gateway={gateway}><KakaoConnectDialog open collectionId="work" initialQuery="던전 밥" autoSearch initialGroupFingerprints={["bound"]} onClose={vi.fn()} onApplied={vi.fn()} /></LibraryProvider>);
+  const choices = await screen.findAllByRole("button", {name: /던전밥.*쿠이 료코.*소미미디어/});
+  expect(choices.map(choice => choice.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+});
+
 const candidates: KakaoSeriesCandidate[] = [{
   anchorItemId: "item-1",
   groupFingerprint: "fingerprint-a",
@@ -58,7 +66,17 @@ describe("KakaoConnectDialog", () => {
     await user.click(result);
     expect(screen.getByText("던전밥 1권")).toBeInTheDocument();
     expect(screen.getByText("던전밥 3권")).toBeInTheDocument();
-    expect(screen.getByText("제외된 상품 2개")).toBeInTheDocument();
+    expect(screen.getByText("같은 권이 겹쳐 제외된 상품 2개")).toBeInTheDocument();
+    expect(screen.queryByText(/권 번호를 알 수 없거나/)).not.toBeInTheDocument();
+  });
+
+  it("reports products left out as not a volume separately from duplicate volumes", async () => {
+    const user = userEvent.setup();
+    renderDialog({ searchKakao: vi.fn().mockResolvedValue([{ ...candidates[0], unparsedCount: 4 }]) });
+
+    await user.click(screen.getByRole("button", { name: "검색" }));
+
+    expect(await screen.findByText("권 번호를 알 수 없거나 세트·가이드라서 제외된 상품 4개")).toBeInTheDocument();
   });
 
   it("rejects a one-character query locally and applies exactly the selected identity", async () => {

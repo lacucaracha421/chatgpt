@@ -856,6 +856,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <CollectionBrowser
                     releaseProvider={view.kind === "collections" ? view.releaseProvider : undefined}
                     releaseCalendar={view.kind === "collections" ? view.releaseCalendar : undefined}
+                    kakaoReview={view.kind === "collections" ? view.kakaoReview : undefined}
                     collections={collections}
                     typeFilter={view.typeFilter}
                     showcase={view.showcase}

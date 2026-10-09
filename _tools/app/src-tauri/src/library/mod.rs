@@ -1,5 +1,6 @@
 pub(crate) mod aladin;
 mod aladin_flow;
+pub(crate) mod kakao_review;
 pub(crate) mod album;
 pub(crate) mod album_authority;
 pub(crate) mod collection_authority;

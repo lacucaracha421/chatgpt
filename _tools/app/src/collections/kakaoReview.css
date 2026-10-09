@@ -1,0 +1,31 @@
+.kakao-review { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.workspace-content .collection-browser__stage:has(.kakao-review) { padding-top: 0; }
+.kakao-review__bar { padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); }
+.kakao-review__list { overflow: auto; min-height: 0; padding: 0 var(--space-4); }
+.kakao-review__row { display: grid; grid-template-columns: 30px minmax(130px, 1fr) minmax(150px, 300px) 148px 220px; align-items: center; gap: var(--space-3); height: 48px; padding: 0 var(--space-2); overflow: hidden; border-bottom: 1px solid var(--color-border); transition: background 140ms var(--ease-standard), height 220ms ease-in-out, opacity 220ms ease-in-out; }
+.kakao-review__row:hover { background: var(--color-surface-hover); }
+.kakao-review__cover { display: block; width: 30px; height: 42px; background: var(--color-surface); overflow: hidden; }
+.kakao-review__cover img { width: 100%; height: 100%; object-fit: cover; }
+.kakao-review__identity { display: grid; gap: 2px; min-width: 0; }
+.kakao-review__identity strong { font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kakao-review__identity small, .kakao-review__source { color: var(--color-muted); font-size: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kakao-review__source { color: var(--color-faint); }
+.kakao-review__row .ui-text-input { width: 100%; }
+.kakao-review__actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); white-space: nowrap; }
+.kakao-review__actions svg { width: 16px; height: 16px; }
+.kakao-review__skip { opacity: 0; transition: opacity 140ms var(--ease-standard); }
+.kakao-review__row:hover .kakao-review__skip, .kakao-review__row:focus-within .kakao-review__skip { opacity: 1; }
+.kakao-review__row.is-success, .kakao-review__row.is-folding { background: color-mix(in srgb, var(--color-success) 12%, transparent); }
+.kakao-review__done { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-success); font-size: var(--type-meta); animation: kakao-review-check 140ms var(--ease-standard); }
+@keyframes kakao-review-check { from { opacity: 0; } to { opacity: 1; } }
+.kakao-review__row.is-folding { height: 0; opacity: 0; border-bottom-color: transparent; }
+.kakao-review__row.is-entering { animation: kakao-review-unfold 220ms ease-in-out; }
+@keyframes kakao-review-unfold { from { height: 0; opacity: 0; } to { height: 48px; opacity: 1; } }
+.kakao-review__row.is-partial { grid-template-columns: 30px minmax(130px, 1fr) minmax(150px, 360px) 112px 220px; }
+.kakao-review__volumes { display: flex; flex-wrap: wrap; gap: 2px; max-height: 38px; overflow: auto; }
+.kakao-review__volumes i { flex: none; width: 8px; height: 8px; border-radius: var(--radius-mark); background: var(--color-muted); }
+.kakao-review__volumes i.is-missing { background: transparent; box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+.kakao-review__missing { color: var(--color-muted); font-size: var(--type-meta); }
+.kakao-review__empty { padding: var(--space-4); color: var(--color-muted); }
+@media (max-width: 1050px) { .kakao-review__row { min-width: 760px; grid-template-columns: 30px minmax(110px, 1fr) minmax(100px, 1fr) 140px 210px; gap: var(--space-2); } .kakao-review__row.is-partial { grid-template-columns: 30px minmax(110px, 1fr) minmax(90px, 1fr) 100px 210px; } }
+@media (prefers-reduced-motion: reduce) { .kakao-review__row, .kakao-review__skip { transition: none; } .kakao-review__done, .kakao-review__row.is-entering { animation: none; } }

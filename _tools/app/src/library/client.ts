@@ -8,6 +8,7 @@ import type {
   KakaoCredentialStatus,
   KakaoSeriesCandidate,
   KakaoSyncResult,
+  KakaoReview,
   AlbumEntry,
   CharacterSidebarCounts,
   AssetAlbumPatch,
@@ -616,6 +617,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<CollectionSummary>("set_collection_showcase", { collectionId, showcase }),
   setCollectionVolumeRange: (collectionId, input) =>
     invoke<CollectionSummary>("set_collection_volume_range", { collectionId, ...input }),
+  listKakaoReviews: () => invoke<KakaoReview[]>("list_kakao_reviews"),
+  setKakaoPartialDismissed: (collectionId, dismissed) => invoke<void>("set_kakao_partial_dismissed", { collectionId, dismissed }),
   getAssetCollections: (assetId) =>
     invoke<string[]>("get_asset_collections", { assetId }),
   patchAssetCollections: (patch: AssetCollectionPatch) =>

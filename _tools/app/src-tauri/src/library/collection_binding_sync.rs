@@ -38,7 +38,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    aladin_flow::{bound_group_keys, MAX_BOUND_GROUPS},
+    aladin_flow::{bound_group_keys, requested_groups_already_bound, MAX_BOUND_GROUPS},
     error::LibraryError,
     models::{
         AladinApplyRequest, AladinGroupSelection, MangaDexApplyRequest, MangaDexApplyTarget,
@@ -775,17 +775,7 @@ impl Library {
             .is_some_and(|(external, config)| match target {
                 Target::MangaDex(manga_id) => external == manga_id,
                 Target::Kakao(request) => {
-                    // Applied already when the binding holds exactly the picked groups
-                    // (each matched by fingerprint, or by anchor for an unchanged pick).
-                    bound_group_keys(config.as_deref(), external).is_some_and(|bound| {
-                        bound.len() == request.groups.len()
-                            && request.groups.iter().all(|picked| {
-                                bound.iter().any(|(anchor, fingerprint)| {
-                                    fingerprint == &picked.group_fingerprint
-                                        || anchor == &picked.anchor_item_id
-                                })
-                            })
-                    })
+                    requested_groups_already_bound(config.as_deref(), external, request)
                 }
             });
         if already {

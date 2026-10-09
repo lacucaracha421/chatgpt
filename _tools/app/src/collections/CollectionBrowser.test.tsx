@@ -65,6 +65,7 @@ function renderBrowser(props: {
   tracking?: CollectionTrackingGateway;
   releaseProvider?: CollectionUpdateProvider;
   releaseCalendar?: boolean;
+  kakaoReview?: boolean;
   calendarApi?: ReleaseCalendarGateway;
   avLinkApi?: AvLinkApi;
   fetchLaunchBoxSpines?: LibraryGateway["fetchLaunchBoxSpines"];
@@ -77,7 +78,7 @@ function renderBrowser(props: {
   if (props.calendarApi) gateway.releaseCalendar = props.calendarApi;
   function Harness() {
     const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
-    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} avLinkApi={props.avLinkApi}
+    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} kakaoReview={props.kakaoReview} avLinkApi={props.avLinkApi}
       collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
       onOpenWork={props.onOpenWork} onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
       libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
@@ -101,6 +102,24 @@ function SearchProbe() {
 }
 
 describe("CollectionBrowser", () => {
+  it("opens connection review after Showcase and new releases, hides a zero count, and returns in place", async () => {
+    const onViewChange = vi.fn();
+    const review = {collectionId: manga.id, query: manga.name, querySource: "name" as const, bound: false, volumes: [], highestOwnedVolume: 0, ownedCount: 0, partialDismissed: false, groupFingerprints: [], minVolume: null, maxVolume: null, hideConnectionPrompt: false};
+    renderBrowser({collections: [manga], typeFilter: "manga", showcase: false, onViewChange, patch: gateway => { gateway.listKakaoReviews = vi.fn().mockResolvedValue([review]); }});
+    const entry = await screen.findByRole("button", {name: "연결 점검 1"});
+    expect(entry.previousElementSibling).toHaveTextContent("신간");
+    await userEvent.click(entry);
+    expect(onViewChange).toHaveBeenLastCalledWith({kind: "collections", typeFilter: "manga", showcase: false, kakaoReview: true});
+    cleanup();
+    renderBrowser({collections: [manga], typeFilter: "manga", showcase: false, kakaoReview: true, onViewChange, patch: gateway => { gateway.listKakaoReviews = vi.fn().mockResolvedValue([review]); }});
+    expect(await screen.findByRole("region", {name: "Kakao 연결 점검"})).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", {name: "만화 목록으로"}));
+    expect(onViewChange).toHaveBeenLastCalledWith({kind: "collections", typeFilter: "manga", showcase: false});
+    cleanup();
+    const gateway = renderBrowser({collections: [manga], typeFilter: "manga", showcase: false, patch: gateway => { gateway.listKakaoReviews = vi.fn().mockResolvedValue([{...review, hideConnectionPrompt: true}]); }});
+    await waitFor(() => expect(gateway.listKakaoReviews).toHaveBeenCalled());
+    expect(screen.queryByRole("button", {name: /연결 점검/})).not.toBeInTheDocument();
+  });
   it("opens a newly created series with its title and TV search intent", async () => {
     const user = userEvent.setup();
     const onViewChange = vi.fn();

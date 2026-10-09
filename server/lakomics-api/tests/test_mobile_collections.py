@@ -448,7 +448,14 @@ class MobileCollectionsTests(unittest.TestCase):
 
     def test_status_advertises_replica_features(self):
         status = self.client.get("/v1/collections/status", headers=AUTH).json()
-        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName"])
+        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview"])
+
+    def test_bad_optional_kakao_review_cannot_reject_replica(self):
+        import mobile_collections as mobile
+        for invalid in [{'query': '가' * 2001}, {'groups': None}, 'bad', 123]:
+            item = {**work('review'), 'kakaoReview': invalid}
+            parsed = mobile.Collection.model_validate(item)
+            self.assertNotIn('kakaoReview', mobile.stored(parsed))
 
     def test_legacy_payload_and_revision_are_byte_identical(self):
         item = {**work("legacy"), "volumes": [{"id": "volume", "volumeNumber": 2, "editionIndex": 1, "displayLabel": "2권"}]}

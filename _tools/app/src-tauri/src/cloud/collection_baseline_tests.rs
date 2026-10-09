@@ -8,6 +8,7 @@ const ALL: ReplicaFeatures = ReplicaFeatures {
     people: true,
     portrait_image: true,
     av_credit_name: true,
+    kakao_review: false,
 };
 
 #[test]

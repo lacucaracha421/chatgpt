@@ -916,6 +916,107 @@ pub(crate) fn provider_commands(library: &Library) -> Vec<Value> {
         .collect()
 }
 
+#[test]
+fn kakao_review_dismissal_queues_authority_config_and_projects_fifo_undo() {
+    let (_temp, library, mut status) = fixture();
+    status.features = vec!["kakaoReview".into()];
+    let mut kakao = binding();
+    kakao["provider"] = json!("kakao");
+    kakao["config"] = json!({"version":1,"query":"던전밥","groupFingerprint":"f","knownItemIds":["one","three"]});
+    kakao["snapshot"] = json!({"volumes":[{"volumeNumber":1},{"volumeNumber":3}]});
+    adopt(&library, &status, json!({"works":[work("w",1)],"bindings":[kakao]}));
+    store_profile_features_status(&library.connection().unwrap(), &status).unwrap();
+    library.set_kakao_partial_dismissed("w", true).unwrap();
+    assert!(library.list_kakao_reviews().unwrap()[0].partial_dismissed);
+    let items = [("one", 1), ("three", 3)].into_iter().map(|(id, volume)| super::super::aladin::AladinItem {
+        item_id:id.into(), title:format!("던전밥 {volume}"), author:None, publisher:Some("출판".into()), isbn13:None,
+        publication_date:None, item_url:None, volume_number:volume, base_title:"던전밥".into(), snapshot_json:"{}".into(),
+    }).collect();
+    library.book_flow("kakao").refresh_aladin_items_at("w",items,NOW).unwrap();
+    assert!(library.list_kakao_reviews().unwrap()[0].partial_dismissed);
+    library.set_kakao_partial_dismissed("w", false).unwrap();
+    assert!(!library.list_kakao_reviews().unwrap()[0].partial_dismissed);
+    let commands = provider_commands(&library);
+    let binds: Vec<_> = commands.iter().filter(|c| c["commandType"] == "setKakaoPartialDismissed").collect();
+    assert_eq!(binds.len(), 2);
+    assert_eq!(binds[0]["expectedVolumes"], json!([1,3]));
+    assert_eq!(binds[0]["dismissed"], true);
+    assert_eq!(binds[1]["dismissed"], false);
+}
+
+fn kakao_review_fixture(supported: bool) -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
+    let (temp, library, mut status) = fixture();
+    if supported { status.features.push("kakaoReview".into()); }
+    let mut kakao = binding();
+    kakao["provider"] = json!("kakao");
+    kakao["config"] = json!({"query":"던전밥","groupFingerprint":"f"});
+    kakao["snapshot"] = json!({"volumes":[{"volumeNumber":1},{"volumeNumber":3}]});
+    adopt(&library, &status, json!({"works":[work("w",1)],"bindings":[kakao]}));
+    store_profile_features_status(&library.connection().unwrap(), &status).unwrap();
+    (temp, library, status)
+}
+
+#[test]
+fn kakao_review_bind_behind_dismiss_predicts_binding_revision() {
+    let (_temp, library, status) = kakao_review_fixture(true);
+    library.set_kakao_partial_dismissed("w", true).unwrap();
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    let input = super::super::models::ExternalBindingInput {
+        provider:"kakao".into(), external_id:"provider-work".into(),
+        provider_config_json:Some(json!({"query":"던전밥","groupFingerprint":"new"}).to_string()),
+        provider_data_json:None, last_synced_at:None,
+    };
+    enqueue_provider_snapshot(&tx, &status, "w", &input).unwrap();
+    let raw: String = tx.query_row("SELECT payload FROM collection_authority_outbox WHERE command_type='bindProvider'", [], |r| r.get(0)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&raw).unwrap()["expectedRevision"], 2);
+}
+
+#[test]
+fn kakao_review_older_server_cannot_queue_or_receive_dismissal() {
+    let (_temp, library, mut status) = kakao_review_fixture(false);
+    assert!(!library.list_kakao_reviews().unwrap()[0].dismissal_supported);
+    assert!(matches!(library.set_kakao_partial_dismissed("w", true), Err(LibraryError::CollectionAuthorityOperationUnavailable)));
+    assert!(provider_commands(&library).is_empty());
+    status.features.push("kakaoReview".into());
+    store_profile_features_status(&library.connection().unwrap(), &status).unwrap();
+    library.set_kakao_partial_dismissed("w", true).unwrap();
+    status.features.clear();
+    library.flush_collection_outbox_with(&status, &|_| panic!("old server must not receive the command"), 0).unwrap();
+    let db = library.connection().unwrap();
+    let state: String = db.query_row("SELECT state FROM collection_authority_outbox", [], |r| r.get(0)).unwrap();
+    assert_eq!(state, "dropped");
+}
+
+#[test]
+fn kakao_review_conflicts_resolve_outbox_head() {
+    for code in ["kakaoNotBound", "workTrashed", "revisionConflict", "unsupportedCollectionCommand"] {
+        let (_temp, library, status) = kakao_review_fixture(true);
+        library.set_kakao_partial_dismissed("w", true).unwrap();
+        library.flush_collection_outbox_with(&status, &|_| Ok(CollectionDelivery::Conflict(json!({"code":code}))), 0).unwrap();
+        let db = library.connection().unwrap();
+        let state: String = db.query_row("SELECT state FROM collection_authority_outbox", [], |r| r.get(0)).unwrap();
+        assert_eq!(state, "dropped", "{code}");
+        db.execute("UPDATE collection_authority_outbox SET state='blocked',conflict_code=?1", [code]).unwrap();
+        drop(db);
+        assert!(library.flush_collection_outbox_with(&status, &|_| panic!("a legacy blocked review must be resolved without transport"), 0).unwrap());
+        let state: String = library.connection().unwrap().query_row("SELECT state FROM collection_authority_outbox", [], |r| r.get(0)).unwrap();
+        assert_eq!(state, "dropped");
+    }
+}
+
+#[test]
+fn kakao_review_undo_after_pending_unbind_does_not_panic() {
+    let (_temp, library, status) = kakao_review_fixture(true);
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    enqueue_collection_command(&tx, &status, "unbindProvider", &json!(["w","kakao"]).to_string(),
+        json!({"workId":"w","provider":"kakao","expectedRevision":1})).unwrap();
+    tx.commit().unwrap();
+    drop(db);
+    assert!(matches!(library.set_kakao_partial_dismissed("w", false), Err(LibraryError::InvalidExternalBinding)));
+}
+
 pub(crate) fn provider_png() -> Vec<u8> {
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::new_rgb8(4, 4)

@@ -465,12 +465,13 @@ fn a_kakao_request_binds_its_group_even_after_the_anchor_drifted() {
     assert_eq!(results[1].1["state"], "failed");
     assert_eq!(results[1].1["reason"]["code"], "collectionNotManga");
     assert_eq!(fake.calls(), ["kakao:gone"]);
-    // The strict PC apply still refuses an unknown fingerprint.
+    // A pick is re-found by its anchor even when the group's fingerprint changed (regrouping
+    // can change it); a pick whose anchor and fingerprint are both unknown is still refused.
     let request = AladinApplyRequest {
         collection_id: "m".into(),
         query: "던전밥".into(),
         groups: vec![AladinGroupSelection {
-            anchor_item_id: group.anchor_item_id.clone(),
+            anchor_item_id: "missing-anchor".into(),
             group_fingerprint: "0".repeat(64),
         }],
     };

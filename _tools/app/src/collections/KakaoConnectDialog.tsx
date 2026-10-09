@@ -1,6 +1,6 @@
 import { EmptyState } from "../shared/ui/EmptyState";
 import { BusyLabel } from "../shared/ui/BusyLabel";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { KakaoSeriesCandidate, KakaoSyncResult } from "../library/types";
@@ -8,6 +8,8 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
+import { normalizeKakaoTitle } from "./kakaoReviewModel";
+import { StableImage } from "../shared/ui/StableImage";
 
 type KakaoConnectDialogProps = {
   open: boolean;
@@ -15,6 +17,10 @@ type KakaoConnectDialogProps = {
   initialQuery: string;
   onClose: () => void;
   onApplied: (result: KakaoSyncResult) => Promise<void> | void;
+  autoSearch?: boolean;
+  work?: { name: string; coverUrl: string | null; ownedCount: number };
+  initialGroupFingerprints?: string[];
+  onSkip?: () => Promise<void>;
 };
 
 export function KakaoConnectDialog({
@@ -23,6 +29,7 @@ export function KakaoConnectDialog({
   initialQuery,
   onClose,
   onApplied,
+  autoSearch = false, work, initialGroupFingerprints = [], onSkip,
 }: KakaoConnectDialogProps) {
   const { gateway } = useLibrary();
   const [query, setQuery] = useState(initialQuery);
@@ -34,6 +41,13 @@ export function KakaoConnectDialog({
   const selected = (results ?? []).filter((candidate) => selectedKeys.includes(candidate.groupFingerprint));
   const [busy, setBusy] = useState<"search" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failedAction, setFailedAction] = useState<"search" | "apply" | "skip" | null>(null);
+  const [searchValid, setSearchValid] = useState(false);
+  const searchGeneration = useRef(0);
+  useEffect(() => {
+    if (open && autoSearch) void search();
+    return () => { searchGeneration.current++; };
+  }, [open, collectionId]);
 
   function toggle(fingerprint: string) {
     setSelectedKeys((keys) =>
@@ -46,29 +60,37 @@ export function KakaoConnectDialog({
   }
 
   async function search() {
+    const generation = ++searchGeneration.current;
     const trimmed = query.trim();
+    setSearchValid(false); setFailedAction("search");
     if (trimmed.length < 2) {
       setError("검색어를 두 글자 이상 입력해 주세요.");
       return;
     }
     setBusy("search");
     setError(null);
-    setSelectedKeys([]);
     try {
       const nextResults = await gateway.searchKakao(trimmed);
+      if (generation !== searchGeneration.current) return;
       setSubmittedQuery(trimmed);
-      setResults(nextResults);
+      setSearchValid(true); setFailedAction(null);
+      const rank = (candidate: KakaoSeriesCandidate) => initialGroupFingerprints.includes(candidate.groupFingerprint) ? 0 : normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(trimmed) ? 1 : 2;
+      const exact = nextResults.filter(candidate => normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(trimmed));
+      setResults(autoSearch ? [...nextResults].sort((a, b) => rank(a) - rank(b)) : nextResults);
+      setSelectedKeys(autoSearch ? nextResults.filter(candidate => initialGroupFingerprints.includes(candidate.groupFingerprint) || (exact.length === 1 && candidate === exact[0])).slice(0, MAX_GROUPS).map(candidate => candidate.groupFingerprint) : []);
     } catch (searchError) {
+      if (generation !== searchGeneration.current) return;
       setError(commandErrorMessage(searchError, "카카오에서 검색하지 못했습니다."));
     } finally {
-      setBusy(null);
+      if (generation === searchGeneration.current) setBusy(null);
     }
   }
 
   async function apply() {
-    if (selected.length === 0 || !submittedQuery) return;
+    if (selected.length === 0 || !submittedQuery || !searchValid || busy) return;
     setBusy("apply");
     setError(null);
+    setFailedAction("apply");
     try {
       const result = await gateway.applyKakao({
         collectionId,
@@ -84,15 +106,18 @@ export function KakaoConnectDialog({
   }
 
   return (
-    <Dialog open={open} title="Kakao 연결" variant="wide" onClose={close}>
+    <Dialog open={open} title="Kakao 연결" variant="wide" onClose={close} onKeyDown={event => {
+      if (event.key === "Enter" && !event.nativeEvent.isComposing && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLButtonElement)) { event.preventDefault(); void apply(); }
+    }}>
       <div className="book-connect">
+        {work && <div className="book-connect__work">{work.coverUrl && <StableImage src={work.coverUrl} alt="" />}<span><strong>{work.name}</strong><small>보유 {work.ownedCount}권</small></span></div>}
         <div className="book-connect__search">
           <TextField
             label="카카오 작품 검색"
             type="search"
             value={query}
             onChange={(event) => { setQuery(event.target.value); setError(null); }}
-            onKeyDown={(event) => { if (event.key === "Enter") void search(); }}
+            onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); if (autoSearch && query.trim() === submittedQuery && selected.length > 0) void apply(); else if (!busy) void search(); } }}
           />
           <Button type="button" disabled={busy !== null} onClick={() => void search()}>
             <BusyLabel busy={!!(busy === "search")} idle={"검색"}>검색 중…</BusyLabel>
@@ -101,7 +126,10 @@ export function KakaoConnectDialog({
 
         {error && <p className="book-connect__error" role="alert">{error}</p>}
         <p className="book-connect__note">국내 출판 제목으로 검색하세요. 출판사별 권 목록과 발매 정보를 연결합니다.</p>
-        {busy === "search" && <Skeleton className="book-connect__loading" label="카카오 검색 중" />}
+        {(results?.[0]?.unparsedCount ?? 0) > 0 && (
+          <p className="book-connect__note">권 번호를 알 수 없거나 세트·가이드라서 제외된 상품 {results?.[0]?.unparsedCount}개</p>
+        )}
+        {busy === "search" && results === null && <Skeleton className="book-connect__loading" label="카카오 검색 중" />}
 
         <div className="book-connect__body">
           <div className="book-connect__results" aria-label="카카오 검색 결과">
@@ -140,7 +168,7 @@ export function KakaoConnectDialog({
                   <div className="book-connect__preview-header">
                     <strong>{candidate.title}</strong>
                     {selected.length > 1 && <small>{[candidate.publisher, volumeRange(candidate)].filter(Boolean).join(" · ")}</small>}
-                    {candidate.ignoredCount > 0 && <small>제외된 상품 {candidate.ignoredCount}개</small>}
+                    {candidate.ignoredCount > 0 && <small>같은 권이 겹쳐 제외된 상품 {candidate.ignoredCount}개</small>}
                   </div>
                   <ul>
                     {[...candidate.volumes].sort((left, right) => left.volumeNumber - right.volumeNumber).map((volume) => (
@@ -159,13 +187,15 @@ export function KakaoConnectDialog({
         </div>
 
         <div className="ui-dialog__actions book-connect__actions">
+          {onSkip && <Button variant="ghost" disabled={busy !== null} onClick={async () => { setBusy("apply"); setError(null); setFailedAction("skip"); try { await onSkip(); onClose(); } catch (reason) { setError(commandErrorMessage(reason, "연결 안내를 숨기지 못했습니다.")); setBusy(null); } }}>연결 안 함</Button>}
           <span>
             {selected.length > 1
               ? `시리즈 ${selected.length}개를 함께 연결합니다. 같은 권은 한 번만 들어갑니다.`
               : "기존 작품명과 선택한 표지는 유지됩니다. 권이 나뉘어 나오면 체크해 함께 연결하세요."}
           </span>
+          {error && failedAction !== "skip" && <Button variant="ghost" disabled={!!busy} onClick={() => { if (failedAction === "apply") void apply(); else void search(); }}>다시 시도</Button>}
           <Button type="button" disabled={busy !== null} onClick={close}>취소</Button>
-          <Button type="button" variant="primary" disabled={selected.length === 0 || busy !== null} onClick={() => void apply()}>
+          <Button type="button" variant="primary" disabled={selected.length === 0 || !searchValid || busy !== null} onClick={() => void apply()}>
             <BusyLabel busy={!!(busy === "apply")} idle={selected.length > 1 ? `${selected.length}개 연결` : "연결"}>연결 중…</BusyLabel>
           </Button>
         </div>

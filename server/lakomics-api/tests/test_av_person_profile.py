@@ -153,7 +153,7 @@ class PersonProfileTests(unittest.TestCase):
                 self.db.commit()
                 before = list(self.db.iterdump())
                 status = asyncio.run(endpoint(authorization="fixture"))
-                self.assertEqual(status["features"], ["personProfileFields"])
+                self.assertEqual(status["features"], ["personProfileFields", "kakaoReview"])
                 self.assertEqual(status["active"], active)
                 self.assertEqual(status["domain"], "collections")
                 if active:

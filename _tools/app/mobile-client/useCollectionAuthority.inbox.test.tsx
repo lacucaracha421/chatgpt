@@ -7,6 +7,7 @@ import {useCollectionAuthority} from './useCollectionAuthority';
 import {AUTHORITY_STATUS_PATH,COMMAND_PATH,enqueueCommand,readCommands} from './collectionCommandOutbox';
 import {setOutboxConnection} from './outboxConnection';
 import {inboxIdentity} from './avInboxFixtures';
+import type {CollectionSummary} from './collectionModel';
 beforeEach(()=>{localStorage.clear();setOutboxConnection('https://test.example');mocks.api.mockReset();mocks.resume.mockRejectedValue(new Error('받은 품번 저장 실패'));
   mocks.api.mockImplementation(async(path,_signal,body)=>path===AUTHORITY_STATUS_PATH?{...inboxIdentity,active:true}:body);
 });
@@ -17,4 +18,16 @@ it('delivers ordinary commands even when inbox resume throws and reports the inb
   await act(async()=>{await hook.result.current.flush();});
   expect(readCommands()[0].state).toBe('accepted');expect(mocks.api.mock.calls.some(([path])=>path===COMMAND_PATH)).toBe(true);
   expect(hook.result.current.failure).toBe('받은 품번 저장 실패');
+});
+it('retires an accepted Kakao review flag when its volume set changes, even if the old set returns',async()=>{
+  mocks.resume.mockResolvedValue(undefined);
+  const hook=renderHook(()=>useCollectionAuthority(true,vi.fn(),true));
+  await waitFor(()=>expect(hook.result.current.identity).toEqual(inboxIdentity));
+  const item: CollectionSummary={id:'m',name:'Manga',type:'manga',showcase:false,kakaoReview:{collectionId:'m',query:'만화',querySource:'name',bound:true,volumes:[1,3],highestOwnedVolume:3,ownedCount:0,partialDismissed:false,groupFingerprints:[],minVolume:null,maxVolume:null,hideConnectionPrompt:false}};
+  act(()=>{hook.result.current.enqueue({commandType:'setKakaoPartialDismissed',workId:'m',dismissed:true,expectedVolumes:[1,3]});});
+  await waitFor(()=>expect(readCommands()[0].state).toBe('accepted'));
+  expect(hook.result.current.work(item).kakaoReview!.partialDismissed).toBe(true);
+  act(()=>hook.result.current.reconcile({...item,kakaoReview:{...item.kakaoReview!,volumes:[1,2,3]}}));
+  expect(readCommands()).toEqual([]);
+  expect(hook.result.current.work(item).kakaoReview!.partialDismissed).toBe(false);
 });

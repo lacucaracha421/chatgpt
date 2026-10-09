@@ -88,7 +88,9 @@ impl Library {
         ttb_key: &str,
     ) -> Result<ReleaseWatchRunResult, LibraryError> {
         let checked_at = chrono::Utc::now().to_rfc3339();
-        self.run_due_release_watch_with(&checked_at, |query| aladin::search(ttb_key, query))
+        self.run_due_release_watch_with(&checked_at, |query| {
+            aladin::search(ttb_key, query).map(|outcome| outcome.items)
+        })
     }
 
     pub fn run_due_kakao_release_watch(
@@ -96,7 +98,7 @@ impl Library {
         key: &str,
     ) -> Result<ReleaseWatchRunResult, LibraryError> {
         self.run_due_book_release_watch_with("kakao", &chrono::Utc::now().to_rfc3339(), |query| {
-            super::kakao_books::search(key, query)
+            super::kakao_books::search(key, query).map(|outcome| outcome.items)
         })
     }
 

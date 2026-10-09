@@ -110,6 +110,7 @@ impl Library {
                 people: true,
                 portrait_image: true,
                 av_credit_name: true,
+                kakao_review: false,
             };
             let snapshot = snapshot_from_transaction(
                 &root,

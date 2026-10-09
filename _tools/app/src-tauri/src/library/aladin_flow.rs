@@ -1,11 +1,14 @@
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use rusqlite::{params, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    aladin::{self, AladinItem},
+    aladin::{self, is_edition_note, is_series_note, AladinItem, SearchOutcome, UNNUMBERED_VOLUME},
     collection::require_collection,
     collection_binding_sync::CommitCheck,
     collection_volume_range::load_transaction,
@@ -105,7 +108,7 @@ impl Library {
         check: CommitCheck<'_>,
     ) -> Result<AladinSyncResult, LibraryError> {
         let flow = self.book_flow("kakao");
-        let items = flow.search_items(key, &request.query)?;
+        let items = flow.search_items(key, &request.query)?.items;
         flow.apply_requested_items(request, items, Some(check))
     }
 }
@@ -113,7 +116,11 @@ impl Library {
 #[derive(Debug, Clone)]
 struct GroupedSeries {
     candidate: AladinSeriesCandidate,
+    /// One product per volume, as bound.
     items: Vec<AladinItem>,
+    /// Every product of the group, duplicates of a volume included: a stored binding is
+    /// re-found by any of its item ids.
+    member_ids: Vec<String>,
 }
 
 /// At most this many groups of one search may be bound together.
@@ -220,6 +227,64 @@ pub(super) fn bound_group_keys(
     )
 }
 
+/// Anchor identity wins over metadata. Without it, prefer a unique known-item group;
+/// narrow split known items by fingerprint. Picks without history use fingerprint alone.
+fn refind_group<'a>(
+    anchor: &str,
+    fingerprint: &str,
+    known_ids: &[String],
+    groups: impl IntoIterator<Item = (&'a str, &'a [String])>,
+) -> Option<usize> {
+    let groups: Vec<_> = groups.into_iter().collect();
+    let unique = |indices: Vec<usize>| match indices.as_slice() {
+        [index] => Some(*index),
+        _ => None,
+    };
+    let anchors: Vec<_> = groups.iter().enumerate()
+        .filter(|(_, (_, ids))| ids.iter().any(|id| id == anchor))
+        .map(|(index, _)| index).collect();
+    if !anchors.is_empty() {
+        return unique(anchors);
+    }
+    let known: Vec<_> = groups.iter().enumerate()
+        .filter(|(_, (_, ids))| ids.iter().any(|id| known_ids.contains(id)))
+        .map(|(index, _)| index).collect();
+    if known.len() == 1 {
+        return unique(known);
+    }
+    unique(groups.iter().enumerate()
+        .filter(|(index, (key, _))| *key == fingerprint
+            && (known_ids.is_empty() || known.contains(index)))
+        .map(|(index, _)| index).collect())
+}
+
+/// A collapsed binding may hold several old picks. Resolve each pick using the same
+/// anchor-first rule as refresh, then require coverage of every currently bound group.
+pub(super) fn requested_groups_already_bound(
+    config_json: Option<&str>,
+    external_id: &str,
+    request: &AladinApplyRequest,
+) -> bool {
+    let Some(config) = config_json.and_then(|json| ProviderConfig::parse(json, external_id)) else {
+        return false;
+    };
+    let members: Vec<Vec<String>> = config.groups.iter().map(|group| {
+        let mut ids = group.known_item_ids.clone();
+        ids.push(group.anchor_item_id.clone());
+        ids
+    }).collect();
+    let mut found = BTreeSet::new();
+    for pick in &request.groups {
+        let Some(index) = refind_group(&pick.anchor_item_id, &pick.group_fingerprint, &[],
+            config.groups.iter().zip(&members)
+                .map(|(group, ids)| (group.group_fingerprint.as_str(), ids.as_slice()))) else {
+            return false;
+        };
+        found.insert(index);
+    }
+    !found.is_empty() && found.len() == config.groups.len()
+}
+
 /// One group of the search being bound, with the anchor and known items stored for it.
 struct PickedGroup {
     anchor_item_id: String,
@@ -256,7 +321,7 @@ fn valid_selection(request: &AladinApplyRequest) -> bool {
 }
 
 impl BookFlow<'_> {
-    fn search_items(&self, key: &str, query: &str) -> Result<Vec<AladinItem>, LibraryError> {
+    fn search_items(&self, key: &str, query: &str) -> Result<SearchOutcome, LibraryError> {
         match self.provider {
             "kakao" => super::kakao_books::search(key, query),
             _ => aladin::search(key, query),
@@ -267,7 +332,12 @@ impl BookFlow<'_> {
         ttb_key: &str,
         query: &str,
     ) -> Result<Vec<AladinSeriesCandidate>, LibraryError> {
-        Ok(group_items(self.search_items(ttb_key, query)?))
+        let outcome = self.search_items(ttb_key, query)?;
+        let mut groups = group_items(outcome.items);
+        for group in &mut groups {
+            group.unparsed_count = outcome.unparsed_count;
+        }
+        Ok(groups)
     }
 
     pub fn apply_aladin(
@@ -279,7 +349,7 @@ impl BookFlow<'_> {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
         super::collection_authority::collection_write_status(&*self.library.connection()?)?;
-        let items = self.search_items(ttb_key, &request.query)?;
+        let items = self.search_items(ttb_key, &request.query)?.items;
         self.apply_aladin_items(request, items)
     }
 
@@ -290,7 +360,7 @@ impl BookFlow<'_> {
     ) -> Result<AladinSyncResult, LibraryError> {
         super::collection_authority::collection_write_status(&*self.library.connection()?)?;
         let config = self.aladin_binding_config(collection_id)?;
-        let items = self.search_items(ttb_key, &config.query)?;
+        let items = self.search_items(ttb_key, &config.query)?.items;
         self.refresh_aladin_items(collection_id, config, items)
     }
 
@@ -316,10 +386,8 @@ impl BookFlow<'_> {
         self.refresh_aladin_items_with_config_at(collection_id, config, items, checked_at)
     }
 
-    /// Re-finds every bound group in a fresh search: the one group holding its anchor item,
-    /// or the one with its fingerprint holding an item it provided before. Any bound group
-    /// found zero or several times refuses the refresh. Two bound groups the search now
-    /// returns as one group are kept once (the provider merged them itself).
+    /// Re-finds each bound group by anchor first, then known items and fingerprint.
+    /// Metadata edits may split groups; two old groups may also collapse into one.
     fn refresh_aladin_items_with_config_at(
         &self,
         collection_id: &str,
@@ -330,20 +398,11 @@ impl BookFlow<'_> {
         let groups = grouped_items(items);
         let mut picked: Vec<PickedGroup> = Vec::new();
         for bound in config.groups {
-            let mut matches = groups.iter().filter(|group| {
-                group
-                    .items
-                    .iter()
-                    .any(|item| item.item_id == bound.anchor_item_id)
-                    || (group.candidate.group_fingerprint == bound.group_fingerprint
-                        && group
-                            .items
-                            .iter()
-                            .any(|item| bound.known_item_ids.contains(&item.item_id)))
-            });
-            let (Some(series), None) = (matches.next(), matches.next()) else {
-                return Err(LibraryError::AmbiguousAladinBinding);
-            };
+            let index = refind_group(&bound.anchor_item_id, &bound.group_fingerprint,
+                &bound.known_item_ids, groups.iter().map(|group|
+                    (group.candidate.group_fingerprint.as_str(), group.member_ids.as_slice())))
+                .ok_or(LibraryError::AmbiguousAladinBinding)?;
+            let series = &groups[index];
             match picked.iter_mut().find(|pick| {
                 pick.series.candidate.group_fingerprint == series.candidate.group_fingerprint
             }) {
@@ -461,37 +520,38 @@ impl BookFlow<'_> {
             .sync_result)
     }
 
-    /// The PC apply, except that a picked group whose anchor no longer matches the fresh
-    /// search (the tablet's pick may be applied days later) binds the one group with the
-    /// picked fingerprint, anchored at that group's current anchor. Each group is resolved
-    /// on its own. The PC UI keeps the strict [`Self::apply_aladin_items`]. `check` runs
-    /// inside the transaction that writes the binding.
+    /// Resolve delayed tablet picks by anchor first, then fingerprint if the anchor left.
+    /// Collapse picks that now resolve to the same group. PC apply remains strict.
     pub(super) fn apply_requested_items(
         &self,
-        mut request: AladinApplyRequest,
+        request: AladinApplyRequest,
         items: Vec<AladinItem>,
         check: Option<CommitCheck<'_>>,
     ) -> Result<AladinSyncResult, LibraryError> {
+        if !valid_selection(&request) {
+            return Err(LibraryError::AmbiguousAladinBinding);
+        }
         let groups = grouped_items(items);
-        for selection in &mut request.groups {
-            let exact = groups.iter().any(|group| {
-                group.candidate.anchor_item_id == selection.anchor_item_id
-                    && group.candidate.group_fingerprint == selection.group_fingerprint
-            });
-            if !exact {
-                let mut drifted = groups.iter().filter(|group| {
-                    group.candidate.group_fingerprint == selection.group_fingerprint
+        let mut picked: Vec<PickedGroup> = Vec::new();
+        for selection in &request.groups {
+            let index = refind_group(&selection.anchor_item_id, &selection.group_fingerprint,
+                &[], groups.iter().map(|group|
+                    (group.candidate.group_fingerprint.as_str(), group.member_ids.as_slice())))
+                .ok_or(LibraryError::AmbiguousAladinBinding)?;
+            let series = &groups[index];
+            if let Some(pick) = picked.iter_mut().find(|pick|
+                pick.series.candidate.group_fingerprint == series.candidate.group_fingerprint) {
+                pick.known_item_ids.push(selection.anchor_item_id.clone());
+            } else {
+                picked.push(PickedGroup {
+                    anchor_item_id: series.candidate.anchor_item_id.clone(),
+                    known_item_ids: vec![selection.anchor_item_id.clone()],
+                    series: series.clone(),
                 });
-                match (drifted.next(), drifted.next()) {
-                    (Some(group), None) => {
-                        selection.anchor_item_id = group.candidate.anchor_item_id.clone()
-                    }
-                    _ => return Err(LibraryError::AmbiguousAladinBinding),
-                }
             }
         }
-        let items = groups.into_iter().flat_map(|group| group.items).collect();
-        self.apply_aladin_items_checked(request, items, check)
+        Ok(self.reconcile_aladin_at(&request.collection_id, &request.query, picked,
+            &chrono::Utc::now().to_rfc3339(), check)?.sync_result)
     }
 
     /// Writes the merged volumes of the picked groups and the binding. Groups are ordered
@@ -510,7 +570,7 @@ impl BookFlow<'_> {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
         picked.sort_by(|left, right| {
-            let lowest = |pick: &PickedGroup| pick.series.items.first().map(|i| i.volume_number);
+            let lowest = |pick: &PickedGroup| pick.series.items.first().map(|i| i.volume_number.max(1));
             lowest(left).cmp(&lowest(right)).then_with(|| {
                 left.series
                     .candidate
@@ -535,20 +595,31 @@ impl BookFlow<'_> {
                 })
                 .collect(),
         };
-        let config_json = config.to_json()?;
-        let snapshot_json = match picked.as_slice() {
-            [pick] => serde_json::to_string(&pick.series.candidate),
-            picks => serde_json::to_string(&serde_json::json!({
-                "groups": picks.iter().map(|pick| &pick.series.candidate).collect::<Vec<_>>()
-            })),
+        let mut config_json = config.to_json()?;
+        // The search-wide excluded count is not part of the stored group.
+        let stored_candidates: Vec<AladinSeriesCandidate> = picked
+            .iter()
+            .map(|pick| AladinSeriesCandidate {
+                unparsed_count: 0,
+                ..pick.series.candidate.clone()
+            })
+            .collect();
+        let snapshot_json = match stored_candidates.as_slice() {
+            [candidate] => serde_json::to_string(candidate),
+            candidates => serde_json::to_string(&serde_json::json!({ "groups": candidates })),
         }
         .map_err(|_| LibraryError::InvalidAladinResponse)?;
         let mut all_items: Vec<&AladinItem> =
             picked.iter().flat_map(|pick| &pick.series.items).collect();
         all_items.sort_by(|left, right| compare_duplicate_preference(left, right));
-        let mut merged: BTreeMap<i64, &AladinItem> = BTreeMap::new();
+        let mut merged: BTreeMap<i64, AladinItem> = BTreeMap::new();
         for item in &all_items {
-            merged.entry(item.volume_number).or_insert(item);
+            // Keep the unnumbered sentinel through final preference sorting, then map to 1.
+            merged.entry(item.volume_number.max(1)).or_insert_with(|| {
+                let mut item = (**item).clone();
+                item.volume_number = item.volume_number.max(1);
+                item
+            });
         }
         let ignored = picked
             .iter()
@@ -563,6 +634,14 @@ impl BookFlow<'_> {
         require_collection(&transaction, collection_id)?;
         if let Some(check) = check {
             check(&transaction)?;
+        }
+        if self.provider == "kakao" {
+            let volumes: Vec<i64> = merged.keys().copied().collect();
+            if super::kakao_review::dismissed_for_volumes(&transaction, collection_id, &volumes)? {
+                let mut next: serde_json::Value = serde_json::from_str(&config_json).map_err(|_| LibraryError::InvalidAladinResponse)?;
+                next["reviewDismissedVolumes"] = serde_json::json!(volumes);
+                config_json = next.to_string();
+            }
         }
         let subscription_last_checked_at = transaction
             .query_row(
@@ -852,23 +931,35 @@ pub(super) fn group_items(items: Vec<AladinItem>) -> Vec<AladinSeriesCandidate> 
         .collect()
 }
 
+/// Groups the products of one search into series. Two products are one series when their
+/// titles match ignoring spacing, punctuation, case and a trailing parenthesised alt title,
+/// their publishers match after dropping obvious imprint suffixes, and their authors match
+/// (an empty author joins the one named author that shares title and publisher). Mirrored
+/// by `collection_bindings.py group_kakao`; change both together.
+///
+/// Products without a volume number count as volume 1 of their series (a series with no
+/// numbered product is a one-volume series) and never replace a numbered volume 1.
 fn grouped_items(items: Vec<AladinItem>) -> Vec<GroupedSeries> {
+    let keys = group_keys(&items);
     let mut groups: BTreeMap<String, Vec<AladinItem>> = BTreeMap::new();
-    for item in items {
-        groups.entry(group_key(&item)).or_default().push(item);
+    for (item, key) in items.into_iter().zip(keys) {
+        groups.entry(key).or_default().push(item);
     }
     groups
         .into_values()
         .map(|mut items| {
             let item_count = items.len() as u64;
+            let member_ids: Vec<String> = items.iter().map(|item| item.item_id.clone()).collect();
             items.sort_by(compare_duplicate_preference);
             let title = items[0].base_title.trim().to_owned();
-            let author = items[0].author.clone();
+            let author = items
+                .iter()
+                .find_map(|item| item.author.clone().filter(|author| !author.trim().is_empty()));
             let publisher = items[0].publisher.clone();
             let fingerprint = fingerprint(&title, author.as_deref(), publisher.as_deref());
             let mut by_volume = BTreeMap::new();
             for item in items {
-                by_volume.entry(item.volume_number).or_insert(item);
+                by_volume.entry(item.volume_number.max(1)).or_insert(item);
             }
             let selected_items: Vec<_> = by_volume.into_values().collect();
             let ignored_count = item_count.saturating_sub(selected_items.len() as u64);
@@ -881,7 +972,7 @@ fn grouped_items(items: Vec<AladinItem>) -> Vec<GroupedSeries> {
             let volumes = selected_items
                 .iter()
                 .map(|item| AladinVolumeCandidate {
-                    volume_number: item.volume_number,
+                    volume_number: item.volume_number.max(1),
                     provider_item_id: item.item_id.clone(),
                     title: item.title.clone(),
                     publication_date: item.publication_date.clone(),
@@ -897,28 +988,128 @@ fn grouped_items(items: Vec<AladinItem>) -> Vec<GroupedSeries> {
                     publisher,
                     volumes,
                     ignored_count,
+                    unparsed_count: 0,
                 },
                 items: selected_items,
+                member_ids,
             }
         })
         .collect()
 }
 
+/// An unnumbered product ranks as volume 1, after any numbered product of that volume.
 fn compare_duplicate_preference(left: &AladinItem, right: &AladinItem) -> Ordering {
-    left.volume_number
-        .cmp(&right.volume_number)
+    let effective = |item: &AladinItem| item.volume_number.max(1);
+    let unnumbered = |item: &AladinItem| item.volume_number == UNNUMBERED_VOLUME;
+    effective(left)
+        .cmp(&effective(right))
+        .then_with(|| unnumbered(left).cmp(&unnumbered(right)))
         .then_with(|| right.isbn13.is_some().cmp(&left.isbn13.is_some()))
         .then_with(|| right.publication_date.cmp(&left.publication_date))
         .then_with(|| left.item_id.cmp(&right.item_id))
 }
 
-fn group_key(item: &AladinItem) -> String {
-    [
-        normalize(&item.base_title),
-        normalize(item.author.as_deref().unwrap_or_default()),
-        normalize(item.publisher.as_deref().unwrap_or_default()),
-    ]
-    .join("\0")
+/// One group key per item (same order as `items`).
+fn group_keys(items: &[AladinItem]) -> Vec<String> {
+    let parts: Vec<(String, String, String)> = items
+        .iter()
+        .map(|item| {
+            (
+                title_key(&item.base_title),
+                alphanumeric_key(item.author.as_deref().unwrap_or_default()),
+                publisher_key(item.publisher.as_deref().unwrap_or_default()),
+            )
+        })
+        .collect();
+    let mut authors: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
+    for (title, author, publisher) in &parts {
+        if !author.is_empty() {
+            authors
+                .entry((title.as_str(), publisher.as_str()))
+                .or_default()
+                .insert(author.as_str());
+        }
+    }
+    parts
+        .iter()
+        .map(|(title, author, publisher)| {
+            let author = match authors.get(&(title.as_str(), publisher.as_str())) {
+                Some(named) if author.is_empty() && named.len() == 1 => {
+                    named.iter().next().copied().unwrap_or_default()
+                }
+                _ => author.as_str(),
+            };
+            [title.as_str(), author, publisher.as_str()].join("\0")
+        })
+        .collect()
+}
+
+/// Letters and digits only, lowercased: spacing, middots, `!`, `?`, `~` and quotes do not
+/// tell two spellings of one title apart.
+fn alphanumeric_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// The start and inner text of a trailing `(...)` / `[...]` note, when text precedes it.
+fn trailing_note(text: &str) -> Option<(usize, &str)> {
+    let opener = match text.chars().next_back()? {
+        ')' => '(',
+        ']' => '[',
+        _ => return None,
+    };
+    let open = text.rfind(opener)?;
+    (!text[..open].trim().is_empty()).then(|| (open, &text[open + 1..text.len() - 1]))
+}
+
+fn title_key(title: &str) -> String {
+    let mut text = title.trim();
+    // Conservatively remove only Latin/kana aliases without digits or series markers.
+    // Korean/unknown notes, parts, side stories, seasons and edition names stay distinct.
+    while let Some((open, _)) = trailing_note(text).filter(|(_, inner)| is_alt_title_note(inner)) {
+        text = text[..open].trim_end();
+    }
+    alphanumeric_key(text)
+}
+
+fn is_alt_title_note(note: &str) -> bool {
+    if is_edition_note(note) || is_series_note(note) {
+        return false;
+    }
+    let letter = |c: char| c.is_ascii_alphabetic()
+        || matches!(c, '\u{00c0}'..='\u{024f}' | '\u{3041}'..='\u{3096}' | '\u{30a1}'..='\u{30fa}' | 'ー');
+    note.chars().any(letter) && note.chars().all(|c| letter(c)
+        || c.is_whitespace() || matches!(c, '-' | '.' | ',' | ':' | ';' | '!' | '?' | '\'' | '"' | '·' | '&'))
+}
+
+fn publisher_key(publisher: &str) -> String {
+    let mut text = publisher.trim();
+    for prefix in ["(주)", "㈜", "주식회사"] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            text = rest.trim_start();
+        }
+    }
+    while let Some((open, _)) = trailing_note(text) {
+        text = text[..open].trim_end();
+    }
+    // "학산문화사/DCW": an ASCII imprint code after a slash.
+    if let Some(slash) = text.rfind('/') {
+        let tail = &text[slash + 1..];
+        if !text[..slash].trim().is_empty()
+            && !tail.trim().is_empty()
+            && tail.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ')
+        {
+            text = text[..slash].trim_end();
+        }
+    }
+    let key = alphanumeric_key(text);
+    match key.strip_suffix("미디어") {
+        Some(rest) if rest.chars().count() >= 2 => rest.to_owned(),
+        _ => key,
+    }
 }
 
 fn fingerprint(title: &str, author: Option<&str>, publisher: Option<&str>) -> String {
@@ -1570,6 +1761,34 @@ mod tests {
         library.set_release_watch_enabled(&id, false).unwrap();
         assert!(!library.get_release_watch_status(&id).unwrap().enabled);
     }
+
+    #[test]
+    fn kakao_review_dismissal_survives_refresh_and_undo_but_clears_on_volume_change() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "던전밥");
+        let items = vec![item("one", "던전밥", 1, "A출판", None, None), item("three", "던전밥", 3, "A출판", None, None)];
+        let flow = library.book_flow("kakao");
+        flow.apply_aladin_items(request(&id, &items), items.clone()).unwrap();
+        library.set_kakao_partial_dismissed(&id, true).unwrap();
+        assert!(library.list_kakao_reviews().unwrap()[0].partial_dismissed);
+        drop(library);
+        let library = Library::open(temp.path()).unwrap();
+        let flow = library.book_flow("kakao");
+        flow.refresh_aladin_items_at(&id, items.clone(), "2026-10-09T00:00:00Z").unwrap();
+        assert!(library.list_kakao_reviews().unwrap()[0].partial_dismissed);
+        library.set_kakao_partial_dismissed(&id, false).unwrap();
+        assert!(!library.list_kakao_reviews().unwrap()[0].partial_dismissed);
+        library.set_kakao_partial_dismissed(&id, true).unwrap();
+        let mut expanded = items;
+        expanded.push(item("two", "던전밥", 2, "A출판", None, None));
+        flow.refresh_aladin_items_at(&id, expanded, "2026-10-10T00:00:00Z").unwrap();
+        let review = &library.list_kakao_reviews().unwrap()[0];
+        assert_eq!(review.volumes, vec![1, 2, 3]);
+        assert!(!review.partial_dismissed);
+        let raw = library.list_collection_external_bindings(&id).unwrap()[0].provider_config_json.clone().unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&raw).unwrap().get("reviewDismissedVolumes").is_none());
+    }
     #[test]
     fn kakao_refreshes_all_but_notifies_only_explicit_count_and_subscription() {
         for (entered, enabled, expected) in [(false,false,0), (false,true,0), (true,false,0), (true,true,1)] {
@@ -1782,5 +2001,433 @@ mod tests {
         assert_eq!(external, "isbn13:9791138491150");
         assert_eq!(config["version"], 1);
         assert_eq!(config["groupFingerprint"], serde_json::json!(second.group_fingerprint));
+    }
+
+    /// A product as the Kakao/Aladin parsers produce it from a raw title.
+    fn product(
+        id: &str,
+        title: &str,
+        author: Option<&str>,
+        publisher: &str,
+        isbn13: Option<&str>,
+        publication_date: Option<&str>,
+    ) -> AladinItem {
+        let (volume_number, base_title) = crate::library::aladin::classify_product(title)
+            .into_volume()
+            .unwrap_or_else(|| panic!("{title} is not a usable product"));
+        AladinItem {
+            item_id: id.into(),
+            title: title.into(),
+            author: author.map(Into::into),
+            publisher: Some(publisher.into()),
+            isbn13: isbn13.map(Into::into),
+            publication_date: publication_date.map(Into::into),
+            item_url: None,
+            volume_number,
+            base_title,
+            snapshot_json: format!(r#"{{"itemId":"{id}"}}"#),
+        }
+    }
+
+    fn volume_numbers(group: &crate::library::models::AladinSeriesCandidate) -> Vec<i64> {
+        group.volumes.iter().map(|volume| volume.volume_number).collect()
+    }
+
+    #[test]
+    fn one_series_is_not_split_by_spacing_middots_or_alt_titles() {
+        for (first, second) in [
+            ("마법 소녀를 1", "마법소녀를 2"),
+            ("봇치·더·록! 1", "봇치 더 록! 2"),
+            ("봇치 더 록! 1", "봇치 더 록 2"),
+            ("위치 워치(Witch Watch) 1", "위치 워치 2"),
+            ("위치 워치 [Witch Watch] 1", "위치워치(ウィッチウォッチ) 2"),
+            ("Re:ZERO 1", "re zero 2"),
+        ] {
+            let groups = group_items(vec![
+                product("a", first, Some("작가"), "출판", None, None),
+                product("b", second, Some("작가"), "출판", None, None),
+            ]);
+            assert_eq!(groups.len(), 1, "{first} / {second}");
+            assert_eq!(volume_numbers(&groups[0]), [1, 2], "{first} / {second}");
+        }
+        // Different words stay different series, and an edition note is not an alt title.
+        let groups = group_items(vec![
+            product("a", "소드 아트 온라인 1", Some("작가"), "출판", None, None),
+            product("b", "소드 아트 온라인 프로그레시브 1", Some("작가"), "출판", None, None),
+            product("c", "도로로 (애장판) 1", Some("작가"), "출판", None, None),
+            product("d", "도로로 1", Some("작가"), "출판", None, None),
+        ]);
+        assert_eq!(groups.len(), 4);
+    }
+
+    #[test]
+    fn an_empty_author_joins_the_one_series_with_the_same_title_and_publisher() {
+        let groups = group_items(vec![
+            product("a", "던전밥 1", Some("쿠이 료코"), "소미미디어", None, None),
+            product("b", "던전밥 2", None, "소미미디어", None, None),
+            product("c", "던전밥 3", Some(""), "소미미디어", None, None),
+        ]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].author.as_deref(), Some("쿠이 료코"));
+        assert_eq!(volume_numbers(&groups[0]), [1, 2, 3]);
+
+        // Two named authors: the author-less product cannot choose, so it stays apart.
+        let groups = group_items(vec![
+            product("a", "던전밥 1", Some("작가 A"), "소미미디어", None, None),
+            product("b", "던전밥 1", Some("작가 B"), "소미미디어", None, None),
+            product("c", "던전밥 2", None, "소미미디어", None, None),
+        ]);
+        assert_eq!(groups.len(), 3);
+
+        // The same title under another publisher is another series.
+        let groups = group_items(vec![
+            product("a", "던전밥 1", Some("쿠이 료코"), "소미미디어", None, None),
+            product("b", "던전밥 2", None, "다른출판사", None, None),
+        ]);
+        assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn obvious_publisher_variants_merge_but_imprints_stay_apart() {
+        for (first, second) in [
+            ("에이템포", "에이템포미디어"),
+            ("학산문화사", "학산문화사/DCW"),
+            ("서울문화사", "(주)서울문화사"),
+            ("대원씨아이", "대원씨아이(서울문화사)"),
+            ("Dai Won", "dai won"),
+        ] {
+            let groups = group_items(vec![
+                product("a", "던전밥 1", Some("작가"), first, None, None),
+                product("b", "던전밥 2", Some("작가"), second, None, None),
+            ]);
+            assert_eq!(groups.len(), 1, "{first} / {second}");
+        }
+        for (first, second) in [("소미미디어", "S코믹스"), ("A출판", "B출판"), ("미디어", "미디어팩토리")] {
+            let groups = group_items(vec![
+                product("a", "던전밥 1", Some("작가"), first, None, None),
+                product("b", "던전밥 2", Some("작가"), second, None, None),
+            ]);
+            assert_eq!(groups.len(), 2, "{first} / {second}");
+        }
+    }
+
+    #[test]
+    fn unnumbered_products_become_volume_one_without_replacing_a_numbered_one() {
+        // A one-shot is a one-volume series.
+        let groups = group_items(vec![product("one", "별의 아이", Some("작가"), "출판", None, None)]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(volume_numbers(&groups[0]), [1]);
+        assert_eq!(groups[0].title, "별의 아이");
+
+        // An unnumbered product with the series title is its volume 1 when none is numbered...
+        let groups = group_items(vec![
+            product("v1", "마법소녀를 (애장판)", Some("작가"), "출판", None, None),
+            product("v2", "마법소녀를 2", Some("작가"), "출판", None, None),
+        ]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(volume_numbers(&groups[0]), [1, 2]);
+        assert_eq!(groups[0].volumes[0].provider_item_id, "v1");
+        assert_eq!(groups[0].ignored_count, 0);
+
+        // ...and loses to a numbered volume 1, whatever its ISBN or date.
+        let groups = group_items(vec![
+            product("plain", "마법소녀를 (일반판)", Some("작가"), "출판", Some("9781"), Some("2030-01-01")),
+            product("numbered", "마법소녀를 1", Some("작가"), "출판", None, None),
+        ]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(volume_numbers(&groups[0]), [1]);
+        assert_eq!(groups[0].volumes[0].provider_item_id, "numbered");
+        assert_eq!(groups[0].ignored_count, 1);
+
+        // An unnumbered product with a different title is not folded into the series.
+        let groups = group_items(vec![
+            product("v1", "마법소녀를 1", Some("작가"), "출판", None, None),
+            product("book", "마법소녀를 공식 팬 이야기", Some("작가"), "출판", None, None),
+        ]);
+        assert_eq!(groups.len(), 2);
+    }
+
+    /// The groups the server's `group_kakao` is tested against too
+    /// (`server/lakomics-api/tests/test_collection_bindings.py`).
+    #[test]
+    fn groups_match_the_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/kakao_grouping.json")).unwrap();
+        let items = fixture["products"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| {
+                let text = |key: &str| p[key].as_str();
+                product(
+                    text("id").unwrap(),
+                    text("title").unwrap(),
+                    text("author"),
+                    text("publisher").unwrap(),
+                    text("isbn13"),
+                    text("date"),
+                )
+            })
+            .collect();
+        let groups = group_items(items);
+        let actual: Vec<serde_json::Value> = groups
+            .iter()
+            .map(|group| {
+                serde_json::json!({
+                    "title": group.title,
+                    "author": group.author,
+                    "publisher": group.publisher,
+                    "fingerprint": group.group_fingerprint,
+                    "volumes": group.volumes.iter()
+                        .map(|volume| serde_json::json!([volume.volume_number, volume.provider_item_id]))
+                        .collect::<Vec<_>>(),
+                    "ignored": group.ignored_count,
+                })
+            })
+            .collect();
+        assert_eq!(serde_json::Value::Array(actual), fixture["groups"]);
+    }
+
+    #[test]
+    fn the_fingerprint_of_an_unchanged_group_is_the_old_one() {
+        let groups = group_items(vec![
+            product("a", "던전밥 2", Some("쿠이  료코"), "소미미디어", None, None),
+            product("b", "던전밥 1", Some("쿠이 료코"), "소미미디어", None, None),
+        ]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            groups[0].group_fingerprint,
+            super::fingerprint("던전밥", Some("쿠이 료코"), Some("소미미디어"))
+        );
+    }
+
+    fn store_kakao_binding(library: &Library, id: &str, external_id: &str, config: String) {
+        library
+            .upsert_collection_external_binding(
+                id,
+                ExternalBindingInput {
+                    provider: "kakao".into(),
+                    external_id: external_id.into(),
+                    provider_config_json: Some(config),
+                    provider_data_json: Some("{}".into()),
+                    last_synced_at: None,
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn two_bound_groups_that_now_merge_still_refresh_as_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "마법소녀를");
+        // Stored under the old grouping: spacing and an imprint suffix made two groups.
+        let old_first = super::fingerprint("마법 소녀를", Some("작가"), Some("에이템포"));
+        let old_second = super::fingerprint("마법소녀를", Some("작가"), Some("에이템포미디어"));
+        store_kakao_binding(
+            &library,
+            &id,
+            "a-1",
+            serde_json::json!({"version": 2, "query": "마법소녀를", "groups": [
+                {"anchorItemId": "a-1", "groupFingerprint": old_first, "knownItemIds": ["a-1", "a-2"]},
+                {"anchorItemId": "b-3", "groupFingerprint": old_second, "knownItemIds": ["b-3"]},
+            ]})
+            .to_string(),
+        );
+        let items = vec![
+            product("a-1", "마법 소녀를 1", Some("작가"), "에이템포", Some("9781"), None),
+            product("a-2", "마법 소녀를 2", Some("작가"), "에이템포", Some("9782"), None),
+            product("b-3", "마법소녀를 3", Some("작가"), "에이템포미디어", Some("9783"), None),
+        ];
+        let merged = group_items(items.clone());
+        assert_eq!(merged.len(), 1);
+        assert_ne!(merged[0].group_fingerprint, old_second);
+
+        library
+            .book_flow("kakao")
+            .refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z")
+            .unwrap();
+
+        assert_eq!(kakao_sources(&library, &id).len(), 3);
+        let (external, config) = kakao_binding(&library, &id);
+        assert_eq!(external, "a-1");
+        assert_eq!(config["version"], 1);
+        assert_eq!(config["groupFingerprint"], serde_json::json!(merged[0].group_fingerprint));
+        assert_eq!(config["knownItemIds"], serde_json::json!(["a-1", "a-2", "b-3"]));
+    }
+
+    #[test]
+    fn a_stored_group_is_found_by_its_anchor_even_when_its_fingerprint_changed() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "봇치 더 록!");
+        let old = super::fingerprint("봇치더록!", Some("하마지 아키"), Some("학산문화사"));
+        store_kakao_binding(
+            &library,
+            &id,
+            "x-1",
+            serde_json::json!({"version": 1, "query": "봇치", "groupFingerprint": old,
+                "knownItemIds": []})
+            .to_string(),
+        );
+        let items = vec![
+            product("x-3", "봇치·더·록! 3", Some("하마지 아키"), "학산문화사/DCW", None, None),
+            product("x-1", "봇치 더 록! 1", Some("하마지 아키"), "학산문화사", None, None),
+            product("x-2", "봇치 더 록! 2", None, "학산문화사", None, None),
+        ];
+        let groups = group_items(items.clone());
+        assert_eq!(groups.len(), 1);
+
+        library
+            .book_flow("kakao")
+            .refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z")
+            .unwrap();
+
+        let (external, config) = kakao_binding(&library, &id);
+        assert_eq!(external, "x-1");
+        assert_eq!(config["groupFingerprint"], serde_json::json!(groups[0].group_fingerprint));
+        assert_eq!(
+            config["knownItemIds"],
+            serde_json::json!(["x-1", "x-2", "x-3"])
+        );
+    }
+
+    #[test]
+    fn a_stored_group_is_found_by_an_earlier_item_when_its_anchor_left_the_search() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "던전밥");
+        store_kakao_binding(
+            &library,
+            &id,
+            "gone",
+            serde_json::json!({"version": 1, "query": "던전밥",
+                "groupFingerprint": "0".repeat(64), "knownItemIds": ["gone", "item-2"]})
+            .to_string(),
+        );
+        let items = vec![
+            product("item-2", "던전밥 2", Some("작가"), "출판", None, None),
+            product("item-3", "던전밥 3", Some("작가"), "출판", None, None),
+        ];
+        library
+            .book_flow("kakao")
+            .refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z")
+            .unwrap();
+        assert_eq!(kakao_sources(&library, &id).len(), 2);
+
+        // Nothing it ever held: still refused.
+        let unrelated = vec![product("other", "다른책 1", Some("작가"), "출판", None, None)];
+        assert!(matches!(
+            library
+                .book_flow("kakao")
+                .refresh_aladin_items_at(&id, unrelated, "2026-10-10T00:00:00Z"),
+            Err(LibraryError::AmbiguousAladinBinding)
+        ));
+    }
+
+    #[test]
+    fn series_notes_do_not_merge_or_swap_sources_on_refresh() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "Series");
+        let first = product("part-1", "Series (1부) 1", Some("작가"), "출판", None, None);
+        let second = product("part-2", "Series (2부) 1", Some("작가"), "출판", Some("9782"), Some("2030-01-01"));
+        library.book_flow("kakao").apply_aladin_items(request(&id, &[first.clone()]), vec![first.clone()]).unwrap();
+        library.book_flow("kakao").refresh_aladin_items_at(&id, vec![first, second], "2026-10-09T00:00:00Z").unwrap();
+        assert_eq!(kakao_sources(&library, &id)[0].1, "part-1");
+        for note in ["1부", "2부", "part one", "외전", "시즌", "번외", "단편", "리부트", "신장판", "unknown 한글"] {
+            let groups = group_items(vec![
+                product("plain", "Series 1", Some("작가"), "출판", None, None),
+                product("note", &format!("Series ({note}) 1"), Some("작가"), "출판", None, None),
+            ]);
+            assert_eq!(groups.len(), 2, "{note}");
+        }
+    }
+
+    #[test]
+    fn numbered_volume_one_wins_across_groups_on_apply_and_refresh() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "Series");
+        let items = vec![
+            product("plain", "Series", Some("작가"), "A출판", Some("9781"), Some("2030-01-01")),
+            product("numbered", "Series 1", Some("작가"), "B출판", None, None),
+        ];
+        let result = library.book_flow("kakao").apply_aladin_items(select_all(&id, &items), items.clone()).unwrap();
+        assert_eq!((result.added, result.ignored), (1, 1));
+        assert_eq!(kakao_sources(&library, &id)[0].1, "numbered");
+        library.book_flow("kakao").refresh_aladin_items_at(&id, items, "2026-10-09T00:00:00Z").unwrap();
+        assert_eq!(kakao_sources(&library, &id)[0].1, "numbered");
+    }
+
+    #[test]
+    fn refresh_prefers_anchor_when_known_products_split_and_narrows_without_anchor() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "Series");
+        let initial = vec![
+            product("anchor", "Series 1", Some("A"), "출판", None, None),
+            product("known", "Series 2", None, "출판", None, None),
+        ];
+        let old_fingerprint = group_items(initial.clone())[0].group_fingerprint.clone();
+        library.book_flow("kakao").apply_aladin_items(request(&id, &initial), initial).unwrap();
+        for author in [Some("B"), None] {
+            let split = vec![
+                product("anchor", "Series 1", Some("A"), "출판", None, None),
+                product("known", "Series 2", author, "출판", None, None),
+                product("other", "Series 3", Some("B"), "출판", None, None),
+            ];
+            library.book_flow("kakao").refresh_aladin_items_at(&id, split, "2026-10-09T00:00:00Z").unwrap();
+        }
+        let config = ProviderConfig { query: "Series".into(), groups: vec![BoundGroup {
+            anchor_item_id: "gone".into(), group_fingerprint: old_fingerprint,
+            known_item_ids: vec!["known-a".into(), "known-b".into()],
+        }] };
+        let split = vec![
+            product("known-a", "Series 2", Some("A"), "출판", None, None),
+            product("known-b", "Series 3", Some("B"), "출판", None, None),
+        ];
+        library.book_flow("kakao").refresh_aladin_items_with_config_at(&id, config, split, "2026-10-09T00:00:00Z").unwrap();
+        assert!(kakao_sources(&library, &id).iter().any(|source| source.1 == "known-a"));
+        assert!(!kakao_sources(&library, &id).iter().any(|source| source.1 == "known-b"));
+    }
+
+    #[test]
+    fn collection_binding_delayed_picks_survive_metadata_changes_and_group_collapse() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "Series");
+        let old = vec![
+            product("z-1", "Series 1", Some("작가"), "에이템포", None, None),
+            product("z-2", "Series 2", Some("작가"), "다른출판", None, None),
+        ];
+        let request = select_all(&id, &old);
+        let fresh = vec![
+            product("a-1", "Series 1", Some("작가"), "에이템포미디어", Some("9781"), None),
+            product("z-1", "Series 1", Some("작가"), "에이템포", None, None),
+            product("z-2", "Series 2", Some("작가"), "에이템포미디어", None, None),
+        ];
+        assert_eq!(group_items(fresh.clone()).len(), 1);
+        library.book_flow("kakao").apply_requested_items(request.clone(), fresh, None).unwrap();
+        let (external, config) = kakao_binding(&library, &id);
+        assert_eq!(external, "a-1");
+        assert_eq!(config["version"], 1);
+        assert!(super::requested_groups_already_bound(Some(&config.to_string()), &external, &request));
+        let mut unrelated = request.clone();
+        unrelated.groups[0].anchor_item_id = "missing".into();
+        assert!(!super::requested_groups_already_bound(Some(&config.to_string()), &external, &unrelated));
+        // Anchor identity overrides a fingerprint that happens to identify another group.
+        let groups = vec![
+            product("z-1", "Series 1", Some("Changed"), "출판", None, None),
+            product("other", "Series 1", Some("작가"), "에이템포", None, None),
+        ];
+        let temp2 = tempfile::tempdir().unwrap();
+        let library = Library::open(temp2.path()).unwrap();
+        let id2 = create_work(&library, "Second");
+        let mut single = request;
+        single.collection_id = id2.clone();
+        single.groups.retain(|group| group.anchor_item_id == "z-1");
+        library.book_flow("kakao").apply_requested_items(single, groups, None).unwrap();
+        assert_eq!(kakao_sources(&library, &id2)[0].1, "z-1");
     }
 }

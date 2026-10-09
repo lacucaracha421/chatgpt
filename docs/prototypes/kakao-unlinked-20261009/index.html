@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kakao 미연결 정리</title>
+<!-- Loads the app's real fonts, tokens, shared controls and the Kakao dialog stylesheet; only frames and the new list pieces are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/book-connect.css">
+<style>
+/* ---------- document chrome (not part of the design) ---------- */
+html, body { height: auto; overflow: auto; user-select: text; }
+body { background: #0e0f10; font: 400 var(--type-body) / 1.45 var(--font-ui); }
+h1, h2, h3, p { margin: 0; }
+.doc { padding: 32px 32px 96px; display: flex; flex-direction: column; gap: 32px; max-width: 1520px; }
+.doc > header h1 { font-size: 24px; font-weight: 600; }
+.lead { color: var(--color-muted); max-width: 1100px; margin-top: 8px; line-height: 1.7; }
+.lead b, .note b, .doc li b { color: var(--color-text); font-weight: 600; }
+.toc { display: flex; gap: 16px; margin-top: 12px; font-size: var(--type-meta); }
+.toc a { color: var(--color-accent); text-decoration: none; }
+.variant { display: flex; flex-direction: column; gap: 24px; padding-top: 16px; border-top: 1px solid #2a2b2d; }
+.variant > h2 { font-size: 20px; font-weight: 600; }
+.variant > h2 small { margin-left: 8px; color: var(--color-faint); font-size: 14px; font-weight: 400; }
+.shot { display: flex; flex-direction: column; gap: 12px; }
+.shot > h3 { font-size: 15px; font-weight: 600; color: var(--color-muted); }
+.shot > h3 small { margin-left: 8px; color: var(--color-faint); font-weight: 400; }
+.note { max-width: 1100px; color: var(--color-muted); font-size: 14px; line-height: 1.7; }
+.pair { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.pair > div { display: flex; flex-direction: column; gap: 8px; }
+.pair > div > p { color: var(--color-faint); font-size: 13px; max-width: 600px; }
+.doc ul.plain { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.8; max-width: 1100px; }
+.demo-hint { color: var(--color-accent); font-size: 13px; }
+
+.frame { position: relative; overflow: hidden; background: var(--color-bg); outline: 1px solid #2a2b2d; color: var(--color-text); font-size: var(--type-body); line-height: var(--line-ui); }
+.frame--pc { width: 1440px; height: 900px; }
+.frame--pc.short { height: 560px; }
+/* Tablet: real 800 × 1280 portrait CSS px, shown at 75 %. Role sizes from mobile.css. */
+.frame--tab { width: 800px; height: 1280px; zoom: .75;
+  --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px;
+  --control-height: 44px; --control-height-compact: 36px; --control-height-sm: 36px; --control-height-icon: 44px; --badge-height: 24px; --badge-icon: 16px;
+  --icon-md: 24px; --icon-sm: 16px; --line-meta: 20px; --line-ui: 24px; --text-md: 17px; --text-sm: 15px; --text-xs: 13px;
+  --row-height-2: 64px; border-radius: 0; }
+svg.i { width: var(--icon-md); height: var(--icon-md); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.s { width: 16px; height: 16px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- PC shell ---------- */
+.pc { display: grid; grid-template-columns: 56px minmax(0, 1fr); height: 100%; }
+.rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-3); background: var(--color-sidebar); border-right: 1px solid var(--color-border); color: var(--color-muted); }
+.rail span { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-control); }
+.rail span.on { background: var(--color-selection-context); color: var(--color-selection-context-text); }
+.rail .push { margin-top: auto; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--toolbar-height); padding: 0 var(--space-2) 0 var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.topbar .ttl { font-weight: 600; }
+.topbar .ttl small { margin-left: var(--space-1); color: var(--color-muted); font-weight: 400; font-size: var(--type-body); }
+.topbar .back { margin-left: calc(-1 * var(--space-2)); }
+.topbar .grow { flex: 1; }
+.winctl { display: flex; gap: var(--space-4); padding: 0 var(--space-2); color: var(--color-faint); font-size: 13px; }
+.scroll { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+
+.ibtn { display: inline-grid; place-items: center; width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); cursor: pointer; }
+.ibtn:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.ibtn svg { width: 16px; height: 16px; }
+.quiet-menu { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); font: inherit; cursor: pointer; }
+.quiet-menu svg { width: 14px; height: 14px; }
+.quiet-menu[aria-expanded="true"], .quiet-menu:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.quiet-menu .on { color: var(--color-text); font-weight: 600; }
+
+/* Collection shortcuts row (as CollectionBrowser.css) */
+.collection-shortcuts { display: flex; align-items: center; gap: var(--space-1); }
+.collection-shortcuts .ui-button { gap: var(--space-2); white-space: nowrap; }
+.collection-shortcuts svg { width: 16px; height: 16px; }
+.sc-count { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.sc-count.is-new { color: var(--color-accent); font-weight: 600; }
+.sc-divider { width: 1px; height: 16px; margin-inline: var(--space-2); background: var(--color-border); }
+.is-callout { outline: 1px dashed rgba(240, 200, 120, .7); outline-offset: 3px; }
+
+.ui-section-bar .ui-segmented { position: relative; }
+
+/* ---------- covers (placeholder artwork) ---------- */
+.cv { position: relative; display: block; flex: none; aspect-ratio: 7 / 10; overflow: hidden; border-radius: var(--radius-mark);
+  background: linear-gradient(165deg, hsl(var(--h) 46% 46%), hsl(calc(var(--h) + 28) 38% 20%)); }
+.cv::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(0,0,0,.28), transparent 9%, transparent 92%, rgba(255,255,255,.06)); }
+.cv b { position: absolute; left: 8%; right: 8%; top: 8%; color: rgba(255,255,255,.88); font-size: 11px; font-weight: 700; line-height: 1.15; word-break: keep-all; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.cv.sm { width: 30px; }
+.cv.sm b { display: none; }
+
+/* ---------- Variant A: 연결 점검 list ---------- */
+.ck-bar { display: flex; align-items: center; gap: var(--space-2); flex: none; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); }
+.ck-bar .ui-segmented { height: var(--control-height-compact); }
+.ck-bar .grow { flex: 1; }
+.ck-list { max-width: 1180px; padding: 0 var(--space-4); }
+.ck-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 300px 148px 220px; align-items: center; gap: var(--space-3); height: var(--row-height-2); padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--color-border); overflow: hidden; background: transparent;
+  transition: background-color var(--motion-fast) var(--ease-standard); }
+.ck-row:hover, .ck-row.is-hover { background: var(--color-surface-hover); }
+.ck-row .cv.sm { width: 30px; }
+.ck-title { display: grid; gap: 2px; min-width: 0; }
+.ck-title strong { overflow: hidden; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.ck-title small { overflow: hidden; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-meta); text-overflow: ellipsis; white-space: nowrap; }
+.ck-row input.ui-text-input { width: 100%; height: 32px; }
+.ck-row input.ui-text-input:focus { outline: 0; box-shadow: inset 0 -2px 0 var(--color-focus); border-radius: var(--radius-control) var(--radius-control) 0 0; }
+.ck-src { overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); text-overflow: ellipsis; white-space: nowrap; }
+.ck-src.is-alt { color: var(--color-muted); }
+.ck-act { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
+.ck-act .later { opacity: 0; transition: opacity var(--motion-fast) var(--ease-standard); }
+.ck-row:hover .later, .ck-row.is-hover .later, .ck-row:focus-within .later { opacity: 1; }
+.ck-act .ui-button { white-space: nowrap; }
+.frame.entry { height: 236px; }
+.frame--tab.entry { height: 300px; }
+.t-row .cv b, .dlg-work .cv b, .t-res .cv b { display: none; }
+.ck-act .ui-button svg { width: 16px; height: 16px; }
+/* Linked: tint toward success with a check, then the row folds away and the rows below glide up. */
+.ck-row .done { display: none; align-items: center; gap: var(--space-1); color: var(--color-success); font-size: var(--type-meta); white-space: nowrap; }
+.ck-row .done svg { width: 16px; height: 16px; stroke-width: 2; }
+.ck-row.is-linked { background: color-mix(in srgb, var(--color-success) 12%, transparent); }
+.ck-row.is-linked .done { display: inline-flex; animation: fadein 140ms var(--ease-standard); }
+.ck-row.is-linked .ck-act > :not(.done) { display: none; }
+.ck-row.is-leaving { height: 0; opacity: 0; border-bottom-color: transparent;
+  transition: height 220ms var(--ease-in-out), opacity 180ms var(--ease-in-out), border-color 220ms var(--ease-in-out), background-color 220ms; }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ck-row.is-leaving { transition: none; } }
+
+/* 일부 권: one small square per known volume, filled when the Kakao binding has it (mark, not a stripe). */
+.ck-row.partial { grid-template-columns: 30px minmax(0, 1fr) 360px 112px auto; }
+.vols { display: flex; flex-wrap: wrap; gap: 2px; max-width: 360px; }
+.vols i { width: 8px; height: 8px; border-radius: 1px; background: var(--color-muted); }
+.vols i.miss { background: transparent; box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+.miss-txt { color: var(--color-muted); font-size: var(--type-meta); white-space: nowrap; }
+
+.help-pop { position: absolute; right: 16px; top: 92px; z-index: 5; width: 360px; padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); background-color: var(--color-surface); box-shadow: var(--shadow-floating); font-size: var(--type-meta); line-height: 1.6; color: var(--color-muted); }
+.help-pop ol { margin: 0; padding-left: 18px; }
+.help-pop b { color: var(--color-text); font-weight: 600; }
+
+/* ---------- Kakao dialog inside a frame ---------- */
+.frame .ui-dialog__overlay { position: absolute; }
+.frame .ui-dialog { position: absolute; }
+.dlg-wrap { position: absolute; inset: 0; z-index: 10; display: none; }
+.dlg-wrap.open { display: block; animation: fadein 140ms var(--ease-standard); }
+.dlg-wrap .ui-dialog { animation: rise 140ms var(--ease-standard); }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.dlg-work { display: flex; align-items: center; gap: var(--space-3); margin: calc(-1 * var(--space-2)) 0 var(--space-1); }
+.dlg-work .cv { width: 28px; }
+.dlg-work span { color: var(--color-muted); font-size: var(--type-meta); }
+.dlg-work strong { color: var(--color-text); font-weight: 600; font-size: var(--type-body); margin-right: var(--space-2); }
+.book-connect__search .ui-field input { width: 100%; }
+.q-src { margin-top: calc(-1 * var(--space-2)); color: var(--color-faint); font-size: var(--type-meta); }
+/* Mockup override: the shipped pressed row adds an inset 2px accent bar on its left edge (a coloured edge stripe); face-only here. */
+.book-connect__result[aria-pressed="true"] { box-shadow: none; }
+.book-connect__body { min-height: 18rem; max-height: 22rem; }
+.book-connect__check { width: 16px; height: 16px; }
+.book-connect__actions { display: flex; align-items: center; gap: var(--space-2); }
+.book-connect__actions .spacer { flex: 1; }
+.dlg-empty { padding: var(--space-6) var(--space-4); color: var(--color-faint); font-size: var(--type-meta); }
+
+/* ---------- Variant B: Kakao filter on the normal grid ---------- */
+.grid-head { display: flex; align-items: baseline; gap: var(--space-2); padding: var(--space-4) var(--space-4) var(--space-2); }
+.grid-head h3 { font-size: var(--type-body); font-weight: 600; }
+.grid-head .tot { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.grid-head .ui-button { margin-left: var(--space-1); }
+.cgrid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-2) var(--space-4) var(--space-8); }
+.ccard { position: relative; display: grid; gap: var(--space-2); min-width: 0; cursor: pointer; transition: opacity 180ms var(--ease-in-out), transform 220ms var(--ease-in-out); }
+.ccard .cv { width: 100%; }
+.ccard .cap { display: grid; gap: 2px; min-width: 0; }
+.ccard .cap strong { overflow: hidden; font-weight: 400; font-size: var(--type-body); text-overflow: ellipsis; white-space: nowrap; }
+.ccard .cap small { overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); text-overflow: ellipsis; white-space: nowrap; }
+.ccard .find { position: absolute; left: var(--space-2); bottom: var(--space-2); z-index: 2; opacity: 0; transition: opacity var(--motion-fast) var(--ease-standard); }
+.ccard:hover .find, .ccard.is-hover .find { opacity: 1; }
+.ccard .vol { position: absolute; left: var(--space-2); bottom: var(--space-2); z-index: 2; }
+.ccard .ok { position: absolute; inset: 0; z-index: 3; display: none; place-items: center; background: color-mix(in srgb, var(--color-success) 26%, transparent); color: var(--color-text); }
+.ccard .ok svg { width: 32px; height: 32px; stroke-width: 2; }
+.ccard.is-linked .ok { display: grid; animation: fadein 140ms var(--ease-standard); }
+.ccard.is-leaving { opacity: 0; transform: scale(.96); }
+.cvwrap { position: relative; }
+
+.float-menu { position: absolute; z-index: 6; min-width: 200px; }
+.float-menu .ui-menu__item { width: 100%; font: inherit; color: var(--color-text); cursor: pointer; }
+.float-menu .ui-menu__item .num { color: var(--color-faint); font-size: var(--type-meta); }
+.menu-label { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2) var(--space-1); color: var(--color-faint); font-size: var(--type-meta); }
+.menu-label::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); }
+.menu-label::after { content: ""; flex: 1; height: 1px; background: var(--section-label-rule); }
+.mark { width: 5px; height: 5px; margin-left: var(--space-2); background: var(--color-accent); }
+.ui-menu__item.cur { font-weight: 600; }
+
+/* ---------- Tablet ---------- */
+.tab { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.tab-top { display: flex; align-items: center; gap: var(--space-2); flex: none; height: 56px; padding: 0 var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.tab-top .ttl { font-weight: 600; }
+.tab-top .ttl small { margin-left: var(--space-1); color: var(--color-muted); font-weight: 400; font-size: var(--type-body); }
+.tab-top .grow { flex: 1; }
+.tab-top .ibtn, .tab .ibtn { width: 44px; height: 44px; }
+.tab .ibtn svg { width: 24px; height: 24px; }
+.tab-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.tab-nav { display: flex; justify-content: space-around; align-items: center; flex: none; height: 64px; border-top: 1px solid var(--color-border); background: var(--color-toolbar); color: var(--color-faint); font-size: 13px; }
+.tab-nav span { display: grid; justify-items: center; gap: 2px; }
+.tab-nav span.on { color: var(--color-text); }
+.tab-sec { display: grid; gap: var(--space-2); padding: var(--space-2) var(--space-6); border-bottom: 1px solid var(--color-border); }
+.tab-sec .ui-segmented { height: 44px; }
+.tab-sec .ui-segmented__cell { font-size: var(--type-body); }
+.tab-short { display: flex; height: 44px; padding: var(--space-1); border-radius: var(--radius-control); background: var(--color-surface); }
+.tab-short button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); border: 0; background: none; color: var(--color-text); font: inherit; }
+.tab-short button + button { box-shadow: inset 1px 0 0 var(--color-border); }
+.tab-short svg { width: 20px; height: 20px; color: var(--color-muted); }
+.tgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-3) var(--space-6) var(--space-8); }
+.tgrid .ccard .cap strong { font-size: 15px; }
+.tgrid .ccard .cap small { font-size: 13px; }
+.filter-line { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-6) 0; }
+.chip { display: inline-flex; align-items: center; gap: var(--space-2); height: 36px; padding: 0 var(--space-2) 0 var(--space-3); border-radius: var(--radius-control); background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; font-size: 15px; }
+.chip .x { display: inline-grid; place-items: center; width: 28px; height: 28px; color: var(--color-muted); }
+.chip .x svg { width: 18px; height: 18px; }
+.chip .num { color: var(--color-muted); font-weight: 500; }
+
+/* Bottom overlay (Collections shortcut surface): leaves ~36px of the screen above it. */
+.t-dim { position: absolute; inset: 0; z-index: 4; background: rgba(0,0,0,.5); }
+.t-over { position: absolute; left: 0; right: 0; bottom: 0; top: 36px; z-index: 5; display: flex; flex-direction: column; background: var(--color-bg); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; }
+.t-over .grab { width: 40px; height: 4px; margin: var(--space-2) auto 0; border-radius: 2px; background: var(--color-border-strong); }
+.t-over header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4) var(--space-2) var(--space-6); }
+.t-over header h3 { flex: 1; font-size: var(--type-title); font-weight: 600; }
+.t-over .seg-wrap { padding: 0 var(--space-6) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.t-over .ui-segmented { height: 44px; }
+.t-list { padding: 0 var(--space-6); overflow: hidden; }
+.t-row { display: flex; align-items: center; gap: var(--space-3); height: 64px; border-bottom: 1px solid var(--color-border); }
+.t-row .cv { width: 38px; }
+.t-row .ck-title { flex: 1; }
+.t-row .ck-title small b { color: var(--color-text); font-weight: 400; }
+.t-row.is-linked { background: color-mix(in srgb, var(--color-success) 12%, transparent); }
+.t-row .done { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-success); font-size: 15px; }
+.t-row .done svg { width: 20px; height: 20px; stroke-width: 2; }
+.t-fold { display: flex; align-items: center; gap: var(--space-2); height: 56px; color: var(--color-muted); font-size: 15px; }
+.t-fold svg { width: 20px; height: 20px; }
+.t-fold .num { color: var(--color-faint); }
+
+/* Tablet bottom sheet (BindSearchSheet) */
+.t-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; display: flex; flex-direction: column; gap: var(--space-3); max-height: 82%; padding: var(--space-2) var(--space-6) var(--space-6);
+  background: var(--color-surface-raised); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; box-shadow: var(--shadow-dialog); }
+.t-sheet .grab { width: 40px; height: 4px; margin: 0 auto var(--space-1); border-radius: 2px; background: var(--color-border-strong); }
+.t-sheet h3 { font-size: var(--type-title); font-weight: 600; }
+.t-sheet .dlg-work { margin: 0; }
+.t-sheet .dlg-work .cv { width: 34px; }
+.t-search { display: flex; align-items: center; gap: var(--space-2); }
+.t-search .ui-text-input { flex: 1; height: 44px; display: flex; align-items: center; gap: var(--space-2); }
+.t-search .ui-text-input svg { width: 20px; height: 20px; color: var(--color-muted); }
+.t-search .ui-button { min-height: 44px; padding: 0 var(--space-4); }
+.t-res { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--color-border); }
+.t-res li { display: flex; align-items: center; gap: var(--space-3); min-height: 72px; padding: var(--space-2) var(--space-1); border-bottom: 1px solid var(--color-border); }
+.t-res li.sel { background: var(--color-filter-selected); }
+.t-res .box { flex: none; width: 20px; height: 20px; border: 1.5px solid var(--color-border-strong); border-radius: 2px; background: var(--color-bg); position: relative; }
+.t-res li.sel .box { border-color: var(--color-accent); }
+.t-res li.sel .box::after { content: ""; position: absolute; inset: 3px; background: var(--color-accent); border-radius: 1px; }
+.t-res .thumb { width: 40px; aspect-ratio: 7/10; border-radius: 2px; }
+.t-res .txt { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.t-res .txt strong { font-weight: 600; }
+.t-res .txt small { color: var(--color-muted); font-size: 13px; }
+.t-actions { display: flex; align-items: center; gap: var(--space-2); }
+.t-actions .spacer { flex: 1; }
+.t-actions .ui-button { min-height: 44px; padding: 0 var(--space-4); }
+.t-hint { color: var(--color-faint); font-size: 13px; }
+
+.t-view { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; display: grid; gap: var(--space-4); padding: var(--space-2) var(--space-6) var(--space-8); background: var(--color-surface-raised); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; box-shadow: var(--shadow-dialog); }
+.t-view .grab { width: 40px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--color-border-strong); }
+.t-view .ui-segmented { height: 44px; }
+.t-view .ui-section-label { font-size: 13px; }
+
+/* Motion strip (common section) */
+.strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 1440px; }
+.strip > div { display: grid; gap: 8px; }
+.strip .frame { height: auto; padding: 8px 0; }
+.strip .ck-row { grid-template-columns: 30px minmax(0, 1fr) 120px; padding: 0 12px; }
+.strip p { color: var(--color-faint); font-size: 13px; }
+.rowghost { height: 24px; }
+.toast { position: absolute; left: 50%; bottom: var(--space-6); z-index: 9; display: flex; align-items: center; gap: var(--space-4); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); transform: translateX(-50%); background-color: var(--color-surface-elevated); border: 1px solid var(--color-border); box-shadow: var(--shadow-floating); font-size: var(--type-body); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>컬렉션 · 만화 — Kakao 미연결 작품 한 번에 연결하기</h1>
+    <p class="lead">만화 150개 중 <b>122개가 Kakao 미연결</b>, 연결된 28개 중 <b>10개는 일부 권만</b> 연결돼 있습니다. 두 안 모두 같은 원칙을 따릅니다: 클릭 한 번이면 그 작품의 <b>기존 Kakao 연결 창이 검색을 마친 상태로</b> 열리고(검색어는 작품명, 작품명이 한국어가 아니면 MangaDex의 한국어 제목), 연결하면 그 작품이 <b>번쩍임 없이</b> 목록에서 접혀 빠집니다. 창에서 바로 <b>연결 안 함</b>을 고를 수 있어 목록이 0까지 줄어듭니다. 실제 앱의 tokens / controls / Kakao 창 CSS를 그대로 불러온 시안이며, PC 1440×900과 태블릿 800×1280(75 % 축소)을 함께 보입니다.</p>
+    <div class="toc"><a href="#a">A안 · 연결 점검 화면</a><a href="#b">B안 · 만화 목록의 Kakao 필터</a><a href="#common">공통 · 연결 후 동작, 검색어 규칙</a><a href="#rec">추천 · 열린 질문</a></div>
+  </header>
+
+  <!-- ===================== A ===================== -->
+  <section class="variant" id="a">
+    <h2>A안 · 연결 점검 화면 <small>만화 바로가기 줄에 “연결 점검 122” — 신간처럼 목록 자리에 열리는 할 일 목록</small></h2>
+
+    <div class="shot">
+      <h3>A-1 · 들어가는 곳과 미연결 목록 <small>PC · 직접 눌러 보세요: 찾기 → 연결</small></h3>
+      <p class="note">만화 섹션 바의 바로가기 줄(쇼케이스 · 신간 다음)에 <b>연결 점검</b>과 남은 개수가 붙습니다. 0이 되면 바로가기 자체가 사라집니다. 누르면 신간 화면처럼 목록 자리를 바꾸고 제목줄은 <b>‹ Kakao 연결 점검</b>. 맨 위 세그먼트로 <b>미연결 · 일부 권 · 제외</b>를 오갑니다. 줄마다 쓸 검색어가 입력칸에 이미 들어 있고 오른쪽에 그 출처(작품명 / MangaDex 한국어 제목 / 한국어 제목 없음)가 흐리게 보입니다. 고칠 수 있고, Enter나 <b>찾기</b>가 Kakao 창을 엽니다. <b>연결 안 함</b>은 줄에 올리거나 포커스가 왔을 때만 보입니다. ↑↓로 줄 이동, Enter로 찾기.</p>
+      <p class="demo-hint">▶ 아래 PC 화면에서 아무 줄의 “찾기”를 눌러 창을 열고 “연결”을 누르면 접혀 빠지는 동작을 볼 수 있습니다.</p>
+      <div class="pair"><div><div class="frame frame--pc entry" id="pcA0"></div><p>PC · 만화 목록의 섹션 바. 점선이 새 바로가기.</p></div></div>
+      <div class="pair"><div><div class="frame frame--tab entry" id="tabA0"></div><p>태블릿 · 위로 당긴 섹션 바의 둘째 줄(바로가기)에 같은 항목.</p></div></div>
+      <div class="frame frame--pc" id="pcA"></div>
+    </div>
+
+    <div class="shot">
+      <h3>A-2 · 찾기를 누른 직후의 Kakao 창 <small>PC · 기존 KakaoConnectDialog 그대로, 검색을 마친 상태로 열림</small></h3>
+      <p class="note">창은 지금 쓰는 <b>Kakao 연결</b> 창(검색 · 결과 · 권 미리보기)을 그대로 씁니다. 바뀌는 점은 네 가지: ① 맨 위에 어떤 작품인지(표지 · 이름 · 보유 권) ② 열자마자 검색이 끝나 있음 — 0.3초 안에 끝나면 아무 표시 없이 결과가 나오고, 늦어지면 결과 자리 스켈레톤, 0.4초가 지나야 “검색 중…” ③ 결과 제목이 검색어와 같은 묶음 하나는 미리 골라 둠 → <b>연결</b> 한 번 ④ 왼쪽 아래 <b>연결 안 함</b>(이 작품은 Kakao에 국내판이 없음). 기존 창의 설명 문장 두 줄은 뺐습니다.</p>
+      <div class="frame frame--pc" id="pcA2"></div>
+    </div>
+
+    <div class="shot">
+      <h3>A-3 · 일부 권 <small>PC · 연결된 28개 중 10개</small></h3>
+      <p class="note">권마다 작은 사각형 하나 — 채워진 칸은 Kakao에 있는 권, 빈 칸은 빠진 권. 옆에 빠진 범위를 글로. <b>다시 연결</b>은 같은 창을 지금 연결된 검색어로 열고, 이미 연결된 묶음은 체크된 채, 같은 시리즈로 보이는 다른 묶음(완결판 · 출판사 변경 등)을 위에 올려 둡니다. <b>이대로 두기</b>는 빠진 권을 받아들이고 제외로 보냅니다. 기준 권 수(사각형 개수)가 무엇인지는 열린 질문입니다.</p>
+      <div class="frame frame--pc short" id="pcA3"></div>
+    </div>
+
+    <div class="shot">
+      <h3>A-T · 태블릿 <small>800×1280 세로 · 75 % 축소 · 바로가기 → 아래에서 올라오는 오버레이 → 검색 시트</small></h3>
+      <div class="pair">
+        <div><div class="frame frame--tab" id="tabA1"></div><p>태블릿은 바로가기 오버레이(위 36px만 남김)로 같은 목록을 엽니다. 줄 높이 64, 줄 전체가 탭 대상(시트 열기), 끝의 ⋯(44)에 연결 안 함. 검색어는 둘째 줄에 — 작품명과 다를 때만 “검색어 …”와 출처를 적습니다. 태블릿 연결은 PC가 적용하는 요청이라, 요청한 작품은 목록에서 빠져 맨 아래 <b>PC 적용 대기</b> 접힘으로 갑니다.</p></div>
+        <div><div class="frame frame--tab" id="tabA2"></div><p>줄을 탭하면 기존 BindSearchSheet가 검색을 마친 채 올라옵니다. 검색어는 시트의 입력칸에서 고칩니다. 점검 목록에서 열었을 때는 <b>연결 요청</b> 한 번으로 끝나고(지금의 “이 작품으로 연결할까요?” 확인 단계를 건너뜀 — 열린 질문), 왼쪽 아래 <b>연결 안 함</b>.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== B ===================== -->
+  <section class="variant" id="b">
+    <h2>B안 · 만화 목록의 Kakao 필터 <small>정렬 · 내 별점 옆 “Kakao ⌄” — 평소 표지 목록을 걸러서 표지를 누르면 바로 Kakao 창</small></h2>
+
+    <div class="shot">
+      <h3>B-1 · 필터를 켠 만화 목록 <small>PC · 직접 눌러 보세요: 표지 → 연결</small></h3>
+      <p class="note">보기 컨트롤에 <b>Kakao</b> 메뉴가 생깁니다(전체 / 미연결 122 / 일부 권 10 / 제외). 고르면 평소 격자·선반·책장이 그대로 걸러지고, 목록 머리는 <b>Kakao 미연결 122</b> + 필터 초기화. 이 필터가 켜진 동안에만 표지 클릭이 작품 대신 <b>Kakao 창</b>을 열고, 올리면 표지 아래에 “찾기” 배지가 뜹니다. 검색어가 작품명과 다를 때만 제목 밑에 흐리게 적힙니다(편집은 창의 입력칸). 작품 열기는 우클릭 메뉴와 창의 표지. 연결하면 표지에 체크가 잠깐 덮였다가 흐려지며 빠지고 옆 표지들이 미끄러져 자리를 메웁니다.</p>
+      <div class="frame frame--pc" id="pcB"></div>
+    </div>
+
+    <div class="shot">
+      <h3>B-2 · 일부 권 필터 <small>PC · 표지 위 권 수 배지</small></h3>
+      <p class="note">일부 권은 표지 위 scrim 배지 <b>8/13권</b>으로만 보입니다. 표지를 누르면 A-3과 같은 다시 연결 창. 빠진 권 범위는 창 안에서 보입니다.</p>
+      <div class="frame frame--pc short" id="pcB2"></div>
+    </div>
+
+    <div class="shot">
+      <h3>B-T · 태블릿 <small>800×1280 세로 · 75 % 축소</small></h3>
+      <div class="pair">
+        <div><div class="frame frame--tab" id="tabB1"></div><p>필터는 맨 위에 칩 <b>Kakao 미연결 122 ✕</b>로 남습니다(✕로 해제). 표지 탭 → A-T와 같은 검색 시트. 작품 열기는 길게 누르기 메뉴.</p></div>
+        <div><div class="frame frame--tab" id="tabB2"></div><p>필터는 기존 <b>보기</b> 시트에 Kakao 세그먼트로 들어갑니다.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== Common ===================== -->
+  <section class="variant" id="common">
+    <h2>공통 <small>두 안 모두 같은 규칙</small></h2>
+    <div class="shot">
+      <h3>연결 후 — 번쩍임 없이 빠지기</h3>
+      <div class="strip" id="strip"></div>
+      <p class="note">창은 140 ms에 닫히고 줄은 창이 닫힌 뒤에 바뀝니다. 성공 토스트는 없고(디자인 §12: 성공은 그 자리에서), 연결 안 함만 <b>되돌리기</b> 토스트가 뜹니다. 연결이 실패하면 창이 닫히지 않고 한 줄 오류 + 다시 시도. 동작 줄이기 설정이면 접힘 없이 바로 빠집니다. 개수(122 → 121)는 접히기 시작할 때 한 번 바뀝니다.</p>
+    </div>
+    <div class="shot">
+      <h3>기본 검색어 규칙</h3>
+      <ul class="plain">
+        <li><b>작품명에 한글이 있으면 작품명</b> — 원피스, 귀멸의 칼날, 스파이X패밀리. 출처 “작품명”.</li>
+        <li><b>한글이 없으면 MangaDex 연결의 한국어 대체 제목</b>(ko 태그 첫 번째) — Uma Musume: Cinderella Gray → 우마무스메 신데렐라 그레이. 출처 “MangaDex 한국어 제목”.</li>
+        <li><b>둘 다 없으면 작품명 그대로</b>, 출처 “한국어 제목 없음” — 결과가 비면 창에 “검색 결과 없음”과 연결 안 함이 바로 보입니다.</li>
+        <li>사용자가 고친 검색어는 그 작품에 기억되고(목록을 닫았다 열어도 유지), 연결에 성공하면 그 검색어가 지금처럼 바인딩의 query로 저장됩니다.</li>
+      </ul>
+    </div>
+    <div class="shot">
+      <h3>연결 안 함</h3>
+      <ul class="plain">
+        <li>새 상태를 만들지 않고 이미 있는 <b>“카카오 연결 안내 숨기기”</b>(작품 편집 · 권 범위 칸의 체크, <code>hideConnectionPrompt</code>)를 켭니다. 작품 화면의 연결 안내가 접히는 것과 같은 뜻이라 PC·태블릿·서버가 이미 같은 값을 나눠 씁니다.</li>
+        <li>제외 탭에서 <b>다시 점검</b>으로 되돌립니다. 일부 권의 “이대로 두기”는 이 값으로 표현이 안 돼 새 표시가 필요합니다(열린 질문).</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="variant" id="rec">
+    <h2>추천 · 열린 질문</h2>
+    <ul class="plain">
+      <li><b>추천: A안.</b> 122개는 “둘러보기”가 아니라 “할 일 목록”이라 줄 목록이 맞습니다 — 검색어와 출처를 줄마다 보고 그 자리에서 고칠 수 있고, 키보드로 Enter · Enter로 이어 가며, 일부 권의 빠진 권을 사각형으로 보여 줄 자리가 있습니다. 0이 되면 바로가기가 사라져 화면에 흔적이 남지 않습니다. B안은 새 화면 없이 가볍지만 필터가 켜진 동안 표지 클릭의 뜻이 바뀌고, 검색어를 연결 창을 열기 전에는 고칠 수 없습니다.</li>
+      <li>위치 결정: 기존 <code>MangaConnections</code>(작품 한 개의 “발매 정보” 칸)는 작품 화면 안의 부품이라 목록의 집이 되기는 어렵습니다 — A안 목록은 그 부품을 다시 쓰지 않고, 연결 창(KakaoConnectDialog / BindSearchSheet)만 그대로 씁니다. 더보기 패널은 앱 전체의 대기열 자리라 만화 한 유형의 정리를 넣기엔 넓습니다.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+/* ---------- icons (Heroicons outline 24, stroke 1.5) ---------- */
+const P = {
+  home: 'm2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
+  photo: 'm2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z',
+  stack: 'M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122',
+  book: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
+  doc: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
+  search: 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  left: 'M15.75 19.5 8.25 12l7.5-7.5',
+  down: 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  check: 'm4.5 12.75 6 6 9-13.5',
+  dots: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  link: 'M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244',
+  x: 'M6 18 18 6M6 6l12 12',
+  bell: 'M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0',
+  spark: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  info: 'm11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z',
+  undo: 'M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3',
+  view: 'M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75',
+  clock: 'M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  pc: 'M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+/* ---------- data ---------- */
+const UNLINKED = [
+  { t: '원피스', a: '오다 에이이치로', n: 108, h: 8, pub: '대원씨아이' },
+  { t: '나루토', a: '키시모토 마사시', n: 72, h: 28, pub: '대원씨아이' },
+  { t: '귀멸의 칼날', a: '고토게 코요하루', n: 23, h: 350, pub: '학산문화사' },
+  { t: '던전밥', a: '쿠이 료코', n: 14, h: 95, pub: '소미미디어' },
+  { t: '스파이X패밀리', a: '엔도 타츠야', n: 13, h: 205, pub: '학산문화사' },
+  { t: 'Uma Musume: Cinderella Gray', a: '쿠지라이 타이요', n: 18, h: 140, q: '우마무스메 신데렐라 그레이', src: 'ko', pub: '대원씨아이' },
+  { t: '장송의 프리렌', a: '야마다 카네히토', n: 13, h: 170, pub: '학산문화사' },
+  { t: 'Look Back', a: '후지모토 타츠키', n: 1, h: 20, q: '룩백', src: 'ko', pub: '학산문화사' },
+  { t: '진격의 거인', a: '이사야마 하지메', n: 34, h: 15, pub: '학산문화사' },
+  { t: 'Chi. -Chikyuu no Undou ni Tsuite-', a: '우오토', n: 8, h: 225, src: 'none', pub: '' },
+  { t: '블루 피리어드', a: '야마구치 츠바사', n: 15, h: 212, pub: '대원씨아이' },
+  { t: '체인소 맨', a: '후지모토 타츠키', n: 19, h: 0, pub: '학산문화사' },
+  { t: '약속의 네버랜드', a: '시라이 카이우', n: 20, h: 110, pub: '학산문화사' },
+  { t: '하이큐!!', a: '후루다테 하루이치', n: 45, h: 30, pub: '대원씨아이' },
+  { t: '도로헤도로', a: '하야시다 큐', n: 23, h: 60, pub: '시공사' },
+  { t: '바닷마을 다이어리', a: '요시다 아키미', n: 9, h: 185, pub: '애니북스' },
+];
+UNLINKED.forEach(w => { w.q = w.q ?? w.t; w.src = w.src ?? 'name'; });
+const PARTIAL = [
+  { t: '신부이야기', a: '모리 카오루', pub: '대원씨아이', have: [1, 12], total: 14, h: 30 },
+  { t: '가치아쿠타', a: '우라나 케이', pub: '학산문화사', have: [1, 8], total: 13, h: 0 },
+  { t: '봇치 더 록! 외전 히로이 키쿠리의 심연주정록', a: '쿠마노 마유', pub: '소미미디어', have: [6, 8], total: 8, h: 320 },
+  { t: '약사의 혼잣말', a: '네코쿠라게', pub: '서울미디어코믹스', have: [1, 10], total: 13, h: 160 },
+  { t: '스킵과 로퍼', a: '타카마ツ 미사키'.replace('ツ', '츠'), pub: '대원씨아이', have: [1, 8], total: 10, h: 120 },
+  { t: '메이드 인 어비스', a: '츠쿠시 아키히토', pub: '대원씨아이', have: [1, 11], total: 13, h: 45 },
+];
+const SRC = { name: ['작품명', ''], ko: ['MangaDex 한국어 제목', 'is-alt'], none: ['한국어 제목 없음', ''] };
+const cover = (w, cls = '') => `<span class="cv ${cls}" style="--h:${w.h}"><b>${esc(w.t)}</b></span>`;
+
+/* ---------- shared pieces ---------- */
+function segmented(cells, active, extra = '') {
+  return `<div class="ui-segmented ${extra}" role="radiogroup"><span class="ui-segmented__thumb ui-segmented__thumb--initial"></span>${cells.map((c, i) => {
+    const [label, count] = Array.isArray(c) ? c : [c];
+    return `<button type="button" class="ui-segmented__cell" ${i === active ? 'data-segmented-active="true"' : ''}><span class="ui-segmented__content"><span class="ui-segmented__label">${label}${count != null ? `<span class="ui-segmented__count num">${count}</span>` : ''}</span></span></button>`;
+  }).join('')}</div>`;
+}
+function placeThumbs(root = document) {
+  root.querySelectorAll('.ui-segmented').forEach(seg => {
+    const cell = seg.querySelector('[data-segmented-active]'), th = seg.querySelector('.ui-segmented__thumb');
+    if (!cell || !th) return;
+    th.style.left = cell.offsetLeft + 'px'; th.style.width = cell.offsetWidth + 'px';
+  });
+}
+function rail() {
+  return `<nav class="rail">${['home', 'photo', 'stack', 'book', 'doc'].map((n, i) => `<span class="${i === 2 ? 'on' : ''}">${ic(n)}</span>`).join('')}<span class="push">${ic('search')}</span><span>${ic('dots')}</span></nav>`;
+}
+const win = `<span class="winctl"><span>—</span><span>☐</span><span>✕</span></span>`;
+function sectionBar({ callout = false, kakaoMenu = false, kakaoOn = false, kakaoOpen = false } = {}) {
+  return `<div class="ui-section-bar">${segmented(['게임', '만화', '영화', ['AV']], 1)}
+    <div class="ui-section-bar__trailing">
+      <div class="collection-shortcuts">
+        <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('spark', 's')}<span>쇼케이스</span></button>
+        <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('bell', 's')}<span>신간</span><span class="sc-count is-new">3</span></button>
+        ${kakaoMenu ? '' : `<button class="ui-button ui-button--quiet ui-button--sm ${callout ? 'is-callout' : ''}" type="button">${ic('link', 's')}<span>연결 점검</span><span class="sc-count num">122</span></button>`}
+      </div>
+      <span class="sc-divider"></span>
+      <button class="quiet-menu" type="button">정렬${ic('down', 's')}</button>
+      <button class="quiet-menu" type="button">내 별점${ic('down', 's')}</button>
+      ${kakaoMenu ? `<button class="quiet-menu is-kakao" type="button" aria-expanded="${kakaoOpen}"><span class="${kakaoOn ? 'on' : ''}">Kakao</span>${ic('down', 's')}</button>` : ''}
+      <button class="ibtn" type="button" aria-label="보기">${ic('view')}</button>
+    </div></div>`;
+}
+
+/* ---------- Variant A rows ---------- */
+function ckRow(w, i, hover = false) {
+  const [srcLabel, srcCls] = SRC[w.src];
+  return `<div class="ck-row ${hover ? 'is-hover' : ''}" data-i="${i}">
+    ${cover(w, 'sm')}
+    <span class="ck-title"><strong>${esc(w.t)}</strong><small>${esc(w.a)} · <span class="num">${w.n}권</span></small></span>
+    <input class="ui-text-input" value="${esc(w.q)}" aria-label="${esc(w.t)} 검색어">
+    <span class="ck-src ${srcCls}">${srcLabel}</span>
+    <span class="ck-act">
+      <span class="done">${ic('check')}연결됨</span>
+      <button class="ui-button ui-button--ghost ui-button--sm later" type="button">연결 안 함</button>
+      <button class="ui-button ui-button--secondary ui-button--sm find" type="button">${ic('search', 's')}찾기</button>
+    </span></div>`;
+}
+function partialRow(w, hover = false) {
+  const vols = Array.from({ length: w.total }, (_, k) => `<i class="${k + 1 >= w.have[0] && k + 1 <= w.have[1] ? '' : 'miss'}"></i>`).join('');
+  const missing = [];
+  if (w.have[0] > 1) missing.push(w.have[0] - 1 === 1 ? '1' : `1–${w.have[0] - 1}`);
+  if (w.have[1] < w.total) missing.push(w.have[1] + 1 === w.total ? `${w.total}` : `${w.have[1] + 1}–${w.total}`);
+  return `<div class="ck-row partial ${hover ? 'is-hover' : ''}">
+    ${cover(w, 'sm')}
+    <span class="ck-title"><strong>${esc(w.t)}</strong><small>${esc(w.a)} · ${esc(w.pub)} · <span class="num">${w.have[0]}–${w.have[1]}권</span> 연결</small></span>
+    <span class="vols" aria-label="${w.total}권 중 ${w.have[1] - w.have[0] + 1}권 연결">${vols}</span>
+    <span class="miss-txt num">${missing.join(', ')}권 없음</span>
+    <span class="ck-act">
+      <button class="ui-button ui-button--ghost ui-button--sm later" type="button">이대로 두기</button>
+      <button class="ui-button ui-button--secondary ui-button--sm" type="button">${ic('link', 's')}다시 연결</button>
+    </span></div>`;
+}
+
+/* ---------- Kakao dialog ---------- */
+function results(w) {
+  if (w.src === 'none') return [];
+  const out = [{ title: w.q, author: w.a, pub: w.pub, from: 1, to: w.n, sel: true }];
+  if (w.n > 5) out.push({ title: `${w.q} 외전`, author: w.a, pub: w.pub, from: 1, to: 1 });
+  if (w.n > 12) out.push({ title: `${w.q} 컬러판`, author: w.a, pub: w.pub, from: 1, to: Math.min(6, w.n) });
+  out.push({ title: `${w.q} 공식 팬북`, author: w.a, pub: w.pub, from: 1, to: 1 });
+  return out;
+}
+function dialog(w, { open = true } = {}) {
+  const res = results(w), sel = res.find(r => r.sel);
+  const [srcLabel] = SRC[w.src];
+  const range = r => r.from === r.to ? `${r.from}권` : `${r.from}–${r.to}권 · ${r.to - r.from + 1}권`;
+  const vols = sel ? Array.from({ length: Math.min(sel.to, 7) }, (_, k) => {
+    const y = 2017 + Math.floor(k / 3), m = ((k * 4) % 12) + 1;
+    return `<li><span>${esc(sel.title)} ${k + 1}</span><small class="num">${y}.${m}.${(k * 7) % 27 + 1} · 979113${String(4841000 + k * 13).padStart(7, '0')}</small></li>`;
+  }).join('') + (sel.to > 7 ? `<li><small>… ${sel.to - 7}권 더</small></li>` : '') : '';
+  return `<div class="dlg-wrap ${open ? 'open' : ''}">
+    <div class="ui-dialog__overlay"></div>
+    <div class="ui-dialog ui-dialog--wide" role="dialog" aria-label="Kakao 연결">
+      <h2 class="ui-dialog__title">Kakao 연결</h2>
+      <div class="book-connect">
+        <div class="dlg-work">${cover(w)}<span><strong>${esc(w.t)}</strong><span class="num">보유 ${w.n}권</span></span></div>
+        <div class="book-connect__search">
+          <label class="ui-field"><span>카카오 작품 검색</span><input class="ui-text-input" type="search" value="${esc(w.q)}"></label>
+          <button class="ui-button ui-button--secondary" type="button">검색</button>
+        </div>
+        ${w.src === 'name' ? '' : `<p class="q-src">${srcLabel}${w.src === 'ko' ? '으로 찾음' : ' · 원래 이름으로 찾음'}</p>`}
+        <div class="book-connect__body">
+          <div class="book-connect__results" aria-label="카카오 검색 결과">
+            ${res.length ? res.map(r => `<div class="book-connect__row"><input type="checkbox" class="book-connect__check ui-checkbox" ${r.sel ? 'checked' : ''}><button type="button" class="book-connect__result" aria-pressed="${!!r.sel}"><strong>${esc(r.title)}</strong><small>${esc([r.author, r.pub, range(r)].filter(Boolean).join(' · '))}</small></button></div>`).join('')
+              : `<div class="ui-empty-state ui-empty-state--inline dlg-empty">검색 결과 없음</div>`}
+          </div>
+          <div class="book-connect__preview" aria-label="선택한 시리즈 권 목록">
+            ${sel ? `<section class="book-connect__preview-group"><div class="book-connect__preview-header"><strong>${esc(sel.title)}</strong></div><ul>${vols}</ul></section>` : ''}
+          </div>
+        </div>
+        <div class="ui-dialog__actions book-connect__actions">
+          <button class="ui-button ui-button--ghost dlg-skip" type="button">연결 안 함</button>
+          <span class="spacer"></span>
+          <button class="ui-button ui-button--secondary dlg-cancel" type="button">취소</button>
+          <button class="ui-button ui-button--primary dlg-apply" type="button" ${sel ? '' : 'disabled'}>연결</button>
+        </div>
+      </div>
+    </div></div>`;
+}
+
+/* ---------- PC A ---------- */
+function pcA({ seg = 0, rows, hoverIndex = -1, help = false, dialogFor = null } = {}) {
+  const counts = [['미연결', 122], ['일부 권', 10], ['제외', 0]];
+  return `<div class="pc">${rail()}<div class="main">
+    <div class="topbar"><button class="ibtn back" type="button" aria-label="만화 목록으로">${ic('left')}</button><span class="ttl">Kakao 연결 점검<small>만화</small></span><span class="grow"></span>${win}</div>
+    <div class="ck-bar">${segmented(counts, seg)}<span class="grow"></span><button class="ibtn" type="button" aria-label="검색어 기준">${ic('info')}</button></div>
+    <div class="scroll"><div class="ck-list">${rows}</div>
+    ${help ? `<div class="help-pop ui-menu"><ol><li>작품명에 한글이 있으면 <b>작품명</b></li><li>아니면 MangaDex의 <b>한국어 제목</b></li><li>둘 다 없으면 작품명 그대로</li></ol></div>` : ''}
+    </div></div></div>${dialogFor ? dialog(dialogFor) : ''}`;
+}
+
+const pcAel = document.getElementById('pcA');
+pcAel.innerHTML = pcA({ rows: UNLINKED.map((w, i) => ckRow(w, i, i === 5)).join(''), help: false });
+document.getElementById('pcA0').innerHTML = `<div class="pc">${rail()}<div class="main"><div class="topbar"><span class="ttl">컬렉션<small>만화</small></span><span class="grow"></span>${win}</div>
+  <div class="scroll">${sectionBar({ callout: true })}<div class="grid-head"><h3>전체</h3><span class="tot num">150</span></div><div class="cgrid">${UNLINKED.slice(0, 8).map((w, i) => ccard(w, i)).join('')}</div></div></div></div>`;
+document.getElementById('pcA2').innerHTML = pcA({ rows: UNLINKED.map((w, i) => ckRow(w, i)).join(''), dialogFor: UNLINKED[2] });
+document.getElementById('pcA3').innerHTML = pcA({ seg: 1, rows: PARTIAL.map((w, i) => partialRow(w, i === 1)).join('') });
+
+/* ---------- PC B ---------- */
+function ccard(w, i, { hover = false, partial = false } = {}) {
+  const sub = partial ? '' : (w.q !== w.t ? `<small>${esc(w.q)}</small>` : '');
+  return `<div class="ccard ${hover ? 'is-hover' : ''}" data-i="${i}"><div class="cvwrap">${cover(w)}
+    ${partial ? `<span class="ui-badge ui-badge--scrim vol num">${w.have[1] - w.have[0] + 1}/${w.total}권</span>` : `<span class="ui-badge ui-badge--scrim find">${ic('search', 's')}찾기</span>`}
+    <span class="ok">${ic('check')}</span></div>
+    <span class="cap"><strong>${esc(w.t)}</strong>${sub}</span></div>`;
+}
+function pcB({ partial = false, menu = true } = {}) {
+  const items = partial ? PARTIAL : UNLINKED;
+  const label = partial ? 'Kakao 일부 권' : 'Kakao 미연결', total = partial ? 10 : 122;
+  return `<div class="pc">${rail()}<div class="main">
+    <div class="topbar"><span class="ttl">컬렉션<small>만화</small></span><span class="grow"></span>${win}</div>
+    <div class="scroll">
+      ${sectionBar({ kakaoMenu: true, kakaoOn: true, kakaoOpen: menu })}
+      <div class="grid-head"><h3>${label}</h3><span class="tot num">${total}</span><button class="ui-button ui-button--ghost ui-button--sm" type="button">필터 초기화</button></div>
+      <div class="cgrid">${items.map((w, i) => ccard(w, i, { hover: !partial && i === 5, partial })).join('')}</div>
+      ${menu ? `<div class="ui-menu float-menu" role="menu" style="right:56px;top:46px">
+        <div class="menu-label">Kakao 연결</div>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">전체</span></button>
+        <button class="ui-menu__item cur" type="button" data-highlighted><span class="ui-menu__item-label">미연결</span><span class="num">122</span><span class="mark"></span></button>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">일부 권</span><span class="num">10</span></button>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">제외</span><span class="num">0</span></button>
+      </div>` : ''}
+    </div></div></div>`;
+}
+document.getElementById('pcB').innerHTML = pcB({ menu: true });
+document.getElementById('pcB2').innerHTML = pcB({ partial: true, menu: false });
+
+/* ---------- Tablet ---------- */
+const tabNav = `<nav class="tab-nav">${[['home', '홈'], ['photo', '에셋'], ['stack', '컬렉션'], ['book', '망가'], ['doc', '메모']].map(([n, l], i) => `<span class="${i === 2 ? 'on' : ''}">${ic(n)}${l}</span>`).join('')}</nav>`;
+function tabList({ filterChip = false, callout = false } = {}) {
+  const items = UNLINKED.slice(0, 16);
+  return `<div class="tab"><div class="tab-top"><span class="ttl">컬렉션<small>만화</small></span><span class="grow"></span><button class="ibtn" type="button">${ic('search')}</button><button class="ibtn" type="button">${ic('view')}</button></div>
+    <div class="tab-body">
+      <div class="tab-sec">${segmented(['게임', '만화', '영화', 'AV'], 1, 'ui-segmented--full-width')}
+        <div class="tab-short"><button type="button">${ic('spark')}쇼케이스</button><button type="button">${ic('bell')}신간 <span class="sc-count is-new">3</span></button>${filterChip ? '' : `<button type="button" class="${callout ? 'is-callout' : ''}">${ic('link')}연결 점검 <span class="sc-count num">122</span></button>`}</div></div>
+      ${filterChip ? `<div class="filter-line"><span class="chip">Kakao 미연결 <span class="num">122</span><span class="x">${ic('x')}</span></span></div>` : ''}
+      <div class="tgrid">${(filterChip ? items : items).map((w, i) => ccard(w, i)).join('')}</div>
+    </div>${tabNav}</div>`;
+}
+function tRow(w, linked = false) {
+  const second = w.q !== w.t ? `검색어 <b>${esc(w.q)}</b> · MangaDex` : `${esc(w.a)} · <span class="num">${w.n}권</span>`;
+  const none = w.src === 'none' ? `${esc(w.a)} · 한국어 제목 없음` : second;
+  return `<div class="t-row ${linked ? 'is-linked' : ''}">${cover(w)}<span class="ck-title"><strong>${esc(w.t)}</strong><small>${none}</small></span>
+    ${linked ? `<span class="done">${ic('check')}요청함</span>` : `<button class="ibtn" type="button" aria-label="${esc(w.t)} 더보기">${ic('dots')}</button>`}</div>`;
+}
+function tabOverlay() {
+  return `<div class="t-dim"></div><div class="t-over"><span class="grab"></span>
+    <header><h3>Kakao 연결 점검</h3><button class="ibtn" type="button" aria-label="닫기">${ic('x')}</button></header>
+    <div class="seg-wrap">${segmented([['미연결', 120], ['일부 권', 10], ['제외', 0]], 0, 'ui-segmented--full-width')}</div>
+    <div class="t-list">${UNLINKED.slice(2, 16).map((w, i) => tRow(w, i === 3)).join('')}
+      <div class="t-fold">${ic('pc')}PC 적용 대기 <span class="num">2</span>${ic('down')}</div></div></div>`;
+}
+document.getElementById('tabA1').innerHTML = tabList() + tabOverlay();
+document.getElementById('tabA0').innerHTML = tabList({ callout: true });
+
+function tabSheet(w) {
+  const res = results(w);
+  return `<div class="t-dim" style="z-index:7"></div><div class="t-sheet"><span class="grab"></span>
+    <h3>Kakao 연결</h3>
+    <div class="dlg-work">${cover(w)}<span><strong>${esc(w.t)}</strong><span class="num">보유 ${w.n}권</span></span></div>
+    <div class="t-search"><label class="ui-text-input">${ic('search')}<input value="${esc(w.q)}" aria-label="카카오 검색어"></label><button class="ui-button ui-button--secondary" type="button">검색</button></div>
+    ${w.src === 'ko' ? `<p class="t-hint">MangaDex 한국어 제목으로 찾음</p>` : ''}
+    <ul class="t-res">${res.map(r => `<li class="${r.sel ? 'sel' : ''}"><span class="box"></span>${cover({ t: r.title, h: w.h + (r.sel ? 0 : 40) }, 'thumb')}<span class="txt"><strong>${esc(r.title)}</strong><small>${esc([r.author, r.pub].join(' · '))}</small><small class="num">${r.from === r.to ? r.from + '권' : `${r.from}–${r.to}권`}</small></span></li>`).join('')}</ul>
+    <div class="t-actions"><button class="ui-button ui-button--ghost" type="button">연결 안 함</button><span class="spacer"></span><button class="ui-button ui-button--ghost" type="button">닫기</button><button class="ui-button ui-button--primary" type="button">연결 요청</button></div>
+  </div>`;
+}
+document.getElementById('tabA2').innerHTML = tabList() + tabOverlay() + tabSheet(UNLINKED[5]);
+
+document.getElementById('tabB1').innerHTML = tabList({ filterChip: true });
+document.getElementById('tabB2').innerHTML = tabList({ filterChip: true }) + `<div class="t-dim" style="z-index:7"></div><div class="t-view"><span class="grab"></span>
+  <div class="ui-section-label"><span class="ui-section-label__title">보기</span><span class="ui-section-label__rule"></span></div>
+  ${segmented(['격자', '선반', '책장'], 0, 'ui-segmented--full-width')}
+  <div class="ui-section-label"><span class="ui-section-label__title">Kakao 연결</span><span class="ui-section-label__rule"></span></div>
+  ${segmented(['전체', ['미연결', 122], ['일부 권', 10], ['제외', 0]], 1, 'ui-segmented--full-width')}
+</div>`;
+
+/* ---------- motion strip ---------- */
+const sw = UNLINKED[2], nx = UNLINKED[3], nx2 = UNLINKED[4];
+const mini = (w, cls = '', act = '') => `<div class="ck-row ${cls}">${cover(w, 'sm')}<span class="ck-title"><strong>${esc(w.t)}</strong><small>${esc(w.a)} · <span class="num">${w.n}권</span></small></span><span class="ck-act">${act}</span></div>`;
+const findBtn = `<button class="ui-button ui-button--secondary ui-button--sm" type="button">${ic('search', 's')}찾기</button>`;
+document.getElementById('strip').innerHTML = `
+  <div><div class="frame">${mini(sw, 'is-linked', `<span class="done" style="display:inline-flex">${ic('check')}연결됨</span>`)}${mini(nx, '', findBtn)}${mini(nx2, '', findBtn)}</div><p>① 창이 닫히면 그 줄만 성공 쪽으로 옅게 물들고 체크가 140 ms에 나타납니다. 줄은 아직 그 자리.</p></div>
+  <div><div class="frame">${mini(sw, 'is-linked', '').replace('ck-row is-linked', 'ck-row is-linked" style="height:20px;opacity:.35')}${mini(nx, '', findBtn)}${mini(nx2, '', findBtn)}</div><p>② 약 0.6초 뒤 높이 48 → 0, 불투명도 1 → 0 (220 ms, ease-in-out). 아래 줄들이 그만큼 미끄러져 올라옵니다. 개수 122 → 121.</p></div>
+  <div><div class="frame">${mini(nx, 'is-hover', findBtn.replace('ui-button--sm"', 'ui-button--sm" style="outline:2px solid var(--color-focus);outline-offset:2px"'))}${mini(nx2, '', findBtn)}${mini(UNLINKED[5], '', findBtn)}</div><p>③ 포커스는 다음 줄의 찾기로. Enter → 창 → Enter(연결)로 이어 갈 수 있습니다.</p></div>`;
+
+/* ---------- interaction: A (rows) ---------- */
+function wireA(frame) {
+  frame.addEventListener('click', e => {
+    const find = e.target.closest('.ck-row .find');
+    if (find) {
+      const row = find.closest('.ck-row'), w = UNLINKED[+row.dataset.i];
+      frame.querySelector('.dlg-wrap')?.remove();
+      frame.insertAdjacentHTML('beforeend', dialog(w));
+      frame.dataset.row = row.dataset.i;
+      return;
+    }
+    if (e.target.closest('.dlg-cancel') || e.target.closest('.ui-dialog__overlay')) { frame.querySelector('.dlg-wrap')?.remove(); return; }
+    const apply = e.target.closest('.dlg-apply'), skip = e.target.closest('.dlg-skip');
+    const later = e.target.closest('.ck-row .later');
+    if (apply || skip || later) {
+      const row = later ? later.closest('.ck-row') : frame.querySelector(`.ck-row[data-i="${frame.dataset.row}"]`);
+      frame.querySelector('.dlg-wrap')?.remove();
+      if (!row) return;
+      const next = row.nextElementSibling;
+      const leave = () => {
+        row.style.height = row.offsetHeight + 'px'; row.offsetHeight;
+        row.classList.add('is-leaving'); row.style.height = '0px';
+        const count = frame.querySelector('.ck-bar [data-segmented-active] .ui-segmented__count');
+        if (count) count.textContent = Math.max(0, +count.textContent - 1);
+        if (skip || later) {
+          const ex = frame.querySelectorAll('.ck-bar .ui-segmented__count')[2]; if (ex) ex.textContent = +ex.textContent + 1;
+          showToast(frame);
+        }
+        setTimeout(() => { row.remove(); next?.querySelector('.find')?.focus(); placeThumbs(frame); }, 240);
+      };
+      if (apply) { row.classList.add('is-linked'); setTimeout(leave, 600); } else leave();
+    }
+  });
+}
+function showToast(frame) {
+  frame.querySelector('.toast')?.remove();
+  frame.insertAdjacentHTML('beforeend', `<div class="toast">연결 안 함으로 옮겼습니다<button class="ui-button ui-button--ghost ui-button--sm" type="button">${ic('undo', 's')}되돌리기</button></div>`);
+  setTimeout(() => frame.querySelector('.toast')?.remove(), 3200);
+}
+wireA(pcAel);
+pcAel.querySelectorAll('.ck-row.is-hover').forEach(r => r.addEventListener('mouseleave', () => r.classList.remove('is-hover'), { once: true }));
+
+/* ---------- interaction: B (cards, FLIP glide) ---------- */
+function wireB(frame) {
+  frame.querySelector('.float-menu')?.addEventListener('click', () => frame.querySelector('.float-menu').remove());
+  frame.addEventListener('click', e => {
+    const card = e.target.closest('.ccard');
+    if (card && !frame.querySelector('.dlg-wrap')) {
+      frame.insertAdjacentHTML('beforeend', dialog(UNLINKED[+card.dataset.i]));
+      frame.dataset.card = card.dataset.i; return;
+    }
+    if (e.target.closest('.dlg-cancel') || e.target.closest('.ui-dialog__overlay')) { frame.querySelector('.dlg-wrap')?.remove(); return; }
+    const apply = e.target.closest('.dlg-apply'), skip = e.target.closest('.dlg-skip');
+    if (apply || skip) {
+      frame.querySelector('.dlg-wrap')?.remove();
+      const c = frame.querySelector(`.ccard[data-i="${frame.dataset.card}"]`); if (!c) return;
+      const go = () => {
+        c.classList.add('is-leaving');
+        const tot = frame.querySelector('.grid-head .tot'); tot.textContent = Math.max(0, +tot.textContent - 1);
+        setTimeout(() => {
+          const sibs = [...frame.querySelectorAll('.ccard')].filter(x => x !== c);
+          const before = new Map(sibs.map(x => [x, x.getBoundingClientRect()]));
+          c.remove();
+          sibs.forEach(x => { const a = before.get(x), b = x.getBoundingClientRect(); const dx = a.left - b.left, dy = a.top - b.top;
+            if (dx || dy) { x.style.transition = 'none'; x.style.transform = `translate(${dx}px,${dy}px)`; x.offsetWidth; x.style.transition = ''; x.style.transform = ''; } });
+        }, 190);
+      };
+      if (apply) { c.classList.add('is-linked'); setTimeout(go, 600); } else go();
+    }
+  });
+}
+wireB(document.getElementById('pcB'));
+
+requestAnimationFrame(() => placeThumbs());
+/* Screenshot helper: ?only=<frame id> shows just that shot. */
+const only = new URLSearchParams(location.search).get('only');
+if (only) { const keep = document.getElementById(only)?.closest('.shot'); document.querySelectorAll('.doc > *, .variant > *').forEach(el => { if (!el.contains(keep)) el.style.display = 'none'; }); }
+document.fonts?.ready.then(() => placeThumbs());
+</script>
+</body>
+</html>

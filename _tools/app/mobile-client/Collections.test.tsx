@@ -86,6 +86,7 @@ describe('tab return retention',()=>{
     expect(screen.getByText(item.name)).toBeTruthy();
     view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);await act(async()=>{});
     expect(listCalls()).toHaveLength(2);expect(screen.getByText('Second page')).toBeTruthy();
+    // The shortcut uses this loaded page; the full review queue stays closed.
     pressTab('만화');await waitFor(()=>expect(listCalls()).toHaveLength(3));
     expect(listCalls().at(-1)?.[0]).toContain('type=manga');
     expect(listCalls().at(-1)?.[0]).not.toContain('cursor=');
@@ -479,7 +480,7 @@ describe('read-only collections',()=>{
   });
   it('keeps identity and edition order and encodes bounded queries',()=>{
     expect(editions(item.volumes)).toEqual([0,1]);expect(editionVolumes(item.volumes,0).map(v=>v.id)).toEqual(['v1','v2']);expect(item.volumes[0].id).toBe('v2');
-    const path=new URL(collectionPath('manga','a & b',true,'opaque/+'),'https://example.invalid');expect(path.searchParams.get('q')).toBe('a & b');expect(path.searchParams.get('cursor')).toBe('opaque/+');expect(path.searchParams.get('limit')).toBe('16');
+    const path=new URL(collectionPath('manga','a & b',true,'opaque/+'),'https://example.invalid');expect(path.searchParams.get('q')).toBe('a & b');expect(path.searchParams.get('cursor')).toBe('opaque/+');expect(path.searchParams.get('limit')).toBe('16');expect(path.searchParams.get('kakaoReview')).toBe('true');
   });
   it('distinguishes unpublished, published empty, and older server',async()=>{
     mocks.api.mockResolvedValueOnce({...page,ready:false,items:[]});const view=render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('컬렉션이 아직 공유되지 않았습니다');

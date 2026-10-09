@@ -34,6 +34,10 @@ descriptor in every work. The blob joins the artwork confirm/HEAD barrier, and e
 replaces the ``home_publications`` cover refs of owner ``collectionPeople`` with the published
 portraits, so the tablet fetches them through ``POST /v1/home/covers/{sha256}/media-ticket``.
 Absent optional fields are never stored, so older payloads and revisions are unchanged.
+
+Kakao connection review reads opt in with ``?kakaoReview=true`` on collection list
+and detail routes. Authority status advertises ``kakaoReview``; default reads and
+staging verification preserve the legacy payload without this optional block.
 """
 from __future__ import annotations
 
@@ -47,7 +51,7 @@ from typing import Annotated, Literal
 from botocore.exceptions import ClientError
 from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints, ValidationError, field_validator, model_serializer, model_validator
 from starlette.concurrency import run_in_threadpool
 
 import authority
@@ -67,7 +71,7 @@ ImageMime = Literal["image/jpeg", "image/png", "image/webp", "image/gif", "image
 CollectionType = Literal["game", "manga", "movie", "av"]
 COLLECTION_TYPES = ("game", "manga", "movie", "av")
 #: Optional replica fields this server accepts (see the module docstring).
-REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage", "avCreditName")
+REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview")
 #: Allowed item ``status`` values per Collection type (feature ``workRecord``); the same
 #: list validates a mobile ``status`` edit (personal-edit version 3).
 ITEM_STATUSES = personal_edits.ITEM_STATUSES
@@ -344,7 +348,38 @@ class CollectionVolumeRange(StrictModel):
         return self
 
 
+class KakaoReview(CollectionVolumeRange):
+    dismissalSupported: StrictBool = False
+    collectionId: ID
+    query: str = Field(max_length=2000)
+    querySource: Literal["name", "mangadex", "none"]
+    bound: StrictBool
+    volumes: list[Annotated[StrictInt, Field(gt=0)]] = Field(max_length=9999)
+    highestOwnedVolume: Annotated[StrictInt, Field(ge=0)]
+    ownedCount: Annotated[StrictInt, Field(ge=0)]
+    partialDismissed: StrictBool
+    groupFingerprints: list[str] = Field(max_length=10)
+
+
 class Collection(StrictModel):
+    kakaoReview: KakaoReview | None = None
+
+    @model_serializer(mode="wrap")
+    def omit_absent_review(self, handler):
+        payload = handler(self)
+        if payload.get("kakaoReview") is None:
+            payload.pop("kakaoReview", None)
+        return payload
+
+    @field_validator("kakaoReview", mode="before")
+    @classmethod
+    def optional_review(cls, value):
+        if value is None:
+            return None
+        try:
+            return KakaoReview.model_validate(value)
+        except (ValueError, TypeError):
+            return None
     id: ID
     name: str = Field(min_length=1, max_length=2000)
     type: CollectionType
@@ -426,9 +461,9 @@ def encode(value) -> str:
 def stored(item: Collection) -> dict:
     """Omit absent optional blocks and fields to preserve older replica payloads."""
     payload = item.model_dump()
-    for key in ("releaseWatch", "ownedVolumes", "releaseSchedule", "av", "status", "ownedPlatform"):
-        if payload[key] is None:
-            del payload[key]
+    for key in ("releaseWatch", "ownedVolumes", "releaseSchedule", "av", "status", "ownedPlatform", "kakaoReview"):
+        if payload.get(key) is None:
+            payload.pop(key, None)
     for volume in payload["volumes"]:
         if volume["coverFocusX"] is None:
             del volume["coverFocusX"]
@@ -442,8 +477,10 @@ def stored(item: Collection) -> dict:
     return payload
 
 
-def public_item(item: dict, detail: bool = False) -> dict:
+def public_item(item: dict, detail: bool = False, *, include_review=False) -> dict:
     result = {key: value for key, value in item.items() if key not in ("volumes", "artworks", "series", "film")}
+    if not include_review or result.get("kakaoReview") is None:
+        result.pop("kakaoReview", None)
     visible = None if detail else {item.get("selectedWorkArtworkId"), item.get("selectedHeroArtworkId"), item.get("selectedBackdropArtworkId")}
     # List shelves draw a spine: the selected spine artwork, else the first one.
     spines = [art for art in item["artworks"] if art["kind"] == "spine"]
@@ -566,9 +603,9 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             return active["revision"], active["publishedAt"]
         return legacy_state(db)
 
-    def finalize(db, active, payload):
+    def finalize(db, active, payload, *, include_review=False):
         if active is not None:
-            collection_authority.finalize_item(db, active["libraryId"], payload)
+            collection_authority.finalize_item(db, active["libraryId"], payload, include_review=include_review)
         return payload
 
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
@@ -779,8 +816,9 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                          direction: Literal["asc", "desc"] = "asc",
                          rating: str = Query(default="all", pattern=r"^(all|unrated|[0-4](?:\.0|\.5)?|5(?:\.0)?)$"),
                          limit: int = Query(default=48, ge=1, le=48), cursor: str | None = Query(default=None, max_length=3000),
+                         kakaoReview: bool = False,
                          authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         with get_db() as db:
             # A consistent read transaction binds metadata rows to this revision.
             db.execute("BEGIN")
@@ -792,6 +830,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             rating_value = float(rating) if rating not in ("all", "unrated") else rating
             scope = [revision, type, q, showcase, None if showcase else sort,
                      None if showcase else direction, "all" if showcase else rating_value]
+            if kakaoReview:
+                scope.append("kakaoReview")
             if cursor:
                 try:
                     decoded = json.loads(base64.urlsafe_b64decode(cursor.encode()))
@@ -832,14 +872,14 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             rows = db.execute(f"SELECT payload FROM {source}" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
             payloads = [json.loads(row["payload"]) for row in rows[:limit]]
             if active is not None:
-                collection_authority.finalize_items(db, active["libraryId"], payloads)
+                collection_authority.finalize_items(db, active["libraryId"], payloads, include_review=kakaoReview)
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
         return {"ready": revision is not None, "revision": revision, "publishedAt": published, "filterVersion": 1, "totalCount": total,
-                "items": [public_item(payload) for payload in payloads], "nextCursor": next_cursor}
+                "items": [public_item(payload, include_review=kakaoReview) for payload in payloads], "nextCursor": next_cursor}
 
     @app.get("/v1/collections/status")
     def publication_status(authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         with get_db() as db:
             db.execute("BEGIN")
             active = served(db)
@@ -863,21 +903,21 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         return payload
 
     @app.get("/v1/collections/{collection_id}")
-    def get_collection(collection_id: ID, authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+    def get_collection(collection_id: ID, authorization: str | None = Header(default=None), kakaoReview: bool = False):
+        reader(authorization)
         with get_db() as db:
             db.execute("BEGIN")
             active = served(db)
             revision, _ = state(db, active)
             row = db.execute(f"SELECT payload FROM {read_table(active)} WHERE id=?", (collection_id,)).fetchone()
-            payload = None if row is None else finalize(db, active, json.loads(row["payload"]))
+            payload = None if row is None else finalize(db, active, json.loads(row["payload"]), include_review=kakaoReview)
             # The work's authority revision: what a client's deleteWork expects (CAS on what it showed).
             entity = None if payload is None or active is None else db.execute(
                 "SELECT entity_revision FROM collection_authority_works WHERE library_id=? AND work_id=?",
                 (active["libraryId"], collection_id)).fetchone()
         if payload is None:
             raise HTTPException(404, "Collection is not published")
-        reply = {"revision": revision, "item": public_item(payload, True)}
+        reply = {"revision": revision, "item": public_item(payload, True, include_review=kakaoReview)}
         if entity is not None:
             reply["entityRevision"] = entity[0]
         return reply

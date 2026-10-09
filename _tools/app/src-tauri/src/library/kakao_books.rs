@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use url::Url;
 
 use super::{
-    aladin::{parse_volume_product, AladinItem},
+    aladin::{classify_product, normalize_search_query, AladinItem, SearchOutcome},
     error::LibraryError,
 };
 
@@ -19,6 +19,7 @@ const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SEARCH_PAGES: u32 = 50;
 const PAGE_SIZE: usize = 50;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const SEARCH_BUDGET: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 enum TransportError {
@@ -50,7 +51,7 @@ struct BookDocument {
 }
 
 /// The REST key is sent only to Kakao in a header, never in a URL or diagnostic.
-pub(crate) fn search(api_key: &str, query: &str) -> Result<Vec<AladinItem>, LibraryError> {
+pub(crate) fn search(api_key: &str, query: &str) -> Result<SearchOutcome, LibraryError> {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     let agent = AGENT.get_or_init(|| {
         ureq::Agent::config_builder()
@@ -61,11 +62,14 @@ pub(crate) fn search(api_key: &str, query: &str) -> Result<Vec<AladinItem>, Libr
             .build()
             .into()
     });
-    search_with(api_key, query, |url, authorization| {
+    search_with_clock(api_key, query, |url, authorization, timeout| {
         let _request = super::provider_requests::Request::start("kakao");
         let mut response = agent
             .get(url.as_str())
             .header("Authorization", authorization)
+            .config()
+            .timeout_global(Some(timeout))
+            .build()
             .call()
             .map_err(|error| {
                 super::provider_requests::record_failure(
@@ -109,14 +113,24 @@ pub(crate) fn search(api_key: &str, query: &str) -> Result<Vec<AladinItem>, Libr
             return Err(TransportError::InvalidResponse);
         }
         String::from_utf8(bytes).map_err(|_| TransportError::InvalidResponse)
-    })
+    }, Instant::now)
 }
 
+#[cfg(test)]
 fn search_with(
     api_key: &str,
     query: &str,
     mut fetch: impl FnMut(&Url, &str) -> Result<String, TransportError>,
-) -> Result<Vec<AladinItem>, LibraryError> {
+) -> Result<SearchOutcome, LibraryError> {
+    search_with_clock(api_key, query, |url, authorization, _| fetch(url, authorization), Instant::now)
+}
+
+fn search_with_clock(
+    api_key: &str,
+    query: &str,
+    mut fetch: impl FnMut(&Url, &str, Duration) -> Result<String, TransportError>,
+    mut now: impl FnMut() -> Instant,
+) -> Result<SearchOutcome, LibraryError> {
     let api_key = api_key.trim();
     if api_key.is_empty() || !api_key.bytes().all(|byte| byte.is_ascii_graphic()) {
         return Err(LibraryError::InvalidAladinCredential);
@@ -126,11 +140,30 @@ fn search_with(
         return Err(LibraryError::InvalidAladinQuery);
     }
     let authorization = format!("KakaoAK {api_key}");
+    let deadline = now() + SEARCH_BUDGET;
+    let mut outcome = search_query_pages(&authorization, query, deadline, &mut fetch, &mut now)?;
+    // Titles with `~ ~`, `&`, quotes or commas often find nothing as typed (the same retry
+    // as the Aladin search): once more with the punctuation turned into spaces.
+    let normalized = normalize_search_query(query);
+    if outcome.items.is_empty() && normalized != query && normalized.chars().count() >= 2 {
+        outcome = search_query_pages(&authorization, &normalized, deadline, &mut fetch, &mut now)?;
+    }
+    Ok(outcome)
+}
+
+fn search_query_pages(
+    authorization: &str,
+    query: &str,
+    deadline: Instant,
+    fetch: &mut impl FnMut(&Url, &str, Duration) -> Result<String, TransportError>,
+    now: &mut impl FnMut() -> Instant,
+) -> Result<SearchOutcome, LibraryError> {
     let mut items = Vec::new();
+    let mut unparsed_count = 0;
     let mut seen = HashSet::new();
-    let started = Instant::now();
     for page in 1..=MAX_SEARCH_PAGES {
-        if started.elapsed() >= Duration::from_secs(60) {
+        let remaining = deadline.saturating_duration_since(now());
+        if remaining.is_zero() {
             return Err(LibraryError::AladinTimedOut);
         }
         let mut url = Url::parse(SEARCH_URL).expect("static Kakao endpoint");
@@ -140,7 +173,11 @@ fn search_with(
             .append_pair("sort", "latest")
             .append_pair("size", &PAGE_SIZE.to_string())
             .append_pair("page", &page.to_string());
-        let json = fetch(&url, &authorization).map_err(map_transport_error)?;
+        let json = fetch(&url, authorization, REQUEST_TIMEOUT.min(remaining))
+            .map_err(map_transport_error)?;
+        if now() >= deadline {
+            return Err(LibraryError::AladinTimedOut);
+        }
         if json.len() > MAX_JSON_BYTES {
             return Err(LibraryError::InvalidAladinResponse);
         }
@@ -152,14 +189,20 @@ fn search_with(
             return Err(LibraryError::InvalidAladinResponse);
         }
         for raw in response.documents {
-            if let Some(item) = parse_document(raw)? {
-                if seen.insert(item.item_id.clone()) {
-                    items.push(item);
+            match parse_document(raw)? {
+                Some(item) => {
+                    if seen.insert(item.item_id.clone()) {
+                        items.push(item);
+                    }
                 }
+                None => unparsed_count += 1,
             }
         }
         if response.meta.is_end {
-            return Ok(items);
+            return Ok(SearchOutcome {
+                items,
+                unparsed_count,
+            });
         }
     }
     // Never apply an incomplete search as if it were the complete release list.
@@ -169,7 +212,7 @@ fn search_with(
 fn parse_document(raw: serde_json::Value) -> Result<Option<AladinItem>, LibraryError> {
     let book: BookDocument =
         serde_json::from_value(raw.clone()).map_err(|_| LibraryError::InvalidAladinResponse)?;
-    let Some(volume) = parse_volume_product(&book.title) else {
+    let Some((volume_number, base_title)) = classify_product(&book.title).into_volume() else {
         return Ok(None);
     };
     let isbn13 = book
@@ -216,8 +259,8 @@ fn parse_document(raw: serde_json::Value) -> Result<Option<AladinItem>, LibraryE
         isbn13: isbn13.map(str::to_owned),
         publication_date,
         item_url,
-        volume_number: volume.volume_number,
-        base_title: volume.base_title,
+        volume_number,
+        base_title,
         snapshot_json: serde_json::to_string(&raw)
             .map_err(|_| LibraryError::InvalidAladinResponse)?,
     }))
@@ -272,6 +315,37 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn retry_and_pages_share_deadline_and_bound_requests_by_remaining_budget() {
+        use std::cell::Cell;
+        let start = Instant::now();
+        let elapsed = Cell::new(Duration::ZERO);
+        let mut timeouts = Vec::new();
+        let result = search_with_clock("key", "Series!", |url, _, timeout| {
+            timeouts.push(timeout);
+            let query = url.query_pairs().find(|(key, _)| key == "query").unwrap().1.into_owned();
+            if query == "Series!" {
+                elapsed.set(Duration::from_secs(55));
+                Ok(json!({"meta": {"is_end": true}, "documents": []}).to_string())
+            } else {
+                elapsed.set(Duration::from_secs(60));
+                Ok(json!({"meta": {"is_end": true}, "documents": [book(1)]}).to_string())
+            }
+        }, || start + elapsed.get());
+        assert!(matches!(result, Err(LibraryError::AladinTimedOut)));
+        assert_eq!(timeouts, [REQUEST_TIMEOUT, Duration::from_secs(5)]);
+
+        elapsed.set(Duration::ZERO);
+        let mut calls = 0;
+        let result = search_with_clock("key", "Series!", |_, _, _| {
+            calls += 1;
+            elapsed.set(SEARCH_BUDGET);
+            Ok(json!({"meta": {"is_end": true}, "documents": []}).to_string())
+        }, || start + elapsed.get());
+        assert!(matches!(result, Err(LibraryError::AladinTimedOut)));
+        assert_eq!(calls, 1);
+    }
+
     fn book(volume: usize) -> serde_json::Value {
         json!({"title": format!("스틸 볼 런 {volume}"), "authors": ["아라키 히로히코"],
             "publisher": "문학동네", "isbn": "", "datetime": "2026-09-01T00:00:00.000+09:00",
@@ -297,7 +371,8 @@ mod tests {
             };
             Ok(json!({"meta":{"is_end":calls == 2},"documents":documents}).to_string())
         })
-        .unwrap();
+        .unwrap()
+        .items;
         assert_eq!(calls, 2);
         assert_eq!(items.len(), 54);
         assert!(items[0].snapshot_json.contains("thumbnail"));
@@ -394,5 +469,87 @@ mod tests {
                 Err(LibraryError::InvalidAladinCredential)
             ));
         }
+    }
+
+    fn book_titled(title: &str) -> serde_json::Value {
+        let mut raw = book(1);
+        raw["title"] = json!(title);
+        raw["url"] = json!(format!(
+            "https://search.daum.net/search?w=bookpage&bookId={}",
+            title.len()
+        ));
+        raw
+    }
+
+    #[test]
+    fn retries_once_without_punctuation_when_nothing_usable_is_found() {
+        let queries = std::cell::RefCell::new(Vec::new());
+        let outcome = search_with("key", "공주님, '고문'의 시간입니다 ~완결~", |url, _| {
+            let query = url
+                .query_pairs()
+                .find(|(name, _)| name == "query")
+                .unwrap()
+                .1
+                .into_owned();
+            queries.borrow_mut().push(query.clone());
+            let documents = if query == "공주님 고문 의 시간입니다 완결" {
+                vec![
+                    book_titled("공주님 '고문'의 시간입니다 1"),
+                    book_titled("공주님 '고문'의 시간입니다 박스 세트"),
+                ]
+            } else {
+                // Only a set came back for the exact text: nothing usable.
+                vec![book_titled("공주님 '고문'의 시간입니다 박스 세트")]
+            };
+            Ok(json!({"meta":{"is_end":true},"documents":documents}).to_string())
+        })
+        .unwrap();
+        assert_eq!(
+            queries.into_inner(),
+            [
+                "공주님, '고문'의 시간입니다 ~완결~",
+                "공주님 고문 의 시간입니다 완결"
+            ]
+        );
+        assert_eq!((outcome.items.len(), outcome.unparsed_count), (1, 1));
+
+        // A query with nothing to strip, or a first search that found something, is not repeated.
+        let mut calls = 0;
+        search_with("key", "던전밥", |_, _| {
+            calls += 1;
+            Ok(json!({"meta":{"is_end":true},"documents":[]}).to_string())
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        let mut calls = 0;
+        search_with("key", "던전밥, 1", |_, _| {
+            calls += 1;
+            Ok(json!({"meta":{"is_end":true},"documents":[book(1)]}).to_string())
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn keeps_unnumbered_products_and_drops_non_volumes() {
+        let items = [
+            "마법소녀를 (애장판)",
+            "마법소녀를 2 (애장판)",
+            "마법소녀를 공식 가이드북",
+            "마법소녀를 (상)",
+        ]
+        .map(|title| parse_document(book_titled(title)).unwrap());
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.as_ref().map(|i| (i.volume_number, i.base_title.as_str())))
+                .collect::<Vec<_>>(),
+            [
+                Some((crate::library::aladin::UNNUMBERED_VOLUME, "마법소녀를")),
+                Some((2, "마법소녀를")),
+                None,
+                None
+            ]
+        );
     }
 }
