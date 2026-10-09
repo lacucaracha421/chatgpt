@@ -31,6 +31,59 @@ function mount() {
   return {...view,list,zone};
 }
 describe('AssetGallery PC scrubber', () => {
+  it('sizes the thumb from the real scroll height when a filter narrows a 30-item scope', () => {
+    const {container, rerender}=render(<AssetGallery layout="masonry" groupDates={false} scopeKey="all" items={items.slice(0,30)} totalCount={30} />);
+    const list=container.querySelector('.asset-gallery__scroll') as HTMLElement;
+    const thumb=()=>document.querySelector('.pc-scrubber-thumb') as HTMLElement;
+    const expectedHeight=()=>384 * list.clientHeight / list.scrollHeight;
+    const fullHeight=list.scrollHeight;
+    expect(Number.parseFloat(thumb().style.height)).toBeCloseTo(expectedHeight());
+    const oldThumbHeight=Number.parseFloat(thumb().style.height);
+
+    rerender(<AssetGallery layout="masonry" groupDates={false} scopeKey="images" items={items.slice(0,18)} totalCount={18} />);
+    expect(list.scrollHeight).toBeLessThan(fullHeight);
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(Number.parseFloat(thumb().style.height)).toBeCloseTo(expectedHeight());
+    expect(Number.parseFloat(thumb().style.height)).toBeGreaterThan(oldThumbHeight);
+  });
+
+  it('keeps the reserved range and thumb size stable when another page arrives', () => {
+    const {container, rerender}=render(<AssetGallery layout="masonry" groupDates={false} scopeKey="paged" items={items.slice(0,12)} totalCount={30} hasNextPage />);
+    const space=container.querySelector('.asset-gallery__virtual-space') as HTMLElement;
+    fireEvent.scroll(container.querySelector('.asset-gallery__scroll')!);
+    const height=space.style.height;
+    const thumb=()=>document.querySelector('.pc-scrubber-thumb') as HTMLElement;
+    expect(Number.parseFloat(thumb().style.height)).toBeCloseTo(384 * 400 / Number.parseFloat(height));
+    const thumbHeight=thumb().style.height;
+    rerender(<AssetGallery layout="masonry" groupDates={false} scopeKey="paged" items={items.slice(0,18)} totalCount={30} hasNextPage />);
+    expect(space.style.height).toBe(height);
+    expect(thumb().style.height).toBe(thumbHeight);
+  });
+
+  it('grabs a large thumb without jumping and drags it through its available travel', () => {
+    const {container}=render(<AssetGallery layout="masonry" groupDates={false} items={items.slice(0,18)} totalCount={18} />);
+    const list=container.querySelector('.asset-gallery__scroll') as HTMLElement;
+    const thumb=document.querySelector('.pc-scrubber-thumb') as HTMLElement;
+    const zone=document.querySelector('.pc-scrubber-zone')!;
+    const travel=384 - Number.parseFloat(thumb.style.height);
+    expect(travel).toBeGreaterThan(0);
+    expect(travel).toBeLessThan(100);
+    fireEvent.pointerDown(thumb,{pointerType:'mouse',button:0,buttons:1,pointerId:7,clientY:38});
+    expect(list.scrollTop).toBe(0);
+    fireEvent.pointerMove(zone,{pointerType:'mouse',buttons:1,pointerId:7,clientY:38 + travel});
+    expect(list.scrollTop).toBeCloseTo(list.scrollHeight - list.clientHeight);
+    expect(Number.parseFloat(thumb.style.top)).toBeCloseTo(travel);
+    fireEvent.pointerUp(zone,{pointerType:'mouse',pointerId:7,clientY:38 + travel});
+  });
+
+  it('keeps a usable minimum on a long range and hides when the scope fits', () => {
+    const {container, rerender}=render(<AssetGallery layout="masonry" items={items} totalCount={10000} hasNextPage />);
+    fireEvent.scroll(container.querySelector('.asset-gallery__scroll')!);
+    expect((document.querySelector('.pc-scrubber-thumb') as HTMLElement).style.height).toBe('32px');
+    rerender(<AssetGallery layout="masonry" groupDates={false} scopeKey="short" items={items.slice(0,6)} totalCount={6} />);
+    expect(document.querySelector('.pc-scrubber-thumb')).toBeNull();
+  });
+
   it('hides the native scrollbar without changing content layout, and grows near the pointer', () => {
     const {list, zone}=mount();
     expect(list).toHaveClass('scrubber-scroll-host'); expect(list).toHaveAttribute('tabindex','0');

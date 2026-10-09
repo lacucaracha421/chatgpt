@@ -10,7 +10,7 @@ const RELEASE_MS = 300;
 const SUMMON_MS = 2600;
 const FADE_MS = 220;
 
-type Metrics = {long: boolean; progress: number; top: number; bottom: number; right: number; height: number};
+type Metrics = {long: boolean; progress: number; viewportRatio: number; top: number; bottom: number; right: number; height: number};
 
 export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, onEndReached, onSeek, indexAtScroll, input = 'touch'}: {scrollRef: RefObject<HTMLElement | null>; total: number; /** The whole list's size when only part of it is loaded; only the label uses it. */ displayTotal?: number | null; sort: ScrubberSort; hidden?: boolean; onEndReached?(): void; onSeek?(index:number):void; indexAtScroll?():number; input?: 'touch' | 'pointer'}) {
   const desktop = input === 'pointer';
@@ -18,7 +18,7 @@ export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, 
   const hoveredRef = useRef(false);
   const sortValues = sort.kind === 'toc' ? sort.buckets : sort.kind === 'fallback' ? undefined : sort.values;
   const model = useMemo(() => buildScrubberModel(sort, total), [sort.kind, sortValues, total]);
-  const [metrics, setMetrics] = useState<Metrics>({long: false, progress: 0, top: 0, bottom: 0, right: 0, height: 0});
+  const [metrics, setMetrics] = useState<Metrics>({long: false, progress: 0, viewportRatio: 1, top: 0, bottom: 0, right: 0, height: 0});
   const [hint, setHint] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'active' | 'released'>('idle');
   const [fading, setFading] = useState(false);
@@ -27,6 +27,10 @@ export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, 
   positionRef.current = position;
   const start = useRef<{x: number; y: number; pointerId: number} | null>(null);
   const scrubbing = useRef(false);
+  const thumbGrabOffset = useRef<number | null>(null);
+  const desktopTrackHeight = Math.max(0, metrics.height - 16);
+  // Use the host's reserved scroll height, so paging keeps the thumb stable too.
+  const desktopThumbHeight = Math.min(desktopTrackHeight, Math.max(32, desktopTrackHeight * metrics.viewportRatio));
   const lastMajor = useRef<number | null>(null);
   const hintTimer = useRef<number | undefined>(undefined);
   const releaseTimer = useRef<number | undefined>(undefined);
@@ -47,6 +51,7 @@ export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, 
     const fallbackLong = client <= 0 && total >= 24;
     setMetrics({
       long: hidden ? false : client > 0 ? scrollHeight > client * (desktop ? 1 : 1.5) : fallbackLong,
+      viewportRatio: scrollHeight > 0 ? Math.min(1, client / scrollHeight) : 1,
       progress: indexAtScroll ? scrubberRatioAt(indexAtScroll(),total) : range > 0 ? Math.max(0, Math.min(1, element.scrollTop / range)) : scrubberRatioAt(positionRef.current.index, total),
       top: rect.top,
       right: window.innerWidth - rect.right,
@@ -126,8 +131,8 @@ export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, 
 
   const updateFromPoint = (coordinate: number) => {
     const rect = trackRef.current?.getBoundingClientRect();
-    const trackStart = desktop ? (rect?.top ?? metrics.top + 8) + 16 : rect?.left ?? 20;
-    const trackLength = desktop ? Math.max(1, (rect?.height || metrics.height - 16) - 32) : rect?.width || Math.max(1, window.innerWidth - 40);
+    const trackStart = desktop ? (rect?.top ?? metrics.top + 8) + (thumbGrabOffset.current ?? desktopThumbHeight / 2) : rect?.left ?? 20;
+    const trackLength = desktop ? Math.max(1, (rect?.height || desktopTrackHeight) - desktopThumbHeight) : rect?.width || Math.max(1, window.innerWidth - 40);
     const ratio = Math.max(0, Math.min(1, (coordinate - trackStart) / trackLength));
     const index = scrubberIndexAt(ratio, total);
     const element = scrollRef.current;
@@ -155,7 +160,15 @@ export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, 
       event.preventDefault(); event.stopPropagation();
       scrubbing.current = true; setPhase('active'); setHint(false);
       event.currentTarget.setPointerCapture?.(event.pointerId);
-      updateFromPoint(event.clientY);
+      if ((event.target as HTMLElement).closest('.pc-scrubber-thumb')) {
+        const top = trackRef.current?.getBoundingClientRect().top ?? metrics.top + 8;
+        const ratio = phase === 'idle' ? metrics.progress : position.ratio;
+        thumbGrabOffset.current = event.clientY - top - (desktopTrackHeight - desktopThumbHeight) * ratio;
+        setPosition({ratio, index: scrubberIndexAt(ratio, total)});
+      } else {
+        thumbGrabOffset.current = null;
+        updateFromPoint(event.clientY);
+      }
     }
   };
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -246,8 +259,9 @@ export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, 
   const scrubberStyle = {'--scrubber-progress': String(ratio)} as CSSProperties;
   if (desktop) {
     if (!visible) return null;
-    const height = Math.max(0, metrics.height - 16);
-    const thumbY = 16 + Math.max(0, height - 32) * ratio;
+    const height = desktopTrackHeight;
+    const thumbTop = (height - desktopThumbHeight) * ratio;
+    const thumbY = desktopThumbHeight / 2 + thumbTop;
     return createPortal(<div className={`pc-scrubber${hint || shown || hovered ? ' is-visible' : ''}${hovered || shown ? ' is-grown' : ''}${fading && !hovered ? ' is-fading' : ''}`}
       data-state={phase} style={{...scrubberStyle, top: metrics.top + 8, right: metrics.right, height}}>
       <div className="pc-scrubber-zone" ref={trackRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove}
@@ -259,7 +273,7 @@ export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, 
           element.scrollTop += event.deltaY * scale; element.scrollLeft += event.deltaX * scale;
           measure(); setHint(true); cancelRelease(); scheduleHide(HINT_MS);
         }} aria-hidden="true">
-        <div className="pc-scrubber-thumb" />
+        <div className="pc-scrubber-thumb" style={{height: desktopThumbHeight, top: thumbTop}} />
       </div>
       {shown && <div className="pc-scrubber-bubble" style={{top: clampScrubberTag(thumbY, height, 48)}} aria-hidden="true">
         {label && <b>{label}</b>}<small>{(position.index + 1).toLocaleString()} / {Math.max(total, displayTotal ?? 0).toLocaleString()}</small>
