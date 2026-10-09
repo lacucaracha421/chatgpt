@@ -13,6 +13,7 @@ source/document consistency, not new native acceptance or production verificatio
 - [Desktop setup and behavior](../_tools/app/README.md): Windows and Linux Tauri application.
 - [Linux platform setup and acceptance limits](operations/linux-desktop.md).
 - [Windows development PC: paths, shells, WSL server tests and Android builds](operations/windows-desktop.md).
+- [Handoff of 2026-10-08/09 Linux laptop work to the Windows PC (Korean)](operations/handoff-2026-10-09-linux-laptop.md).
 - [Android build, current source version and acceptance](../android/README.md).
 - [Browser collector (active, `extension-list/`)](../extension-list/README.md). The legacy `extension/` collector was removed on 2026-09-26 (see Git history); [edge-extension.md](edge-extension.md) remains as its historical operation guide.
 
