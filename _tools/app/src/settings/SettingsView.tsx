@@ -83,7 +83,7 @@ const SHORTCUTS = [
   ["Enter", "선택·적용"], ["Shift + 클릭", "반대 선택"], ["← / →", "이전·다음"],
 ] as const;
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, onPrivateVaultChanged, initialSection, sectionRequest, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, onPrivateVaultChanged, initialSection, sectionRequest, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
   const {nsfwFilter,setNsfwFilter} = usePrivacy();
   const [caseSounds, setCaseSounds] = useCaseSounds();
   const workspace = useWorkspaceChrome();
@@ -174,8 +174,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [catalogRestoreBusy, setCatalogRestoreBusy] = useState(false);
   const [catalogRestoreMessage, setCatalogRestoreMessage] = useState<string | null>(null);
   const [catalogCheckpointConfirming, setCatalogCheckpointConfirming] = useState(false);
-  const [bookImportRunning, setBookImportRunning] = useState(false);
-  const [bookImportMessage, setBookImportMessage] = useState<string | null>(null);
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const cloud = useCloudSyncStatus(gateway, library?.root ?? "");
   const { health: authorityHealth } = useAuthoritySyncHealth(gateway, library?.root ?? "");
@@ -185,9 +183,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   useAutoDismiss(notice, setNotice);
   useAutoDismiss(cloudMessage, setCloudMessage);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
-  useAutoDismiss(bookImportMessage, setBookImportMessage);
 
-  const pending = restoring || submitting || switchingLibrary || cloudBusy || catalogBusy || catalogCacheBusy || catalogRestoreBusy || bookImportRunning || kakaoBusy || igdbBusy || tmdbBusy || stashdbBusy;
+  const pending = restoring || submitting || switchingLibrary || cloudBusy || catalogBusy || catalogCacheBusy || catalogRestoreBusy || kakaoBusy || igdbBusy || tmdbBusy || stashdbBusy;
   const loadCloud = section === "frequent" || section === "connection" || section === "advanced";
   const loadCatalog = section === "frequent" || section === "catalog" || section === "advanced";
 
@@ -287,18 +284,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }).catch(cause => { if (active) setMangaRootError(commandErrorMessage(cause, "망가 폴더를 확인하지 못했습니다.")); });
     return () => { active = false; };
   }, [gateway, section]);
-
-  async function chooseBookImportFolder() {
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected !== "string" || bookImportRunning) return;
-    setBookImportRunning(true); setBookImportMessage(null);
-    try {
-      const report = await gateway.importBookCollections(selected);
-      setBookImportMessage(`컬렉션 가져오기 완료: 스캔 ${report.scanned}개, 생성 ${report.created}개, 건너뜀 ${report.skipped}개${report.errors.length ? `, 오류 ${report.errors.length}개` : ""}`);
-      if (report.created > 0) onCollectionsChanged?.();
-    } catch (cause) { setBookImportMessage(commandErrorMessage(cause, "컬렉션을 가져오지 못했습니다.")); }
-    finally { setBookImportRunning(false); }
-  }
 
   async function chooseImportFolder() {
     const selected = await open({ directory: true, multiple: false, defaultPath: lastImportFolder ?? undefined });
@@ -632,7 +617,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <MobileCatalogPublishSettings />
           </SettingsGroup>
           <SettingsGroup title="가져오기">
-            <SimpleRow name="컬렉션 가져오기 · book 폴더" status={bookImportMessage ?? undefined} control={<Button size="sm" variant="secondary" disabled={bookImportRunning} onClick={() => void chooseBookImportFolder()}><BusyLabel busy={!!(bookImportRunning)} idle={"폴더 선택"}>가져오는 중…</BusyLabel></Button>} />
             <SimpleRow name="메타데이터 가져오기" status={lastImportFolder ?? "설정 안 됨"} control={<span className="settings-view__control-pair">{lastImportFolder && <Button size="sm" variant="quiet" disabled={metadataImportRunning || !onImportFolder} onClick={() => void onImportFolder?.(lastImportFolder)}>최근 폴더 다시 가져오기</Button>}<Button size="sm" variant="secondary" disabled={metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>다른 폴더 선택</Button></span>} />
           </SettingsGroup>
           <SettingsGroup title="카탈로그 복구">

@@ -312,7 +312,7 @@ Status: `IDEA` — user 2026-10-08 selected as a promising **new top-level infor
 
 ## AV-AUTHORITY-001 — AV editing and StashDB under the Collections authority
 
-Status: `IN PROGRESS` — user 2026-10-07: AV first, then book import. The 1B plan (§4) fenced AV detail/people/portrait editing and StashDB refresh; the server stores `details.av`, `av_credits` and `collection_authority_people` but has no command to change them and no StashDB code. Order chosen by the user, PC first and the tablet in the same round:
+Status: `IN PROGRESS` — user 2026-10-07: AV first, then book import. Book import (Settings "컬렉션 가져오기 · book 폴더", `book_migration.rs`) is retired instead (user 2026-10-09: no longer used); its Settings row was removed, the backend command stays fenced. The 1B plan (§4) fenced AV detail/people/portrait editing and StashDB refresh; the server stores `details.av`, `av_credits` and `collection_authority_people` but has no command to change them and no StashDB code. Order chosen by the user, PC first and the tablet in the same round:
 1. Front/spine/back artwork through `addArtwork`/`selectArtwork` (no server change).
 2. `setAvDetails` + `setAvCredits` commands (field CAS; `creditName` kept; PC limits aligned to the server's), PC + tablet editing.
 3. People: memo, favourite, portrait commands plus a people section in the feed. User approved (2026-10-07) a one-time upload of the PC's current people rows to the server at the start of this step (server DB backup first; never overwrite server-only values with PC nulls or vice versa).
