@@ -1,0 +1,157 @@
+# Server-owned tablet Kakao binding requests (SERVER-INDEP-001)
+
+Status: audited proposal, 2026-10-09; design only. Product questions in §7 remain undecided.
+Audit: `V:\chatgpt`, `main` at `d7d16d48`, including the observed working tree; no provider, network or production access.
+Only this document is changed. Wishlist worker files and `server-wishlist-20261009.md` are outside the write scope.
+References below are repository-relative `file:line` locations at audit time; concurrent server edits can move them.
+The existing release-check design is historical context; current source, including slice-2 recovery, takes precedence.
+
+## 1. What happens today
+
+### Tablet: search, select, enqueue, wait
+
+- A manga detail renders `CollectionBindings`; its large 작품 연결 panel or folded 연결 row opens the Kakao search sheet, with 연결 / 다시 연결 actions. Sources: `_tools/app/mobile-client/Collections.tsx:713`, `_tools/app/mobile-client/CollectionBindings.tsx:91`, `:94`, `:119`.
+- The 만화 section's 연결 점검 shortcut opens `KakaoReviewOverlay`; it uses the same `BindSearchSheet` for 찾기 / 다시 연결, independently of shelf pagination and filters. Sources: `_tools/app/mobile-client/Collections.tsx:627`, `:775`; `_tools/app/mobile-client/KakaoReviewOverlay.tsx:24`, `:158`, `:168`.
+- The sheet searches immediately, can edit the query, ranks/preselects known fingerprints or a unique exact title in review mode, and selects up to ten groups. Ordinary detail selection opens confirmation; review mode submits the selection directly. Sources: `_tools/app/mobile-client/CollectionBindings.tsx:169`, `:193`, `:210`, `:226`, `:229`; `_tools/app/mobile-client/collectionBindingsModel.ts:40`.
+- Client routes are `GET /v1/collections/bindings/status`, `GET .../search/kakao?query=`, `POST .../requests`, and `GET .../requests?collectionId=&state=all&limit=20`. Sources: `_tools/app/mobile-client/collectionBindingsModel.ts:16`, `:144`; server registration: `server/lakomics-api/collection_bindings.py:1159`, `:1172`, `:1244`, `:1254`.
+- Search already runs on the server using its Kakao REST key. It parses titles/ISBN/date/URL/raw documents, groups products, crawls pages within one deadline, and retries a punctuation-normalized query only when no products were parsed. Sources: `server/lakomics-api/collection_bindings.py:260`, `:596`, `:744`, `:810`, `:860`.
+- The submitted version-1 request contains a UUID operation ID, work ID, provider, query and selected anchors/fingerprints; titles, thumbnails and range/count fields are display hints. An unbound work sends `expected.externalId=null`; reconnect sends no expectation. Sources: `_tools/app/mobile-client/collectionBindingsModel.ts:129`; `server/lakomics-api/collection_bindings.py:976`, `:985`, `:995`.
+- This is a stored bind intent, **not** the tablet's durable Collections command outbox. The sheet reuses its operation ID after an unknown outcome but sends directly through `fileBindRequest`; authority review settings use `authority.enqueue` instead. Sources: `_tools/app/mobile-client/CollectionBindings.tsx:241`; `_tools/app/mobile-client/collectionBindingsModel.ts:144`; `_tools/app/mobile-client/KakaoReviewOverlay.tsx:120`.
+- Server submission validates the shape and manga target, replays the same ID/payload, rejects ID reuse with `operationConflict`, supersedes older pending requests for that work/provider, and stores `pending`; it does not apply the binding. Sources: `server/lakomics-api/collection_bindings.py:1179`, `:1204`, `:1213`, `:1222`, `:1234`.
+- While waiting, detail says 연결 대기 · PC가 켜지면 적용. Review removes the row from the main segments and lists it under PC 적용 대기. Request signals trigger rereads, with periodic fallback. Sources: `_tools/app/mobile-client/CollectionBindings.tsx:26`, `:30`, `:71`, `:129`; `_tools/app/mobile-client/KakaoReviewOverlay.tsx:33`, `:98`, `:166`, `:170`.
+
+### PC request consumer: intended legacy flow versus the active authority fence
+
+- The PC publication lane reads publisher-only `GET .../bindings/log?after=&limit=` and reports through `POST .../requests/{id}/result`. Only pending rows are applied; cursor/epoch recovery and bounded transient retries exist. Sources: `_tools/app/src-tauri/src/cloud/auto_publication.rs:248`; `_tools/app/src-tauri/src/library/collection_binding_sync.rs:449`, `:554`, `:608`, `:653`; `server/lakomics-api/collection_bindings.py:1294`, `:1361`.
+- **Important current defect:** `decide_binding_request` first calls `fence_collection_operation`. Once this PC has adopted Collections authority, that helper returns `CollectionAuthorityOperationUnavailable`; classification makes it permanent `applyFailed`, and the consumer reports `failed` without fetching Kakao. Sources: `_tools/app/src-tauri/src/library/collection_binding_sync.rs:692`, `:284`, `:332`, `:623`; `_tools/app/src-tauri/src/library/collection_authority.rs:250`.
+- Collections authority is recorded as activated on 2026-10-06, but this audit did not inspect any installed PC's adoption state. Consequently, “turn on the PC and it applies” is not a valid promise for an authority-adopted build at this revision. Source for activation record: `docs/adr/README.md:55`; fence evidence above.
+- Without that fence (legacy, non-adopted PC), precheck validates work/type, treats all requested groups already bound as applied, compares any expected external ID, then checks binding identity again inside the write transaction after fetching. Sources: `_tools/app/src-tauri/src/library/collection_binding_sync.rs:705`, `:715`, `:746`.
+- Its Kakao applier reads the **PC's** Kakao credential and searches again; delayed choices resolve by anchor, then unique fingerprint, collapsing groups that now coincide. Sources: `_tools/app/src-tauri/src/library/collection_binding_sync.rs:139`; `_tools/app/src-tauri/src/library/aladin_flow.rs:73`, `:489`.
+- After local success the consumer reports applied and notifies the PC UI; that result report is separate from any authority command delivery. Server result recording even accepts a superseded request's result today. Sources: `_tools/app/src-tauri/src/library/collection_binding_sync.rs:614`, `:653`, `:517`; `server/lakomics-api/collection_bindings.py:1333`.
+- Tablet detail then displays connected from the work projection, or “PC에서 적용됨” if the request is applied before that projection agrees; failures show the reported reason. Review rereads pending requests and the manga projection, so a still-partial binding can return to 일부 권. Sources: `_tools/app/mobile-client/CollectionBindings.tsx:30`, `:65`; `_tools/app/mobile-client/KakaoReviewOverlay.tsx:40`, `:97`; `_tools/app/src/collections/kakaoReviewModel.ts:11`; projection invalidation: `_tools/app/mobile-client/Collections.tsx:544`.
+
+### PC direct connection and existing-binding refresh
+
+- PC detail's 발매 정보 panel and menu open `KakaoConnectDialog`; 연결 점검 opens that dialog with an editable query and known fingerprints. Sources: `_tools/app/src/collections/CollectionOverlay.tsx:395`, `:503`; `_tools/app/src/collections/CollectionBrowser.tsx:326`, `:413`; `_tools/app/src/collections/KakaoReviewScreen.tsx:173`.
+- The dialog invokes `searchKakao`, then `applyKakao` with the selected groups; the gateway invokes Rust `search_kakao` / `apply_kakao`, both using the PC key. Direct apply searches again and requires exact candidate anchor plus fingerprint, unlike delayed tablet selection. Sources: `_tools/app/src/collections/KakaoConnectDialog.tsx:62`, `:89`; `_tools/app/src/library/client.ts:604`; `_tools/app/src-tauri/src/commands.rs:1449`, `:1464`; `_tools/app/src-tauri/src/library/aladin_flow.rs:309`, `:452`.
+- Reconciliation sorts selected groups by lowest volume then fingerprint, stores config v1 for one group/v2 for several, merges overlapping volume numbers by product preference, and maps unnumbered products to volume 1. Sources: `_tools/app/src-tauri/src/library/aladin_flow.rs:165`, `:538`, `:578`.
+- It upserts Kakao volume sources, inserts missing edition-0 slots, keeps existing slots/covers, preserves dismissal only for the same volume set, and handles gated release events. It does not replace the work title or download Kakao artwork. Sources: `_tools/app/src-tauri/src/library/aladin_flow.rs:604`, `:626`, `:688`, `:725`, `:820`.
+- With authority active, source/slot writes enqueue `upsertVolumeSource` / `upsertVolume`; binding reconciliation enqueues `bindProvider` when identity/config differs and `applyProviderSnapshot` when snapshot/values differ. Without authority it writes the binding locally. Sources: `_tools/app/src-tauri/src/library/aladin_flow.rs:695`, `:834`; `_tools/app/src-tauri/src/library/collection_authority.rs:437`, `:531`.
+- Thus direct PC apply's local success is not evidence of server acceptance: its callback refreshes the screen while shared mutations remain outbox commands. Sources: `_tools/app/src/collections/KakaoConnectDialog.tsx:95`; `_tools/app/src-tauri/src/library/collection_authority.rs:533`, `:548`; `_tools/app/src-tauri/src/library/aladin_flow.rs:717`.
+- Existing-binding 새로고침 calls `gateway.refreshKakao`, Rust `refresh_kakao`, then local `refresh_aladin`; it fetches the stored query and refinds all groups by anchor/known IDs/fingerprint. The overlay reloads volumes, connection and watch status. Sources: `_tools/app/src/collections/CollectionOverlay.tsx:327`; `_tools/app/src/library/client.ts:608`; `_tools/app/src-tauri/src/commands.rs:1479`; `_tools/app/src-tauri/src/library/aladin_flow.rs:322`, `:355`.
+- The release-check handover gates automatic checks and 신간 새로고침, **not** that per-work Rust command. Tablet connection controls currently offer reconnect rather than a separate Kakao refresh action. Sources: `_tools/app/src-tauri/src/library/server_release_checks.rs:49`, `:82`; `_tools/app/src-tauri/src/commands.rs:1479`; `_tools/app/mobile-client/CollectionBindings.tsx:106`, `:122`.
+
+### Unbind, 연결 안 함, 이대로 두기
+
+- No Kakao unbind action is exposed by the inspected PC `MangaConnections` or tablet binding/review controls; reconnect and exclusion are different operations. Sources: `_tools/app/src/collections/MangaConnections.tsx:9`, `:65`, `:80`; `_tools/app/mobile-client/CollectionBindings.tsx:106`; `_tools/app/mobile-client/KakaoReviewOverlay.tsx:158`, `:167`. This is a bounded UI audit, not a claim about every historical build.
+- Server authority nevertheless supports `unbindProvider`: revision-check the binding, clear config/snapshot, retain a binding tombstone, and rederive availability/schedule; it does not delete sources, volume slots, ownership or artwork. Source: `server/lakomics-api/collection_authority.py:2152`.
+- 연결 안 함 writes `setVolumeRange.hideConnectionPrompt` while retaining min/max. 이대로 두기 writes `setKakaoPartialDismissed` with the viewed volume set. Both have undo/다시 점검, and neither unbinds. PC dismissal also enqueues an authority command when active. Sources: `_tools/app/src/collections/KakaoReviewScreen.tsx:77`; `_tools/app/mobile-client/KakaoReviewOverlay.tsx:120`, `:127`, `:167`; `_tools/app/src-tauri/src/library/kakao_review.rs:226`; `server/lakomics-api/collection_authority.py:2123`, `:2357`.
+- Tablet stores those settings in its authority outbox; the server applies them without the PC. Dismissal is tied to snapshot volumes, ignores a stale dismiss request, and refresh carries it only while the volume set matches. Sources: `_tools/app/mobile-client/KakaoReviewOverlay.tsx:123`; `server/lakomics-api/collection_authority.py:2133`; `server/lakomics-api/kakao_review.py:13`, `:18`; `server/lakomics-api/collection_release_checks.py:356`.
+- Review defaults to a Korean work name, otherwise a MangaDex Korean alternate title, with a stored Kakao query overriding it. Unlinked hidden works and dismissed partial works enter 제외. Sources: `server/lakomics-api/kakao_review.py:22`; `_tools/app/src/collections/kakaoReviewModel.ts:11`.
+
+## 2. Ownership boundary
+
+- The server can own the entire Kakao bind/rebind/refresh: key, provider fetching, parsing/grouping, authority metadata, slot/source creation, snapshots and release rules already exist. Evidence: `server/lakomics-api/collection_bindings.py:260`, `:596`, `:744`; `server/lakomics-api/collection_release_checks.py:298`, `:334`, `:787`.
+- It also already owns unbind and both review settings. No provider fetch or filesystem operation is required for those commands. Evidence: `server/lakomics-api/collection_authority.py:2123`, `:2152`, `:2357`.
+- The missing work is selection resolution plus request execution/receipt coordination, not a new provider implementation. `plan_refresh` requires an existing config; new binding must build picks first and reuse `reconcile`. Evidence: `server/lakomics-api/collection_release_checks.py:313`, `:334`.
+- Nothing in this metadata operation must stay on the PC. The PC keeps local replica application, offline artwork caching and its existing fallback for non-authority libraries. Provider artwork must remain WorkArtwork outside Asset ingestion. Boundary reference: `docs/adr/0032-provider-artwork-stays-out-of-the-asset-library.md:3`.
+- MangaDex binds/checks, wishlist implementation, automatic linking of unlinked works, and bulk repair/backfill are outside this contract.
+
+## 3. Proposed server contract
+
+Uncited contract bullets in §§3–5 are proposed requirements; cited observations explicitly describe current source.
+
+### API and execution
+
+- Keep version-1 `POST /v1/collections/bindings/requests` and existing search/status/list routes. With the feature on, new Kakao requests are assigned to the server; MangaDex keeps its existing executor.
+- Add internal execution metadata to the existing request storage: executor (`pc`/`server`), library ID/epoch, captured binding precondition, retry count and next attempt. Keep public states `pending/applied/failed/superseded`; add optional `executor` to replies for updated clients.
+- Capture authority identity and binding bound-state/revision/config identity at enqueue, including a tombstoned binding's revision. Honor explicit `expected.externalId`; absence means reconnect the binding observed at enqueue, never permission to overwrite arbitrary later choices.
+- Persist the intent before responding. Return `{version:1, request}` immediately and wake one bounded in-process worker using the existing lifecycle pattern; do not make a provider crawl hold the HTTP request open.
+- One server process and one serial request worker suffice. Reuse provider locking/page admission with search and release checks; no external queue, lease service, new database or generic workflow engine.
+- Preflight the pending server-owned request and active library/epoch; fetch full products without SQLite locks. Do not trust client thumbnails, counts or title hints as provider data.
+- Resolve each selected group using the delayed-PC anchor-first/unique-fingerprint rules; collapse coincident groups, reject missing/ambiguous groups, then call the shared reconciliation planner. Preserve strict selection validation in the existing local PC fallback.
+- Under `BEGIN IMMEDIATE`, recheck request state/executor, latest request for that work/provider, authority epoch, live manga target and binding precondition. Reload sources, slots, ownership/range and dismissal before planning writes.
+- Apply one `apply_command_batch`: changed `upsertVolumeSource` rows, missing edition-0 `upsertVolume` slots, conditional `bindProvider`, then `applyProviderSnapshot`; gated `recordReleaseEvent` follows the shared reconcile policy.
+- Use current source/slot entity revisions and snapshot digest, including tombstones; preserve existing volume IDs, covers, manual labels/order and other editions. Use the release worker's deterministic ID scheme only for genuinely absent slots; a tombstone must not be mistaken for a never-created slot.
+- Preserve omitted sources/slots as PC reconciliation does. Rebind does not purge the previous group's volumes; this potentially surprising behavior is a product question, not permission to invent cleanup.
+- Mark `applied` in the same transaction as authority mutations and the batch receipt. The read projection and change feed must be ready before the request can be observed as applied; local PC enqueue is never enough.
+- Permanent errors record a safe Korean reason; reuse ambiguity/duplicate-identity/provider error categories. Transient timeout/429/transport/SQLite contention retain pending with bounded retries; reuse backoff classification, honor Retry-After and survive restart. A stop during fetch commits nothing.
+- Keep bind requests independently eligible from the once-daily release schedule. A daily throttle must not delay a user's first link, and release-check state must not falsely record success after an aborted bind.
+- Existing unbind/review commands remain `PUT /v1/collections/authority/commands`. A successful explicit unbind atomically supersedes pending Kakao bind requests so an in-flight result cannot silently reconnect the work; keep retained volumes/artwork.
+- For existing-binding refresh, reuse `POST /v1/collections/release-checks/run` with `provider:kakao, workId`; its current response is queued/status, not a `KakaoSyncResult` (`server/lakomics-api/collection_release_checks.py:946`, `:961`). Extend per-work completion visibility only as needed before routing the PC overlay through it. Reconnect remains a new selected-group request. If release checks are disabled, the bind feature must not promise server per-work refresh; keep the existing local refresh fallback or leave its handover disabled.
+
+### Revisions and idempotency
+
+- Bind/source/slot commands retain authority CAS; snapshots retain `baseSnapshotDigest`. A binding identity change, unbind/rebind cycle or replaced request aborts the old result with no partial writes. Revision checks prevent the same-external-ID ABA case.
+- A snapshot-only or known-item-history change with unchanged query/group identity may trigger one bounded fresh preflight/refetch. Treat changed query/group selection conservatively as `bindingChanged`; never classify arbitrary same-anchor config changes as background work. Pure review-setting changes can be merged from commit-time state without dropping dismissal; unbind/rebind revision history cannot be waived.
+- Reuse request operation ID/payload hashing and authority batch receipts. Derive batch/child IDs from `(library, epoch, request operation ID, command/entity key)`; replay a completed receipt before provider I/O. Internal CAS observations are not mutable client payload.
+- The request row and receipt freeze completion together: a crash before commit retries; a crash after commit returns the stored result without new provider traffic, deltas or events. ID reuse with changed selection remains `operationConflict`.
+- Reuse release-event content deduplication and the existing event rules; do not create notifications merely because the executor changed. Initial binding/rebinding notification policy remains an explicit product question.
+- Retain completed request/receipt compatibility within existing bounded retention. After an operation ages out, clients must reread current state before making a new choice; do not promise indefinite exactly-once execution.
+
+## 4. PC handover, switch and compatibility
+
+- Add `LAKOMICS_KAKAO_BINDS` default OFF. Advertise `serverKakaoBinds` in Collections authority features and `kakaoApply:true` in bindings status only when authority is active, the key is available and the executor is alive. `kakaoSearch` alone is not ownership advertisement.
+- Use a separate feature from `serverReleaseChecks:kakao`: automatic checks and user binding requests have different activation/failure scopes. The existing checker already advertises only with switch/key/live worker: `server/lakomics-api/collection_release_checks.py:157`.
+- If the bind switch is ON but authority/key/executor readiness fails, reject new Kakao submissions with a controlled unavailable error rather than assigning them to the PC. Previously accepted server requests keep their owner and retry state.
+- Update tablet copy for server-owned requests: pending means server processing, applied means server-confirmed, failed remains retryable by a new deliberate request. Keep pending distinguishable from connected and preserve old content until a consistent reread is ready.
+- New PCs route Kakao search/apply through the server when advertised, reuse an operation ID after response loss, then pull authority deltas before showing confirmed completion. Route per-work refresh to the server with a queued/completion adapter; do not cast its status response to local sync counts.
+- Slice-2 recovery already adopts/drops refused `bindProvider/upsertVolumeSource/upsertVolume` rows instead of wedging FIFO; explicit different-ID binds can be rederived up to three times, derived sources get a deferred refetch, and user volume fields get a three-way merge. Evidence: `_tools/app/src-tauri/src/library/collection_authority.rs:2750`, `:3514`, `:3607`, `:3663`, `:3683`.
+- That recovery is not complete protection for this handover: its same-external-ID test can adopt a changed multi-group config as derived data, losing a user's group selection. Add fixtures for same-anchor/different-group reconnect and use request preconditions for new server-routed choices. Evidence for the existing comparison: `_tools/app/src-tauri/src/library/collection_authority.rs:3669`.
+- `unbindProvider` is not in that provider recovery target list. Any future exposed unbind must adopt a conflict and ask for a fresh deliberate retry rather than silently replaying a stale disconnect. Evidence: `_tools/app/src-tauri/src/library/collection_authority.rs:2758`; `server/lakomics-api/collection_authority.py:2158`.
+- Server-owned pending rows must never appear as executable pending work in publisher `/log`. Filter them while advancing scan cursors over their sequence positions; compute publisher `oldestPendingSequence`/status head consistently from PC-owned work so old PCs do not rewind forever. Reject publisher results for server-owned requests, even superseded ones.
+- Ownership is pinned on each accepted request, not re-evaluated from the live flag every poll. Activation does not silently seize already-PC-owned requests. Stop/drain in-flight legacy work and reconcile pending/result/projection mismatches before any separately authorized reassignment.
+- Old tablets continue posting version 1 and reading the four states; legacy single-group choices remain supported. They benefit from PC-off completion but retain misleading PC labels until updated. Existing native allowlist permits these exact routes: `android/src/com/lakomics/mobile/NetworkPolicy.java:99`; legacy normalization: `server/lakomics-api/collection_bindings.py:1019`.
+- Old PCs may still make direct local binds and lack robust conflict recovery. Before enabling, update the single user's PC and drain its provider outbox; do not solve compatibility with device clocks, a second authority or a new global epoch.
+- Switch OFF prevents new server assignment and advertisement; requests already assigned to the server retain ownership and a drain/recovery path. A hard-stop rollback keeps them pending, then resumes the same executor; it never hands unknown outcomes to a PC automatically.
+- Without advertisement, preserve direct PC behavior. Tablet-to-PC fallback at this revision is fenced under active authority (§1); do not advertise it as functioning until a separately tested authority-safe consumer is added. No network error after server acceptance may trigger automatic local reapply.
+
+## 5. Smallest useful slices and acceptance
+
+| Slice | Deliverable and acceptance | Required evidence |
+| --- | --- | --- |
+| 1 | Dormant server request executor, request ownership/log fence, pure selected-group planner and atomic authority completion. OFF changes no current behavior; ON in fixtures applies a new one-group link while PC is absent; replay/restart changes nothing twice. Multi-group/legacy request support ships with this slice because existing clients send them. | Plain-Python unittest: planner parity and SQLite/route fixtures; no real HTTP/provider calls. |
+| 2 | Tablet copy/state handling and PC search/apply handover; extend per-work refresh completion adapter only enough for the existing overlay. PC and tablet converge from the server projection; ordinary direct-PC fallback remains usable when disabled. | Rust injected-transport/outbox tests; targeted PC and mobile frontend tests; native/device acceptance later under separate runtime scope. |
+| 3 | Enable only after PC upgrade/drain, inspect PC-off link/relink/refresh and later PC catch-up, then exercise OFF/restart recovery. Any pending legacy intent is reviewed before explicit reassignment. | Separately authorized deployment/provider/device acceptance; record live evidence independently of fixture success. |
+
+- Python parity fixtures: product identity/raw URL/date, unnumbered volume 1, anchors drifting/disappearing, fingerprint ambiguity, joined groups collapsing, overlapping volume preference, v1/v2 config and excluded-product counts.
+- Python transactions: existing work/cover/manual slot preservation; duplicate provider item elsewhere rolls back everything; epoch change/trash/unbind/supersession during fetch; revision/digest race with release checker; same-ID replay, changed-ID payload rejection, result loss and worker restart.
+- Python delivery: publisher log cursor gaps/pagination/ETag/oldest-pending signal, old result submissions, retention boundaries, bounded retries/429/key failure, no DB lock during provider fetch, OFF behavior and no false advertisement.
+- Rust: no local provider fetch when owned by server; replay same operation ID; per-work refresh queued versus confirmed; unknown outcome never falls back; same-anchor changed groups; source/slot conflicts; later user intent supersedes older rederived commands; fallback fence remains explicit.
+- Frontend: detail and review link/relink with PC absent; partial works returning after application; server-pending versus connected; failed request visibility in review; review settings/undo; old status without new fields; stale rereads cannot replace a just-filed request; retained content without flash.
+- Extend the existing shared fixtures/test suites rather than inventing a test harness. Existing precedents: `server/lakomics-api/tests/test_collection_bindings.py:298`, `:602`; `server/lakomics-api/tests/test_collection_release_checks.py:51`, `:402`; `_tools/app/src/collections/KakaoConnectDialog.test.tsx:1`; `_tools/app/mobile-client/KakaoReviewOverlay.test.tsx:1`.
+- For new routes, update only their exact Android allowlist entries and tests; preserving the existing bind routes avoids this dependency in slice 1. This design audit ran no Python, Rust, frontend, native or device tests.
+
+## 6. Risks and limits
+
+- The authority fence is a source-observed defect, not a reproduced production failure; installed builds, deployment and adoption were not inspected. Current tablet wording can hide that distinction.
+- Existing review fetches only pending requests, so failures can disappear back into the unlinked/partial queue without their reason; detail does show them. Sources: `_tools/app/mobile-client/KakaoReviewOverlay.tsx:53`, `:98`; `_tools/app/mobile-client/CollectionBindings.tsx:32`.
+- Full Kakao recrawls compete with search and daily checks; share the existing quotas/deadline and keep commits short. Real provider quota, latency, selected-group drift frequency and production pending counts were not measured.
+- Preserve source/raw/snapshot compatibility and all user artwork/ownership. Rebind keeps omitted products; tombstone revival and same-anchor multi-group recovery require focused fixtures before activation.
+- Concurrent wishlist changes mean line references can move; this audit reads those boundaries without editing them. No backlog changes, migrations, cleanup, provider requests, production writes, installs or Git writes are authorized by this document.
+- Over-engineering to avoid: distributed worker leases, event sourcing beyond existing receipts/feed, multi-user conflict arbitration, separate Kakao catalog persistence, automatic confidence scoring/linking and mandatory artwork downloads.
+
+## 7. Open product questions (no decisions made here)
+
+- Should the tablet expose a separate existing-binding 새로고침 action, or keep 다시 연결 as its only manual correction action?
+- Should Kakao 연결 해제 become visible on PC/tablet? If so, what should the confirmation say about retained volumes and ownership?
+- When reconnecting to a different edition/group set, should omitted old Kakao products remain visible, or should the app offer an explicit cleanup choice?
+- Should initial binding/rebinding generate 신간 events for newly discovered volumes, or establish a quiet baseline? Keep ownership/subscription/range requirements unless separately changed.
+- Should Kakao product thumbnails ever become persisted volume/work artwork, or remain search previews? Current reconciliation creates no Kakao artwork (`_tools/app/src-tauri/src/library/aladin_flow.rs:820`); this proposal preserves that behavior pending a decision.
+- Should incomplete binding after application return immediately to 일부 권, and should the review list display failed request reasons inline?
+- How should old pending or failed tablet requests be handled at activation: explicit retry by the user, or a separately approved one-time reassignment of reviewed pending requests?
+
+## 8. Decisions (user, 2026-10-09)
+
+The user accepted the controller's recommendations:
+
+1. Initial binding and rebinding establish a quiet baseline: no 신간 events for volumes found by the bind itself.
+2. Rebinding to another edition/group set keeps the omitted old products, as today; no cleanup choice in this work.
+3. The 연결 점검 review list shows a failed request's reason inline (one line) instead of silently returning the work to its segment.
+4. No new tablet 연결 해제 or 새로고침 controls; 다시 연결 stays the only manual correction.
+5. Kakao thumbnails stay search previews; no persisted artwork.
+6. Old pending/failed requests at activation: none exist (production read-only check 2026-10-09: 15 requests, all `applied`, newest 2026-09-28), so no reassignment path is needed beyond refusing to seize PC-owned rows.
+
+Production note: since authority activation (2026-10-06) no tablet bind request has been filed, so the §1 fence defect is unreproduced; a tablet bind filed now is expected to come back `failed`. MangaDex requests share `decide_binding_request` and are expected to fail the same way.
+
+If artwork is requested later, use confirmed provider data and the existing WorkArtwork/blob pipeline, preserve manual selections, and keep download failure independent of metadata binding. Do not ingest provider covers as Assets or treat a tablet-supplied thumbnail URL as trusted download input.
