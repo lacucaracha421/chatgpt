@@ -31,7 +31,7 @@ it("renders birthday age, centimetres, natural breasts and career; omits missing
   rerender(<ProfileRows profile={profile({ birthDate: "2001", heightCm: null, bandIn: null, waistIn: null, hipIn: null, breastType: "FAKE", careerStart: 2010, careerEnd: 2023 })} />);
   expect(screen.getByText("2001")).toBeVisible(); expect(screen.queryByText(/만 \d+세/)).toBeNull();
   expect(screen.queryByText("사이즈")).toBeNull(); expect(screen.queryByText("키")).toBeNull();
-  expect(screen.getByText("보형")).toBeVisible(); expect(screen.getByText("· 은퇴")).toBeVisible();
+  expect(screen.getByText("인공")).toBeVisible(); expect(screen.getByText("· 은퇴")).toBeVisible();
   rerender(<ProfileRows profile={profile({ birthDate: null, heightCm: null, bandIn: null, waistIn: null, hipIn: null, cup: null, breastType: "NA", careerStart: null })} />);
   expect(screen.queryByLabelText("프로필")).toBeNull();
 });

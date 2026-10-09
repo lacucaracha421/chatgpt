@@ -46,12 +46,17 @@ impl AvPersonRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvPerson {
+    pub name_ja: Option<String>,
+    #[serde(flatten)]
+    pub profile_metadata: serde_json::Value,
     pub id: String,
     pub display_name: String,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvPersonCredit {
+    #[serde(flatten)]
+    pub profile_metadata: serde_json::Value,
     pub id: String,
     pub display_name: String,
     pub role: AvPersonRole,
@@ -217,6 +222,9 @@ pub struct AvRelated {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvPerformerShelf {
+    pub name_ja: Option<String>,
+    #[serde(flatten)]
+    pub profile_metadata: serde_json::Value,
     pub person_id: String,
     pub display_name: String,
     pub total: usize,
@@ -255,6 +263,8 @@ pub struct AvPerformerPage {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvPerformerPerson {
+    #[serde(flatten)]
+    pub profile_metadata: serde_json::Value,
     pub id: String,
     pub display_name: String,
     pub name_ja: Option<String>,
@@ -282,6 +292,9 @@ pub struct AvPerformerWork {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvCoPerformer {
+    pub name_ja: Option<String>,
+    #[serde(flatten)]
+    pub profile_metadata: serde_json::Value,
     pub id: String,
     pub display_name: String,
     pub count: i64,

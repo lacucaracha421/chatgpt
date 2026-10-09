@@ -202,11 +202,11 @@ it.each(["performer", "director"] as const)("filters existing person search and 
   candidate.directors=role==="director"?[person]:[];
   const peopleApi={searchPeople:vi.fn().mockResolvedValue([{id:"actor",displayName:"출연 전용"},{id:"director",displayName:"감독 전용"},{id:"both",displayName:"겸업"},{id:"none",displayName:"이력 없음"}]),getPerformer:vi.fn().mockImplementation(async (id:string)=>({works:id==="both"?[{collectionId:"dual-work",role:"performer"}]:id==="none"?[]:[{role:id==="actor"?"performer":id==="director"?"director":role==="performer"?"director":"performer"}]})),getDetails:vi.fn().mockImplementation(async (id:string)=>({people:id==="dual-work"?[{id:"both",role:"director"}]:[]}))} as unknown as Pick<import("./avTypes").AvGateway,"searchPeople"|"getPerformer"|"getDetails">;
   render(<AvLinkChooserDialog inboxId="inbox-1" collections={[]} api={api(candidate)} peopleApi={peopleApi} onClose={vi.fn()} onApplied={vi.fn()} onDismissed={vi.fn()}/>);
-  const control=await screen.findByRole("combobox",{name:"배우 A (女優A) 연결 방식"});
+  const control=await screen.findByRole("combobox",{name:"배우 A 연결 방식"});
   expect(control).toHaveValue("new");
   expect(within(control).queryByRole("option",{name:"다른 역할"})).toBeNull();
   fireEvent.change(control,{target:{value:"search"}});
-  const results=await screen.findByRole("listbox",{name:"배우 A (女優A) 기존 인물 검색 결과"});
+  const results=await screen.findByRole("listbox",{name:"배우 A 기존 인물 검색 결과"});
   expect(within(results).getAllByRole("option").map(o=>o.textContent)).toEqual([role==="performer"?"출연 전용":"감독 전용","겸업"]);
   fireEvent.click(within(results).getByRole("option",{name:"겸업"}));
   expect(control).toHaveValue("link:both");

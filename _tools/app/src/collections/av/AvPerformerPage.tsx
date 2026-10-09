@@ -1,3 +1,9 @@
+import {BusyLabel} from "../../shared/ui/BusyLabel";
+import {PersonProfileEditor} from "./PersonProfileEditor";
+import {PersonProfileRows, ProfileManualMark} from "./PersonProfileRows";
+import {performerName} from "./performerName";
+import {hasProfileMetadata, ownsProfile, profileExpected, type ProfileExpected, type ProfileChanges} from "./personProfileFields";
+import type {PersonProfileState} from "../avTypes";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { ArrowLeftIcon, CameraIcon, ChevronDownIcon, EllipsisHorizontalIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
@@ -10,7 +16,7 @@ import { usePrivacy } from "../../privacy/PrivacyContext";
 import { avError } from "../avClient";
 import type { AvGateway, AvPerformerPage as PerformerData, AvWorkCard } from "../avTypes";
 import { AvPortrait } from "./AvPortrait";
-import { AvPerformerProfile } from "./AvPerformerProfile";
+import { AvPerformerProfile, ProfileLinks } from "./AvPerformerProfile";
 import { AvPerformerLibraryStats } from "./AvPerformerLibraryStats";
 import { AvPortraitPicker } from "./AvPortraitPicker";
 import { LightCase } from "../case/LightCase";
@@ -35,6 +41,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   const [view, updateView] = useCollectionView("av");
   const [pickedId, setPickedId] = useState<string | null>(null);
   const request = useRef(0);
+  const profileReadVersion = useRef(0);
   const [page, setPage] = useState<PerformerData | null>(null);
   const [filter, setFilter] = useState<WorkFilter>("all");
   const [sort, setSort] = useState<WorkSort>("newest");
@@ -45,12 +52,14 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   const [favorite, setFavorite] = useState<boolean | null>(null);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const [profileState, setProfileState] = useState<{id: string; value: PersonProfileState | null} | null>(null);
+  const [profileEditing, setProfileEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const generation = ++request.current;
     let active = true;
-    setError(null); setBusy(false); setMemoEditing(false); setPickerOpen(false); setSourceError(null);
+    setError(null); setBusy(false); setMemoEditing(false); setPickerOpen(false); setProfileEditing(false); setSourceError(null);
     void api.getPerformer(personId).then(value => { if (active && generation === request.current) { setPage(value); setMemo(value.person.memo ?? ""); } }, reason => { if (active) setError(avError(reason)); });
     return () => { active = false; request.current++; };
   }, [api, personId]);
@@ -63,6 +72,18 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
       .catch(reason => { if (active) setSourceError(avError(reason)); });
     return () => { active = false; };
   }, [personId]);
+
+  useEffect(() => {
+    if (!api.getPersonProfileState) return;
+    let active = true;
+    const reload = () => { const version = profileReadVersion.current; void api.getPersonProfileState!(personId).then(value => { if (active && version === profileReadVersion.current) setProfileState({id: personId, value}); }, () => {}); };
+    reload();
+    const version = profileReadVersion.current;
+    void api.refreshPersonProfileState?.(personId).then(value => { if (active && version === profileReadVersion.current) setProfileState({id: personId, value}); }, () => {});
+    const stop = api.subscribeProfilesChanged?.(reload);
+    const timer = window.setInterval(reload, 1500);
+    return () => { active = false; stop?.(); window.clearInterval(timer); };
+  }, [api, personId]);
 
   const works = useMemo(() => {
     if (!page) return [];
@@ -99,33 +120,64 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
 
   const source = portraitSource(page, page.works);
   const stale = page.person.id !== personId;
+  const profilePerson = profileState?.id === personId ? profileState.value : null;
+  const person = {...page.person, ...profilePerson};
+  const name = performerName(person);
+  const profileEditable = !!profilePerson?.profileFieldsSupported && hasProfileMetadata(profilePerson) && !!api.setPersonProfileFields && !stale;
+  const profileRefused = !!profilePerson?.profileConflicts?.length;
+  const saveProfile = async (changes: ProfileChanges, expected: ProfileExpected = profileExpected(person, changes)) => {
+    if (!profileEditable || profileRefused) throw new Error("프로필을 편집할 수 없습니다.");
+    const value = await api.setPersonProfileFields!(personId, changes, expected);
+    if (request.current !== generation) return;
+    profileReadVersion.current++; setProfileState({id: personId, value});
+    void api.getPerformer(personId).then(next => { if (request.current === generation) setPage(next); }, () => {});
+  };
+  const generation = request.current;
+  const resolveProfile = async (operationId: string, overwrite: boolean) => {
+    try { const value = await api.resolvePersonProfileConflict?.(personId, operationId, overwrite); if (value && request.current === generation) { profileReadVersion.current++; setProfileState({id: personId, value}); } }
+    catch (reason) { if (request.current === generation) setError(avError(reason)); }
+  };
+  const markProps = {person, onSave: saveProfile, onEdit: () => setProfileEditing(true), disabled: profileRefused};
   return <article className="av-performer-page" aria-label="AV 배우 상세">
     <div className="av-performer-page__topline">
       <Button size="icon" variant="ghost" aria-label="작품으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>
       <span>AV › 배우</span>
       <Menu label="배우 관리" align="end" triggerClassName="av-performer-page__manage" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
         { id: "portrait", label: "사진 바꾸기", onSelect: () => setPickerOpen(true), disabled: stale },
+        ...(profileEditable ? [{id: "profile", label: "프로필 편집", onSelect: () => setProfileEditing(true), disabled: profileRefused}] : []),
         { id: "memo", label: "메모 편집", onSelect: () => { setMemo(page.person.memo ?? ""); setMemoEditing(true); }, disabled: stale },
         ...(onOpenSettings ? [{ id: "settings", label: "설정", onSelect: onOpenSettings }] : []),
       ]} />
     </div>
+    <BusyLabel busy={!!profilePerson?.profilePending} delay={400}><p className="av-profile__quiet" role="status">대기</p></BusyLabel>
+    {profilePerson?.profileMessage && <p role="status">{profilePerson.profileMessage}</p>}
+    {profilePerson?.profileConflicts?.map(conflict => <div key={conflict.operationId} className="av-profile__quiet" role="status">충돌 · <Button size="sm" disabled={conflict.code !== "revisionConflict"} onClick={() => { void resolveProfile(conflict.operationId, true); }}>덮어쓰기</Button><Button size="sm" onClick={() => { void resolveProfile(conflict.operationId, false); }}>버리기</Button></div>)}
+    {profileEditing && profileEditable && <PersonProfileEditor person={person} disabled={profileRefused} onClose={() => setProfileEditing(false)} onSave={saveProfile}/>}
     {error && <p role="alert">{error}</p>}
     <div className="av-performer-page__body" inert={stale || undefined} aria-busy={stale}>
       <header className="av-performer-page__header">
         <div className="av-performer-page__portrait">
-          <AvPortrait portrait={page.person.portrait} name={page.person.displayName} size="performer" />
+          <AvPortrait portrait={page.person.portrait} name={name.primary} size="performer" />
           <Button size="sm" variant="quiet" className="av-performer-page__portrait-change" title={`사진 출처: ${source.label}`} onClick={() => setPickerOpen(true)}><CameraIcon aria-hidden="true" />사진 바꾸기</Button>
         </div>
         <div className="av-performer-page__identity">
           <div className="av-performer-page__name-row">
-            <h1>{page.person.displayName}</h1>
+            <h1>{name.primary}{profileEditable && <ProfileManualMark {...markProps} label="이름" keys={["displayName"]}/>}</h1>
+            {profileEditable && <IconButton label="프로필 편집" icon={PencilIcon} disabled={profileRefused} onClick={() => setProfileEditing(true)}/>}
             <IconButton pop label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} icon={StarIcon} activeIcon={StarSolidIcon} active={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={() => void toggleFavorite()} />
           </div>
-          {page.person.nameJa && <p className="av-performer-page__name-ja" lang="ja">{page.person.nameJa}</p>}
+          {(name.secondary || profileEditable && person.stashdbId && Object.prototype.hasOwnProperty.call(person.profileOverrides ?? {}, "nameJa")) && <p className="av-performer-page__name-ja" lang="ja">{name.secondary || "비움"}{profileEditable && <ProfileManualMark {...markProps} label="일본어 이름" keys={["nameJa"]}/>}</p>}
           {sourceError && <p className="av-profile__quiet" role="status">{sourceError}</p>}
         </div>
         <section className="av-performer-page__facts" aria-label="프로필 정보">
-          <AvPerformerProfile compact displayName={page.person.displayName} nameJa={page.person.nameJa} personId={page.person.id} api={api} onOpenSettings={onOpenSettings} />
+          <AvPerformerProfile renderRows={stored => {
+            const facts = {...person, stashdbId: profileEditable ? person.stashdbId : null, profile: Object.prototype.hasOwnProperty.call(person, 'profile') ? person.profile : stored ? {...stored, urls: stored.urls.map(link => ({site: link.site.name, url: link.url}))} : null};
+            const urls = Array.isArray(facts.profile?.urls) ? facts.profile.urls : [];
+            return <><PersonProfileRows {...markProps} person={facts}/>
+              {profileEditable && ownsProfile(person, "urls") && <span className="av-profile__quiet">링크<ProfileManualMark {...markProps} label="링크" keys={["urls"]}/>{!urls.length && <span> 비움</span>}</span>}
+              <ProfileLinks profile={{urls: urls.map(link => ({url: link.url, site: {name: link.site}}))}}/>
+            </>;
+          }} hideLinks compact displayName={name.primary} nameJa={name.secondary} personId={page.person.id} api={api} onOpenSettings={onOpenSettings} />
         </section>
         <section className="av-performer-page__memo" aria-label="내 메모">
           <SectionLabel title="메모" actions={!memoEditing && <Button size="icon" variant="ghost" aria-label="배우 메모 편집" onClick={() => { setMemo(page.person.memo ?? ""); setMemoEditing(true); }}><PencilIcon aria-hidden="true" /></Button>} />
@@ -150,12 +202,12 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
           render={work => <WorkTile work={work} privacyMode={privacyMode} selected={pickedId === work.collectionId} current={work.collectionId === currentCollectionId} onPick={setPickedId} onOpenCollection={onOpenCollection} />} />
       </section>
       <div className="av-performer-page__related">
-        {page.coPerformers.length > 0 && <section><SectionLabel as="h2" title="자주 함께 나온 배우" count={page.coPerformers.length} /><div className="av-performer-page__co">{page.coPerformers.map(co => <Button variant="ghost" key={co.id} onClick={() => onOpenPerformer?.(co.id)} className="av-performer-page__co-card" aria-label={`${co.displayName} ${co.count}편`} data-person-id={co.id}><AvPortrait portrait={co.portrait} name={co.displayName} size={40} /><span><b>{co.displayName}</b><small>{co.count}편</small></span></Button>)}</div></section>}
+        {page.coPerformers.length > 0 && <section><SectionLabel as="h2" title="자주 함께 나온 배우" count={page.coPerformers.length} /><div className="av-performer-page__co">{page.coPerformers.map(co => <Button variant="ghost" key={co.id} onClick={() => onOpenPerformer?.(co.id)} className="av-performer-page__co-card" aria-label={`${performerName(co).primary} ${co.count}편`} data-person-id={co.id}><AvPortrait portrait={co.portrait} name={performerName(co).primary} size={40} /><span><b>{performerName(co).primary}</b>{performerName(co).secondary && <small lang="ja">{performerName(co).secondary}</small>}<small>{co.count}편</small></span></Button>)}</div></section>}
         {page.labels.length > 0 && <section><SectionLabel as="h2" title="레이블" count={page.labels.length} /><div className="av-performer-page__labels">{page.labels.map(label => <Badge key={label.name}>{label.name} <span className="numeric">{label.count}</span></Badge>)}</div></section>}
       </div>
       </div>
     </div>
-    {pickerOpen && !stale && <AvPortraitPicker currentPortrait={page.person.portrait} personId={page.person.id} personName={page.person.displayName} wikidataId={page.person.wikidataId} api={api} onClose={() => setPickerOpen(false)} onSaved={portrait => { setPage(value => value ? { ...value, person: { ...value.person, portrait } } : value); setPickerOpen(false); }} />}
+    {pickerOpen && !stale && <AvPortraitPicker currentPortrait={page.person.portrait} personId={page.person.id} personName={name.primary} wikidataId={page.person.wikidataId} api={api} onClose={() => setPickerOpen(false)} onSaved={portrait => { setPage(value => value ? { ...value, person: { ...value.person, portrait } } : value); setPickerOpen(false); }} />}
   </article>;
 }
 

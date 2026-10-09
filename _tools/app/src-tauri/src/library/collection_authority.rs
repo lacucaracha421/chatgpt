@@ -44,9 +44,11 @@ const COMMANDS: &[&str] = &[
     "setPerson",
     "setPersonPortrait",
     "setPersonProfile",
+    "setPersonProfileFields",
 ];
 
 include!("collection_authority_people.rs");
+include!("collection_authority_profile_fields.rs");
 include!("collection_authority_av_inbox.rs");
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
@@ -61,6 +63,8 @@ pub(crate) struct CollectionAuthorityStatus {
     pub contract_version: Option<i64>,
     #[serde(default)]
     pub cursor: Option<i64>,
+    #[serde(default)]
+    pub features: Vec<String>,
 }
 
 impl CollectionAuthorityStatus {
@@ -236,6 +240,7 @@ pub(crate) fn collection_write_status(
         epoch: state.as_ref().map(|s| s.id.epoch),
         contract_version: state.as_ref().map(|s| s.id.version),
         cursor: state.as_ref().map(|s| s.id.cursor),
+        features: cached_profile_features(db)?,
     };
     ensure_collection_write_ready(db, &status)?;
     Ok(status)
@@ -1563,13 +1568,16 @@ pub(crate) fn predicted_collection_revision(
         } else if section == "works"
             && matches!(
                 command,
-                "setPerson" | "setPersonPortrait" | "setPersonProfile"
+                "setPerson" | "setPersonPortrait" | "setPersonProfile" | "setPersonProfileFields"
             )
             && state["avCredits"]
                 .as_array()
                 .is_some_and(|c| c.iter().any(|c| c["personId"] == body["personId"]))
         {
-            let changed = if command == "setPersonProfile" {
+            let changed = if command == "setPersonProfileFields" {
+                let mut person = predicted_person_before(db, text(&body, "personId")?, Some(text(&body, "operationId")?))?;
+                apply_person_profile_fields(&mut person, &body["changes"])?
+            } else if command == "setPersonProfile" {
                 let mut person = predicted_person_before(
                     db,
                     text(&body, "personId")?,
@@ -2414,6 +2422,7 @@ impl Library {
         let value = client.collection_authority_read("/v1/collections/authority/status", token)?;
         let status: CollectionAuthorityStatus =
             serde_json::from_value(value).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        store_profile_features_status(&*self.connection()?, &status)?;
         let Some(id) = status.identity(&*self.connection()?)? else {
             return Ok((false, false));
         };
@@ -2738,6 +2747,11 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
         match body["commandType"].as_str() {
             Some("setPerson") => project_person_fields(tx, text(&body, "personId")?, &body["changes"], &created_at)?,
+            Some("setPersonProfileFields") => {
+                let person = text(&body, "personId")?;
+                let state = predicted_person(tx, person)?;
+                project_profile_fields(tx, person, &state, &created_at)?;
+            }
             Some("setPersonPortrait") => project_person_portrait(tx, text(&body, "personId")?, &body["portrait"], &created_at)?,
             Some("setAvDetails") => {
                 project_av_details(tx, text(&body, "workId")?, &body["changes"])?
@@ -3375,6 +3389,11 @@ impl Library {
                     tx.execute("UPDATE collection_authority_outbox SET state='accepted',receipt=?2,last_error=NULL,updated_at=?3 WHERE seq=?1",params![seq,receipt.to_string(),timestamp])?;
                     sent = true;
                 }
+                Ok(CollectionDelivery::Conflict(detail) | CollectionDelivery::Dropped(detail))
+                    if body["commandType"] == "setPersonProfileFields" && detail["code"] == "unsupportedCollectionCommand" => {
+                    tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason=?2,conflict_code=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,text(&detail,"code")?,detail.to_string(),timestamp])?;
+                    sent = true;
+                }
                 Ok(CollectionDelivery::Conflict(detail)) => {
                     if core_command(text(&body, "commandType")?) {
                         drop_core_intent(&tx, seq, &body, &detail, &timestamp)?;
@@ -3407,6 +3426,9 @@ impl Library {
                 Err(error) => return Err(error),
             }
             reapply_pending_core_edits(&tx)?;
+            if body["commandType"] == "setPersonProfileFields" {
+                reproject_profile_person(&tx, text(&body, "personId")?, &timestamp)?;
+            }
             tx.commit()?;
         }
         Ok(sent)

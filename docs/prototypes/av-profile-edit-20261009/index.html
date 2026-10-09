@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>배우 프로필 직접 편집</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="mock.css">
+<style>
+.cards { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+.card { align-content: start; }
+.card img { max-height: 520px; object-fit: contain; object-position: top; background: #0e0f10; }
+.rules { margin-top: 32px; max-width: 1100px; display: grid; gap: 8px; color: var(--color-muted); line-height: 1.7; }
+.rules h2 { font-size: 18px; font-weight: 600; color: var(--color-text); margin-top: 16px; }
+.rules ul { margin: 0; padding-left: 18px; }
+.rules b { color: var(--color-text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>배우 프로필 직접 편집 (2026-10-09)</h1>
+    <p class="lead">승인된 배우 페이지(A안) 위에 <b>직접 입력</b>을 얹는 시안입니다. 고친 칸만 직접 입력이 되어 StashDB 새로고침에도 남고, 손대지 않은 칸은 계속 StashDB를 따릅니다. 고친 칸은 언제든 StashDB 값과 비교하고 <b>되돌리기</b>할 수 있습니다. PC가 기준이고 태블릿은 같은 조각을 터치 크기로 씁니다.</p>
+  </header>
+  <div class="cards">
+    <a class="card" href="pc.html">
+      <h2>PC — 들어가는 곳 · 편집 · 저장 후</h2>
+      <ul>
+        <li>이름 옆 연필 + 배우 관리 ⋯ → 프로필 편집</li>
+        <li>대화상자 하나: 이름 · 일본어 이름 · 생년월일 · 키 · 사이즈(cm) · 컵 · 가슴 · 활동 · 링크</li>
+        <li>고친 칸: “직접 입력” + 아래에 StashDB 값 · 되돌리기</li>
+        <li>페이지: 항목 이름 뒤 “· 직접 입력”, 누르면 비교 창</li>
+      </ul>
+      <img src="shot-pc-dialog.png" alt="PC 편집 대화상자">
+    </a>
+    <a class="card" href="tablet.html">
+      <h2>태블릿 — 같은 조각, 시트로</h2>
+      <ul>
+        <li>이름 옆 연필(44px), 위 막대 ⋯ 배우 관리 시트(새로 제안)</li>
+        <li>같은 양식을 위 36px만 남기는 아래 시트로, 숫자 키패드</li>
+        <li>“· 직접 입력”을 누르면 작은 비교 시트</li>
+      </ul>
+      <img src="shot-tablet-sheet.png" alt="태블릿 편집 시트">
+    </a>
+    <a class="card" href="states.html">
+      <h2>상태 — 저장 · 충돌 · 비우기 · StashDB 없음</h2>
+      <ul>
+        <li>저장은 즉시 반영, 0.4초 넘을 때만 “대기”</li>
+        <li>충돌 · 덮어쓰기 · 버리기 (기존 줄 그대로)</li>
+        <li>StashDB ▾ 메뉴에 “모두 StashDB 값으로”</li>
+        <li>비움 값, 잘못된 주소, StashDB 없는 배우</li>
+      </ul>
+      <img src="shot-states.png" alt="저장과 충돌 상태">
+    </a>
+  </div>
+
+  <div class="rules">
+    <h2>규칙 요약</h2>
+    <ul>
+      <li><b>따름 / 직접 입력 / 비움</b> — 칸마다 셋 중 하나. 값을 고치면 직접 입력, 칸을 비우고 저장하면 비움(이것도 직접 입력), 되돌리기를 누르면 다시 따름.</li>
+      <li><b>한 칸의 단위</b> — 생년월일, 키, 사이즈(B·W·H 함께), 컵, 가슴, 활동(시작·끝 함께), 링크 목록 전체. 사이즈·활동은 셋/둘 중 하나라도 고치면 묶음 전체에 표시가 붙고, 되돌리기도 묶음 전체에 적용됩니다. 이름도 직접 입력·되돌리기가 붙지만, 기준은 StashDB가 아니라 원래 앱에 있던 한국어·일본어 이름입니다. StashDB 연결·새로고침은 이름을 바꾸지 않습니다.</li>
+      <li><b>새로고침</b> — StashDB 새로고침은 따르는 칸만 바꿉니다. 다른 사람으로 바꾸기·연결 해제도 직접 입력은 남깁니다.</li>
+      <li><b>입력</b> — 생년월일은 연만 / 연·월 / 연·월·일 모두 허용(월·일 칸은 비워 둘 수 있음). 사이즈는 화면과 같은 cm로 입력하고, 저장 단위가 인치 정수라 칸을 벗어날 때 실제로 보일 값으로 맞춰집니다(85 → 84). 활동 끝을 비우면 현역. 가슴은 자연 · 인공 · 모름.</li>
+      <li><b>서버가 아직 모를 때</b> — 연필과 메뉴 항목이 꺼진 상태로 보이고, 고쳐 놓은 내용은 버리지 않습니다.</li>
+      <li><b>모양</b> — 색 줄·배지 없이 글자 밝기만. 대화상자는 기존 모서리 괄호, 시트는 위 모서리 8px. 열림은 140–200ms 페이드와 살짝 떠오름(이 시안 이미지는 정지 화면).</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import {loadedPerformerNames} from './personNameCache';
 /**
  * Manga release notifications (신간 알림) shared with the PC
  * (`server/lakomics-api/collection_releases.py`).
@@ -114,7 +115,7 @@ export async function allWorks(type: CollectionKind, signal?: AbortSignal): Prom
         const reply: CollectionPage = await api<CollectionPage>(collectionPath(type, '', false, cursor, filters), signal);
         first ??= reply;
         if (reply.revision !== first.revision) throw Object.assign(new Error('Collection list changed'), {status: 409});
-        works.push(...(reply.items ?? []));
+        works.push(...await loadedPerformerNames(reply.items ?? []));
         if (!reply.nextCursor) break;
         cursor = reply.nextCursor;
       }

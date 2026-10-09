@@ -1,3 +1,6 @@
+import {outboxConnection} from './outboxConnection';
+import {rememberPersonNames} from './personNameCache';
+import type {ProfilePerson} from "../src/collections/av/personProfileFields";
 export type CollectionKind = 'game' | 'manga' | 'movie' | 'av';
 export type CollectionFilters = {sort:'recent'|'media_date'|'name';direction:'asc'|'desc';rating:'all'|'unrated'|number};
 export const defaultCollectionFilters = ():CollectionFilters => ({sort:'media_date',direction:'desc',rating:'all'});
@@ -7,12 +10,13 @@ export type CollectionVolume = {id:string; volumeNumber:number; editionIndex:num
 export type AvPortraitCrop = {artworkId:string;x:number;y:number;w:number;h:number};
 /** A performer's StashDB / Commons portrait as published (`portraitImage` feature); the bytes come through the Home cover ticket. */
 export type AvPortraitImage = {sha256:string;sizeBytes:number;contentType:string;width:number;height:number};
-export type AvPerson = {id:string;name:string;nameJa?:string|null;creditName?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null;portraitImage?:AvPortraitImage|null};
+export type AvPerson = ProfilePerson & {id:string;name:string;nameJa?:string|null;creditName?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null;portraitImage?:AvPortraitImage|null};
 export type AvInfo = {productCode?:string|null;titleJa?:string|null;maker?:string|null;label?:string|null;series?:string|null;genres:string[];releaseDate?:string|null;people:AvPerson[]};
 export type CollectionSummary = {
   artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null}>;
   id:string; name:string; type:CollectionKind; description?:string|null; overview?:string|null;
   av?:AvInfo|null;
+  avPeople?: (ProfilePerson & {personId: string})[];
   /** 원제: for manga, usually the Japanese title the PC filled from MangaDex. */
   originalTitle?:string|null;
   coverAssetId?:string|null; selectedWorkArtworkId?:string|null; selectedHeroArtworkId?:string|null; selectedBackdropArtworkId?:string|null;
@@ -55,16 +59,18 @@ export type CollectionPersonProfile = {
   careerStart:number|null; careerEnd:number|null;
   urls:{site:string;url:string}[];
 };
-export type CollectionPerson = {
+export type CollectionPerson = ProfilePerson & {
   id:string; personId?:string; entityRevision?:number; stashdbId?:string|null; portraitImage?:AvPortraitImage|null; portraitSelection?:unknown; memo:string|null; favorite:boolean;
   profile:CollectionPersonProfile|null;
   portrait:null|{source:'stashdb'|'commons'|'cover';author:string|null;license:string|null;licenseUrl:string|null;sourceUrl:string|null};
 };
 export const personPath=(personId:string)=>`/v1/collections/people/${encodeURIComponent(personId)}`;
 /** The person in a `GET /v1/collections/people/{id}` reply, or null when it is not that person's. */
-export function personReply(reply:unknown,personId:string):CollectionPerson|null {
+export function personReply(reply:unknown,personId:string, connection = outboxConnection()):CollectionPerson|null {
   const person=(reply as {person?:unknown}|null)?.person as CollectionPerson|null|undefined;
-  return person&&typeof person==='object'&&person.id===personId?person:null;
+  if (!person || typeof person !== 'object' || person.id !== personId) return null;
+  rememberPersonNames([person], connection);
+  return person;
 }
 export type CollectionPage = {totalCount?:number;ready:boolean;revision:string|null;publishedAt:string|null;items:CollectionSummary[];nextCursor:string|null;filterVersion?:1};
 export function collectionPath(type:CollectionKind, q:string, showcase:boolean, cursor:string|null, filters?:CollectionFilters) {

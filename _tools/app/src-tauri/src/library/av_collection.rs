@@ -18,6 +18,8 @@ pub struct AvHomeWork {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvHomePerformer {
+    #[serde(flatten)]
+    pub profile_metadata: serde_json::Value,
     pub id: String,
     pub display_name: String,
     pub original_name: Option<String>,
@@ -63,10 +65,12 @@ pub(crate) fn details(connection: &Connection, id: &str) -> Result<AvDetails, Av
         }
     }
     value.people = connection.prepare("SELECT p.id,p.display_name,r.role,r.sort_order,r.credit_name,p.name_ja,(SELECT COUNT(DISTINCT cr.collection_id) FROM collection_person_relations cr JOIN collections c ON c.id=cr.collection_id AND c.type='av' WHERE cr.person_id=p.id) FROM collection_person_relations r JOIN collection_people p ON p.id=r.person_id WHERE r.collection_id=?1 ORDER BY CASE r.role WHEN 'performer' THEN 0 ELSE 1 END,r.sort_order,p.id")?.query_map([id], |r| Ok(AvPersonCredit {
-        id: r.get(0)?, display_name: r.get(1)?, role: if r.get::<_, String>(2)? == "performer" { AvPersonRole::Performer } else { AvPersonRole::Director }, order: r.get(3)?, credit_name: r.get(4)?, name_ja:r.get(5)?,work_count:r.get(6)?,portrait:None,
+        profile_metadata: serde_json::json!({}), id: r.get(0)?, display_name: r.get(1)?, role: if r.get::<_, String>(2)? == "performer" { AvPersonRole::Performer } else { AvPersonRole::Director }, order: r.get(3)?, credit_name: r.get(4)?, name_ja:r.get(5)?,work_count:r.get(6)?,portrait:None,
     }))?.collect::<Result<Vec<_>,_>>()?;
+    let metadata = super::collection_authority::PersonDisplayMetadata::read(connection)?;
     for person in &mut value.people {
         person.portrait = super::av_portrait::portrait(connection, &person.id)?;
+        person.profile_metadata = metadata.person(connection, &person.id)?;
     }
     Ok(value)
 }
@@ -149,9 +153,12 @@ impl Library {
         let Some(latest_work) = recent_owned_works.first().cloned() else {
             return Ok(None);
         };
+        let mut profile_metadata = super::collection_authority::person_display_metadata(&connection, &id)?;
+        profile_metadata["nameJa"] = serde_json::json!(original_name);
         let original_name = original_name.filter(|name| name != &display_name);
         let portrait = super::av_portrait::portrait(&connection, &id)?;
         Ok(Some(AvHomePerformer {
+            profile_metadata,
             portrait,
             id,
             display_name,
@@ -179,7 +186,9 @@ impl Library {
                 .replace('_', "\\_")
         );
         let connection = self.connection()?;
-        let result = connection.prepare("SELECT id,display_name FROM collection_people WHERE display_name LIKE ?1 ESCAPE '\\' ORDER BY display_name,id LIMIT 20")?.query_map([pattern], |r| Ok(AvPerson { id:r.get(0)?, display_name:r.get(1)? }))?.collect::<Result<Vec<_>,_>>()?;
+        let mut result = connection.prepare("SELECT id,display_name,name_ja FROM collection_people WHERE display_name LIKE ?1 ESCAPE '\\' ORDER BY display_name,id LIMIT 20")?.query_map([pattern], |r| Ok(AvPerson { profile_metadata: serde_json::json!({}), id:r.get(0)?, display_name:r.get(1)?, name_ja:r.get(2)? }))?.collect::<Result<Vec<_>,_>>()?;
+        let metadata = super::collection_authority::PersonDisplayMetadata::read(&connection)?;
+        for person in &mut result { person.profile_metadata = metadata.person(&connection, &person.id)?; }
         Ok(result)
     }
     pub fn save_av_details(&self, id: &str, input: SaveAvDetails) -> Result<AvDetails, AvError> {

@@ -462,3 +462,19 @@ pub async fn preview_av_stashdb_image(
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
 }
+
+#[tauri::command]
+pub async fn get_av_person_profile_state(person_id: String, refresh: Option<bool>, state: State<'_, AppState>) -> Result<serde_json::Value, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || if refresh == Some(true) { library.refresh_av_person_profile_state(&person_id) } else { library.av_person_profile_state(&person_id) }).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn set_av_person_profile_fields(person_id: String, changes: serde_json::Value, expected: serde_json::Value, state: State<'_, AppState>) -> Result<serde_json::Value, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_av_person_profile_fields(&person_id, changes, expected)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn resolve_av_person_profile_conflict(person_id: String, operation_id: String, overwrite: bool, state: State<'_, AppState>) -> Result<serde_json::Value, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.resolve_av_person_profile_conflict(&person_id, &operation_id, overwrite)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}

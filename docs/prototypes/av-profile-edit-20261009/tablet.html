@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>프로필 직접 편집 · 태블릿</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>태블릿 · 배우 프로필 직접 편집</h1>
+    <p class="lead">PC와 같은 조각(이름 줄의 연필, 같은 편집 양식, 같은 “· 직접 입력” 표시)을 태블릿 크기로. 다른 점은 <b>대화상자 대신 아래에서 올라오는 시트</b>, 44px 터치 칸, 숫자 칸의 숫자 키패드, 그리고 비교 창이 작은 시트라는 것뿐입니다. <a href="index.html" style="color:var(--color-accent)">← 목차</a></p>
+  </header>
+
+  <section class="shot">
+    <h2>④ 들어가는 곳 <small>800 × 1280 세로</small></h2>
+    <p class="note"><span class="cap-num">1</span><b>이름 옆 연필</b>(44px 터치 칸) — PC와 같은 자리. <span class="cap-num">2</span><b>위 막대 ⋯ 배우 관리</b>(새로 추가 제안) — 오른쪽 작은 화면처럼 시트로 사진 바꾸기 · 프로필 편집 · 메모 편집 · StashDB 프로필을 모읍니다. 지금 태블릿에는 ⋯가 없고 아래의 “StashDB ▾”만 있습니다.</p>
+    <div class="row-frames">
+      <div class="frame frame--tab" data-callouts='[[".name-row .edit","1"],[".tab-top .push","2"]]'>
+        <div class="fold" data-label="1280px"></div>
+        <div data-render="tabPage" data-opts='{}'></div>
+      </div>
+      <div class="frame frame--tab frame--crop" style="height:700px;min-height:0">
+        <div data-render="tabPage" data-opts='{"menu":true}'></div>
+        <div class="scrim"></div>
+        <div class="sheet" role="dialog" aria-label="배우 관리">
+          <div class="sheet__grip"><span></span></div>
+          <div class="sheet__head"><h2>배우 관리</h2></div>
+          <div class="sheet-list">
+            <button class="sheet-item" type="button"><i data-icon="camera"></i>사진 바꾸기</button>
+            <button class="sheet-item is-pressed" type="button"><i data-icon="pencil"></i>프로필 편집</button>
+            <button class="sheet-item" type="button"><i data-icon="doc"></i>메모 편집</button>
+            <button class="sheet-item" type="button"><i data-icon="link"></i>StashDB 프로필</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="shot">
+    <h2>⑤ 편집 시트 <small>위 36px만 남기고 올라옴 · 아래로 쓸어 닫기</small></h2>
+    <p class="note">PC 대화상자와 같은 양식 조각, 두 칸 배치 그대로. 키·생년월일·사이즈·활동 칸은 숫자 키패드가 뜹니다. 아래 막대(취소 · 저장)는 키보드가 올라오면 키보드 바로 위에 붙습니다. 저장하지 않고 쓸어 닫으면 바뀐 게 있을 때만 “편집한 내용을 버릴까요?”를 묻습니다.</p>
+    <div class="frame frame--tab">
+      <div data-render="tabPage" data-opts='{}'></div>
+      <div class="scrim"></div>
+      <div data-render="sheet" data-opts='{}' style="display:contents"></div>
+    </div>
+  </section>
+
+  <section class="shot">
+    <h2>⑥ 저장한 뒤 <small>왼쪽: 페이지 · 오른쪽: “직접 입력”을 누르면 뜨는 작은 시트</small></h2>
+    <p class="note">PC와 똑같이 항목 이름 뒤 “· 직접 입력”. 태블릿에서는 누르면 아래에서 작은 비교 시트가 올라와 내 값과 StashDB 값을 나란히 보여 주고, <b>StashDB 값으로 되돌리기</b>와 <b>편집</b>을 고릅니다.</p>
+    <div class="row-frames">
+      <div class="frame frame--tab">
+        <div class="fold" data-label="1280px"></div>
+        <div data-render="tabPage" data-opts='{"after":true}'></div>
+      </div>
+      <div class="frame frame--tab frame--crop" style="height:700px;min-height:0">
+        <div data-render="tabPage" data-opts='{"after":true,"pop":"height"}'></div>
+        <div class="scrim"></div>
+        <div class="sheet" role="dialog" aria-label="키 비교">
+          <div class="sheet__grip"><span></span></div>
+          <div class="sheet__head"><h2>키</h2></div>
+          <div class="sheet__body" style="display:grid;gap:var(--space-3);padding-top:0">
+            <div class="pop__row"><span>직접 입력</span><b class="me num">158 cm</b></div>
+            <div class="pop__row"><span>StashDB</span><b class="num">160 cm</b></div>
+          </div>
+          <div class="sheet__foot" style="border-top:0;padding-top:0"><button class="ui-button ui-button--secondary" type="button" style="flex:1"><i data-icon="undo" data-small></i>&nbsp;StashDB 값으로 되돌리기</button><button class="ui-button ui-button--secondary" type="button" style="flex:1"><i data-icon="pencil" data-small></i>&nbsp;편집</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<script src="mock.js"></script>
+</body>
+</html>

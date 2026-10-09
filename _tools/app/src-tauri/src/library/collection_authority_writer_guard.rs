@@ -3,6 +3,7 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 const ALLOWLIST: &[(&str, &str)] = &[
+    ("library/collection_authority_profile_fields.rs", "batch AV manual profiles: authority-only field CAS outbox and optimistic replica projection"),
     ("library/collection_authority_people.rs", "batch AV 3a: confirmed person replica, reconcile and outbox projection"),
     ("library/collection_authority_av_inbox.rs", "batch AV inbox 2: server inbox apply composed as one transactional outbox sequence with optimistic projection"),
     (

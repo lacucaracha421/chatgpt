@@ -38,6 +38,8 @@ impl Library {
         {
             let ids = work_ids(&c,"EXISTS(SELECT 1 FROM collection_person_relations r WHERE r.collection_id=c.id AND r.person_id=?1 AND r.role='performer')",&person.id,id,false)?;
             performers.push(AvPerformerShelf {
+                profile_metadata: person.profile_metadata.clone(),
+                name_ja: person.name_ja.clone(),
                 person_id: person.id,
                 display_name: person.display_name,
                 total: ids.len(),
@@ -133,8 +135,10 @@ impl Library {
 }
 fn performer_page(c: &Connection, id: &str) -> Result<AvPerformerPage, AvError> {
     require_person(c, id)?;
-    let mut person = c.query_row("SELECT display_name,name_ja,wikidata_id,fanza_actress_id,memo FROM collection_people WHERE id=?1",[id],|r|Ok(AvPerformerPerson{id:id.into(),display_name:r.get(0)?,name_ja:r.get(1)?,wikidata_id:r.get(2)?,fanza_actress_id:r.get(3)?,memo:r.get(4)?,portrait:None}))?;
+    let mut person = c.query_row("SELECT display_name,name_ja,wikidata_id,fanza_actress_id,memo FROM collection_people WHERE id=?1",[id],|r|Ok(AvPerformerPerson{profile_metadata:serde_json::json!({}),id:id.into(),display_name:r.get(0)?,name_ja:r.get(1)?,wikidata_id:r.get(2)?,fanza_actress_id:r.get(3)?,memo:r.get(4)?,portrait:None}))?;
     person.portrait = portrait(c, id)?;
+    let metadata = super::collection_authority::PersonDisplayMetadata::read(c)?;
+    person.profile_metadata = metadata.person(c,id)?;
     let predicate = "EXISTS(SELECT 1 FROM collection_person_relations r WHERE r.collection_id=c.id AND r.person_id=?1)";
     let ids = work_ids(c, predicate, id, "", false)?;
     let mut works = Vec::new();
@@ -153,9 +157,11 @@ fn performer_page(c: &Connection, id: &str) -> Result<AvPerformerPage, AvError> 
         });
     }
     let stats=c.query_row(&format!("SELECT COUNT(*),MIN({RELEASE}),MAX({RELEASE}),AVG(c.my_score) FROM collections c LEFT JOIN collection_av_details d ON d.collection_id=c.id WHERE c.type='av' AND {predicate}"),[id],|r|Ok(AvPerformerStats{work_count:r.get(0)?,first_release:r.get(1)?,last_release:r.get(2)?,average_score:r.get(3)?}))?;
-    let mut co_performers=c.prepare("SELECT p.id,p.display_name,COUNT(DISTINCT r.collection_id) AS shared FROM collection_person_relations r JOIN collections c ON c.id=r.collection_id AND c.type='av' JOIN collection_people p ON p.id=r.person_id WHERE r.role='performer' AND r.person_id<>?1 AND EXISTS(SELECT 1 FROM collection_person_relations mine WHERE mine.collection_id=c.id AND mine.person_id=?1 AND mine.role='performer') GROUP BY p.id ORDER BY shared DESC,p.display_name,p.id LIMIT 8")?.query_map([id],|r|Ok(AvCoPerformer{id:r.get(0)?,display_name:r.get(1)?,count:r.get(2)?,portrait:None}))?.collect::<Result<Vec<_>,_>>()?;
+    let mut co_performers=c.prepare("SELECT p.id,p.display_name,COUNT(DISTINCT r.collection_id) AS shared FROM collection_person_relations r JOIN collections c ON c.id=r.collection_id AND c.type='av' JOIN collection_people p ON p.id=r.person_id WHERE r.role='performer' AND r.person_id<>?1 AND EXISTS(SELECT 1 FROM collection_person_relations mine WHERE mine.collection_id=c.id AND mine.person_id=?1 AND mine.role='performer') GROUP BY p.id ORDER BY shared DESC,p.display_name,p.id LIMIT 8")?.query_map([id],|r|Ok(AvCoPerformer{profile_metadata:serde_json::json!({}),name_ja:None,id:r.get(0)?,display_name:r.get(1)?,count:r.get(2)?,portrait:None}))?.collect::<Result<Vec<_>,_>>()?;
     for p in &mut co_performers {
         p.portrait = portrait(c, &p.id)?;
+        p.profile_metadata = metadata.person(c,&p.id)?;
+        p.name_ja = c.query_row("SELECT name_ja FROM collection_people WHERE id=?1",[&p.id],|r|r.get(0))?;
     }
     let labels=c.prepare(&format!("SELECT TRIM(d.label),COUNT(*) AS total FROM collections c JOIN collection_av_details d ON d.collection_id=c.id WHERE c.type='av' AND NULLIF(TRIM(d.label),'') IS NOT NULL AND {predicate} GROUP BY TRIM(d.label) ORDER BY total DESC,TRIM(d.label)"))?.query_map([id],|r|Ok(AvLabelCount{name:r.get(0)?,count:r.get(1)?}))?.collect::<Result<Vec<_>,_>>()?;
     Ok(AvPerformerPage {

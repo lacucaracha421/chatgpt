@@ -1,3 +1,5 @@
+import {rememberPersonNames} from './personNameCache';
+import type {ProfilePerson} from "../src/collections/av/personProfileFields";
 import {api, native} from './transport';
 import {outboxConnection} from './outboxConnection';
 import {sameAuthority, type AuthorityIdentity, type BlobReceipt} from './collectionCommandOutbox';
@@ -12,7 +14,7 @@ export type InboxCandidate = {fields:AvDetailFields; jacketSha256?:string;jacket
 export type InboxDetail = {inbox:InboxItem;candidate:InboxCandidate|null;matches:{libraryId:string;workId:string;name:string;entityRevision:number}[]};
 export type PreparedArtwork = {surface:Surface;kind:string;provider:string;providerImageId:string;width:number;height:number;language:string|null;original:BlobReceipt;thumbnail:BlobReceipt|null};
 export type InboxWork = {workId:string;type:string;name:string;lifecycle:string;entityRevision:number;selection:Record<string,string|null>;details:{av?:AvDetailFields};avCredits:AvCredit[];avPeople?:InboxPerson[]};
-export type InboxPerson = {personId:string;displayName:string;nameJa:string|null};
+export type InboxPerson = ProfilePerson & {personId:string;displayName:string;nameJa:string|null};
 export type InboxArtwork = {workId:string;artworkId:string;kind:string;provider:string;providerImageId:string|null};
 export type InboxAuthority = {identity:AuthorityIdentity;snapshotCursor?:number;works:InboxWork[];artworks:InboxArtwork[];people:InboxPerson[]};
 export const inboxPath = (id:string) => `/v1/av-inbox/${encodeURIComponent(id)}`;
@@ -61,6 +63,7 @@ export async function readInboxAuthority(identity:AuthorityIdentity,signal?:Abor
   }
   for(const work of result.works)work.avCredits=work.avCredits.map(({personId,role,order,creditName})=>({personId,role,order,creditName:creditName??null}));
   for(const work of result.works)for(const person of work.avPeople??[])if(!result.people.some(p=>p.personId===person.personId))result.people.push(person);
+  rememberPersonNames(result.people, connection);
   return result;
 }
 export async function jacketPreview(id:string,signal:AbortSignal):Promise<string> {

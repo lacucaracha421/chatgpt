@@ -1,0 +1,23 @@
+.person-profile-editor { display:grid; gap:var(--space-4); }
+.person-profile-editor__field { display:grid; gap:var(--space-2); min-width:0; }
+.person-profile-editor__label { display:flex; align-items:center; gap:var(--space-2); font-size:var(--type-meta); color:var(--color-muted); }
+.person-profile-editor__label>span,.person-profile-editor__source,.person-profile-editor__field>small { color:var(--color-faint); font-size:var(--type-meta); }
+.person-profile-editor__pair,.person-profile-editor__triple { display:grid; gap:var(--space-2); grid-template-columns:repeat(2,minmax(0,1fr)); }
+.person-profile-editor__triple { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.person-profile-editor input { width:100%; min-width:0; }
+.person-profile-editor__links { display:grid; gap:var(--space-2); }
+.person-profile-editor__link { display:grid; gap:var(--space-2); grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto; }
+.person-profile-editor__source { display:flex; align-items:center; gap:var(--space-1); flex-wrap:wrap; }
+.person-profile-mark { font-size:var(--type-meta); color:var(--color-faint); background:none; border:0; padding:0 var(--space-1); cursor:pointer; }
+.person-profile-compare dl { display:grid; gap:var(--space-3); }
+.person-profile-compare dt { color:var(--color-muted); font-size:var(--type-meta); }
+.person-profile-compare dd { margin:var(--space-1) 0 0; }
+.person-profile-popover { position:fixed; z-index:10; min-width:16rem; max-width:min(24rem,90vw); padding:var(--space-4); border:1px solid var(--color-border); background:var(--color-surface-elevated); box-shadow:var(--shadow-floating); animation:person-profile-enter 180ms ease-out; }
+@keyframes person-profile-enter { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+@media (prefers-reduced-motion:reduce) { .person-profile-popover { animation:none; } }
+
+.person-profile-editor__url-error { grid-column:1 / -1; color:var(--color-danger); font-size:var(--type-meta); }
+.library-sheet--tall .person-profile-editor>.ui-dialog__actions { position:sticky; bottom:0; padding:var(--space-3) 0; background:var(--color-sidebar); }
+.person-profile-mark-wrap { position:relative; }
+
+.person-profile-editor__input-label { display:grid; gap:var(--space-1); color:var(--color-muted); font-size:var(--type-meta); }

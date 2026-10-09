@@ -1,5 +1,7 @@
+import type {ProfilePerson, ProfileChanges, ProfileExpected} from "./av/personProfileFields";
+export type PersonProfileState = ProfilePerson & {profilePending?: boolean; profileFieldsSupported?: boolean; profileMessage?: string; profileConflicts?: {operationId: string; code: string}[]};
 export type AvPersonRole = "performer" | "director";
-export type AvPerson = { id: string; displayName: string };
+export type AvPerson = ProfilePerson & { id: string; displayName: string };
 export type AvPortrait =
   | { kind: "crop"; artworkId: string; revision: string; rect: { x: number; y: number; w: number; h: number } }
   | ({ kind: "stashdb" } & AvStashdbPreview)
@@ -35,15 +37,15 @@ export type AvWorkCard = {
   frontArtworkId: string | null; spineArtworkId: string | null; backArtworkId: string | null; coverRevision: string;
 };
 export type AvRelated = {
-  performers: { personId: string; displayName: string; total: number; items: AvWorkCard[] }[];
+  performers: (ProfilePerson & { personId: string; displayName: string; total: number; items: AvWorkCard[] })[];
   series: { name: string; total: number; items: (AvWorkCard & { current: boolean })[] } | null;
   label: { name: string; total: number; items: AvWorkCard[] } | null;
 };
 export type AvPerformerPage = {
-  person: { id: string; displayName: string; nameJa: string | null; wikidataId: string | null; fanzaActressId: string | null; memo: string | null; portrait: AvPortrait | null };
+  person: ProfilePerson & { id: string; displayName: string; nameJa: string | null; wikidataId: string | null; fanzaActressId: string | null; memo: string | null; portrait: AvPortrait | null };
   stats: { workCount: number; firstRelease: string | null; lastRelease: string | null; averageScore: number | null };
   works: (AvWorkCard & { role: AvPersonRole; solo: boolean })[];
-  coPerformers: { id: string; displayName: string; count: number; portrait: AvPortrait | null }[];
+  coPerformers: (ProfilePerson & { id: string; displayName: string; count: number; portrait: AvPortrait | null })[];
   labels: { name: string; count: number }[];
 };
 export type AvPortraitSource = { collectionId: string; name: string; productCode: string | null; artworkId: string; revision: string; solo: boolean; width: number; height: number };
@@ -65,6 +67,10 @@ export type AvPerformerProfile = {
   candidates: AvProfileCandidate[]; fetchedAt: string;
 };
 export interface AvGateway {
+  refreshPersonProfileState?(personId: string): Promise<PersonProfileState | null>;
+  getPersonProfileState?(personId: string): Promise<PersonProfileState | null>;
+  setPersonProfileFields?(personId: string, changes: ProfileChanges, expected: ProfileExpected): Promise<PersonProfileState>;
+  resolvePersonProfileConflict?(personId: string, operationId: string, overwrite: boolean): Promise<PersonProfileState>;
   getStashdbCredentialStatus(): Promise<AvStashdbStatus>;
   getStashdbProfileDetail(personId: string): Promise<AvPerformerProfile | null>;
   previewStashdbImage(url: string): Promise<string>;

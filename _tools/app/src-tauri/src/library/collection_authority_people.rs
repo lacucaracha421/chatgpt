@@ -136,14 +136,15 @@ fn predict_person_profile(
         .map(|raw| serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse))
         .transpose()?;
     let changed = if body["stashdbId"].is_null() {
-        !state["stashdbId"].is_null() || !state["profile"].is_null()
+        !state["stashdbId"].is_null() || !state.get("stashdbProfile").unwrap_or(&state["profile"]).is_null()
     } else if let Some(profile) = hint.as_ref() {
-        state["stashdbId"] != body["stashdbId"] || state["profile"] != *profile
+        state["stashdbId"] != body["stashdbId"] || state.get("stashdbProfile").unwrap_or(&state["profile"]) != profile
     } else {
         true
     };
     state["stashdbId"] = body["stashdbId"].clone();
-    state["profile"] = hint.unwrap_or(Value::Null);
+    state["stashdbProfile"] = hint.unwrap_or(Value::Null);
+    merge_person_profile(state)?;
     Ok(changed)
 }
 fn profile_prediction_key(operation: &str) -> String {
@@ -172,19 +173,19 @@ fn predicted_person_before(
     person: &str,
     before: Option<&str>,
 ) -> Result<Value, LibraryError> {
-    let mut value = confirmed_person(db, person)?;
-    let rows = db
-        .prepare(
-            "SELECT payload FROM collection_authority_outbox WHERE state='pending' ORDER BY seq",
-        )?
+    let rows = pending_person_intents(db)?;
+    let end = before.and_then(|operation| rows.iter().position(|body| body["operationId"] == operation)).unwrap_or(rows.len());
+    predict_person_intents(db, person, &rows[..end])
+}
+fn pending_person_intents(db: &Connection) -> Result<Vec<Value>, LibraryError> {
+    db.prepare("SELECT payload FROM collection_authority_outbox WHERE state='pending' ORDER BY seq")?
         .query_map([], |r| r.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    for raw in rows {
-        let body: Value =
-            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
-        if before.is_some_and(|operation| body["operationId"] == operation) {
-            break;
-        }
+        .map(|raw| serde_json::from_str(&raw?).map_err(|_| LibraryError::InvalidCloudResponse))
+        .collect()
+}
+fn predict_person_intents(db: &Connection, person: &str, rows: &[Value]) -> Result<Value, LibraryError> {
+    let mut value = confirmed_person(db, person)?;
+    for body in rows {
         if body["commandType"] == "setAvCredits" && value.is_none() {
             if let Some(p) = body["people"]
                 .as_array()
@@ -214,8 +215,11 @@ fn predicted_person_before(
             changed = state["portraitSelection"] != body["portrait"];
             state["portraitSelection"] = body["portrait"].clone();
         }
+        if body["commandType"] == "setPersonProfileFields" {
+            changed = apply_person_profile_fields(state, &body["changes"])?;
+        }
         if body["commandType"] == "setPersonProfile" {
-            changed = predict_person_profile(db, state, &body)?;
+            changed = predict_person_profile(db, state, body)?;
         }
         if changed {
             state["entityRevision"] = json!(integer(state, "entityRevision")? + 1);
@@ -363,6 +367,13 @@ fn receive_person(tx: &Transaction<'_>, person: &Value, now: &str) -> Result<(),
     {
         return Ok(());
     }
+    let mut retained = person.clone();
+    if let Some(previous) = previous {
+        for field in ["stashdbProfile", "profileOverrides", "profileBaseNames"] {
+            if retained.get(field).is_none() { if let Some(value) = previous.get(field) { retained[field] = value.clone(); } }
+        }
+    }
+    let person = &retained;
     tx.execute("INSERT INTO collection_authority_people_cache(library_id,epoch,person_id,revision,payload) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(library_id,epoch,person_id) DO UPDATE SET revision=excluded.revision,payload=excluded.payload",
         params![l.id.library,l.id.epoch,id,rev,person.to_string()])?;
     tx.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,?4,?4) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,name_ja=excluded.name_ja",
@@ -640,8 +651,8 @@ fn project_person_profile(
     // from the confirmed cache, while keeping stashdb_id genuinely null.
     tx.execute("INSERT OR REPLACE INTO collection_person_profiles
         (person_id,source,status,stashdb_id,name,aliases_json,birth_date,height_cm,band_in,waist_in,hip_in,cup,breast_type,career_start,career_end,urls_json,images_json,candidates_json,fetched_at)
-        VALUES(?1,'stashdb',CASE WHEN ?2 IS NULL THEN 'none' ELSE 'matched' END,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'[]','[]',?15)",
-        params![person,sql_value(&value["stashdbId"])?,text(profile,"name")?,profile["aliases"].to_string(),
+        VALUES(?1,'stashdb',CASE WHEN ?2 IS NULL OR ?3 IS NULL THEN 'none' ELSE 'matched' END,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'[]','[]',?15)",
+        params![person,sql_value(&value["stashdbId"])?,sql_value(&profile["name"])?,profile["aliases"].to_string(),
         sql_value(&profile["birthDate"])?,sql_value(&profile["heightCm"])?,sql_value(&profile["bandIn"])?,
         sql_value(&profile["waistIn"])?,sql_value(&profile["hipIn"])?,sql_value(&profile["cup"])?,
         sql_value(&profile["breastType"])?,sql_value(&profile["careerStart"])?,sql_value(&profile["careerEnd"])?,json!(urls).to_string(),now])?;

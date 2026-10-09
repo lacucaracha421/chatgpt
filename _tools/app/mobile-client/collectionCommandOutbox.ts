@@ -1,3 +1,5 @@
+import {rememberPersonNames} from './personNameCache';
+import {applyProfileChanges, hasOwn, hasProfileMetadata, profileExpected, validateProfileChanges, validateProfileExpected, validateProfileCareer, type ProfilePerson, type ProfileChanges, type ProfileExpected} from "../src/collections/av/personProfileFields";
 import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection';
 import {api, ApiError, errorText} from './transport';
 import type {CollectionDetail, CollectionKind, CollectionSummary, CollectionPerson} from './collectionModel';
@@ -35,10 +37,11 @@ export type PortraitManifest = {original: BlobReceipt; width: number; height: nu
 export type PersonRevisionCommand = {personId: string; workId?: never; expectedRevision: number} & (
   {commandType: 'setPersonProfile'; stashdbId: string | null} |
   {commandType: 'setPersonPortrait'; portrait: ({kind: 'image'} & PortraitManifest) | null});
-export type PersonCommand = SetPersonCommand | PersonRevisionCommand;
+export type SetPersonProfileFieldsCommand = {commandType: 'setPersonProfileFields'; personId: string; workId?: never; changes: ProfileChanges; expected: ProfileExpected};
+export type PersonCommand = SetPersonCommand | PersonRevisionCommand | SetPersonProfileFieldsCommand;
 export type AuthorityCommand = WorkCommand | PersonCommand;
 export function isPersonCommand(command: AuthorityCommand): command is PersonCommand {
-  return command.commandType === 'setPerson' || command.commandType === 'setPersonProfile' || command.commandType === 'setPersonPortrait';
+  return command.commandType === 'setPersonProfileFields' || command.commandType === 'setPerson' || command.commandType === 'setPersonProfile' || command.commandType === 'setPersonPortrait';
 }
 export type Command = AuthorityIdentity & AuthorityCommand & {operationId: string};
 /**
@@ -47,7 +50,7 @@ export type Command = AuthorityIdentity & AuthorityCommand & {operationId: strin
  */
 export type ConflictWork = {name: string; fields: Fields; entityRevision?: number; details?: {av?: CollectionSummary['av']}; avCredits?: AvCredit[]};
 /** The server's person in a `setPerson` conflict (`current.person`). */
-export type ConflictPerson = {personId?: string; memo?: string | null; favorite?: boolean; entityRevision?: number};
+export type ConflictPerson = ProfilePerson & {personId?: string; memo?: string | null; favorite?: boolean; entityRevision?: number};
 export type CommandIntent = {inboxId?: string; command: Command; label?: string; avOverlay?: AvOverlay; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
   state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: ConflictWork; person?: ConflictPerson}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
@@ -64,7 +67,7 @@ export function readCommands(connection = outboxConnection()): CommandIntent[] {
       if (!row?.command || typeof row.command.operationId !== 'string'
         || !(typeof row.command.workId === 'string' || isPersonCommand(row.command) && typeof row.command.personId === 'string')
         || !authorityIdentity({...row.command, active: true}) || !['pending', 'conflict', 'accepted'].includes(row.state)) return false;
-      if (row.command.commandType === 'setPersonProfile' || row.command.commandType === 'setPersonPortrait') {
+      if (row.command.commandType === 'setPersonProfileFields' || row.command.commandType === 'setPersonProfile' || row.command.commandType === 'setPersonPortrait') {
         try { validateAvCommand(row.command); } catch { return false; }
       }
       return true;
@@ -161,7 +164,11 @@ export function replaceCommand(operationId: string, command: AuthorityCommand | 
 }
 const inFlight = new Map<string, Promise<void>>();
 function validateAvCommand(command: AuthorityCommand) {
-  if (command.commandType === 'setPerson') {
+  if (command.commandType === 'setPersonProfileFields') {
+    if (typeof command.personId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.personId)) throw new Error(AV_INPUT_ERROR);
+    validateProfileChanges(command.changes); validateProfileExpected(command.changes, command.expected);
+    if (new TextEncoder().encode(JSON.stringify(command)).byteLength > 64 * 1024) throw new Error(AV_INPUT_ERROR);
+  } else if (command.commandType === 'setPerson') {
     if (typeof command.personId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.personId)) throw new Error(AV_INPUT_ERROR);
     validatePersonFields(command.changes); validatePersonFields(command.expected);
     if (!sameAvValue(Object.keys(command.changes).sort(), Object.keys(command.expected).sort())) throw new Error(AV_INPUT_ERROR);
@@ -387,6 +394,7 @@ export function personCommand(personId: string, confirmed: PersonValues, rows: C
 export function rebasePersonCommand(row: CommandIntent): PersonCommand | null {
   const command = row.command, current = row.conflict?.current?.person;
   if (!isPersonCommand(command) || !current) return null;
+  if (command.commandType === 'setPersonProfileFields') return row.conflict?.code === 'revisionConflict' && hasProfileMetadata(current) ? {commandType: 'setPersonProfileFields', personId: command.personId, changes: command.changes, expected: profileExpected(current, command.changes)} : null;
   if (command.commandType !== 'setPerson') return row.conflict?.code === 'revisionConflict' && Number.isSafeInteger(current.entityRevision) && current.entityRevision! > 0
     ? command.commandType === 'setPersonProfile'
       ? {commandType: 'setPersonProfile', personId: command.personId, stashdbId: command.stashdbId, expectedRevision: current.entityRevision!}
@@ -429,6 +437,7 @@ export function confirmedPersonEntity(person: CollectionPerson, personId: string
     const received = row.receipts?.[row.receipts.length - 1]?.person;
     if (received && (received.id === personId || received.personId === personId) && (received.entityRevision ?? 0) >= (next.entityRevision ?? 0)) next = {...next, ...received, id: personId};
   }
+  rememberPersonNames([next]);
   return next;
 }
 export function reconcilePersonRevision(identity: AuthorityIdentity, personId: string, revision: number, readStartedAt: number) {
@@ -437,4 +446,27 @@ export function reconcilePersonRevision(identity: AuthorityIdentity, personId: s
     && row.command.personId === personId && row.command.commandType !== 'setPerson' && readStartedAt > (row.acceptedAt ?? Infinity)
     && revision >= (row.receipts?.[row.receipts.length - 1]?.person?.entityRevision ?? Infinity)));
   if (next.length !== rows.length) write(next);
+}
+
+/** Unresolved FIFO profile intents over the newest confirmed full-person read/receipt. */
+export function optimisticPersonProfile<T extends ProfilePerson>(person: T, personId: string, rows: CommandIntent[]): T {
+  let next = person;
+  for (const row of rows) if (row.state !== 'accepted' && isPersonCommand(row.command) && row.command.personId === personId) {
+    if (row.command.commandType === 'setPersonProfileFields') next = applyProfileChanges(next, row.command.changes);
+    else if (row.command.commandType === 'setPersonProfile' && row.command.stashdbId === null) {
+      next = {...next, stashdbId: null, stashdbProfile: null};
+      const changes: ProfileChanges = {};
+      for (const key of ['birthDate','heightCm','bandIn','waistIn','hipIn','cup','breastType','careerStart','careerEnd','urls'] as const)
+        if (!hasOwn(next.profileOverrides ?? {}, key)) changes[key] = {reset: true};
+      next = applyProfileChanges(next, changes);
+    }
+  }
+  return next;
+}
+export function personProfileCommand(personId: string, person: ProfilePerson, rows: CommandIntent[], changes: ProfileChanges, expected: ProfileExpected): SetPersonProfileFieldsCommand {
+  if (!hasProfileMetadata(person) || rows.some(row => row.state === 'conflict' && isPersonCommand(row.command) && row.command.personId === personId)) throw new Error('충돌을 정리한 뒤 다시 편집할 수 있습니다.');
+  if (rows.some(row => row.state !== 'accepted' && row.command.commandType === 'setPersonProfile' && row.command.personId === personId && row.command.stashdbId !== null)) throw new Error('앞선 StashDB 변경을 보낸 뒤 다시 저장해 주세요.');
+  const predicted = optimisticPersonProfile(person, personId, rows);
+  validateProfileChanges(changes); validateProfileExpected(changes, expected); validateProfileCareer(predicted, changes);
+  return {commandType: 'setPersonProfileFields', personId, changes, expected};
 }

@@ -1,3 +1,4 @@
+import {performerName} from "./av/performerName";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { displayDate, displayTime } from "../shared/displayDate";
 import { ArrowTopRightOnSquareIcon, ArrowUturnLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
@@ -16,7 +17,7 @@ import { avLinkClient, type AvLinkApplyRequest, type AvLinkCandidate, type AvLin
 
 type Surface = "front" | "spine" | "back";
 type FieldKey = "title_ja" | "release_date" | "maker" | "label" | "series";
-type PersonDraft = { action: "skip" | "link" | "new"; personId?: string; displayName: string };
+type PersonDraft = { action: "skip" | "link" | "new"; personId?: string; displayName: string; nameSource?: AvPerson };
 type AvLinkApi = typeof avLinkClient;
 
 const FIELD_ROWS: Array<{ key: FieldKey; label: string }> = [
@@ -87,11 +88,15 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
     try {
       const raw = await api.getCandidate(inboxId, destination);
       const eligibleMatches = async (people: AvLinkPersonMatch[], role: "performer" | "director") => Promise.all(people.map(async person => {
-        if (!person.personId || person.alreadyLinked) return person;
-        return await hasPersonCredit(peopleApi, person.personId, role) ? person : { ...person, personId: null, displayName: null, matchBy: null };
+        if (!person.personId) return person;
+        const page = await peopleApi.getPerformer(person.personId).catch(reason => { if (person.alreadyLinked) return null; throw reason; });
+        if (!page) return person;
+        const enriched = {...person, ...page.person};
+        return person.alreadyLinked || await hasPersonCredit(peopleApi, person.personId, role, page) ? enriched : { ...person, personId: null, displayName: null, matchBy: null };
       }));
       const [performers, directors] = await Promise.all([eligibleMatches(raw.performers, "performer"), eligibleMatches(raw.directors, "director")]);
-      const next = { ...raw, performers, directors };
+      const current = raw.current ? {...raw.current, people: await Promise.all(raw.current.people.map(async person => ({...person, ...(await peopleApi.getPerformer(person.id).catch(() => null))?.person})))} : null;
+      const next = { ...raw, current, performers, directors };
       setCandidate(next);
       setChoseNew(false);
       setTargetId(next.current?.collectionId);
@@ -347,7 +352,7 @@ function PeopleRow({ role, label, checked, isNew, current, people, drafts, onChe
     <span role="cell" className="av-link-people">{people.length === 0 ? "후보 없음" : people.map(person => {
       const draft = drafts[person.name_ja] ?? defaultPersonDraft(person);
       const name = personLabel(person);
-      return <span className="av-link-person" key={person.name_ja}><span className="av-link-person__name"><b>{name}</b>{person.alreadyLinked && <small>이미 연결됨</small>}</span>
+      return <span className="av-link-person" key={person.name_ja}><span className="av-link-person__name"><b>{name}</b>{personNames(person).secondary && <small lang="ja">{personNames(person).secondary}</small>}{person.alreadyLinked && <small>이미 연결됨</small>}</span>
         {!person.alreadyLinked && <PersonChoiceControl role={role} person={person} draft={draft} peopleApi={peopleApi}
           onChange={value => onDrafts({ ...drafts, [person.name_ja]: value })} />}
       </span>;
@@ -386,15 +391,15 @@ function PersonChoiceControl({ role, person, draft, peopleApi, onChange }: {
       setSearching(false);
       onChange(value.startsWith("link:") ? { ...draft, action: "link", personId: value.slice(5) } : { ...draft, action: "new", personId: undefined });
     }}>
-      {person.personId && <option value={`link:${person.personId}`}>{person.displayName || name}</option>}
-      {draft.action === "link" && draft.personId && draft.personId !== person.personId && <option value={`link:${draft.personId}`}>{draft.displayName}</option>}
+      {person.personId && <option value={`link:${person.personId}`}>{name}</option>}
+      {draft.action === "link" && draft.personId && draft.personId !== person.personId && <option value={`link:${draft.personId}`}>{performerName(draft.nameSource ?? draft).primary}</option>}
       <option value="new">새 인물로 추가</option>
       <option value="search">기존 인물에 연결…</option>
     </select>
     {searching && <span className="av-link-person__search"><input autoFocus aria-label={`${name} 기존 인물 검색`} maxLength={120} value={query} onChange={event => setQuery(event.target.value)} />
       {results.length > 0 && <span role="listbox" aria-label={`${name} 기존 인물 검색 결과`}>{results.map(result => <button type="button" role="option" key={result.id} onClick={() => {
-        onChange({ action: "link", personId: result.id, displayName: result.displayName }); setSearching(false);
-      }}>{result.displayName}</button>)}</span>}</span>}
+        onChange({ action: "link", personId: result.id, displayName: result.displayName, nameSource: result }); setSearching(false);
+      }}>{performerName(result).primary}{performerName(result).secondary && <small lang="ja">{performerName(result).secondary}</small>}</button>)}</span>}</span>}
     {!searching && draft.action === "new" && <input aria-label={`${name} 표시 이름`} maxLength={120} value={draft.displayName} onChange={event => onChange({ ...draft, displayName: event.target.value })} />}
   </>;
 }
@@ -431,12 +436,16 @@ function peopleRequest(people: AvLinkPersonMatch[], drafts: Record<string, Perso
   });
 }
 
+function personNames(person: AvLinkPersonMatch) {
+  return performerName({...person, displayName: person.displayName || person.name_ko || person.name_ja, nameJa: person.nameJa || person.name_ja});
+}
+
 function personLabel(person: AvLinkPersonMatch) {
-  return person.name_ko ? `${person.name_ko} (${person.name_ja})` : person.name_ja;
+  return personNames(person).primary;
 }
 
 function currentPeople(candidate: AvLinkCandidate, role: "performer" | "director") {
-  return candidate.current?.people.filter(person => person.role === role).map(person => person.creditName || person.displayName).join(" · ") || "—";
+  return candidate.current?.people.filter(person => person.role === role).map(person => [performerName(person).primary, performerName(person).secondary].filter(Boolean).join(" · ")).join(" · ") || "—";
 }
 
 function fieldDisplay(key: FieldKey, value: string | null | undefined) {
@@ -468,8 +477,8 @@ function errorMessage(reason: unknown, fallback: string) {
   return typeof reason === "string" && reason.trim() ? reason.trim() : fallback;
 }
 
-async function hasPersonCredit(api: Pick<AvGateway, "getPerformer" | "getDetails">, personId: string, role: "performer" | "director") {
-  const page = await api.getPerformer(personId);
+async function hasPersonCredit(api: Pick<AvGateway, "getPerformer" | "getDetails">, personId: string, role: "performer" | "director", known?: Awaited<ReturnType<AvGateway["getPerformer"]>>) {
+  const page = known ?? await api.getPerformer(personId);
   if (page.works.some(work => work.role === role)) return true;
   if (role === "performer") return false;
   // Performer pages collapse a dual credit in one work to its performer role.

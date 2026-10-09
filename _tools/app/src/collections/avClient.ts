@@ -28,6 +28,10 @@ export const avGateway: AvGateway = {
     return { ...preview, thumbnailDataUrl: `data:image/png;base64,${btoa(binary)}` };
   },
   getRelated: collectionId => invoke("get_av_related", { collectionId }),
+  refreshPersonProfileState: personId => invoke("get_av_person_profile_state", {personId, refresh: true}),
+  getPersonProfileState: personId => invoke("get_av_person_profile_state", {personId}),
+  setPersonProfileFields: (personId, changes, expected) => invoke("set_av_person_profile_fields", {personId, changes, expected}),
+  resolvePersonProfileConflict: (personId, operationId, overwrite) => invoke("resolve_av_person_profile_conflict", {personId, operationId, overwrite}),
   getPerformer: personId => invoke("get_av_performer", { personId }),
   savePersonMemo: (personId, memo) => invoke("save_av_person_memo", { personId, memo }),
   listPortraitSources: personId => invoke("list_av_portrait_sources", { personId }),

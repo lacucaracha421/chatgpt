@@ -1,3 +1,5 @@
+import {PerformerName, usePerformerNames} from "./PerformerName";
+import {performerName} from "../src/collections/av/performerName";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useMemo, useRef, useState, type CSSProperties} from 'react';
 import {ChevronDownIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
@@ -38,7 +40,7 @@ export function PersonPortrait({person,current,items,revision,size='small',priva
   const crop=privacy||imageWanted?null:person.portraitCrop;
   const source=items.find(item=>item.artworkVersions?.[crop?.artworkId??''])??current;
   const url=useArtworkSet(source,crop?{front:{id:crop.artworkId,original:false}}:{},revision,!privacy&&!imageWanted).urls.front;
-  const label=`${person.name} 사진`;
+  const label=`${performerName(person).primary} 사진`;
   if(!privacy&&image&&portrait.url)return <span className={`av-portrait av-portrait-${size} has-image`} aria-label={label}>
     <StableImage src={portrait.url} alt="" width={image.width||undefined} height={image.height||undefined} draggable={false}/>
   </span>;
@@ -48,7 +50,7 @@ export function PersonPortrait({person,current,items,revision,size='small',priva
     style.backgroundSize=`${100/crop.w}% ${100/crop.h}%`;
     style.backgroundPosition=`${crop.w<1?crop.x/(1-crop.w)*100:0}% ${crop.h<1?crop.y/(1-crop.h)*100:0}%`;
   }
-  return <span className={`av-portrait av-portrait-${size}${url&&crop?' has-image':''}`} style={style} aria-label={label}>{(!url||!crop)&&<span aria-hidden="true">{initials(person.name)}</span>}</span>;
+  return <span className={`av-portrait av-portrait-${size}${url&&crop?' has-image':''}`} style={style} aria-label={label}>{(!url||!crop)&&<span aria-hidden="true">{initials(performerName(person).primary)}</span>}</span>;
 }
 
 type LookupFeedback = {kind: 'sent'; code: string} | {kind: 'offline' | 'rate' | 'invalid'};
@@ -155,13 +157,13 @@ export function AvPerformerShelves({items,revision,active,privacy,perRow,picked,
     }
     return [...people.values()].sort((a,b)=>a.person.order-b.person.order||a.person.name.localeCompare(b.person.name,'ko'));
   },[items]);
-  return <div className="av-performer-list">{rows.map(({person,works})=><section key={person.id} className="av-performer-shelf" aria-label={`${person.name} 작품`}>
+  return <div className="av-performer-list">{rows.map(({person,works})=><section key={person.id} className="av-performer-shelf" aria-label={`${performerName(person).primary} 작품`}>
     <button type="button" className="av-performer-heading" onClick={()=>onPerformer(person.id)}>
       <PersonPortrait person={person} current={works[0]!} items={items} revision={revision}/>
-      <span><b>{person.name}</b>{person.nameJa&&<small lang="ja">{person.nameJa}</small>}</span>
+      <span><PerformerName person={person}/></span>
       <span className="muted numeric">{works.length.toLocaleString()}편</span><ChevronRightIcon aria-hidden="true"/>
     </button>
-    <CollectionList items={works} view={{layout:'shelf',perRow,grouping:'sort'}} showcase windowRows pickedId={picked} label={`${person.name} 작품 선반`} onPick={onTap}
+    <CollectionList items={works} view={{layout:'shelf',perRow,grouping:'sort'}} showcase windowRows pickedId={picked} label={`${performerName(person).primary} 작품 선반`} onPick={onTap}
       render={work=><ShelfTile item={work} revision={revision} active={active} privacy={privacy} picked={picked===work.id} onTap={onTap}/>}/>
   </section>)}</div>;
 }
@@ -177,20 +179,21 @@ export function AvCast({item,items,complete,revision,onPerson}:{item:CollectionD
   return <section className="work-info" aria-label="출연 · 감독"><SectionLabel title="출연 · 감독"/><div className="tablet-work-people">
     {people.map(person=><Button key={`${person.role}/${person.id}`} variant="ghost" className="tablet-work-person" disabled={person.role!=='performer'} onClick={()=>onPerson(person.id)}>
       <PersonPortrait person={person} current={item} items={items} revision={revision}/>
-      <span><b>{person.creditName || person.name}</b><small>{person.role==='director'?'감독':[person.nameJa,complete?`내 라이브러리 ${count(person).toLocaleString()}편`:null].filter(Boolean).join(' · ')}</small></span>
+      <span><PerformerName person={person}/><small>{person.role==='director'?'감독':[complete?`내 라이브러리 ${count(person).toLocaleString()}편`:null].filter(Boolean).join(' · ')}</small>{person.creditName && person.creditName !== performerName(person).primary && person.creditName !== performerName(person).secondary && <small>{person.creditName}</small>}</span>
     </Button>)}
   </div></section>;
 }
 
 /** 관련 작품, as on the PC: the performers' other works, the same series and label, from the loaded works. */
 export function AvRelatedWorks({item,items,onOpen}:{item:CollectionDetail;items:CollectionSummary[];onOpen(id:string):void}) {
+  const [open,setOpen]=useState(false);
+  const people=usePerformerNames(performersOf(item), open);
   const others=items.filter(work=>work.type==='av'&&work.id!==item.id);
   const groups=[
-    ...performersOf(item).map(person=>({name:`${person.name} · 다른 작품`,works:others.filter(work=>performersOf(work).some(other=>other.id===person.id))})),
+    ...people.map(person=>({name:`${performerName(person).primary} · 다른 작품`,works:others.filter(work=>performersOf(work).some(other=>other.id===person.id))})),
     ...(item.av?.series?[{name:'같은 시리즈',works:others.filter(work=>work.av?.series===item.av?.series)}]:[]),
     ...(item.av?.label?[{name:'같은 레이블',works:others.filter(work=>work.av?.label===item.av?.label)}]:[]),
   ].filter(group=>group.works.length>0);
-  const [open,setOpen]=useState(false);
   if(!groups.length)return null;
   return <div className="tablet-work-related"><button type="button" className="tablet-work-related__toggle" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>관련 작품<ChevronDownIcon aria-hidden="true"/></button><Fold open={open}>{groups.map(group=><section key={group.name} aria-label={group.name}><SectionLabel title={group.name}/>
     {group.works.map(work=><Button key={work.id} variant="quiet" onClick={()=>onOpen(work.id)}>{[work.av?.productCode??work.name,displayDate(work.av?.releaseDate??work.releaseDate)].filter(Boolean).join(' · ')}</Button>)}

@@ -1453,6 +1453,7 @@ pub(crate) fn fixture() -> (tempfile::TempDir, Library, CollectionAuthorityStatu
         epoch: Some(1),
         contract_version: Some(1),
         cursor: Some(0),
+        features: vec![],
     };
     (temp, library, status)
 }
@@ -4407,4 +4408,268 @@ fn collection_authority_av_inbox_artwork_has_nothing_to_upload() {
     library
         .upload_collection_command_artwork_with(&body, &never_upload, &never_confirm)
         .unwrap();
+}
+
+fn manual_profile_fixture() -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
+    let (temp, library, mut status) = people_fixture(false);
+    status.features = vec!["personProfileFields".into()];
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    let profile = json!({"source":"stashdb","name":"Roman Name","aliases":[],"birthDate":"1990","heightCm":160,"bandIn":32,"waistIn":24,"hipIn":34,"cup":"C","breastType":"NATURAL","careerStart":2010,"careerEnd":null,"urls":[]});
+    let mut person = server_person(1, "remote memo");
+    person["stashdbId"] = json!("stash");
+    person["profile"] = profile.clone(); person["stashdbProfile"] = profile;
+    person["profileOverrides"] = json!({});
+    receive_person(&tx, &person, NOW).unwrap();
+    tx.execute("INSERT INTO notes_state(key,value) VALUES('personProfileFieldsStatus',?1)",[json!({"active":true,"libraryId":status.library_id,"epoch":1,"features":["personProfileFields"]}).to_string()]).unwrap();
+    tx.commit().unwrap(); drop(db);
+    (temp,library,status)
+}
+#[test]
+fn collection_authority_manual_profile_fields_fifo_tokens_and_work_revision() {
+    let (_temp, library, _status)=manual_profile_fixture();
+    edit_profile(&library,json!({"bandIn":33,"cup":null})).unwrap();
+    edit_profile(&library,json!({"bandIn":34})).unwrap();
+    let db=library.connection().unwrap();
+    let bodies=db.prepare("SELECT payload FROM collection_authority_outbox WHERE command_type='setPersonProfileFields' ORDER BY seq").unwrap().query_map([],|r|r.get::<_,String>(0)).unwrap().map(|r|serde_json::from_str::<Value>(&r.unwrap()).unwrap()).collect::<Vec<_>>();
+    assert_eq!(bodies[0]["expected"]["bandIn"],json!({"value":32,"overridden":false}));
+    assert_eq!(bodies[1]["expected"]["bandIn"],json!({"value":33,"overridden":true}));
+    assert_eq!(bodies[0]["changes"].as_object().unwrap().len(),2);
+    let person=predicted_person(&db,"p").unwrap();
+    assert_eq!(person["profile"]["bandIn"],34);
+    assert!(person["profileOverrides"].get("cup").is_some());
+    assert!(person["profile"]["cup"].is_null());
+    assert_eq!(person["stashdbProfile"]["cup"],"C");
+    assert_eq!(confirmed_person(&db,"p").unwrap().unwrap()["entityRevision"],1);
+    assert_eq!(person["entityRevision"],3);
+    assert_eq!(predicted_collection_revision(&db,"works",&json!(["av"]).to_string()).unwrap(),3);
+}
+#[test]
+fn collection_authority_manual_profile_receipts_metadata_and_old_revision_guard() {
+    let (_temp,library,status)=manual_profile_fixture();
+    edit_profile(&library,json!({"heightCm":170,"displayName":"한국 이름"})).unwrap();
+    library.flush_collection_outbox_with(&status,&|body| {
+        let mut person=predicted_person(&*library.connection().unwrap(),"p").unwrap();
+        person["entityRevision"]=json!(2);
+        Ok(CollectionDelivery::Accepted(person_receipt(&status,body,person,1)))
+    },0).unwrap();
+    let mut db=library.connection().unwrap();let tx=db.transaction().unwrap();
+    let mut older=server_person(1,"old");older["profile"]=Value::Null;
+    receive_person(&tx,&older,NOW).unwrap();
+    let confirmed=confirmed_person(&tx,"p").unwrap().unwrap();
+    assert_eq!(confirmed["displayName"],"한국 이름");
+    assert_eq!(confirmed["profileBaseNames"]["displayName"],"Display");
+    assert_eq!(confirmed["stashdbProfile"]["heightCm"],160);
+    assert_eq!(confirmed["profileOverrides"]["heightCm"],170);
+    tx.commit().unwrap();drop(db);
+    let state=library.av_person_profile_state("p").unwrap();
+    assert_eq!(state["profileFieldsSupported"],true);
+    assert_eq!(library.get_av_performer("p").unwrap().person.display_name,"한국 이름");
+}
+#[test]
+fn collection_authority_manual_profile_group_reset_follows_source_and_clear_keeps_manual() {
+    let (_temp,library,status)=manual_profile_fixture();
+    edit_profile(&library,json!({"bandIn":33,"careerEnd":2020})).unwrap();
+    {
+        let mut db=library.connection().unwrap();let tx=db.transaction().unwrap();
+        let mut person=predicted_person(&tx,"p").unwrap();person["entityRevision"]=json!(3);
+        person["stashdbProfile"]["bandIn"]=json!(35);
+        receive_person(&tx,&person,NOW).unwrap();
+        tx.execute("UPDATE collection_authority_outbox SET state='accepted'",[]).unwrap();
+        tx.commit().unwrap();
+    }
+    edit_profile(&library,json!({"bandIn":{"reset":true},"waistIn":{"reset":true},"hipIn":{"reset":true}})).unwrap();
+    let state=library.av_person_profile_state("p").unwrap();assert_eq!(state["profile"]["bandIn"],35);assert!(state["profileOverrides"].get("bandIn").is_none());
+    let mut db=library.connection().unwrap();let tx=db.transaction().unwrap();
+    enqueue_person_profile(&tx,&status,"p",None).unwrap();
+    let state=predicted_person(&tx,"p").unwrap();
+    assert_eq!(state["profile"]["careerEnd"],2020);assert!(state["stashdbProfile"].is_null());
+    tx.commit().unwrap();
+}
+#[test]
+fn collection_authority_manual_profile_gate_conflict_and_new_operation_id() {
+    let (_temp,library,status)=manual_profile_fixture();
+    edit_profile(&library,json!({"heightCm":170})).unwrap();
+    let original: String=library.connection().unwrap().query_row("SELECT operation_id FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1",[],|r|r.get(0)).unwrap();
+    let mut current=confirmed_person(&*library.connection().unwrap(),"p").unwrap().unwrap();current["profileOverrides"]["heightCm"]=json!(180);current["profile"]["heightCm"]=json!(180);current["entityRevision"]=json!(2);
+    library.flush_collection_outbox_with(&status,&|_|Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"person":current}}))),0).unwrap();
+    assert!(edit_profile(&library,json!({"cup":"D"})).is_err());
+    library.resolve_av_person_profile_conflict("p",&original,true).unwrap();
+    let body:Value=library.connection().unwrap().query_row("SELECT payload FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1",[],|r|r.get::<_,String>(0)).map(|v|serde_json::from_str(&v).unwrap()).unwrap();
+    assert_ne!(body["operationId"],original);assert_eq!(body["expected"]["heightCm"],json!({"value":180,"overridden":true}));
+    assert_eq!(library.av_person_profile_state("p").unwrap()["profile"]["heightCm"],170);
+    library.connection().unwrap().execute("UPDATE notes_state SET value='{}' WHERE key='personProfileFieldsStatus'",[]).unwrap();
+    assert!(edit_profile(&library,json!({"cup":"D"})).is_err());
+}
+
+#[test]
+fn collection_authority_manual_profile_empty_links_cas_and_unsupported_draft() {
+    let (_temp,library,status)=manual_profile_fixture();
+    {
+        let mut db=library.connection().unwrap();let tx=db.transaction().unwrap();
+        let mut person=confirmed_person(&tx,"p").unwrap().unwrap();person["entityRevision"]=json!(2);person["profile"]=Value::Null;person["stashdbProfile"]=Value::Null;person["stashdbId"]=Value::Null;
+        receive_person(&tx,&person,NOW).unwrap();tx.commit().unwrap();
+    }
+    edit_profile(&library,json!({"urls":null})).unwrap();
+    let body:Value=library.connection().unwrap().query_row("SELECT payload FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1",[],|r|r.get::<_,String>(0)).map(|v|serde_json::from_str(&v).unwrap()).unwrap();
+    assert_eq!(body["expected"]["urls"],json!({"value":null,"overridden":false}));
+    library.flush_collection_outbox_with(&status,&|_|Ok(CollectionDelivery::Dropped(json!({"code":"unsupportedCollectionCommand"}))),0).unwrap();
+    assert_eq!(library.av_person_profile_state("p").unwrap()["profileMessage"],"서버가 아직 프로필 편집을 지원하지 않습니다.");
+    assert_eq!(library.av_person_profile_state("p").unwrap()["profileConflicts"],json!([]));
+    assert_eq!(library.connection().unwrap().query_row("SELECT payload FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1",[],|r|r.get::<_,String>(0)).unwrap(),body.to_string());
+    assert!(validate_profile_fields(&json!({"birthDate":"1990-ab"})).is_err());
+}
+#[test]
+fn collection_authority_manual_profile_authority_read_preserves_newer_state_and_unknown_features() {
+    let (_temp,library,status)=manual_profile_fixture();
+    let mut current=confirmed_person(&*library.connection().unwrap(),"p").unwrap().unwrap();current["entityRevision"]=json!(2);current["profileOverrides"]["heightCm"]=json!(170);current["profile"]["heightCm"]=json!(170);
+    let advertised=json!({"active":true,"libraryId":status.library_id,"epoch":1,"contractVersion":1,"cursor":0,"features":["futureFeature","personProfileFields"]});
+    library.refresh_profile_person_with("p",&||Ok(advertised.clone()),&||Ok(Some(json!({"person":current})))).unwrap();
+    let old=server_person(1,"old");
+    let state=library.refresh_profile_person_with("p",&||Ok(advertised.clone()),&||Ok(Some(json!({"person":old})))).unwrap();assert_eq!(state["profileOverrides"]["heightCm"],170);
+    let state=library.refresh_profile_person_with("p",&||Ok(json!({"active":false,"features":["personProfileFields"]})),&||panic!("inactive authority must not read a person")).unwrap();assert_eq!(state["profileFieldsSupported"],false);
+}
+
+#[test]
+fn collection_authority_manual_profile_waits_for_unknown_provider_source() {
+    let (_temp, library, status) = manual_profile_fixture();
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    enqueue_person_profile(&tx, &status, "p", Some("new-source")).unwrap();
+    let operation: String = tx.query_row("SELECT operation_id FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1", [], |r| r.get(0)).unwrap();
+    tx.commit().unwrap();
+    drop(db);
+    assert!(edit_profile(&library, json!({"heightCm":170})).is_err());
+    let db = library.connection().unwrap();
+    let mut source = confirmed_person(&db, "p").unwrap().unwrap()["stashdbProfile"].clone();
+    source["heightCm"] = json!(165);
+    db.execute("INSERT INTO notes_state(key,value) VALUES(?1,?2)", params![profile_prediction_key(&operation), source.to_string()]).unwrap();
+    drop(db);
+    edit_profile(&library, json!({"heightCm":170})).unwrap();
+    let body: String = library.connection().unwrap().query_row("SELECT payload FROM collection_authority_outbox ORDER BY seq DESC LIMIT 1", [], |r| r.get(0)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["expected"]["heightCm"], json!({"value":165,"overridden":false}));
+}
+
+fn edit_profile(library: &Library, changes: Value) -> Result<Value, LibraryError> {
+    let initial = library.av_person_profile_state("p")?;
+    let expected = changes.as_object().unwrap().keys().map(|field| (field.clone(), profile_field_token(&initial, field))).collect::<serde_json::Map<_, _>>();
+    library.set_av_person_profile_fields("p", changes, Value::Object(expected))
+}
+
+#[test]
+fn collection_authority_manual_profile_discard_without_current_reprojects_names_and_profile() {
+    let (_temp, library, status) = manual_profile_fixture();
+    edit_profile(&library, json!({"displayName":"discarded","nameJa":"discarded ja","heightCm":170})).unwrap();
+    let operation: String = library.connection().unwrap().query_row("SELECT operation_id FROM collection_authority_outbox ORDER BY seq LIMIT 1", [], |r| r.get(0)).unwrap();
+    // A legacy blocked row has no current.person in its definitive refusal.
+    library.connection().unwrap().execute("UPDATE collection_authority_outbox SET state='blocked',conflict_code='unsupportedCollectionCommand',conflict_detail='{\"code\":\"unsupportedCollectionCommand\"}'", []).unwrap();
+    // Simulate a later FIFO intent; discard must retain this prediction.
+    {
+        let mut db = library.connection().unwrap(); let tx = db.transaction().unwrap();
+        enqueue_collection_command(&tx, &status, "setPersonProfileFields", "p", json!({"personId":"p","changes":{"cup":"D"},"expected":{"cup":{"value":"C","overridden":false}}})).unwrap();
+        tx.commit().unwrap();
+    }
+    library.resolve_av_person_profile_conflict("p", &operation, false).unwrap();
+    let db = library.connection().unwrap();
+    let names: (String, Option<String>) = db.query_row("SELECT display_name,name_ja FROM collection_people WHERE id='p'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    let confirmed = confirmed_person(&db,"p").unwrap().unwrap();
+    assert_eq!(names.0, confirmed["displayName"].as_str().unwrap());
+    assert_eq!(names.1.as_deref(), confirmed["nameJa"].as_str());
+    let fields: (i64, String) = db.query_row("SELECT height_cm,cup FROM collection_person_profiles WHERE person_id='p'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(fields, (160,"D".into()));
+}
+#[test]
+fn collection_authority_manual_profile_unsupported_drops_and_allows_next_person_intent() {
+    let (_temp, library, status) = manual_profile_fixture();
+    edit_profile(&library,json!({"displayName":"discarded","heightCm":170})).unwrap();
+    library.save_av_person_memo("p",Some("next memo".into())).unwrap();
+    let mut delivered = Vec::new();
+    library.flush_collection_outbox_with(&status,&|body| {
+        if body["commandType"] == "setPersonProfileFields" { return Ok(CollectionDelivery::Dropped(json!({"code":"unsupportedCollectionCommand"}))); }
+        let state=predicted_person(&*library.connection().unwrap(),"p").unwrap();
+        Ok(CollectionDelivery::Accepted(person_receipt(&status,body,state,1)))
+    },0).unwrap();
+    let db=library.connection().unwrap();
+    delivered.extend(db.prepare("SELECT state FROM collection_authority_outbox ORDER BY seq").unwrap().query_map([],|r|r.get::<_,String>(0)).unwrap().map(Result::unwrap));
+    assert_eq!(delivered, ["dropped","accepted"]);
+    assert_eq!(db.query_row("SELECT height_cm FROM collection_person_profiles WHERE person_id='p'",[],|r|r.get::<_,i64>(0)).unwrap(),160);
+    drop(db);
+    assert_eq!(library.get_av_performer("p").unwrap().person.display_name,"Display");
+    assert_eq!(library.av_person_profile_state("p").unwrap()["profileMessage"],"서버가 아직 프로필 편집을 지원하지 않습니다.");
+}
+#[test]
+fn collection_authority_manual_profile_tokens_remain_frozen_after_confirmed_change() {
+    let (_temp, library, status)=manual_profile_fixture();
+    let initial=library.av_person_profile_state("p").unwrap();
+    let expected=json!({"heightCm":profile_field_token(&initial,"heightCm")});
+    {
+        let mut db=library.connection().unwrap();let tx=db.transaction().unwrap();
+        let mut newer=confirmed_person(&tx,"p").unwrap().unwrap();
+        newer["entityRevision"]=json!(2);newer["profile"]["heightCm"]=json!(180);newer["profileOverrides"]["heightCm"]=json!(180);
+        receive_person(&tx,&newer,NOW).unwrap();tx.commit().unwrap();
+    }
+    library.set_av_person_profile_fields("p",json!({"heightCm":170}),expected.clone()).unwrap();
+    let body:String=library.connection().unwrap().query_row("SELECT payload FROM collection_authority_outbox ORDER BY seq LIMIT 1",[],|r|r.get(0)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["expected"],expected);
+    library.flush_collection_outbox_with(&status,&|body| {
+        let current=confirmed_person(&*library.connection().unwrap(),"p").unwrap().unwrap();
+        assert_ne!(body["expected"]["heightCm"],profile_field_token(&current,"heightCm"));
+        Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"person":current}})))
+    },0).unwrap();
+    assert_eq!(library.av_person_profile_state("p").unwrap()["profileConflicts"][0]["code"],"revisionConflict");
+}
+#[test]
+fn collection_authority_manual_profile_status_noop_does_not_fire_notes_hook() {
+    let (_temp,library,status)=manual_profile_fixture();
+    let db=library.connection().unwrap();
+    db.execute_batch("CREATE TEMP TABLE status_wakes(count INTEGER); INSERT INTO status_wakes VALUES(0); CREATE TEMP TRIGGER profile_status_wake AFTER UPDATE ON main.notes_state WHEN NEW.key='personProfileFieldsStatus' BEGIN UPDATE status_wakes SET count=count+1; END;").unwrap();
+    store_profile_features_status(&db,&status).unwrap();
+    store_profile_features_status(&db,&status).unwrap();
+    assert_eq!(db.query_row("SELECT count FROM status_wakes",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+    let mut changed=status.clone();changed.features.push("future".into());
+    store_profile_features_status(&db,&changed).unwrap();
+    assert_eq!(db.query_row("SELECT count FROM status_wakes",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+}
+#[test]
+fn collection_authority_manual_profile_conflicts_exclude_other_person_commands() {
+    let (_temp,library,_status)=manual_profile_fixture();
+    edit_profile(&library,json!({"heightCm":170})).unwrap();
+    library.save_av_person_memo("p",Some("memo".into())).unwrap();
+    library.connection().unwrap().execute("UPDATE collection_authority_outbox SET state='blocked',conflict_code='revisionConflict',conflict_detail='{}'",[]).unwrap();
+    let state=library.av_person_profile_state("p").unwrap();
+    assert_eq!(state["profileConflicts"].as_array().unwrap().len(),1);
+    assert_eq!(library.connection().unwrap().query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE state='blocked'",[],|r|r.get::<_,i64>(0)).unwrap(),2);
+}
+
+#[test]
+fn collection_authority_person_metadata_reads_pending_intents_once_per_list() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    let (_temp,library,_status)=manual_profile_fixture();
+    edit_profile(&library,json!({"heightCm":170})).unwrap();
+    let db=library.connection().unwrap();
+    let reads=Arc::new(AtomicUsize::new(0)); let counted=reads.clone();
+    db.authorizer(Some(move |context: AuthContext<'_>| {
+        if matches!(context.action,AuthAction::Read{table_name:"collection_authority_outbox",column_name:"payload"}) { counted.fetch_add(1,Ordering::Relaxed); }
+        Authorization::Allow
+    })).unwrap();
+    // Three independent projections used to perform three scans of the entire outbox.
+    for _ in 0..3 { person_display_metadata(&db,"p").unwrap(); }
+    assert_eq!(reads.load(Ordering::Relaxed),3);
+    reads.store(0,Ordering::Relaxed);
+    let metadata=PersonDisplayMetadata::read(&db).unwrap();
+    for _ in 0..3 { assert_eq!(metadata.person(&db,"p").unwrap()["profile"]["heightCm"],170); }
+    assert_eq!(reads.load(Ordering::Relaxed),1);
+    reads.store(0,Ordering::Relaxed);
+    super::super::av_collection::details(&db,"av").unwrap();
+    assert_eq!(reads.load(Ordering::Relaxed),1);
+}
+
+#[test]
+fn collection_authority_manual_profile_unsupported_conflict_is_a_definitive_refusal() {
+    let (_temp,library,status)=manual_profile_fixture();
+    edit_profile(&library,json!({"heightCm":170})).unwrap();
+    library.flush_collection_outbox_with(&status,&|_| Ok(CollectionDelivery::Conflict(json!({"code":"unsupportedCollectionCommand"}))),0).unwrap();
+    assert_eq!(library.connection().unwrap().query_row("SELECT state FROM collection_authority_outbox ORDER BY seq LIMIT 1",[],|r|r.get::<_,String>(0)).unwrap(),"dropped");
+    assert_eq!(library.av_person_profile_state("p").unwrap()["profile"]["heightCm"],160);
 }

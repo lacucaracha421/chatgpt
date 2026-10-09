@@ -1,3 +1,5 @@
+import {usePerformerNames} from "./PerformerName";
+import {performerName} from "../src/collections/av/performerName";
 import {useWorkSurfaceReady} from "../src/collections/work/useWorkSurfaceReady";
 import {WorkZoomObject, WorkZoomProvider, WorkZoomStage} from '../src/collections/work/WorkZoom';
 import {WorkBackdrop} from '../src/collections/work/WorkBackdrop';
@@ -173,7 +175,7 @@ function CaseWorkSurface({shown, current, active, privacy, score, record = workR
   const data = {...workCaseData(work, shown.urls, privacy), title: work.av?.titleJa?.trim() || work.name, discLabel: [work.av?.productCode, work.av?.maker, work.av?.label].filter(Boolean).join(' · ')};
   const isObject = mode === 'case' || mode === 'open';
   const hidden: CSSProperties = {visibility: 'hidden', pointerEvents: 'none'};
-  const people = work.av?.people ?? [];
+  const people = usePerformerNames(work.av?.people ?? [], active && current && !privacy);
   return <>
     <div className="tablet-work__frame" style={{"--work-strip-height": work.type === 'av' || strip.length ? '76px' : '0px'} as CSSProperties}>
       {!privacy && shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => ready('hero')}/>}
@@ -188,7 +190,7 @@ function CaseWorkSurface({shown, current, active, privacy, score, record = workR
               publisher: work.type === 'av' ? work.av?.maker : work.type === 'movie' ? work.productionCompany : work.publisher,
               platformName: work.type === 'game' ? record(work).find(([label]) => label === '기기')?.[1] || work.platforms?.split('·')[0]?.trim() : null}}
             inside={<CaseInside title={work.name} type={work.type} hero={shown.urls.hero} front={data.front} privacy={privacy} record={caseRecord(record(work), <CaseScore score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}
-              people={people.map(person => ({...person, name: person.creditName || person.name, portrait: person.portraitCrop || person.portraitImage ? <PersonPortrait person={person} current={work} items={portraitSources ?? [work]} revision={shown.revision} size="large"/> : null}))}/>}
+              people={people.map(person => ({...person, name: person.creditName || performerName(person).primary, nameJa: performerName(person).secondary, portrait: person.portraitCrop || person.portraitImage ? <PersonPortrait person={person} current={work} items={portraitSources ?? [work]} revision={shown.revision} size="large"/> : null}))}/>}
             onReady={() => ready('object')}/>
         </div>
         {work.type === 'av' && <div className="work-flat-slot" style={mode === 'flat' ? undefined : hidden} aria-hidden={mode !== 'flat'} inert={mode !== 'flat' || undefined}>

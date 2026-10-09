@@ -1,3 +1,4 @@
+import type {ProfilePerson} from "../collections/av/personProfileFields";
 import type { AvPortrait } from "../collections/avTypes";
 
 export type LibrarySummary = {
@@ -110,7 +111,7 @@ export type HomeOverview = {
   assets: { total: number; today: number; week: number; images: number; videos: number };
   collections: Record<CollectionType, number>;
   tagger: { total: number; recommendation: number; veto: number } | null;
-  avPerformer: {
+  avPerformer: ProfilePerson & {
     id: string;
     displayName: string;
     originalName: string | null;
@@ -286,7 +287,7 @@ export type RemoteReadingProgress = CatalogWorkIdentity & {
   lastReadAt: string;
 };
 
-export type AvFavoritePerformer = {
+export type AvFavoritePerformer = ProfilePerson & {
   id: string;
   displayName: string;
   originalName: string | null;

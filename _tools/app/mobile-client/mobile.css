@@ -439,3 +439,11 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 @media (prefers-reduced-motion:reduce) { .gallery-date-heading__count { transition:none; } }
 
 .privacy-mask { animation:none; opacity:1; display:block; width:100%; height:100%; background:var(--color-private-fill); }
+
+/* Shared profile fields use tablet touch sizes and the existing bottom-sheet surface. */
+.person-profile-mark { min-height:var(--touch-target); }
+.tablet-performer__band { position:relative; }
+.tablet-performer__manage { position:absolute; top:0; right:0; }
+.tablet-performer__manage-items { display:grid; gap:var(--space-1); }
+.person-profile-editor__link { grid-template-columns:minmax(0,1fr) auto; }
+.person-profile-editor__link>input:first-child { grid-column:1 / -1; }

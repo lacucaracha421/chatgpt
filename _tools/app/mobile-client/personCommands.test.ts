@@ -1,3 +1,4 @@
+import {profileExpected} from '../src/collections/av/personProfileFields';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {setOutboxConnection} from './outboxConnection';
 const mocks = vi.hoisted(() => ({api: vi.fn()}));
@@ -122,4 +123,44 @@ describe('setPerson in the command outbox', () => {
     expect(readCommands()[0]).toMatchObject({state: 'accepted'});
     expect(new Set(sent().map(body => (body as unknown as {operationId: string}).operationId))).toEqual(new Set([row.command.operationId]));
   });
+});
+
+it('profile field intents persist exact storage tokens, explicit null ownership and FIFO expectations', async () => {
+  const {personProfileCommand, optimisticPersonProfile} = await import('./collectionCommandOutbox');
+  const person={displayName:'日本名',nameJa:'日本名',profile:{bandIn:32,heightCm:160},stashdbProfile:{bandIn:32,heightCm:160,name:'Roman Name'},profileOverrides:{}};
+  const first=personProfileCommand('p1',person,[],{bandIn:33,heightCm:null},profileExpected(person,{bandIn:33,heightCm:null}));
+  expect(first.expected).toEqual({bandIn:{value:32,overridden:false},heightCm:{value:160,overridden:false}});
+  enqueueCommand(identity,first);
+  const second=personProfileCommand('p1',person,readCommands(),{bandIn:{reset:true}},profileExpected(optimisticPersonProfile(person,'p1',readCommands()),{bandIn:{reset:true}}));
+  expect(second.expected).toEqual({bandIn:{value:33,overridden:true}});
+  expect(readCommands()[0].command).toMatchObject({changes:{heightCm:null}});
+  expect(optimisticPersonProfile(person,'p1',readCommands()).profileOverrides).toHaveProperty('heightCm',null);
+  server();await flushCommands();expect(sent()).toHaveLength(1);
+});
+it('profile conflict rebases both value and override membership with a fresh operation id',async()=>{
+  const {personProfileCommand}=await import('./collectionCommandOutbox');
+  const person={displayName:'배우',stashdbProfile:{heightCm:160},profile:{heightCm:160},profileOverrides:{}};
+  const intent=enqueueCommand(identity,personProfileCommand('p1',person,[],{heightCm:null},profileExpected(person,{heightCm:null})));
+  server(()=>new ApiError('conflict',409,{detail:{code:'revisionConflict',current:{person:{...person,profile:{heightCm:170},profileOverrides:{heightCm:170}}}}}));
+  await flushCommands();const row=readCommands()[0];const replacement=rebasePersonCommand(row)!;
+  expect(replacement).toMatchObject({expected:{heightCm:{value:170,overridden:true}}});
+  replaceCommand(intent.command.operationId,replacement);expect(readCommands()[0].command.operationId).not.toBe(intent.command.operationId);
+});
+it('rejects corrupt persisted profile CAS tokens and unsupported person metadata',async()=>{
+  const {personProfileCommand}=await import('./collectionCommandOutbox');
+  expect(()=>personProfileCommand('p1',{displayName:'배우'},[],{heightCm:160},{heightCm:{value:null,overridden:false}})).toThrow();
+  const command={...identity,operationId:'bad',commandType:'setPersonProfileFields',personId:'p1',changes:{heightCm:160},expected:{heightCm:{value:150,overridden:'yes'}}};
+  localStorage.setItem(KEY,JSON.stringify([{command,state:'pending'}]));expect(readCommands()).toEqual([]);
+});
+
+it('keeps opening profile tokens when another device changes the confirmed value',async()=>{
+ const {personProfileCommand}=await import('./collectionCommandOutbox');
+ const initial={displayName:'배우',profile:{heightCm:160},stashdbProfile:{heightCm:160},profileOverrides:{}};
+ const changes={heightCm:170},expected=profileExpected(initial,changes);
+ const newer={...initial,profile:{heightCm:180},profileOverrides:{heightCm:180}};
+ const command=personProfileCommand('p1',newer,[],changes,expected);
+ expect(command.expected).toEqual({heightCm:{value:160,overridden:false}});
+ enqueueCommand(identity,command);
+ server(()=>new ApiError('conflict',409,{detail:{code:'revisionConflict',current:{person:{...newer,id:'p1',entityRevision:2}}}}));
+ await flushCommands();expect(readCommands()[0]).toMatchObject({state:'conflict',conflict:{code:'revisionConflict'}});
 });

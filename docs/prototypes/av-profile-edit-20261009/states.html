@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>프로필 직접 편집 · 상태</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="mock.css">
+<style>
+.frame--side { min-height: 0; }
+.frame--dlg { width: 768px; padding: 24px; background: var(--color-bg); box-sizing: border-box; }
+.frame--band { width: 800px; min-height: 0; }
+.frame--band .ta-page { padding-bottom: var(--space-6); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>상태 · 저장, 충돌, StashDB 없음, 비우기</h1>
+    <p class="lead">편집 화면 바깥에서 생기는 상태들. 모두 기존 배우 정보 저장(즐겨찾기·메모)과 같은 방식을 그대로 씁니다. <a href="index.html" style="color:var(--color-accent)">← 목차</a></p>
+  </header>
+
+  <section class="shot">
+    <h2>⑦ 저장 중 · 충돌 <small>PC 왼쪽 기둥 · 태블릿 머리 부분</small></h2>
+    <p class="note"><b>저장</b>을 누르면 창이 바로 닫히고 페이지 값이 즉시 바뀝니다. 0.4초 안에 끝나면 아무 표시도 없고, 그보다 오래 걸릴 때만 StashDB 줄 아래에 <b>대기</b>가 나타납니다(나타나면 짧게 유지해 깜빡이지 않음). 다른 기기에서 먼저 바뀌었다면 같은 자리에 <b>충돌 · 다른 기기에서 배우 정보가 바뀌었습니다 · 덮어쓰기 · 버리기</b> — 지금 태블릿 배우 페이지의 줄과 같은 모양입니다. 충돌을 정리하기 전까지 연필은 눌리지 않습니다.</p>
+    <div class="row-frames">
+      <div class="frame frame--side"><div data-render="pcSide" data-opts='{"after":true,"queue":"wait"}'></div></div>
+      <div class="frame frame--side"><div data-render="pcSide" data-opts='{"after":true,"queue":"conflict"}'></div></div>
+      <div class="frame frame--tab frame--band"><div class="ta-page"><div data-render="tabBand" data-opts='{"after":true,"queue":"conflict"}'></div></div></div>
+    </div>
+  </section>
+
+  <section class="shot">
+    <h2>⑧ StashDB ▾ 메뉴 <small>새로고침은 직접 입력을 건드리지 않음 · 한 번에 모두 되돌리기</small></h2>
+    <p class="note"><b>StashDB 새로고침</b>은 따르는 칸만 새 값으로 바꾸고 직접 입력한 칸은 그대로 둡니다. 직접 입력이 있으면 메뉴에 <b>모두 StashDB 값으로</b>가 생깁니다(개수 표시). <b>다른 사람으로 바꾸기</b>나 <b>연결 해제</b>를 해도 직접 입력한 값은 남습니다.</p>
+    <div class="frame frame--side" style="height:1000px"><div data-render="pcSide" data-opts='{"after":true}'></div>
+      <div class="ui-menu float" role="menu" data-anchor=".stash-trigger" data-place="below-start" style="min-width:264px">
+        <button class="ui-menu__item" type="button" disabled style="color:var(--color-faint)"><span class="ui-menu__item-label">Hanase Mio · 花瀬みお</span></button>
+        <button class="ui-menu__item" type="button" disabled style="color:var(--color-faint)"><span class="ui-menu__item-label num">10.8 21:45 확인</span></button>
+        <div class="ui-menu__sep"></div>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">StashDB 새로고침</span></button>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">다른 사람으로 바꾸기</span></button>
+        <button class="ui-menu__item" type="button" data-highlighted><span class="ui-menu__item-label">모두 StashDB 값으로</span><span class="hint num">직접 입력 3</span></button>
+        <div class="ui-menu__sep"></div>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">StashDB 연결 해제</span></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="shot">
+    <h2>⑨ 비우기 · 잘못된 주소 <small>같은 대화상자</small></h2>
+    <p class="note">따르는 칸을 비우고 저장하면 <b>비움</b>이라는 직접 입력이 됩니다 — StashDB에 값이 있어도 페이지에 그 항목이 나오지 않습니다(예: 컵 F가 틀렸지만 맞는 값을 모를 때). 되돌리기로 다시 StashDB를 따릅니다. 링크 주소가 http(s)로 시작하지 않으면 빨간 테두리와 한 줄 설명, 저장은 그 줄을 고칠 때까지 막힙니다.</p>
+    <div class="frame frame--dlg"><div data-render="dialog" data-opts='{"emptyCup":true,"badUrl":true,"inline":true}'></div></div>
+  </section>
+
+  <section class="shot">
+    <h2>⑩ StashDB 연결이 없는 배우 <small>모든 칸이 내 값 · 표시와 비교 줄 없음</small></h2>
+    <p class="note">StashDB에 없는 배우도 같은 양식으로 편집합니다. 비교할 값이 없으니 <b>직접 입력</b> 표시, 비교 줄, 되돌리기, “모두 StashDB 값으로”가 모두 빠집니다. 페이지에도 “· 직접 입력”을 붙이지 않습니다(전부 내 값이므로). 나중에 StashDB에 연결하면 이미 채운 칸이 직접 입력으로 남고 빈 칸만 StashDB를 따릅니다. 그때부터 남은 칸에 “· 직접 입력”이 붙습니다.</p>
+    <div class="frame frame--dlg"><div data-render="dialog" data-opts='{"noStash":true,"inline":true}'></div></div>
+  </section>
+</div>
+<script src="mock.js"></script>
+</body>
+</html>

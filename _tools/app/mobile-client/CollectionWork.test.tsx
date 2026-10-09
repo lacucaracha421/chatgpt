@@ -362,3 +362,9 @@ it('opens a manga volume with a book sound, but not in privacy mode', () => {
   fireEvent.doubleClick(view.container.querySelector('[data-volume-id="v1"]')!);
   expect(play).toHaveBeenCalledTimes(1);
 });
+
+it('uses a per-work credit name inside the AV case and the display rule otherwise',()=>{
+ const item:CollectionDetail={...manga,type:'av',av:{genres:[],people:[{id:'p',name:'日本名',nameJa:'日本名',stashdbProfile:{name:'Roman Name'},creditName:'작품 속 이름',role:'performer',order:0},{id:'q',name:'別名',nameJa:'別名',stashdbProfile:{name:'Other Roman'},role:'performer',order:1}]}};
+ const {container}=render(<CaseWork item={item} revision="credit" active privacy={false} position={1} total={1} score={()=>null} record={()=>[]} onStep={vi.fn()} info={()=>null}/>);
+ expect(container.querySelector('.case-pola')).toHaveTextContent('작품 속 이름');expect(container.querySelectorAll('.case-pola')[1]).toHaveTextContent('Other Roman');
+});

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { PrivacyProvider } from "../../privacy/PrivacyContext";
-import type { AvGateway, AvPerformerPage as PerformerData, AvPerformerProfile } from "../avTypes";
+import type { AvGateway, AvPerformerPage as PerformerData, AvPerformerProfile, PersonProfileState } from "../avTypes";
 import { AvPerformerPage } from "./AvPerformerPage";
 
 vi.mock("../../library/client", () => ({ libraryGateway: { listAvFavorites: vi.fn().mockResolvedValue([]), setAvFavorite: vi.fn().mockResolvedValue(undefined) } }));
@@ -125,4 +125,43 @@ it("does not start current-work metadata with a separator when there is no date"
   render(page(gateway({ getPerformer: vi.fn().mockResolvedValue(data) })));
   const work = await screen.findByRole("button", { name: "작품 0 CODE-0" });
   expect(work.querySelector(".av-performer-page__date")).toHaveTextContent(/^이 작품$/);
+});
+
+it('uses romanized primary names, Japanese subtitles and a capability-gated editor',async()=>{
+  const data=performer();data.person.displayName='日本名';data.person.profile={name:'Roman Name'};
+  data.coPerformers[0]={...data.coPerformers[0],displayName:'同僚',nameJa:'同僚',stashdbProfile:{name:'Co Roman'}};
+  const state={...data.person,stashdbId:'s',stashdbProfile:{name:'Roman Name',heightCm:160},profile:{name:'Roman Name',heightCm:160},profileOverrides:{},profileFieldsSupported:true};
+  const save=vi.fn().mockResolvedValue({...state,profile:{...state.profile,heightCm:170},profileOverrides:{heightCm:170}});
+  const api=gateway({getPerformer:vi.fn().mockResolvedValue(data),getPersonProfileState:vi.fn().mockResolvedValue(state),setPersonProfileFields:save});
+  render(page(api));
+  await screen.findByRole('heading',{name:'Roman Name'});expect(screen.getByText('日本名',{selector:'p'})).toBeVisible();expect(screen.getByText('Co Roman')).toBeVisible();expect(screen.getByText('同僚')).toBeVisible();
+  fireEvent.click(await screen.findByRole('button',{name:'프로필 편집'}));fireEvent.change(screen.getByLabelText('키 (cm)'),{target:{value:'170'}});fireEvent.click(screen.getByRole('button',{name:'저장'}));
+  await waitFor(()=>expect(save).toHaveBeenCalledWith('p',{heightCm:170},{heightCm:{value:160,overridden:false}}));
+});
+it('keeps the pencil hidden for an old server and disables it for an unresolved person conflict',async()=>{
+  const state={...performer().person,stashdbProfile:null,profileOverrides:{},profileFieldsSupported:false};
+  const api=gateway({getPersonProfileState:vi.fn().mockResolvedValue(state),setPersonProfileFields:vi.fn()});
+  const view=render(page(api));await screen.findByRole('heading',{name:'배우'});expect(screen.queryByRole('button',{name:'프로필 편집'})).toBeNull();view.unmount();
+  render(page(gateway({getPersonProfileState:vi.fn().mockResolvedValue({...state,profileFieldsSupported:true,profileConflicts:[{operationId:'op',code:'revisionConflict'}]}),setPersonProfileFields:vi.fn()})));
+  expect(await screen.findByRole('button',{name:'프로필 편집'})).toBeDisabled();expect(screen.getByRole('button',{name:'덮어쓰기'})).toBeVisible();
+});
+
+it('keeps the same profile rows when the async editor metadata arrives',async()=>{
+ let finish:(value:PersonProfileState)=>void=()=>{};
+ const links=[{url:'https://x.com/performer',site:{name:'X'}}];
+ const api=gateway({getPerformerProfile:vi.fn().mockResolvedValue({...profile,urls:links}),getPersonProfileState:vi.fn(()=>new Promise<PersonProfileState>(resolve=>{finish=resolve;})),setPersonProfileFields:vi.fn()});
+ render(page(api));await screen.findByText('158 cm');
+ const original=document.querySelector('.av-profile__rows'),originalLinks=screen.getByLabelText('배우 링크');expect(original).not.toBeNull();
+ await act(async()=>finish({...performer().person,profile:{heightCm:158,birthDate:profile.birthDate,careerStart:2024,urls:links.map(link=>({site:link.site.name,url:link.url}))},stashdbProfile:{heightCm:158},profileOverrides:{},profileFieldsSupported:true}));
+ expect(document.querySelector('.av-profile__rows')).toBe(original);expect(document.querySelectorAll('.av-profile__rows')).toHaveLength(1);expect(screen.getByLabelText('배우 링크')).toBe(originalLinks);
+});
+it('sends the editor opening tokens after a profile change notification',async()=>{
+ let changed=()=>{};
+ const initial={...performer().person,profile:{heightCm:160},stashdbProfile:{heightCm:160},profileOverrides:{},profileFieldsSupported:true};
+ const read=vi.fn().mockResolvedValue(initial),save=vi.fn().mockResolvedValue(initial);
+ const api=gateway({getPersonProfileState:read,setPersonProfileFields:save,subscribeProfilesChanged:handler=>{changed=handler;return()=>{};}});
+ render(page(api));fireEvent.click(await screen.findByRole('button',{name:'프로필 편집'}));fireEvent.change(screen.getByLabelText('키 (cm)'),{target:{value:'170'}});
+ read.mockResolvedValue({...initial,profile:{heightCm:180},profileOverrides:{heightCm:180}});await act(async()=>changed());
+ await screen.findByText(/다른 기기에서 바뀌었어요/);fireEvent.click(screen.getByRole('button',{name:'저장'}));
+ await waitFor(()=>expect(save).toHaveBeenCalledWith('p',{heightCm:170},{heightCm:{value:160,overridden:false}}));
 });

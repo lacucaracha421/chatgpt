@@ -1,3 +1,4 @@
+import type {ProfilePerson} from "./av/personProfileFields";
 import { invoke } from "@tauri-apps/api/core";
 import { nativeMediaUrl } from "../assets/mediaUrl";
 
@@ -24,13 +25,13 @@ export interface AvLinkFields {
   label?: string | null; series?: string | null; genres?: string[] | null;
 }
 export interface AvLinkCoverSet { frontId: string | null; spineId: string | null; backId: string | null; revision: string }
-export interface AvLinkPersonMatch {
+export interface AvLinkPersonMatch extends Omit<ProfilePerson, "displayName"> {
   name_ja: string; name_ko: string | null; wikidata_id: string | null; fanza_actress_id: string | null;
   personId: string | null; displayName: string | null; matchBy: string | null; alreadyLinked: boolean;
 }
 export interface AvLinkCurrentCollection {
   collectionId: string; name: string; productCode: string | null; fields: AvLinkFields; covers: AvLinkCoverSet;
-  people: { id: string; displayName: string; role: "performer" | "director"; order: number; creditName: string | null }[];
+  people: (ProfilePerson & { id: string; displayName: string; role: "performer" | "director"; order: number; creditName: string | null })[];
 }
 /** Split coordinates are integer pixels in the original jacket: back | spine | front.
  * For a portrait candidate x1=x2=0, so only front has pixels. useSpine is false

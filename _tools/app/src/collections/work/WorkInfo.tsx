@@ -1,3 +1,4 @@
+import {performerName} from "../av/performerName";
 import type { CollectionSummary, CollectionWorkRecord, CollectionRecordEdit, TmdbConnection } from "../../library/types";
 import type { AvDetails, AvRelated } from "../avTypes";
 import { displayDate } from "../../shared/displayDate";
@@ -24,7 +25,7 @@ export function WorkInfo({ collection, av, related, tmdb, record = defaultRecord
   onOpenPerson(id: string): void; onOpenCollection?(id: string): void; onCopyCode(): void;
 }) {
   const groups = related ? [
-    ...related.performers.map(person => ({ name: `${person.displayName} · 다른 작품`, items: person.items })),
+    ...related.performers.map(person => ({ name: `${performerName(person).primary} · 다른 작품`, items: person.items })),
     ...(related.series ? [{ name: "같은 시리즈", items: related.series.items }] : []),
     ...(related.label ? [{ name: "같은 레이블", items: related.label.items }] : []),
   ] : [];
@@ -36,7 +37,7 @@ export function WorkInfo({ collection, av, related, tmdb, record = defaultRecord
     </section>
     {collection.type === "movie" && collection.overview?.trim() && <section aria-label="개요"><SectionLabel title="개요" /><p className="work-overview">{collection.overview}</p></section>}
     {collection.type === "movie" && (tmdb?.series ? <SeriesSeasons key={collection.id} series={tmdb.series} /> : tmdb?.mediaType !== "tv" && tmdb?.film ? <FilmDetails key={collection.id} film={tmdb.film} onOpenCollection={onOpenCollection} /> : null)}
-    {av && av.people.length > 0 && <section><SectionLabel title="출연 · 감독" /><div className="work-people">{av.people.map(person => <Button key={`${person.role}/${person.id}`} variant="ghost" onClick={() => onOpenPerson(person.id)} className="work-person"><AvPortrait portrait={person.portrait} name={person.displayName} size={40} /><span><b>{person.displayName}</b><small>{person.role === "director" ? "감독" : [person.nameJa, `내 라이브러리 ${person.workCount}편`].filter(Boolean).join(" · ")}</small>{person.creditName && <small>{person.creditName}</small>}</span></Button>)}</div></section>}
+    {av && av.people.length > 0 && <section><SectionLabel title="출연 · 감독" /><div className="work-people">{av.people.map(person => <Button key={`${person.role}/${person.id}`} variant="ghost" onClick={() => onOpenPerson(person.id)} className="work-person"><AvPortrait portrait={person.portrait} name={performerName(person).primary} size={40} /><span><b>{performerName(person).primary}</b>{performerName(person).secondary && <small lang="ja">{performerName(person).secondary}</small>}<small>{person.role === "director" ? "감독" : [`내 라이브러리 ${person.workCount}편`].filter(Boolean).join(" · ")}</small>{person.creditName && <small>{person.creditName}</small>}</span></Button>)}</div></section>}
     {groups.some(group => group.items.length > 0) && <details><summary>관련 작품</summary>{groups.filter(group => group.items.length > 0).map(group => <section key={group.name}><SectionLabel title={group.name} />{group.items.map(item => <Button key={item.collectionId} variant="quiet" onClick={() => onOpenCollection?.(item.collectionId)}>{item.productCode ?? item.name} · {displayDate(item.releaseDate)}</Button>)}</section>)}</details>}
   </div>;
 }

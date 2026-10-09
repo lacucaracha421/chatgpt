@@ -1,3 +1,4 @@
+import {observePersonNameAuthority} from './personNameCache';
 import {INBOX_APPLY_EVENT, readInboxPlans, resumeInboxApplies} from './avInboxApply';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {visibleInterval} from './useVisibleInterval';
@@ -13,7 +14,7 @@ import type {AvOverlay} from './avEditModel';
 
 export function useCollectionAuthority(active: boolean, onSettled: () => void, observeCurrentLibrary = false) {
   const connection = outboxConnection();
-  const [status, setStatus] = useState<{connection: string | null; identity: AuthorityIdentity} | null>(null);
+  const [status, setStatus] = useState<{connection: string | null; identity: AuthorityIdentity; features: string[]} | null>(null);
   const [library, setLibrary] = useState<string | null>(null);
   const [statusError, setStatusError] = useState(''), [statusRetry, setStatusRetry] = useState(0);
   const [rows, setRows] = useState(readCommands);
@@ -31,7 +32,7 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void, o
       try {
         const reply = await api(AUTHORITY_STATUS_PATH, controller.signal, undefined, 'GET', false, connection);
         if (controller.signal.aborted || connection !== outboxConnection()) return;
-        const value = authorityIdentity(reply); setStatus(value ? {connection, identity: value} : null);
+        const value = authorityIdentity(reply); observePersonNameAuthority(value); setStatus(value ? {connection, identity: value, features: Array.isArray((reply as {features?: unknown})?.features) ? (reply as {features: unknown[]}).features.filter((f): f is string => typeof f === 'string') : []} : null);
         setStatusError(value ? '' : '컬렉션을 사용할 수 없습니다.');
         // Trash has no published work list from which to observe the current library.
         if (observeCurrentLibrary && value) setLibrary(value.libraryId);
@@ -132,7 +133,7 @@ export function useCollectionAuthority(active: boolean, onSettled: () => void, o
     if (choice === 'overwrite') void flush();
     return true;
   };
-  return {identity, rows: scoped, acknowledgements: settledRows, failure, statusError, retryStatus: () => setStatusRetry(value => value + 1), enqueue, enqueueBatch, edit, visible, resolveConflict, flush,
+  return {identity, features: identity ? status?.features ?? [] : [], rows: scoped, acknowledgements: settledRows, failure, statusError, retryStatus: () => setStatusRetry(value => value + 1), enqueue, enqueueBatch, edit, visible, resolveConflict, flush,
     drop: (workId: string) => { if (identity) dropWork(identity, workId); },
     observeLibrary: setLibrary,
     work: <T extends CollectionSummary>(item: T) => optimisticWork(confirmedWork(item, settledRows), scoped.filter(row=>row.state!=='accepted')),

@@ -1,8 +1,10 @@
+import {performerName} from "./performerName";
+import { inchesToCm } from "./personProfileFields";
 import { AvStashdbImage } from "./AvStashdbImage";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { ArrowPathIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { displayDate, displayDateTime } from "../../shared/displayDate";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { usePrivacy } from "../../privacy/PrivacyContext";
@@ -41,8 +43,8 @@ function linkInfo(link: Profile["urls"][number]) {
   return { priority: 6, label: link.site.name || url.hostname };
 }
 export function ProfileRows({ profile, today = new Date() }: { profile: Profile; today?: Date }) {
-  const measurements = [profile.bandIn ? `B${Math.round(profile.bandIn * 2.54)}${profile.cup ? ` (${profile.cup})` : ""}` : null, profile.waistIn ? `W${Math.round(profile.waistIn * 2.54)}` : null, profile.hipIn ? `H${Math.round(profile.hipIn * 2.54)}` : null].filter(Boolean).join(" ");
-  const breast = profile.breastType === "NATURAL" ? "자연" : profile.breastType === "FAKE" ? "보형" : null;
+  const measurements = [profile.bandIn ? `B${inchesToCm(profile.bandIn)}${profile.cup ? ` (${profile.cup})` : ""}` : null, profile.waistIn ? `W${inchesToCm(profile.waistIn)}` : null, profile.hipIn ? `H${inchesToCm(profile.hipIn)}` : null].filter(Boolean).join(" ");
+  const breast = profile.breastType === "NATURAL" ? "자연" : profile.breastType === "FAKE" ? "인공" : null;
   const career = profile.careerStart !== null ? <>{profile.careerStart} – {profile.careerEnd ?? "현역"} <small>{profile.careerEnd !== null ? "· 은퇴" : `${Math.max(1, today.getFullYear() - profile.careerStart)}년차`}</small></> : profile.careerEnd !== null ? <>{profile.careerEnd} · 은퇴</> : null;
   if (!profile.birthDate && !profile.heightCm && !measurements && !profile.cup && !breast && !career) return null;
   return <dl className="av-profile__rows" aria-label="프로필">
@@ -62,7 +64,7 @@ function profileDisplayLinks(profile: Pick<Profile, "urls">) {
     seen.add(normalized); return true;
   }).map(link => ({ ...link, ...linkInfo(link) })).sort((a, b) => a.priority - b.priority);
 }
-export function ProfileLinks({ profile, openLink = openUrl, disabled = false }: { profile: Profile; openLink?: (url: string) => Promise<void>; disabled?: boolean }) {
+export function ProfileLinks({ profile, openLink = openUrl, disabled = false }: { profile: Pick<Profile, "urls">; openLink?: (url: string) => Promise<void>; disabled?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState(false);
   const links = profileDisplayLinks(profile);
@@ -74,7 +76,7 @@ export function ProfileLinks({ profile, openLink = openUrl, disabled = false }: 
   </div>{error && <p className="av-profile__quiet" role="status">링크를 열지 못했습니다.</p>}</>;
 }
 
-export function AvPerformerProfile({ personId, api, onOpenSettings, displayName, nameJa, compact = false }: { compact?: boolean; displayName?: string; nameJa?: string | null; personId: string; api: AvGateway; onOpenSettings?: () => void }) {
+export function AvPerformerProfile({ personId, api, onOpenSettings, displayName, nameJa, compact = false, hideRows = false, hideLinks = false, renderRows }: { renderRows?: (profile: Profile | null) => ReactNode; hideLinks?: boolean; hideRows?: boolean; compact?: boolean; displayName?: string; nameJa?: string | null; personId: string; api: AvGateway; onOpenSettings?: () => void }) {
   const { privacyMode } = usePrivacy();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loadedPersonId, setLoadedPersonId] = useState<string | null>(null);
@@ -155,9 +157,12 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
     } catch (reason) { if (current === request.current) setError(failure(reason, "StashDB 연결을 저장하지 못했습니다.")); }
     finally { if (current === request.current) setBusy(false); }
   }
-  if (configured === false && !status?.routed) return <p className="av-profile__quiet">StashDB 키가 없어요 · <button type="button" onClick={onOpenSettings}>설정</button></p>;
+
+  if (configured === false && !status?.routed && !renderRows) return <p className="av-profile__quiet">StashDB 키가 없어요 · <button type="button" onClick={onOpenSettings}>설정</button></p>;
   const aliases = [...new Set([profile?.name, ...(profile?.aliases ?? [])].filter((name): name is string => Boolean(name?.trim())).map(name => name.trim()))].filter(name => name !== displayName && name !== nameJa);
   return <div className="av-profile" aria-busy={busy || loadingPerson} inert={loadingPerson || undefined}>
+    {renderRows?.(loadingPerson ? null : profile)}
+    {configured === false && !status?.routed && <p className="av-profile__quiet">StashDB 키가 없어요 · <button type="button" onClick={onOpenSettings}>설정</button></p>}
     {status?.routed && status.supported === false && <p className="av-profile__quiet" role="status">서버가 아직 StashDB 조회를 지원하지 않습니다.</p>}
     {status?.routed && status.supported !== false && configured === false && <p className="av-profile__quiet" role="status">서버에 StashDB 키가 설정되지 않았습니다.</p>}
     {profile?.syncIssue && <p className="av-profile__quiet" role="status">StashDB 변경을 반영하지 못했습니다. 동기화 상태에서 충돌 또는 실패를 확인해 주세요.</p>}
@@ -166,8 +171,8 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
     {status?.routed && (!profile || profile.status === "none") && configured && status.supported !== false && <Button size="sm" variant="quiet" disabled={!actionable || busy} onClick={() => void refresh(true)}>StashDB 배우 찾기</Button>}
     {profile?.status === "matched" && <>
       {!compact && aliases.length > 0 && <p className="av-profile__aliases">{aliases.slice(0, 3).join(" · ")}</p>}
-      <ProfileRows profile={profile} />
-      <ProfileLinks key={`${profile.personId}:${profile.stashdbId}`} profile={profile} disabled={!actionable} />
+      {!hideRows && !renderRows && <ProfileRows profile={profile} />}
+      {!hideLinks && <ProfileLinks key={`${profile.personId}:${profile.stashdbId}`} profile={profile} disabled={!actionable} />}
       {compact ? <Menu key={personId} disabled={!actionable} label="StashDB 프로필" triggerClassName="av-profile__manage" trigger={<>StashDB<ChevronDownIcon aria-hidden="true" /></>} items={[
         ...(aliases.length ? [{ id: "aliases", label: aliases.slice(0, 3).join(" · "), disabled: true, onSelect: () => {} }] : []),
         { id: "checked", label: `${displayDateTime(profile.fetchedAt)} 확인`, disabled: true, onSelect: () => {} },
@@ -183,13 +188,13 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
     <BusyLabel busy={!!(!profile && busy)}><p className="av-profile__quiet" role="status">StashDB 확인 중…</p></BusyLabel>
     {!loadingPerson && error && <p className="av-profile__quiet" role="status">{error} <button type="button" disabled={!actionable || busy || status?.supported === false} onClick={() => void refresh(!!(status?.routed && !profile?.stashdbId))}>다시 시도</button></p>}
     {actionable && status?.routed && confirmClear === personId && <Dialog open title="StashDB 연결 해제" onClose={() => setConfirmClear(null)}>
-      <p>이 배우의 StashDB 연결과 프로필 정보를 지웁니다. 대표 이미지는 유지됩니다.</p>
+      <p>StashDB 연결을 해제합니다. 직접 입력한 값과 대표 이미지는 유지됩니다.</p>
       <div className="ui-dialog__actions"><Button onClick={() => setConfirmClear(null)}>취소</Button><Button variant="danger" disabled={busy} onClick={() => void clear()}>연결 해제</Button></div>
     </Dialog>}
     {!loadingPerson && candidates !== null && <Dialog open title="StashDB 배우 고르기" onClose={() => { if (!busy) setCandidates(null); }}>
       <div className="av-profile__candidates">{candidates.map(candidate => <div className="av-profile__candidate" key={candidate.stashdbId}>
         {!privacyMode && status !== null && candidate.imageUrl && (status?.routed || safeProfileUrl(candidate.imageUrl)) && <AvStashdbImage url={candidate.imageUrl} routed={!!status?.routed} api={api} onError={reason => setError(failure(reason,"사진을 불러오지 못했습니다."))} />}
-        <div><b>{candidate.name}</b><p>{candidate.aliases.join(" · ")}</p>{candidate.birthDate && <small>{displayDate(candidate.birthDate)}</small>}</div>
+        <div><b>{performerName({name: candidate.name}).primary}</b><p>{candidate.aliases.join(" · ")}</p>{candidate.birthDate && <small>{displayDate(candidate.birthDate)}</small>}</div>
         <Button size="sm" disabled={!actionable || busy} onClick={() => void choose(candidate.stashdbId)}>이 사람</Button>
       </div>)}{candidates.length === 0 && <EmptyState inline title="검색 결과 없음" />}</div>
       {error && <p role="alert">{error}</p>}

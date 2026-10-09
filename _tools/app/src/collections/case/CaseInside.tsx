@@ -3,7 +3,7 @@ import { recordStates } from "../work/WorkRecord";
 import type { Fact } from "./CollectionCase";
 import "./CaseInside.css";
 
-export type CasePerson = { id: string; name: string; role: "performer" | "director"; order: number; portrait?: ReactNode };
+export type CasePerson = { id: string; name: string; nameJa?: string | null; role: "performer" | "director"; order: number; portrait?: ReactNode };
 
 /** Printed stars retain fractional ratings without turning the booklet into an editor. */
 export function CaseScore({ score }: { score: number | null }) {
@@ -36,7 +36,7 @@ export function CaseInside({ title, type, record, facts, hero, front, privacy = 
       <dl className="case-av-rows">{["레이블", "발매", "수록"].map(label => <div key={label}><dt>{label}</dt><dd>{fact(label) || blank}</dd></div>)}</dl>
       <div className="case-av-record">{status}{personal("내 별점")}</div>
     </div>
-      {directors.length > 0 && <div className="case-director">감독 · {directors.map(person => person.name).join(" · ")}</div>}
+      {directors.length > 0 && <div className="case-director">감독 · {directors.map((person, index) => <span key={person.id}>{index > 0 && " · "}{person.name}{person.nameJa && person.nameJa !== person.name && <small lang="ja">{person.nameJa}</small>}</span>)}</div>}
       {cast.length > 0 && <div className="case-cast" data-count={Math.min(cast.length, 3)} aria-label="출연">
         {shown.map(person => <div className="case-pola" key={person.id}>
           <div className="case-pola-photo" aria-hidden="true"
@@ -44,7 +44,7 @@ export function CaseInside({ title, type, record, facts, hero, front, privacy = 
             onLoadCapture={event => { if (event.target instanceof HTMLImageElement) event.target.style.removeProperty("opacity"); }}>
             <span className="case-silhouette" />
             {person.portrait}
-          </div><span className="case-pola-name">{person.name}</span>
+          </div><span className="case-pola-name">{person.name}{person.nameJa && person.nameJa !== person.name && <small lang="ja">{person.nameJa}</small>}</span>
         </div>)}
         {cast.length > 3 && <div className="case-pola case-pola-more"><div className="case-pola-photo">+{cast.length - 2}</div><span className="case-pola-name">출연</span></div>}
       </div>}

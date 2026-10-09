@@ -44,6 +44,11 @@ describe("shared busy presentation", () => {
     expect(result.current).toBe(true);
     rerender({ busy: false }); expect(result.current).toBe(false);
   });
+  it("supports the profile editor's 400 ms delay", () => {
+    render(<BusyLabel busy delay={400} idle="저장">저장 중</BusyLabel>);
+    advance(399); expect(screen.getByText("저장")).toBeTruthy();
+    advance(1); expect(screen.getByText("저장 중")).toBeTruthy();
+  });
   it("cancels callbacks when unmounted", () => {
     const { unmount } = renderHook(() => useDelayedBusy(true));
     unmount(); expect(vi.getTimerCount()).toBe(0);

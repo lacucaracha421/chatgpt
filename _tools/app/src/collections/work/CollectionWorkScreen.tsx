@@ -1,3 +1,4 @@
+import {performerName} from "../av/performerName";
 import {useWorkSurfaceReady} from "./useWorkSurfaceReady";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
 import { WorkBackdrop } from "./WorkBackdrop";
@@ -141,7 +142,7 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
             publisher: data.collection.type === "av" ? data.av?.maker : data.collection.type === "movie" ? data.collection.productionCompany : data.collection.publisher,
             platformName: data.collection.type === "game" ? record.ownedPlatform || data.collection.platforms?.split("·")[0]?.trim() : null }}
           inside={<CaseInside title={data.collection.name} type={data.collection.type} hero={heroSrc} front={caseData.front} privacy={privacy} record={insideRecord(data.collection, record)} facts={insideFacts(data.collection, data.av)}
-            people={data.av?.people.map(person => ({ ...person, name: person.displayName, portrait: person.portrait ? <AvPortrait portrait={person.portrait} name={person.displayName} size="performer" /> : null }))} />}
+            people={data.av?.people.map(person => ({ ...person, name: performerName(person).primary, nameJa: performerName(person).secondary, portrait: person.portrait ? <AvPortrait portrait={person.portrait} name={person.displayName} size="performer" /> : null }))} />}
           onReady={() => ready("object")} />
       </div>
       {data.collection.type === "av" && <div className="work-flat-slot" style={mode === "flat" ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={mode !== "flat"} inert={mode !== "flat"}><FlatJacket key={data.collection.id} data={caseData} stageBox={stageBox} onReady={() => { flatReady.current = true; if (desired.current === "flat") setMode("flat"); }} /></div>}

@@ -309,7 +309,7 @@ it("prints AV cast names on cards without the retired tray note", () => {
   expect(container.querySelector(".note")).toBeNull();
   expect(container.querySelector(".case-cast")).toHaveTextContent("이름만");
   expect(container.querySelector(".case-cast")).not.toHaveTextContent("긴 크레딧");
-  expect(container.querySelector(".case-cast")).not.toHaveTextContent("일본 이름");
+  expect(container.querySelector(".case-cast small[lang=ja]")).toHaveTextContent("일본 이름");
 });
 it("opens the film form with a disc case, booklet facts and film record options", async () => {
   const data = filmValue(); const { container, actions } = view(data); const user = userEvent.setup();

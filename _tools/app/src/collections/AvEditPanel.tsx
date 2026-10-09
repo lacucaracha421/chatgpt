@@ -1,3 +1,4 @@
+import {performerName} from "./av/performerName";
 import { useEffect, useRef, useState } from "react";
 import { Dialog } from "../shared/ui/Dialog";
 import { Button } from "../shared/ui/Button";
@@ -7,12 +8,12 @@ import { avError } from "./avClient";
 import limits from "./avLimits.json";
 import type { AvDetails, AvGateway, AvPerson, AvPersonInput, AvPersonRole } from "./avTypes";
 
-type CreditDraft = AvPersonInput & { key: string; displayName: string };
+type CreditDraft = AvPersonInput & { key: string; displayName: string; nameSource?: AvPerson };
 export function AvEditPanel({ details, api, onClose, onSaved }: {
   details: AvDetails; api: AvGateway; onClose(): void; onSaved(value: AvDetails): void;
 }) {
   const [code, setCode] = useState(details.productCode ?? ""), [label, setLabel] = useState(details.label ?? ""), [series, setSeries] = useState(details.series ?? "");
-  const [people, setPeople] = useState<CreditDraft[]>(() => details.people.map(person => ({ key: `${person.role}/${person.id}`, displayName: person.displayName, person: { kind: "existing", id: person.id }, role: person.role, creditName: person.creditName })));
+  const [people, setPeople] = useState<CreditDraft[]>(() => details.people.map(person => ({ key: `${person.role}/${person.id}`, displayName: person.displayName, nameSource: person, person: { kind: "existing", id: person.id }, role: person.role, creditName: person.creditName })));
   const [query, setQuery] = useState(""), [role, setRole] = useState<AvPersonRole>("performer");
   const [results, setResults] = useState<AvPerson[]>([]), [error, setError] = useState<string | null>(null), [saving, setSaving] = useState(false);
   const active = useRef(true);
@@ -28,7 +29,7 @@ export function AvEditPanel({ details, api, onClose, onSaved }: {
     const displayName = person?.displayName ?? query.trim();
     if (!displayName || people.length >= limits.credits) return;
     if (person && people.some(item => item.person.kind === "existing" && item.person.id === person.id && item.role === role)) { setError("이미 같은 역할로 연결된 인물입니다."); return; }
-    setPeople(items => [...items, { key: crypto.randomUUID(), displayName, person: person ? { kind: "existing", id: person.id } : { kind: "new", displayName }, role, creditName: null }]);
+    setPeople(items => [...items, { key: crypto.randomUUID(), displayName, nameSource: person, person: person ? { kind: "existing", id: person.id } : { kind: "new", displayName }, role, creditName: null }]);
     setQuery(""); setError(null);
   }
   function move(index: number, direction: -1 | 1) {
@@ -52,16 +53,16 @@ export function AvEditPanel({ details, api, onClose, onSaved }: {
       <div className="av-people-add"><Select label="역할" value={role} onChange={event => setRole(event.target.value as AvPersonRole)}><option value="performer">출연</option><option value="director">감독</option></Select>
         <TextField label="인물 이름 검색" maxLength={limits.personName} value={query} onChange={event => setQuery(event.target.value)} />
         {query.trim() && <Button disabled={saving || people.length >= limits.credits} onClick={() => add()}>새 인물로 추가</Button>}
-        {results.length > 0 && <ul aria-label="기존 인물">{results.map(person => <li key={person.id}><Button disabled={saving} onClick={() => add(person)}>{person.displayName} · {person.id.slice(0, 8)}</Button></li>)}</ul>}
+        {results.length > 0 && <ul aria-label="기존 인물">{results.map(person => <li key={person.id}><Button disabled={saving} onClick={() => add(person)}>{performerName(person).primary}{performerName(person).secondary && <small lang="ja">{performerName(person).secondary}</small>} · {person.id.slice(0, 8)}</Button></li>)}</ul>}
       </div>
       {(["performer", "director"] as const).map(creditRole => <section key={creditRole} aria-label={creditRole === "performer" ? "출연자" : "감독"}>
         <h3>{creditRole === "performer" ? "출연자" : "감독"}</h3>
         {people.map((person, index) => person.role !== creditRole ? null : <div key={person.key} className="av-person-row">
-          <span>{person.displayName}</span>
-          <TextField label={`${person.displayName} 작품 내 표기`} maxLength={limits.creditName} value={person.creditName ?? ""} onChange={event => setPeople(items => items.map((item, position) => position === index ? { ...item, creditName: event.target.value } : item))} />
-          <Button aria-label={`${person.displayName} 위로`} disabled={saving || !people.slice(0, index).some(item => item.role === creditRole)} onClick={() => move(index, -1)}>위</Button>
-          <Button aria-label={`${person.displayName} 아래로`} disabled={saving || !people.slice(index + 1).some(item => item.role === creditRole)} onClick={() => move(index, 1)}>아래</Button>
-          <Button disabled={saving} aria-label={`${person.displayName} 연결 제거`} onClick={() => setPeople(items => items.filter((_, position) => position !== index))}>제거</Button>
+          <span>{performerName(person.nameSource ?? person).primary}{performerName(person.nameSource ?? person).secondary && <small lang="ja">{performerName(person.nameSource ?? person).secondary}</small>}</span>
+          <TextField label={`${performerName(person.nameSource ?? person).primary} 작품 내 표기`} maxLength={limits.creditName} value={person.creditName ?? ""} onChange={event => setPeople(items => items.map((item, position) => position === index ? { ...item, creditName: event.target.value } : item))} />
+          <Button aria-label={`${performerName(person.nameSource ?? person).primary} 위로`} disabled={saving || !people.slice(0, index).some(item => item.role === creditRole)} onClick={() => move(index, -1)}>위</Button>
+          <Button aria-label={`${performerName(person.nameSource ?? person).primary} 아래로`} disabled={saving || !people.slice(index + 1).some(item => item.role === creditRole)} onClick={() => move(index, 1)}>아래</Button>
+          <Button disabled={saving} aria-label={`${performerName(person.nameSource ?? person).primary} 연결 제거`} onClick={() => setPeople(items => items.filter((_, position) => position !== index))}>제거</Button>
         </div>)}
       </section>)}
       {error && <p role="alert">{error}</p>}

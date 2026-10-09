@@ -214,8 +214,8 @@ it('offers only people credited in each role, including people credited in both'
   const avCredits=[{personId:'actor',role:'performer' as const,order:0},{personId:'director',role:'director' as const,order:0},{personId:'both',role:'performer' as const,order:1},{personId:'both',role:'director' as const,order:1}];
   chooser(detail,{...inboxAuthority,people,works:[{...inboxWork,details:{av:{productCode:'OTHER-1',genres:[]}},avCredits}]});
   const performer=screen.getByRole('combobox',{name:'女優 인물 연결'}),director=screen.getByRole('combobox',{name:'監督 인물 연결'});
-  expect(within(performer).getAllByRole('option').map(o=>o.textContent)).toEqual(['새 인물','출연 전용에 연결','겸업에 연결']);
-  expect(within(director).getAllByRole('option').map(o=>o.textContent)).toEqual(['새 인물','감독 전용에 연결','겸업에 연결']);
+  expect(within(performer).getAllByRole('option').map(o=>o.textContent)).toEqual(['새 인물','출연 전용 · 女優에 연결','겸업 · 兼業에 연결']);
+  expect(within(director).getAllByRole('option').map(o=>o.textContent)).toEqual(['새 인물','감독 전용 · 女優에 연결','겸업 · 兼業에 연결']);
   expect(performer).toHaveValue('actor');
   expect(performer).toHaveClass('ui-text-input');
   expect(document.getElementById(performer.getAttribute('aria-labelledby')!)).toHaveClass('sr-only');

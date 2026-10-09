@@ -1,3 +1,4 @@
+import {performerName} from "../src/collections/av/performerName";
 import {useEffect, useRef, useState} from 'react';
 import {displayDate} from '../src/shared/displayDate';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
@@ -11,6 +12,46 @@ import {stashdbError, stashdbPreview, stashdbRead, STASHDB_NOT_CONFIGURED, STASH
 import './avStashdb.css';
 
 type Authority = ReturnType<typeof useCollectionAuthority>;
+type StashdbScope = {connection: string | null; identity: Authority['identity']};
+function stashdbReady(scope: StashdbScope, authority: Authority, person: CollectionPerson) {
+  return personRevision(person.id, person.entityRevision, authority.rows) !== null && !!scope.identity && !!authority.identity && sameAuthority(scope.identity, authority.identity) && scope.connection === outboxConnection();
+}
+function stashdbCommandRevision(scope: StashdbScope, authority: Authority, person: CollectionPerson) {
+  if (!stashdbReady(scope, authority, person) || !scope.identity) throw new Error('앞선 배우 변경을 보낸 뒤 다시 선택해 주세요.');
+  const revision = personRevision(person.id, person.entityRevision, readCommands().filter(row => sameAuthority(row.command, scope.identity!)));
+  if (revision === null) throw new Error('앞선 배우 변경을 보낸 뒤 다시 선택해 주세요.');
+  return revision;
+}
+/** Management uses the same readiness, provider and frozen connection guards as the picker. */
+export function StashdbProfileActions({person, authority, name, onClose}: {person: CollectionPerson; authority: Authority; name: string; onClose(): void}) {
+  const [scope] = useState<StashdbScope>(() => ({connection: outboxConnection(), identity: authority.identity}));
+  const [configured, setConfigured] = useState(false), [busy, setBusy] = useState(true), [failure, setFailure] = useState(''), [confirm, setConfirm] = useState(false);
+  const ready = stashdbReady(scope, authority, person);
+  useEffect(() => {
+    const controller = new AbortController();
+    void stashdbRead<{stashdb?: boolean}>('/v1/providers/status', controller.signal, undefined, scope.connection).then(status => {
+      if (status.stashdb === undefined) throw new Error(STASHDB_OLD_SERVER);
+      if (!status.stashdb) throw new Error(STASHDB_NOT_CONFIGURED);
+      if (!controller.signal.aborted) setConfigured(true);
+    }).catch(error => { if (!controller.signal.aborted) setFailure(stashdbError(error)); }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    return () => controller.abort();
+  }, [scope]);
+  const enqueue = (stashdbId: string | null) => {
+    try {
+      if (stashdbId && (!configured || busy)) return;
+      const expectedRevision = stashdbCommandRevision(scope, authority, person);
+      authority.enqueue({commandType: 'setPersonProfile', personId: person.id, stashdbId, expectedRevision}, name);
+      onClose();
+    } catch (error) { setFailure(stashdbError(error)); }
+  };
+  return <>
+    {person.stashdbId && <Button variant="quiet" disabled={!ready || busy || !configured} onClick={() => enqueue(person.stashdbId!)}>StashDB 새로고침</Button>}
+    {(person.stashdbId || person.profile) && <Button variant="quiet" disabled={!ready} onClick={() => setConfirm(true)}>StashDB 연결 해제</Button>}
+    {failure && <p role="alert">{failure}</p>}
+    {confirm && <Dialog open title="StashDB 연결 해제" onClose={() => setConfirm(false)}><DialogDescription>StashDB 연결을 해제합니다. 직접 입력한 값과 대표 이미지는 유지됩니다.</DialogDescription><div className="ui-dialog__actions"><Button onClick={() => setConfirm(false)}>취소</Button><Button variant="primary" disabled={!ready} onClick={() => enqueue(null)}>연결 해제</Button></div></Dialog>}
+  </>;
+}
+
 export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, onClose, onPortrait}: {
   mode: 'profile' | 'portrait'; person: CollectionPerson; name: string; nameJa?: string | null; privacy: boolean; authority: Authority;
   onClose(): void; onPortrait(command: PersonRevisionCommand, url: string | null, operationId: string): void;
@@ -22,8 +63,7 @@ export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, 
   const [confirm, setConfirm] = useState<'profile' | 'portrait' | null>(null), [retry, setRetry] = useState(0);
   const work = useRef<AbortController | null>(null), previews = useRef<AbortController | null>(null), lock = useRef(false);
   const showBusy = useDelayedBusy(busy, {delay: 400});
-  const revision = personRevision(person.id, person.entityRevision, authority.rows);
-  const ready = revision !== null && !!scope.identity && !!authority.identity && sameAuthority(scope.identity, authority.identity) && scope.connection === outboxConnection();
+  const ready = stashdbReady(scope, authority, person);
   useEffect(() => () => { work.current?.abort(); previews.current?.abort(); }, []);
   useEffect(() => {
     work.current?.abort();
@@ -60,9 +100,7 @@ export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, 
     return () => controller.abort();
   }, [results, photos, privacy, mode, scope, retry]);
   const enqueue = (wish: {commandType: 'setPersonProfile'; stashdbId: string | null} | {commandType: 'setPersonPortrait'; portrait: ({kind: 'image'} & PortraitManifest) | null}, url: string | null = null) => {
-    if (!ready || !scope.identity || scope.connection !== outboxConnection()) throw new Error('앞선 배우 변경을 보낸 뒤 다시 선택해 주세요.');
-    const currentRevision = personRevision(person.id, person.entityRevision, readCommands().filter(row => sameAuthority(row.command, scope.identity!)));
-    if (currentRevision === null) throw new Error('앞선 배우 변경을 보낸 뒤 다시 선택해 주세요.');
+    const currentRevision = stashdbCommandRevision(scope, authority, person);
     const command: PersonRevisionCommand = {...wish, personId: person.id, expectedRevision: currentRevision};
     const row = authority.enqueue(command, name);
     if (command.commandType === 'setPersonPortrait') onPortrait(command, url, row.command.operationId);
@@ -96,7 +134,7 @@ export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, 
       {mode === 'profile' ? <>
         <form onSubmit={event => { event.preventDefault(); void search(); }}><Field label="배우 이름"><TextInput value={query} maxLength={200} onChange={event => setQuery(event.target.value)}/></Field><Button type="submit" disabled={busy || !configured || !query.trim()}>검색</Button></form>
         {results && <div className="tablet-stashdb__candidates" aria-label="StashDB 검색 결과">{results.map(candidate => <Button key={candidate.stashdbId} variant="ghost" aria-label={`${candidate.name} ${candidate.aliases.join(" · ")} ${displayDate(candidate.birthDate)}`} disabled={!ready || busy || !configured} onClick={() => act(() => enqueue({commandType: 'setPersonProfile', stashdbId: candidate.stashdbId}))}>
-          {!privacy && urls[candidate.stashdbId] && <img src={urls[candidate.stashdbId]} alt=""/>}<span><b>{candidate.name}</b><small>{candidate.aliases.join(' · ')}</small><small>{displayDate(candidate.birthDate)}</small></span>
+          {!privacy && urls[candidate.stashdbId] && <img src={urls[candidate.stashdbId]} alt=""/>}<span><b>{performerName({name: candidate.name}).primary}</b><small>{candidate.aliases.join(' · ')}</small><small>{displayDate(candidate.birthDate)}</small></span>
         </Button>)}{results.length === 0 && <EmptyState inline title="검색 결과 없음"/>}</div>}
         {person.stashdbId && <Button disabled={!ready || busy || !configured} onClick={() => act(() => enqueue({commandType: 'setPersonProfile', stashdbId: person.stashdbId!}))}>새로고침</Button>}
         {(person.stashdbId || person.profile) && <Button disabled={!ready || lock.current} onClick={() => setConfirm('profile')}>연결 해제</Button>}

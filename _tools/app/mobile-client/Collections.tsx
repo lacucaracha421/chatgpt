@@ -1,3 +1,5 @@
+import {loadedPerformerNames} from './personNameCache';
+import {EllipsisHorizontalIcon} from "@heroicons/react/24/outline";
 import {AvInbox} from './AvInbox';
 import {AreaSwitch} from '../src/shared/motion/AreaSwitch';
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
@@ -295,7 +297,7 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
     if(warm){if(warmAttempted.current)return;warmAttempted.current=true;}
     const controller=new AbortController();
     firstPending.current=true;
-    const firstPage=()=>api<CollectionPage>(pathRef.current(null),controller.signal).then(result=>{validateRef.current?.(result);newest.current=result.revision;return result;});
+    const firstPage=()=>api<CollectionPage>(pathRef.current(null),controller.signal).then(async result=>{validateRef.current?.(result);newest.current=result.revision;return {...result,items:await loadedPerformerNames(result.items)};});
     const commit=(result:CollectionPage)=>{committed.current=key;setState({key,slot,items:result.items,page:result,next:result.nextCursor,busy:false,more:false,error:'',moreError:'',legacy:false});};
     // A slot switch over a shown list goes through `present` (the shared view swap); its commit is
     // dropped once this request is superseded.
@@ -340,7 +342,8 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
     void (async()=>{
       try {
         while(next){
-          const result=await api<CollectionPage>(pathRef.current(next),controller.signal);
+          const raw=await api<CollectionPage>(pathRef.current(next),controller.signal);
+          const result={...raw,items:await loadedPerformerNames(raw.items)};
           if(controller.signal.aborted)return;
           validateRef.current?.(result);
           if(result.revision!==current.page?.revision){newest.current=result.revision;restart();return;}
@@ -408,6 +411,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const shelfPutDown=useShelfPutDown(()=>{setPicked(null);setMangaPick(null);});
   const stepping=useRef(false);
   // The AV performer page: `from` is the work it was opened from (Back returns there).
+  const [performerManagementRequest, setPerformerManagementRequest] = useState(0);
   const [performer,setPerformer]=useState<{id:string;from:string|null}|null>(null),[performerOrder,setPerformerOrder]=useState<'newest'|'oldest'>('newest');
   const [personalSheet,setPersonalSheet]=useState<PersonalSheet>(null);
   // MangaDex / 카카오 연결: the open search sheet in the manga detail.
@@ -497,7 +501,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     }
     const controller=new AbortController();setDetailError('');
     const readStartedAt=Date.now();
-    void api<{revision:string;item:CollectionDetail;entityRevision?:number}>(`/v1/collections/${encodeURIComponent(selected)}`,controller.signal).then(result=>{
+    void api<{revision:string;item:CollectionDetail;entityRevision?:number}>(`/v1/collections/${encodeURIComponent(selected)}`,controller.signal).then(async result=>{
+      result={...result,item:(await loadedPerformerNames([result.item]))[0]!};
       if(controller.signal.aborted)return;
       committedDetail.current=detailKey;setDetail({...result,readAt:readStartedAt});
       edits.authority.reconcile(result.item,'detail',readStartedAt);
@@ -613,7 +618,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const header=selected
     ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<span className="top-bar__crumbs is-alone">{directWork?'홈':<>컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</>}</span>} actions={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits}/>{edits.authority.identity&&<WorkManageButton onOpen={()=>setManage('menu')}/>}</div>:undefined}/>
     :performer
-      ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › AV › 배우</span>}/>
+      ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › AV › 배우</span>} actions={edits.authority.identity ? <IconButton label="배우 관리" icon={EllipsisHorizontalIcon} onClick={() => setPerformerManagementRequest(value => value + 1)}/> : undefined}/>
     :searching&&tab!=='av'&&!overlayOpen
         ?<TopBarSearch title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
@@ -748,7 +753,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     </Overlay>
-    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={avPerformerView(viewOf('av')).perRow} order={performerOrder} authority={edits.authority}
+    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={avPerformerView(viewOf('av')).perRow} order={performerOrder} authority={edits.authority} managementRequest={performerManagementRequest}
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
     </>, work: workView}}/>}
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
