@@ -35,6 +35,8 @@
 .av-link-chooser__heading p { display: flex; align-items: baseline; gap: var(--space-2); margin: var(--space-1) 0 0; color: var(--color-muted); font-size: var(--text-sm); }
 .av-link-chooser__heading p button { padding: 0; color: var(--color-text); background: none; border: 0; text-decoration: underline; text-underline-offset: 3px; }
 .av-link-chooser__heading .ui-select { width: min(360px, 100%); margin-top: var(--space-2); }
+.av-link-chooser__matches p { margin-top: var(--space-1); }
+.av-link-chooser__matches > span { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
 .av-link-chooser__source { display: grid; justify-items: end; gap: 2px; color: var(--color-muted); font-size: var(--text-xs); }
 .av-link-chooser__loading { margin: auto; color: var(--color-muted); }
 .av-link-chooser__body { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); flex: 1; min-height: 0; overflow: hidden; }

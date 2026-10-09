@@ -2,6 +2,11 @@
 mod apply;
 pub(crate) mod models;
 pub(crate) mod provider;
+pub(crate) mod routed;
+mod routed_apply;
+mod routed_migration;
+#[cfg(test)]
+mod routed_tests;
 mod spine;
 #[cfg(test)]
 mod tests;
@@ -70,25 +75,30 @@ fn json<T: serde::Serialize>(value: &T) -> Result<String, AvError> {
 fn from_json<T: serde::de::DeserializeOwned>(value: &str) -> Result<T, AvError> {
     serde_json::from_str(value).map_err(|_| AvError::Invalid)
 }
+/// Every local AV Collection whose stored product code normalizes to `code`.
+fn matching_collections(connection: &Connection, code: &str) -> Result<Vec<String>, AvError> {
+    let mut statement=connection.prepare("SELECT d.collection_id,d.product_code FROM collection_av_details d JOIN collections c ON c.id=d.collection_id WHERE c.type='av' AND d.product_code IS NOT NULL ORDER BY c.id")?;
+    let rows = statement
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, raw)| normalize_code(raw).as_deref() == Some(code))
+        .map(|(id, _)| id)
+        .collect())
+}
 fn matched_collection(
     connection: &Connection,
     code: Option<&str>,
 ) -> Result<Option<String>, AvError> {
     let Some(code) = code else { return Ok(None) };
-    let mut statement=connection.prepare("SELECT d.collection_id,d.product_code FROM collection_av_details d JOIN collections c ON c.id=d.collection_id WHERE c.type='av' AND d.product_code IS NOT NULL ORDER BY c.id")?;
-    let matches = statement
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|(_, raw)| normalize_code(raw).as_deref() == Some(code))
-        .map(|(id, _)| id)
-        .collect::<Vec<_>>();
+    let matches = matching_collections(connection, code)?;
     // Duplicate local product codes require the user to select a destination.
     Ok((matches.len() == 1).then(|| matches[0].clone()))
 }
 fn inbox(connection: &Connection, id: &str) -> Result<InboxItem, AvError> {
     let mut item=connection.query_row("SELECT id,request_id,product_code,normalized_code,source_url,received_at,status,attempts,last_error,fetched_at,collection_id FROM av_link_inbox WHERE id=?1",[id],|r|Ok(InboxItem{
-        id:r.get(0)?,request_id:r.get(1)?,product_code:r.get(2)?,normalized_code:r.get(3)?,source_url:r.get(4)?,received_at:r.get(5)?,status:r.get(6)?,attempts:r.get(7)?,last_error:r.get(8)?,fetched_at:r.get(9)?,collection_id:r.get(10)?,collection_name:None,
+        id:r.get(0)?,request_id:r.get(1)?,product_code:r.get(2)?,normalized_code:r.get(3)?,source_url:r.get(4)?,received_at:r.get(5)?,status:r.get(6)?,attempts:r.get(7)?,last_error:r.get(8)?,fetched_at:r.get(9)?,collection_id:r.get(10)?,collection_name:None,matches:vec![],apply_state:None,
     })).optional()?.ok_or(AvError::Invalid)?;
     if item.status != "applied" {
         item.collection_id = matched_collection(connection, item.normalized_code.as_deref())?;
@@ -189,11 +199,17 @@ fn current_collection(connection: &Connection, id: &str) -> Result<CurrentCollec
 }
 impl Library {
     pub fn list_av_link_inbox(&self) -> Result<Vec<InboxItem>, AvError> {
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_list();
+        }
         let connection = self.connection()?;
         let ids=connection.prepare("SELECT id FROM av_link_inbox WHERE status NOT IN ('dismissed','applied') ORDER BY received_at,id")?.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
         ids.iter().map(|id| inbox(&connection, id)).collect()
     }
     pub fn av_link_pending_count(&self) -> Result<i64, AvError> {
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_pending_count();
+        }
         Ok(self.connection()?.query_row(
             "SELECT count(*) FROM av_link_inbox WHERE status NOT IN ('dismissed','applied')",
             [],
@@ -205,6 +221,9 @@ impl Library {
         id: &str,
         collection_id: Option<&str>,
     ) -> Result<Candidate, AvError> {
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_candidate(&self.av_inbox_session()?, id, collection_id);
+        }
         let connection = self.connection()?;
         let item = inbox(&connection, id)?;
         if item.status != "found" {
@@ -244,6 +263,7 @@ impl Library {
             jacket_height: candidate.height,
             default_split: describe_split(candidate.width, candidate.height, split),
             inbox: item,
+            matches: vec![],
             current,
             performers,
             directors,
@@ -265,13 +285,22 @@ impl Library {
             .map_or(ratio.split, |(image, _)| detect_split(&image).split)
     }
     pub fn retry_av_link(&self, id: &str) -> Result<(), AvError> {
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_retry(&self.av_inbox_session()?, id);
+        }
         self.reset_av_link(id, None, false)
     }
     pub fn fix_av_link_code(&self, id: &str, code: &str) -> Result<(), AvError> {
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_fix_code(&self.av_inbox_session()?, id, code);
+        }
         let normalized = normalize_code(code).ok_or(AvError::Invalid)?;
         self.reset_av_link(id, Some(normalized), false)
     }
     pub fn dismiss_av_link(&self, id: &str) -> Result<(), AvError> {
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_dismiss(&self.av_inbox_session()?, id);
+        }
         self.reset_av_link(id, None, true)
     }
     fn reset_av_link(&self, id: &str, code: Option<String>, dismiss: bool) -> Result<(), AvError> {
@@ -314,6 +343,9 @@ impl Library {
     }
     pub(crate) fn av_link_jacket(&self, id: &str) -> Result<(Vec<u8>, &'static str), AvError> {
         uuid::Uuid::parse_str(id).map_err(|_| AvError::Invalid)?;
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_jacket(&self.av_inbox_session()?, id);
+        }
         let connection = self.connection()?;
         if inbox(&connection, id)?.status != "found" {
             return Err(AvError::Invalid);
@@ -627,6 +659,20 @@ impl Library {
 
     fn next_av_link_due_at(&self, restricted: bool) -> Result<Option<i64>, AvError> {
         let c = self.connection()?;
+        match routed::route_on(&c)? {
+            // The server owns the inbox: the local worker has nothing to schedule.
+            routed::Route::Server => Ok(routed_apply::routed_due_at(&c, restricted)?
+                .map(|due| due.max(routed::retry_at(&c)))),
+            routed::Route::OldServer => {
+                let probe = routed::route_probe_due_at(&c)?;
+                let legacy = Self::legacy_due_at(&c, restricted)?;
+                Ok([probe, legacy].into_iter().flatten().min())
+            }
+            routed::Route::Local => Self::legacy_due_at(&c, restricted),
+        }
+    }
+
+    fn legacy_due_at(c: &Connection, restricted: bool) -> Result<Option<i64>, AvError> {
         let pending: Option<i64> = c.query_row(
             "SELECT MIN(next_attempt_at) FROM av_link_inbox WHERE normalized_code IS NOT NULL AND status IN ('queued','fetching')",
             [], |r| r.get(0),
@@ -657,6 +703,63 @@ impl Library {
             })
             .transpose()?;
         Ok([pending, poll].into_iter().flatten().min())
+    }
+
+    /// The server-inbox cycle for a library whose route is confirmed. `false` leaves the
+    /// legacy local cycle to run (authority inactive, or an older server).
+    pub(crate) fn run_routed_av_cycle(&self, restricted: bool) -> bool {
+        let active = self
+            .connection()
+            .ok()
+            .and_then(|c| {
+                crate::library::collection_authority::collection_authority_active(&c).ok()
+            })
+            .unwrap_or(false);
+        if !active {
+            return false;
+        }
+        let now = chrono::Utc::now().timestamp();
+        let wait = |seconds: i64| {
+            if let Ok(c) = self.connection() {
+                routed::note_retry(&c, now + seconds);
+            }
+        };
+        let Ok(session) = self.av_inbox_session() else {
+            wait(60);
+            return self.av_link_route().ok() == Some(routed::Route::Server);
+        };
+        if self.refresh_av_route_with(&session, now).is_err() {
+            wait(60);
+        }
+        if self.av_link_route().ok() != Some(routed::Route::Server) {
+            return false;
+        }
+        if !self.routed_av_cycle(&session, now, restricted) {
+            wait(if restricted { 60 } else { 15 });
+        }
+        true
+    }
+
+    /// One pass of the server-inbox cycle. `false` when the server could not be read, so
+    /// the caller spaces the next attempt.
+    pub(crate) fn routed_av_cycle(
+        &self,
+        server: &impl routed::InboxServer,
+        now: i64,
+        restricted: bool,
+    ) -> bool {
+        // Each step is independent: a failed read must not stop an acknowledgement.
+        let mut healthy = self.resume_av_inbox_applies(server, now).is_ok();
+        let mirror_due = self
+            .connection()
+            .ok()
+            .and_then(|c| Self::mirror_due_at(&c, restricted).ok())
+            .is_none_or(|due| due <= now);
+        if mirror_due {
+            healthy &= self.refresh_av_mirror_with(server, now).is_ok();
+        }
+        let _ = self.migrate_local_av_inbox_with(server, now);
+        healthy
     }
 
     fn finish_av_link_error(
@@ -716,9 +819,11 @@ pub(crate) fn tick(library: Library, restricted: bool) {
         let Ok(_worker) = WORKER.try_lock() else {
             return;
         };
-        let http = NetworkClient::new();
-        let _ = library.poll_av_links(&http, restricted);
-        let _ = library.fetch_next_av_link_with(&http, chrono::Utc::now().timestamp());
+        if !library.run_routed_av_cycle(restricted) {
+            let http = NetworkClient::new();
+            let _ = library.poll_av_links(&http, restricted);
+            let _ = library.fetch_next_av_link_with(&http, chrono::Utc::now().timestamp());
+        }
         let delay = library
             .next_av_link_tick(restricted)
             .unwrap_or(std::time::Duration::from_secs(1));

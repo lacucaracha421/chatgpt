@@ -47,6 +47,7 @@ const COMMANDS: &[&str] = &[
 ];
 
 include!("collection_authority_people.rs");
+include!("collection_authority_av_inbox.rs");
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -983,8 +984,44 @@ fn selection_slot(kind: &str) -> Result<&str, LibraryError> {
     }
 }
 
+#[cfg(test)]
 fn artwork_slot(db: &Connection, work: &str, slot: &str) -> Result<Option<String>, LibraryError> {
     db.query_row("SELECT id FROM collection_work_artworks WHERE collection_id=?1 AND selected=1 AND (kind=?2 OR (?2='work' AND kind IN ('cover','volume_cover'))) ORDER BY id LIMIT 1",params![work,slot],|r|r.get(0)).optional().map_err(Into::into)
+}
+
+/// The selection the server will see after earlier FIFO intents, independent of the
+/// local picture (inbox artwork is intentionally projected only after its receipt).
+fn predicted_artwork_slot(
+    db: &Connection,
+    work: &str,
+    slot: &str,
+) -> Result<Option<String>, LibraryError> {
+    let raw: Option<String> = db
+        .query_row(
+            "SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id=?1",
+            [work],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let confirmed: Value = raw
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| LibraryError::InvalidCloudResponse)?
+        .unwrap_or(Value::Null);
+    let mut current = confirmed["selection"][slot].as_str().map(str::to_owned);
+    let pending = db
+        .prepare(
+            "SELECT payload FROM collection_authority_outbox WHERE state='pending' AND command_type='selectArtwork' AND json_extract(payload,'$.workId')=?1 AND json_extract(payload,'$.slot')=?2 ORDER BY seq",
+        )?
+        .query_map(params![work, slot], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for raw in pending {
+        let body: Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        current = body["artworkId"].as_str().map(str::to_owned);
+    }
+    Ok(current)
 }
 
 fn project_selection(
@@ -993,7 +1030,12 @@ fn project_selection(
     slot: &str,
     art: Option<&str>,
 ) -> Result<(), LibraryError> {
-    tx.execute("UPDATE collection_work_artworks SET selected=(id IS ?3) WHERE collection_id=?1 AND (kind=?2 OR (?2='work' AND kind IN ('cover','volume_cover')))",params![work,slot,art])?;
+    // Clear first: SQLite checks the unique selected-slot index after each row update,
+    // so a single CASE update can select the new row before it clears the old row.
+    tx.execute("UPDATE collection_work_artworks SET selected=0 WHERE collection_id=?1 AND (kind=?2 OR (?2='work' AND kind IN ('cover','volume_cover')))",params![work,slot])?;
+    if let Some(art) = art {
+        tx.execute("UPDATE collection_work_artworks SET selected=1 WHERE id=?3 AND collection_id=?1 AND (kind=?2 OR (?2='work' AND kind IN ('cover','volume_cover')))",params![work,slot,art])?;
+    }
     Ok(())
 }
 
@@ -1011,7 +1053,7 @@ pub(crate) fn enqueue_artwork_selection(
             return Err(LibraryError::InvalidWorkArtwork);
         }
     }
-    let current = artwork_slot(tx, work, slot)?;
+    let current = predicted_artwork_slot(tx, work, slot)?;
     if current.as_deref() == art {
         return Ok(());
     }
@@ -1283,14 +1325,9 @@ fn validate_av_changes(changes: &Value) -> Result<(), LibraryError> {
     Ok(())
 }
 
-/// Save and immutable command insertion share the caller's local transaction.
-pub(crate) fn enqueue_av_changes(
-    tx: &Transaction<'_>,
-    status: &CollectionAuthorityStatus,
-    work: &str,
-    before: &Value,
-) -> Result<(), LibraryError> {
-    let after = editable_av(tx, work)?;
+/// The confirmed AV details of a work with every pending `setAvDetails` replayed on top,
+/// i.e. the value a command queued now must expect.
+pub(crate) fn predicted_av_details(tx: &Connection, work: &str) -> Result<Value, LibraryError> {
     let raw: Option<String> = tx.query_row("SELECT payload FROM collection_authority_revisions WHERE section='works' AND work_id=?1", [work], |r|r.get(0)).optional()?;
     let mut confirmed: Value = raw
         .as_deref()
@@ -1314,6 +1351,24 @@ pub(crate) fn enqueue_av_changes(
             }
         }
     }
+    Ok(confirmed["details"]["av"].clone())
+}
+
+/// Whether the authority already knows this person (confirmed credit, remembered
+/// confirmation or a pending `setAvCredits` that creates it).
+fn av_person_known(tx: &Transaction<'_>, person: &str) -> Result<bool, LibraryError> {
+    tx.query_row("SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?2) OR EXISTS(SELECT 1 FROM collection_authority_revisions r,json_each(r.payload,'$.avCredits') c WHERE r.section='works' AND json_extract(c.value,'$.personId')=?1) OR EXISTS(SELECT 1 FROM collection_authority_outbox o,json_each(o.payload,'$.people') p WHERE o.state='pending' AND o.command_type='setAvCredits' AND json_extract(p.value,'$.personId')=?1)",params![person,confirmed_av_person_key(tx,person)?],|r|r.get(0)).map_err(Into::into)
+}
+
+/// Save and immutable command insertion share the caller's local transaction.
+pub(crate) fn enqueue_av_changes(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    before: &Value,
+) -> Result<(), LibraryError> {
+    let after = editable_av(tx, work)?;
+    let confirmed = json!({"details":{"av":predicted_av_details(tx, work)?}});
     let mut changes = json!({});
     let mut expected = json!({});
     for field in ["productCode", "label", "series"] {
@@ -1341,7 +1396,7 @@ pub(crate) fn enqueue_av_changes(
             if !seen.insert(person) {
                 continue;
             }
-            let known: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?2) OR EXISTS(SELECT 1 FROM collection_authority_revisions r,json_each(r.payload,'$.avCredits') c WHERE r.section='works' AND json_extract(c.value,'$.personId')=?1) OR EXISTS(SELECT 1 FROM collection_authority_outbox o,json_each(o.payload,'$.people') p WHERE o.state='pending' AND o.command_type='setAvCredits' AND json_extract(p.value,'$.personId')=?1)",params![person,confirmed_av_person_key(tx,person)?],|r|r.get(0))?;
+            let known = av_person_known(tx, person)?;
             if !known {
                 let (display, name_ja): (String, Option<String>) = tx.query_row(
                     "SELECT display_name,name_ja FROM collection_people WHERE id=?1",
@@ -3096,6 +3151,17 @@ impl Library {
         use sha2::{Digest, Sha256};
         use std::io::Read;
         let is_portrait = body["commandType"] == "setPersonPortrait";
+        // The server prepared and confirmed this blob for an AV inbox apply; there is
+        // no local file to upload. The marker is bookkeeping, never part of the payload.
+        if !is_portrait
+            && self.connection()?.query_row(
+                "SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?1)",
+                [av_inbox_operation_key(text(body, "operationId")?)],
+                |r| r.get::<_, bool>(0),
+            )?
+        {
+            return Ok(());
+        }
         let blob: crate::cloud::collections::ArtworkBlob = if is_portrait {
             portrait_blob(&body["portrait"]["original"])?
         } else {
@@ -3181,7 +3247,7 @@ impl Library {
         Ok(())
     }
 
-    fn flush_collection_outbox_with(
+    pub(crate) fn flush_collection_outbox_with(
         &self,
         status: &CollectionAuthorityStatus,
         send: &dyn Fn(&Value) -> Result<CollectionDelivery, LibraryError>,
@@ -3323,6 +3389,12 @@ impl Library {
                         sent = true;
                     } else {
                         tx.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason=?2,conflict_detail=?3,updated_at=?4 WHERE seq=?1",params![seq,text(&detail,"code")?,detail.to_string(),timestamp])?;
+                        drop_av_inbox_dependents(
+                            &tx,
+                            text(&body, "operationId")?,
+                            seq,
+                            &timestamp,
+                        )?;
                     }
                 }
                 Ok(CollectionDelivery::Retry)

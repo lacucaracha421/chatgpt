@@ -11,12 +11,12 @@ const props = { open: false, onOpenChange: vi.fn() };
 
 it("generates a back only without real back art and outside privacy mode", () => {
   const { container, rerender } = render(<CollectionCase {...props} data={data} backContent={{ overview: "Story" }} />);
-  expect(screen.getByLabelText("생성 뒷표지")).toHaveTextContent("Story");
+  expect(screen.getByLabelText("생성 뒤표지")).toHaveTextContent("Story");
   rerender(<CollectionCase {...props} data={{ ...data, back: "/real-back" }} />);
-  expect(screen.queryByLabelText("생성 뒷표지")).toBeNull();
+  expect(screen.queryByLabelText("생성 뒤표지")).toBeNull();
   expect(screen.getByRole("img", { name: "Game 뒷면" })).toHaveAttribute("src", "/real-back");
   rerender(<CollectionCase {...props} data={{ ...data, privacy: true }} backContent={{ hero: "/secret", overview: "Secret" }} />);
-  expect(screen.queryByLabelText("생성 뒷표지")).toBeNull();
+  expect(screen.queryByLabelText("생성 뒤표지")).toBeNull();
   expect(container.querySelector(".k-back .case-mask")).toBeInTheDocument();
   expect(container).not.toHaveTextContent("Secret");
 });

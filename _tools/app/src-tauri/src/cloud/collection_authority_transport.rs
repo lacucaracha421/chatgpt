@@ -192,6 +192,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn av_inbox_requests_reject_other_routes_and_mismatched_bodies() {
+        let client = CloudClient::new("https://fixture.invalid/").unwrap();
+        let empty = serde_json::json!({});
+        for (method, path, body) in [
+            ("GET", "/v1/providers/status", None),
+            ("GET", "/v1/captures/pending", None),
+            ("POST", "/v1/av-inbox/x/retry", None),
+            ("GET", "/v1/av-inbox/x", Some(&empty)),
+            ("PUT", "/v1/av-inbox/x", None),
+            ("POST", "/v1/av-lookups-other", Some(&empty)),
+        ] {
+            assert!(
+                matches!(
+                    client.av_inbox_request(method, path, body, "token", 16),
+                    Err(LibraryError::InvalidCloudResponse)
+                ),
+                "{method} {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn collection_authority_av_inbox_hold_fences_every_post_before_transport() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = crate::library::Library::open(temp.path().join("library")).unwrap();
+        library.use_machine_settings(temp.path().join("machine.json"));
+        let endpoint = "http://127.0.0.1";
+        library.set_cloud_sync_hold(endpoint, true).unwrap();
+        let client = CloudClient::with_gate(endpoint, library.sync_gate(endpoint).unwrap()).unwrap();
+        for path in [
+            "/v1/av-lookups",
+            "/v1/av-inbox/id/artwork",
+            "/v1/av-inbox/id/dismiss",
+            "/v1/av-inbox/id/retry",
+            "/v1/av-inbox/id/fix-code",
+            "/v1/av-inbox/id/applied",
+        ] {
+            // Empty credentials would fail if transport construction were reached.
+            assert!(
+                matches!(
+                    client.av_inbox_request("POST", path, Some(&serde_json::json!({})), "", 16),
+                    Err(LibraryError::CloudSyncHeld)
+                ),
+                "{path}"
+            );
+        }
+        // Reads follow ordinary authority reads and pass the send hold.
+        assert!(matches!(
+            client.av_inbox_request("GET", "/v1/av-inbox", None, "", 16),
+            Err(LibraryError::CloudCredentialNotConfigured)
+        ));
+    }
+
+    #[test]
     fn collection_authority_structural_refusals_keep_codes_and_handle_proxy_bodies() {
         for status in [413, 422] {
             assert_eq!(
@@ -230,6 +284,66 @@ impl CloudClient {
         if path != "/v1/providers/status" && !path.starts_with("/v1/providers/stashdb/") {
             return Err(LibraryError::InvalidCloudResponse);
         }
+        // Writes honour the receive-only hold like every other authority send.
+        let _permit = body.map(|_| self.send_permit()).transpose()?;
+        let agent = self.coded_agent()?;
+        let endpoint = self.endpoint(path)?;
+        let mut response = if let Some(body) = body {
+            agent
+                .post(endpoint)
+                .header("Authorization", bearer(token)?)
+                .send_json(body)
+        } else {
+            agent
+                .get(endpoint)
+                .header("Authorization", bearer(token)?)
+                .call()
+        }
+        .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_owned);
+        let mut bytes = Vec::new();
+        response
+            .body_mut()
+            .as_reader()
+            .take(limit as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        if bytes.len() > limit {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(crate::library::av_link::provider::HttpResponse {
+            status,
+            bytes,
+            content_type,
+        })
+    }
+}
+
+impl CloudClient {
+    /// Server AV inbox reads and actions plus the intake route used to migrate old local
+    /// items. Same API origin and credentials as every other authority route; never follows
+    /// redirects, and the path allowlist keeps provider traffic out of this helper.
+    pub(crate) fn av_inbox_request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        token: &str,
+        limit: usize,
+    ) -> Result<crate::library::av_link::provider::HttpResponse, LibraryError> {
+        let allowed = path == "/v1/av-inbox"
+            || path.starts_with("/v1/av-inbox/")
+            || path.starts_with("/v1/av-inbox?")
+            || path == "/v1/av-lookups";
+        if !allowed || !matches!(method, "GET" | "POST") || (method == "POST") != body.is_some() {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let _permit = body.map(|_| self.send_permit()).transpose()?;
         let agent = self.coded_agent()?;
         let endpoint = self.endpoint(path)?;
         let mut response = if let Some(body) = body {

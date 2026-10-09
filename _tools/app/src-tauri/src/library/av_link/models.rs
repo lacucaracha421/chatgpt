@@ -16,6 +16,18 @@ pub struct InboxItem {
     pub fetched_at: Option<String>,
     pub collection_id: Option<String>,
     pub collection_name: Option<String>,
+    /// Several live AV Collections share this code: the user picks one explicitly.
+    #[serde(default)]
+    pub matches: Vec<InboxMatch>,
+    /// Local progress of a server-inbox apply: `applying`, `blocked` or `failed`.
+    #[serde(default)]
+    pub apply_state: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxMatch {
+    pub collection_id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +153,8 @@ pub struct CurrentCollection {
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
     pub inbox: InboxItem,
+    /// Live AV Collections with this product code (server `matches` in routed mode).
+    pub matches: Vec<InboxMatch>,
     pub metadata: Movie,
     pub fields: Fields,
     pub jacket_url: String,
@@ -151,21 +165,21 @@ pub struct Candidate {
     pub performers: Vec<PersonMatch>,
     pub directors: Vec<PersonMatch>,
 }
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceChoice {
     Candidate,
     Keep,
     Clear,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Surfaces {
     pub front: SurfaceChoice,
     pub spine: SurfaceChoice,
     pub back: SurfaceChoice,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PersonChoice {
     Link {
@@ -186,7 +200,7 @@ impl PersonChoice {
         }
     }
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplyRequest {
     pub collection_id: Option<String>,

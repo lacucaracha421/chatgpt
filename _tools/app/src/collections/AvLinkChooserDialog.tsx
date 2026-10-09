@@ -29,14 +29,14 @@ const FIELD_ROWS: Array<{ key: FieldKey; label: string }> = [
 const SURFACES: Array<{ key: Surface; label: string }> = [
   { key: "front", label: "앞표지" },
   { key: "spine", label: "책등" },
-  { key: "back", label: "뒷표지" },
+  { key: "back", label: "뒤표지" },
 ];
 
 export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, peopleApi = avGateway, onClose, onApplied, onDismissed }: {
   inboxId: string;
   collections: CollectionSummary[];
   api?: AvLinkApi;
-  peopleApi?: Pick<AvGateway, "searchPeople">;
+  peopleApi?: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
   onClose(): void;
   onApplied(collectionId: string): void | Promise<void>;
   onDismissed(): void | Promise<void>;
@@ -45,6 +45,8 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
   const [candidate, setCandidate] = useState<AvLinkCandidate | null>(null);
   const [targetId, setTargetId] = useState<string | undefined>(undefined);
   const [showPicker, setShowPicker] = useState(false);
+  // Several collections share this code: apply stays off until one is picked, or "new" is chosen on purpose.
+  const [choseNew, setChoseNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [split, setSplit] = useState({ x1: 1, x2: 2 });
   const [surfaces, setSurfaces] = useState<Record<Surface, AvLinkSurfaceChoice>>({ front: "candidate", spine: "candidate", back: "candidate" });
@@ -83,17 +85,26 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
   const load = useCallback(async (destination?: string) => {
     setLoading(true); setError(null);
     try {
-      const next = await api.getCandidate(inboxId, destination);
+      const raw = await api.getCandidate(inboxId, destination);
+      const eligibleMatches = async (people: AvLinkPersonMatch[], role: "performer" | "director") => Promise.all(people.map(async person => {
+        if (!person.personId || person.alreadyLinked) return person;
+        return await hasPersonCredit(peopleApi, person.personId, role) ? person : { ...person, personId: null, displayName: null, matchBy: null };
+      }));
+      const [performers, directors] = await Promise.all([eligibleMatches(raw.performers, "performer"), eligibleMatches(raw.directors, "director")]);
+      const next = { ...raw, performers, directors };
       setCandidate(next);
+      setChoseNew(false);
       setTargetId(next.current?.collectionId);
       resetFromCandidate(next);
     } catch (reason) {
       setError(errorMessage(reason, "후보를 불러오지 못했습니다."));
     } finally { setLoading(false); }
-  }, [api, inboxId, resetFromCandidate]);
+  }, [api, inboxId, peopleApi, resetFromCandidate]);
   useEffect(() => { void load(); }, [load]);
 
   const isNew = Boolean(candidate && !candidate.current);
+  const matches = candidate?.matches ?? [];
+  const needsPick = isNew && matches.length > 1 && !choseNew;
   const spinePercent = candidate ? ((split.x2 - split.x1) / candidate.jacketWidth) * 100 : 0;
   const spineWarning = Boolean(candidate?.defaultSplit.isWrap) && (spinePercent < 1 || spinePercent > 12);
 
@@ -177,7 +188,13 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
       <header className="av-link-chooser__header">
         <div className="av-link-chooser__heading"><h2>{title}{candidate && <span className="av-link-code">{candidate.inbox.normalizedCode || candidate.inbox.productCode}</span>}</h2>
           {candidate && (isNew
-            ? <p>이 품번과 맞는 AV 컬렉션이 없어요. <button type="button" onClick={() => setShowPicker(value => !value)}>기존 컬렉션에 연결…</button></p>
+            ? matches.length > 1
+              ? <div className="av-link-chooser__matches" role="group" aria-label="같은 품번의 컬렉션">
+                <p>같은 품번의 컬렉션이 <b>{matches.length}</b>개 있어요. 후보를 넣을 곳을 고르세요.</p>
+                <span>{matches.map(match => <Button key={match.collectionId} size="sm" onClick={() => void chooseTarget(match.collectionId)}>{match.name}</Button>)}
+                  <Button size="sm" variant="ghost" aria-pressed={choseNew} onClick={() => setChoseNew(true)}>새 AV 컬렉션으로 만들기</Button></span>
+              </div>
+              : <p>이 품번과 맞는 AV 컬렉션이 없어요. <button type="button" onClick={() => setShowPicker(value => !value)}>기존 컬렉션에 연결…</button></p>
             : <p>적용할 컬렉션 <b>{candidate.current?.name}</b><span> · AV{candidate.current?.fields.release_date && <> · <span className="numeric">{candidate.current.fields.release_date.slice(0, 4)}</span></>}</span> <button type="button" onClick={() => setShowPicker(value => !value)}>다른 컬렉션 선택</button></p>)}
           {showPicker && <Select label="연결할 AV 컬렉션" value={targetId ?? ""} onChange={event => void chooseTarget(event.target.value)}>
             {isNew && <option value="">새 AV 컬렉션으로 만들기</option>}
@@ -244,7 +261,7 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
         <span className="av-link-chooser__footer-spacer" />
         {candidate && <span className="av-link-chooser__summary">표지 <b className="numeric">{coverChanges}</b>면 · 정보 <b className="numeric">{infoChanges}</b>개 바뀜</span>}
         <Button disabled={busy} onClick={onClose}>나중에</Button>
-        <Button variant="primary" disabled={busy || loading || !candidate || (isNew && !newName.trim())} onClick={() => void apply()}>{isNew ? "새 컬렉션 만들기" : "적용"}</Button>
+        <Button variant="primary" disabled={busy || loading || !candidate || needsPick || (isNew && !newName.trim())} onClick={() => void apply()}>{isNew ? "새 컬렉션 만들기" : "적용"}</Button>
       </footer>
     </div>
   </Dialog>;
@@ -282,7 +299,7 @@ function MetadataDiff({ candidate, isNew, checks, onCheck, peopleChecks, onPeopl
   onDirectors(value: Record<string, PersonDraft>): void;
   genres: Set<string>;
   onGenres(value: Set<string>): void;
-  peopleApi: Pick<AvGateway, "searchPeople">;
+  peopleApi: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
 }) {
   return <div className={`av-link-diff${isNew ? " is-new" : ""}`} role="table" aria-label="후보 정보 비교">
     <div className="av-link-diff__head" role="row"><span /><b role="columnheader">항목</b>{!isNew && <b className="av-link-diff__current" role="columnheader">지금</b>}<b role="columnheader">LibreDMM</b></div>
@@ -298,9 +315,9 @@ function MetadataDiff({ candidate, isNew, checks, onCheck, peopleChecks, onPeopl
         <span role="cell" className="av-link-diff__candidate">{fieldDisplay(key, next)}{same && <em>같음</em>}{different && <em className="is-different">다름</em>}</span>
       </div>;
     })}
-    <PeopleRow label="출연" checked={peopleChecks.performers} isNew={isNew} current={currentPeople(candidate, "performer")}
+    <PeopleRow role="performer" label="출연" checked={peopleChecks.performers} isNew={isNew} current={currentPeople(candidate, "performer")}
       people={candidate.performers} drafts={performers} onCheck={value => onPeopleCheck("performers", value)} onDrafts={onPerformers} peopleApi={peopleApi} />
-    <PeopleRow label="감독" checked={peopleChecks.directors} isNew={isNew} current={currentPeople(candidate, "director")}
+    <PeopleRow role="director" label="감독" checked={peopleChecks.directors} isNew={isNew} current={currentPeople(candidate, "director")}
       people={candidate.directors} drafts={directors} onCheck={value => onPeopleCheck("directors", value)} onDrafts={onDirectors} peopleApi={peopleApi} />
     <div className={`av-link-diff__row av-link-diff__row--rich${peopleChecks.genres ? "" : " is-off"}`} role="row">
       <input type="checkbox" aria-label="장르 적용" checked={peopleChecks.genres} disabled={!candidate.fields.genres?.length} onChange={event => onPeopleCheck("genres", event.target.checked)} />
@@ -312,7 +329,8 @@ function MetadataDiff({ candidate, isNew, checks, onCheck, peopleChecks, onPeopl
   </div>;
 }
 
-function PeopleRow({ label, checked, isNew, current, people, drafts, onCheck, onDrafts, peopleApi }: {
+function PeopleRow({ role, label, checked, isNew, current, people, drafts, onCheck, onDrafts, peopleApi }: {
+  role: "performer" | "director";
   label: string;
   checked: boolean;
   isNew: boolean;
@@ -321,7 +339,7 @@ function PeopleRow({ label, checked, isNew, current, people, drafts, onCheck, on
   drafts: Record<string, PersonDraft>;
   onCheck(value: boolean): void;
   onDrafts(value: Record<string, PersonDraft>): void;
-  peopleApi: Pick<AvGateway, "searchPeople">;
+  peopleApi: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
 }) {
   return <div className={`av-link-diff__row av-link-diff__row--rich${checked ? "" : " is-off"}`} role="row">
     <input type="checkbox" aria-label={`${label} 적용`} checked={checked} disabled={!people.some(person => !person.alreadyLinked)} onChange={event => onCheck(event.target.checked)} />
@@ -330,17 +348,18 @@ function PeopleRow({ label, checked, isNew, current, people, drafts, onCheck, on
       const draft = drafts[person.name_ja] ?? defaultPersonDraft(person);
       const name = personLabel(person);
       return <span className="av-link-person" key={person.name_ja}><span className="av-link-person__name"><b>{name}</b>{person.alreadyLinked && <small>이미 연결됨</small>}</span>
-        {!person.alreadyLinked && <PersonChoiceControl person={person} draft={draft} peopleApi={peopleApi}
+        {!person.alreadyLinked && <PersonChoiceControl role={role} person={person} draft={draft} peopleApi={peopleApi}
           onChange={value => onDrafts({ ...drafts, [person.name_ja]: value })} />}
       </span>;
     })}</span>
   </div>;
 }
 
-function PersonChoiceControl({ person, draft, peopleApi, onChange }: {
+function PersonChoiceControl({ role, person, draft, peopleApi, onChange }: {
+  role: "performer" | "director";
   person: AvLinkPersonMatch;
   draft: PersonDraft;
-  peopleApi: Pick<AvGateway, "searchPeople">;
+  peopleApi: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
   onChange(value: PersonDraft): void;
 }) {
   const name = personLabel(person);
@@ -351,10 +370,15 @@ function PersonChoiceControl({ person, draft, peopleApi, onChange }: {
     if (!searching || !query.trim()) { setResults([]); return; }
     let live = true;
     const timer = window.setTimeout(() => {
-      void peopleApi.searchPeople(query.trim()).then(value => { if (live) setResults(value); }, () => { if (live) setResults([]); });
+      void peopleApi.searchPeople(query.trim()).then(async value => {
+        const eligible = await Promise.all(value.map(async person => {
+          return await hasPersonCredit(peopleApi, person.id, role) ? person : null;
+        }));
+        if (live) setResults(eligible.filter((person): person is AvPerson => person !== null));
+      }).catch(() => { if (live) setResults([]); });
     }, 180);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [peopleApi, query, searching]);
+  }, [peopleApi, query, searching, role]);
   return <>
     <select aria-label={`${name} 연결 방식`} value={searching ? "search" : draft.action === "link" ? `link:${draft.personId}` : draft.action} onChange={event => {
       const value = event.target.value;
@@ -442,4 +466,13 @@ function errorMessage(reason: unknown, fallback: string) {
   if (reason instanceof Error) return reason.message.trim() || fallback;
   if (typeof reason === "object" && reason && "message" in reason && typeof reason.message === "string") return reason.message.trim() || fallback;
   return typeof reason === "string" && reason.trim() ? reason.trim() : fallback;
+}
+
+async function hasPersonCredit(api: Pick<AvGateway, "getPerformer" | "getDetails">, personId: string, role: "performer" | "director") {
+  const page = await api.getPerformer(personId);
+  if (page.works.some(work => work.role === role)) return true;
+  if (role === "performer") return false;
+  // Performer pages collapse a dual credit in one work to its performer role.
+  const details = await Promise.all(page.works.map(work => api.getDetails(work.collectionId)));
+  return details.some(work => work.people.some(person => person.id === personId && person.role === role));
 }

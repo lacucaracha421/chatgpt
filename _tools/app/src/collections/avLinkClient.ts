@@ -2,10 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { nativeMediaUrl } from "../assets/mediaUrl";
 
 export type AvLinkStatus = "queued" | "fetching" | "found" | "not_found" | "error" | "dismissed" | "applied";
+/** A live AV Collection that already carries this item's product code. */
+export interface AvLinkMatch { collectionId: string; name: string }
+/** Progress of a server-inbox apply: the choice is being written, stopped on a conflict, or was refused. */
+export type AvLinkApplyState = "applying" | "blocked" | "failed";
 export interface AvLinkInboxItem {
   id: string; requestId: string; productCode: string; normalizedCode: string | null;
   sourceUrl: string | null; receivedAt: string; status: AvLinkStatus; attempts: number;
   lastError: string | null; fetchedAt: string | null; collectionId: string | null; collectionName: string | null;
+  /** Several matches: the user picks one explicitly (collectionId is then null). Server inbox only. */
+  matches?: AvLinkMatch[];
+  applyState?: AvLinkApplyState | null;
 }
 export interface AvLinkMovie {
   normalized_id: string; title: string; date: string | null; makers: string[]; labels: string[];
@@ -30,7 +37,7 @@ export interface AvLinkCurrentCollection {
  * outside the 1–12% estimate; the UI may explicitly choose a nonempty spine.
  */
 export interface AvLinkCandidate {
-  inbox: AvLinkInboxItem; metadata: AvLinkMovie; fields: AvLinkFields;
+  inbox: AvLinkInboxItem; matches?: AvLinkMatch[]; metadata: AvLinkMovie; fields: AvLinkFields;
   jacketUrl: string; jacketWidth: number; jacketHeight: number;
   defaultSplit: { x1: number; x2: number; isWrap: boolean; useSpine: boolean };
   current: AvLinkCurrentCollection | null; performers: AvLinkPersonMatch[]; directors: AvLinkPersonMatch[];

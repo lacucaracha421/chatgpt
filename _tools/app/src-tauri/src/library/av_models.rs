@@ -19,6 +19,9 @@ pub enum AvError {
     Image,
     #[error("{1}")]
     StashdbRelay(&'static str, &'static str),
+    /// Server AV inbox refusals and local apply-progress states, with a user-facing message.
+    #[error("{1}")]
+    Inbox(&'static str, &'static str),
     #[error(transparent)]
     Library(#[from] super::error::LibraryError),
     #[error(transparent)]

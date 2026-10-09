@@ -10,6 +10,9 @@ import "./avLink.css";
 export type AvLinkApi = typeof avLinkClient;
 
 const activeStatus = (item: AvLinkInboxItem) => item.status === "queued" || item.status === "fetching";
+/** The choice is being written to the server; nothing else can be done with the row meanwhile. */
+const applying = (item: AvLinkInboxItem) => item.applyState === "applying";
+const stopped = (item: AvLinkInboxItem) => item.applyState === "blocked";
 
 export function useAvLinkInbox({ enabled = true, poll = false, refreshKey = "", api = avLinkClient }: {
   enabled?: boolean;
@@ -50,7 +53,7 @@ export function useAvLinkInbox({ enabled = true, poll = false, refreshKey = "", 
     };
   }, [enabled, refresh]);
 
-  const hasActive = items.some(activeStatus);
+  const hasActive = items.some(item => activeStatus(item) || applying(item));
   useEffect(() => {
     if (!enabled || !poll || !hasActive) return;
     const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") void refresh(); }, 5_000);
@@ -104,7 +107,7 @@ export function AvLinkInbox({ items, collections, api = avLinkClient, error, onR
   const [code, setCode] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const found = useMemo(() => items.filter(item => item.status === "found"), [items]);
+  const found = useMemo(() => items.filter(item => item.status === "found" && !applying(item) && !stopped(item)), [items]);
   if (items.length === 0) return null;
 
   async function action(id: string, work: () => Promise<unknown>) {
@@ -150,13 +153,13 @@ export function AvLinkInbox({ items, collections, api = avLinkClient, error, onR
         <span className="av-link-row__status">{statusLabel(item)}</span>
         <span className="av-link-row__target">{targetCopy(item)}</span>
         <span className="av-link-row__actions">
-          {item.status === "found" && <Button size="sm" onClick={() => setChooserId(item.id)}>후보 보기</Button>}
+          {item.status === "found" && !applying(item) && !stopped(item) && <Button size="sm" onClick={() => setChooserId(item.id)}>후보 보기</Button>}
           {(item.status === "not_found" || item.status === "error") && <>
             <Button size="sm" disabled={busyId === item.id} onClick={() => void action(item.id, () => api.retry(item.id))}><ArrowPathIcon aria-hidden="true" />다시 시도</Button>
             <Button size="sm" variant="ghost" disabled={busyId === item.id} onClick={() => beginFix(item)}>품번 고치기</Button>
           </>}
         </span>
-        <Button size="icon" variant="ghost" aria-label={`${item.productCode} 버리기`} disabled={busyId === item.id} onClick={() => dismiss(item)}><XMarkIcon aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" aria-label={`${item.productCode} 버리기`} disabled={busyId === item.id || applying(item) || stopped(item)} onClick={() => dismiss(item)}><XMarkIcon aria-hidden="true" /></Button>
       </div>)}
     </div>}
     {(error || actionError) && <p className="av-link-inbox__error" role="alert">{actionError ?? error}</p>}
@@ -167,23 +170,29 @@ export function AvLinkInbox({ items, collections, api = avLinkClient, error, onR
 }
 
 function statusIcon(item: AvLinkInboxItem) {
-  if (activeStatus(item)) return <ClockIcon />;
+  if (activeStatus(item) || applying(item)) return <ClockIcon />;
   if (item.status === "found") return <MagnifyingGlassIcon />;
   return <ExclamationTriangleIcon />;
 }
 
 function statusLabel(item: AvLinkInboxItem) {
-  if (activeStatus(item)) return <><span className="av-link-spinner" aria-hidden="true" />조회 중</>;
-  if (item.status === "found") return "찾음";
+  if (applying(item)) return <><span className="av-link-spinner" aria-hidden="true" />보내는 중</>;
+  if (stopped(item)) return "멈춤";
+  if (activeStatus(item)) return <><span className="av-link-spinner" aria-hidden="true" />찾는 중</>;
+  if (item.status === "found") return "후보 있음";
   if (item.status === "not_found") return "못 찾음";
   return "오류";
 }
 
 function targetCopy(item: AvLinkInboxItem) {
+  if (applying(item)) return <><b>컬렉션에 적용하는 중</b><small>서버에 반영되면 목록에서 사라져요</small></>;
+  if (stopped(item)) return <><b>적용이 멈췄어요</b><small>다른 기기의 변경과 충돌했어요 · 상태 창의 “서버에서 막힌 변경”을 확인해 주세요</small></>;
   if (activeStatus(item)) return <><b>LibreDMM에서 찾는 중</b><small>정보와 재킷을 가져오고 있어요</small></>;
   if (item.status === "not_found") return <><b>LibreDMM에 없는 품번</b><small>품번 표기가 다르거나 아직 등록 전일 수 있어요</small></>;
   if (item.status === "error") return <><b>가져오지 못했습니다</b><small>{item.lastError || "잠시 뒤 다시 시도해 주세요"}</small></>;
+  if (item.applyState === "failed") return <><b>지난 적용이 거절됐어요</b><small>후보를 다시 열어 확인해 주세요</small></>;
   if (item.collectionId) return <><b>기존 컬렉션에 후보 추가</b><small>→ {item.collectionName || "이름 없는 AV 컬렉션"}</small></>;
+  if (item.matches && item.matches.length > 1) return <><b>같은 품번의 컬렉션이 {item.matches.length}개 있어요</b><small>후보를 열어 어디에 넣을지 고르세요</small></>;
   return <><b>새 AV 컬렉션 만들기</b><small>맞는 기존 컬렉션이 없습니다</small></>;
 }
 

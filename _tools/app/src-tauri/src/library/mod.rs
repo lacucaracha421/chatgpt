@@ -600,7 +600,15 @@ impl Library {
                 }
                 // Poll cursors only record this worker's own schedule; they are
                 // not new work and must not wake another empty tick.
-                if matches!(table, "av_link_inbox" | "library_settings") {
+                // The server inbox keeps its mirror and apply progress in notes_state and
+                // follows the authority outbox, so those writes re-evaluate its schedule.
+                if matches!(
+                    table,
+                    "av_link_inbox"
+                        | "library_settings"
+                        | "notes_state"
+                        | "collection_authority_outbox"
+                ) {
                     av_link::note_work();
                 }
             },

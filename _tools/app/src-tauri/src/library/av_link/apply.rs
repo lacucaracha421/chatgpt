@@ -10,7 +10,7 @@ use std::{
     io::{Cursor, Read},
 };
 
-fn validate_fields(fields: &Fields) -> Result<(), AvError> {
+pub(super) fn validate_fields(fields: &Fields) -> Result<(), AvError> {
     for (value, limit) in [
         (&fields.title_ja, 4000),
         (&fields.maker, 240),
@@ -117,6 +117,10 @@ fn apply_people(
 }
 impl Library {
     pub fn apply_av_link(&self, id: &str, request: ApplyRequest) -> Result<ApplyResult, AvError> {
+        // With the server inbox confirmed, the choice goes through the authority outbox.
+        if self.av_link_route()? == super::routed::Route::Server {
+            return self.apply_av_link_routed(id, request);
+        }
         // Creating AV Collections/people/credits has no authority command yet (1B §4).
         // The inbox item stays `found`, so it can be applied after the follow-up.
         crate::library::collection_authority::fence_collection_operation(&*self.connection()?)?;

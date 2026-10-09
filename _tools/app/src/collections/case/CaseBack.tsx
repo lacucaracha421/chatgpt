@@ -16,7 +16,7 @@ const platformNames = { sw2: "Nintendo Switch 2", sw: "Nintendo Switch", ps5: "P
 export function CaseBack({ data, content = {} }: { data: CaseData; content?: CaseBackContent }) {
   const hero = content.hero || data.front;
   const screenshots = content.screenshots?.filter(Boolean).slice(0, 3) ?? [];
-  return <div className={`case-back case-back--${data.platform}`} aria-label="생성 뒷표지">
+  return <div className={`case-back case-back--${data.platform}`} aria-label="생성 뒤표지">
     <div className={`case-back-hero${!content.hero ? " is-fallback" : ""}`} style={hero ? { backgroundImage: `url(${JSON.stringify(hero)})` } : undefined}>
       <b>{data.title}</b>
     </div>

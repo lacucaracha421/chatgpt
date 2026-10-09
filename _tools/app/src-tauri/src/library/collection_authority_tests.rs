@@ -4380,3 +4380,31 @@ fn collection_authority_stashdb_profile_predictions_are_pruned_after_drop_or_dis
         assert_eq!(library.connection().unwrap().query_row("SELECT value FROM notes_state WHERE key='unrelatedPrediction'", [], |r| r.get::<_, String>(0)).unwrap(), "keep");
     }
 }
+
+#[test]
+fn collection_authority_av_inbox_artwork_has_nothing_to_upload() {
+    let (_temp, library, _) = fixture();
+    let body = json!({"commandType":"addArtwork","operationId":"op-inbox","workId":"w","artworkId":"art",
+        "original":{"sha256":"a".repeat(64),"sizeBytes":5,"contentType":"image/jpeg"}});
+    let never_upload = |_: &crate::cloud::collections::ArtworkBlob, _: &[u8]| -> Result<(), LibraryError> {
+        panic!("server-prepared artwork is never uploaded")
+    };
+    let never_confirm = |_: &crate::cloud::collections::ArtworkBlob| -> Result<bool, LibraryError> {
+        panic!("server-prepared artwork is already confirmed")
+    };
+    // An ordinary local artwork without a file still fails the upload.
+    assert!(library
+        .upload_collection_command_artwork_with(&body, &never_upload, &never_confirm)
+        .is_err());
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO notes_state(key,value) VALUES(?1,'inbox')",
+            [av_inbox_operation_key("op-inbox")],
+        )
+        .unwrap();
+    library
+        .upload_collection_command_artwork_with(&body, &never_upload, &never_confirm)
+        .unwrap();
+}
