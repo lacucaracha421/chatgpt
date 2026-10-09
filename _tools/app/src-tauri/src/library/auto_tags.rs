@@ -499,9 +499,9 @@ pub(crate) fn import_file(
     Ok(summary)
 }
 
-/// Optional version-1 review extension. A legacy import clears raw signals/mappings,
-/// never user edits or already-applied review candidates. Any malformed extension
-/// rolls the entire machine-output replacement back.
+/// Optional version-1 review extension. A legacy import clears raw signals,
+/// never character-tag links, user edits or already-applied review candidates.
+/// Any malformed extension rolls the entire machine-output replacement back.
 fn import_review_signals(
     transaction: &Connection,
     source: &Connection,
@@ -510,7 +510,6 @@ fn import_review_signals(
     transaction.execute("DELETE FROM asset_tagger_character_scores", [])?;
     transaction.execute("DELETE FROM asset_tagger_coverage", [])?;
     transaction.execute("DELETE FROM tagger_character_vocabulary", [])?;
-    transaction.execute("DELETE FROM character_target_tagger_tags", [])?;
     match read_meta(source, "tagger_review_version")?.as_deref() {
         None => return Ok(()),
         Some("1") => {}
@@ -577,7 +576,7 @@ fn import_review_signals(
     {
         let mut read = source.prepare("SELECT target_id,tag FROM target_tags")?;
         let mut rows = read.query([])?;
-        let mut insert = transaction.prepare("INSERT INTO character_target_tagger_tags SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM character_targets WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM character_target_tagger_tag_exclusions WHERE target_id=?1 AND tag=?2)")?;
+        let mut insert = transaction.prepare("INSERT OR IGNORE INTO character_target_tagger_tags SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM character_targets WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM character_target_tagger_tag_exclusions WHERE target_id=?1 AND tag=?2)")?;
         while let Some(row) = rows.next()? {
             let target: String = row.get(0)?;
             let tag: String = row.get(1)?;

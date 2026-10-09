@@ -84,6 +84,27 @@ it("keeps a dismissed suggestion dismissed after a remount at the same data revi
   expect(client.list).toHaveBeenCalledTimes(2);
 });
 
+it("keeps a registered suggestion retired after refreshing and remounting", async () => {
+  const client = api();
+  vi.mocked(client.register).mockImplementation(async () => {
+    vi.mocked(client.list).mockResolvedValue([]);
+    return { target, queuedCount: 3 };
+  });
+  const tree = () => <CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />;
+  const first = render(tree());
+  await screen.findByText("이졸데");
+  fireEvent.click(screen.getByRole("button", { name: "등록" }));
+  const create = await screen.findByRole("button", { name: "캐릭터 만들기" });
+  await waitFor(() => expect(create).toBeEnabled());
+  fireEvent.click(create);
+  await screen.findByText("조건에 맞는 새 캐릭터 제안이 없습니다.");
+  expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ tag: suggestion.tag, linkTag: true }));
+  first.unmount();
+  render(tree());
+  expect(screen.queryByText("이졸데")).not.toBeInTheDocument();
+  expect(client.list).toHaveBeenCalledTimes(2);
+});
+
 describe("character suggestions", () => {
   it("ships reviewed Korean names and humanises unknown qualifiers", () => {
     expect(suggestionName(suggestion.tag)).toBe("이졸데");
