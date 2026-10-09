@@ -225,7 +225,11 @@ export function releaseBoardEntry(work: CollectionSummary, ownedOf: (work: Colle
     releaseSchedule: {kakao, mangadex: work.releaseSchedule?.mangadex ?? null},
   };
 }
+/** Events from providers the apps still support; Aladin was retired (2026-10-09) and its stored events stay hidden, as on the PC. */
+export function supportedReleaseEvents(events: readonly ReleaseEvent[]): (ReleaseEvent & {provider: 'kakao' | 'mangadex'})[] {
+  return events.filter((event): event is ReleaseEvent & {provider: 'kakao' | 'mangadex'} => event.provider !== 'aladin');
+}
 /** A published unread event in the PC's inbox shape. */
-export function releaseInboxItem(event: ReleaseEvent): ReleaseInboxItem {
+export function releaseInboxItem(event: ReleaseEvent & {provider: 'kakao' | 'mangadex'}): ReleaseInboxItem {
   return {collectionId: event.collectionId, collectionName: event.collectionName, provider: event.provider, event: {id: event.eventId, kind: event.kind, volumeNumber: event.volumeNumber, previousValue: event.previousValue, currentValue: event.currentValue, detectedAt: event.detectedAt}};
 }

@@ -17,7 +17,7 @@ import {Scrubber} from './Scrubber';
 import {errorText} from './transport';
 import type {CollectionSummary} from './collectionModel';
 import {commitReleases, invalidateReleases, loadShelf, releaseEpoch, releaseStore, type ReleaseStore} from './releaseStore';
-import {acknowledgeReleases, allUnreadReleases, localToday, releaseBoardEntry, releaseInboxItem, type ReleaseCounts} from './collectionReleasesModel';
+import {acknowledgeReleases, allUnreadReleases, localToday, releaseBoardEntry, releaseInboxItem, supportedReleaseEvents, type ReleaseCounts} from './collectionReleasesModel';
 
 type Region = 'kr' | 'jp';
 export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 정보가 보여요';
@@ -140,7 +140,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   const absent = !!shelf && works.length > 0 && !works.some(work => work.releaseSchedule !== undefined);
   // The shared ledger reads the PC's board and inbox; the rows carry the published work back.
   const board = new Map(works.map(work => [work.id, releaseBoardEntry(work, ownedOf, watching)]));
-  const inbox = groupInbox(data.events.map(releaseInboxItem));
+  const inbox = groupInbox(supportedReleaseEvents(data.events).map(releaseInboxItem));
   const shared = works as unknown as SharedSummary[];
   const korean = koreanReleaseLedger(shared, board, inbox, today);
   const japan = japanReleaseLedger(shared, board, inbox, today);
@@ -148,7 +148,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   const volumeCounts = releaseLedgerCounts(rows);
   // A work either tab lists keeps its notifications there; the rest are listed plainly below.
   const shown = new Set([...korean, ...japan].map(row => row.work.id));
-  const others = [...groupInbox(data.events.filter(event => !shown.has(event.collectionId)).map(releaseInboxItem)).entries()];
+  const others = [...groupInbox(supportedReleaseEvents(data.events).filter(event => !shown.has(event.collectionId)).map(releaseInboxItem)).entries()];
   const unread = Math.max(counts.unread, data.events.length);
   const checkedAt = works.map(work => work.releaseSchedule?.[shownRegion === 'kr' ? 'kakao' : 'mangadex']?.checkedAt).filter((value): value is string => !!value).sort().reverse()[0];
   const scrubberSort=useMemo(()=>({kind:'date' as const,values:data.events.map(event=>event.detectedAt)}),[data.events]);
