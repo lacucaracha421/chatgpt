@@ -146,7 +146,7 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
         const position = positions[itemIndex];
         const windowKey = showcase ? itemIndex + 1 : position.row;
         children.push(<div key={item.id} className="collection-list__cell" data-list-index={itemIndex++}
-          style={{ gridRow: position.row, gridColumn: position.column + 1, height: windowed ? "calc(var(--case-height) + 64px)" : undefined }}>
+          style={{ gridRow: position.row, gridColumn: position.column + 1, height: windowed ? "calc(var(--case-height) + 80px)" : undefined }}>
           {!windowed || nearRows.has(windowKey) || pinnedRows.has(windowKey) ? render(item) : null}
         </div>);
       });
