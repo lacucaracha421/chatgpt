@@ -147,7 +147,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
       return record;
     },
     onOpenPerson: setPerformer, onOpenCollection,
-    onCopyCode: code => { if (code && navigator.clipboard?.writeText) void navigator.clipboard.writeText(code).catch(reason => setError(avError(reason))); },
+    onCopyCode: code => code && navigator.clipboard?.writeText ? navigator.clipboard.writeText(code).catch(reason => { setError(avError(reason)); throw reason; }) : Promise.reject(new Error("clipboard unavailable")),
     onManage: data => [
       { id: "edit", label: "컬렉션 편집", onSelect: () => setPanel({ kind: "edit", data }) },
       { id: "showcase", label: data.collection.showcase ? "쇼케이스에서 빼기" : "쇼케이스에 추가", onSelect: () => actions.onShowcase(data.collection) },

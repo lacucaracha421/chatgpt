@@ -1,13 +1,43 @@
-.person-profile-editor { display:grid; gap:var(--space-4); }
-.person-profile-editor__field { display:grid; gap:var(--space-2); min-width:0; }
+.person-profile-editor { display:grid; gap:var(--space-4); container-type:inline-size; }
+.person-profile-editor>.ui-button { justify-self:start; }
+/* Twelve columns: names halve the row, short facts share rows (생년월일 · 키 · 컵 · 가슴, 사이즈 · 활동), links span it. */
+.person-profile-editor__grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:var(--space-4); align-items:start; }
+.person-profile-editor__field { display:grid; gap:var(--space-1); min-width:0; grid-column:span 6; }
+.person-profile-editor__field--birthDate { grid-column:span 4; }
+.person-profile-editor__field--heightCm,.person-profile-editor__field--breastType { grid-column:span 3; }
+.person-profile-editor__field--cup { grid-column:span 2; }
+.person-profile-editor__field--urls { grid-column:1 / -1; }
+@container (max-width:520px) {
+  .person-profile-editor__field--displayName,.person-profile-editor__field--nameJa,.person-profile-editor__field--birthDate,.person-profile-editor__field--bandIn,.person-profile-editor__field--careerStart { grid-column:1 / -1; }
+  .person-profile-editor__field--heightCm,.person-profile-editor__field--cup,.person-profile-editor__field--breastType { grid-column:span 4; }
+}
 .person-profile-editor__label { display:flex; align-items:center; gap:var(--space-2); font-size:var(--type-meta); color:var(--color-muted); }
 .person-profile-editor__label>span,.person-profile-editor__source,.person-profile-editor__field>small { color:var(--color-faint); font-size:var(--type-meta); }
-.person-profile-editor__pair,.person-profile-editor__triple { display:grid; gap:var(--space-2); grid-template-columns:repeat(2,minmax(0,1fr)); }
-.person-profile-editor__triple { grid-template-columns:repeat(3,minmax(0,1fr)); }
-.person-profile-editor input { width:100%; min-width:0; }
-.person-profile-editor__links { display:grid; gap:var(--space-2); }
-.person-profile-editor__link { display:grid; gap:var(--space-2); grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto; }
+.person-profile-editor__field--displayName input,.person-profile-editor__field--nameJa input { width:100%; min-width:0; }
+.person-profile-editor__inline { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2); }
+.person-profile-editor__piece { display:inline-flex; align-items:center; gap:var(--space-1); }
+/* Content-sized short inputs: width follows the expected characters, never below the touch target. */
+.person-profile-editor__short { width:max(var(--touch-target),calc(var(--chars) * 1ch + 2 * var(--space-3))); min-width:0; font-variant-numeric:tabular-nums; }
+.person-profile-editor__short--2 { --chars:2; }
+.person-profile-editor__short--3 { --chars:3; }
+.person-profile-editor__short--4 { --chars:4; }
+.person-profile-editor__unit { color:var(--color-muted); font-size:var(--type-meta); }
+/* The group label already names 가슴; the select keeps its label for assistive technology only. */
+.person-profile-editor__field--breastType .ui-select { justify-self:start; }
+.person-profile-editor__field--breastType select { min-height:var(--control-height); }
+.person-profile-editor__field--breastType .ui-select>span { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.person-profile-editor__link-actions { display:flex; align-items:center; gap:var(--space-1); margin-left:auto; }
+.person-profile-editor__links { display:grid; gap:var(--space-1); }
+.person-profile-editor__link { display:grid; gap:var(--space-2); grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto; align-items:center; }
+.person-profile-editor__link input { width:100%; min-width:0; }
+@container (max-width:520px) {
+  .person-profile-editor__links { gap:var(--space-3); }
+  .person-profile-editor__link { grid-template-columns:minmax(0,1fr) auto; row-gap:var(--space-1); }
+  .person-profile-editor__link>input:first-child { grid-column:1 / -1; }
+}
 .person-profile-editor__source { display:flex; align-items:center; gap:var(--space-1); flex-wrap:wrap; }
+/* The quiet 되돌리기 lines its text up with the source text whether it stays on the line or wraps under it. */
+.person-profile-editor__source>.ui-button { margin-left:calc(var(--space-2) * -1); }
 .person-profile-mark { font-size:var(--type-meta); color:var(--color-faint); background:none; border:0; padding:0 var(--space-1); cursor:pointer; }
 .person-profile-compare dl { display:grid; gap:var(--space-3); }
 .person-profile-compare dt { color:var(--color-muted); font-size:var(--type-meta); }
@@ -20,4 +50,3 @@
 .library-sheet--tall .person-profile-editor>.ui-dialog__actions { position:sticky; bottom:0; padding:var(--space-3) 0; background:var(--color-sidebar); }
 .person-profile-mark-wrap { position:relative; }
 
-.person-profile-editor__input-label { display:grid; gap:var(--space-1); color:var(--color-muted); font-size:var(--type-meta); }

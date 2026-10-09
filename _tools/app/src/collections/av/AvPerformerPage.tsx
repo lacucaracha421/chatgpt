@@ -164,7 +164,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
           <div className="av-performer-page__name-row">
             <h1>{name.primary}{profileEditable && <ProfileManualMark {...markProps} label="이름" keys={["displayName"]}/>}</h1>
             {profileEditable && <IconButton label="프로필 편집" icon={PencilIcon} disabled={profileRefused} onClick={() => setProfileEditing(true)}/>}
-            <IconButton pop label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} icon={StarIcon} activeIcon={StarSolidIcon} active={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={() => void toggleFavorite()} />
+            <IconButton pop className="av-performer-page__favorite" label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} icon={StarIcon} activeIcon={StarSolidIcon} active={favorite ?? false} disabled={favorite === null || favoriteBusy} onClick={() => void toggleFavorite()} />
           </div>
           {(name.secondary || profileEditable && person.stashdbId && Object.prototype.hasOwnProperty.call(person.profileOverrides ?? {}, "nameJa")) && <p className="av-performer-page__name-ja" lang="ja">{name.secondary || "비움"}{profileEditable && <ProfileManualMark {...markProps} label="일본어 이름" keys={["nameJa"]}/>}</p>}
           {sourceError && <p className="av-profile__quiet" role="status">{sourceError}</p>}

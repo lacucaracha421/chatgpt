@@ -445,5 +445,3 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .tablet-performer__band { position:relative; }
 .tablet-performer__manage { position:absolute; top:0; right:0; }
 .tablet-performer__manage-items { display:grid; gap:var(--space-1); }
-.person-profile-editor__link { grid-template-columns:minmax(0,1fr) auto; }
-.person-profile-editor__link>input:first-child { grid-column:1 / -1; }

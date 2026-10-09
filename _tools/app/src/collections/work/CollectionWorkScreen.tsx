@@ -29,7 +29,8 @@ export type CollectionWorkData = { collection: CollectionSummary; record?: Colle
 export type WorkActions = {
   onClose(): void; onStep(offset: -1 | 1): void; onEdit(collection: CollectionSummary): void; onShowcase(collection: CollectionSummary): void;
   onManage(data: CollectionWorkData): MenuItem[]; onSave(collection: CollectionSummary, edit: CollectionRecordEdit): Promise<CollectionWorkRecord>; onPickVolume?(id: string): void; onEnlargeManga?(): void;
-  onOpenPerson(id: string): void; onOpenCollection?(id: string): void; onCopyCode(code: string | null): void;
+  onOpenPerson(id: string): void; onOpenCollection?(id: string): void; /** Resolves once the code is on the clipboard, so the copy icon can show it was copied. */
+  onCopyCode(code: string | null): Promise<unknown> | void;
 };
 function samePresentation(left: CollectionWorkData, right: CollectionWorkData) {
   // Game spine images keep their own painted slot, preserving the current case rotation.
@@ -158,6 +159,6 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
     <WorkStrip onReady={() => ready("strip")} av={data.collection.type === "av"} mode={picked} frontThumbnailUrl={caseData.front} artworks={data.artworks} privacy={privacy} onPick={pick} />
     </>}
     <aside className="asset-viewer__dock work-dock" aria-label="작품 정보" style={info ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={!info} inert={!info}><div className="asset-viewer__dock-body">{data.manga?.ownership}<WorkInfo collection={data.collection} av={data.av} related={data.related} tmdb={data.tmdb} record={record}
-      onSave={edit => actions.onSave(data.collection, edit)} onOpenPerson={actions.onOpenPerson} onOpenCollection={actions.onOpenCollection} onCopyCode={() => actions.onCopyCode(data.av?.productCode ?? null)} />{data.manga?.management}</div></aside>
+      onSave={edit => actions.onSave(data.collection, edit)} onOpenPerson={actions.onOpenPerson} onOpenCollection={actions.onOpenCollection} onCopyCode={code => actions.onCopyCode(code)} />{data.manga?.management}</div></aside>
   </>;
 }

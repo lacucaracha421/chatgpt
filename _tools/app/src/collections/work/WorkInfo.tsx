@@ -11,6 +11,7 @@ import { CaseScore } from "../case/CaseInside";
 import { moreWorkFacts, workFacts } from "./workFacts";
 export { insideFacts, moreWorkFacts, workFacts, type WorkFactAv, type WorkFactSource } from "./workFacts";
 import { FilmDetails } from "../FilmDetails";
+import { withProductCodeCopy } from "./ProductCodeCopy";
 import { SeriesSeasons } from "../SeriesSeasons";
 
 export function workRecord(collection: CollectionSummary, record = defaultRecord(collection)): Fact[] {
@@ -22,7 +23,7 @@ export function insideRecord(collection: CollectionSummary, record: CollectionWo
 export function WorkInfo({ collection, av, related, tmdb, record = defaultRecord(collection), onSave, onOpenPerson, onOpenCollection, onCopyCode }: {
   collection: CollectionSummary; av: AvDetails | null; related: AvRelated | null; tmdb?: TmdbConnection | null;
   record?: CollectionWorkRecord; onSave(edit: CollectionRecordEdit): Promise<CollectionWorkRecord>;
-  onOpenPerson(id: string): void; onOpenCollection?(id: string): void; onCopyCode(): void;
+  onOpenPerson(id: string): void; onOpenCollection?(id: string): void; onCopyCode(code: string): Promise<unknown> | void;
 }) {
   const groups = related ? [
     ...related.performers.map(person => ({ name: `${performerName(person).primary} · 다른 작품`, items: person.items })),
@@ -31,9 +32,8 @@ export function WorkInfo({ collection, av, related, tmdb, record = defaultRecord
   ] : [];
   return <div className="work-info">
     <WorkRecordEditor collection={collection} record={record} onSave={onSave} />
-    <section><SectionLabel title="작품 정보" /><CaseFacts rows={workFacts(collection, av)} />
+    <section><SectionLabel title="작품 정보" /><CaseFacts rows={withProductCodeCopy(workFacts(collection, av), av?.productCode, onCopyCode)} />
       <CaseFacts rows={moreWorkFacts(collection, av, tmdb?.series ?? null)} />
-      {av?.productCode && <Button size="sm" variant="quiet" onClick={onCopyCode}>품번 복사</Button>}
     </section>
     {collection.type === "movie" && collection.overview?.trim() && <section aria-label="개요"><SectionLabel title="개요" /><p className="work-overview">{collection.overview}</p></section>}
     {collection.type === "movie" && (tmdb?.series ? <SeriesSeasons key={collection.id} series={tmdb.series} /> : tmdb?.mediaType !== "tv" && tmdb?.film ? <FilmDetails key={collection.id} film={tmdb.film} onOpenCollection={onOpenCollection} /> : null)}

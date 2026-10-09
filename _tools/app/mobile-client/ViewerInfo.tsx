@@ -110,7 +110,7 @@ export function summaryText(asset: Asset, now = new Date()): string {
  * is swallowed. The bridge is the only path that works inside the APK; the browser API
  * covers the development preview.
  */
-async function writeClipboard(text: string): Promise<void> {
+export async function writeClipboard(text: string): Promise<void> {
   if (window.LakomicsNative) return native('copyText', {text}, undefined).then(() => undefined);
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);

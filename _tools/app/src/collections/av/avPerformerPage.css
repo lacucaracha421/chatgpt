@@ -14,7 +14,10 @@
 .av-performer-page__portrait-change svg { width: var(--icon-sm); height: var(--icon-sm); }
 .av-performer-page__identity { min-width: 0; display: grid; gap: var(--space-1); }
 .av-performer-page__name-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.av-performer-page__name-row .ui-icon-button { flex: none; margin-left: auto; }
+/* The edit pencil sits right after the name; only the favourite star keeps to the far end. */
+.av-performer-page__name-row > h1 { min-width: 0; }
+.av-performer-page__name-row .ui-icon-button { flex: none; }
+.av-performer-page__name-row .av-performer-page__favorite { margin-left: auto; }
 .av-performer-page h1 { margin: 0; font-size: var(--type-title); line-height: var(--line-title); font-weight: 600; overflow-wrap: anywhere; }
 .av-performer-page__name-ja { margin: 0; color: var(--color-muted); font-family: var(--font-ja), var(--font-ui); }
 .av-performer-page__facts { min-width: 0; }
