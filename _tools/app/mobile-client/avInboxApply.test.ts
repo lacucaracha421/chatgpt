@@ -6,7 +6,7 @@ import {ApiError} from './transport';
 import {composeInboxCommands,createInboxPlan,initialChoices,readInboxPlans,resumeInboxApplies,cancelInboxPlan,inboxWorks,inboxMatches,refreshedChoices,retryInboxPlan} from './avInboxApply';
 import {AUTHORITY_STATUS_PATH,COMMAND_PATH,flushCommands,readCommands,reconcileCommands} from './collectionCommandOutbox';
 import {inboxAuthority,inboxFixture,inboxIdentity,inboxWork,manifest} from './avInboxFixtures';
-import type {InboxAuthority} from './avInbox';
+import type {InboxAuthority} from './avInboxModel';
 let authority:InboxAuthority;
 beforeEach(()=>{localStorage.clear();setOutboxConnection('https://test.example');mocks.api.mockReset();mocks.native.mockResolvedValue({url:'data:image/jpeg;base64,YQ=='});authority=structuredClone(inboxAuthority);
   mocks.api.mockImplementation(async(path:string,_signal:unknown,body:Record<string,unknown>)=>{
@@ -80,7 +80,7 @@ it('uses receipted no-op effects for credit revision and pins accepted operation
 });
 it('reads supported baseline sections and collects AV people embedded in works',async()=>{
   authority.works=[{...inboxWork,avPeople:[{personId:'known',displayName:'배우',nameJa:'女優'}]}];
-  const {readInboxAuthority}=await import('./avInbox');const state=await readInboxAuthority(inboxIdentity);
+  const {readInboxAuthority}=await import('./avInboxModel');const state=await readInboxAuthority(inboxIdentity);
   expect(state.people).toEqual(authority.works[0].avPeople);
   expect(mocks.api.mock.calls.filter(([p])=>p.includes('section=')).map(([p])=>new URL('https://test.example'+p).searchParams.get('section'))).toEqual(['works','artworks']);
 });
@@ -99,7 +99,7 @@ it('waits for preceding FIFO changes and composes from their accepted authority 
 });
 it('strips published credit display fields before sending a complete desired credit list',async()=>{
   authority.works=[{...inboxWork,avCredits:[{personId:'old',role:'performer',order:0,creditName:null,name:'Old name',nameJa:'以前'} as unknown as typeof inboxWork.avCredits[number]]}];
-  const {readInboxAuthority}=await import('./avInbox');const read=await readInboxAuthority(inboxIdentity);
+  const {readInboxAuthority}=await import('./avInboxModel');const read=await readInboxAuthority(inboxIdentity);
   expect(Object.keys(read.works[0].avCredits[0]).sort()).toEqual(['creditName','order','personId','role']);
   const choices=initialChoices(inboxFixture,read.works[0]);createInboxPlan(inboxFixture,read,choices);await pass();await pass();
   const body=mocks.api.mock.calls.find(([p,,b])=>p===COMMAND_PATH&&b.commandType==='setAvCredits')?.[2];

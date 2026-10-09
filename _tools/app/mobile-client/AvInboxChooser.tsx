@@ -13,7 +13,7 @@ import {normalizeProductCode} from './avLookup';
 import type {CollectionSummary} from './collectionModel';
 import {sameAvValue} from './avEditModel';
 import {createInboxPlan, initialChoices, inboxWorks, inboxPeople, inboxMatches, refreshedChoices, inboxRecheckChanges, readInboxPlans, surfaceSlot, type InboxChoices, type PersonChoice} from './avInboxApply';
-import {candidateHasSurface, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxCandidate, type InboxDetail, type InboxWork, type Surface} from './avInbox';
+import {candidateHasSurface, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxCandidate, type InboxDetail, type InboxWork, type Surface} from './avInboxModel';
 
 export function useInboxJacket(id:string,enabled:boolean,version?:string){
   const [value,setValue]=useState<{id:string;url:string}|null>(null);

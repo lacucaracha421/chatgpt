@@ -3,7 +3,7 @@ import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection'
 import {enqueueInboxCommands, readCommands, releaseInboxCommands, discardInboxCommands, sameAuthority, type Command, type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
 import {AV_DETAIL_FIELDS, sameAvValue, validateAvDetails, validateAvCredits, type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson} from './avEditModel';
 import {normalizeProductCode} from './avLookup';
-import {candidateHasSurface, inboxPath, reviewedInboxDetail, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxDetail, type InboxWork, type PreparedArtwork, type Surface} from './avInbox';
+import {candidateHasSurface, inboxPath, reviewedInboxDetail, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxDetail, type InboxWork, type PreparedArtwork, type Surface} from './avInboxModel';
 
 export type PersonChoice={nameJa:string;role:'performer'|'director';action:'new'|'link'|'skip';displayName:string;personId:string|null};
 export type InboxChoices={workId:string|null;name:string;surfaces:Record<Surface,'candidate'|'keep'|'clear'>;fields:AvDetailFields;people:PersonChoice[]};
@@ -238,7 +238,7 @@ async function resume(connection:string,identity:AuthorityIdentity){
           plan.manifests.push(...reply.items);save(plan,connection);
         }
         // Fresh baseline confirms state did not change while preparing; it also finds crop reuse.
-        const {readInboxAuthority}=await import('./avInbox');
+        const {readInboxAuthority}=await import('./avInboxModel');
         const current=await readInboxAuthority(identity);
         if(!currentPlan(plan,connection))return;
         const work=current.works.find(w=>w.workId===plan.workId);

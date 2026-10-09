@@ -10,7 +10,7 @@ import {AvInboxChooser} from './AvInboxChooser';
 import {inboxAuthority,inboxFixture,inboxIdentity,inboxWork} from './avInboxFixtures';
 import {PRIVACY_MODE_KEY} from './privacyMode';
 import {createInboxPlan,initialChoices,readInboxPlans,type InboxPlan} from './avInboxApply';
-import type {InboxDetail,InboxItem} from './avInbox';
+import type {InboxDetail,InboxItem} from './avInboxModel';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 let list:InboxItem[],details:Record<string,InboxDetail>,offline:boolean;
 const authority={identity:inboxIdentity,flush:vi.fn()} as unknown as ReturnType<typeof useCollectionAuthority>;

@@ -13,7 +13,7 @@ import {usePrivacyMode} from './privacyMode';
 import type {CollectionSummary} from './collectionModel';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {INBOX_APPLY_EVENT, cancelInboxPlan, pauseInboxPlan, retryInboxPlan, readInboxPlans, type InboxPlan} from './avInboxApply';
-import {inboxDetail, reviewedInboxDetail, inboxList, inboxPath, readInboxAuthority, type InboxAuthority, type InboxDetail, type InboxItem} from './avInbox';
+import {inboxDetail, reviewedInboxDetail, inboxList, inboxPath, readInboxAuthority, type InboxAuthority, type InboxDetail, type InboxItem} from './avInboxModel';
 import {inboxRowThumbnail} from './avInboxThumbnail';
 import {StableImage} from '../src/shared/ui/StableImage';
 import './avInbox.css';

@@ -1,5 +1,5 @@
 import {outboxConnection} from './outboxConnection';
-import {jacketPreview, type InboxDetail} from './avInbox';
+import {jacketPreview, type InboxDetail} from './avInboxModel';
 
 let lane:Promise<unknown>=Promise.resolve();
 const thumbnails=new Map<string,Promise<string>>();
