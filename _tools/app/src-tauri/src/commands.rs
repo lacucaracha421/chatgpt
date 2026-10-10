@@ -2834,16 +2834,6 @@ pub async fn open_collection_authority_report(app: AppHandle, path: String) -> R
 }
 
 #[tauri::command]
-pub async fn push_cloud_collections(
-    state: State<'_, AppState>,
-    on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
-) -> Result<crate::cloud::collections::CloudCollectionsPublishResult, CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.push_cloud_collections(&|progress| { let _ = on_progress.send(progress); }))
-        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
-}
-
-#[tauri::command]
 pub async fn push_cloud_characters(
     state: State<'_, AppState>,
     on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,

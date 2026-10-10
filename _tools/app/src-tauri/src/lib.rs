@@ -623,7 +623,6 @@ pub fn run() {
             commands::test_cloud_capture_connection,
             commands::create_extension_pairing,
             commands::push_cloud_metadata_backup,
-            commands::push_cloud_collections,
             commands::verify_collection_authority_baseline,
             commands::list_collection_trash,
             commands::get_collection_trash_cover,

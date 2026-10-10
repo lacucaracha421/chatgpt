@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { PublicationStatus } from "../layout/PublicationStatus";
 import { dismissPublication, startPublication, type PublishProgress } from "./publicationJobs";
 
-afterEach(() => { cleanup(); dismissPublication("catalog"); dismissPublication("collections"); });
+afterEach(() => { cleanup(); dismissPublication("catalog"); dismissPublication("characters"); });
 
 it("keeps progress and duplicate protection across screen unmounts, completing only after the server returns", async () => {
   let progress!: (value: PublishProgress) => void;
@@ -26,14 +26,14 @@ it("keeps progress and duplicate protection across screen unmounts, completing o
 });
 
 it("retains errors after navigation and allows an explicit retry without blocking the other job", async () => {
-  await act(async () => { await startPublication("collections", async () => { throw new Error("offline"); }, String); });
+  await act(async () => { await startPublication("characters", async () => { throw new Error("offline"); }, String); });
   const first = render(<PublicationStatus />);
   expect(screen.getByRole("alert")).toBeTruthy();
   first.unmount();
   render(<PublicationStatus />);
   expect(screen.getByRole("alert")).toBeTruthy();
   await act(async () => { await Promise.all([
-    startPublication("collections", async () => 4, result => `${result}개 완료`),
+    startPublication("characters", async () => 4, result => `${result}개 완료`),
     startPublication("catalog", async () => 9, result => `${result}개 완료`),
   ]); });
   expect(screen.getByText(/4개 완료/)).toBeTruthy();
