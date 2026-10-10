@@ -70,7 +70,7 @@ function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: 
     return () => controller.abort();
   }, [cover?.url, cover?.sha256, privacy]);
   if (privacy) return <span className={`home-cover-placeholder is-private ${className}`} aria-label="비공개 모드로 이미지 숨김" />;
-  return url ? <StableImage className={`home-home-image ${className}`} src={url} alt={alt} /> : <span data-perf-image-pending={catalogPerfEnabled()&&!!(cover?.sha256||cover?.url)?"true":undefined} className={`home-cover-placeholder ${className}`} aria-label={`${alt} 표지 준비 중`} />;
+  return url ? <StableImage className={`home-home-image ${className}`} src={url} alt={alt} /> : <span data-cover-pending={cover?.sha256||cover?.url?"true":undefined} data-perf-image-pending={catalogPerfEnabled()&&!!(cover?.sha256||cover?.url)?"true":undefined} className={`home-cover-placeholder ${className}`} aria-label={`${alt} 표지 준비 중`} />;
 }
 
 type HomeArtworkCacheEntry = {url: string; until: number};
@@ -121,7 +121,7 @@ function useHomeArtwork(item: CollectionSummary, revision: string, active: boole
 
 function HomeMangaCover({item, revision, label, active}: {item: CollectionSummary; revision: string; label: string; active: boolean}) {
   const url = useHomeArtwork(item, revision, active);
-  return url ? <StableImage className="collection-art" src={url} alt={label} /> : <span data-perf-image-pending={catalogPerfEnabled()&&!!(collectionCover(item)||item.coverAssetId)?"true":undefined} className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>;
+  return url ? <StableImage className="collection-art" src={url} alt={label} /> : <span data-cover-pending={collectionCover(item)||item.coverAssetId?"true":undefined} data-perf-image-pending={catalogPerfEnabled()&&!!(collectionCover(item)||item.coverAssetId)?"true":undefined} className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>;
 }
 
 function HomePlayingCase({item, revision, active, privacy, selected}: {item: CollectionSummary; revision: string; active: boolean; privacy: boolean; selected: boolean}) {

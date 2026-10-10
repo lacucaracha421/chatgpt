@@ -5,6 +5,8 @@ import {meteredConnection, warmConnection} from './warmNetwork';
 import {viewportImages,viewportImageDecoded} from '../src/shared/motion/viewportImages';
 
 export const AREA_PREWARM_IDLE_MS = 1500;
+/** Home's first pictures get this long to arrive; a cover that never does must not block the warm-up forever. */
+export const PREWARM_MEDIA_WAIT_MS = 3000;
 
 /** One bounded warm-up per connection, after foreground content and images settle. */
 export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTMLElement|null>) {
@@ -33,7 +35,7 @@ export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTM
   const allowed=enabled&&online&&visible&&!meteredConnection();
   useEffect(()=>{
     if(!allowed||warmed===scope)return;
-    let timer=0,frame=0,idle:number|undefined,stopped=false,painted=false;
+    let timer=0,frame=0,idle:number|undefined,stopped=false,painted=false,mediaSince=0;
     const decoded=new WeakMap<HTMLImageElement,string>(),decoding=new WeakMap<HTMLImageElement,string>();
     const cancel=()=>{
       window.clearTimeout(timer);window.cancelAnimationFrame(frame);
@@ -44,13 +46,14 @@ export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTM
       const stage=host.current?.querySelector<HTMLElement>('.motion-stage');
       const shown=stage?.dataset.motionShown;
       const view=stage?.querySelector<HTMLElement>(`[data-motion-view="${shown}"]`);
-      if(stage?.dataset.motionActive!==shown||(shown!=='home'&&shown!=='library')||!view||!viewReady(view))return false;
-      // Home's media tickets have no img yet; do not race those first pictures.
-      if(shown==='home'&&Array.from(view.querySelectorAll('.home-cover-placeholder')).some(element=>{
+      if(stage?.dataset.motionActive!==shown||(shown!=='home'&&shown!=='library')||!view||!viewReady(view)){mediaSince=0;return false;}
+      // Home's media tickets have no img yet; do not race those first pictures. Only a placeholder
+      // that expects a cover counts: an entry without artwork keeps its placeholder for good.
+      const waiting=shown==='home'&&Array.from(view.querySelectorAll('.home-cover-placeholder[data-cover-pending]')).some(element=>{
         const rect=element.getBoundingClientRect();
         return rect.width>0&&rect.height>0&&rect.bottom>0&&rect.top<window.innerHeight&&rect.right>0&&rect.left<window.innerWidth;
-      }))return false;
-      return viewportImages(view).map(image=>{
+      });
+      const settled=viewportImages(view).map(image=>{
         const source=`${image.src}|${image.srcset}`;
         if(decoded.get(image)===source||viewportImageDecoded(image))return true;
         if(typeof image.decode!=='function')return image.complete;
@@ -60,6 +63,9 @@ export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTM
         }
         return false;
       }).every(Boolean);
+      if(!waiting&&settled){mediaSince=0;return true;}
+      mediaSince||=Date.now();
+      return Date.now()-mediaSince>=PREWARM_MEDIA_WAIT_MS;
     };
     const finish=()=>{
       idle=undefined;
@@ -73,7 +79,8 @@ export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTM
       if(document.visibilityState==='hidden')return;
       timer=window.setTimeout(()=>{
         timer=0;
-        if(window.requestIdleCallback)idle=window.requestIdleCallback(finish);
+        // Android WebView may never grant an idle period on a still page; the timeout bounds the wait.
+        if(window.requestIdleCallback)idle=window.requestIdleCallback(finish,{timeout:1000});
         else finish();
       },AREA_PREWARM_IDLE_MS);
     };

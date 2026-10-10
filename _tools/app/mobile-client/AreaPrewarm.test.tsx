@@ -5,7 +5,7 @@ import {AreaSwitch,MotionScope,READY_CAP_MS,viewReady} from '../src/shared/motio
 import {Catalog} from './Catalog';
 import {forgetCatalogCovers} from './CatalogCover';
 import {Collections} from './Collections';
-import {AREA_PREWARM_IDLE_MS,useAreaPrewarm} from './useAreaPrewarm';
+import {AREA_PREWARM_IDLE_MS,PREWARM_MEDIA_WAIT_MS,useAreaPrewarm} from './useAreaPrewarm';
 import {usePrivacyMode} from './privacyMode';
 import type {CatalogPage} from './catalogModel';
 import type {CollectionPage} from './collectionModel';
@@ -132,7 +132,7 @@ it('defers for scrolling, even if the idle callback was already queued',async()=
 it('waits for Home viewport media tickets and image decode before hidden requests',async()=>{
   render(<Shell/>);
   const home=document.querySelector('[data-motion-view="home"]')!;
-  const placeholder=document.createElement('span');placeholder.className='home-cover-placeholder';home.append(placeholder);
+  const placeholder=document.createElement('span');placeholder.className='home-cover-placeholder';placeholder.dataset.coverPending='true';home.append(placeholder);
   placeholder.getBoundingClientRect=()=>({width:100,height:100,top:0,bottom:100,left:0,right:100} as DOMRect);
   await warm();expect(mocks.api).not.toHaveBeenCalled();
   placeholder.remove();
@@ -142,6 +142,32 @@ it('waits for Home viewport media tickets and image decode before hidden request
   const decode=Promise.withResolvers<void>();image.decode=()=>decode.promise;
   await time(AREA_PREWARM_IDLE_MS);await idle();expect(mocks.api).not.toHaveBeenCalled();
   await act(async()=>decode.resolve());await time(AREA_PREWARM_IDLE_MS);await idle();
+  expect(first('catalog')).toHaveLength(1);
+});
+const visibleRect=()=>({width:100,height:100,top:0,bottom:100,left:0,right:100} as DOMRect);
+// Cold start on the tablet: Home draws, its first image decodes from cache, the user taps the Home tab and then leaves the screen alone.
+async function idleFor(ms:number){for(let elapsed=0;elapsed<ms;elapsed+=500){await time(500);await idle();}await flush();}
+it('prefetches Catalog and Collections during a long Home idle although a Home tile has no cover to wait for',async()=>{
+  const shell=render(<Shell/>);
+  const home=document.querySelector('[data-motion-view="home"]')!;
+  home.getBoundingClientRect=visibleRect;
+  // An upcoming entry or work without artwork keeps its placeholder for good: no ticket is on its way.
+  const bare=document.createElement('span');bare.className='home-cover-placeholder';bare.getBoundingClientRect=visibleRect;home.append(bare);
+  const image=document.createElement('img');image.src='https://example.invalid/home';image.getBoundingClientRect=visibleRect;image.decode=()=>Promise.resolve();home.append(image);
+  await frame();await frame();
+  fireEvent.pointerDown(home);fireEvent.touchStart(home); // the Home tab tap
+  await idleFor(8000);
+  expect(shell.container.querySelector('[data-motion-view="home"]')).toBe(home);
+  for(const area of areas)expect(first(area)).toHaveLength(1);
+});
+it('stops waiting for a Home cover ticket that never arrives after the media wait cap',async()=>{
+  render(<Shell/>);
+  const home=document.querySelector('[data-motion-view="home"]')!;
+  home.getBoundingClientRect=visibleRect;
+  const stuck=document.createElement('span');stuck.className='home-cover-placeholder';stuck.dataset.coverPending='true';stuck.getBoundingClientRect=visibleRect;home.append(stuck);
+  await frame();await frame();
+  await idleFor(PREWARM_MEDIA_WAIT_MS-1000);expect(mocks.api).not.toHaveBeenCalled();
+  await idleFor(2500+AREA_PREWARM_IDLE_MS);
   expect(first('catalog')).toHaveLength(1);
 });
 it('prepares at most twelve hidden Catalog covers once, with one ticket in flight',async()=>{

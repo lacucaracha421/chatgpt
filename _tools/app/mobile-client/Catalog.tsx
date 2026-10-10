@@ -259,7 +259,8 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
       }
     };
     const run=()=>{void prepare().catch(()=>{}).finally(()=>controller.abort());};
-    if(window.requestIdleCallback)idle=window.requestIdleCallback(run);
+    // Android WebView may never grant an idle period on a still page; the timeout bounds the wait.
+    if(window.requestIdleCallback)idle=window.requestIdleCallback(run,{timeout:1000});
     else timer=window.setTimeout(run,0);
     const visibility=()=>{if(document.visibilityState==='hidden')stop();};
     const events=['lakomics-pause','lakomics-power','lakomics-network','offline','lakomics-thumbnail-warm-toggle'];
