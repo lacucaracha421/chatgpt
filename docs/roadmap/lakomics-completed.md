@@ -2,6 +2,10 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Dropped by the user — 2026-10-10 (held items)
+
+The user asked to delete every held backlog item except the realistic game case mockup. Removed from the backlog without implementation; reopen only on a new request (the full text is in Git history before this change): `MOBILE-CACHE-001` (Android durable metadata replica), `PC-RELEASE-FEEDBACK-20260929` (late PC calendar covers), `OSS-SCAN-20260926` (optional OSS trials), `MOBILE-UX-001` (landscape two-pane Library and classification-capacity research), `CHAR-AUTO-007` / `CHAR-AUTO-008` (character auto-assignment follow-up; dropped from the order the same day), `CHAR-MODEL-001` (character-model re-evaluation research), `SIMILARITY-003` (video similarity validation / vPDQ), `PERF-SIMILARITY` (metric index gate), `ASSET-EAGLE-20261001` (Eagle-style Asset candidates), `IDEA-002` (date timeline), `NL-SEARCH-PERF-001` (VisionMind comparison research), and the held bullets for ledger import, character panel region editing, light theme, AV work-screen disc animation and Collections cache persistence.
+
 ## Closure checkpoint — 2026-10-10 (evening) — server ownership of wishlist, Kakao and MangaDex binds
 
 All live results and acceptance below were verified by the controller on **2026-10-10 KST** and supplied for this documentation update. No new runtime, deployment, device, production-data or Git writes were performed for this update. This checkpoint supersedes the morning reconciliation's pending wishlist/Kakao/MangaDex handover and binding-fence claims; unrelated acceptance gates remain in the [active backlog](lakomics-backlog.md#waiting-on-the-user-devicenative-checks).

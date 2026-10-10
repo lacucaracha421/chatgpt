@@ -73,10 +73,6 @@ Delivered folder/idle/startup/thumbnail-priority changes and their dated measure
 Status: `PARTIAL` — Collections ownership is settled and activated (2026-10-06, `8d368991`); its legacy publication is retired (`59461c1c`). Decide ownership only for remaining PC-published domains, including Character data; retire manual controls, compatibility readers, staging or fences only after identifying a live replacement and recovery needs. `useMobilePublications` still serves unmigrated domains.
 Preserve SQLite replica, workstation compute/filesystem state, durable intent and per-domain cursors/preferences. Completed authority cutovers and the user-closed `CLOUD-WORK-001`, `MOBILE-WRITE-002`, `MOBILE-003` are not new work.
 
-## MOBILE-CACHE-001 — Android durable metadata replica
-
-Status: `HOLD` — durable authority metadata, cursors and outboxes already exist in Android `ReplicaSchema`; do not rebuild those lanes. After remaining browse contracts stabilize, cover unmigrated browse metadata and render committed local state before background updates (remaining coverage unverified 2026-10-10). Keep the bounded binary media cache separate; derive Picker views from the replica and invalidate by server/library identity.
-
 <a id="user-req-20260924--user-requests-2026-09-24-evening"></a>
 ## USER-REQ-20260924 — Collections authority slice 1
 
@@ -152,7 +148,6 @@ The latest recorded tagger schedule is 16:00 daily (2026-10-07), superseding the
 
 Status: `PARTIAL` — compare Home's `마법소녀를 동경해서` thumbnail with the stable calendar path; separate memo `피드백` kind and tablet favourite-performer/Home parity are (unverified 2026-10-10). Catalog request optimisation is consolidated in PERF; its committed fixes are archived.
 - **Catalog ownership (decided 2026-09-28):** PC should import server refresh additions while retaining its own catalog/publisher/updater; no committed PC import was found (unverified 2026-10-10).
-- **Ledger import (`HOLD`, decided 2026-09-28):** resume with user-downloaded Naver Pay/card Excel/CSV, one parser per source and confirmation before saving; notification capture is optional later. No consumer API is assumed.
 
 <a id="user-feedback-20260928b--second-feedback-batch-2026-09-28-night"></a>
 ## USER-FEEDBACK-20260928B — Remaining cross-client requests
@@ -162,15 +157,8 @@ Status: `PARTIAL` — implemented redesigns, manga cleanup UI, automatic edition
 - **Home AV:** favourite performers should open the performer route rather than AV Collections; AV new releases need a feed; tablet favourite-performer data parity remains (unverified 2026-10-10). Keep no-resume policy (user 2026-09-30): local manga starts at page 1, library video at 0:00; unused 0114 progress tables do not reopen resume.
 - **Refresh motion:** new tiles arriving during refresh were requested to animate; the later accepted motion set only animates first load (`297891ea`, `97edc2c9`). Whether the earlier refresh-animation request was explicitly withdrawn is (unverified 2026-10-10); do not add it without reconciling the accepted rule.
 - **Catalog review:** server automatic-decision origin labels, decision-log restart replay and PC decision reporting completeness need recheck (unverified 2026-10-10); `includesServerWorks=false` deliberately preserves server-only candidates, not unfinished behaviour.
-- **Character panel (`HOLD`, user 2026-09-29):** after classification-flow cleanup, adjust regions on reference tiles with fixed panel order, one flagged-count line and stable controls (mockup F); [folder prototypes](../prototypes/pc-folders-20260929/).
 - **Find / natural-language search:** keep the rail Find button and later improve convenience (decided 2026-09-28). The natural-language search `HOLD` was lifted by the user on 2026-10-04; see `NL-SEARCH-001`.
-- **Light theme (`HOLD`, decided 2026-09-28):** Settings choice, dark default, token-only light palette; [foundation palettes](../prototypes/design-foundation-20260928/part4.html).
 - **Vanished manga folders:** UI is implemented (`4542a6b9`, `af2fd1a4`); production deletion still needs separate approval. Preserve user choice of selected records only with verified automatic backup (decided 2026-09-28).
-
-<a id="pc-release-feedback-20260929--release-build-use-feedback-2026-09-29-evening"></a>
-## PC-RELEASE-FEEDBACK-20260929 — Deferred calendar-cover latency
-
-Status: `HOLD` — user deferred late PC calendar covers; no fix selected. Picker items 4–5 acceptance was closed 2026-10-05 (night checkpoint).
 
 <a id="home-opt-001--home-optimisation-and-debugging-pass-pc-and-tablet"></a>
 ## HOME-OPT-001 — Residual test reliability
@@ -191,12 +179,6 @@ In-flight artwork cleanup race is fixed (`af2fd1a4`); this does not prove every 
 
 Status: `TODO` — low priority; kept when the vault's acceptance line was closed 2026-10-05 (ADR-0039). Original scan-error title/thumbnail preservation, full-image cache headers and per-tile-probe audit survivors are (unverified 2026-10-10); recheck the rewritten path only.
 
-<a id="oss-scan-20260926--open-source-projects-worth-using-idea"></a>
-## OSS-SCAN-20260926 — Optional bounded trials
-
-Status: `HOLD` — no adoption implied. For a concrete need only: sqlite-vec/usearch; imgutils CCIP; PixAI; vPDQ; in-process ONNX via ort; komf/Mihon metadata; Litestream; es-hangul/Lindera search; ThumbHash; jxl-oxide; ffmpeg-sidecar; rusqlite_migration; manga-ocr/comic-translate; Real-CUGAN/Real-ESRGAN; KGen/TIPO/tag dictionaries; restic/kopia/rclone.
-Existing trial results remain in [research](../research/reference-projects.md) and the completed checkpoint. Immich/Stash/lap/PhotoSwipe/lightbox references are optional; GPL/AGPL code is ideas-only, never copy. No installs, dependencies or production operations are authorized by this list.
-
 <a id="ai-jev-002--jev-for-text-candidate-decisions-idea"></a>
 ## AI-JEV-002 — Text candidate decisions
 
@@ -214,53 +196,9 @@ Live R2 signed Content-Length refusal is not established by fixtures (storage en
 Status: `TODO` — low priority; [review](../research/server-review-2026-09-24.md). Personal-edit/noop, character/similarity decision histories and observation-ledger retention still need review (unverified 2026-10-10); refresh-job pruning is implemented (`5c1b80d7`) and is not the same history.
 Items 5 (legacy long memo conflict) and 9 (auth before body validation) are fixed (`67e0cd97`). Shared-token trash/restore matches the retained design; the similarity-kept Trash refusal acceptance was closed 2026-10-05.
 
-<a id="mobile-ux-001--portrait-real-use-follow-up"></a>
-## MOBILE-UX-001 — Deferred portrait investigations
-
-Status: `HOLD` — landscape two-pane Library stays parked (user 2026-09-28: need unclear); begin from actual wide-content/stand/split-screen use if resumed. Dimensions, sidebar, filters, copying and duplicate-review source work are archived; older unconfirmed device checks were closed 2026-10-05.
-Keep classification-capacity research bounded and on hold: inference stays on PC, with isolated model-memory/latency measurement before any VPS migration (unverified 2026-10-10). Actual model-file viewing and three-column root cards were dropped; physical covers remain sufficient.
-
 # Character classification
 
-<a id="char-auto-007--evidence-based-accuracy-plan-2026-09-23-re-analysis"></a>
-## CHAR-AUTO-007 — S36 enablement and case follow-up
-
-Status: `HOLD` — **dropped from the priority order by the user on 2026-10-10** ("캐릭터 자동 지정은 이제 빼도 될듯"); reopen only if the user asks. Previous plan: enable/watch the recorded S36 results on the user's 백합 series and spot-check acceptances; no new extraction is required. Evaluator, shadow scoring/review and per-series live switch are implemented (`9b72e87e`, `7f9d7bef`, `d8546dba`, `bc8770df`, `c9e13eb1`, `f87a67f1`).
-Retain 안조 follow-up: choose anchor regions for `e60e44a1` (#1/#2) and `90394071` (#4), add four manual acceptances as supporting references (unverified 2026-10-10). Keep manual truth, same-series competition and strict automatic guards; production enablement/writes need their own approval.
-
-<a id="char-auto-008--multi-form-characters-and-reference-quality-hints"></a>
-## CHAR-AUTO-008 — Multi-form reference hints
-
-Status: `HOLD` — follows `CHAR-AUTO-007`, dropped by the user on 2026-10-10. Previous plan: measure first with the chronological evaluator. Explore user-confirmable form/outfit clusters and same-form voting; use at least six references per form as the existing workaround. Flag isolated references rather than a whole minority form.
-Recheck 수나 `aeffff69`, `5c2ca1c1`, `ec4e8499` and 모니에 `720276e7`, `f29f450c`; thresholds need evaluator evidence. Multi-person competition is a later concrete-case follow-up (user 2026-09-24), not a permanent reopened accuracy pass.
-
-<a id="char-model-001--mature-data-rebenchmark-and-new-candidate-models"></a>
-## CHAR-MODEL-001 — Mature-dataset B36/S36 re-evaluation and newer character-model trials (2026-10-08)
-
-Status: `HOLD` — **research backlog only; not approved to download/run models, rescan the active library, edit thresholds, switch a series, publish decisions, or modify production data.** Current B36-based character classification has good subjective hit rate and no major usability pain; prefer a measured small addition over an architectural replacement. Existing `CHAR-AUTO-007` (S36 per-series readiness/spot-check), `CHAR-AUTO-008` (multi-form references), and `AUTO-TAG-001` (PixAI v1.0 + canary import/apply) retain their own status and priority.
-
-- **Why re-evaluate now:** the early B36-versus-S36 experiments preceded growth in manually accepted/rejected character evidence; the old results are not a reliable automatic-switch decision today. [HOLDOUT.md](../../_tools/app/character-runtime/HOLDOUT.md) records earlier all-target contrast AUC B36 0.610 vs S36 0.731 (same-series 0.448 vs 0.568), but also documents query-relative/witness/ground-truth leakage limits and warns against comparing incompatible protocols. These are not end-to-end native automatic-assignment precision or independent current-library measurements. The stricter current [S36 policy](../../_tools/app/character-runtime/s36_policy.json) was tightened on 2026-09-23 after a small reviewed backfill (original automatic tier 28/39 correct, stricter tier 19/19 correct); small selected samples do **not** prove broad superiority. The existing UI requires per-character readiness (30 reviewed automatic candidates, <=1 wrong, and 50 manual examples for `ready`), which is cumbersome in real use; do not silently remove this guard.
-- **Already valuable independent evidence:** [PixAI v1.0 / canary research](../research/tagger-character-signal-20260927.md) compared their mapped character tags on the earlier 46-character, 1,257 manually accepted pair subset: PixAI 1,139/1,257; canary 1,152/1,257; both 1,092/1,257; either 1,199/1,257 at score >=0.85. Two low tagger scores (<0.3 each) marked 73 existing automatic acceptances as suspicious, and a user-reviewed stratified sample of 20 contained 19 wrong memberships. These are tagger detection/agreement and selected-review statistics, **not** general tagger precision, causal improvement, or a direct CCIP comparison. Current native veto/recommendation pathways already exist; do not duplicate the pipeline.
-- **Candidate A — [CL Tagger v2](https://huggingface.co/cella110n/cl_tagger_v2) (first bounded tagger trial):** SigLIP2 So400m, `v2.00` stable released 2026-06-14; `v2_01a` provisional released 2026-06-18 and advertises 49,654 **character** tags and 108,036 total tags. These counts are vocabulary coverage, not Lakomics hit rate or proof of a newer training-data cutoff (last training-data date not verified). Requires gated model access and consent to a **custom, nonredistributable** license; `v2_01a` may be overwritten under the same version name. First verify exact model snapshot/hash, usage/packaging rights and mapping for 2025–2026 characters; conduct personal read-only local trial only if separately approved. Do not bundle model weights with Lakomics.
-- **Candidate B — [Taggerine](https://huggingface.co/lodestones/taggerine) (independent tagger comparator):** DINOv3 ViT-H, Apache-2.0, about 5.27 GB weights, vocabulary **74,625 total Danbooru/e621 tags**, not 74,625 character labels. Verify per-category character coverage and training cut-off, plus RTX 5070 Ti 16-GB VRAM/time/accuracy before treating it as a useful third vote.
-- **Candidate C — [Anime Character Re-Identification](https://github.com/BeUnMerreHuman/Anime-Character-Re-Identification) (separate visual-identity benchmark):** anime-adapted DINOv3 embeddings + person detection/retrieval. Unlike a closed character-name tag vocabulary, reference-based recognition can support newly created characters if good exemplars exist; no verified Lakomics B36/S36 accuracy advantage. Keep as optional, not a replacement or new publisher.
-- **Fresh dataset watch — [Danbooru2026](https://huggingface.co/datasets/nyanko-devs/danbooru2026):** 11M+ images, WIP as of inspection, original artwork copyrights retained; an underlying dataset is **not** a trained current-character classifier. Confirm annotation availability, per-character date/coverage, licenses, deduplication and actual mapping before proposing derived training. Kagami-24k is general-tag-focused rather than a character-name replacement; OppaiOracle successor remains watch-only until published character tag coverage and training cutoff are confirmed. Do not infer that a model released in 2026 necessarily trained through 2026.
-- **Proposed same-evidence evaluation (read-only; not yet run):** freeze a newer reproducible snapshot and honest human-labeled pairs, group exact/PDQ-near-duplicates and shared reference/source groups, hold out future/post-freeze decisions, and separately label a representative sample of **unreviewed incoming assets** to measure actual coverage. Use the existing [replay dataset/evaluator](../../_tools/app/character-runtime/HOLDOUT.md), but add parity checks for production geometry/multi-person competition and publication gates: the offline `rule6`/`contrast` values alone are not complete native decisions. Compare (1) current B36 native policy, (2) current S36 policy, (3) B36 + current dual-tagger gates, (4) S36 + current gates, (5) guarded B36/S36 hybrid with current taggers, then each proposed new tagger in **shadow-only** mode on the same held-out cases. Never transfer thresholds such as `0.85` between unrelated taggers without calibration.
-- **Measure what matters:** correct/wrong auto-memberships **per 1,000 eligible new images**, asset-character precision and recall, safe auto-completion/abstention, number of manual corrections/checks avoided, candidate coverage for post-2025/2026 characters, false vetoes, known-vs-unknown targets, per-character and per-series results, same-series lookalikes, outfit/form changes, cosplay, multiple/overlapping people, tiny/failed detections, reference-set quality, per-image warm inference and peak RSS/VRAM on the main PC. Report CIs or denominators; avoid selecting a policy on small, repeatedly inspected historical subsets. New-model output agreement is not independent ground truth.
-- **Decision gate, no automatic migration:** Prefer keeping B36 by default unless a frozen, independent evaluation establishes a *material* improvement within a pre-agreed false-positive budget; if gains vary by character, produce an **automatic comparison/readiness report with simple user confirmation**, rather than forcing repeated manual screen-by-screen S36 evaluation. Never silently switch per-series settings, relabel accepted images, auto-promote predictions to reference/training truth, loosen manual-decision protection, or start a full-library scan. Check explicit model/download/license and data-processing authorization before experiments.
-
 # Similarity / media identity
-
-<a id="similarity-003--similar-video-fingerprinting-and-review"></a>
-## SIMILARITY-003 — Representative video validation and optional vPDQ
-
-Status: `HOLD` — validate the existing implementation when real re-encode/resolution/trim/crop/watermark samples appear; do not fabricate a new architecture requirement. Audio optional; [execution record](../research/video-similarity-execution-plan-20260908.md).
-User 2026-09-26 chose vPDQ later as opt-in, not replacement; [trial](../research/oss-trial-vpdq-20260926.md). Representative-sample acceptance remains deferred, not claimed.
-
-<a id="perf-similarity--metric-index--bk-tree-gate"></a>
-## PERF-SIMILARITY — Metric index gate
-
-Status: `HOLD` — linear PDQ stays default; reopen only if representative 100k+/250k+ measurements or historical discovery show a material bottleneck.
 
 # Works / Collections
 
@@ -360,7 +298,6 @@ Encrypted-vault trash placement/unlock was requested for confirmation during des
 Status: `TODO` — remaining user requests and decisions of 2026-10-05; each bullet carries its own status. Requests delivered the same day are in the [2026-10-05](lakomics-completed.md#closure-checkpoint--2026-10-05--tablet-catch-up-ui-unification-phase-1-and-pc-speed) and [2026-10-05 (night)](lakomics-completed.md#closure-checkpoint--2026-10-05-night--ui-unification-phases-23-folder-move-motion-bookmarks-speed-and-acceptance-closure) checkpoints.
 - **Tag translations (`TODO`, later batch):** manga catalog tags are often long-winded paraphrases or untranslated, and some asset tags are untranslated; the user will collect examples first.
 - **Realistic game case (`HOLD`, user 2026-10-10):** make the Collections 3D case look like a real physical object. Mockup [`realistic-case-20261010`](../prototypes/realistic-case-20261010/index.html) shows ten techniques (clear sleeve, rounded/lit edges, scratches, hinge, clips, disc print + rainbow, hub/PUSH, paper, contact shadow, pointer light) with cost notes and a light shelf variant; extras (manual, art card, map, stickers) are later options. Mockup commit `c2949cc8`; remains on HOLD. Saved for later; the user picks which effects to adopt before implementation (PC first, tablet with the same parts).
-- **AV work screen disc (`HOLD`):** tapping the disc plays a disc-out animation and opens a site; waits until the user picks the site.
 - **Decided, not planned:** Notes media attachments — option (b) chosen 2026-10-05: dropping files inserts their paths (`19ef652e`); real encrypted attachments (outside ADR-0035's scope) only if the user asks. Series folder 미분류/전체 stays an inline control above the gallery, not in 보기, by design; revisit only if the user asks.
 
 ## WIN-FEEDBACK-20261004 — First Windows release-run findings
@@ -369,7 +306,6 @@ Status: `PARTIAL` — reported by the user 2026-10-04 on the first Windows relea
 - **Windows test debt:** the source-root separator repair is archived (`7c1dd0e5`). Server `tests.test_media_thumbnail_encode` `test_no_kind_leaves_a_partial_file_behind_on_an_unsupported_source` returns exit 7 instead of 4 under the WSL test venv (Pillow/codec environment; untouched code).
 - **Abandoned thumbnail requests — source fix 2026-10-06:** media-protocol requests made after a view change (`media_view_changed`, sent on area and gallery scope changes) are served before older queued ones, FIFO within a view; old ones still finish. Native release timing during rapid switching is unmeasured; targeted measurement remains in `PERF-ALL-001`.
 - **No popping in (user 2026-10-04):** progressed — menus, dialogs, popovers, toasts, selection bar and tablet sheets ease in and out (`2748f0db`); first-screen tiles and late images appear together (`2eef344c`, `288ae552`); the launch mark covers the first Home load (`3dd73981`). Keep sweeping instant panels and late blocks found in use (≈150–250 ms ease-in, reduced motion respected; never fade from a blank frame where the no-flash rule applies).
-- **Collections cache should survive (on hold — user 2026-10-04: seems fine after more use):** the user wanted the PC Collections screen to keep its cache instead of rebuilding it (compare `mobile-client` collection caching with the PC `collection_cache.rs` / frontend Collections loading and game-case bake cache).
 - **Tablet manga back synopsis/price (`TODO`):** the tablet manga case back still needs the volume fields in the replica (server work), a separate item.
 
 ## MANGA-CATALOG-FEEDBACK-20261004 — Manga catalog requests
@@ -413,12 +349,6 @@ Status: `IDEA` — user-shared survey 2026-10-02, not adoption. Later candidates
 Reader gesture/loading references: Mihon (no resume/following features); writing/search/revisit: usememos, fml, meguri; optional PySceneDetect, damaged-file checks, gallery-dl/Stash ideas-only, nowinandroid metadata flow, Tink AEAD review, restic backups, tus only for demonstrated retry pain. No installs implied.
 `fast_image_resize` is not adopted (resize 13.6%, below 25% measurement bar); static-WebP decode optimisation is done (`59c95ff0`). sqlite-vec, imgutils clustering and mismatched CSD weights are not new trials; TanStack Virtual already exists; larger taggers require same-sample comparisons.
 
-<a id="asset-eagle-20261001--pc-asset-screen-candidates-from-the-eagle-comparison"></a>
-## ASSET-EAGLE-20261001 — Held Asset candidates
-
-Status: `HOLD` — user 2026-10-01 parked until manga/polish finish; PC mockup required, [unfinished draft](../prototypes/pc-assets-eagle-20261001/) unreviewed. Keep candidate panel pin option, editable folder/character/tag chips plus rating/memo, and sidebar triage counts; the current dock alone does not prove these options finished (unverified 2026-10-10).
-Thumbnail-size slider is superseded by user-chosen shared row-count control (2026-09-30). Colour palette/search remains later; preserve date-group counts, no decorative gradients or accent-outline selection.
-
 <a id="stats-001--personal-statistics"></a>
 ## STATS-001 — Metric definitions
 
@@ -447,11 +377,6 @@ Status: `IDEA` — user-requested concept captured for later consideration; **no
 Status: `IDEA` — user 2026-10-03 liked this one among the brainstormed tools; not approved for implementation, do not start until the user explicitly asks.
 While browsing X, the collector marks each image as already in the library by image content, not only by URL, so reposts from other accounts are caught; it may also show a taste-match score based on the library. Today's collector saved marks are URL-based only (`extension-list/src/x-gallery.js` `savedMedia`). Reuse the PC similarity and artist-style data through the existing collector ↔ PC connection; the score's definition and privacy of what is sent stay open.
 Not chosen 2026-10-03 (judged impractical): source-loss monitoring, reverse-search quality upgrade, bookstore barcode check, yearly recap, tablet photo-frame mode.
-
-<a id="idea-002--asset-date-timeline-exploration"></a>
-## IDEA-002 — Date timeline exploration
-
-Status: `HOLD` — no implementation until a concrete need exceeds the current date-grouped Library/Revisit.
 
 ## LINUX-DESKTOP-001 — Deeper CachyOS / KDE Plasma integration
 
@@ -507,19 +432,3 @@ Status: `PARTIAL` — PC shipped to main 2026-10-05; tablet option A remains uni
   - laptop query side, needing a smaller text model;
   - video.
 - **Laptop later:** the query worker holds about 4.1 GB RAM because the SigLIP text tower is fp32. New images need the main PC to index them.
-
-<a id="nl-search-perf-001--visionmind-comparison-and-search-performance-research"></a>
-## NL-SEARCH-PERF-001 — VisionMind comparison and search-performance research
-
-Status: `HOLD` — **research recorded 2026-10-08, no implementation approved**. Do not displace `NL-SEARCH-001` tablet option A or the current `PERF-ALL-001` order. This is a source-level comparison and a conditional measurement plan, **not** a native benchmark or proof of a speedup.
-
-- **Sources:** Lakomics [Rust ranking/index cache](../../_tools/app/src-tauri/src/library/nl_search.rs), [query worker](../../_tools/app/src-tauri/src/library/nl_search_worker.rs), [runtime reference](../../_tools/app/nl-search-runtime/README.md), [2026-10-04 search trial](../research/nl-search-trial-20261004.md); VisionMind [vector_index.py](https://github.com/AtomChen0425/VisionMind/blob/main/src/core/vector_index.py), [semantic_search.py](https://github.com/AtomChen0425/VisionMind/blob/main/src/core/semantic_search.py), [pipeline.py](https://github.com/AtomChen0425/VisionMind/blob/main/src/core/pipeline.py), [GUI search](https://github.com/AtomChen0425/VisionMind/blob/main/src/gui/main.py).
-- **Comparison, not a FAISS adoption rationale:** VisionMind's `IndexIDMap2(IndexFlatIP)` is *exact exhaustive* inner-product search on normalized vectors, **not** approximate HNSW/IVF. Lakomics computes exact dot products in Rust over `BTreeMap<String, Vec<f32>>`, then sorts all scores. Both compare all N candidates of dimension D (O(ND) scoring); FAISS could execute its inner loop faster, but there is no matched benchmark. Lakomics persists FP16 vectors in SQLite and decodes them to FP32 in memory; VisionMind persists FP32 embeddings and a separate FAISS index.
-- **Index lifecycle:** Lakomics caches an `Arc<Index>`, reloads it on cache-file changes, validates the SQLite import and atomically publishes replacement caches. VisionMind's search path calls `faiss.read_index()` from disk per search even though it has an in-memory cache elsewhere; its per-image upsert writes the FAISS index file again. Avoid copying these VisionMind I/O patterns. Neither code inspection nor the prior trial establishes end-to-end speed superiority.
-- **User-visible baseline distinction:** The main-PC 2026-10-04 trial used 9,103 images/GIFs and 32 Korean queries (default P@10 0.68; precise P@10 0.72). It recorded ~10 s **cold query-worker load**, ~0.6 s **warm query embedding/worker response**, and ~4.1 GB **worker RSS** (precise mode: ~26–30 s load and ~4.8 GiB GPU; ~0.07 s warm query). These are **not** measurements of the Rust dot-product/sort stage or complete UI click-to-paint latency. At ~9k assets, improvements to the vector scan may be imperceptible if embedding dominates.
-- **Priority 0 — measure before changing anything (highest immediate value for diagnosis, no direct user-visible gain):** Instrument on a real Windows release build: first/cold vs prewarmed search and repeated warm search; worker startup, Korean translation/text embedding, Rust DB/name/tag routing, cache loading, dot products, sorting/Top-K, result delivery, and first visible tiles. Record p50/p95, peak/steady RSS, CPU, GPU VRAM, corpus size, and whether search prewarm actually hides the ~10 s cold load. Use a disposable or read-only snapshot for benchmark fixtures, never mutate the active library.
-- **Priority 1 — user-visible cold-search latency and memory, conditional on measurements:** Revisit query-worker prewarm/lifetime, text-tower size/quantization or smaller compatible encoders, and repeat-query embedding caching. Compare cold first-result time and warm search separately; a smaller encoder or cache must preserve Korean query quality, name routing, current mixed routes, and P@10 within an agreed tolerance. Prewarming may trade faster first search for substantial persistent RAM, so do not enable it indiscriminately. No automatic model replacement.
-- **Priority 2 — cheap exact-search optimization, only if ranking is measurable:** Replace full sorting with deterministic Top-K selection (up to requested result limit; **retain the top 200 per model** for precise-mode RRF), preserving descending score, asset-ID tie breaks, live-asset filtering, name/tag/mixed routes, and exact result ordering. Benchmark before/after on 9k and larger synthetic corpora. Likely low perceptible impact at today's scale.
-- **Priority 3 — contiguous vector layout / SIMD, only if scan or memory becomes a bottleneck:** Benchmark a dense aligned `f32` vector matrix with separate stable asset-ID mapping against the current `BTreeMap`; measure cache-load duration, RSS, dot-product latency, model separation (1152/4096 dimensions), index invalidation, and identical results. A vector-layout refactor is not justified by FAISS's presence alone; potential benefit grows with corpus size.
-- **Priority 4 — ANN gate for substantially larger libraries only:** Consider FAISS HNSW/IVF (or another ANN index) *only after* exact scoring dominates an agreed search-latency budget at 100k+ assets. Test recall@K, P@10 for Korean appearance/scene/expression/character queries, filtered candidate behavior and RRF, memory/disk/build cost, incremental updates, deletion safety, and Windows packaging. Keep exact-search fallback; no ANN adoption without a measured advantage and approved quality tradeoff.
-- **Acceptance for any later optimization:** Before/after end-to-end Windows release measurements with the same query set and content snapshot, separate cold/warm p50/p95, RSS/VRAM, ranking equality or judged retrieval quality, and no search UI flash/pop-in. Follow [performance work](../agents/implementation.md#performance-work). Research does not authorize implementation, production indexing, writes, or deployment.
