@@ -140,6 +140,8 @@ Status: `TODO` — investigate bulk `new_volume` notifications for already-exist
 <a id="auto-tag-001--automatic-image-tags-and-tagger-character-signal"></a>
 ## AUTO-TAG-001 — Production import/apply gate
 
+Verified 2026-10-10 (controller, read-only): the 16:00 runs of 2026-10-09 and 2026-10-10 completed (`exit 0`; 33 new images, 0 errors) and exported; the library DB holds the same 362,427 tag rows; no run was logged on 2026-10-08 (PC likely off).
+
 Status: `PARTIAL` — **user approved production import/apply on 2026-10-07**; inbox import + tagger-review apply already run automatically (`auto_tag_inbox.rs`, every 300 s on the main profile, `applyTaggerReview` on). The nightly tagger runs of 10-06 and 10-07 were interrupted (no exit line in `C:\laku\tagger\logs\nightly.log`); the task moved to 16:00 daily on 2026-10-07 and was re-run that day; preserve preview/apply and optional tagger review. Configured SQLite-inbox polling/import is implemented (`e88c21ff`, native workload hook), not a missing feature.
 The latest recorded tagger schedule is 16:00 daily (2026-10-07), superseding the old 03:00 line. Keep awake/session-up operation without missed-night catch-up (user 2026-09-27); current nightly completion and `.npz` → SQLite export are (unverified 2026-10-10). Keep quarterly model comparisons before switching; tablet tagger/registration remains dropped by the PC-only decision. [Research](../research/tagger-character-signal-20260927.md), `docs/prototypes/auto-tags-20260927/`.
 
@@ -174,6 +176,7 @@ Status: `PARTIAL` — [review report](../research/pc-app-review-2026-09-25.md); 
 - Asset restore/error-recovery and relation re-baseline edges; repeated content-hash mismatches; dropped lifecycle-intent detail; remaining non-trash sync UI-thread work.
 - `empty_trash`/purge lock scope, TrashBrowser retention reset and authority-path purge guard re-review; IGDB screenshot hero labeling; Kakao renumbering retry (Aladin retired by `c474aa77`); long HEVC/ProRes limits; S36 rollback after trashing an automatic acceptance.
 In-flight artwork cleanup race is fixed (`af2fd1a4`); this does not prove every purge/recovery edge accepted.
+- **Read-only verification 2026-10-10 (Sol, current code, no runtime):** already fixed — asset restore/error-recovery/relation re-baseline; not a defect — authority-path purge guard; needs runtime — long HEVC/ProRes limits (30-minute and Windows 1 GiB caps exist). Still real: repeated content-hash mismatch re-downloads the original without importing (medium); dropped trash/restore intent detail not shown per asset (low); non-trash sync commands still on the UI thread during bulk work (medium); `empty_trash`/purge lock scope blocks other DB work (medium); TrashBrowser retention input reset by remote changes (medium); IGDB hero screenshot labeled as artwork (low); Kakao lower volume renumbering keeps failing refresh, server path too (medium); S36 rollback blocked after trashing an auto-accepted asset (medium, low relevance after `CHAR-AUTO-007` was dropped). Evidence: Sol report of 2026-10-10 (controller scratchpad).
 
 ## VAULT-ENC-001 — Residual audit claims
 
