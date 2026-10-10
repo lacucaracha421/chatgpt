@@ -165,6 +165,7 @@ mod provider_requests;
 mod query;
 pub(crate) mod release_calendar;
 pub(crate) mod server_release_calendar;
+pub(crate) mod server_release_wishlist;
 mod release_watch;
 pub(crate) mod release_wishlist;
 pub(crate) mod tagger_review;
@@ -321,6 +322,7 @@ pub struct Library {
     pub(crate) collection_publication_defer: Arc<Mutex<crate::cloud::auto_publication::Deferral>>,
     pub(crate) publication_inputs: Arc<crate::cloud::auto_publication::Inputs>,
     server_calendar_refresh: Arc<Mutex<Option<std::time::Instant>>>,
+    release_wishlist_authority: Arc<Mutex<()>>,
     pub(crate) character_changes: Arc<character_changes::CharacterChanges>,
     // Encrypted Private Vault (ADR-0039): lock state, decrypted index and write serialization.
     encrypted_vault: Arc<external_vault::EncryptedVaultRuntime>,
@@ -450,6 +452,7 @@ impl Library {
             collection_publication_defer: Arc::default(),
             publication_inputs: Arc::default(),
             server_calendar_refresh: Arc::default(),
+            release_wishlist_authority: Arc::default(),
             character_changes: Arc::default(),
             encrypted_vault: Arc::default(),
         };

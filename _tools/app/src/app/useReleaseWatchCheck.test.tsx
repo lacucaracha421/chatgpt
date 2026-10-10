@@ -7,6 +7,16 @@ function Harness({ gateway, changed, root = "fixture" }: {gateway: LibraryGatewa
   useReleaseWatchCheck(gateway, root, changed); return null;
 }
 const status: CollectionUpdateStatus = {provider:"mangadex",checked:0,changedCollections:0,failed:0,remaining:0,requests:0,elapsedMs:0,networkMs:0,throttleMs:0,startedAt:null,finishedAt:null,retryAt:null,stopReason:null,busy:false};
+it("skips startup and hourly local wishlist checks once wishlist ownership is confirmed", async () => {
+  vi.useFakeTimers();
+  const runDue = vi.fn();
+  const gateway = { collectionTracking: { updateStatus: vi.fn().mockResolvedValue(status), runUpdates: vi.fn() },
+    releaseCalendar: { wishlistServerOwned: vi.fn().mockResolvedValue(true), runDue } } as unknown as LibraryGateway;
+  render(<Harness gateway={gateway} changed={vi.fn().mockResolvedValue(undefined)} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_600_000); });
+  expect(runDue).not.toHaveBeenCalled();
+});
 it("keeps PC wishlist checks running with a server-owned calendar", async () => {
   vi.useFakeTimers();
   const runDue = vi.fn().mockResolvedValue({ checked: 0, changed: 0, remaining: 0, stopReason: null });

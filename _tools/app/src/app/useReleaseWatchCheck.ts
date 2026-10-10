@@ -57,10 +57,12 @@ export function useReleaseWatchCheck(
           const result = await gateway.runDueReleaseWatch();
           if (active) await onChanged(result);
         }
-        // Wishlist checks stay on PC even with the server calendar enabled. Rust gates
-        // calendar discovery for every caller; do not skip this intent/event lane.
+        // Wishlist ownership is independent of calendar ownership. Rust also fences
+        // every runner entry in case ownership changes after this inexpensive read.
         if (active && gateway.releaseCalendar && !getWorkloadProfile().restricted) {
-          try { await gateway.releaseCalendar.runDue(); } catch { /* retried on the hourly pass */ }
+          try {
+            if (!await gateway.releaseCalendar.wishlistServerOwned?.()) await gateway.releaseCalendar.runDue();
+          } catch { /* retried on the hourly pass */ }
         }
       } finally {
         if (active) timer = setTimeout(() => void run().catch(() => undefined), Math.max(CONTINUATION_MS, nextWakeAt - Date.now()));

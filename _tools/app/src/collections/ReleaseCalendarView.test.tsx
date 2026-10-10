@@ -50,6 +50,51 @@ function mount(api: ReleaseCalendarGateway, onWishlistChange = vi.fn(), props: {
 }
 
 describe("server calendar handover", () => {
+  it("shows a background handover failure through the existing error presentation and retains content", async () => {
+    const api = gateway(calendar([{ ...title("igdb:1", "Retained title", "2026-10-22", "exact"), watched: false }]));
+    let report!: (error: unknown) => void;
+    const stop = vi.fn();
+    api.subscribeWishlistError = handler => { report = handler; return stop; };
+    const mounted = mount(api);
+    await screen.findByText("Retained title");
+    act(() => report({ code: "wishlist_seed_too_large", message: "이관 용량이 너무 큽니다." }));
+    expect(screen.getByText("이관 용량이 너무 큽니다.")).toBeInTheDocument();
+    expect(screen.getByText("Retained title")).toBeInTheDocument();
+    mounted.unmount();
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it("shows a pending wishlist add immediately while retaining the covers", async () => {
+    const entry = { ...title("igdb:1", "Pending title", "2026-10-22", "exact"), watched: false };
+    const api = gateway(calendar([entry]));
+    let resolveAdd!: (item: ReleaseWishlistItem) => void;
+    let changed!: () => void;
+    api.subscribeChanged = handler => { changed = handler; return () => {}; };
+    api.add = vi.fn().mockImplementation(() => new Promise<ReleaseWishlistItem>(resolve => { resolveAdd = resolve; }));
+    mount(api);
+    await screen.findByText("Pending title");
+    fireEvent.click(screen.getByRole("button", { name: "Pending title 관심 목록에 추가" }));
+    expect(screen.getByRole("button", { name: "Pending title 관심 목록에서 빼기" })).toBeInTheDocument();
+    expect(screen.getByText("Pending title")).toBeInTheDocument();
+    await act(async () => { changed(); });
+    expect(screen.getByRole("button", { name: "Pending title 관심 목록에서 빼기" })).toBeInTheDocument();
+    const item: ReleaseWishlistItem = { ...entry, source: "calendar", addedAt: "", muted: false, lastCheckedAt: null, nextCheckAt: null, released: false, unread: [] };
+    api.wishlist = vi.fn().mockResolvedValue([item]);
+    await act(async () => { resolveAdd(item); });
+    expect(screen.getByRole("button", { name: "Pending title 관심 목록에서 빼기" })).toBeInTheDocument();
+  });
+
+  it("restores membership after a real rejected edit without clearing the calendar", async () => {
+    const entry = { ...title("igdb:1", "Rejected title", "2026-10-22", "exact"), watched: false };
+    const api = gateway(calendar([entry]));
+    api.add = vi.fn().mockRejectedValue(new Error("rejected"));
+    mount(api);
+    await screen.findByText("Rejected title");
+    fireEvent.click(screen.getByRole("button", { name: "Rejected title 관심 목록에 추가" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rejected title 관심 목록에 추가" })).toBeInTheDocument());
+    expect(screen.getByText("Rejected title")).toBeInTheDocument();
+  });
+
   it("does not discover providers when the server owns a due calendar", async () => {
     const cached = calendar([{ ...title("igdb:1", "Server title", "2026-10-22", "exact"), watched: false }]);
     cached.sources[0]!.due = true;

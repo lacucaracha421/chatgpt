@@ -159,6 +159,10 @@ impl From<LibraryError> for CommandError {
             _ => error.to_string(),
         };
         let code = match error {
+            LibraryError::WishlistSeedTooLarge => "wishlist_seed_too_large",
+            LibraryError::WishlistHandoverPending => "wishlist_handover_pending",
+            LibraryError::WishlistManualUnavailable => "wishlist_manual_unavailable",
+            LibraryError::WishlistRequestRejected(_) => "wishlist_request_rejected",
             LibraryError::LibraryInUse => "library_in_use",
             LibraryError::LibraryLock { .. } => "library_lock_failed",
             LibraryError::Backup { .. } => "backup_failed",

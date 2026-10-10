@@ -1,4 +1,4 @@
-//! Gate all calendar provider work at the Rust boundary. Wishlist tracking stays on PC.
+//! Calendar provider gate and shared authoritative upcoming projection cache.
 use super::{
     collection_authority::collection_write_status,
     error::LibraryError,
@@ -597,7 +597,7 @@ impl Library {
 
     /// Read commands serve disk immediately; their background task revalidates here.
     pub fn refresh_server_calendar_cache(&self, force: bool) -> Result<bool, LibraryError> {
-        if !self.server_release_calendar_enabled() {
+        if !self.server_release_calendar_enabled() && !self.server_release_wishlist_blocked()? {
             return Ok(false);
         }
         let Ok(mut last) = self.server_calendar_refresh.try_lock() else {
@@ -624,18 +624,34 @@ impl Library {
         read: &dyn Fn(Option<&str>) -> Result<Option<(Value, Option<String>)>, LibraryError>,
         status: &dyn Fn() -> Result<Value, LibraryError>,
     ) -> Result<bool, LibraryError> {
+        let _guard = self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut cache: ServerCache = load(&*self.connection()?, key)?;
         let previous = serde_json::to_string(&cache).unwrap();
+        let mut confirmed = None;
         // Commit a valid document even if the independent status route is down.
         if let Some((document, etag)) = read(cache.etag.as_deref())? {
             self.server_calendar_from(&document, &Value::Null)?;
+            if document["wishlist"].is_array() {
+                super::server_release_wishlist::validate_projection(&document)?;
+                confirmed = Some(document.clone());
+            }
             cache.document = Some(document);
             cache.etag = etag;
+        } else {
+            // A 304 revalidates the cached membership after a delivered intent.
+            confirmed = cache.document.clone().filter(|d|d["wishlist"].is_array());
         }
         cache.status = status().ok();
         let changed = previous != serde_json::to_string(&cache).unwrap();
-        if changed {
-            save(&*self.connection()?, key, &cache)?;
+        if changed || confirmed.is_some() {
+            let wishlist_key = self.wishlist_key()?;
+            let mut db = self.connection()?;
+            let tx = db.transaction()?;
+            if let Some(document) = confirmed {
+                self.confirm_wishlist_projection_on(&tx, &wishlist_key, &document)?;
+            }
+            save(&tx, key, &cache)?;
+            tx.commit()?;
         }
         Ok(changed)
     }
@@ -682,6 +698,12 @@ impl Library {
             entries,
             sources,
         })
+    }
+
+    pub(super) fn server_calendar_document(&self) -> Result<Value, LibraryError> {
+        let key = self.server_cache_key()?;
+        let cache: ServerCache = load(&*self.connection()?, &key)?;
+        Ok(cache.document.unwrap_or_else(||serde_json::json!({"version":1,"entries":[]})))
     }
 
     pub(super) fn server_calendar_title(

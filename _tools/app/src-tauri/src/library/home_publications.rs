@@ -1,4 +1,33 @@
 //! PC Home publishers: bounded, endpoint-scoped checkpoints; no provider refresh/backfill.
+#[cfg(test)]
+mod wishlist_authority_gates {
+    use super::*;
+
+    struct NoTransport;
+    impl HomeTransport for NoTransport {
+        fn publish(&self, _: &str, _: Option<&Value>, _: &str) -> Result<Value, LibraryError> { panic!("stale upcoming PUT") }
+        fn intents(&self, _: i64, _: &str) -> Result<Value, LibraryError> { panic!("local tablet intent polling") }
+        fn artwork(&self, _: &ArtworkBlob, _: &[u8], _: &str) -> Result<(), LibraryError> { panic!("unexpected artwork") }
+    }
+
+    #[test]
+    fn server_release_wishlist_fences_full_wishlist_only_put_and_local_intent_application() {
+        let temp = tempfile::tempdir().unwrap();
+        let lib = Library::open(temp.path()).unwrap();
+        let now = Utc::now();
+        for mode in [json!({"server":true}), json!({"seed":{}})] {
+            let key = lib.wishlist_key().unwrap();
+            lib.connection().unwrap().execute("INSERT INTO notes_state(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,mode.to_string()]).unwrap();
+            for calendar_on in [false,true] {
+                lib.connection().unwrap().execute("INSERT INTO notes_state(key,value) VALUES('serverReleaseCalendarMode',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[json!({"server":calendar_on}).to_string()]).unwrap();
+                lib.run_home_with(&NoTransport,"fixture-token","","upcoming",now,now.date_naive(),false).unwrap();
+                assert!(lib.upcoming_body(now,now.date_naive(),0).is_err());
+                let page: IntentPage = serde_json::from_value(json!({"version":1,"after":0,"lastSequence":0,"acknowledgedThrough":0,"prunedThrough":0,"items":[],"nextCursor":0,"hasMore":false})).unwrap();
+                assert!(lib.apply_home_intents("",&page,now,now.date_naive()).is_err());
+            }
+        }
+    }
+}
 use super::{
     error::LibraryError,
     release_calendar::{self, ReleaseKind, ReleaseTitle},
@@ -152,7 +181,7 @@ fn cover(kind: ReleaseKind, value: Option<&str>) -> Value {
         json!({"url":url})
     }
 }
-fn title(value: &ReleaseTitle) -> Value {
+pub(super) fn title(value: &ReleaseTitle) -> Value {
     json!({"id":value.id,"kind":value.kind,"title":text(&value.title,500),
         "originalTitle":optional(value.original_title.as_deref(),500),"date":value.date,"precision":value.precision,
         "region":optional(value.region.as_deref(),16),
@@ -208,6 +237,21 @@ impl Library {
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
             return Ok(());
         }
+        if kind == "upcoming" {
+            // Missing dormant routes must preserve the old local path; a saved seed/owner
+            // remains fenced even when status/worker/feature is unavailable.
+            let sync = self.sync_server_release_wishlist();
+            if self.server_release_wishlist_blocked()? {
+                sync?;
+                self.refresh_server_calendar_cache(true)?;
+                return Ok(());
+            }
+            match sync {
+                Err(LibraryError::WishlistRequestRejected(code)) if code == "wishlistCursorConflict" => {},
+                Err(error @ (LibraryError::WishlistSeedTooLarge | LibraryError::WishlistRequestRejected(_))) => return Err(error),
+                _ => {}
+            }
+        }
         if !self.home_publication_due_on(
             &*self.connection()?,
             endpoint,
@@ -249,6 +293,10 @@ impl Library {
         today: NaiveDate,
         _light: bool,
     ) -> Result<(), LibraryError> {
+        let _wishlist_guard = if kind == "upcoming" {
+            Some(self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+        } else { None };
+        if kind == "upcoming" && self.server_release_wishlist_blocked()? { return Ok(()); }
         let endpoint = status_watch::endpoint_key(endpoint);
         let mut state = State::load(&*self.connection()?, &endpoint, kind)?;
         let clock = now.timestamp();
@@ -416,6 +464,7 @@ impl Library {
         today: NaiveDate,
         cursor: i64,
     ) -> Result<Value, LibraryError> {
+        if self.server_release_wishlist_blocked()? { return Err(LibraryError::WishlistHandoverPending); }
         let wishlist: Vec<_> = self.list_release_watch()?.into_iter().filter(|v|supported(v.kind)).map(|v| {
             let mut body = title(&ReleaseTitle {id:v.id, kind:v.kind,provider:v.provider,external_id:v.external_id,
                 title:v.title,original_title:v.original_title,cover:v.cover,platforms:v.platforms,date:v.date,
@@ -501,6 +550,7 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<(), LibraryError> {
+        if self.server_release_wishlist_blocked()? { return Err(LibraryError::WishlistHandoverPending); }
         let server_calendar = self.server_release_calendar_enabled_at(now.timestamp())?;
         let mut db = self.connection()?;
         let tx = db.transaction()?;

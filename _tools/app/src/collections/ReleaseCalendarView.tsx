@@ -80,12 +80,15 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
   const [pending, setPending] = useState<string | null>(null);
   const active = useRef(true);
   const generation = useRef(0);
+  const mutationPending = useRef(false);
+  const mutationVersion = useRef(0);
   const referenceYear = new Date().getFullYear();
 
-  const loadWishlist = useCallback(async () => {
-    if (!api) return;
+  const loadWishlist = useCallback(async (afterEdit = false) => {
+    if (!api || (mutationPending.current && !afterEdit)) return;
+    const version = mutationVersion.current;
     const items = await api.wishlist();
-    if (active.current) setWishlist(items);
+    if (active.current && version === mutationVersion.current) setWishlist(items);
   }, [api]);
 
   useEffect(() => {
@@ -116,11 +119,15 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
       }
     })();
     const stop = api.subscribeChanged?.(() => {
+      void loadWishlist().then(() => { if (isCurrent() && !mutationPending.current) onWishlistChange?.(); }).catch(() => undefined);
       void api.calendar().then(value => { if (isCurrent()) setCalendar(value); }).catch(() => undefined);
       void api.serverStatus?.().then(value => { if (isCurrent()) setServerStatus(value); })
         .catch(() => { if (isCurrent()) setServerStatus(null); });
     });
-    return () => { stop?.(); active.current = false; generation.current++; };
+    const stopErrors = api.subscribeWishlistError?.(err => {
+      if (isCurrent()) setError(commandErrorMessage(err, "관심 목록을 서버와 동기화하지 못했습니다."));
+    });
+    return () => { stop?.(); stopErrors?.(); active.current = false; generation.current++; };
   }, [api, loadWishlist]);
 
   const wishById = useMemo(() => new Map((wishlist ?? []).map(item => [item.id, item])), [wishlist]);
@@ -150,27 +157,38 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
 
   async function toggle(tile: Tile) {
     if (!api || pending) return;
+    mutationPending.current = true; mutationVersion.current++;
     setPending(tile.id); setError(null);
+    const previous = wishlist;
+    setWishlist(items => tile.watched ? (items ?? []).filter(item => item.id !== tile.id)
+      : [...(items ?? []), { ...tile, source: "calendar", addedAt: new Date().toISOString(), muted: false,
+        lastCheckedAt: null, nextCheckAt: null, released: tile.released ?? false, unread: [] }]);
     try {
       if (tile.watched) await api.remove(tile.id);
       else await api.add(tile.id);
-      await loadWishlist();
+      await loadWishlist(true);
       onWishlistChange?.();
     } catch (err) {
+      setWishlist(previous);
       setError(commandErrorMessage(err, tile.watched ? "관심 목록에서 빼지 못했습니다." : "관심 목록에 추가하지 못했습니다."));
-    } finally { setPending(null); }
+    } finally { mutationPending.current = false; setPending(null); }
   }
 
   async function acknowledge(key: string, events: ReleaseWishlistEvent[]) {
     if (!api || pending || !events.length) return;
+    mutationPending.current = true; mutationVersion.current++;
     setPending(key); setError(null);
+    const previous = wishlist;
+    const ids = new Set(events.map(event => event.id));
+    setWishlist(items => (items ?? []).map(item => ({ ...item, unread: item.unread.filter(event => !ids.has(event.id)) })));
     try {
       await api.acknowledge(events.map(event => event.id));
-      await loadWishlist();
+      await loadWishlist(true);
       onWishlistChange?.();
     } catch (err) {
+      setWishlist(previous);
       setError(commandErrorMessage(err, "알림을 확인 처리하지 못했습니다."));
-    } finally { setPending(null); }
+    } finally { mutationPending.current = false; setPending(null); }
   }
 
   async function refreshNow() {

@@ -1393,6 +1393,8 @@ export type ReleaseWishlistRunResult = { checked: number; changed: number; remai
 export type ServerCalendarStatus = { version: 1; busy: boolean; sources: ReleaseCalendarSource[]; finishedAt?: string | null; startedAt?: string | null };
 export type ServerCalendarRun = { outcome: "local" | "queued" | "unavailable" } | { outcome: "rateLimited"; retryAfterSeconds: number | null };
 export interface ReleaseCalendarGateway {
+  wishlistServerOwned?(): Promise<boolean>;
+  subscribeWishlistError?(handler: (error: unknown) => void): () => void;
   serverEnabled?(): Promise<boolean>;
   serverStatus?(): Promise<ServerCalendarStatus>;
   requestServerRun?(): Promise<ServerCalendarRun>;

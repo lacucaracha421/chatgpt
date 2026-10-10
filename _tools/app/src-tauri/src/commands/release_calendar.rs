@@ -9,6 +9,16 @@ use crate::library::{
 };
 
 #[tauri::command]
+pub async fn server_release_wishlist_owned(
+    state: State<'_, AppState>,
+) -> Result<bool, CommandError> {
+    let library = current_required(state)?;
+    library
+        .server_release_wishlist_blocked()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn server_release_calendar_enabled(
     state: State<'_, AppState>,
 ) -> Result<bool, CommandError> {
@@ -103,8 +113,29 @@ pub async fn refresh_release_calendar_now(
 #[tauri::command]
 pub async fn list_release_wishlist(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<WatchItem>, CommandError> {
     let library = current_required(state)?;
+    let refresh = library.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let before = refresh
+            .list_release_watch()
+            .ok()
+            .and_then(|items| serde_json::to_vec(&items).ok());
+        if let Err(error) = refresh.refresh_release_wishlist() {
+            let _ = app.emit(
+                "library://release-wishlist-error",
+                &CommandError::from(error),
+            );
+        }
+        let after = refresh
+            .list_release_watch()
+            .ok()
+            .and_then(|items| serde_json::to_vec(&items).ok());
+        if before != after {
+            let _ = app.emit("library://release-calendar-changed", ());
+        }
+    });
     tauri::async_runtime::spawn_blocking(move || library.list_release_watch())
         .await
         .map_err(|_| background_task_error())?
@@ -118,10 +149,16 @@ pub async fn add_release_wishlist_item(
     state: State<'_, AppState>,
 ) -> Result<WatchItem, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.add_release_watch(&id))
-        .await
-        .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || {
+        let item = library.add_release_watch(&id)?;
+        if library.server_release_wishlist_blocked()? {
+            library.flush_release_wishlist_edits()?;
+        }
+        Ok::<_, crate::library::error::LibraryError>(item)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -130,10 +167,16 @@ pub async fn remove_release_wishlist_item(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.remove_release_watch(&id))
-        .await
-        .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || {
+        library.remove_release_watch(&id)?;
+        if library.server_release_wishlist_blocked()? {
+            library.flush_release_wishlist_edits()?;
+        }
+        Ok::<_, crate::library::error::LibraryError>(())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -143,10 +186,16 @@ pub async fn set_release_wishlist_muted(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.set_release_watch_muted(&id, muted))
-        .await
-        .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || {
+        library.set_release_watch_muted(&id, muted)?;
+        if library.server_release_wishlist_blocked()? {
+            library.flush_release_wishlist_edits()?;
+        }
+        Ok::<_, crate::library::error::LibraryError>(())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -156,7 +205,11 @@ pub async fn acknowledge_release_wishlist_events(
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.acknowledge_release_watch_events(&event_ids)
+        library.acknowledge_release_watch_events(&event_ids)?;
+        if library.server_release_wishlist_blocked()? {
+            library.flush_release_wishlist_edits()?;
+        }
+        Ok::<_, crate::library::error::LibraryError>(())
     })
     .await
     .map_err(|_| background_task_error())?

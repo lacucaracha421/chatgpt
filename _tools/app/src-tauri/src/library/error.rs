@@ -50,6 +50,14 @@ pub enum LibraryError {
     CloudReplicationUpgradeRequired,
     #[error("클라우드 API 응답이 올바르지 않습니다")]
     InvalidCloudResponse,
+    #[error("관심 목록 이관 용량이 서버 한도를 넘습니다. 로컬 목록을 유지했습니다.")]
+    WishlistSeedTooLarge,
+    #[error("관심 목록을 서버로 이관 중입니다. 응답을 확인한 뒤 다시 시도합니다.")]
+    WishlistHandoverPending,
+    #[error("서버 관심 목록에서는 발매 캘린더에 있는 작품만 추가할 수 있습니다.")]
+    WishlistManualUnavailable,
+    #[error("서버가 관심 목록 요청을 거부했습니다: {0}")]
+    WishlistRequestRejected(String),
     #[error("컬렉션 서버 기준선을 받는 중입니다. 동기화가 끝난 뒤 다시 편집해 주세요.")]
     CollectionAuthorityNotAdopted,
     #[error("컬렉션 서버 권위가 일치하지 않습니다. 동기화 상태를 확인해 주세요.")]

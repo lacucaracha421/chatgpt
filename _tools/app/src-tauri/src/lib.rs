@@ -286,6 +286,7 @@ pub fn run() {
             commands::release_calendar::get_release_calendar,
             commands::release_calendar::refresh_server_calendar_cache,
             commands::release_calendar::server_release_calendar_enabled,
+            commands::release_calendar::server_release_wishlist_owned,
             commands::release_calendar::get_server_release_calendar_status,
             commands::release_calendar::request_server_release_calendar,
             commands::release_calendar::refresh_release_calendar,

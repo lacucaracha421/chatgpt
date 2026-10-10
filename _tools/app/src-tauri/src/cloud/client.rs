@@ -13,6 +13,9 @@ pub(crate) use collection_authority_transport::{CollectionDelivery, ReleaseCheck
 #[path = "release_calendar.rs"]
 mod release_calendar;
 pub(crate) use release_calendar::CalendarRun;
+#[path = "release_wishlist.rs"]
+mod release_wishlist;
+pub(crate) use release_wishlist::WishlistReply;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const METADATA_BACKUP_OBJECT_KEY: &str = "backups/library-metadata.sqlite";

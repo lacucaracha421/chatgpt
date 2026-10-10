@@ -251,6 +251,14 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     importFile: (path) => invoke("import_auto_tags", { path }),
   },
   releaseCalendar: {
+    wishlistServerOwned: () => invoke("server_release_wishlist_owned"),
+    subscribeWishlistError: (handler) => {
+      let stopped = false;
+      let unlisten: (() => void) | undefined;
+      void listen("library://release-wishlist-error", event => handler(event.payload))
+        .then(stop => { if (stopped) stop(); else unlisten = stop; }).catch(() => undefined);
+      return () => { stopped = true; unlisten?.(); };
+    },
     serverEnabled: () => invoke("server_release_calendar_enabled"),
     serverStatus: () => invoke("get_server_release_calendar_status"),
     requestServerRun: () => invoke("request_server_release_calendar"),

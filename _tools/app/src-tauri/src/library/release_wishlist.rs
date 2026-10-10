@@ -8,7 +8,7 @@
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use rusqlite::{params, OptionalExtension};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 use super::{
     error::LibraryError,
@@ -27,7 +27,7 @@ const STOP_AFTER_RELEASE_DAYS: i64 = 30;
 const RUN_LIMIT: usize = 40;
 const IGDB_BATCH: usize = 10;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchEvent {
     pub id: String,
@@ -39,7 +39,7 @@ pub struct WatchEvent {
     pub read_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchItem {
     pub id: String,
@@ -333,6 +333,11 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<WatchItem, LibraryError> {
+        let _guard = self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.server_release_wishlist_blocked()? {
+            self.queue_wishlist_intent("add", id, &[])?;
+            return self.server_wishlist_items()?.into_iter().find(|i|i.id == id).ok_or(LibraryError::IgdbNotFound);
+        }
         let (kind, number, season) = split_id(id)?;
         let cached = if self.server_release_calendar_enabled() {
             self.server_calendar_title(id)?
@@ -364,12 +369,16 @@ impl Library {
     }
 
     pub fn remove_release_watch(&self, id: &str) -> Result<(), LibraryError> {
+        let _guard = self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.server_release_wishlist_blocked()? { return self.queue_wishlist_intent("remove", id, &[]); }
         remove_watch(&*self.connection()?, id)?;
         self.publication_inputs.signal(&[8]);
         Ok(())
     }
 
     pub fn set_release_watch_muted(&self, id: &str, muted: bool) -> Result<(), LibraryError> {
+        let _guard = self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.server_release_wishlist_blocked()? { return self.queue_wishlist_intent(if muted {"mute"} else {"unmute"}, id, &[]); }
         mute_watch(&*self.connection()?, id, muted)?;
         self.publication_inputs.signal(&[8]);
         Ok(())
@@ -380,6 +389,15 @@ impl Library {
         &self,
         event_ids: &[String],
     ) -> Result<(), LibraryError> {
+        let _guard = self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.server_release_wishlist_blocked()? {
+            let items = self.server_wishlist_items()?;
+            for item in items {
+                let ids: Vec<_> = item.unread.into_iter().filter(|e|event_ids.contains(&e.id)).map(|e|e.id).collect();
+                for chunk in ids.chunks(100) { self.queue_wishlist_intent("acknowledge", &item.id, chunk)?; }
+            }
+            return Ok(());
+        }
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         acknowledge_watch(&transaction, event_ids)?;
@@ -394,7 +412,17 @@ impl Library {
 
     /// Every watched title with its headline date and unread events, soonest first.
     pub fn list_release_watch(&self) -> Result<Vec<WatchItem>, LibraryError> {
+        if self.server_release_wishlist_blocked()? { return self.server_wishlist_items(); }
+        self.local_release_watch_items()
+    }
+
+    pub(super) fn local_release_watch_items(&self) -> Result<Vec<WatchItem>, LibraryError> {
         self.release_watch_items_where(None)
+    }
+
+    pub(super) fn local_wishlist_public_title(&self, id: &str) -> Result<Option<serde_json::Value>, LibraryError> {
+        let title = cached_title(&*self.connection()?, id, Utc::now())?;
+        Ok(title.as_ref().map(super::home_publications::title))
     }
 
     fn release_watch_items_where(
@@ -517,6 +545,10 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<WatchRunResult, LibraryError> {
+        let _guard = self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.server_release_wishlist_blocked()? {
+            return Ok(WatchRunResult { checked:0, changed:0, remaining:0, stop_reason:None });
+        }
         let due: Vec<String> = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
@@ -600,6 +632,7 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<bool, LibraryError> {
+        if self.server_release_wishlist_blocked()? { return Ok(false); }
         let checked_at = now.to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;

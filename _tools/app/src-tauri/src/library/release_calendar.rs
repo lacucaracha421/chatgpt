@@ -1199,12 +1199,16 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<ReleaseCalendar, LibraryError> {
+        let server_watched = if self.server_release_wishlist_blocked()? {
+            Some(self.list_release_watch()?.into_iter().map(|i|i.id).collect::<std::collections::HashSet<String>>())
+        } else { None };
         let connection = self.connection()?;
         let (start, end) = window(today);
-        let watched: std::collections::HashSet<String> = connection
-            .prepare("SELECT id FROM release_watch_items")?
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
+        let watched: std::collections::HashSet<String> = match server_watched {
+            Some(ids) => ids,
+            None => connection.prepare("SELECT id FROM release_watch_items")?
+                .query_map([], |row| row.get(0))?.collect::<Result<_, _>>()?,
+        };
         let mut entries = Vec::new();
         let mut sources = Vec::new();
         for provider in ["igdb", "tmdb", "tmdb_tv"] {
