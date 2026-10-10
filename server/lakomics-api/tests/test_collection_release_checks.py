@@ -429,7 +429,7 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual(self.cursor(), cursor_before + 1)  # only the racing command
         self.assertEqual((self.sources(), self.events(), self.state()), ({}, [], None))
         # The next attempt starts from the new binding and succeeds.
-        self.assertTrue(self.check(day=1))
+        self.assertFalse(self.check(day=1))  # first successful check: quiet baseline
         self.assertEqual(sorted(self.sources()), [1, 2])
 
     def test_unbound_or_deleted_work_is_ineligible_not_an_error(self):
