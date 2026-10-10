@@ -5,6 +5,7 @@ export type CollectionKind = 'game' | 'manga' | 'movie' | 'av';
 export type CollectionFilters = {sort:'recent'|'media_date'|'name';direction:'asc'|'desc';rating:'all'|'unrated'|number};
 export const defaultCollectionFilters = ():CollectionFilters => ({sort:'media_date',direction:'desc',rating:'all'});
 export type CollectionVolume = {id:string; volumeNumber:number; editionIndex:number; displayLabel:string; coverArtworkId?:string|null; localReleaseDate?:string|null;
+  isbn13?:string|null; contents?:string|null; price?:number|null; publisher?:string|null; releaseStatus?:'released'|'upcoming'|null;
   /** From an upgraded PC (`coverFocus`): where the spine strip sits across the current cover, 0–1. */
   coverFocusX?:number|null};
 export type AvPortraitCrop = {artworkId:string;x:number;y:number;w:number;h:number};

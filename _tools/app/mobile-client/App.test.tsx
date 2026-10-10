@@ -1133,3 +1133,57 @@ it('opens the shared info from a single list selection and consumes Back before 
  act(()=>window.dispatchEvent(new Event('lakomics-back')));
  await waitFor(()=>expect(screen.queryByText('2개 선택')).toBeNull());
 });
+
+it('runs likes from the tablet selection bar and retains only failed selections without blanking tiles',async()=>{
+ const original=mocks.api.getMockImplementation()!;
+ mocks.native.mockImplementation(async op=>op==='albumTree'?{adopted:true,libraryId:'a'.repeat(32),epoch:1,albums:[]}:{configured:true,endpoint:'https://example.invalid'});
+ mocks.api.mockImplementation(async(path:string,signal:AbortSignal,body:Record<string,unknown>)=>{
+   if(path==='/v1/albums/commands'){
+     if(body.commandType==='ensureLikesAlbum')return {album:{id:'likes'}};
+     if(body.assetId==='a2')throw new Error('failure');return {membership:{}};
+   }
+   if(path.startsWith('/v1/albums/likes?'))return {albumId:'likes',memberships:[{assetId:new URL(`https://test${path}`).searchParams.get('assetIds'),desiredState:false,entityRevision:3}]};
+   return original(path,signal,body);
+ });
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+ fireEvent.contextMenu(await screen.findByText('tile-a1'));fireEvent.contextMenu(screen.getByText('tile-a2'));
+ fireEvent.click(await screen.findByRole('button',{name:'좋아요 켜기'}));
+ await screen.findByText(/2개 중 1개 완료, 1개 실패/);
+ expect(screen.getByText('1개 선택')).toBeTruthy();expect(screen.getByText('tile-a1')).toBeTruthy();expect(screen.getByText('tile-a2')).toBeTruthy();
+ expect(screen.queryByRole('button',{name:'이 앨범에서 빼기'})).toBeNull();
+});
+
+it('trashes the selected assets and offers a batch undo in the tablet gallery',async()=>{
+ mocks.native.mockImplementation(async(op:string,body:{assetId:string;command:string})=>{
+   if(op==='assetLifecycleState')return {available:true,items:[]};
+   if(op==='assetLifecycleSet')return {available:true,items:[{assetId:body.assetId,command:body.command,state:'pending'}]};
+   return {configured:true,endpoint:'https://example.invalid'};
+ });
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+ fireEvent.contextMenu(await screen.findByText('tile-a1'));fireEvent.contextMenu(screen.getByText('tile-a2'));
+ fireEvent.click(await screen.findByRole('button',{name:'휴지통으로',exact:true}));
+ const undo=await screen.findByRole('button',{name:'실행 취소'});
+ expect(screen.queryByText('tile-a1')).toBeNull();expect(screen.queryByText('tile-a2')).toBeNull();
+ fireEvent.click(undo);await screen.findByText('tile-a1');expect(screen.getByText('tile-a2')).toBeTruthy();
+ expect(mocks.native.mock.calls.filter(([op,payload])=>op==='assetLifecycleSet'&&payload.command==='restore')).toHaveLength(2);
+});
+
+it('keeps queued album removals hidden across refresh and opens the correct remaining asset',async()=>{
+ const original=mocks.api.getMockImplementation()!;
+ let blocked=false;
+ mocks.native.mockImplementation(async(op:string)=>{
+   if(op==='albumTree')return {adopted:true,libraryId:'a'.repeat(32),epoch:1,albums:[{id:'trip',name:'여행',parentId:null,iconKey:null,colorKey:null,assetCount:2}]};
+   if(op==='albumMembershipSet'||op==='albumMemberships')return {adopted:true,albums:[{id:'trip',desiredState:false,pending:!blocked,blocked}]};
+   return {configured:true,endpoint:'https://example.invalid'};
+ });
+ mocks.api.mockImplementation(async(path:string,signal:AbortSignal)=>path.includes('/v1/albums/assets')?{items:a,hasMore:false,nextCursor:null,filterVersion:1}:original(path,signal));
+ render(<App/>);fireEvent.click(await screen.findByRole('radio',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'여행, 2개'}));
+ fireEvent.contextMenu(await screen.findByText('tile-a1'));fireEvent.click(screen.getByRole('button',{name:'이 앨범에서 빼기'}));
+ await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());expect(screen.getByText('tile-a2')).toBeTruthy();
+ fireEvent.click(screen.getByText('tile-a2'));expect(await screen.findByText('viewer-a2')).toBeTruthy();fireEvent.click(screen.getByText('viewer close'));
+ act(()=>window.dispatchEvent(viewerEditEvent()));
+ await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>String(path).includes('albumId=trip')).length).toBeGreaterThan(1));
+ expect(screen.queryByText('tile-a1')).toBeNull();
+ blocked=true;act(()=>window.dispatchEvent(new Event('lakomics-resume')));
+ expect(await screen.findByText('tile-a1')).toBeTruthy();expect(await screen.findByText(/앨범에서 빼기 전송에 실패/)).toBeTruthy();
+});

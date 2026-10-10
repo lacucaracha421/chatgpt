@@ -33,6 +33,25 @@ def blob(data):
 class CollectionAuthorityTests(unittest.TestCase):
     tearDown = fixtures.MobileCollectionsTests.tearDown
 
+    def test_volume_back_details_enrich_existing_projection_without_writes(self):
+        self.ready()
+        self.ok(self.command('upsertVolumeSource', headers=self.publisher, workId='a', volumeNumber=1,
+                             provider='kakao', providerItemId='k1', title='Volume title', author=None,
+                             publisher='Publisher', isbn13='9780306406157', publicationDate='2026-01-01',
+                             itemUrl=None, data={'contents': 'Volume synopsis', 'price': 12000, 'sale_price': 9000},
+                             deleted=False, expectedRevision=0))
+        with api_app.get_db() as db:
+            before = list(db.iterdump())
+        reply = self.ok(self.client.get('/v1/collections/a', headers=self.auth))
+        volume = reply['item']['volumes'][0]
+        self.assertEqual((volume['contents'], volume['price'], volume['publisher'], volume['isbn13']),
+                         ('Volume synopsis', 12000, 'Publisher', '9780306406157'))
+        listing = self.ok(self.client.get('/v1/collections', headers=self.auth))
+        self.assertNotIn('volumes', listing['items'][0])
+        self.assertEqual(listing['revision'], reply['revision'])
+        with api_app.get_db() as db:
+            self.assertEqual(list(db.iterdump()), before)
+
     def test_kakao_review_client_dismissal_undo_and_snapshot_change(self):
         self.ready()
         config = {"version": 1, "query": "던전밥", "groupFingerprint": "group", "knownItemIds": ["one", "three"]}

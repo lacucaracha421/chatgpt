@@ -38,6 +38,26 @@ def av_info():
 
 
 class MobileCollectionsTests(unittest.TestCase):
+    def test_optional_volume_details_round_trip_and_bounds(self):
+        item = work()
+        volume = {"id": "volume", "volumeNumber": 1, "editionIndex": 0, "displayLabel": "1"}
+        item["volumes"] = [{**volume, "isbn13": "9780306406157", "contents": "Synopsis",
+                            "price": 12000, "publisher": "Publisher"}]
+        self.assertEqual(self.publish([item]).status_code, 200)
+        detail = self.client.get("/v1/collections/work", headers=AUTH).json()["item"]["volumes"][0]
+        for field in ("isbn13", "contents", "price", "publisher"):
+            self.assertEqual(detail[field], item["volumes"][0][field])
+        self.assertNotIn("volumes", self.listing().json()["items"][0])
+        for field, value in (("contents", "x" * 20001), ("publisher", "x" * 2001),
+                             ("price", True), ("price", -1), ("price", 12.5)):
+            with self.subTest(field=field, value_type=type(value)):
+                mobile_collections.Volume.model_validate(volume)
+                with self.assertRaises(ValueError):
+                    mobile_collections.Volume.model_validate({**volume, field: value})
+        stored = mobile_collections.stored(mobile_collections.Collection.model_validate({**work(), "volumes": [volume]}))
+        for field in ("contents", "price", "publisher"):
+            self.assertNotIn(field, stored["volumes"][0])
+
     def setUp(self):
         self.clock = 0.0
         cache = head_cache.HeadMetadataCache(clock=lambda: self.clock)
@@ -448,7 +468,7 @@ class MobileCollectionsTests(unittest.TestCase):
 
     def test_status_advertises_replica_features(self):
         status = self.client.get("/v1/collections/status", headers=AUTH).json()
-        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview"])
+        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview", "volumeDetails"])
 
     def test_bad_optional_kakao_review_cannot_reject_replica(self):
         import mobile_collections as mobile

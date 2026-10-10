@@ -26,14 +26,16 @@ export function useLibraryTrash<V extends ViewerLike>(configured: boolean, endpo
   const known = useRef(new Map<string, Asset>());
   const [knownVersion, setKnownVersion] = useState(0);
   const [undo, setUndo] = useState<{asset: Asset; index: number; key: number} | null>(null);
+  const [batchUndo,setBatchUndo]=useState<{ids:string[];key:number}|null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
   const backRef = useRef<(() => boolean) | null>(null);
   const changedAt = useRef(0);
+  const connection=useRef(endpoint);connection.current=endpoint;
 
   // A new connection starts with nothing hidden and nothing to undo.
   useEffect(() => {
-    known.current.clear(); setHidden(new Set()); setUndo(null); setError(''); setOpen(false); setAvailable(false);
+    known.current.clear(); setHidden(new Set()); setUndo(null); setBatchUndo(null); setError(''); setOpen(false); setAvailable(false);
   }, [endpoint]);
 
   useEffect(() => {
@@ -65,14 +67,14 @@ export function useLibraryTrash<V extends ViewerLike>(configured: boolean, endpo
   }, [configured, endpoint]);
 
   useEffect(() => {
-    if (!undo && !error) return;
-    const timer = window.setTimeout(() => { setUndo(null); setError(''); }, UNDO_MS);
+    if (!undo && !batchUndo && !error) return;
+    const timer = window.setTimeout(() => { setUndo(null); setBatchUndo(null); setError(''); }, UNDO_MS);
     return () => clearTimeout(timer);
-  }, [undo, error]);
+  }, [undo, batchUndo, error]);
 
   /** Move one Asset to the trash from the viewer: no confirmation, advance, offer undo. */
   const trash = useCallback(async (asset: Asset, index: number) => {
-    setError('');
+    setError('');setBatchUndo(null);
     try {
       const state = await setLifecycle(asset.id, 'trash');
       if (state.tombstoned) { setError('이미 영구 삭제된 자산입니다.'); return; }
@@ -91,6 +93,41 @@ export function useLibraryTrash<V extends ViewerLike>(configured: boolean, endpo
     });
     setUndo({asset, index, key: Date.now()});
   }, [setViewer]);
+
+  /** Batch writes report refusals to the selection bar; they never become permanent deletion. */
+  const trashSelected = useCallback(async (asset: Asset) => {
+    const state = await setLifecycle(asset.id, 'trash');
+    const row = state.items.find(item => item.assetId === asset.id);
+    if (!state.available || state.tombstoned || row?.state === 'blocked' || row?.state === 'dropped') {
+      throw new Error('휴지통으로 옮기지 못했습니다. 다시 시도해 주세요.');
+    }
+    known.current.set(asset.id, asset); setKnownVersion(value => value + 1);
+    changedAt.current = Date.now();
+    setHidden(current => new Set(current).add(asset.id));
+  }, []);
+
+  const offerBatchUndo=useCallback((ids:string[])=>{
+    if(ids.length){setUndo(null);setError('');setBatchUndo({ids,key:Date.now()});}
+  },[]);
+  const undoBatch=useCallback(async()=>{
+    const last=batchUndo;setBatchUndo(null);
+    if(!last)return;
+    const owner=endpoint;
+    const restoredIds:string[]=[],failedIds:string[]=[];
+    for(const id of last.ids){
+      if(connection.current!==owner)return;
+      try {
+        const state=await setLifecycle(id,'restore');
+        if(connection.current!==owner)return;
+        const row=state.items.find(item=>item.assetId===id);
+        if(!state.available||state.tombstoned||row?.state==='blocked'||row?.state==='dropped')throw new Error('복원 실패');
+        restoredIds.push(id);
+      } catch {failedIds.push(id);}
+    }
+    changedAt.current=Date.now();
+    setHidden(current=>{const next=new Set(current);for(const id of restoredIds)next.delete(id);return next;});
+    if(failedIds.length)setError(`${last.ids.length}개 중 ${failedIds.length}개를 되돌리지 못했습니다. 휴지통에서 다시 시도해 주세요.`);
+  },[batchUndo,endpoint]);
 
   /** Undo: cancels a not-yet-sent trash, or sends the restore after it. */
   const undoLast = useCallback(async () => {
@@ -119,7 +156,8 @@ export function useLibraryTrash<V extends ViewerLike>(configured: boolean, endpo
 
   const snackbar: ReactNode = error
     ? <div className="trash-snackbar" role="alert"><span>{error}</span></div>
+    : batchUndo ? <TrashSnackbar key={batchUndo.key} onUndo={()=>{void undoBatch();}}/>
     : undo ? <TrashSnackbar key={undo.key} onUndo={() => { void undoLast(); }}/> : null;
 
-  return {available, hidden, hiddenRef, known: known.current, knownVersion, open, setOpen, backRef, trash, restored, recent, snackbar};
+  return {available, hidden, hiddenRef, known: known.current, knownVersion, open, setOpen, backRef, trash, trashSelected, offerBatchUndo, restored, recent, snackbar};
 }

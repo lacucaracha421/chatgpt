@@ -214,7 +214,7 @@ function CaseWorkSurface({shown, current, active, privacy, score, record = workR
 /** The published volume as the shared bookcase reads it; a future local date is a pre-registered volume. */
 export function sharedVolume(volume: CollectionVolume, today: string): SharedVolume {
   const date = volume.localReleaseDate ?? null;
-  return {...volume, coverArtworkId: volume.coverArtworkId ?? null, localReleaseDate: date, isbn13: null, releaseStatus: date && date.slice(0, 10) > today ? 'upcoming' : null};
+  return {...volume, coverArtworkId: volume.coverArtworkId ?? null, localReleaseDate: date, isbn13: volume.isbn13 ?? null, releaseStatus: volume.releaseStatus ?? (date && date.slice(0, 10) > today ? 'upcoming' : null)};
 }
 
 /**

@@ -40,6 +40,11 @@ and detail routes. Authority status advertises ``kakaoReview``; default reads an
 staging verification preserve the legacy payload without this optional block.
 Requested manga lists also return ``kakaoUnlinkedCount`` for the whole served
 library, excluding hidden prompts and pending Kakao requests, regardless of filters.
+
+``volumeDetails`` accepts optional volume ``contents``, positive integer list
+``price`` and ``publisher``; ``isbn13`` was already supported. Detail reads enrich
+these from live authority volume sources without rewriting older projections.
+Lists remain compact and the replica byte cap/version stay unchanged.
 """
 from __future__ import annotations
 
@@ -74,7 +79,7 @@ ImageMime = Literal["image/jpeg", "image/png", "image/webp", "image/gif", "image
 CollectionType = Literal["game", "manga", "movie", "av"]
 COLLECTION_TYPES = ("game", "manga", "movie", "av")
 #: Optional replica fields this server accepts (see the module docstring).
-REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview")
+REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview", "volumeDetails")
 #: Allowed item ``status`` values per Collection type (feature ``workRecord``); the same
 #: list validates a mobile ``status`` edit (personal-edit version 3).
 ITEM_STATUSES = personal_edits.ITEM_STATUSES
@@ -119,6 +124,9 @@ class Volume(StrictModel):
     coverArtworkId: ID | None = None
     localReleaseDate: str | None = Field(default=None, max_length=100)
     isbn13: str | None = Field(default=None, max_length=100)
+    contents: str | None = Field(default=None, max_length=20000)
+    price: StrictInt | None = Field(default=None, gt=0, le=9007199254740991)
+    publisher: str | None = Field(default=None, max_length=2000)
     releaseStatus: str | None = Field(default=None, max_length=100)
     # Horizontal cover focus (feature ``coverFocus``); never stored as null.
     coverFocusX: float | None = Field(default=None, ge=0, le=1)
@@ -468,6 +476,9 @@ def stored(item: Collection) -> dict:
         if payload.get(key) is None:
             payload.pop(key, None)
     for volume in payload["volumes"]:
+        for key in ("contents", "price", "publisher"):
+            if volume.get(key) is None:
+                del volume[key]
         if volume["coverFocusX"] is None:
             del volume["coverFocusX"]
     for index, person in enumerate(payload.get("av", {}).get("people", ())):
@@ -610,6 +621,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     def finalize(db, active, payload, *, include_review=False):
         if active is not None:
             collection_authority.finalize_item(db, active["libraryId"], payload, include_review=include_review)
+            collection_authority.volume_details(db, active["libraryId"], payload)
         return payload
 
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.

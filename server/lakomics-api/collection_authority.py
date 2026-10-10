@@ -1172,6 +1172,56 @@ def kakao_unlinked_count(db, library_id):
         """, [library_id]).fetchone()[0]
 
 
+def volume_details(db, library_id, item):
+    """Enrich detail reads from current sources, including pre-feature projections.
+
+    Match the PC volume read: Kakao before Aladin, one source per volume number
+    across editions, Kakao contents/list price and either provider's publisher.
+    Do not rewrite stored projections or expand list responses with provider data.
+    """
+    if item.get("type") != "manga" or not item.get("volumes"):
+        return item
+    sources = {}
+    for row in db.execute(
+            "SELECT volume_number,provider,publisher,isbn13,data"
+            " FROM collection_authority_volume_sources WHERE library_id=? AND work_id=?"
+            " AND deleted=0 AND provider IN ('kakao','aladin')"
+            " ORDER BY CASE provider WHEN 'kakao' THEN 0 ELSE 1 END",
+            [library_id, item["id"]]):
+        sources.setdefault(row["volume_number"], row)
+    for volume in item["volumes"]:
+        source = sources.get(volume["volumeNumber"])
+        if source is None:
+            continue
+        try:
+            data = json.loads(source["data"])
+        except (ValueError, TypeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        for key in ("contents", "price", "publisher"):
+            volume.pop(key, None)
+        def text(value, limit):
+            return value.strip()[:limit] if isinstance(value, str) and value.strip() else None
+        volume["isbn13"] = text(source["isbn13"], 100)
+        publisher = text(source["publisher"], 2000) or text(data.get("publisher"), 2000)
+        if publisher:
+            volume["publisher"] = publisher
+        if source["provider"] == "kakao":
+            contents = text(data.get("contents"), 20000)
+            if contents:
+                volume["contents"] = contents
+            price = data.get("price")
+            # PC accepts positive integer list prices, including digit strings.
+            # Sale prices, booleans, fractional and non-finite values are not print data.
+            if isinstance(price, str):
+                value = price.strip()
+                price = int(value) if re.fullmatch(r"[0-9]{1,16}", value) else None
+            if type(price) is int and 0 < price <= 9007199254740991:
+                volume["price"] = price
+    return item
+
+
 def finalize_items(db, library_id, items, *, detail=False, today=None, include_review=False):
     """Resolve a page's visible member counts/covers without loading member IDs."""
     if not items:

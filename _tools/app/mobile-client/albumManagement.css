@@ -1,0 +1,15 @@
+.album-management-actions { display:flex; flex-direction:column; gap:var(--space-2); }
+.album-management fieldset { border:0; padding:0; margin-block:var(--space-3); }
+.album-management legend { margin-bottom:var(--space-2); }
+.album-look-choices { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+.album-look-choices .ui-button { min-height:44px; }
+.album-look-preview { display:flex; align-items:center; gap:var(--space-2); }
+.album-look-preview svg { width:24px; height:24px; }
+.album-card-management { position:relative; }
+.album-card-management > .library-folder { width:100%; }
+.library-children > .album-card-management { flex:0 0 clamp(130px,24vw,190px); }
+.album-card-management > .ui-button { position:absolute; top:var(--space-1); right:var(--space-1); min-width:44px; min-height:44px; background:var(--color-surface-raised); }
+.album-management-create { margin-block:var(--space-2); }
+.mobile-app .asset-selection-bar { flex-wrap:wrap; }
+.selection-action-notice { width:100%; padding:var(--space-1); font-size:var(--type-meta); }
+.selection-action-notice:empty { display:none; }
