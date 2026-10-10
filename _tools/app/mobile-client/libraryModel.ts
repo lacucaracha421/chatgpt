@@ -23,6 +23,14 @@ export function mergeLibraryEntries(items:Classification[],characters?:Character
     const ids=new Set(kept.map(item=>item.id));
     return kept.map(item=>({...item,parent_id:ids.has(item.parent_id??'')?item.parent_id:null}));
 }
+/**
+ * The count a folder card shows: the whole subtree, as the PC's shelf and sidebar do.
+ * A character series keeps the character index's own count, and a server without subtree
+ * counts leaves the direct count in place.
+ */
+export function folderCardCount(entry:Entry):number{
+  return entry.characterNode?entry.asset_count:entry.total_asset_count??entry.asset_count;
+}
 export function ancestorsOf(entries:Entry[],id?:string):Entry[]{
  const result:Entry[]=[],seen=new Set<string>(id?[id]:[]);let current=entries.find(e=>e.id===id);
  while(current?.parent_id&&!seen.has(current.parent_id)){seen.add(current.parent_id);current=entries.find(e=>e.id===current!.parent_id);if(current)result.unshift(current);}

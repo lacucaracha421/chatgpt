@@ -1664,12 +1664,13 @@ class BaselineRoleTests(ClassificationAuthorityFixture):
 
 
 class CommandAuthorizationTests(ClassificationAuthorityFixture):
-    """Structural commands are publisher-only in v1; assignment is a client operation.
+    """Move, delete and appearance are publisher-only; assignment, create and rename are client operations.
 
     R2 leaves the character-series-into-originals rule to the PC, so the server cannot
-    yet enforce every structural invariant. A non-PC client must therefore not be able
-    to originate a structural mutation, and the legacy shared credential must not gain
-    publisher capability.
+    yet enforce every structural invariant of a *move*. A non-PC client must therefore not
+    be able to move or delete, and the legacy shared credential must not gain publisher
+    capability. Create and rename (user 2026-10-10, tablet folder management) need no
+    PC-only data: the server enforces every rule the PC applies to them.
     """
 
     def setUp(self):
@@ -1692,13 +1693,21 @@ class CommandAuthorizationTests(ClassificationAuthorityFixture):
                                                    "expectedRevision": 1}),
         ]
 
+    def publisher_only_bodies(self):
+        return [body for body in self.structural_bodies()
+                if body[0] not in classification_authority.CLIENT_COMMANDS]
+
     def issue(self, command_type, fields, headers, operation_id=R1):
         body = {"libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
                 "operationId": operation_id, "commandType": command_type, **fields}
         return self.client.put(COMMANDS, headers=headers, json=body)
 
-    def test_an_ordinary_client_cannot_issue_structural_commands(self):
-        for command_type, fields in self.structural_bodies():
+    def test_an_ordinary_client_cannot_issue_publisher_only_commands(self):
+        self.assertEqual(
+            [command_type for command_type, _ in self.publisher_only_bodies()],
+            [classification_authority.MOVE, classification_authority.DELETE,
+             classification_authority.APPEARANCE])
+        for command_type, fields in self.publisher_only_bodies():
             with self.subTest(command=command_type):
                 response = self.issue(command_type, fields, self.auth)
                 self.assertEqual(response.status_code, 401, response.text)
@@ -1709,7 +1718,7 @@ class CommandAuthorizationTests(ClassificationAuthorityFixture):
                          sorted([ROOT, WORK, TAG, OTHER, ORIGINALS]))
 
     def test_a_client_gets_the_same_auth_failure_before_structural_body_validation(self):
-        command_type, fields = self.structural_bodies()[1]
+        command_type, fields = self.publisher_only_bodies()[0]
         well_formed = self.issue(command_type, fields, self.auth)
         malformed = self.client.put(COMMANDS, headers=self.auth,
                                     json={"commandType": command_type})
@@ -1784,10 +1793,21 @@ class CommandAuthorizationTests(ClassificationAuthorityFixture):
                                   classificationId=TAG, expectedRevision=0,
                                   headers=shared)
         self.assertEqual(assignment.status_code, 200, assignment.text)
-        for command_type, fields in self.structural_bodies():
+        for command_type, fields in self.publisher_only_bodies():
             with self.subTest(command=command_type):
                 self.assertEqual(
                     self.issue(command_type, fields, shared).status_code, 401)
+        # Create and rename are client operations, so the shared credential may issue them.
+        created = self.issue(
+            classification_authority.CREATE,
+            {"classificationId": R3, "kind": "root", "name": "공유 폴더", "parentId": None,
+             "iconKey": None, "colorKey": None}, shared, operation_id=R2)
+        self.assertEqual(created.status_code, 200, created.text)
+        renamed = self.issue(
+            classification_authority.RENAME,
+            {"classificationId": R3, "name": "공유 이름", "expectedRevision": 1},
+            shared, operation_id=R4)
+        self.assertEqual(renamed.status_code, 200, renamed.text)
 
     def test_an_unknown_command_name_requires_publisher_before_validation(self):
         """An unrecognized command is not a client operation, and reveals nothing."""
@@ -1806,11 +1826,107 @@ class CommandAuthorizationTests(ClassificationAuthorityFixture):
                     self.issue(command_type, fields, {}).status_code, 401)
 
     def test_authorization_precedes_envelope_validation(self):
-        """A client must not be able to probe the structural command contract."""
+        """A client must not be able to probe a publisher command's contract."""
         response = self.client.put(
             COMMANDS, headers=self.auth,
-            json={"commandType": classification_authority.RENAME})
+            json={"commandType": classification_authority.MOVE})
         self.assertEqual(response.status_code, 401, response.text)
+
+
+class ClientCreateRenameTests(ClassificationAuthorityFixture):
+    """An ordinary client may create and rename folders; the server enforces the PC rules."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+
+    def create(self, classification_id, name="새 폴더", kind="tag", parent=ROOT,
+               headers=None, operation_id=R1):
+        return self.client.put(COMMANDS, headers=headers or self.auth, json={
+            "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
+            "operationId": operation_id, "commandType": classification_authority.CREATE,
+            "classificationId": classification_id, "kind": kind, "name": name,
+            "parentId": parent, "iconKey": None, "colorKey": None})
+
+    def rename(self, classification_id, name, expected=1, headers=None, operation_id=R2):
+        return self.client.put(COMMANDS, headers=headers or self.auth, json={
+            "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
+            "operationId": operation_id, "commandType": classification_authority.RENAME,
+            "classificationId": classification_id, "name": name,
+            "expectedRevision": expected})
+
+    def test_a_client_creates_a_top_level_folder_and_a_child_folder(self):
+        top = self.create(R3, "새 최상위", kind="root", parent=None)
+        self.assertEqual(top.status_code, 200, top.text)
+        self.assertEqual(top.json()["classification"]["kind"], "root")
+        child = self.create(R4, "  하위 폴더  ", kind="tag", parent=R3, operation_id=R2)
+        self.assertEqual(child.status_code, 200, child.text)
+        # The name is trimmed exactly as the PC trims it, and each create advances the cursor once.
+        self.assertEqual(child.json()["classification"]["name"], "하위 폴더")
+        self.assertEqual(child.json()["classification"]["entityRevision"], 1)
+        self.assertEqual(self.cursor(), 2)
+
+    def test_a_client_create_needs_a_uuid_id_but_a_publisher_does_not(self):
+        refused = self.create("my-folder")
+        self.assert_coded(refused, 422, "invalidClassificationCommand")
+        self.assertEqual(self.change_rows(), [])
+        accepted = self.create("my-folder", headers=self.publisher_auth, operation_id=R2)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+
+    def test_a_client_create_follows_the_pc_name_and_parent_rules(self):
+        self.assert_coded(self.create(R3, "   "), 422, "emptyClassificationName")
+        self.assert_coded(self.create(R3, "x" * 201), 422, "classificationNameTooLong")
+        # A work needs a root parent and a root takes none: the PC's validate_parent.
+        self.assert_coded(self.create(R3, "작품", kind="work", parent=TAG),
+                          422, "invalidClassificationParent")
+        self.assert_coded(self.create(R3, "최상위 태그", kind="tag", parent=None),
+                          422, "invalidClassificationParent")
+        self.assert_coded(self.create(R3, "없는 부모", parent="30000000-0000-4000-8000-000000000009"),
+                          404, "classificationNotFound")
+        self.assertEqual(self.change_rows(), [])
+
+    def test_a_client_create_refuses_a_duplicate_sibling_name_case_insensitively(self):
+        self.assertEqual(self.create(R3, "Folder").status_code, 200)
+        self.assert_coded(self.create(R4, "folder", operation_id=R2),
+                          409, "duplicateClassificationName")
+        # The same name under another parent is fine.
+        self.assertEqual(self.create(R4, "Folder", parent=OTHER, operation_id=R3).status_code, 200)
+
+    def test_a_client_create_is_idempotent_by_operation_id(self):
+        first = self.create(R3, "한 번만")
+        again = self.create(R3, "한 번만")
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(again.json(), first.json())
+        self.assertEqual(self.cursor(), 1)
+        changed = self.create(R3, "다른 이름")
+        self.assert_coded(changed, 409, "operationConflict")
+
+    def test_a_client_renames_with_compare_and_set(self):
+        renamed = self.rename(OTHER, "  새 이름  ")
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["classification"]["name"], "새 이름")
+        self.assertEqual(renamed.json()["classification"]["entityRevision"], 2)
+        stale = self.rename(OTHER, "늦은 이름", expected=1, operation_id=R3)
+        detail = self.assert_coded(stale, 409, "revisionConflict")
+        self.assertEqual(detail["current"]["name"], "새 이름")
+        self.assertEqual(detail["current"]["entityRevision"], 2)
+
+    def test_a_client_rename_refuses_the_protected_and_duplicate_cases(self):
+        self.assert_coded(self.rename(ORIGINALS, "다른 이름"), 409, "protectedClassification")
+        self.assert_coded(self.rename(OTHER, "게임", operation_id=R3),
+                          409, "duplicateClassificationName")
+        self.assert_coded(self.rename(OTHER, "   ", operation_id=R4),
+                          422, "emptyClassificationName")
+        self.assert_coded(
+            self.rename("30000000-0000-4000-8000-000000000009", "없음", operation_id=R5),
+            404, "classificationNotFound")
+        self.assertEqual(self.change_rows(), [])
+
+    def test_create_and_rename_still_need_a_credential(self):
+        self.assertEqual(self.create(R3, headers={}).status_code, 401)
+        self.assertEqual(self.rename(OTHER, "이름", headers={}).status_code, 401)
+        self.assertEqual(self.change_rows(), [])
 
 
 class BaselineSnapshotCoherenceTests(ClassificationAuthorityFixture):

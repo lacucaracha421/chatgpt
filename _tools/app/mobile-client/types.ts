@@ -15,7 +15,14 @@ export interface Asset {
   // Optional source-provided state; the current library publication omits favourites.
   favorite?: boolean; pending?: boolean; preview?: string; ratio?: number;
 }
-export interface Classification { id: string; name: string; parent_id: string | null; asset_count: number; color_key?: string; icon_key?: string }
+/**
+ * `asset_count` is how many Assets are filed in this folder alone. `total_asset_count` (only from
+ * a server that declares list version 2) is how many distinct Assets are in it or any subfolder.
+ * Neither stands in for the other.
+ */
+export interface Classification { id: string; name: string; parent_id: string | null; asset_count: number; total_asset_count?: number; color_key?: string; icon_key?: string; kind?: 'root'|'work'|'tag' }
+/** The classification list reply; `listVersion` and `authority` appear only when asked for with `subtree_counts=1`. */
+export interface ClassificationList { items: Classification[]; listVersion?: number; authority?: {libraryId: string; epoch: number; contractVersion: number} }
 /**
  * A page as it arrives on the wire.
  *
@@ -35,7 +42,9 @@ export interface PageWire { items: Asset[]; has_more: boolean; next_cursor: stri
  */
 export interface Page { items: Asset[]; has_more: boolean; next_cursor: string | null; filter_version?: number;
   /** The list generation the server read these rows under; absent from servers that predate it. */
-  list_generation?: string }
+  list_generation?: string;
+  /** Present only on a 내용 검색 page: whether captions exist and whether the vocabulary gate turned the text away. */
+  description?: {ready:boolean;gated:boolean} }
 /**
  * Asset filters, mirroring the PC's media/aspect vocabulary. `all` is the client-side
  * spelling of "no filter" and is never sent on the wire.
@@ -44,7 +53,7 @@ export type AssetMediaFilter = 'all' | 'images' | 'videos';
 export type AssetAspectFilter = 'all' | 'square' | 'landscape' | 'portrait';
 export type AssetDurationFilter = 'all' | 'under_30s' | '30s_1m' | '1m_5m' | 'over_5m';
 export interface AssetFiltersValue { media: AssetMediaFilter; aspect: AssetAspectFilter; duration: AssetDurationFilter }
-export interface View { unclassified?:boolean; search?:import('../src/assets/assetSearch').AssetSearchName[]; album?:{id:string;libraryId:string;epoch:number}; root?:boolean; characterNode?:string; characters?: boolean; tab: 'home' | 'library'; classification?: string; revisit?: 'date' | string; title: string }
+export interface View { unclassified?:boolean; search?:import('../src/assets/assetSearch').AssetSearchName[]; album?:{id:string;libraryId:string;epoch:number}; root?:boolean; characterNode?:string; characters?: boolean; tab: 'home' | 'library'; classification?: string; revisit?: 'date' | string; /** 내용 검색 result state: rows ranked by the PC-published captions (NL-SEARCH-001). */description?:{query:string;force:boolean}; title: string }
 export interface Ticket { url: string; expires_at?: string; expires_in?: number; content_type?: string }
 export interface Status { configured: boolean; endpoint: string; allowPrivateHttp?: boolean }
 export interface Revisit { bundles: {kind: string; title: string; items?: Asset[]; groups?: {creator_key: string; creator_name: string; creator_handle: string; asset_count: number; items: Asset[]}[]}[] }

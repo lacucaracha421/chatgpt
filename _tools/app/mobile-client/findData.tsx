@@ -1,4 +1,4 @@
-import {useEffect,useState,useSyncExternalStore} from 'react';
+import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {FolderIcon,RectangleStackIcon} from '@heroicons/react/24/outline';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {FIND_SCOPES} from '../src/shared/findModel';
@@ -9,6 +9,7 @@ import {collectionPath,type CollectionSummary,type CollectionPage,type Collectio
 import {entryView,ancestorsOf,type Entry} from './libraryModel';
 import {albumView,type AlbumTree} from './albumModel';
 import type {View} from './types';
+import {DESCRIPTION_TYPING_PAUSE_MS,cachedDescription,descriptionQueryReady,readDescription,type DescriptionAnswer} from './descriptionSearch';
 import {artistName,searchValues,type LibraryArtist} from './artistsModel';
 
 export const TABLET_FIND_SCOPES=FIND_SCOPES.filter(scope=>scope!=='명령');
@@ -64,4 +65,32 @@ export function useFindNoteTitles(open:boolean,store:NotesStore) {
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   useEffect(()=>{if(open)void store.load();},[open,store]);
   return {notes:(state.unlocked?state.notes:[]).map(({id,title,type,deleted})=>({id,title,type,deleted})),loading:!state.ready,error:state.error};
+}
+
+/**
+ * 이미지 내용 strip state for the open sheet. `query` is committed text only (the note editor binding
+ * commits after Hangul composition ends), and the server is asked once typing has paused. The last answer
+ * stays as `shown` until the next one replaces it; a new sheet session starts without one.
+ */
+export function useDescriptionStrip({open,endpoint,query,enabled,count}:{open:boolean;endpoint:string;query:string;enabled:boolean;count:number}) {
+  const [shown,setShown]=useState<DescriptionAnswer|null>(null),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false);
+  const latest=useRef<string|null>(null);
+  const text=query.trim();
+  const wanted=open&&enabled&&descriptionQueryReady(text)?text:null;
+  useEffect(()=>{if(!open){latest.current=null;setShown(null);setFailed(false);setBusy(false);}},[open]);// no-flash-ok: the sheet is closed, nothing is painted
+  useEffect(()=>{
+    if(!wanted){latest.current=null;setBusy(false);return;}
+    const cached=cachedDescription(endpoint,{query:wanted,force:false},count);
+    if(cached){latest.current=wanted;setShown(cached);setFailed(false);setBusy(false);return;}
+    let active=true;
+    const timer=window.setTimeout(()=>{
+      latest.current=wanted;setBusy(true);
+      void readDescription(endpoint,{query:wanted,force:false},count).then(answer=>{
+        if(!active)return;
+        setShown(answer);setFailed(false);
+      },()=>{if(active)setFailed(true);}).finally(()=>{if(latest.current===wanted)setBusy(false);});
+    },DESCRIPTION_TYPING_PAUSE_MS);
+    return()=>{active=false;window.clearTimeout(timer);};
+  },[wanted,endpoint,count]);
+  return {shown,busy,failed,asked:wanted!==null};
 }

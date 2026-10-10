@@ -35,6 +35,8 @@ beforeEach(()=>{setOutboxConnection(CONNECTION);
     if(path==='/v1/collections/status')return capable?{revision,capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true,collectionRecordEdit:recordCapable},libraryId:LIBRARY}:{revision,capabilities:{collectionPersonalEdit:false}};
     if(path==='/v1/collections/personal-edits'){const reply=command(body!);if(reply instanceof Error)throw reply;return reply;}
     if(path.startsWith('/v1/collections?'))return page();
+    // These tests do not exercise provider binding; answer like a server without it.
+    if(path.startsWith('/v1/collections/bindings/'))throw new ApiError('x',404,{detail:'Not Found'});
     return {revision,item};
   });
   mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});

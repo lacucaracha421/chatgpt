@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 import conditional
 import asset_visibility
+import library_description
 import home_publications as common
 from home_publications import Strict, fail, text
 from library_artists import AssetId
@@ -47,6 +48,7 @@ CREATE INDEX IF NOT EXISTS library_tag_visibility_by_visible ON library_tag_visi
 
 
 def startup_db(db):
+    db.executescript(library_description.DDL)
     db.executescript(DDL)
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "assets" not in tables:
@@ -156,6 +158,7 @@ class Upload(Strict):
 
 
 def register(app, get_db, require_client, require_publisher):
+    library_description.register(app, get_db, require_client, require_publisher)
     def invalid():
         fail(422, "invalidAutoTagUpload", "Invalid effective tag publication")
 

@@ -3,12 +3,15 @@ import {useNsfwFilter} from './privacyMode';
 import {collectionCover} from './collectionModel';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import {useDeferredValue,useEffect,useId,useLayoutEffect,useMemo,useRef,useState} from 'react';
-import {XMarkIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline';
+import {XMarkIcon,MagnifyingGlassIcon,PhotoIcon} from '@heroicons/react/24/outline';
+import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {Button,EmptyState,IconButton,TextInput,SectionLabel,Skeleton} from './ui';
 import {FindEntryContent} from '../src/shared/FindEntryContent';
 import {findGroups,GROUP_LIMIT,readRecent,rememberRecent,type FindScope} from '../src/shared/findModel';
 import {NAVIGATION_GROUP_LABELS,type NavigationEntryGroup} from '../src/shared/findEntries';
-import {TABLET_FIND_SCOPES,type TabletFindEntry} from './findData';
+import {TABLET_FIND_SCOPES,useDescriptionStrip,type TabletFindEntry} from './findData';
+import {DescriptionStrip} from './FindDescriptionStrip';
+import {DESCRIPTION_PREVIEW_COUNT,descriptionQueryReady} from './descriptionSearch';
 import {artworkTicket,decoded} from './collectionArtwork';
 import {decodeImage,mediaTicket} from './media';
 import {useNoteEditor} from './noteCaret';
@@ -35,7 +38,7 @@ function FindMedia({entry,cache,signal}:{entry:TabletFindEntry;cache:MediaCache;
   return masked?<span className="privacy-mask" aria-label="이미지 숨김"/>:url?<img src={url} alt="" className={entry.avatar?'find-entry__avatar':undefined}/>:entry.icon;
 }
 
-export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,error,onRetry}:{open:boolean;onClose():void;entries:TabletFindEntry[];endpoint:string;privacy:boolean;loading?:boolean;error?:string;onRetry?():void}) {
+export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,error,onRetry,onDescription}:{open:boolean;onClose():void;entries:TabletFindEntry[];endpoint:string;privacy:boolean;loading?:boolean;error?:string;onRetry?():void;/** Opens the 내용 검색 result state; absent when the screen cannot show one. */onDescription?(query:string):void}) {
   const [nsfwFilter]=useNsfwFilter();
   const [query,setQuery]=useState(''),[scope,setScope]=useState<FindScope>('전체');
   const [expanded,setExpanded]=useState<NavigationEntryGroup[]>([]),[recent,setRecent]=useState<string[]>([]),[activeId,setActiveId]=useState<string|null>(null);
@@ -51,12 +54,22 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
   },[open,recentKey]);
   useEffect(()=>{if(open&&!privacy)setRecent(readRecent(recentKey));},[privacy,open,recentKey]);
   const draft=useDeferredValue(useMemo(()=>({query,scope}),[query,scope]));
-  const groups=useMemo(()=>findGroups(entries,draft.query,draft.scope,privacy?[]:recent),[entries,draft,privacy,recent]);
+  const strip=useDescriptionStrip({open,endpoint,query:draft.query,enabled:!!onDescription&&draft.scope==='전체',count:DESCRIPTION_PREVIEW_COUNT});
+  const stripBusy=useDelayedBusy(strip.busy);
+  const typed=draft.query.trim(),notReady=strip.shown?.ready===false;
+  const withContent=useMemo(()=>onDescription&&draft.scope==='전체'&&descriptionQueryReady(typed)?[{id:'description-search',group:'content',label:`‘${typed}’ 장면 찾기`,icon:<PhotoIcon/>,activity:stripBusy?'장면을 찾는 중…':notReady?undefined:'Enter',
+    detail:<DescriptionStrip answer={strip.shown} failed={strip.failed} cache={session.cache} signal={session.controller.signal} privacy={privacy}/>,
+    destination:{kind:'screen',screen:'assets'},run:()=>onDescription(typed)} as TabletFindEntry,...entries]:entries,[onDescription,draft.scope,typed,stripBusy,notReady,strip.shown,strip.failed,session,privacy,entries]);
+  const groups=useMemo(()=>{
+    const found=findGroups(withContent,draft.query,draft.scope,privacy?[]:recent);
+    // Until the captions exist the row is informational, so Enter keeps going to the first real match.
+    return notReady?[...found.filter(({group})=>group!=='content'),...found.filter(({group})=>group==='content')]:found;
+  },[withContent,draft,privacy,recent,notReady]);
   const displayed=groups.map(({group,items})=>({group,items:expanded.includes(group)?items:items.slice(0,GROUP_LIMIT),total:items.length}));
   const ordered=displayed.flatMap(group=>group.items) as TabletFindEntry[];
   const selected=ordered.findIndex(entry=>entry.id===activeId);const current=Math.max(0,selected);
   const pick=(entry:TabletFindEntry)=>{
-    if(!privacy)setRecent(rememberRecent(recentKey,entry.id));
+    if(!privacy&&entry.group!=='content')setRecent(rememberRecent(recentKey,entry.id));
     picked.current=true;onClose();entry.run();
   };
   useEffect(()=>{if(open)document.getElementById(`${id}-option-${current}`)?.scrollIntoView?.({block:'nearest'});},[open,current,id]);

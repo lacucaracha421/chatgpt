@@ -92,16 +92,24 @@ is never part of the change log. It is delivered with every baseline page instea
 a fresh PC rebuilds the protected id from server authority alone. v1 has exactly one
 role, so it is carried whole rather than paginated.
 
-# Structural commands are publisher-only in v1
+# Structural commands: client create/rename, publisher move/delete/appearance
 
 R2 deliberately leaves the character-series-subtree-into-originals rule as a PC-derived
 constraint, so the server cannot yet enforce every structural invariant a non-PC client
-could violate. ``setAssetClassification`` therefore accepts an ordinary client
-credential, while create/rename/move/delete/appearance require the publisher role. The
-legacy shared credential is a client and never gains publisher capability, so a non-PC
-client cannot originate a structural mutation until the server can enforce every
-structural rule itself. Authorization deliberately precedes command validation, so an
-under-privileged caller cannot probe the command contract.
+could violate. That rule belongs to *move* alone, so ``moveClassification``,
+``deleteClassification`` and ``updateClassificationAppearance`` still require the publisher
+role.
+
+``setAssetClassification``, ``createClassification`` and ``renameClassification`` accept an
+ordinary client credential (user decision 2026-10-10, tablet folder management). Neither
+create nor rename needs PC-only data, and the server enforces every rule the PC applies to
+them itself: trimmed non-empty name, parent/kind combination (``validate_parent``), sibling
+name uniqueness, the protected ``originals`` node refusing rename, and compare-and-set on the
+entity revision. A client-originated create additionally has to carry a UUID classification
+id, the id shape the PC mints, so a client cannot invent reserved-looking ids. The legacy
+shared credential is a client and never gains publisher capability. Authorization
+deliberately precedes command validation, so an under-privileged caller cannot probe the
+contract of a publisher command.
 
 # Inactive safety and cutover boundary
 
@@ -207,6 +215,9 @@ APPEARANCE = "updateClassificationAppearance"
 DELETE = "deleteClassification"
 ASSIGNMENT = "setAssetClassification"
 COMMAND_TYPES = (CREATE, RENAME, MOVE, APPEARANCE, DELETE, ASSIGNMENT)
+#: Commands an ordinary client credential may issue. Move, delete and appearance stay
+#: publisher-only (see "Structural commands" in the module docstring).
+CLIENT_COMMANDS = (ASSIGNMENT, CREATE, RENAME)
 
 #: Common envelope plus the exact per-command keys. A body carrying anything else is
 #: a caller bug rather than a silently ignored hint.
@@ -1357,12 +1368,12 @@ def register_classification_authority(app, get_db, require_client, require_publi
 
     Authorization separates the two write classes, using the shipped role guards rather
     than a new role system. ``setAssetClassification`` is an ordinary client operation,
-    because assignment is the product's normal organization action. Every structural
-    command requires ``publisher``, because R2 leaves the character-series-into-originals
-    rule as a PC-derived constraint: until the server can enforce every structural
-    invariant itself, a non-PC client must not be able to originate a structural
-    mutation. The legacy shared credential is accepted only as a client by
-    ``client_guard`` and is never a publisher, so it cannot acquire that capability
+    because assignment is the product's normal organization action, and so are create and
+    rename (``CLIENT_COMMANDS``): neither depends on the PC-derived character-series rule,
+    and the server enforces their structural rules itself. Move, delete and appearance
+    require ``publisher``, because R2 leaves the character-series-into-originals rule as a
+    PC-derived constraint on move. The legacy shared credential is accepted only as a client
+    by ``client_guard`` and is never a publisher, so it cannot acquire that capability
     through this route.
     """
     lifecycle(app).on_startup(lambda _event=None: startup(get_db))
@@ -1563,14 +1574,25 @@ def register_classification_authority(app, get_db, require_client, require_publi
         except (ValueError, UnicodeError):
             fail(422, "invalidClassificationCommand", "분류 명령을 읽을 수 없습니다.")
         declared = body.get("commandType") if isinstance(body, dict) else None
-        if not isinstance(declared, str) or declared != ASSIGNMENT:
-            # Only the assignment command is an ordinary client operation. Anything
-            # else — including an unrecognized command name — requires the publisher
-            # role, so a non-PC client cannot originate a structural mutation while R2
-            # leaves the character-series originals rule to the PC.
+        publisher = True
+        if not isinstance(declared, str) or declared not in CLIENT_COMMANDS:
+            # Assignment, create and rename are ordinary client operations. Anything else
+            # (including an unrecognized command name) requires the publisher role, so a
+            # non-PC client cannot move or delete while R2 leaves the character-series
+            # originals rule to the PC.
             require_publisher(authorization)
-        library_id, epoch, contract_version, operation_id, command_type, entity = \
-            parse_command(body)
+        elif declared != ASSIGNMENT:
+            try:
+                require_publisher(authorization)
+            except HTTPException:
+                publisher = False
+        library_id, epoch, contract_version, operation_id, command_type, entity = (
+            parse_command(body))
+        if command_type == CREATE and not publisher and not UUID_PATTERN.fullmatch(
+                entity["classificationId"]):
+            # A client-minted folder id is a UUID, as the PC mints; other id shapes stay a
+            # publisher privilege (the migrated `lakomics-originals` root is one).
+            fail(422, "invalidClassificationCommand", "분류 ID가 올바르지 않습니다.")
         now = now_iso()
 
         def run():

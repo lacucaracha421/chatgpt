@@ -18,3 +18,4 @@
 .asset-scope-chip { white-space:nowrap; flex:none; }
 .app-body:has(> .asset-search-layer) { position:relative; }
 .asset-search-layer { position:absolute; inset:0; z-index:var(--z-floating-menu); background:var(--color-bg); display:flex; }
+.description-note { margin:0; padding:var(--space-2) var(--space-6); color:var(--color-muted); font-size:var(--type-meta); }

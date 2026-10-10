@@ -13,6 +13,8 @@ vi.mock('./Home',()=>({Home:({items,onRecent,onArtists}:HomeProps)=><div><button
 vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll,sparse,onSelectAsset}:{onSelectAsset?(id:string):void;sparse?:SparseGallerySource;intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} data-toc-total={sparse?.toc.totalCount} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onContextMenu={event=>{event.preventDefault();onSelectAsset?.(a.id);}} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}{sparse&&<button onClick={()=>void sparse.load(2,2,new AbortController().signal)}>seek bucket</button>}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
+/** The folder list is requested with the subtree counts and list version the tablet asks for. */
+const CLASSIFICATIONS='/v1/library/classifications?subtree_counts=1';
 import {viewerEditEvent} from './listGeneration';
 import {ApiError} from './transport';
 import {outboxConnection,setOutboxConnection} from './outboxConnection';
@@ -55,7 +57,7 @@ it.each(['pending','settled'])('keeps startup reads through status confirmation 
   });
   const count=(path:string)=>reads.filter(read=>read.path===path).length;
   expect(count('/v1/library/list-generation')).toBe(1);
-  expect(count('/v1/library/classifications')).toBe(1);
+  expect(count(CLASSIFICATIONS)).toBe(1);
   expect(count('/v1/library/characters')).toBe(1);
   expect(count('/v1/captures/pending?limit=40')).toBe(1);
   expect(reads.every(read=>!read.signal.aborted)).toBe(true);
@@ -66,7 +68,7 @@ it.each(['pending','settled'])('keeps startup reads through status confirmation 
   // A genuine later generation still refreshes the committed page and indexes.
   await act(async()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:'b'.repeat(64)}})));
   await act(async()=>reads.filter(read=>read.path.includes('assets?')).forEach(read=>read.finish({items:a,has_more:false,next_cursor:null,listGeneration:'b'.repeat(64)})));
-  expect(count('/v1/library/classifications')).toBe(2);
+  expect(count(CLASSIFICATIONS)).toBe(2);
   expect(count('/v1/library/characters')).toBe(2);
   expect(count('/v1/captures/pending?limit=40')).toBe(2);
 });
@@ -77,7 +79,7 @@ it('drops startup reads when the authoritative status changes the connection',as
   const reads:{path:string;signal:AbortSignal}[]=[];
   mocks.api.mockImplementation((path:string,signal:AbortSignal)=>{reads.push({path,signal});return new Promise(()=>{});});
   render(<App/>);
-  const old=reads.filter(read=>['/v1/library/list-generation','/v1/library/classifications','/v1/library/characters','/v1/captures/pending?limit=40'].includes(read.path));
+  const old=reads.filter(read=>['/v1/library/list-generation',CLASSIFICATIONS,'/v1/library/characters','/v1/captures/pending?limit=40'].includes(read.path));
   expect(old).toHaveLength(4);
   await act(async()=>confirm({configured:true,endpoint:'https://new.example'}));
   expect(old.every(read=>read.signal.aborted)).toBe(true);
@@ -89,7 +91,7 @@ it('drops old index reads on an explicit reconfiguration even when the endpoint 
   const reads:{path:string;signal:AbortSignal}[]=[];
   mocks.api.mockImplementation((path:string,signal:AbortSignal)=>{reads.push({path,signal});return new Promise(()=>{});});
   render(<App/>);await act(async()=>{});
-  const paths=['/v1/library/list-generation','/v1/library/classifications','/v1/library/characters'];
+  const paths=['/v1/library/list-generation',CLASSIFICATIONS,'/v1/library/characters'];
   const old=reads.filter(read=>paths.includes(read.path));expect(old).toHaveLength(3);
   fireEvent.click(screen.getByRole('button',{name:'더보기'}));
   fireEvent.click(screen.getByRole('button',{name:'설정',exact:true}));
@@ -1003,7 +1005,7 @@ describe('asset search scope navigation',()=>{
     const artist={id:'search-artist',label:names.artist,displayName:names.artist,keys:['search-artist'],assetCount:2,recentCount:0,pinned:false,hidden:false,main:true,coverAssetIds:[]};
     mocks.native.mockImplementation(async(op:string)=>op==='albumTree'?{adopted:true,libraryId:'library',epoch:1,code:'',albums:[{id:'search-album',name:names.album,parentId:null,iconKey:null,colorKey:null,assetCount:2}]}:{configured:true,endpoint:'https://example.invalid'});
     mocks.api.mockImplementation((path:string)=>{
-      if(path==='/v1/library/classifications')return Promise.resolve({items:[{id:'b',name:names.folder,asset_count:2,parent_id:null}]});
+      if(path===CLASSIFICATIONS)return Promise.resolve({items:[{id:'b',name:names.folder,asset_count:2,parent_id:null}]});
       if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'시리즈',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false},{id:'character:c',sourceId:'c',seriesId:'s',kind:'character',parentId:'series:s',name:names.character,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'character:c',filter:'all',totalCount:2,sourceCount:2}]});
       if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
       if(path.startsWith('/v1/albums/assets?'))return Promise.resolve({items:b,hasMore:false,nextCursor:null});

@@ -17,9 +17,11 @@ from fastapi import HTTPException, Header, Query
 import asset_authority
 import asset_filters
 import asset_list_query
+import album_authority
 import authority
 import classification_authority
 import classification_snapshot
+import classification_subtree
 import collection_authority
 import conditional
 import mobile_collections
@@ -60,8 +62,16 @@ def decode_mobile_cursor(cursor: str, expected_sort: str) -> tuple[str, str]:
     return payload[1], payload[2]
 
 
+#: Advertised by `/v1/library/classifications?subtree_counts=1`. A client offers the
+#: subtree view and the extra sort orders only after a server declares this, so an older
+#: server is never sent a parameter it would silently ignore.
+LIST_VERSION = 2
+
+
 def list_mobile_classifications(
     authorization: str | None = Header(default=None),
+    # Opt-in, so a request without it is answered byte-for-byte as before.
+    subtree_counts: int = Query(default=0, ge=0, le=1),
 ):
     api.require_auth(authorization)
     with api.get_db() as db:
@@ -82,12 +92,26 @@ def list_mobile_classifications(
                 # that accepted commands have already superseded. The sidecar is read from
                 # this route's own historical display list, so its pre-cutover order holds.
                 payload = json.loads(snapshot["payload"]) if snapshot is not None else {}
-                return {
-                    "items": classification_authority.compatibility_tree(
-                        db, active,
-                        classification_snapshot.display_order(payload.get("entries", []))),
-                    "published_at": payload.get("published_at"),
-                }
+                items = classification_authority.compatibility_tree(
+                    db, active,
+                    classification_snapshot.display_order(payload.get("entries", [])))
+                response = {"items": items, "published_at": payload.get("published_at")}
+                if subtree_counts:
+                    # Assignment is single-valued here, so a subtree total is the plain sum of
+                    # the direct counts below it. `asset_count` itself stays the direct count.
+                    totals = classification_subtree.subtree_totals_single(
+                        {item["id"]: item["parent_id"] for item in items},
+                        {item["id"]: item["asset_count"] for item in items})
+                    for item in items:
+                        item["total_asset_count"] = totals[item["id"]]
+                    response["listVersion"] = LIST_VERSION
+                    # The identity a folder command presents (create and rename go through
+                    # `/v1/classifications/authority/commands`). Absent before cutover, when
+                    # no client may write structure.
+                    response["authority"] = {
+                        "libraryId": active["libraryId"], "epoch": active["epoch"],
+                        "contractVersion": active["contractVersion"]}
+                return response
 
             # Before cutover preserve the shipped snapshot projection exactly: the published
             # entries supply the tree and the replicated relations supply the counts.
@@ -106,10 +130,30 @@ def list_mobile_classifications(
                     """
                 ).fetchall()
             }
+            pairs = None
+            if subtree_counts:
+                # Legacy rows are multi-link, so distinct Assets are counted per subtree.
+                pairs = [
+                    (row["classification_id"], row["asset_id"])
+                    for row in db.execute(
+                        """
+                        SELECT relationship.classification_id, relationship.asset_id
+                        FROM asset_classifications AS relationship
+                        JOIN visible_assets AS asset ON asset.id = relationship.asset_id
+                        WHERE asset.committed = 1
+                        """
+                    ).fetchall()
+                ]
         finally:
             db.rollback()
 
     payload = json.loads(snapshot["payload"])
+    totals = None
+    if pairs is not None:
+        totals = classification_subtree.subtree_totals_distinct(
+            {entry["id"]: entry.get("parentId") for entry in payload.get("entries", [])
+             if isinstance(entry.get("id"), str) and entry["id"]},
+            pairs)
     items = []
     for sort_index, entry in enumerate(payload.get("entries", [])):
         classification_id = entry.get("id")
@@ -125,9 +169,14 @@ def list_mobile_classifications(
                 "color_key": entry.get("colorKey"),
                 "sort_index": sort_index,
                 "asset_count": counts.get(classification_id, 0),
+                **({"total_asset_count": totals.get(classification_id, 0)}
+                   if totals is not None else {}),
             }
         )
-    return {"items": items, "published_at": payload.get("published_at")}
+    response = {"items": items, "published_at": payload.get("published_at")}
+    if totals is not None:
+        response["listVersion"] = LIST_VERSION
+    return response
 
 
 def mobile_tree_membership(classification_id: str, asset_id: str, authorization: str | None = Header(default=None)):
@@ -207,6 +256,22 @@ def _classified_asset_sql(active):
         WHERE relationship.asset_id = asset.id)""", [])
 
 
+def _classification_parents(db, active):
+    """``{id: parent_id | None}`` for the tree the folder views are served from.
+
+    Read inside the caller's snapshot, from the same source the tree route uses: canonical
+    authority state once the domain is active, otherwise the published snapshot.
+    """
+    if active is not None:
+        return {row["classification_id"]: row["parent_id"] for row in db.execute(
+            "SELECT classification_id, parent_id FROM classification_authority_state"
+            " WHERE library_id = ? AND deleted = 0", [active["libraryId"]])}
+    snapshot = db.execute("SELECT payload FROM classification_snapshots WHERE singleton = 1").fetchone()
+    entries = json.loads(snapshot["payload"]).get("entries", []) if snapshot is not None else []
+    return {entry["id"]: entry.get("parentId") for entry in entries
+            if isinstance(entry.get("id"), str) and entry["id"]}
+
+
 def list_mobile_classification_assets(
     classification_id: list[str] | None = Query(default=None),
     unclassified: int = Query(default=0, ge=0, le=1),
@@ -218,7 +283,12 @@ def list_mobile_classification_assets(
     # Read raw text so pages can ignore even an invalid TOC-only offset.
     utc_offset_minutes: str = Query(default="0", alias="utcOffsetMinutes"),
     if_none_match: str | None = Header(default=None),
-    sort: Literal["newest", "oldest"] = "newest",
+    sort: Literal["newest", "oldest", "favorites", "random"] = "newest",
+    # Only meaningful with `sort=random`: the client-chosen shuffle. The same seed always
+    # yields the same order, so paging is stable; a new seed is a reshuffle.
+    seed: str | None = Query(default=None, pattern="^[0-9A-Za-z]{8,64}$"),
+    # 1 lists the folder and every folder below it. The direct listing stays the default.
+    subtree: int = Query(default=0, ge=0, le=1),
     limit: int = Query(
         default=MOBILE_LIBRARY_DEFAULT_LIMIT,
         ge=1,
@@ -246,6 +316,11 @@ def list_mobile_classification_assets(
     api.require_auth(authorization)
     if toc and cursor is not None:
         raise HTTPException(status_code=400, detail="toc and cursor are mutually exclusive")
+    ranked = sort in asset_list_query.RANKED_SORTS
+    if (sort == "random") != (seed is not None):
+        raise HTTPException(status_code=422, detail="seed is required with, and only valid with, sort=random")
+    if toc and ranked:
+        raise HTTPException(status_code=422, detail="toc supports only the newest and oldest sorts")
     applied_offset = 0
     if toc:
         try:
@@ -254,9 +329,16 @@ def list_mobile_classification_assets(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max, tag, artist)
     classifications = asset_filters.identifiers(classification_id, 8, 200)
+    if subtree and (unclassified or not classifications):
+        raise HTTPException(status_code=422, detail="subtree needs a classification_id and cannot be combined with unclassified")
     # Preserve the shipped cursor scope for absent/single classification requests.
     classification_id = classifications[0] if len(classifications) == 1 else list(classifications) if classifications else None
     scope_identity = {"classification_id": classification_id, "unclassified": 1} if unclassified else classification_id
+    if subtree:
+        # A subtree listing is a different list from the direct one, so its cursors and TOC
+        # bind the mode: a direct cursor cannot be resumed here, nor this one there.
+        scope_identity = {"classification_id": classification_id, "subtree": 1}
+    sort_slot = asset_list_query.sort_identity(sort, seed)
     classification_clause = ""
     after = None
     if cursor is not None:
@@ -268,7 +350,7 @@ def list_mobile_classification_assets(
         parsed = asset_filters.decode_cursor(cursor, "library-assets", filters,
                                              400, "Invalid cursor")
         if len(parsed) == 3:
-            if unclassified or len(classifications) > 1:
+            if unclassified or len(classifications) > 1 or subtree or ranked:
                 raise HTTPException(status_code=400, detail="Invalid cursor")
             # Pre-filter layout. It has no scope slots — the classification is the parameter
             # the request arrived with — so the sort slot is all there is to bind.
@@ -277,14 +359,20 @@ def list_mobile_classification_assets(
             cursor_sort_at, cursor_asset_id = asset_filters.require_strings(
                 parsed[1:], 400, "Invalid cursor")
         elif len(parsed) == 4:
-            # New cursors bind the classification as well as the sort and filters.
-            if parsed[0] != sort or parsed[1] != scope_identity:
+            # New cursors bind the classification as well as the sort and filters. A shuffle
+            # also binds its seed through the sort slot.
+            if parsed[0] != sort_slot or parsed[1] != scope_identity:
                 raise HTTPException(status_code=400, detail="Invalid cursor")
             cursor_sort_at, cursor_asset_id = asset_filters.require_strings(
                 parsed[2:], 400, "Invalid cursor")
         else:
             raise HTTPException(status_code=400, detail="Invalid cursor")
         after = (cursor_sort_at, cursor_asset_id)
+        if ranked:
+            try:
+                after = asset_list_query.ranked_after(sort, cursor_sort_at, cursor_asset_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor") from None
 
     # The scope bindings precede the shared technical filter bindings.
     filter_clause, filter_params = asset_filters.filter_clause(filters)
@@ -305,46 +393,72 @@ def list_mobile_classification_assets(
         # lifecycle predicate here: one rule means a trashed Asset cannot be hidden on
         # one route and visible on another. The projection fails closed, so an Asset
         # whose canonical row is missing is hidden rather than exposed.
-        for classification in classifications:
+        # The classifications a subtree request expands, parent-first; otherwise each stands alone.
+        expanded = [[classification] for classification in classifications]
+        if subtree:
+            parents = _classification_parents(db, active)
+            children = classification_subtree.children_of(parents)
+            expanded = [classification_subtree.subtree_ids(parents, classification, children)
+                        for classification in classifications]
+        for members in expanded:
             # Written as a membership test over the classification's own index rather
             # than a correlated EXISTS: the planner turned the latter into a walk of the
             # whole library in sort order with one probe per Asset (about 30 ms for
             # 9,200 Assets), while this form reads the classification's Asset ids from
             # the covering index and sorts only those (about 1-2 ms at any size).
+            # A direct request names one id; a subtree request names the folder and its
+            # descendants, passed as one JSON array so the statement shape never grows.
+            single = len(members) == 1
             if active is not None:
                 # Single-valued by contract, so this is an exact equality against the
                 # authority's canonical assignment rather than a legacy relation test.
-                classification_clause += """
+                classification_clause += f"""
                     AND asset.id IN (
                         SELECT assignment.asset_id
                         FROM classification_authority_assignments AS assignment
                         WHERE assignment.library_id = ?
-                          AND assignment.classification_id = ?
+                          AND assignment.classification_id {"= ?" if single else "IN (SELECT value FROM json_each(?))"}
                     )
                 """
                 clause_params.append(active["libraryId"])
-                clause_params.append(classification)
             else:
-                classification_clause += """
+                classification_clause += f"""
                     AND asset.id IN (
                         SELECT relationship.asset_id
                         FROM asset_classifications AS relationship
-                        WHERE relationship.classification_id = ?
+                        WHERE relationship.classification_id {"= ?" if single else "IN (SELECT value FROM json_each(?))"}
                     )
                 """
-                clause_params.append(classification)
+            clause_params.append(members[0] if single else json.dumps(members))
         if unclassified:
             classified_sql, classified_params = api._classified_asset_sql(active)
             classification_clause += f" AND NOT {classified_sql}"
             clause_params.extend(classified_params)
-        query = asset_list_query.AssetListQuery(
-            "visible_assets AS asset",
-            f"asset.committed = 1 {classification_clause} {filter_clause}",
-            clause_params + filter_params, sort, prefer_id_lookup=filters.artist is not None)
+        where_clause = f"asset.committed = 1 {classification_clause} {filter_clause}"
+        if ranked:
+            liked_sql, liked_params = "0", []
+            if sort == "favorites":
+                # Liked Assets are the members of the Likes album. Without an active album
+                # authority nothing is liked, so the order degrades to plain newest.
+                albums = authority.active_domain(db, album_authority.DOMAIN)
+                likes_id = (album_authority.likes_album_id(db, albums["libraryId"], require_unique=False)
+                            if albums is not None else None)
+                if likes_id is not None:
+                    liked_sql = """EXISTS (SELECT 1 FROM album_authority_members AS liked
+                        WHERE liked.library_id = ? AND liked.album_id = ?
+                          AND liked.asset_id = asset.id AND liked.desired_state = 1)"""
+                    liked_params = [albums["libraryId"], likes_id]
+            query = asset_list_query.RankedAssetListQuery(
+                "visible_assets AS asset", where_clause, clause_params + filter_params, sort,
+                seed=seed, liked_sql=liked_sql, liked_params=liked_params)
+        else:
+            query = asset_list_query.AssetListQuery(
+                "visible_assets AS asset", where_clause, clause_params + filter_params, sort,
+                prefer_id_lookup=filters.artist is not None)
         if toc:
             payload = query.toc(db, generation, lambda previous: asset_filters.encode_cursor(
                 "library-assets", filters, [sort, scope_identity, *previous]), applied_offset)
-            return asset_filters.search_response(payload, filters, if_none_match, scope_identity if unclassified else list(classifications))
+            return asset_filters.search_response(payload, filters, if_none_match, scope_identity if unclassified or subtree else list(classifications))
         rows = query.page(db, limit + 1, after)
         has_more = len(rows) > limit
         page_rows = rows[:limit]
@@ -393,16 +507,21 @@ def list_mobile_classification_assets(
     next_cursor = None
     if has_more and page_rows:
         last = page_rows[-1]
+        key = (asset_list_query.RankedAssetListQuery.cursor_key(sort, last) if ranked
+               else last["mobile_sort_at"])
         next_cursor = asset_filters.encode_cursor(
-            "library-assets", filters,
-            [sort, scope_identity, last["mobile_sort_at"], last["id"]])
+            "library-assets", filters, [sort_slot, scope_identity, key, last["id"]])
     # `listGeneration` is additive: a client binds the page to it in one round trip instead
     # of bracketing the fetch with two `/v1/library/list-generation` reads.
     return conditional.json_response(
         {"items": items, "next_cursor": next_cursor, "has_more": has_more,
          "filterVersion": asset_filters.FILTER_VERSION, "searchVersion": 1, "listGeneration": generation,
          "searchFilters": {"tag": list(filters.tags), "artist": filters.artist, "classification_id": list(classifications),
-                           **({"unclassified": 1} if unclassified else {})}},
+                           **({"unclassified": 1} if unclassified else {}),
+                           # Echoed so a client can tell a server that applied these
+                           # parameters from one that ignored them.
+                           **({"subtree": 1} if subtree else {}),
+                           **({"sort": sort} if ranked else {})}},
         if_none_match)
 
 

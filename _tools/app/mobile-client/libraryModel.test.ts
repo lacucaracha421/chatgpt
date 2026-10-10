@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import type {CharacterIndex} from './characterModel';
-import {mergeLibraryEntries,ancestorsOf,searchLibraryEntries,entryView} from './libraryModel';
+import {mergeLibraryEntries,ancestorsOf,searchLibraryEntries,entryView,folderCardCount} from './libraryModel';
 const revision='a'.repeat(64);
 const characterNode=(kind:'series'|'group'|'character',sourceId:string,name:string,parentId:string|null)=>({id:`${kind}:${sourceId}`,kind,sourceId,seriesId:'s',parentId,name,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false});
 const characters:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,publishedAt:'2026',
@@ -39,4 +39,15 @@ it('shows a character once instead of also listing its same-named folder inside 
  expect(searchLibraryEntries(entries,'character').map(e=>e.id).sort()).toEqual(['character:c','elsewhere']);
  // A sub-folder of the hidden folder stays reachable under the character entry.
  expect(entries.find(e=>e.id==='folder-c-sub')?.parent_id).toBe('character:c');
+});
+
+it('shows the subtree total on a folder card, a series own character count, and the direct count without subtree counts',()=>{
+ const entries=mergeLibraryEntries([{id:'games',name:'게임',parent_id:null,asset_count:10,total_asset_count:40},{id:'s',name:'Series',parent_id:'games',asset_count:99,total_asset_count:77},{id:'old',name:'옛',parent_id:null,asset_count:3}],characters);
+ const count=(id:string)=>folderCardCount(entries.find(entry=>entry.id===id)!);
+ expect(count('games')).toBe(40);
+ // The merged series carries the character index's count; the server's subtree total does not override it.
+ expect(count('s')).toBe(2);
+ expect(count('old')).toBe(3);
+ // The direct count itself is never repurposed.
+ expect(entries.find(entry=>entry.id==='games')!.asset_count).toBe(10);
 });

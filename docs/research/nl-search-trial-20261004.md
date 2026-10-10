@@ -44,3 +44,26 @@ The trial ran on the main PC (RTX 5070 Ti) outside the repo. Scripts, vectors, c
 
 ## Licences
 SigLIP2, Qwen3-VL and Qwen3-VL-Embedding are Apache-2.0, and opus-mt-ko-en is Apache-2.0. Not used: JoyCaption (Llama licence, English only) and `opus-mt-tc-big-ko-en` (CC-BY-4.0; broken output in this transformers version).
+
+## Tablet option A — server/tablet part (2026-10-10)
+Steps 3 and 4 of `NL-SEARCH-001` are built; the PC caption lane (steps 1a and 2) is not, so a fresh server answers "not ready" and the tablet shows a quiet "아직 준비 중".
+
+**Client route (tablet, read-only):** `GET /v1/library/search/description?q=<text ≤200>&limit=<1–200, default 200>&force=<bool>` with a client token. It is in the Android allowlist (`NetworkPolicy.java`, GET only). Response: `{version:1, ready, query, force, gated, coverage, route, listGeneration, items:[mobile asset projection]}`. `route` is `tags` (character name only, no model), `captions` (Hangul-pair BM25), `mixed` (name tags restrict the BM25 result) or `mixed_fallback` (the description found nothing, so the name's tags answer). `ready:false` means no caption is published for any visible image yet (and the name route had no answer). `gated:true` with no items means the 60 % vocabulary gate turned the text away; `force=true` ranks anyway. Videos, uncommitted and non-visible Assets are dropped before vocabulary, statistics and ranking.
+
+**Publisher route the PC lane must implement:** `PUT /v1/library/captions` with a publisher token, JSON, at most 8 MiB per request (send about 1,000 captions per batch; 9k Korean captions are 3–8 MB in total).
+
+```
+{"version":1,
+ "captions":[{"assetId":"<id>","text":"<Korean caption ≤4000 chars>"}  |  {"assetId":"<id>","text":null}],
+ "names":[{"targetId":"<id>","displayName":"레제/Reze","seriesName":"체인소맨"|null,"tags":["reze_(chainsaw_man)"]}  |  {"targetId":"<id>","deleted":true}]}
+```
+- Both lists are optional, at most 10,000 rows each, ids match `[A-Za-z0-9_-]{1,128}` and are unique within a request. A caption with `text:null` and a `deleted` name row remove the stored row.
+- Rows are upserts keyed by `assetId` / `targetId`, compared by a sha256 digest of the text (names: canonical JSON with sorted tags). An unchanged row writes nothing and the response `changed` is false; a batch with any change increments `revision` once. Rows missing from a request are kept, so the PC sends `deleted` rows for removed targets.
+- `names` come from `character_targets`: `displayName` is `display_name` (aliases joined by `/`), `seriesName` the series folder name (`classification_entries.name` of `series_classification_id`), `tags` the tagger tags of `character_target_tagger_tags`. The tags must be ids the auto-tag lane has published; matching is on whole whitespace tokens, and the matched series words are absorbed so "체인소맨 레제" stays a name query.
+- Captions are the NFC Korean texts of `captions.jsonl` (the same text the PC gate vocabulary reads). The server tokenizes with the same units as `runtime_support.text_units`, so the gate agrees with the PC.
+- Response: `{version:1, revision, changed, captions:<rows sent>, names:<rows sent>}`; 422 `invalidCaptionUpload` for any invalid row (nothing is written), 413 `captionUploadTooLarge`.
+- Storage is three tables created at server startup next to the auto-tag tables: `library_caption_state`, `library_captions`, `library_caption_names`. Publication never touches media, classification or the auto-tag tables.
+
+**Server measurements and limits:** the ranking reads every visible caption per request and caches per-caption units by digest; 9,000 synthetic captions answered in about 0.15 s warm and 0.65 s cold on the laptop. Tag-route results carry no score, so they are ordered by id (the PC orders by tag score); the tablet has no tag scores.
+
+**Tablet UI:** the 찾기 sheet gets the "이미지 내용" row "‘…’ 장면 찾기" with a strip of the top 7 images (request `limit=7`, after a 0.4 s typing pause on the committed text, so never mid-composition); the old strip stays until the next is ready and a masked rating never requests media. Enter or a tap opens the "내용 검색" result state in 에셋 (`View.description`, route `limit=200`), with the "이미지 내용" badge, the order note, 검색 해제 (also Android Back), and for a gated text "그래도 가장 비슷한 그림 보기". While the server says not ready the row reads "아직 준비 중", sorts last and does not take Enter.

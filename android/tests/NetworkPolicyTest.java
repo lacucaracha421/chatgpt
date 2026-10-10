@@ -28,6 +28,10 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.api("/v1/library/search/suggestions?text=%E3%84%B1&limit=20","GET"));
  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/search/suggestions",method));
  reject(()->NetworkPolicy.api("/v1/library/search/suggestions/extra","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/search/description?q=%EB%88%88&force=true&limit=200","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/search/description",method));
+ reject(()->NetworkPolicy.api("/v1/library/search/description/extra","GET"));
+ for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/library/captions",method));
  reject(()->NetworkPolicy.api("/v1/library/auto-tags","PUT"));
  pass(()->NetworkPolicy.api("/v1/library/assets?limit=100&cursor=abc","GET"));pass(()->NetworkPolicy.api("/v1/library/assets/id-123/media-ticket","POST"));pass(()->NetworkPolicy.api("/v1/captures/id_1/download","GET"));
  for(String p:new String[]{"https://evil.test/v1/library/assets","//evil.test/v1/library/assets","/v1/library/assets/../prepare","/v1/library/assets#x","/v1/captures","/v1/library/metadata-backup","/v1/classifications"})reject(()->NetworkPolicy.api(p,"GET"));

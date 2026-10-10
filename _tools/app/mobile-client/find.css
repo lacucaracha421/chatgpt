@@ -15,6 +15,12 @@
 .tablet-find__option:active { background: var(--color-surface-pressed); }
 .tablet-find__option:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .tablet-find__more { width: 100%; margin-top: var(--space-2); }
+/* 이미지 내용 row: the squares sit under the label like the PC palette's strip, and keep their pictures between answers. */
+.tablet-find__strip-area { display: flex; min-width: 0; margin-top: var(--space-1); }
+.tablet-find__strip { display: flex; gap: var(--space-1); min-width: 0; overflow: hidden; }
+.tablet-find__thumb { position: relative; display: block; flex: none; width: 64px; height: 64px; overflow: hidden; border-radius: var(--radius-tile); }
+.tablet-find__thumb img, .tablet-find__thumb .privacy-mask { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tablet-find__strip-status { color: var(--color-muted); font-size: var(--type-meta); }
 .tablet-find__empty { padding: var(--space-8) 0; }
 .tablet-find__skeleton { display: grid; gap: var(--space-2); animation: tablet-find-skeleton 300ms step-end; }
 .tablet-find__skeleton .ui-skeleton { height: var(--row-height-2); }

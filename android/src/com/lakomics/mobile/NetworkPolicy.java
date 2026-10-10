@@ -36,6 +36,8 @@ final class NetworkPolicy {
   boolean get=p.equals("/v1/library/list-generation") || p.equals("/v1/library/classifications") || p.equals("/v1/library/assets") || p.equals("/v1/library/revisit") || p.equals("/v1/library/revisit/date") || p.matches("/v1/library/revisit/creator/[A-Za-z0-9_%.-]+/assets") || p.equals("/v1/captures/pending") || p.matches("/v1/captures/[A-Za-z0-9_-]+/download");
   get=get || p.equals("/v1/library/characters") || p.equals("/v1/library/characters/assets") || p.equals("/v1/library/characters/status");
   get=get || p.equals("/v1/library/search/suggestions");
+  // NL-SEARCH-001 option A: read-only content search. The caption PUT (`/v1/library/captions`) is publisher-only and stays unreachable.
+  get=get || p.equals("/v1/library/search/description");
   // SAF grant checks: exactly one classification and one Asset, GET only.
   get=get || p.matches("/v1/library/classifications/[A-Za-z0-9_-]{1,128}/contains/[A-Za-z0-9_-]{1,128}");
   // HOME-DASH-001: read-only Home library counts.
@@ -64,11 +66,10 @@ final class NetworkPolicy {
   get=get || p.equals("/v1/albums/assets") || p.equals("/v1/albums/likes");
   // Classification authority reads. Exactly the two read routes.
   get=get || p.equals("/v1/classifications/authority/baseline") || p.equals("/v1/classifications/authority/changes");
-  // The Classification assignment command: one desired-state write per Asset, and nothing
-  // else. The authority's structural commands travel on the *same* server route, but
-  // `ClassificationAssignmentOutbox` constructs `setAssetClassification` internally and the
-  // server requires the publisher role for every other command, so Android cannot reach a
-  // structural mutation through this path. Activate stays absent from every allowlist.
+  // Classification authority commands: per-Asset assignment plus, since 2026-10-10, folder
+  // create and rename from the tablet. The server still requires the publisher role for
+  // move, delete and appearance, so those structural mutations stay PC-only. Activate stays
+  // absent from every allowlist.
   boolean classificationPut=p.equals("/v1/classifications/authority/commands");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   post=post || p.equals("/v1/providers/apply") || p.equals("/v1/providers/artwork") || p.equals("/v1/providers/stashdb/portrait");

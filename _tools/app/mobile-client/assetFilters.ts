@@ -11,9 +11,20 @@
  */
 import type {AssetFiltersValue, AssetMediaFilter, AssetAspectFilter, AssetDurationFilter} from './types';
 
-/** Sort values supported by the ordinary tablet library endpoint. */
-export type AssetSort = 'newest' | 'oldest';
-export type AssetQueryFilters = AssetFiltersValue & {sort?: AssetSort};
+/**
+ * Sort values of the ordinary tablet library endpoint. `newest` and `oldest` are the
+ * original pair; `favorites` (liked first, then newest) and `random` (a seeded shuffle) are
+ * offered only by a server that declares `listVersion` 2 (see `LIST_VERSION_RANKED`).
+ */
+export type AssetSort = 'newest' | 'oldest' | 'favorites' | 'random';
+/**
+ * The query-shaping extras that ride on the filter object beside the media/aspect/duration
+ * contract: the sort, the shuffle's seed, and the folder subtree mode. They are part of the
+ * request, so they are part of `filterKey` and therefore of every cache and cursor identity.
+ */
+export type AssetQueryFilters = AssetFiltersValue & {sort?: AssetSort; seed?: string; subtree?: boolean};
+/** The classification list version that serves the extra sorts, `subtree` and subtree counts. */
+export const LIST_VERSION_RANKED = 2;
 
 export const EMPTY_FILTERS: AssetFiltersValue = {media:'all', aspect:'all', duration:'all'};
 
@@ -45,11 +56,51 @@ export const ASPECT_LABELS: Record<AssetAspectFilter, string> = {all:'전체', s
 export const DURATION_LABELS: Record<AssetDurationFilter, string> = {
   all:'전체', under_30s:'30초 미만', '30s_1m':'30초–1분', '1m_5m':'1–5분', over_5m:'5분 이상',
 };
-export const SORT_LABELS: Record<AssetSort, string> = {newest:'최신순',oldest:'오래된순'};
+export const SORT_LABELS: Record<AssetSort, string> = {newest:'최신순',oldest:'오래된순',favorites:'좋아요순',random:'랜덤'};
 export const ASSET_SORTS: readonly AssetSort[] = ['newest','oldest'];
+/** Every sort, for a server that declares `LIST_VERSION_RANKED`. */
+export const RANKED_ASSET_SORTS: readonly AssetSort[] = ['newest','oldest','favorites','random'];
 
+const SEED_PATTERN = /^[0-9A-Za-z]{8,64}$/;
+/** A fresh shuffle seed: 32 hex characters, the shape the server accepts. */
+export function newSeed(): string {
+  return crypto.randomUUID().replace(/-/g, '');
+}
+/**
+ * `random` without a usable seed cannot be requested, so it reads as `newest`: a filter object
+ * can never describe a shuffle the wire would refuse.
+ */
 export function sortOf(filters: AssetFiltersValue): AssetSort {
-  return (filters as AssetQueryFilters).sort === 'oldest' ? 'oldest' : 'newest';
+  const {sort, seed} = filters as AssetQueryFilters;
+  if (sort === 'oldest' || sort === 'favorites') return sort;
+  return sort === 'random' && typeof seed === 'string' && SEED_PATTERN.test(seed) ? 'random' : 'newest';
+}
+export function seedOf(filters: AssetFiltersValue): string | undefined {
+  return sortOf(filters) === 'random' ? (filters as AssetQueryFilters).seed : undefined;
+}
+export function subtreeOf(filters: AssetFiltersValue): boolean {
+  return (filters as AssetQueryFilters).subtree === true;
+}
+/** Favorites and random have no date order, so no month index and no date headings. */
+export function isRankedSort(sort: AssetSort): boolean {
+  return sort === 'favorites' || sort === 'random';
+}
+/** The same filters under another sort; `random` always carries a seed, every other sort none. */
+export function withSort(filters: AssetFiltersValue, sort: AssetSort, seed: string = newSeed()): AssetFiltersValue {
+  const {seed: _seed, sort: _sort, ...rest} = filters as AssetQueryFilters;
+  void _seed; void _sort;
+  return {...rest, sort, ...(sort === 'random' ? {seed} : {})} as AssetFiltersValue;
+}
+/** The same filters with the folder subtree mode on or off (absent means direct). */
+export function withSubtree(filters: AssetFiltersValue, subtree: boolean): AssetFiltersValue {
+  const {subtree: _subtree, ...rest} = filters as AssetQueryFilters;
+  void _subtree;
+  return (subtree ? {...rest, subtree: true} : rest) as AssetFiltersValue;
+}
+/** Only the sort, seed and subtree extras of a filter object, for carrying across a reset. */
+export function queryExtras(filters: AssetFiltersValue): Partial<AssetQueryFilters> {
+  const {sort, seed, subtree} = filters as AssetQueryFilters;
+  return {...(sort ? {sort} : {}), ...(seed ? {seed} : {}), ...(subtree ? {subtree} : {})};
 }
 
 /** Inclusive/exclusive millisecond bounds. Absent means unbounded, never `0`. */
@@ -89,7 +140,10 @@ export function filterParams(filters: AssetFiltersValue) {
   if (bounds.min !== undefined) params.set('duration_ms_min', String(bounds.min));
   if (bounds.max !== undefined) params.set('duration_ms_max', String(bounds.max));
   // newest is the endpoint default; only the non-default value needs a wire parameter.
-  if ((filters as AssetQueryFilters).sort === 'oldest') params.set('sort', 'oldest');
+  const sort = sortOf(filters);
+  if (sort !== 'newest') params.set('sort', sort);
+  if (sort === 'random') params.set('seed', seedOf(filters)!);
+  if (subtreeOf(filters)) params.set('subtree', '1');
   return params;
 }
 /** Append the active filters to an already-built path. No filters leaves the path untouched. */
@@ -97,4 +151,19 @@ export function withFilters(path: string, filters: AssetFiltersValue) {
   const params = filterParams(filters);
   if (![...params].length) return path;
   return `${path}${path.includes('?') ? '&' : '?'}${params}`;
+}
+
+/**
+ * Refuse a page that was not answered under the sort and scope it was asked for.
+ *
+ * A server that predates the extra sorts or the subtree mode ignores (or rejects) the
+ * parameters, and presenting its direct, date-ordered page as a shuffle or a subtree would be
+ * a wrong list under a right-looking title. `searchFilters` echoes what the server applied.
+ */
+export function assertAppliedQuery(reply: unknown, filters: AssetFiltersValue): void {
+  const sort = sortOf(filters), subtree = subtreeOf(filters);
+  if (!subtree && (sort === 'newest' || sort === 'oldest')) return;
+  const applied = (reply as {searchFilters?: {sort?: unknown; subtree?: unknown}} | null | undefined)?.searchFilters;
+  if (subtree && applied?.subtree !== 1) throw new Error('이 서버는 하위 폴더까지 보기를 지원하지 않습니다. 서버를 업데이트해 주세요.');
+  if (isRankedSort(sort) && applied?.sort !== sort) throw new Error('이 서버는 이 정렬을 지원하지 않습니다. 서버를 업데이트해 주세요.');
 }

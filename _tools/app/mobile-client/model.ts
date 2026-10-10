@@ -3,6 +3,7 @@ import {displayDate} from '../src/shared/displayDate';
 import type {Asset, AssetFiltersValue, Page, PageWire, View} from './types';
 import {EMPTY_FILTERS, filterKey, filterVersionOf, withFilters} from './assetFilters';
 import {formatDuration} from '../src/assets/assetMetadata';
+import {descriptionPath} from './descriptionSearch';
 export const PAGE_SIZE = 40;
 /** Thumbnail size: 0 (크게) … 2 (촘촘하게) in half steps; 1 (균형) is the default. */
 export const DENSITIES = ['크게', '조금 크게', '균형', '조금 촘촘하게', '촘촘하게'] as const;
@@ -21,13 +22,15 @@ export function rowHeight(density: number, width: number) { return Math.min(290 
  * restored position or a cached page from one filter set be reused for another.
  */
 export function viewKey(view: View, filters: AssetFiltersValue = EMPTY_FILTERS) {
-  const base = `${view.tab}:${view.root?'root':''}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`;
+  const base = `${view.tab}:${view.root?'root':''}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}${view.description?`:description:${view.description.force?'force':'gated'}:${view.description.query}`:''}`;
   const unsorted = view.unclassified ? `${base}:unclassified` : base;
   const scope = view.album ? `${base}:album:${JSON.stringify(view.album)}` : unsorted;
   const key = [filterKey(filters),assetSearchSelectionKey(view.search)].filter(Boolean).join(':');
   return key ? `${scope}:${key}` : scope;
 }
 export function pagePath(view: View, cursor: string | null, filters: AssetFiltersValue = EMPTY_FILTERS, limit = PAGE_SIZE) {
+  // A 내용 검색 view is one ranked list (no cursor, no filters): the server answers the top 200 at once.
+  if (view.description) return descriptionPath(view.description);
   const params = assetSearchParams(new URLSearchParams({limit: String(limit)}),view.search,!view.album);
   if (cursor) params.set('cursor', cursor);
   if (view.unclassified) params.set('unclassified', '1');

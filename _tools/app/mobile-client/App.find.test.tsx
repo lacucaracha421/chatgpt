@@ -63,7 +63,8 @@ it('keeps the existing Assets search in its top-bar slot',async()=>{
 });
 
 it.each(['홈','에셋'])('find opens the %s tab',async(name)=>{
-  await start(name);fireEvent.click(await screen.findByRole('option'));
+  await start(name);// A typed word also offers the 이미지 내용 row; the screen row is the one named like the word.
+  fireEvent.click((await screen.findAllByRole('option')).find(option=>option.textContent===name)!);
   await waitFor(()=>expect(nav(name).getAttribute('aria-current')).toBe('page'));
   expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull();
 });

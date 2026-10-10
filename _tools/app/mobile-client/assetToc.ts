@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, type Dispatch, type SetStateAction} from
 import {api, errorText} from './transport';
 import {normalizePage, pagePath} from './model';
 import {albumPage, type AlbumAssetPage} from './albumModel';
-import {ASSET_FILTER_VERSION, hasActiveFilters, sortOf} from './assetFilters';
+import {ASSET_FILTER_VERSION, assertAppliedQuery, hasActiveFilters, isRankedSort, sortOf} from './assetFilters';
 import type {Asset, AssetFiltersValue, Page, View} from './types';
 
 export type AssetTocBucket = {key:string; startIndex:number; count:number; startCursor:string|null};
@@ -16,7 +16,7 @@ export type SparseGallerySource = AssetRangeList & {
 };
 
 export function supportsAssetToc(view:View) {
-  return view.tab==='library' && !view.root && !view.characters && !view.revisit;
+  return view.tab==='library' && !view.root && !view.characters && !view.revisit && !view.description;
 }
 export function assetTocPath(view:View, filters:AssetFiltersValue, offset=-new Date().getTimezoneOffset()) {
   const [path, query]=pagePath(view,null,filters).split('?');
@@ -40,6 +40,8 @@ export function validAssetToc(value:unknown):value is AssetToc {
   return end===toc.totalCount;
 }
 export async function readAssetToc(view:View, filters:AssetFiltersValue, signal:AbortSignal):Promise<AssetToc|null> {
+  // A favorites or shuffled list has no date order, so a month index would describe positions it does not have.
+  if(isRankedSort(sortOf(filters)))return null;
   try {
     const value=await api<unknown>(assetTocPath(view,filters),signal);
     return !signal.aborted&&validAssetToc(value)&&value.sort===sortOf(filters)?value:null;
@@ -49,6 +51,7 @@ export async function readTocPage(view:View, filters:AssetFiltersValue, cursor:s
   const reply=await api<AlbumAssetPage&Page&{listGeneration?:string}>(pagePath(view,cursor,filters),signal);
   const page=view.album?albumPage(reply):normalizePage(reply);
   if(hasActiveFilters(filters)&&page.filter_version!==ASSET_FILTER_VERSION)throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
+  if(!view.album)assertAppliedQuery(reply,filters);
   return {...page,list_generation:reply.listGeneration};
 }
 export class AssetListChanged extends Error {}

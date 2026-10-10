@@ -1,7 +1,7 @@
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {ChevronDownIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
-import {ASPECT_LABELS,DURATION_LABELS,MEDIA_LABELS,EMPTY_FILTERS,hasActiveFilters,sortOf} from './assetFilters';
+import {ASPECT_LABELS,DURATION_LABELS,MEDIA_LABELS,EMPTY_FILTERS,hasActiveFilters,queryExtras} from './assetFilters';
 import type {AssetFiltersValue} from './types';
 export type FilterGroup=keyof AssetFiltersValue;
 const groups={media:{label:'종류',labels:MEDIA_LABELS},aspect:{label:'비율',labels:ASPECT_LABELS},duration:{label:'길이',labels:DURATION_LABELS}};
@@ -15,7 +15,8 @@ export function FilterChips({value,applied=value,onChange,open,onOpen,media=true
   // Length only narrows videos, so it is unavailable while the kind is limited to images.
   const imagesOnly=value.media==='images';
   const choose=(group:FilterGroup,key:string)=>onChange(group==='media'&&key==='images'?{...value,media:'images',duration:'all'}:{...value,[group]:key});
-  const clear=()=>onChange({...EMPTY_FILTERS,sort:sortOf(value)} as AssetFiltersValue);
+  // A reset clears the filters, not the sort, the shuffle's seed or the folder's subtree mode.
+  const clear=()=>onChange({...EMPTY_FILTERS,...queryExtras(value)} as AssetFiltersValue);
   const visibleGroups=(Object.keys(groups) as FilterGroup[]).filter(key=>enabled[key]&&!(key==='duration'&&imagesOnly));
   return <>{row&&<div ref={stripWheel} className={`filter-chips${variant==='toolbar'?' filter-chips--toolbar':''}`} role="group" aria-label="자산 필터">{visibleGroups.map(key=>{
     const group=groups[key],labels:Record<string,string>=group.labels;
