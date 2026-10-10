@@ -31,6 +31,11 @@ reference management and full character metadata import remain PC-owned. The sep
 not a general character authority switch. ADR-0033 still describes current authority.
 The future transition is proposed in [ADR-0036](../adr/0036-staged-server-authority.md).
 
+**Decision (user, 2026-10-10):** character data stays PC-owned. Structure, references and
+inference remain on the PC; the server keeps this read projection and the tablet exclusion
+and review intent logs. No server character authority or tablet character assignment is
+planned; reopen only on a new request.
+
 ## Identity and gallery semantics
 
 | Field or scope | Meaning |
