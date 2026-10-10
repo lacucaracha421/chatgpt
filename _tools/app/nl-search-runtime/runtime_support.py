@@ -50,16 +50,37 @@ def text_units(text):
     return units
 
 
-def caption_vocabulary(path):
-    """Distinct units of every caption text in a captions.jsonl file, or None when it is absent."""
+def read_captions(path):
+    """Caption records of a captions.jsonl file as {asset id: record}, or None when it is absent.
+
+    One JSON object per line with `id` and `text`. A later line replaces an earlier one with the same
+    id. An interrupted final line (a crash during an append) is ignored; damage anywhere else raises.
+    """
     path = Path(path)
     if not path.is_file():
         return None
+    lines = [line for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+    records = {}
+    for number, line in enumerate(lines):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            if number == len(lines) - 1:
+                break
+            raise
+        if isinstance(record, dict) and record.get('id') and isinstance(record.get('text'), str):
+            records[str(record['id'])] = record
+    return records
+
+
+def caption_vocabulary(path):
+    """Distinct units of every caption text in a captions.jsonl file, or None when it is absent."""
+    records = read_captions(path)
+    if records is None:
+        return None
     vocab = set()
-    with path.open(encoding='utf-8') as stream:
-        for line in stream:
-            if line.strip():
-                vocab.update(text_units(json.loads(line).get('text') or ''))
+    for record in records.values():
+        vocab.update(text_units(record['text']))
     return vocab
 
 
@@ -178,3 +199,46 @@ class QwenEncoder:
             output = self.model.process(items, normalize=True)
         self.torch.cuda.synchronize()
         return normalize(output.float().cpu().numpy())
+
+
+CAPTION_MODEL = 'Qwen/Qwen3-VL-8B-Instruct'
+CAPTION_PROMPT = '''이미지를 한국어로 설명하세요. 보이는 사실만 써 주세요. 인물이나 대상,
+외모와 머리색, 옷, 행동, 표정, 배경과 장소, 이미지 종류(일러스트, 만화 페이지,
+실사 사진, 게임 스크린샷, 밈 등)를 포함해 2~3문장으로 쓰세요.
+마지막 줄에는 "키워드: " 다음에 한국어 키워드 10~20개를 쉼표로 나열하세요.
+이름이나 보이지 않는 내용을 추측하지 마세요.'''
+CAPTION_MAX_PIXELS = 768 * 768
+CAPTION_MAX_NEW_TOKENS = 200
+
+
+class QwenCaptioner:
+    """Qwen3-VL-8B-Instruct (NF4) Korean captions, left-padded batched greedy generation."""
+
+    def __init__(self):
+        self.torch = torch_setup(gpu=True)
+        import bitsandbytes  # Fail if missing; never install dependencies.
+        from transformers import AutoProcessor, BitsAndBytesConfig, Qwen3VLForConditionalGeneration
+        snapshot = require_snapshot(CAPTION_MODEL)
+        config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4',
+                    bnb_4bit_compute_dtype=self.torch.bfloat16, bnb_4bit_use_double_quant=True)
+        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+            str(snapshot), local_files_only=True, dtype=self.torch.bfloat16,
+            device_map={'': 0}, attn_implementation='sdpa', quantization_config=config).eval()
+        self.processor = AutoProcessor.from_pretrained(str(snapshot), local_files_only=True,
+                    min_pixels=4 * 32 * 32, max_pixels=CAPTION_MAX_PIXELS)
+        self.processor.tokenizer.padding_side = 'left'
+
+    def caption(self, images):
+        """One decoded string per image (possibly empty)."""
+        torch = self.torch
+        conversations = [[{'role': 'user', 'content': [
+            {'type': 'image', 'image': image, 'max_pixels': CAPTION_MAX_PIXELS},
+            {'type': 'text', 'text': CAPTION_PROMPT}]}] for image in images]
+        inputs = self.processor.apply_chat_template(conversations, tokenize=True, add_generation_prompt=True,
+                    return_dict=True, return_tensors='pt', padding=True).to('cuda')
+        with torch.inference_mode():
+            outputs = self.model.generate(**inputs, do_sample=False, max_new_tokens=CAPTION_MAX_NEW_TOKENS)
+        torch.cuda.synchronize()
+        texts = self.processor.batch_decode(outputs[:, inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+        del outputs, inputs
+        return [text.strip() for text in texts]

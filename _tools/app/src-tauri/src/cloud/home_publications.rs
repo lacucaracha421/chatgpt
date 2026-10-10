@@ -18,6 +18,7 @@ impl HomeTransport for CloudClient {
                 "/v1/home/upcoming" => 8 * 1024 * 1024,
                 "/v1/library/artists" => 16 * 1024 * 1024,
                 "/v1/library/auto-tags" => 1024 * 1024,
+                "/v1/library/captions" => 8 * 1024 * 1024,
                 "/v1/home/av-pick" => 64 * 1024,
                 _ => return Err(LibraryError::InvalidCloudResponse),
             };

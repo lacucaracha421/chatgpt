@@ -363,5 +363,184 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotIn('README.md', download.call_args.kwargs['allow_patterns'])
 
 
+
+class FakeCaptioner:
+    """Stands in for the Qwen model: one scripted text per image; no GPU, no model files."""
+    oom_errors = (MemoryError,)
+
+    def __init__(self, fail_batches_over=None, empty=()):
+        self.batches, self.fail_batches_over, self.empty = [], fail_batches_over, set(empty)
+
+    def caption(self, images):
+        if self.fail_batches_over is not None and len(images) > self.fail_batches_over:
+            raise MemoryError('simulated out of memory')
+        self.batches.append(list(images))
+        return ['' if image in self.empty else 'Caption of ' + image + '\n\n키워드: 하나' for image in images]
+
+
+class CaptionTests(unittest.TestCase):
+    def setUp(self):
+        import nl_caption
+        import nl_index
+        self.caption, self.index = nl_caption, nl_index
+        self.root = HERE / ('fixture-' + uuid.uuid4().hex)
+        self.root.mkdir()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.db = self.root / 'library.sqlite'
+        with closing(sqlite3.connect(self.db)) as c, c:
+            c.executescript('''
+                CREATE TABLE assets(id TEXT PRIMARY KEY, content_hash TEXT,
+                  relative_path TEXT, status TEXT, media_kind TEXT);
+                INSERT INTO assets VALUES ('a','h-a','a.jpg','normal','image'),
+                  ('b','h-b','b.gif','normal','gif'), ('c','h-c','c.jpg','normal','image'),
+                  ('d','h-a','d.jpg','normal','image'), ('e','h-e','e.jpg','normal','image'),
+                  ('gone','h-g','g.jpg','trash','image'), ('video','h-v','v.mp4','normal','video');
+            ''')
+        self.rows = self.index.corpus(self.db)
+        self.path = self.root / 'state' / 'captions.jsonl'
+
+    def seed(self, *records):
+        self.path.parent.mkdir(exist_ok=True)
+        self.path.write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in records), encoding='utf-8')
+
+    def lines(self):
+        return [json.loads(line) for line in self.path.read_text(encoding='utf-8').splitlines()]
+
+    def run_rows(self, captioner, todo, **kwargs):
+        kwargs.setdefault('limit', 100)
+        kwargs.setdefault('max_seconds', 100)
+        return self.caption.caption_rows(captioner, todo, lambda row: row['id'], self.path, **kwargs)
+
+    def test_plan_only_missing_images_and_content_hash_reuse(self):
+        records = {'a': {'id': 'a', 'text': 'known', 'model': '8B'}, 'b': {'id': 'b', 'text': '  '}}
+        copies, todo = self.caption.plan(self.rows, records)
+        # d shares content with a, so it copies a's text; b has an empty text; trash and video are no corpus.
+        self.assertEqual([r['id'] for r in copies], ['d'])
+        self.assertEqual((copies[0]['text'], copies[0]['copied_from']), ('known', 'a'))
+        self.assertEqual([r['id'] for r in todo], ['b', 'c', 'e'])
+
+    def test_batches_append_resume_and_never_recaption(self):
+        self.seed({'id': 'a', 'text': 'seed', 'secs': 1.0, 'model': '8B'})
+        records = self.caption.load_records(self.path)
+        _, todo = self.caption.plan(self.rows, records)
+        first = self.run_rows(FakeCaptioner(), todo, limit=2, batch_size=2)
+        self.assertEqual((first['captioned'], first['stopped']), (2, 'limit'))
+        self.assertEqual([r['id'] for r in self.lines()], ['a', 'b', 'c'])
+        records = self.caption.load_records(self.path)
+        copies, todo = self.caption.plan(self.rows, records)
+        self.assertEqual([r['id'] for r in todo], ['e'])
+        fake = FakeCaptioner()
+        second = self.run_rows(fake, todo, batch_size=8)
+        self.assertEqual((second['captioned'], second['stopped'], fake.batches), (1, None, [['e']]))
+        done = self.lines()[-1]
+        self.assertEqual((done['id'], done['model']), ('e', '8B'))
+        self.assertTrue(done['text'].startswith('Caption of e'))
+        self.assertEqual(self.caption.plan(self.rows, self.caption.load_records(self.path))[1], [])
+
+    def test_time_budget_stops_before_next_batch(self):
+        ticks = iter(range(0, 1000, 10))
+        _, todo = self.caption.plan(self.rows, {})
+        report = self.run_rows(FakeCaptioner(), todo, max_seconds=25, batch_size=1, clock=lambda: next(ticks))
+        self.assertEqual(report['stopped'], 'time')
+        self.assertGreater(report['captioned'], 0)
+        self.assertLess(report['captioned'], len(todo))
+
+    def test_errors_do_not_stop_the_run_and_empty_text_is_not_stored(self):
+        _, todo = self.caption.plan(self.rows, {})
+        def open_image(row):
+            if row['id'] == 'b':
+                raise OSError('unreadable')
+            return row['id']
+        report = self.caption.caption_rows(FakeCaptioner(empty={'c'}), todo, open_image, self.path, 100, 100, 8)
+        self.assertEqual(sorted(e['id'] for e in report['errors']), ['b', 'c'])
+        self.assertEqual([r['id'] for r in self.lines()], ['a', 'd', 'e'])
+        # Both failures stay missing, so the next run retries them.
+        self.assertEqual([r['id'] for r in self.caption.plan(self.rows, self.caption.load_records(self.path))[1]],
+                         ['b', 'c'])
+
+    def test_out_of_memory_halves_the_batch(self):
+        _, todo = self.caption.plan(self.rows, {})
+        fake = FakeCaptioner(fail_batches_over=2)
+        report = self.run_rows(fake, todo, batch_size=8)
+        self.assertEqual(report['captioned'], len(todo))
+        self.assertTrue(all(len(batch) <= 2 for batch in fake.batches))
+        with self.assertRaises(RuntimeError):
+            self.run_rows(FakeCaptioner(fail_batches_over=0), todo, batch_size=1)
+
+    def test_interrupted_final_line_is_repaired_before_appending(self):
+        self.seed({'id': 'a', 'text': '하나', 'model': '8B'})
+        with self.path.open('a', encoding='utf-8', newline='\n') as stream:
+            stream.write('{"id": "b", "text": "둘')  # crash in the middle of an append
+        from runtime_support import caption_vocabulary, read_captions
+        self.assertEqual(list(read_captions(self.path)), ['a'])
+        self.assertTrue(caption_vocabulary(self.path))
+        records = self.caption.load_records(self.path)
+        self.assertEqual(list(records), ['a'])
+        self.caption.append_records(self.path, [{'id': 'c', 'text': '셋'}])
+        self.assertEqual([r['id'] for r in self.lines()], ['a', 'c'])
+        # Damage in the middle is never silently skipped.
+        self.path.write_text('{"id":"a","text":"x"}\nbroken\n{"id":"c","text":"y"}\n', encoding='utf-8')
+        with self.assertRaises(json.JSONDecodeError):
+            read_captions(self.path)
+
+    def test_later_record_wins_and_missing_file_is_none(self):
+        from runtime_support import read_captions
+        self.assertIsNone(read_captions(self.root / 'missing.jsonl'))
+        self.seed({'id': 'a', 'text': 'old'}, {'id': 'a', 'text': 'new'})
+        self.assertEqual(read_captions(self.path)['a']['text'], 'new')
+
+    def test_dry_run_counts_without_loading_a_model(self):
+        self.seed({'id': 'a', 'text': 'seed'})
+        report = self.caption.main(['--library', str(self.root), '--state', str(self.root / 'state'),
+                                    '--db', str(self.db), '--dry-run'])
+        self.assertEqual((report['corpus_count'], report['existing'], report['copied'], report['missing']),
+                         (5, 1, 1, 3))
+        self.assertEqual(len(self.lines()), 1)  # a dry run writes nothing
+
+    def test_main_with_nothing_missing_loads_no_model_and_copies_duplicates(self):
+        self.seed(*({'id': i, 'text': 'text ' + i} for i in ('a', 'b', 'c', 'e')))
+        with patch('runtime_support.QwenCaptioner', side_effect=AssertionError('model must not load')):
+            report = self.caption.main(['--library', str(self.root), '--state', str(self.root / 'state'),
+                                        '--db', str(self.db)])
+        self.assertEqual((report['copied'], report['missing'], report['remaining']), (1, 0, 0))
+        self.assertEqual(self.lines()[-1]['id'], 'd')
+        self.assertTrue((self.root / 'state' / 'last-caption-run.json').is_file())
+
+    def test_export_has_captions_table_nfc_corpus_only_and_digest(self):
+        store = self.index.VectorStore(self.root / 'vstate')
+        self.addCleanup(store.close)
+        for row in self.rows:
+            vector = np.zeros(1152, dtype=np.float32)
+            vector[0] = 1
+            store.put_batch('siglip', [(row['content_hash'], vector)])
+        inbox = self.root / 'inbox'
+        path = inbox / 'nl-search-latest.sqlite'
+        bare = self.index.export_inbox(store, self.rows, inbox, ['siglip'])
+        with closing(sqlite3.connect(path)) as c:
+            self.assertFalse(c.execute("SELECT name FROM sqlite_master WHERE name='captions'").fetchall())
+            self.assertNotIn('caption_count', dict(c.execute('SELECT key,value FROM meta')))
+        self.seed({'id': 'a', 'text': ' 안녕 '}, {'id': 'gone', 'text': '휴지통'}, {'id': 'zzz', 'text': '없음'},
+                  {'id': 'b', 'text': '사하'})  # decomposed Hangul becomes NFC
+        from runtime_support import read_captions
+        records = read_captions(self.path)
+        captions = self.index.export_captions(records, self.rows)
+        self.assertEqual(captions, {'a': '안녕', 'b': '사하'})
+        first = self.index.export_inbox(store, self.rows, inbox, ['siglip'], self.index.vocabulary(records), captions)
+        self.assertTrue(first['changed'])
+        self.assertEqual(first['caption_count'], 2)
+        self.assertNotEqual(first['digest'], bare['digest'])
+        with closing(sqlite3.connect(path)) as c:
+            self.assertEqual(dict(c.execute('SELECT asset_id,text FROM captions')), captions)
+            self.assertEqual(dict(c.execute('SELECT key,value FROM meta'))['caption_count'], '2')
+            self.assertEqual(c.execute("SELECT sql FROM sqlite_master WHERE name='captions'").fetchone()[0],
+                             'CREATE TABLE captions(asset_id TEXT PRIMARY KEY, text TEXT NOT NULL)')
+        same = self.index.export_inbox(store, self.rows, inbox, ['siglip'], self.index.vocabulary(records), dict(captions))
+        self.assertFalse(same['changed'])
+        captions['a'] = '다른 설명'
+        self.assertTrue(self.index.export_inbox(store, self.rows, inbox, ['siglip'], None, captions)['changed'])
+        self.assertEqual(self.index.export_inbox(store, self.rows, inbox, ['siglip'], None, None)['digest'],
+                         bare['digest'])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

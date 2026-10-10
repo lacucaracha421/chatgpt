@@ -239,6 +239,7 @@ impl Library {
                         ("siglip".into(), summary.siglip),
                         ("qwen8b".into(), summary.qwen8b),
                         ("skipped".into(), summary.skipped),
+                        ("captions".into(), summary.captions),
                     ]);
                 }
                 Ok(())

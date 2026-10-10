@@ -224,12 +224,24 @@ impl Library {
                     eprintln!("home publication {kind}: {error}");
                     error
                 }),
-            "autoTags" => self
-                .run_due_auto_tag_publication(endpoint)
-                .map_err(|error| {
-                    eprintln!("auto tag publication: {error}");
-                    error
-                }),
+            // The Korean captions and character names for tablet content search ride this lane
+            // (`caption_publication.rs`); each step reports its own error.
+            "autoTags" => both(
+                || {
+                    self.run_due_auto_tag_publication(endpoint)
+                        .map_err(|error| {
+                            eprintln!("auto tag publication: {error}");
+                            error
+                        })
+                },
+                || {
+                    self.run_due_caption_publication(endpoint)
+                        .map_err(|error| {
+                            eprintln!("caption publication: {error}");
+                            error
+                        })
+                },
+            ),
             "visibility" => self.publish_due_catalog_visibility(endpoint),
             "similarity" => self.run_due_similarity_review(endpoint).map_err(|error| {
                 eprintln!("similarity review: {error}");

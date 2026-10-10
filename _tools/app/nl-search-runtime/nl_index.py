@@ -8,10 +8,11 @@ import os
 from pathlib import Path
 import sqlite3
 import time
+import unicodedata
 import uuid
 
-from runtime_support import (MODELS, PREPROCESS, QwenEncoder, SiglipImages, caption_vocabulary,
-                             normalize, packed_image, read_only, source_path)
+from runtime_support import (MODELS, PREPROCESS, QwenEncoder, SiglipImages, normalize, packed_image,
+                             read_captions, read_only, source_path, text_units)
 import numpy as np
 
 
@@ -99,10 +100,32 @@ def seed_from_trial(store, rows, trial_out, models):
     return counts
 
 
-def export_inbox(store, rows, inbox, models, vocab=None):
-    """Digest includes actual published bytes, settings and vocabulary, excludes the timestamp.
+def export_captions(records, rows):
+    """{asset id: NFC caption text} of the corpus images that have a caption (the table the PC publishes)."""
+    result = {}
+    for row in rows:
+        record = (records or {}).get(row['id'])
+        text = unicodedata.normalize('NFC', record['text']).strip() if record else ''
+        if text:
+            result[row['id']] = text
+    return result
+
+
+def vocabulary(records):
+    """Gate vocabulary of every caption in the state file (also of images no longer in the corpus)."""
+    if records is None:
+        return None
+    vocab = set()
+    for record in records.values():
+        vocab.update(text_units(record['text']))
+    return vocab
+
+
+def export_inbox(store, rows, inbox, models, vocab=None, captions=None):
+    """Digest includes actual published bytes, settings, vocabulary and captions, excludes the timestamp.
 
     `vocab` is the caption vocabulary of (kind, value) units; None or empty exports no vocab table.
+    `captions` maps asset id to caption text; None or empty exports no captions table.
     """
     models = sorted(set(models))
     inbox = Path(inbox)
@@ -129,6 +152,9 @@ def export_inbox(store, rows, inbox, models, vocab=None):
     vocab = sorted(vocab) if vocab else []
     if vocab:
         meta['vocab_count'] = str(len(vocab))
+    captions = sorted(captions.items()) if captions else []
+    if captions:
+        meta['caption_count'] = str(len(captions))
     digest = hashlib.sha256(json.dumps(meta, sort_keys=True).encode())
     for model in models:
         digest.update(model.encode())
@@ -140,6 +166,10 @@ def export_inbox(store, rows, inbox, models, vocab=None):
         digest.update(b'vocab')
         for kind, value in vocab:
             digest.update(json.dumps([kind, value]).encode())
+    if captions:
+        digest.update(b'captions')
+        for asset_id, text in captions:
+            digest.update(json.dumps([asset_id, text], ensure_ascii=False).encode())
     signature = digest.hexdigest()
     target = inbox / 'nl-search-latest.sqlite'
     if target.exists():
@@ -148,7 +178,7 @@ def export_inbox(store, rows, inbox, models, vocab=None):
             old = c.execute("SELECT value FROM meta WHERE key='content_digest'").fetchone()
             if old and old[0] == signature:
                 return {'changed': False, 'asset_count': len(published), 'vocab_count': len(vocab),
-                        'bytes': target.stat().st_size, 'digest': signature}
+                        'caption_count': len(captions), 'bytes': target.stat().st_size, 'digest': signature}
         finally:
             c.close()
     temp = inbox / (target.name + '.' + uuid.uuid4().hex + '.tmp')
@@ -166,6 +196,9 @@ def export_inbox(store, rows, inbox, models, vocab=None):
                     c.execute('CREATE TABLE vocab(kind TEXT NOT NULL, value TEXT NOT NULL, '
                               'PRIMARY KEY(kind,value)) WITHOUT ROWID')
                     c.executemany('INSERT INTO vocab VALUES (?,?)', vocab)
+                if captions:
+                    c.execute('CREATE TABLE captions(asset_id TEXT PRIMARY KEY, text TEXT NOT NULL)')
+                    c.executemany('INSERT INTO captions VALUES (?,?)', captions)
         finally:
             c.close()
         with temp.open('r+b') as stream:
@@ -175,7 +208,7 @@ def export_inbox(store, rows, inbox, models, vocab=None):
         if temp.exists():
             temp.unlink()
     return {'changed': True, 'asset_count': len(published), 'vocab_count': len(vocab),
-            'bytes': target.stat().st_size, 'digest': signature}
+            'caption_count': len(captions), 'bytes': target.stat().st_size, 'digest': signature}
 
 
 def run_model(store, model, selected, library, verify_seed=False):
@@ -266,11 +299,15 @@ def main(argv=None):
         for model in models:
             report['models'][model] = run_model(store, model, selected, args.library,
                                                  verify_seed=bool(args.seed_from_trial))
-        # Optional captions (<state>/captions.jsonl) feed the "no match" gate vocabulary.
-        vocab = caption_vocabulary(args.state / 'captions.jsonl')
-        report['export'] = export_inbox(store, rows, args.inbox, models, vocab)
+        # Optional captions (<state>/captions.jsonl, written by nl_caption.py) feed the "no match" gate
+        # vocabulary and the `captions` table the desktop publishes to the tablet.
+        records = read_captions(args.state / 'captions.jsonl')
+        vocab = vocabulary(records)
+        captions = export_captions(records, rows)
+        report['export'] = export_inbox(store, rows, args.inbox, models, vocab, captions)
         print(f'VOCAB {len(vocab) if vocab else 0} units'
               + ('' if vocab is not None else ' (no captions.jsonl; gate off)'), flush=True)
+        print(f'CAPTIONS {len(captions)} of {len(rows)} images', flush=True)
         (args.state / 'last-run.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         print(json.dumps(report, ensure_ascii=False), flush=True)
     finally:

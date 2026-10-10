@@ -18,6 +18,8 @@ const QWEN_DIM: usize = 4096;
 const SCHEMA: &str = "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE siglip(asset_id TEXT PRIMARY KEY,vector BLOB NOT NULL);
     CREATE TABLE qwen8b(asset_id TEXT PRIMARY KEY,vector BLOB NOT NULL);";
+/// PC-only copy of the published Korean captions (`captions` table of the inbox export).
+const CAPTIONS_SCHEMA: &str = "CREATE TABLE captions(asset_id TEXT PRIMARY KEY,text TEXT NOT NULL);";
 const VOCAB_SCHEMA: &str = "CREATE TABLE vocab(kind TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(kind,value)) WITHOUT ROWID;";
 /// Minimum share of known query units for the cosine route ("no match" gate).
 const GATE: f64 = 0.6;
@@ -179,6 +181,7 @@ pub(crate) struct ImportCounts {
     pub siglip: u64,
     pub qwen8b: u64,
     pub skipped: u64,
+    pub captions: u64,
 }
 
 /// Ids of library assets. Read once and released, so the long vector validation below never holds
@@ -240,14 +243,31 @@ fn import_cache(
             }
         }
     }
+    let captions = has_table(&source, "captions")?;
+    if captions {
+        let mut stmt = source.prepare("SELECT asset_id,text FROM captions")?;
+        let mut rows = stmt.query([])?;
+        let mut seen = HashSet::new();
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let text: String = row.get(1)?;
+            if id.is_empty() || text.trim().is_empty() || !seen.insert(id.clone()) {
+                return Err(invalid("검색 색인 캡션 형식이 올바르지 않습니다."));
+            }
+            if known.contains(&id) {
+                counts.captions += 1;
+            }
+        }
+    }
     if destination.is_file() {
         let current = read_only(destination)?;
         if metadata(&current)
             .ok()
             .and_then(|m| m.get("content_digest").cloned())
             == meta.get("content_digest").cloned()
-            // A cache imported before vocab support lacks the table: import it again.
+            // A cache imported before vocab or caption support lacks the table: import it again.
             && has_table(&current, "vocab").unwrap_or(false) == vocab
+            && has_table(&current, "captions").unwrap_or(false) == captions
         {
             return Ok(counts);
         }
@@ -262,6 +282,9 @@ fn import_cache(
     store.execute_batch(SCHEMA)?;
     if vocab {
         store.execute_batch(VOCAB_SCHEMA)?;
+    }
+    if captions {
+        store.execute_batch(CAPTIONS_SCHEMA)?;
     }
     let tx = store.transaction()?;
     meta.insert("imported_at".into(), chrono::Utc::now().to_rfc3339());
@@ -295,6 +318,17 @@ fn import_cache(
         let mut insert = tx.prepare("INSERT INTO vocab VALUES (?1,?2)")?;
         while let Some(row) = rows.next()? {
             insert.execute(params![row.get::<_, String>(0)?, row.get::<_, String>(1)?])?;
+        }
+    }
+    if captions {
+        let mut stmt = source.prepare("SELECT asset_id,text FROM captions")?;
+        let mut rows = stmt.query([])?;
+        let mut insert = tx.prepare("INSERT INTO captions VALUES (?1,?2)")?;
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            if known.contains(&id) {
+                insert.execute(params![id, row.get::<_, String>(1)?])?;
+            }
         }
     }
     tx.commit()?;
@@ -559,6 +593,46 @@ impl Library {
             .map_err(|e| invalid(format!("검색 색인을 가져오지 못했습니다: {e}")))?;
         *index = None;
         Ok(counts)
+    }
+    /// Modification stamp of the imported cache; empty without a cache. The caption publication
+    /// lane compares it to the stamp of its last complete pass.
+    pub(crate) fn nl_search_cache_stamp(&self) -> String {
+        std::fs::metadata(self.nl_search_path())
+            .ok()
+            .and_then(|m| {
+                let nanos = m
+                    .modified()
+                    .ok()?
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .ok()?
+                    .as_nanos();
+                Some(format!("{nanos}:{}", m.len()))
+            })
+            .unwrap_or_default()
+    }
+    /// Captions of the imported cache as (asset id, text), or None when the cache is missing or
+    /// holds no caption table (an older export), so that "unknown" is never read as "no captions".
+    /// Holds the index lock so a concurrent import cannot replace the file under the reader.
+    pub(crate) fn nl_search_cached_captions(&self) -> Result<Option<Vec<(String, String)>>> {
+        let _index = self
+            .nl_search_runtime
+            .index
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let path = self.nl_search_path();
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let conn = read_only(&path)?;
+        let _snapshot = conn.unchecked_transaction()?;
+        if !has_table(&conn, "captions")? {
+            return Ok(None);
+        }
+        let rows = conn
+            .prepare("SELECT asset_id,text FROM captions ORDER BY asset_id")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(Some(rows))
     }
     pub(crate) fn nl_search_counts(&self) -> Result<(u64, u64)> {
         if !self.nl_search_path().is_file() {

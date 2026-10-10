@@ -57,7 +57,8 @@ fn nl_search_import_filters_unknown_preserves_meta_and_skips_digest() {
         ImportCounts {
             siglip: 3,
             qwen8b: 1,
-            skipped: 1
+            skipped: 1,
+            captions: 0
         }
     );
     let old = std::fs::read(&output).unwrap();
@@ -474,6 +475,7 @@ fn nl_search_inbox_dispatch_counts_and_unchanged_skip() {
     assert_eq!(
         last.imported,
         BTreeMap::from([
+            ("captions".into(), 0),
             ("siglip".into(), 1),
             ("qwen8b".into(), 0),
             ("skipped".into(), 1)
@@ -764,4 +766,63 @@ fn nl_search_gate_no_match_force_name_route_and_missing_vocab() {
     }
     // Name routes are never gated, even when the name has no countable units.
     assert_eq!(gated(&target.display_name).route, "tags");
+}
+
+#[test]
+fn nl_search_import_copies_known_captions_and_reimports_when_the_table_appears() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("inbox.sqlite");
+    let output = temp.path().join("cache/vectors.sqlite");
+    let conn = source(&input, false);
+    let library = library();
+    let known = known_assets(&library).unwrap();
+    assert_eq!(import_cache(&known, &input, &output).unwrap().captions, 0);
+    assert!(!has_table(&read_only(&output).unwrap(), "captions").unwrap());
+    // Same digest, but the export now carries captions: the cache must be imported again.
+    conn.execute_batch(
+        "CREATE TABLE captions(asset_id TEXT PRIMARY KEY,text TEXT NOT NULL);
+        INSERT INTO captions VALUES ('a','흰 머리 소녀'),('gone','휴지통'),('unknown','없는 에셋');",
+    )
+    .unwrap();
+    assert_eq!(import_cache(&known, &input, &output).unwrap().captions, 2);
+    let cache = read_only(&output).unwrap();
+    let rows: Vec<(String, String)> = cache
+        .prepare("SELECT asset_id,text FROM captions ORDER BY asset_id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    // Unknown ids are dropped at import; eligibility (normal image/GIF) is the publisher's decision.
+    assert_eq!(
+        rows,
+        vec![("a".into(), "흰 머리 소녀".into()), ("gone".into(), "휴지통".into())]
+    );
+    drop(cache);
+    let old = std::fs::read(&output).unwrap();
+    import_cache(&known, &input, &output).unwrap();
+    assert_eq!(old, std::fs::read(&output).unwrap(), "unchanged digest keeps the cache");
+}
+
+#[test]
+fn nl_search_invalid_captions_never_replace_the_cache() {
+    for defect in ["empty_text", "empty_id", "duplicate"] {
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("inbox.sqlite");
+        let output = temp.path().join("vectors.sqlite");
+        let conn = source(&input, false);
+        conn.execute_batch("CREATE TABLE captions(asset_id TEXT,text TEXT NOT NULL); INSERT INTO captions VALUES ('a','첫째');").unwrap();
+        let library = library();
+        let known = known_assets(&library).unwrap();
+        import_cache(&known, &input, &output).unwrap();
+        let old = std::fs::read(&output).unwrap();
+        conn.execute_batch(match defect {
+            "empty_text" => "UPDATE captions SET text='  '",
+            "empty_id" => "INSERT INTO captions VALUES ('','둘째')",
+            _ => "INSERT INTO captions VALUES ('a','둘째')",
+        })
+        .unwrap();
+        assert!(import_cache(&known, &input, &output).is_err(), "{defect}");
+        assert_eq!(old, std::fs::read(&output).unwrap(), "{defect}");
+    }
 }

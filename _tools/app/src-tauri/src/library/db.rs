@@ -4,13 +4,15 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 125;
+pub(crate) const SCHEMA_VERSION: i64 = 126;
 
-/// Test helper: undoes migrations 0103 through 0125 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0126 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE caption_publication_state;
+    DROP TABLE caption_publication_digests;
     DROP TABLE collection_authority_people_reconcile;
     DROP TABLE collection_authority_portrait_blobs;
     DROP TABLE collection_authority_people_cache;
@@ -745,6 +747,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 124 {
             transaction.execute_batch(include_str!("../../migrations/0125_av_people_authority.sql"))?;
+        }
+        if version <= 125 {
+            transaction.execute_batch(include_str!("../../migrations/0126_caption_publication.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

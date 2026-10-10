@@ -327,9 +327,12 @@ impl Library {
                 .unwrap_or(true);
         }
         due[11] = !light
-            && self
+            && (self
                 .auto_tag_publication_due_on(&db, endpoint, now)
-                .unwrap_or(true);
+                .unwrap_or(true)
+                || self
+                    .caption_publication_due_on(&db, endpoint, now)
+                    .unwrap_or(true));
         Ok(due)
     }
 }

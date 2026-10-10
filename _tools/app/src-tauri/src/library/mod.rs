@@ -128,6 +128,7 @@ pub(crate) mod artists;
 mod artists_tests;
 pub(crate) mod auto_tag_inbox;
 pub(crate) mod auto_tag_publication;
+pub(crate) mod caption_publication;
 pub(crate) mod auto_tags;
 #[cfg(test)]
 mod auto_tags_tests;
