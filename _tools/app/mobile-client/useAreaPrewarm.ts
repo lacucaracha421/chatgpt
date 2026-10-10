@@ -2,10 +2,11 @@ import {useEffect, useState, type RefObject} from 'react';
 import {viewReady} from '../src/shared/motion/AreaSwitch';
 import {NETWORK_EVENT, type NetworkChange} from './deviceSignals';
 import {meteredConnection, warmConnection} from './warmNetwork';
+import {viewportImages,viewportImageDecoded} from '../src/shared/motion/viewportImages';
 
 export const AREA_PREWARM_IDLE_MS = 1500;
 
-/** One list-only warm-up per connection, after the foreground screen has painted and settled. */
+/** One bounded warm-up per connection, after foreground content and images settle. */
 export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTMLElement|null>) {
   const [warmed,setWarmed]=useState<string|null>(null);
   const [online,setOnline]=useState(()=>navigator.onLine!==false);
@@ -33,6 +34,7 @@ export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTM
   useEffect(()=>{
     if(!allowed||warmed===scope)return;
     let timer=0,frame=0,idle:number|undefined,stopped=false,painted=false;
+    const decoded=new WeakMap<HTMLImageElement,string>(),decoding=new WeakMap<HTMLImageElement,string>();
     const cancel=()=>{
       window.clearTimeout(timer);window.cancelAnimationFrame(frame);
       if(idle!==undefined)window.cancelIdleCallback?.(idle);
@@ -42,7 +44,22 @@ export function useAreaPrewarm(scope:string, enabled:boolean, host:RefObject<HTM
       const stage=host.current?.querySelector<HTMLElement>('.motion-stage');
       const shown=stage?.dataset.motionShown;
       const view=stage?.querySelector<HTMLElement>(`[data-motion-view="${shown}"]`);
-      return stage?.dataset.motionActive===shown&&(shown==='home'||shown==='library')&&!!view&&viewReady(view);
+      if(stage?.dataset.motionActive!==shown||(shown!=='home'&&shown!=='library')||!view||!viewReady(view))return false;
+      // Home's media tickets have no img yet; do not race those first pictures.
+      if(shown==='home'&&Array.from(view.querySelectorAll('.home-cover-placeholder')).some(element=>{
+        const rect=element.getBoundingClientRect();
+        return rect.width>0&&rect.height>0&&rect.bottom>0&&rect.top<window.innerHeight&&rect.right>0&&rect.left<window.innerWidth;
+      }))return false;
+      return viewportImages(view).map(image=>{
+        const source=`${image.src}|${image.srcset}`;
+        if(decoded.get(image)===source||viewportImageDecoded(image))return true;
+        if(typeof image.decode!=='function')return image.complete;
+        if(decoding.get(image)!==source){
+          decoding.set(image,source);
+          void image.decode().catch(()=>{}).then(()=>{if(!stopped&&`${image.src}|${image.srcset}`===source)decoded.set(image,source);});
+        }
+        return false;
+      }).every(Boolean);
     };
     const finish=()=>{
       idle=undefined;

@@ -254,7 +254,7 @@ export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unkn
     enabled, scope, source: 'upcoming', signalKey: 'upcoming', initial: cachedUpcoming(scope), forceKey,
     read: async signal => {
       await flushUpcomingWishlist(signal, scope);
-      const next = normalizeUpcomingReply(await api<unknown>('/v1/home/upcoming', signal));
+      const next = normalizeUpcomingReply(await api<unknown>('/v1/home/upcoming', signal, undefined, 'GET', true));
       reconcileUpcomingWishlist(wishlistIds(next));
       rememberUpcoming(scope, next);
       return next;

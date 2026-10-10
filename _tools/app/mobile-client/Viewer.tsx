@@ -13,7 +13,8 @@ import type {Asset} from './types';
 import {imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText} from './transport';
-import {videoEvent, viewerTiming} from './perf';
+import {videoEvent, viewerTiming,takeViewerOpen} from './perf';
+import {catalogPerfEnabled} from './catalogPerf';
 import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
@@ -96,6 +97,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   // The heart lives here, not on gallery tiles (user, 2026-10-02): one membership read per shown asset.
   const likes = useLikesAlbum(asset ? [asset.id] : [], !vault && !!asset && !asset.pending, asset?.id);
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
+  const openTap=useRef<number|undefined>(undefined);
+  const tapTaken=useRef(false);
+  if(!tapTaken.current){tapTaken.current=true;openTap.current=takeViewerOpen();}
   const timing=useRef<{id:string;url?:string;span:ReturnType<typeof viewerTiming>}|undefined>(undefined);
   const prepared=useRef(new Map<string,string>());
   const prefetches=useRef(new Map<string,{controller:AbortController; ticket:ReturnType<typeof mediaTicket>; decoded:Promise<void>}>());
@@ -196,7 +200,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     }
     const controller = new AbortController();
     const fromPrepared=prepared.current.has(asset.id)&&asset.kind!=='video'&&!retry;
-    const span=viewerTiming(asset.id,asset.kind,fromPrepared);
+    const span=viewerTiming(asset.id,asset.kind,fromPrepared,openTap.current);openTap.current=undefined;
     const observation={id:asset.id,url:fromPrepared?prepared.current.get(asset.id):undefined,span};
     timing.current=observation;
     span.log('open');
@@ -224,6 +228,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   }, []);
   // Record the slot actually displayed, including promotions inside StableImage.
   useLayoutEffect(() => {
+    if(!catalogPerfEnabled())return;
     const observe = () => {
       const observation = timing.current;
       if (!observation || observation.id !== asset.id || observation.span.done || !observation.url) return;

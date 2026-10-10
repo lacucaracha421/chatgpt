@@ -63,6 +63,7 @@ from starlette.concurrency import run_in_threadpool
 
 import authority
 import collection_authority
+import conditional
 import collection_bindings
 import collection_release_checks
 import collection_personal_edits as personal_edits
@@ -919,7 +920,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 "collectionBindings": collection_bindings.capabilities()}
 
     @app.get("/v1/collections/people/{person_id}")
-    def get_person(person_id: ID, authority: bool = False, authorization: str | None = Header(default=None)):
+    def get_person(person_id: ID, authority: bool = False, authorization: str | None = Header(default=None),
+                   if_none_match: str | None = Header(default=None)):
         """``?authority=1`` adds the authority person fields; the default body is unchanged."""
         require_auth(authorization)
         with get_db() as db:
@@ -928,10 +930,11 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             payload = public_person(db, person_id, active["libraryId"] if active else None, entity=authority)
         if payload is None:
             raise HTTPException(404, "Person is not published")
-        return payload
+        return conditional.json_response(payload, if_none_match)
 
     @app.get("/v1/collections/{collection_id}")
-    def get_collection(collection_id: ID, authorization: str | None = Header(default=None), kakaoReview: bool = False):
+    def get_collection(collection_id: ID, authorization: str | None = Header(default=None), kakaoReview: bool = False,
+                       if_none_match: str | None = Header(default=None)):
         reader(authorization)
         with get_db() as db:
             db.execute("BEGIN")
@@ -948,7 +951,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         reply = {"revision": revision, "item": public_item(payload, True, include_review=kakaoReview)}
         if entity is not None:
             reply["entityRevision"] = entity[0]
-        return reply
+        return conditional.json_response(reply, if_none_match)
 
     @app.post("/v1/collections/{collection_id}/artworks/{artwork_id}/media-ticket")
     def artwork_ticket(collection_id: ID, artwork_id: ID, body: TicketRequest,

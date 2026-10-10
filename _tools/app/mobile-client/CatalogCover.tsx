@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {afterDecode,arrive,type CardArrival} from './motion';
 import {catalogImageTicket} from './catalogMedia';
-import {catalogCoverDecoded} from './catalogPerf';
+import {catalogCoverDecoded,catalogPerfEnabled} from './catalogPerf';
 import {useTabletCatalogMasked} from './catalogMask';
 import type {CatalogItem} from './catalogModel';
 import {observeCatalogCover} from './catalogCoverObservers';
@@ -28,14 +28,14 @@ function rememberCover(source:string,url:string){
  * cards appear with their pictures (no empty boxes filling in one by one). Bounded by `capMs`;
  * covers not ready by then load as usual. Never throws.
  */
-export async function prepareCatalogCovers(items:readonly Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>[],revision:string,signal:AbortSignal,capMs:number){
+export async function prepareCatalogCovers(items:readonly Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>[],revision:string,signal:AbortSignal,capMs:number,foreground=true){
   if(tabletCatalogMasked())return;
   const missing=items.filter(item=>item.thumbnailUrl&&!coverUrls.has(coverSource(item,revision)));
   if(!missing.length)return;
   let timer=0;
   const work=Promise.all(missing.map(async item=>{
     const source=coverSource(item,revision);
-    const url=catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl!},signal)
+    const url=catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl!},signal,()=>foreground)
       .then(ticket=>{if(signal.aborted||!validCoverUrl(ticket.url))return null;rememberCover(source,ticket.url);return ticket.url;},()=>null)
       .finally(()=>{if(preparing.get(source)===url)preparing.delete(source);});
     preparing.set(source,url);
@@ -88,7 +88,7 @@ export function CatalogCover({item,revision,active,onUrl,arrival}:{item:Pick<Cat
     setDecoded(source);
     if(host.current)catalogCoverDecoded(host.current);
   };
-  return <span className="catalog-cover-image" ref={host} data-catalog-cover={item.thumbnailUrl?item.providerWorkId:undefined} data-catalog-decoded={shown&&decoded===source?'true':undefined}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:shown?<img key={source} ref={picture} src={shown} alt="" onLoad={event=>{const element=event.currentTarget;afterDecode(element,()=>settle(element));}} onError={()=>{
+  return <span className="catalog-cover-image" ref={host} data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!!item.thumbnailUrl&&failed!==source&&decoded!==source?"true":undefined} data-catalog-cover={item.thumbnailUrl?item.providerWorkId:undefined} data-catalog-decoded={shown&&decoded===source?'true':undefined}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:shown?<img key={source} ref={picture} src={shown} alt="" onLoad={event=>{const element=event.currentTarget;afterDecode(element,()=>settle(element));}} onError={()=>{
     // A remembered URL that no longer loads is forgotten and asked for again, once.
     if(image?.source!==source&&coverUrls.get(source)===shown){coverUrls.delete(source);setRetry(value=>value+1);return;}
     coverUrls.delete(source);arrival?.ready();loaded.current=null;setFailed(source);}}/>:null}</span>;

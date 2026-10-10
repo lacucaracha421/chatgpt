@@ -40,7 +40,7 @@ it('one full pass: pages, status checks and thumbnail bridge calls', async()=>{
   await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'),{timeout:20_000});
   const ops=tally();
-  console.info(`[perf] warm-up full pass (${ASSETS} assets): apiPages=${mocks.api.mock.calls.length} nativeStatus=${ops.get('status')??0} nativeThumbnail=${ops.get('thumbnail')??0} (each native thumbnail = one mediaWorkers slot + SecureSettings.read + cache lookup, even on a cache hit)`);
+  console.info(`[perf] warm-up full pass (${ASSETS} assets): apiPages=${mocks.api.mock.calls.length} nativeStatus=${ops.get('status')??0} nativeThumbnail=${ops.get('thumbnail')??0} (each native thumbnail = one separate thumbnailWorkers slot + SecureSettings.read + cache lookup, even on a cache hit)`);
   expect(warmState().warmed).toBe(ASSETS);
 });
 

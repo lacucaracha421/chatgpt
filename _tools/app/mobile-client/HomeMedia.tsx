@@ -1,3 +1,4 @@
+import {catalogPerfEnabled} from './catalogPerf';
 import {useEffect, useState} from 'react';
 import {api, native, ApiError} from './transport';
 import {mediaTicket} from './media';
@@ -66,5 +67,5 @@ export function HomeAssetImage({asset, variant, className, paused}: {asset: Asse
     void mediaTicket(asset, variant, controller.signal).then(ticket => {if (!controller.signal.aborted) setUrl(ticket.url);}, () => {});
     return () => controller.abort();
   }, [asset.id, asset.thumbnail_revision, variant, paused, masked]);
-  return masked ? <span className={`${className ?? ''} privacy-mask`} aria-label="비공개 모드로 이미지 숨김" /> : url ? <StableImage className={className} src={url} alt={variant === 'original' ? '오늘의 한 장' : ''} draggable={false} /> : <span className={`${className ?? ''} home-cover-placeholder`} />;
+  return masked ? <span className={`${className ?? ''} privacy-mask`} aria-label="비공개 모드로 이미지 숨김" /> : url ? <StableImage className={className} src={url} alt={variant === 'original' ? '오늘의 한 장' : ''} draggable={false} /> : <span data-perf-image-pending={catalogPerfEnabled()?"true":undefined} className={`${className ?? ''} home-cover-placeholder`} />;
 }

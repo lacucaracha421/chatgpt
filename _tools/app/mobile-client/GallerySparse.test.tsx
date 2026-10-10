@@ -52,7 +52,7 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{
-  cleanup();vi.unstubAllGlobals();vi.restoreAllMocks();delete (HTMLImageElement.prototype as {decode?:unknown}).decode;
+  cleanup();vi.useRealTimers();vi.unstubAllGlobals();vi.restoreAllMocks();delete (HTMLImageElement.prototype as {decode?:unknown}).decode;
   for(const [name,descriptor] of descriptors){if(descriptor)Object.defineProperty(HTMLElement.prototype,name,descriptor);else delete (HTMLElement.prototype as unknown as Record<string,unknown>)[name];}descriptors.clear();
 });
 function resize(){act(()=>{for(const entry of observers)if(entry.target)entry.callback([{target:entry.target,borderBoxSize:[{inlineSize:632,blockSize:1000}]} as unknown as ResizeObserverEntry],{} as ResizeObserver);});}
@@ -165,6 +165,28 @@ it('loads across a spacer with bounded commits',async()=>{
   expect(mocks.api.mock.calls.some(([path])=>new URL(path,'https://test').searchParams.get('cursor')==='40')).toBe(true);
   expect(commits).toBeLessThanOrEqual(4);expect(mocks.renders).toBeLessThanOrEqual(4);
   console.info(`TOC spacer: renders=${mocks.renders}, commits=${commits}, loaded=${current.items.length}, ms=${(performance.now()-started).toFixed(1)}`);
+});
+
+it('keeps a static canvas pattern when fast flings outrun delayed range pages',async()=>{
+  const scroll=await mount();
+  vi.useFakeTimers();
+  mocks.api.mockImplementation((_path:string,signal:AbortSignal)=>new Promise((_resolve,reject)=>{
+    signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});
+  }));
+  const canvas=document.querySelector<HTMLElement>('.gallery-canvas')!;
+  const height=canvas.style.height,pitch=canvas.style.getPropertyValue('--gallery-placeholder-pitch');
+  expect(pitch).toBe('230px');
+  for(let fling=1;fling<=20;fling++) {
+    scroll.scrollTop=10_000+fling*1800;fireEvent.scroll(scroll);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(400);});
+    expect(canvas.style.getPropertyValue('--gallery-placeholder-pitch')).toBe(pitch);
+    expect(canvas.style.height).toBe(height);
+    expect(parseFloat(height)).toBeGreaterThan(scroll.scrollTop+scroll.clientHeight);
+    expect(document.querySelector('[data-gallery-placeholder-row]')).toBeNull();
+    expect(document.querySelector('.gallery-complete-tail')).toBeNull();
+  }
+  expect(current.items).toHaveLength(40);
+  expect(mocks.api).toHaveBeenCalled();
 });
 
 it('preserves a painted asset and its pixel offset as real rows replace an earlier spacer',async()=>{

@@ -16,14 +16,18 @@ final class StartupPerf {
  // Exact public routes only. Dynamic identities collapse to a fixed family label.
  static String route(String path){
   if("download".equals(path))return "download";if(path==null)return "other";String p=path.split("\\?",2)[0];
+  if(p.equals("/v1/library/assets"))return path.matches(".*[?&]subtree=1(?:&.*)?")?"library.assets.subtree":path.matches(".*[?&](tag|artist)=[^&]*(?:&.*)?")?"library.assets.search":"library.assets";
+  if(p.equals("/v1/collections")){for(String type:new String[]{"manga","game","movie"})if(path.matches(".*[?&]type="+type+"(?:&.*)?"))return "collections."+type;return "collections";}
   if(p.matches("/v1/(library/(assets|summary|classifications|characters|characters/status|characters/review|similarity/review|revisit|list-generation|media-tickets)|captures/pending|home/(upcoming|av-pick)|collections(/(status|releases|releases/counts|bindings/status))?|mobile-catalog/(status|refresh|count|duplicates)|albums/(likes|assets|baseline|changes)|sync/status|assets/authority/(status|baseline|changes)|classifications/authority/(baseline|changes)|exchange/(devices|inbox|outbox))"))return p.substring(4).replace('/','.');
+  if(p.matches("/v1/(library/search/description|albums/commands|classifications/authority/commands|home/upcoming/wishlist|collections/bindings/(status|requests|search/(kakao|mangadex)))"))return p.substring(4).replace('/','.');
+  if(p.matches("/v1/collections/bindings/requests/[^/]+(/cancel)?"))return "collections.bindings.requests";
   if(p.startsWith("/v1/notes/"))return "notes";
   if(p.startsWith("/v1/collections/"))return "collections.detail";
   if(p.startsWith("/v1/home/covers/"))return "home.coverTicket";
   if(p.startsWith("/v1/library/assets/"))return "library.assetTicket";
   return "other";
  }
- static boolean jsName(String name){return name!=null&&name.matches("other|notes|status|notesState|notesSync|syncSignals|albumTree|albumStatus|pickerStatus|exchangeState|exchangeDevices|cacheStatus|thumbnail|media|homeCover|collectionArtwork|catalogImage|mediaTickets|thumbnailsCached|collectionArtworksCached|library\\.(assets|summary|classifications|characters|characters\\.status|characters\\.review|similarity\\.review|revisit|list-generation|media-tickets|assetTicket)|captures\\.pending|home\\.(upcoming|av-pick|coverTicket)|collections(\\.(manga|game|movie|status|releases|releases\\.counts|detail))?|mobile-catalog\\.(status|refresh|count|duplicates)|albums\\.(likes|assets)|sync\\.status");}
+ static boolean jsName(String name){return name!=null&&name.matches("other|notes|status|notesState|notesSync|syncSignals|albumTree|albumStatus|pickerStatus|exchangeState|exchangeDevices|cacheStatus|thumbnail|media|homeCover|collectionArtwork|catalogImage|mediaTickets|thumbnailsCached|collectionArtworksCached|library\\.(assets|assets\\.subtree|assets\\.search|search\\.description|summary|classifications|characters|characters\\.status|characters\\.review|similarity\\.review|revisit|list-generation|media-tickets|assetTicket)|captures\\.pending|home\\.(upcoming|upcoming\\.wishlist|av-pick|coverTicket)|collections(\\.(manga|game|movie|status|releases|releases\\.counts|bindings\\.(status|requests|search\\.(kakao|mangadex))|detail))?|mobile-catalog\\.(status|refresh|count|duplicates)|albums\\.(likes|assets|commands|baseline|changes)|classifications\\.authority\\.(commands|baseline|changes)|sync\\.status");}
  static Request submit(String operation,String payload,ThreadPoolExecutor pool,String lane){
   if(!enabled())return null;String name="other";
   if("api".equals(operation))try{name=route(new JSONObject(payload).optString("path"));}catch(Exception ignored){}

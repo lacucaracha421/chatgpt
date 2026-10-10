@@ -1,3 +1,4 @@
+import {catalogPerfEnabled} from './catalogPerf';
 import {useTabletAssetMask} from './assetMask';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {AreaVisible} from '../src/shared/motion/AreaSwitch';
@@ -6,7 +7,7 @@ import {Badge} from '../src/shared/ui/Badge';
 import {FolderMove} from '../src/assets/FolderWave';
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
-import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
+import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,type CSSProperties,type PointerEvent,type ReactNode} from 'react';
 import {defaultRangeExtractor, observeElementOffset, observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PhotoIcon} from '@heroicons/react/24/outline';
 import {collectedDate} from '../src/assets/masonryLayout';
@@ -79,7 +80,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy: re
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <div className="media-tile-shell" data-gallery-cell="" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
+  return <div className="media-tile-shell" data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!preview&&asset.thumbnail_available!==false?"true":undefined} data-gallery-cell="" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
     if(suppressClick.current){suppressClick.current=false;return;}
     if(selectionMode){onToggle?.(asset.id);return;}
     if(!requestedPrivacy) onOpen(index);
@@ -129,7 +130,8 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope}: {sparse?:SparseGallerySource;
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope, hasMore=false}: {sparse?:SparseGallerySource;
+  /** Cursor-paged lists keep their reserved tail neutral only while more items can arrive. */hasMore?:boolean;
   /** The place these tiles belong to (a folder, album or character), without filters: a change moves folders like the PC. */folderScope?:string;
   /** Unused since folder moves stopped animating (user 2026-10-05); remove together with its callers. */folderPath?:readonly string[]; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
@@ -174,6 +176,8 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
       });
     },rowSize,(target+GALLERY_ROW_GAP)/Math.max(1,width/target));
   }, [items, width, density, sort.kind, sparse?.ranges,sparse?.toc]);
+  const rowsHeight=useMemo(()=>rows.reduce((height,row)=>height+rowSize(row),0),[rows]);
+  const pagedExtent=useRef({identity,height:0});
   const seekController=useRef<AbortController|null>(null),backgroundController=useRef<AbortController|null>(null);
   const [destination,setDestination]=useState<{index:number;controller:AbortController}|null>(null);
   const destinationRows=useMemo(()=>{
@@ -283,6 +287,22 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   }, []);
   // Warm roughly two screens below what is rendered; a new position replaces the old batch.
   const virtualRows = virtualizer.getVirtualItems();
+  const viewportTop=parent.current?.scrollTop??restoreScroll,viewportHeight=parent.current?.clientHeight??0;
+  const reportedHeight=virtualizer.getTotalSize();
+  if(pagedExtent.current.identity!==identity)pagedExtent.current={identity,height:0};
+  // Do not let arriving pages shrink the scroll extent below an already reached
+  // viewport. Its neutral rows are replaced in place as the cursor walk catches up.
+  if(!sparse&&hasMore&&rowsIdentity.current===identity&&rows.length&&(viewportTop>=introHeight+rowsHeight||reportedHeight>rowsHeight&&viewportTop+viewportHeight>introHeight+rowsHeight))
+    pagedExtent.current.height=Math.max(pagedExtent.current.height,viewportTop-introHeight+viewportHeight);
+  const canvasHeight=Math.max(reportedHeight,sparse?0:pagedExtent.current.height);
+  const target=rowHeight(density,width);
+  const columns=Math.max(1,Math.floor((width+GALLERY_TILE_GAP)/(target+GALLERY_TILE_GAP)));
+  const tileWidth=(width-GALLERY_TILE_GAP*(columns-1))/columns;
+  // The background exists even when momentum moves beyond every mounted virtual row.
+  // No offset-dependent placeholder DOM or scroll state is needed to paint it.
+  const canvasStyle:CSSProperties & Record<string,string|number>={height:canvasHeight,
+    '--gallery-placeholder-height':`${target}px`, '--gallery-placeholder-pitch':`${target+GALLERY_ROW_GAP}px`,
+    '--gallery-placeholder-width':`${tileWidth}px`, '--gallery-placeholder-column-pitch':`${tileWidth+GALLERY_TILE_GAP}px`};
   const lastRow = virtualRows.length ? virtualRows[virtualRows.length - 1].index : -1;
   useEffect(() => {
     const element = parent.current;
@@ -296,7 +316,9 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     prefetchThumbnails(ahead, controller.signal);
     return () => controller.abort();
   }, [lastRow, rows, paused, privacy, vault]);
-  const checkEnd = () => {const element = parent.current; if (!sparse && !paused && element && element.clientHeight > 0 && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
+  // The loaded row boundary, not an estimated/reserved scrollHeight, owns paging.
+  // This also continues loading after a response while the viewport is still beyond it.
+  const checkEnd = () => {const element = parent.current; if (!sparse && !paused && element && element.clientHeight > 0 && introHeight + rowsHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
   useEffect(checkEnd, [items.length, onNearEnd, paused]);
   const visibleGap=virtualRows.find(virtual=>rows[virtual.index]?.spacer && virtual.end>Math.max(introHeight,parent.current?.scrollTop??0) && virtual.start<(parent.current?.scrollTop??0)+(parent.current?.clientHeight||0)*2);
   const gapRow=visibleGap?rows[visibleGap.index]:undefined;
@@ -316,15 +338,16 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     if (last && now - last.at < 350 && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 32) { lastBackgroundTap.current = null; onClearSelection(); return; }
     lastBackgroundTap.current = {at: now, x: event.clientX, y: event.clientY};
   };
-  return <FolderMove scope={folderScope} queryKey={identity} visible={!paused} privacyKey={`${privacy}`} count={items.length} host={parent}><div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
+  return <FolderMove scope={folderScope} queryKey={identity} visible={!paused} privacyKey={`${privacy}`} count={items.length} host={parent}><div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} style={{overflowAnchor:'none'}} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) {onScroll(event.currentTarget.scrollTop);} checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
     {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
     {pull}
     {intro!=null&&<div ref={introduction} className="gallery-intro">{intro}</div>}
-    <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
+    <div className="gallery-canvas" style={canvasStyle}>
+      {!sparse&&!hasMore&&canvasHeight>rowsHeight&&<div className="gallery-complete-tail" aria-hidden="true" style={{top:rowsHeight,height:canvasHeight-rowsHeight}}/>}
       {virtualizer.getVirtualItems().map(virtual => {
         const row = rows[virtual.index];
         if (!row) return null;
-        if(row.spacer)return <div key={virtual.key} className="gallery-sparse-spacer" aria-hidden="true" data-spacer-start={row.startIndex} style={{position:'absolute',width:'100%',height:row.height,transform:`translateY(${virtual.start-introHeight}px)`}}/>;
+        if(row.spacer)return null;
         const hasDateHeadings = Boolean(row.dateHeadings?.length);
         const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
         const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;

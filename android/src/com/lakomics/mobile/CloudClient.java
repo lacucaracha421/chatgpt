@@ -22,12 +22,13 @@ final class CloudClient {
   NetworkPolicy.providerImage(path);
   if(!connection.has("token"))throw new IllegalStateException("Not configured");
   HttpURLConnection c=(HttpURLConnection)new URL(connection.getString("endpoint")+path).openConnection();boolean reusable=false;
+  HttpSessionPerf.Sample sample=HttpSessionPerf.begin(path);
   try{
    prepare(c,signal);c.setRequestProperty("Authorization","Bearer "+connection.getString("token"));
    c.setRequestProperty("Accept","image/jpeg, image/png, image/webp");c.setRequestProperty("Accept-Encoding","identity");
-   byte[] bytes=providerImageBytes(c,signal,NetworkPolicy.providerImageLimit(path));reusable=true;
+   byte[] bytes=providerImageBytes(c,signal,NetworkPolicy.providerImageLimit(path),sample);reusable=true;
    return new JSONObject().put("url","data:"+providerImageMime(c)+";base64,"+java.util.Base64.getEncoder().encodeToString(bytes));
-  }finally{if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
+  }finally{if(sample!=null)sample.finish(reusable,signal!=null&&signal.isCanceled());if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
  }
  static String providerImageMime(HttpURLConnection c)throws IOException{
   String type=c.getContentType();type=type==null?"":type.split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);
@@ -38,12 +39,15 @@ final class CloudClient {
   return providerImageBytes(c,signal,4L*1024*1024);
  }
  static byte[] providerImageBytes(HttpURLConnection c,CancellationSignal signal,long max)throws Exception{
+  return providerImageBytes(c,signal,max,null);
+ }
+ private static byte[] providerImageBytes(HttpURLConnection c,CancellationSignal signal,long max,HttpSessionPerf.Sample sample)throws Exception{
   int status=c.getResponseCode();if(status!=200)throw new HttpFailure(status,null);
   providerImageMime(c);
   String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
   long expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
   ByteArrayOutputStream out=new ByteArrayOutputStream();
-  try(InputStream in=c.getInputStream()){MediaTransfer.copy(in,out,max,expected,System.nanoTime()+MediaTransfer.DEADLINE_NANOS,signal==null?null:signal::throwIfCanceled);}
+  try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample)){MediaTransfer.copy(in,out,max,expected,System.nanoTime()+MediaTransfer.DEADLINE_NANOS,signal==null?null:signal::throwIfCanceled);}
   return out.toByteArray();
  }
  void validate(String endpoint,String token,CancellationSignal cancel)throws Exception{
@@ -69,19 +73,20 @@ final class CloudClient {
  private ConditionalRead.Reply startupAuthenticatedReply(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel,String etag,String device)throws Exception{
   NetworkPolicy.api(path,method);if(!s.has("token"))throw new IllegalStateException("Not configured");
   HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
+  HttpSessionPerf.Sample sample=HttpSessionPerf.begin(path);
   try {
    prepare(c,cancel);c.setRequestMethod(method);c.setRequestProperty("Authorization","Bearer "+s.getString("token"));c.setRequestProperty("Accept","application/json");
    if(etag!=null)c.setRequestProperty("If-None-Match",etag);
    if(device!=null)c.setRequestProperty("X-Lakomics-Device",device);
-   if(method.equals("POST") || method.equals("PUT")){byte[] b=(body==null?"{}":body.toString()).getBytes("UTF-8");if(b.length>(path.startsWith("/v1/notes/")?610000:65536))throw new IOException("Request too large");c.setDoOutput(true);c.setFixedLengthStreamingMode(b.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream o=c.getOutputStream()){o.write(b);}}
+   if(method.equals("POST") || method.equals("PUT")){byte[] b=(body==null?"{}":body.toString()).getBytes("UTF-8");if(b.length>(path.startsWith("/v1/notes/")?610000:65536))throw new IOException("Request too large");c.setDoOutput(true);c.setFixedLengthStreamingMode(b.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream o=HttpSessionPerf.output(c.getOutputStream(),sample)){o.write(b);}}
    int code=c.getResponseCode();
    ConditionalRead.Reply reply=ConditionalRead.response(code,c.getHeaderField("ETag"),()->{
     ByteArrayOutputStream out=new ByteArrayOutputStream();
-    try(InputStream in=c.getInputStream()){copy(in,out,4*1024*1024,cancel);}
+    try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample)){copy(in,out,4*1024*1024,cancel);}
     JSONObject result=new JSONObject(out.toString("UTF-8"));stripKeys(result);return result.toString();
-   },status->new HttpFailure(status,errorBody(c)));
+   },status->new HttpFailure(status,errorBody(c,sample)));
    reusable=true;return reply;
-  } finally {if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}
+  } finally {if(sample!=null)sample.finish(reusable,cancel!=null&&cancel.isCanceled());if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}
  }
  /**
   * One `/v1/sync/status?wait=N&signals=1` long-poll (StatusWatcher). Its ETag is the caller's
@@ -94,22 +99,26 @@ final class CloudClient {
   String path="/v1/sync/status?wait="+wait+"&signals=1";
   NetworkPolicy.api(path,"GET");if(!s.has("token"))throw new IllegalStateException("Not configured");
   HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
+  HttpSessionPerf.Sample sample=HttpSessionPerf.begin(path);
   try {
    prepare(c,cancel);c.setReadTimeout((wait+20)*1000);c.setRequestProperty("Authorization","Bearer "+s.getString("token"));c.setRequestProperty("Accept","application/json");
    if(etag!=null)c.setRequestProperty("If-None-Match",etag);
    int code=c.getResponseCode();boolean capable=c.getHeaderField(StatusWatcher.WAIT_HEADER)!=null;
    ConditionalRead.Reply reply=ConditionalRead.response(code,c.getHeaderField("ETag"),()->{
     ByteArrayOutputStream out=new ByteArrayOutputStream();
-    try(InputStream in=c.getInputStream()){copy(in,out,4*1024*1024,cancel);}
+    try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample)){copy(in,out,4*1024*1024,cancel);}
     return new JSONObject(out.toString("UTF-8")).toString();
-   },status->new HttpFailure(status,errorBody(c)));
+   },status->new HttpFailure(status,errorBody(c,sample)));
    reusable=true;return new StatusWatcher.Reply(reply.status,reply.etag,capable,reply.body);
-  } finally {if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}
+  } finally {if(sample!=null)sample.finish(reusable,cancel!=null&&cancel.isCanceled());if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}
  }
  static String errorBody(HttpURLConnection c){
+  return errorBody(c,null);
+ }
+ private static String errorBody(HttpURLConnection c,HttpSessionPerf.Sample sample){
   // A rejected response body is bounded and read before disconnect, so the
   // client can still tell a revision conflict from an identity mismatch.
-  InputStream stream=c.getErrorStream();if(stream==null)return null;
+  InputStream stream=HttpSessionPerf.input(c.getErrorStream(),sample);if(stream==null)return null;
   try{ByteArrayOutputStream out=new ByteArrayOutputStream();copy(stream,out,65536,null);return out.toString("UTF-8");}
   catch(Exception ignored){return null;}
   finally{try{stream.close();}catch(Exception ignored){}}
@@ -136,16 +145,17 @@ final class CloudClient {
   PerfLog.Op perf=PerfLog.current.get();long downloadStarted=System.nanoTime();
   try{URI u=new URI(url);if(!"https".equals(u.getScheme()) || u.getHost()==null || u.getUserInfo()!=null)throw new IOException("Invalid media URL");
   long deadline=System.nanoTime()+MediaTransfer.DEADLINE_NANOS;
-  HttpURLConnection c=(HttpURLConnection)u.toURL().openConnection();boolean reusable=false;try{
+  HttpURLConnection c=(HttpURLConnection)u.toURL().openConnection();boolean reusable=false;
+  HttpSessionPerf.Sample sample=HttpSessionPerf.begin("download");try{
    prepare(c,signal);c.setRequestProperty("Accept-Encoding","identity");
    int status=c.getResponseCode();if(status!=200)throw new HttpFailure(status,null);
    String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
    long expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
-   try(InputStream in=c.getInputStream();OutputStream out=new FileOutputStream(file)){try{MediaTransfer.copy(in,out,max,expected,deadline,signal==null?null:signal::throwIfCanceled);}finally{if(perf!=null)perf.bytes+=file.length();}}
+   try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample);OutputStream out=new FileOutputStream(file)){try{MediaTransfer.copy(in,out,max,expected,deadline,signal==null?null:signal::throwIfCanceled);}finally{if(perf!=null)perf.bytes+=file.length();}}
    // A fully read and closed body lets the platform pool keep the TLS connection for the
    // next storage download; only failed or cancelled transfers tear the socket down.
    reusable=true;
-  }finally{if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
+  }finally{if(sample!=null)sample.finish(reusable,signal!=null&&signal.isCanceled());if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
   }finally{if(perf!=null)perf.download+=System.nanoTime()-downloadStarted;}
  }
 }

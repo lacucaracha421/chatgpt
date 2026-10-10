@@ -1,10 +1,9 @@
 import './transport';
+import {perfEnabled} from './perfEnabled';
 
 const DECODED='lakomics-catalog-cover-decoded';
 let sequence=0;
-export function catalogPerfEnabled(){
-  try{return window.LakomicsNative?.perfEnabled?.()===true;}catch{return false;}
-}
+export const catalogPerfEnabled=perfEnabled;
 export function catalogCoverDecoded(host:HTMLElement){
   host.dataset.catalogDecoded='true';
   if(catalogPerfEnabled())host.dispatchEvent(new Event(DECODED,{bubbles:true}));

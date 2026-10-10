@@ -1,3 +1,4 @@
+import {catalogPerfEnabled} from './catalogPerf';
 import {loadedPerformerNames} from './personNameCache';
 import {EllipsisHorizontalIcon} from "@heroicons/react/24/outline";
 import {AvInbox} from './AvInbox';
@@ -36,6 +37,7 @@ import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindingsModel';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import {displayDate} from '../src/shared/displayDate';
+import {beginScreenTiming,screenReady} from './perf';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
 import {BellIcon, CalendarDaysIcon, SparklesIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon,  XMarkIcon} from '@heroicons/react/24/outline';
@@ -129,7 +131,7 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
   useEffect(()=>{if(privacy||absent||broken)arrival?.ready();},[privacy,absent,broken,arrival]);
   // While the card still waits, the card's arrival shows this cover; it does not fade on its own.
   if(ready&&arrival?.waiting())arriving.current=false;
-  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onLoad={arrival&&(event=>{const element=event.currentTarget;afterDecode(element,()=>{arrival.ready();arrive(element);});})} onError={()=>{arrival?.ready();loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?<BusyLabel busy>불러오는 중…</BusyLabel>:'표지'}</span></span>}</span>;
+  return <span ref={host} data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!absent&&!broken&&!ready?"true":undefined} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onLoad={arrival&&(event=>{const element=event.currentTarget;afterDecode(element,()=>{arrival.ready();arrive(element);});})} onError={()=>{arrival?.ready();loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?<BusyLabel busy>불러오는 중…</BusyLabel>:'표지'}</span></span>}</span>;
 }
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};
@@ -394,6 +396,7 @@ function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(v
 /** A place another tab asks Collections to show (Home's 신간 and 발매 예정); `key` makes a repeat ask count. */
 export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
+type WorkDetailRead={revision:string;item:CollectionDetail;entityRevision?:number;readAt?:number};
 /** `onReturnHome`: set while the screen was opened from Home; closing that entry level (신간 or the work opened) returns there. */
 export function Collections({active,prefetch=false,paused,backRef,request,onReturnHome,directWork}:{active:boolean;prefetch?:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void;directWork?:string}) {
   const filterWheel=useHorizontalWheel();
@@ -404,8 +407,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [filtersByType,setFiltersByType]=useState<Record<CollectionKind,Filters>>(()=>({game:defaultCollectionFilters(),manga:defaultCollectionFilters(),movie:defaultCollectionFilters(),av:defaultCollectionFilters()}));
   const filters=filtersByType[type];
   const [refresh,setRefresh]=useState(0);
+  // This component belongs to one connection; retain only a small recent-work set.
+  const detailCache=useRef(new Map<string,WorkDetailRead>());
   // What the server serves may have changed: the lists re-read, and so does the shared 신간 read on its next show.
-  const bump=useCallback(()=>{invalidateReleases();setRefresh(n=>n+1);},[]);
+  const bump=useCallback(()=>{detailCache.current.clear();invalidateReleases();setRefresh(n=>n+1);},[]);
   const [showcaseAll,setShowcaseAll]=useState(false),[calendarOpen,setCalendarOpen]=useState(false);
   const [sheet,setSheet]=useState<'sort'|'rating'|'view'|'performerSort'|null>(null);
   // 보기 per type (격자 · 선반, 한 줄에 N개), the case a tap turned to the front, and the order a work was opened from.
@@ -472,7 +477,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const showcasePage=shownShowcase?showcase.page:null;
   const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||overlayOpen||!!performer);
   const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
-  const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
+  const detailPull=usePullToRefresh(detailRef,()=>{detailCache.current.clear();setDetailRefresh(n=>n+1);},!!selected&&!detail&&!detailError,!active||paused||!selected);
   // An accepted personal edit changes what the server serves; re-read both views.
   const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
   const kakaoQueue=useKakaoReviewQueue(live&&kakaoReviewOpen,refresh);
@@ -496,12 +501,17 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   useEffect(()=>{main.items.forEach(work=>edits.authority.reconcile(work));if(detail&&detail.revision!=='local-create')edits.authority.reconcile(detail.item,'detail');},[main.items,detail,edits.authority.identity?.libraryId,edits.authority.identity?.epoch,edits.authority.rows]);
 
   const reviewSupported=edits.authority.features.includes('kakaoReview');
+  const detailCacheKey=JSON.stringify([selected,reviewSupported]);
   const detailKey=JSON.stringify([selected,detailRefresh,reviewSupported]);
   const committedDetail=useRef('');
-  useEffect(()=>{
+  useLayoutEffect(()=>{
     // A step to the previous/next work keeps the shown work (inert) until the next one is ready.
     const step=stepping.current;stepping.current=false;
-    committedDetail.current='';if(!step)setDetail(current=>current?.item.id===selected?current:null);
+    committedDetail.current='';if(!step){
+      const cached=detailCache.current.get(detailCacheKey);
+      if(cached){detailCache.current.delete(detailCacheKey);detailCache.current.set(detailCacheKey,cached);}
+      setDetail(current=>cached??(current?.item.id===selected?current:null));
+    }
     setDetailError('');setCoverIndex(null);setOverview(false);setPersonalSheet(null);setBindSheet(null);setManage(null);setSearchKind('movie');
     if(!step&&detailRef.current)detailRef.current.scrollTop=0;
   },[selected]);
@@ -514,10 +524,13 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     }
     const controller=new AbortController();setDetailError('');
     const readStartedAt=Date.now();
-    void api<{revision:string;item:CollectionDetail;entityRevision?:number}>(`/v1/collections/${encodeURIComponent(selected)}${reviewSupported?'?kakaoReview=true':''}`,controller.signal).then(async result=>{
+    void api<{revision:string;item:CollectionDetail;entityRevision?:number}>(`/v1/collections/${encodeURIComponent(selected)}${reviewSupported?'?kakaoReview=true':''}`,controller.signal,undefined,'GET',true).then(async result=>{
       result={...result,item:(await loadedPerformerNames([result.item]))[0]!};
       if(controller.signal.aborted)return;
-      committedDetail.current=detailKey;setDetail({...result,readAt:readStartedAt});
+      const next={...result,readAt:readStartedAt};
+      detailCache.current.delete(detailCacheKey);detailCache.current.set(detailCacheKey,next);
+      while(detailCache.current.size>20)detailCache.current.delete(detailCache.current.keys().next().value!);
+      committedDetail.current=detailKey;setDetail(next);
       edits.authority.reconcile(result.item,'detail',readStartedAt);
       setEdition(current=>editions(result.item.volumes).includes(current)?current:editions(result.item.volumes)[0]??0);
     }).catch(reason=>{if(!controller.signal.aborted)setDetailError(errorText(reason));});
@@ -538,7 +551,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   useEffect(()=>{
     if(!browseLive||(tab!=='game'&&tab!=='movie'))return;
     const controller=new AbortController();
-    void api<unknown>('/v1/home/upcoming',controller.signal).then(value=>{if(!controller.signal.aborted)setCalendarReply(normalizeReleaseCalendarReply(value));},()=>{});
+    void api<unknown>('/v1/home/upcoming',controller.signal,undefined,'GET',true).then(value=>{if(!controller.signal.aborted)setCalendarReply(normalizeReleaseCalendarReply(value));},()=>{});
     return()=>controller.abort();
   },[browseLive,refresh,tab]);
   usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;bump();setDetailRefresh(n=>n+1);});
@@ -549,7 +562,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   useLayoutEffect(()=>{if(!selected&&!overlayOpen&&!performer&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,overlayOpen,performer,main.committed,main.key,active]);
 
   // A work opened over 신간 closes back to 신간; the entry level opened from Home closes back to Home.
-  const closeWork=useCallback(()=>{if(directWork){onReturnHome?.();return;}setSelected(null);if(!overlayOpen&&!performer)onReturnHome?.();},[directWork,overlayOpen,performer,onReturnHome]);
+  const closeWork=useCallback(()=>{
+    if(directWork){onReturnHome?.();return;}
+    if(overlayOpen||performer||!onReturnHome)beginScreenTiming('collections','back');
+    setSelected(null);if(!overlayOpen&&!performer)onReturnHome?.();
+  },[directWork,overlayOpen,performer,onReturnHome]);
   // The performer page returns to the work it was opened from.
   const closePerformer=useCallback(()=>{if(performer?.from)setSelected(performer.from);setPerformer(null);},[performer]);
   const closeInbox=useCallback(()=>{setInboxOpen(false);onReturnHome?.();},[onReturnHome]);
@@ -576,7 +593,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   /** Opens a work; `from` is the list it was opened in, which a swipe on the work steps through. */
-  const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{if(listRef.current&&!overlayOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
+  const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{beginScreenTiming('collection.work','open');if(listRef.current&&!overlayOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
   const stepWork=(offset:-1|1)=>{const index=order.indexOf(selected??''),next=order[index+offset];if(index<0||!next)return;stepping.current=true;setSelected(next);};
   /** On the shelf a first tap turns the case to the front; a tap on the picked case opens it. */
   const tapWork=(items:CollectionSummary[])=>(id:string)=>{if(picked===id)openWork(id,items.map(work=>work.id));else setPicked(id);};
@@ -610,6 +627,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     ||(row.state==='accepted'&&(listSeenAt.current.get(main.page?.revision??'')??Infinity)<(row.acceptedAt??0)))).map(row=>row.command.workId));
   const onDeleted=(id:string)=>{setOrder(current=>current.filter(value=>value!==id));closeWork();};
 
+  useLayoutEffect(()=>{if(active&&selected&&(detail?.item.id===selected||detailError))screenReady('collection.work',detailRef.current,detailError?'error':'ok');else if(active&&!selected&&main.committed)screenReady('collections',sectionRef.current,main.error?'error':'ok');});
   const item=detail?.item?edits.authority.work(detail.item):undefined, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];
   const covers=item?[{id:collectionCover(item),label:item.name},...volumes.map(v=>({id:v.coverArtworkId,label:[volumeLabel(v),volumeReleaseLabel(v)].filter(Boolean).join(' · ')}))]:[];
   const physical=item?.type==='manga';
@@ -622,7 +640,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // The type's own shortcuts sit in the section bar's right group on both surfaces; the controls
   // every type shares (쇼케이스, 정렬, 내 별점, 보기) live in the top bar, so the bar's segment
   // keeps one width on every type.
-  const calendarShortcut=(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>;
+  const calendarShortcut=(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>{beginScreenTiming('releaseCalendar','open');setCalendarOpen(true);}}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>;
   const newsShortcut=tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>;
   const reviewShortcut=tab==='manga'&&kakaoUnlinked>0&&<Button variant="quiet" size="sm" aria-label={`연결 점검 ${kakaoUnlinked}`} onClick={()=>setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true"/><span className="collection-shortcuts__label">연결 점검</span><span className="numeric collection-shortcuts__count">{kakaoUnlinked}</span></Button>;
   const shortcuts=(calendarShortcut||newsShortcut||reviewShortcut)?<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}{reviewShortcut}</div>:undefined;
@@ -769,8 +787,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>}
     </Overlay>
-    <Overlay open={calendarOpen} covered={!live||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>setCalendarOpen(false)}>
-      {calendarOpen&&(tab==='game'||tab==='movie')&&<ReleaseCalendar embedded onSnapshot={setCalendarReply} initialKind={tab} onClose={()=>setCalendarOpen(false)}/>}
+    <Overlay open={calendarOpen} covered={!live||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>{beginScreenTiming('collections','back');setCalendarOpen(false);}}>
+      {calendarOpen&&(tab==='game'||tab==='movie')&&<ReleaseCalendar embedded onSnapshot={setCalendarReply} initialKind={tab} onClose={()=>{beginScreenTiming('collections','back');setCalendarOpen(false);}}/>}
     </Overlay>
     <KakaoReviewOverlay open={kakaoReviewOpen} active={live} onClose={()=>setKakaoReviewOpen(false)} queue={kakaoQueue} authority={edits.authority}
       cover={(work,revision)=><Artwork item={work} id={collectionCover(work)} revision={revision} active={live&&kakaoReviewOpen} label={work.name}/>}/>

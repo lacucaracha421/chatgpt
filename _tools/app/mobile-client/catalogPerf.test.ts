@@ -1,5 +1,8 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {catalogCoverDecoded,catalogScreenTiming} from './catalogPerf';
+import {catalogCoverDecoded,catalogScreenTiming,catalogPerfEnabled} from './catalogPerf';
+import {resetPerfEnabledForTests} from './perfEnabled';
+import {startupMark,startupRequest} from './startupPerf';
+import {viewerTiming} from './perf';
 let now:number,request:ReturnType<typeof vi.fn>;
 function fixture(){
   const root=document.createElement('div');document.body.append(root);
@@ -10,7 +13,7 @@ function fixture(){
     return host;
   });return {root,covers};
 }
-beforeEach(()=>{now=100;vi.spyOn(performance,'now').mockImplementation(()=>now);request=vi.fn();window.LakomicsNative={request,cancel:vi.fn(),perfEnabled:()=>true};});
+beforeEach(()=>{resetPerfEnabledForTests();now=100;vi.spyOn(performance,'now').mockImplementation(()=>now);request=vi.fn();window.LakomicsNative={request,cancel:vi.fn(),perfEnabled:()=>true};});
 afterEach(()=>{document.body.innerHTML='';delete window.LakomicsNative;vi.restoreAllMocks();});
 it('logs one first/90% decoded summary for the initial visible cohort, excluding preloads',()=>{
   const {root,covers}=fixture(),stop=catalogScreenTiming(root);
@@ -29,6 +32,26 @@ it('reports incomplete cohorts on screen exit rather than fabricating a 90% time
 it('measures already decoded covers on re-entry and stays silent by default',()=>{
   const {root,covers}=fixture();for(const host of covers)host.dataset.catalogDecoded='true';
   catalogScreenTiming(root)();expect(JSON.parse(request.mock.calls[0][2])).toMatchObject({status:'ok',firstCoverMs:0,visible90Ms:0});
-  request.mockClear();window.LakomicsNative!.perfEnabled=()=>false;
+  request.mockClear();window.LakomicsNative!.perfEnabled=()=>false;resetPerfEnabledForTests();
   const stop=catalogScreenTiming(root);catalogCoverDecoded(covers[0]);stop();expect(request).not.toHaveBeenCalled();
+});
+it.each([false,true])('reads the bridge flag once per page, shared by catalog, viewer and startup (enabled=%s)',enabled=>{
+  const flag=vi.fn(()=>enabled);window.LakomicsNative!.perfEnabled=flag;
+  for(let i=0;i<100;i++)expect(catalogPerfEnabled()).toBe(enabled);
+  startupMark('firstReactRenderMs');startupRequest('thumbnail',{assetId:'a'});
+  viewerTiming('a','image',false);
+  window.LakomicsNative!.perfEnabled=vi.fn(()=>!enabled);
+  expect(catalogPerfEnabled()).toBe(enabled);
+  expect(flag).toHaveBeenCalledTimes(1);
+  expect(window.LakomicsNative!.perfEnabled).not.toHaveBeenCalled();
+  if(!enabled)expect(request).not.toHaveBeenCalled();
+});
+it('memoizes a throwing or missing bridge as disabled for the page',()=>{
+  const flag=vi.fn(()=>{throw new Error('unavailable');});window.LakomicsNative!.perfEnabled=flag;
+  expect(catalogPerfEnabled()).toBe(false);expect(catalogPerfEnabled()).toBe(false);
+  expect(flag).toHaveBeenCalledTimes(1);
+  resetPerfEnabledForTests();delete window.LakomicsNative;
+  expect(catalogPerfEnabled()).toBe(false);
+  window.LakomicsNative={request,cancel:vi.fn(),perfEnabled:flag};
+  expect(catalogPerfEnabled()).toBe(false);expect(flag).toHaveBeenCalledTimes(1);
 });

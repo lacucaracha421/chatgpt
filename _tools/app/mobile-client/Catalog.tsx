@@ -3,6 +3,7 @@ import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
+import {beginScreenTiming,screenReady} from './perf';
 import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {swapSegment,type ViewSwap} from '../src/shared/motion/viewSwap';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
@@ -11,7 +12,9 @@ import {ArrowLeftIcon,BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIco
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {Badge,Button,EmptyState,IconButton} from './ui';
-import {api,errorText} from './transport';
+import {api,errorText,native} from './transport';
+import {batteryAllowsWarm,warmEnabled,type BatteryState} from './thumbnailWarm';
+import {meteredConnection,warmConnection} from './warmNetwork';
 import {CatalogCover,catalogCoversKnown,prepareCatalogCovers} from './CatalogCover';
 import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
 import {catalogScreenTiming} from './catalogPerf';
@@ -86,6 +89,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   const privacy = useTabletCatalogMasked();
   const listEnabled=!paused&&(active||(prefetch&&!privacy));
   const warmStatusAttempted=useRef(false),warmListAttempted=useRef(false);
+  const warmCoversAttempted=useRef(false);
   const listPending=useRef(false);
   const [reader,setReader]=useState<CatalogReaderManifest|null>(null),[readerBusy,setReaderBusy]=useState(false),[readerError,setReaderError]=useState('');
   const shownScope=useRef<CatalogQuery['scope']|null>(null),swapOwner=useRef({}).current;
@@ -232,6 +236,39 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     return()=>{controller.abort();swap?.cancel();listPending.current=false;};
   },[listEnabled,key,path,query,listReady]);
   useEffect(()=>{
+    if(active||!prefetch||paused||privacy||!page||committed.current!==key||warmCoversAttempted.current)return;
+    const controller=new AbortController(),connection=warmConnection();
+    const allowed=()=>!controller.signal.aborted&&document.visibilityState!=='hidden'&&navigator.onLine!==false&&!meteredConnection()&&warmEnabled();
+    if(!allowed())return;
+    // One low-priority pass after the hidden first page commits. A foreground
+    // activation cancels it; nearby cards then join any already prepared covers.
+    let idle:number|undefined,timer=0;
+    const stop=()=>{controller.abort();if(idle!==undefined)window.cancelIdleCallback?.(idle);window.clearTimeout(timer);};
+    const prepare=async()=>{
+      if(!allowed())return;
+      warmCoversAttempted.current=true;
+      const status=await native<{battery?:BatteryState}>('status',{},controller.signal);
+      if(!allowed()||!batteryAllowsWarm(status.battery))return;
+      // Sequential tickets keep this hidden work below foreground image traffic.
+      for(const item of page.items.slice(0,FIRST_SCREEN_COVERS)){
+        if(!allowed())return;
+        const ticket=new AbortController(),cancel=()=>ticket.abort();
+        controller.signal.addEventListener('abort',cancel,{once:true});
+        try{await prepareCatalogCovers([item],page.publicationRevision??NO_REVISION,ticket.signal,IMAGE_READY_CAP_MS,false);}
+        finally{ticket.abort();controller.signal.removeEventListener('abort',cancel);}
+      }
+    };
+    const run=()=>{void prepare().catch(()=>{}).finally(()=>controller.abort());};
+    if(window.requestIdleCallback)idle=window.requestIdleCallback(run);
+    else timer=window.setTimeout(run,0);
+    const visibility=()=>{if(document.visibilityState==='hidden')stop();};
+    const events=['lakomics-pause','lakomics-power','lakomics-network','offline','lakomics-thumbnail-warm-toggle'];
+    events.forEach(event=>window.addEventListener(event,stop));
+    document.addEventListener('visibilitychange',visibility);
+    connection?.addEventListener?.('change',stop);
+    return()=>{stop();events.forEach(event=>window.removeEventListener(event,stop));document.removeEventListener('visibilitychange',visibility);connection?.removeEventListener?.('change',stop);};
+  },[active,prefetch,paused,privacy,page,key]);
+  useEffect(()=>{
     // A canceled/failed warm-up gets the ordinary user-initiated retry. A live
     // warm request keeps its owner through activation and is never duplicated.
     if(active&&warmListAttempted.current&&!listPending.current&&committed.current!==key)setRefresh(value=>value+1);
@@ -299,6 +336,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   function closeReader(){readerRequest.current?.abort();readerRequest.current=null;setReaderBusy(false);setReader(null);}
   useEffect(()=>{if(privacy){closeReader();readerPrefetch.current?.controller.abort();readerPrefetch.current=null;}},[privacy]);
   const loadReader=(force=false)=>{
+    if(!force)beginScreenTiming('catalog.reader','open');
     if(privacy||!active||paused||!selected||!page?.context||!page.publicationRevision)return;const owner=readerOwner;const cacheKey=readerCacheKey(selected,page.publicationRevision,filterKey);
     if(!force){const cached=lruGet(readerCache.current,cacheKey);if(cached){setReader(cached);setReaderError('');return;}}
     readerRequest.current?.abort();const controller=new AbortController();readerRequest.current=controller;setReaderBusy(true);setReaderError('');
@@ -471,6 +509,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   },[shownListKey,revision]);
   const scrubberSort=useMemo(()=>query.sort==='latest' ? {kind:'date' as const,values:items.map(item=>item.posted)} : {kind:'fallback' as const},[items,query.sort]);
 
+  useLayoutEffect(()=>{if(readerError)screenReady('catalog.reader',section.current,'error');});
   useLevelMotion(section,active?(selected?'detail':'list'):null,selected?1:0);
   // Search lives in the shared bar: the magnifier opens it, and it stays open while a query is set.
   const searching=searchOpen||!!draft||!!query.text;

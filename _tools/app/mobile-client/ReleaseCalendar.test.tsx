@@ -82,6 +82,7 @@ describe('ReleaseCalendar', () => {
     });
     render(<ReleaseCalendar embedded initialKind="game" onClose={vi.fn()} />);
     const recent = await screen.findByRole('region', {name: '지난 7일'});
+    expect(mocks.api.mock.calls.find(([path])=>path==='/v1/home/upcoming')?.[4]).toBe(true);
     expect(recent.classList.contains('is-recent')).toBe(true);
     expect(within(recent).queryAllByRole('listitem')).toHaveLength(0);
     fireEvent.click(within(recent).getByRole('button', {name: '펼치기'}));

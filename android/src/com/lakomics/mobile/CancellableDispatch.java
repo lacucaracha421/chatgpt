@@ -12,6 +12,8 @@ final class CancellableDispatch implements Runnable {
         void setListener(Runnable listener);
     }
 
+    interface Preparation { void run() throws Exception; }
+
     private final Cancellation cancellation;
     private final Runnable body;
     private final Consumer<String> cleanup;
@@ -51,5 +53,25 @@ final class CancellableDispatch implements Runnable {
             finish(canceled ? "canceled" : "rejected");
             if (!canceled) throw e;
         }
+    }
+
+    /** Prepare in FIFO order before taking a download slot; cancellation follows the current queue. */
+    void submitPrepared(ThreadPoolExecutor preparing, ThreadPoolExecutor executor,
+                        Preparation preparation, Consumer<Exception> failure) {
+        AtomicBoolean handedOff = new AtomicBoolean();
+        CancellableDispatch admission = new CancellableDispatch(cancellation, () -> {
+            try { preparation.run(); }
+            catch (Exception e) {
+                try { if (!cancellation.isCanceled()) failure.accept(e); }
+                finally { finish(cancellation.isCanceled() ? "canceled" : null); }
+                return;
+            }
+            // From here the download dispatch owns cleanup, including cancellation/rejection
+            // during submit. The preparation stage must not close a running worker's ticket.
+            handedOff.set(true);
+            try { submit(executor, true); }
+            catch (RejectedExecutionException e) { if (!cancellation.isCanceled()) failure.accept(e); }
+        }, status -> { if (!handedOff.get()) finish(status); });
+        admission.submit(preparing, true);
     }
 }

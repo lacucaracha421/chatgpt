@@ -129,6 +129,66 @@ it('defers for scrolling, even if the idle callback was already queued',async()=
   await time(AREA_PREWARM_IDLE_MS-1);expect(mocks.api).not.toHaveBeenCalled();
   await time(1);await idle();expect(first('catalog')).toHaveLength(1);
 });
+it('waits for Home viewport media tickets and image decode before hidden requests',async()=>{
+  render(<Shell/>);
+  const home=document.querySelector('[data-motion-view="home"]')!;
+  const placeholder=document.createElement('span');placeholder.className='home-cover-placeholder';home.append(placeholder);
+  placeholder.getBoundingClientRect=()=>({width:100,height:100,top:0,bottom:100,left:0,right:100} as DOMRect);
+  await warm();expect(mocks.api).not.toHaveBeenCalled();
+  placeholder.remove();
+  const image=document.createElement('img');image.src='https://example.invalid/home';home.append(image);
+  image.getBoundingClientRect=placeholder.getBoundingClientRect;
+  home.getBoundingClientRect=placeholder.getBoundingClientRect;
+  const decode=Promise.withResolvers<void>();image.decode=()=>decode.promise;
+  await time(AREA_PREWARM_IDLE_MS);await idle();expect(mocks.api).not.toHaveBeenCalled();
+  await act(async()=>decode.resolve());await time(AREA_PREWARM_IDLE_MS);await idle();
+  expect(first('catalog')).toHaveLength(1);
+});
+it('prepares at most twelve hidden Catalog covers once, with one ticket in flight',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string,...args:unknown[])=>path.startsWith('/v1/mobile-catalog/search?')
+    ?Promise.resolve({...catalog,items:Array.from({length:20},(_,index)=>({...catalog.items[0],providerWorkId:String(index)}))}):original(path,...args));
+  let running=0,peak=0;
+  mocks.native.mockImplementation(async(op:string)=>{
+    if(op==='status')return {battery:{charging:false,level:80,powerSave:false}};
+    running++;peak=Math.max(peak,running);await Promise.resolve();running--;
+    return {url:'https://app.lakomics.local/media-cache/cover',expires_in:300};
+  });
+  vi.stubGlobal('Image',class{src='';decode=()=>Promise.resolve();});
+  render(<Shell/>);await warm();
+  expect(mocks.native).not.toHaveBeenCalled();
+  await idle();await flush();
+  expect(mocks.native.mock.calls.filter(([op])=>op==='catalogImage')).toHaveLength(12);
+  expect(mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork')).toHaveLength(0);
+  expect(peak).toBe(1);expect(document.querySelector('img')).toBeNull();
+  await time(65_000);await idle();expect(mocks.native.mock.calls.filter(([op])=>op==='catalogImage')).toHaveLength(12);
+});
+it.each([{charging:false,level:49,powerSave:false},{charging:false,level:80,powerSave:true},undefined])('skips hidden covers when battery disallows warming: %j',async battery=>{
+  mocks.native.mockResolvedValue({battery});render(<Shell/>);await warm();await idle();await flush();
+  expect(mocks.native.mock.calls.filter(([op])=>op==='catalogImage')).toHaveLength(0);
+});
+it.each(['pause','metered','hidden'] as const)('cancels a hidden cover and stops the bounded pass on %s',async reason=>{
+  let pending:AbortSignal|undefined;
+  mocks.native.mockImplementation((op:string,_payload:unknown,signal:AbortSignal)=>{
+    if(op==='status')return Promise.resolve({battery:{charging:true,level:80,powerSave:false}});
+    pending=signal;return new Promise(()=>{});
+  });
+  render(<Shell/>);await warm();await idle();await flush();
+  expect(pending?.aborted).toBe(false);
+  if(reason==='pause')window.dispatchEvent(new Event('lakomics-pause'));
+  if(reason==='metered'){
+    Object.defineProperty(navigator,'connection',{value:{type:'cellular'}});
+    window.dispatchEvent(new CustomEvent('lakomics-network',{detail:{online:true,restored:false}}));
+  }
+  if(reason==='hidden'){
+    vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+  await flush();expect(pending?.aborted).toBe(true);
+  await time(1000);await idle();
+  expect(mocks.native.mock.calls.filter(([op])=>op==='catalogImage')).toHaveLength(1);
+  if(reason==='hidden')vi.restoreAllMocks();
+});
 it.each(['privacy','offline','cellular','saveData','busy','viewer','hidden'] as const)('does no warm-up while %s blocks it',async reason=>{
   if(reason==='privacy')localStorage.setItem('lakomics.mobile.privacyMode','1');
   if(reason==='offline')Object.defineProperty(navigator,'onLine',{value:false});

@@ -1,5 +1,7 @@
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {screenReady} from './perf';
+import {catalogPerfEnabled} from './catalogPerf';
+import {useCallback,useLayoutEffect,useEffect,useRef,useState} from 'react';
 import {ArrowLeftIcon,ArrowPathIcon,MagnifyingGlassMinusIcon} from '@heroicons/react/24/outline';
 import {Dialog,DialogDescription,IconButton,Button} from './ui';
 import {decodeImage} from './media';
@@ -27,7 +29,7 @@ function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,
   },[workId,manifestRevision,page.index,page.url,retry,attempt]);
   useEffect(()=>()=>onDispose(page.index),[page.index,onDispose]);
   const style=transform?{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}:undefined;
-  return <div className="catalog-reader-page" data-page={page.index}>
+  return <div className="catalog-reader-page" data-perf-image-pending={catalogPerfEnabled()&&!src&&!failed?"true":undefined} data-page={page.index}>
     {src?<img src={src} alt={`${page.index+1}페이지`} draggable={false} style={style} onError={()=>{setSrc('');setFailed(true);onFailure();}}/>:failed?<div className="catalog-reader-page-error"><span>페이지를 불러오지 못했습니다.</span><div><Button size="sm" variant="ghost" onClick={()=>setRetry(v=>v+1)}>다시 시도</Button><Button size="sm" variant="ghost" onClick={onRefresh}>주소 갱신</Button></div></div>:<div className="catalog-reader-page-loading"><BusyLabel busy>페이지 불러오는 중…</BusyLabel></div>}
   </div>;
 }
@@ -48,6 +50,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{man
   const pageDisposed=useCallback((index:number)=>setReady(old=>{if(!old[index])return old;const next={...old};delete next[index];return next;}),[]);
   const [bounds,setBounds]=useState({width:window.innerWidth,height:window.innerHeight});
   const [stageElement,setStageElement]=useState<HTMLDivElement|null>(null);
+  useLayoutEffect(()=>{if(stageElement)screenReady('catalog.reader',stageElement);});
   const landscape=bounds.width>bounds.height;
   const targetStart=landscape&&target>0?target-(target%2===0?1:0):target;
   const targetPages=manifest.pages.slice(targetStart,targetStart+(landscape&&targetStart>0?2:1));

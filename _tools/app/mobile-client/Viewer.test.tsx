@@ -1,6 +1,7 @@
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
+import {resetPerfEnabledForTests} from './perfEnabled';
 import {readFileSync} from 'node:fs';
 // Radix's dialog focus/escape machinery schedules work outside `fireEvent`, so the
 // environment must advertise `act` support for those updates to be flushed.
@@ -29,27 +30,29 @@ it.each([['분류','classification-editor-open'],['앨범','album-editor-open']]
   expect(backRef.current?.()).toBe(false);
 });
 afterEach(()=>{cleanup();delete window.LakomicsNative;vi.restoreAllMocks();});
+beforeEach(resetPerfEnabledForTests);
 // jsdom has no media playback; the viewer's own calls (resume, release) are observed instead.
 beforeEach(()=>{localStorage.clear();Object.defineProperty(window,'innerWidth',{configurable:true,value:800});Object.defineProperty(window,'innerHeight',{configurable:true,value:1280});vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});mocks.ticket.mockReset();mocks.decode.mockReset();mocks.thumbnail.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));mocks.thumbnail.mockImplementation(async(asset:Asset)=>({...asset,preview:`https://test.invalid/thumb-loaded-${asset.id}`}));});
 describe('progressive viewer',()=>{
   it('logs the original commit only after decode and observes prepared neighbour reuse',async()=>{
     const events:Record<string,unknown>[]=[];
-    window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn()};
+    window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn(),perfEnabled:()=>true};
     let finish!:()=>void;
     mocks.decode.mockImplementation((url:string)=>url.endsWith('a')?new Promise<void>(resolve=>{finish=resolve;}):Promise.resolve());
     const {rerender}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
-    await waitFor(()=>expect(events.some(p=>p.event==='native'&&p.id==='a')).toBe(true));
+    await waitFor(()=>expect(events.some(p=>p.event==='native')).toBe(true));
     expect(events.some(p=>p.event==='commit')).toBe(false);
     expect(screen.getByRole('img').getAttribute('src')).toBe(items[0].preview);
     await act(async()=>{finish();});
     await showOriginal('a');
-    await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.id==='a')).toBe(true));
+    await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.prepared===false)).toBe(true));
     expect(screen.getByRole('img').getAttribute('src')).toContain('original-a');
-    await waitFor(()=>expect(events.some(p=>p.event==='prefetch_finish'&&p.id==='b'&&p.status==='ok')).toBe(true));
+    await waitFor(()=>expect(events.some(p=>p.event==='prefetch_finish'&&p.status==='ok')).toBe(true));
     const requests=mocks.ticket.mock.calls.length;
     rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
     await showOriginal('b');
-    await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.id==='b'&&p.prepared===true&&p.source==='prepared')).toBe(true));
+    await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.prepared===true&&p.source==='prepared')).toBe(true));
+    expect(events.every(p=>!('id' in p))).toBe(true);
     expect(mocks.ticket).toHaveBeenCalledTimes(requests);
   });
   it('does not prefetch a neighbour whose decode would be very large',async()=>{
@@ -103,12 +106,12 @@ describe('progressive viewer',()=>{
   });
   it('logs cancellation without claiming a late decode committed',async()=>{
     const events:Record<string,unknown>[]=[];
-    window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn()};
+    window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn(),perfEnabled:()=>true};
     let finish!:()=>void;mocks.decode.mockImplementation(()=>new Promise<void>(resolve=>{finish=resolve;}));
     const {unmount}=render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     await waitFor(()=>expect(mocks.decode).toHaveBeenCalledOnce());
     unmount();await act(async()=>{finish();});
-    expect(events.filter(p=>p.event==='end')).toMatchObject([{id:'a',status:'canceled'}]);
+    expect(events.filter(p=>p.event==='end')).toMatchObject([{req:expect.any(String),status:'canceled'}]);
     expect(events.some(p=>p.event==='commit')).toBe(false);
   });
   it('cancels the native original request when leaving the viewer',async()=>{
@@ -163,7 +166,7 @@ describe('progressive viewer',()=>{
     const source=async()=>{await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')??'').toContain('original-v'));return document.querySelector('video')!;};
     it('renews once with a fresh ticket when metadata does not arrive, then shows the delay message',async()=>{
       const events:Record<string,unknown>[]=[];
-      window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn()};
+      window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn(),perfEnabled:()=>true};
       const media=await import('./media');
       render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
       const first=await source();fireEvent.loadStart(first);
@@ -172,7 +175,7 @@ describe('progressive viewer',()=>{
       await act(async()=>{vi.advanceTimersByTime(200);});
       await waitFor(()=>expect(mocks.ticket).toHaveBeenCalledTimes(2));
       expect(media.invalidateTicket).toHaveBeenCalledWith(expect.objectContaining({id:'v'}),'original');
-      await waitFor(()=>expect(events.some(p=>p.event==='video'&&p.media==='retry'&&p.id==='v')).toBe(true));
+      await waitFor(()=>expect(events.some(p=>p.event==='video'&&p.media==='retry')).toBe(true));
       expect(screen.queryByText(/영상 연결이 지연되고/)).toBeNull();
       // The stalled element is released: no src, network stopped.
       expect(first.hasAttribute('src')).toBe(false);expect(HTMLMediaElement.prototype.load).toHaveBeenCalled();

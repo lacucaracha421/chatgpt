@@ -71,6 +71,12 @@ def main():
             run(java_cmd, f'-Dvault.fixtures={root / "tests/fixtures/private-vault"}',
                 f'-Dnotes.fixtures={root.parent / "tests/fixtures/notes-v2"}',
                 '-cp', tests, f'com.lakomics.mobile.{name}Test')
+        run(javac, '-encoding', 'UTF-8', '-cp', tests, '-d', tests,
+            root / 'tests/PreparedDispatchTest.java', root / 'tests/BridgeRequestTest.java')
+        run(java_cmd, '-cp', tests, 'com.lakomics.mobile.PreparedDispatchTest')
+        # This host fixture extracts the Activity's actual admission code, without Android services.
+        subprocess.run([str(java_cmd), '-cp', str(tests), 'com.lakomics.mobile.BridgeRequestTest'],
+                       check=True, env=env, cwd=root.parent)
         # The Album and Classification replica checks need neither the Android runtime
         # nor an Android database: the sync engines and the store depend on the
         # platform-free JSON reader and on the storage seam, so they run on the plain

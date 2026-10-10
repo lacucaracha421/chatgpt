@@ -75,7 +75,10 @@ h1,h2,h3,p { margin:0; }
 .density-symbol { color:var(--color-muted); font-size:23px; line-height:1; }
 .density-0 { letter-spacing:3px; }.density-2 { transform:scaleX(.75); }
 .gallery-scroll { flex:1; min-height:140px; overflow:auto; padding:18px 16px 0; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--color-border) transparent; }
-.gallery-canvas { width:100%; position:relative; }
+/* Static empty tiles remain painted even when a fling outruns all mounted rows. */
+.gallery-canvas { width:100%; position:relative; background-color:var(--color-bg); background-image:repeating-linear-gradient(to bottom, transparent 0 var(--gallery-placeholder-height), var(--color-bg) var(--gallery-placeholder-height) var(--gallery-placeholder-pitch)), repeating-linear-gradient(to right, var(--color-surface) 0 var(--gallery-placeholder-width), var(--color-bg) var(--gallery-placeholder-width) var(--gallery-placeholder-column-pitch)); }
+.gallery-intro, .gallery-complete-tail { background:var(--color-bg); }
+.gallery-complete-tail { position:absolute; left:0; width:100%; }
 .gallery-justified-unit { position:absolute; inset:0 0 auto; width:100%; background:var(--color-bg); }
 .gallery-row { position:absolute; top:0; left:0; display:flex; gap:var(--mobile-row-gap); width:100%; }
 .gallery-row-segment { display:flex; flex:none; }

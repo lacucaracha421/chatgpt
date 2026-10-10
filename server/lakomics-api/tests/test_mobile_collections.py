@@ -89,6 +89,32 @@ class MobileCollectionsTests(unittest.TestCase):
     def listing(self, **params):
         return self.client.get("/v1/collections", headers=AUTH, params=params)
 
+    def test_work_detail_conditional_read_covers_body_and_requires_auth(self):
+        self.assertEqual(self.publish([work()]).status_code, 200)
+        path = "/v1/collections/work"
+        first = self.client.get(path, headers=AUTH)
+        self.assertEqual(first.status_code, 200)
+        etag = first.headers["etag"]
+        headers = {**AUTH, "If-None-Match": etag}
+        same = self.client.get(path, headers=headers)
+        self.assertEqual(same.status_code, 304)
+        self.assertEqual(same.content, b"")
+        self.assertEqual(same.headers["etag"], etag)
+        # A body change must be detected even without a publication/entity revision
+        # change (live enrichment, including date-dependent release status).
+        with api_app.get_db() as db:
+            payload = json.loads(db.execute("SELECT payload FROM mobile_collections WHERE id='work'").fetchone()[0])
+            payload["name"] = "Changed work"
+            db.execute("UPDATE mobile_collections SET payload=? WHERE id='work'", (json.dumps(payload),))
+            db.commit()
+        changed = self.client.get(path, headers=headers)
+        self.assertEqual(changed.status_code, 200)
+        self.assertNotEqual(changed.headers["etag"], etag)
+        self.assertEqual(changed.json()["revision"], first.json()["revision"])
+        self.assertEqual(changed.json()["item"]["name"], "Changed work")
+        unauthorized = {"If-None-Match": changed.headers["etag"]}
+        self.assertEqual(self.client.get(path, headers=unauthorized).status_code, 401)
+
     def with_art(self):
         item, media = work(), blob()
         item.update(selectedWorkArtworkId="cover", artworks=[{"id": "cover", "kind": "cover", "selected": True, "thumbnail": media, "original": media}], volumes=[{"id": "volume", "volumeNumber": 2, "editionIndex": 1, "displayLabel": "2권", "coverArtworkId": "cover"}])
@@ -465,6 +491,29 @@ class MobileCollectionsTests(unittest.TestCase):
     def publish_people(self, items, people, revision=None):
         return self.client.put("/v1/collections/replica", headers=AUTH, json={
             "version": 1, "baseRevision": revision, "collections": items, "people": people})
+
+    def test_person_detail_conditional_read_and_auth(self):
+        published = self.publish_people([work(type="av")], [self.person()])
+        self.assertEqual(published.status_code, 200)
+        path = "/v1/collections/people/person"
+        first = self.client.get(path, headers=AUTH)
+        self.assertEqual(first.status_code, 200)
+        etag = first.headers["etag"]
+        headers = {**AUTH, "If-None-Match": etag}
+        same = self.client.get(path, headers=headers)
+        self.assertEqual(same.status_code, 304)
+        self.assertEqual(same.content, b"")
+        update = self.publish_people([work(type="av")], [self.person(memo="Changed memo")], published.json()["revision"])
+        self.assertEqual(update.status_code, 200)
+        changed = self.client.get(path, headers=headers)
+        self.assertEqual(changed.status_code, 200)
+        self.assertNotEqual(changed.headers["etag"], etag)
+        self.assertEqual(changed.json()["person"]["memo"], "Changed memo")
+        for authorization in (None, "Bearer wrong"):
+            unauthorized = {"If-None-Match": changed.headers["etag"]}
+            if authorization:
+                unauthorized["Authorization"] = authorization
+            self.assertEqual(self.client.get(path, headers=unauthorized).status_code, 401)
 
     def test_status_advertises_replica_features(self):
         status = self.client.get("/v1/collections/status", headers=AUTH).json()

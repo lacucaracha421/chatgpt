@@ -144,7 +144,7 @@ it('cold start on the shelf with a saturated native media lane: every first-scre
 it('cold start on the shelf with published spines: covers first, then only the visible cases\' spines', async()=>{
   // An upgraded server publishes `spineArtworkId`: each shelf case adds one spine ticket, but only
   // after its own front is shown and only while it is near the viewport, so the first-screen
-  // covers keep the four-wide queue to themselves and off-screen cases ask for nothing.
+  // covers keep the eight-wide queue to themselves and off-screen cases ask for nothing.
   const spined=works.map((work,i)=>({...work,spineArtworkId:'spine',artworkVersions:{...work.artworkVersions,spine:{thumbnail:digest(i+5000)}}}));
   const base=mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation(async(path:string)=>path.startsWith('/v1/collections?')&&!path.includes('showcase=true')?{...page,items:spined}:base(path));

@@ -1,6 +1,8 @@
+import {catalogPerfEnabled} from './catalogPerf';
+import {screenReady} from './perf';
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon} from '@heroicons/react/24/outline';
-import {useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
+import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
 import {TopBar} from './TopBar';
 import {Badge, Button, DDay, EmptyState, SegmentedControl, SectionLabel, Skeleton} from './ui';
 import {api, ApiError, errorText, native} from './transport';
@@ -71,7 +73,7 @@ function HomeCoverImage({cover, alt, privacy}: {cover: Cover; alt: string; priva
     return () => controller.abort();
   }, [cover?.url, cover?.sha256, privacy]);
   if (privacy) return <span className="release-calendar-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" />;
-  return url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="release-calendar-cover-placeholder" aria-label={`${alt} 표지 준비 중`} />;
+  return url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span data-perf-image-pending={catalogPerfEnabled()&&!!(cover?.sha256||cover?.url)?"true":undefined} className="release-calendar-cover-placeholder" aria-label={`${alt} 표지 준비 중`} />;
 }
 function EmptyCalendar({wishlistOnly}: {wishlistOnly: boolean}) {
   const Icon = wishlistOnly ? BookmarkOutlineIcon : CalendarDaysIcon;
@@ -187,7 +189,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
     const controller = new AbortController();
     setState('loading');
     setError('');
-    void flushUpcomingWishlist(controller.signal).then(() => api<unknown>('/v1/home/upcoming', controller.signal)).then(async value => {
+    void flushUpcomingWishlist(controller.signal).then(() => api<unknown>('/v1/home/upcoming', controller.signal, undefined, 'GET', true)).then(async value => {
       if (controller.signal.aborted) return;
       const next = normalizeReleaseCalendarReply(value);
       const view = latest.current;
@@ -282,6 +284,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
   useEffect(() => () => cancelSegmentSwap(swapOwner), [swapOwner]);
   // The first covers rise in like the gallery's first batch.
   useFirstAppearance(scroller, calendarEntries.length, state === 'ready', 'release-calendar', '.release-calendar-card');
+  useLayoutEffect(()=>{if(state!=='loading')screenReady('releaseCalendar',scroller.current,state==='error'?'error':'ok');});
   const unreadTotal = reply?.wishlist.reduce((sum, entry) => sum + entry.unread.length, 0) ?? 0;
 
   const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length.toLocaleString('ko-KR') : undefined} />;

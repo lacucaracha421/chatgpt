@@ -120,7 +120,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     if (!active || person?.id === personId && !stale) return;
     const controller = new AbortController(), readAt = Date.now(), again = stale, connection = outboxConnection();
     // A re-read keeps the shown person on a failure; only a definite 404 removes it.
-    void api<unknown>(personPath(personId), controller.signal).then(reply => personReply(reply, personId, connection),
+    void api<unknown>(personPath(personId), controller.signal, undefined, 'GET', true).then(reply => personReply(reply, personId, connection),
       reason => again && !(reason instanceof ApiError && reason.status === 404) ? undefined : null).then(value => {
       if (controller.signal.aborted || value === undefined) return;
       setPerson({id: personId, person: value, readAt});
@@ -136,7 +136,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   useEffect(() => {
     if (!active || !identity || authorityRead?.id === personId && !authorityStale) return;
     const controller = new AbortController(), readAt = Date.now(), connection = outboxConnection();
-    void api<unknown>(`${personPath(personId)}?authority=1`, controller.signal).then(reply => personReply(reply, personId, connection)).then(value => {
+    void api<unknown>(`${personPath(personId)}?authority=1`, controller.signal, undefined, 'GET', true).then(reply => personReply(reply, personId, connection)).then(value => {
       if (!controller.signal.aborted) setAuthorityPerson({id: personId, person: value, readAt, scope: authorityScope});
     }, () => {});
     return () => controller.abort();

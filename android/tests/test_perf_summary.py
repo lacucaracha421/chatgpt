@@ -1,4 +1,5 @@
 """Offline parser checks; run with python3 -m unittest discover -s android/tests -p test_perf_summary.py."""
+from contextlib import contextmanager
 import importlib.util
 import io
 from pathlib import Path
@@ -22,7 +23,74 @@ I/LakomicsPerf(123): js event=end id=B req=S-4 kind=image prepared=0 source=nati
 '''
 
 
+@contextmanager
+def log_file(data):
+    # A file in the OS temp root also works in restricted Windows hosts where private temp
+    # directories are inaccessible. Close before launching the reader (Windows sharing rules).
+    with tempfile.NamedTemporaryFile(prefix='lakomics-perf-', suffix='.log', delete=False) as source:
+        source.write(data)
+        path = Path(source.name)
+    try:
+        yield path
+    finally:
+        path.unlink()
+
+
 class PerfSummaryTest(unittest.TestCase):
+    def test_byte_totals_include_failed_and_canceled_operations_separately(self):
+        output = io.StringIO()
+        perf.report([
+            'media status=ok cache=miss bytes=100 totalMs=1',
+            'media status=ok cache=miss bytes=250 totalMs=2',
+            'media status=error cache=miss bytes=30 totalMs=9',
+            'media status=canceled cache=miss bytes=20 totalMs=9',
+            'startupRequest route=albums.commands lane=bridge status=ok runMs=1',
+            'startupHttp route=albums.commands lane=bridge status=finished runMs=1',
+            'startupHttp route=albums.commands lane=bridge status=finished runMs=2',
+        ], output)
+        text = output.getvalue()
+        self.assertIn('total totals/operations media status=ok bytes=350', text)
+        self.assertIn('total totals/operations media status=error bytes=30', text)
+        self.assertIn('total totals/operations media status=canceled bytes=20', text)
+        self.assertIn('total counts/startup operations route=albums.commands status=ok count=1', text)
+        self.assertIn('total counts/startup requests route=albums.commands status=finished count=2', text)
+
+    def test_screen_trigger_percentiles_missing_images_and_tap(self):
+        output = io.StringIO()
+        perf.report([
+            'js screen=album trigger=open readyMs=10 imagesReadyMs=30 status=ok',
+            'js screen=album trigger=open readyMs=20 imagesReadyMs=50 status=ok',
+            'js screen=album trigger=back readyMs=5 imagesReadyMs=-1 status=incomplete',
+            'js screen=folder trigger=open readyMs=-1 imagesReadyMs=-1 status=canceled',
+            'js event=commit kind=image source=prepared status=ok commitMs=4 tapToDisplayedMs=14',
+        ], output)
+        self.assertIn('js/screen=album trigger=open status=ok | readyMs | 2 | 15.000 | 20.000 | 20.000', output.getvalue())
+        groups, _ = perf.summarize(['js screen=album trigger=back readyMs=5 imagesReadyMs=-1 status=incomplete'])
+        self.assertNotIn('imagesReadyMs', groups['js/screen=album trigger=back status=incomplete'])
+        self.assertIn('tapToDisplayedMs | 1 | 14.000', output.getvalue())
+
+    def test_session_http_uses_latest_snapshot_not_sum(self):
+        groups, _ = perf.summarize([
+            'sessionHttp route=download sessionMs=60000 requests=3 bytesIn=100 bytesOut=0 failed=1 failedBytesIn=30 canceled=0 canceledBytesIn=0',
+            'sessionHttp route=download sessionMs=120000 requests=5 bytesIn=350 bytesOut=0 finished=3 failed=1 failedBytesIn=30 canceled=1 canceledBytesIn=20 pending=0',
+            'sessionHttp route=albums.commands sessionMs=120000 requests=1 bytesIn=10 bytesOut=40 finished=1 failed=0 canceled=0 pending=0',
+        ])
+        self.assertEqual(groups['session/http route=download']['requests'], [5])
+        self.assertEqual(groups['session/http route=download']['bytesIn'], [350])
+        self.assertEqual(groups['session/http route=download']['failedBytesIn'], [30])
+        self.assertEqual(groups['session/http route=download']['canceledBytesIn'], [20])
+        self.assertEqual(groups['session/http route=albums.commands']['bytesOut'], [40])
+
+    def test_windows_encodings_for_files_and_stdin(self):
+        expected = subprocess.run([sys.executable, str(SCRIPT)], input=SAMPLE.encode('utf-8'), capture_output=True, check=True).stdout
+        for encoding in ('utf-8-sig', 'utf-16', 'utf-16-le', 'utf-16-be'):
+            with self.subTest(encoding=encoding), log_file(SAMPLE.encode(encoding)) as path:
+                data = SAMPLE.encode(encoding)
+                file = subprocess.run([sys.executable, str(SCRIPT), str(path)], capture_output=True, check=True)
+                stdin = subprocess.run([sys.executable, str(SCRIPT)], input=data, capture_output=True, check=True)
+                self.assertEqual(file.stdout, expected)
+                self.assertEqual(stdin.stdout, expected)
+
     def test_cache_correlation_and_non_overlapping_js_phases(self):
         groups, excluded = perf.summarize(SAMPLE.splitlines())
         self.assertEqual(groups['native/media cache=miss']['batchHttpMs'], [8])
@@ -32,6 +100,14 @@ class PerfSummaryTest(unittest.TestCase):
         self.assertEqual(groups['viewer/image cache=hit']['openToCommitMs'], [12])
         self.assertEqual(groups['viewer/image cache=prepared']['openToCommitMs'], [1])
         self.assertEqual(excluded, {'media/canceled': 1, 'viewer/canceled': 1})
+
+    def test_entity_free_request_correlation(self):
+        groups, _ = perf.summarize([
+            'media req=MEASUREMENT status=ok cache=miss bytes=100 totalMs=70',
+            'js event=commit req=MEASUREMENT kind=image source=native status=ok nativeMs=72 decodeMs=85 commitMs=90 tapToDisplayedMs=100',
+        ])
+        self.assertEqual(groups['viewer/image cache=miss']['openToCommitMs'], [90])
+        self.assertEqual(groups['viewer/image cache=miss']['tapToDisplayedMs'], [100])
 
     def test_retries_unmatched_memory_prefetch_and_malformed_numbers(self):
         groups, _ = perf.summarize([
@@ -72,9 +148,7 @@ class PerfSummaryTest(unittest.TestCase):
 
     def test_cli_file_and_stdin(self):
         stdin = subprocess.run([sys.executable, str(SCRIPT)], input=SAMPLE, text=True, capture_output=True, check=True)
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'logcat.txt'
-            path.write_text(SAMPLE)
+        with log_file(SAMPLE.encode('utf-8')) as path:
             file = subprocess.run([sys.executable, str(SCRIPT), str(path)], text=True, capture_output=True, check=True)
         self.assertEqual(stdin.stdout, file.stdout)
         self.assertIn('viewer/image cache=miss | openToCommitMs | 1 | 90.000 | 90.000 | 90.000', file.stdout)

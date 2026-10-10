@@ -39,6 +39,41 @@ const bookcaseLabels=()=>within(screen.getByRole('group',{name:'권별 책장'})
 beforeEach(()=>{localStorage.clear();for(const kind of ['game','manga','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));resetReleaseStore();resetMangaShelfDetails();mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
+it('shows a cached work on immediate reopen while conditionally revalidating',async()=>{
+  const props={active:true,paused:false,backRef:{current:null as (()=>boolean)|null}};
+  const next=Promise.withResolvers<{revision:string;item:CollectionDetail}>();
+  const refreshed=Promise.withResolvers<{revision:string;item:CollectionDetail}>();
+  let reads=0;
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/status'))return {revision:'r1'};
+    if(path.startsWith('/v1/collections?'))return path.includes('showcase=true')?{...page,items:[]}:page;
+    if(path==='/v1/collections/manga-1')return ++reads===1?{revision:'r1',item}:reads===2?next.promise:refreshed.promise;
+    return {entries:[],wishlist:[]};
+  });
+  render(<Collections {...props}/>);
+  fireEvent.click(await screen.findByText(item.name));
+  await screen.findByRole('heading',{level:1,name:item.name});
+  await act(async()=>{props.backRef.current?.();});
+  fireEvent.click(screen.getByText(item.name));
+  await act(async()=>{});
+  // The cached destination exists immediately; the retained shelf still owns
+  // the ordinary two-frame area transition while the network remains pending.
+  expect(within(detailPane()).getByText(item.name,{selector:'h1'})).toBeTruthy();
+  expect(reads).toBe(2);
+  expect(mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/manga-1').every(call=>call[4]===true)).toBe(true);
+  expect(mocks.api.mock.calls.find(([path])=>path==='/v1/home/upcoming')?.[4]).toBe(true);
+  await screen.findByRole('heading',{level:1,name:item.name});
+  await act(async()=>next.resolve({revision:'r1',item:{...item,name:'Updated detail'}}));
+  expect(screen.getByRole('heading',{level:1,name:'Updated detail'})).toBeTruthy();
+  await act(async()=>{props.backRef.current?.();});
+  pull(list());await act(async()=>{});
+  fireEvent.click(screen.getByText(item.name));
+  expect(reads).toBe(3);
+  expect(detailPane().getAttribute('aria-busy')).toBe('true');
+  await act(async()=>refreshed.resolve({revision:'r1',item}));
+  await screen.findByRole('heading',{level:1,name:item.name});
+});
+
 it('shows the server-wide manga review count before later pages and keeps it through filtering',async()=>{
   const laterPage=new Promise<CollectionPage>(()=>{});
   mocks.api.mockImplementation(async(path:string)=>{

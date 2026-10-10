@@ -1,9 +1,9 @@
 import {viewportImages, viewportImageDecoded} from '../src/shared/motion/viewportImages';
+import {perfEnabled as enabled} from './perfEnabled';
 
 type Milestone = 'firstReactRenderMs'|'homeReadyMs'|'viewportImagesReadyMs'|'splashLeavingMs'|'splashEndMs';
 type Route = {name:string;firstStartMs:number;firstEndMs:number;lastEndMs:number;issued:number;cancelled:number;reissued:number;pending:number};
 let state: {marks:Partial<Record<Milestone,number>>;routes:Map<string,Route>;cancelledKeys:Set<string>;done:boolean}|undefined;
-const enabled=()=>{try{return window.LakomicsNative?.perfEnabled?.()===true;}catch{return false;}};
 const send=(payload:unknown)=>{try{window.LakomicsNative?.request('','perfLog',JSON.stringify(payload));}catch{/* Measurement cannot fail startup. */}};
 
 /** Fixed route vocabulary. Queries are never logged; only the Collection type enum is classified. */
@@ -11,6 +11,10 @@ export function startupRoute(operation:string, payload:Record<string,unknown>) {
   if(operation!=='api')return /^(status|notesState|notesSync|syncSignals|albumTree|albumStatus|pickerStatus|exchangeState|exchangeDevices|cacheStatus|thumbnail|media|homeCover|collectionArtwork|catalogImage|mediaTickets|thumbnailsCached|collectionArtworksCached)$/.test(operation)?operation:'other';
   const path=typeof payload.path==='string'?payload.path:'';
   const [plain,query]=path.split('?',2);
+  const params=new URLSearchParams(query);
+  if(plain==='/v1/library/assets')return params.get('subtree')==='1'?'library.assets.subtree':(params.has('tag')||params.has('artist'))?'library.assets.search':'library.assets';
+  if(/^\/v1\/(library\/search\/description|albums\/(commands|baseline|changes)|classifications\/authority\/(commands|baseline|changes)|home\/upcoming\/wishlist|collections\/bindings\/(status|requests|search\/(kakao|mangadex)))$/.test(plain))return plain.slice(4).replace(/\//g,'.');
+  if(/^\/v1\/collections\/bindings\/requests\/[^/]+(?:\/cancel)?$/.test(plain))return 'collections.bindings.requests';
   if(plain==='/v1/collections') {
     const type=new URLSearchParams(query).get('type');
     return type==='manga'||type==='game'||type==='movie'?`collections.${type}`:'collections';

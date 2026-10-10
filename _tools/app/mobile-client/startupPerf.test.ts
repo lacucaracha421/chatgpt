@@ -1,9 +1,11 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {finishStartupTiming,observeStartupSplash,resetStartupTimingForTests,startupMark,startupRequest,startupRoute} from './startupPerf';
 import {native} from './transport';
+import {resetPerfEnabledForTests} from './perfEnabled';
 
 let now:number,request:ReturnType<typeof vi.fn>;
 beforeEach(()=>{
+  resetPerfEnabledForTests();
   now=20;vi.spyOn(performance,'now').mockImplementation(()=>now);
   request=vi.fn();window.LakomicsNative={request,cancel:vi.fn(),perfEnabled:()=>true};
   resetStartupTimingForTests();
@@ -47,6 +49,28 @@ it('never logs dynamic route segments, query strings or arbitrary operation name
   expect(startupRoute('api',{path:'/v1/collections/private-title?token=secret'})).toBe('collections.detail');
   expect(startupRoute('api',{path:'/v1/collections?type=private-title'})).toBe('collections');
   expect(startupRoute('private-title',{})).toBe('other');
+});
+it.each([
+  ['/v1/albums/commands','albums.commands'],
+  ['/v1/albums/baseline?after=private','albums.baseline'],
+  ['/v1/albums/changes','albums.changes'],
+  ['/v1/classifications/authority/commands','classifications.authority.commands'],
+  ['/v1/classifications/authority/baseline','classifications.authority.baseline'],
+  ['/v1/classifications/authority/changes','classifications.authority.changes'],
+  ['/v1/home/upcoming/wishlist','home.upcoming.wishlist'],
+  ['/v1/collections/bindings/status','collections.bindings.status'],
+  ['/v1/collections/bindings/search/kakao?query=private','collections.bindings.search.kakao'],
+  ['/v1/collections/bindings/search/mangadex?query=private','collections.bindings.search.mangadex'],
+  ['/v1/collections/bindings/requests?collectionId=private','collections.bindings.requests'],
+  ['/v1/collections/bindings/requests/private/cancel','collections.bindings.requests'],
+  ['/v1/library/assets?subtree=1&classification_id=private','library.assets.subtree'],
+  ['/v1/library/assets?tag=private','library.assets.search'],
+  ['/v1/library/assets?artist=private','library.assets.search'],
+  ['/v1/library/assets?classification_id=private','library.assets'],
+  ['/v1/library/search/description?q=private','library.search.description'],
+  ['/v1/collections/bindings/search/private?query=private','collections.detail'],
+])('classifies %s without retaining any query or identity',(path,name)=>{
+  expect(startupRoute('api',{path})).toBe(name);
 });
 it('keeps pending finishes visible after the summary and does not confuse different media reads',()=>{
   const first=startupRequest('thumbnail',{assetId:'private-first',revision:'r1'});

@@ -1,6 +1,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {catalogImageTicket,type CatalogImageRequest} from './catalogMedia';
 import {shelfForegroundBusy} from './shelfWarmActivity';
+import {resetPerfEnabledForTests} from './perfEnabled';
 const mocks=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mocks.native}));
 const request:CatalogImageRequest={workId:'42',revision:'a'.repeat(64),kind:'cover',index:0,url:'https://ehgt.org/cover.jpg'};
@@ -11,6 +12,7 @@ function load(id:string,visible=()=>true){
   void result.catch(()=>{});return result;
 }
 beforeEach(()=>{
+  resetPerfEnabledForTests();
   localStorage.clear();controllers=[];replies=[];mocks.native.mockReset();
   mocks.native.mockImplementation(()=>{const reply=Promise.withResolvers<{url:string}>();replies.push(reply);return reply.promise;});
   delete window.LakomicsNative;
@@ -54,6 +56,8 @@ it('passes JS queue time only when the native perf switch is on',async()=>{
   now=260;replies[0].resolve({url:'cached'});await requests[0];
   expect(mocks.native.mock.calls[6][1].jsQueueMs).toBe(250);
   delete window.LakomicsNative;
+  // A disabled bridge represents a new page; the current page keeps its memoized flag.
+  resetPerfEnabledForTests();
   replies[1].resolve({url:'cached'});await requests[1];
   load('8');expect(mocks.native.mock.calls[7][1].perfId).toBeUndefined();
 });
