@@ -1842,14 +1842,14 @@ class ClientCreateRenameTests(ClassificationAuthorityFixture):
 
     def create(self, classification_id, name="새 폴더", kind="tag", parent=ROOT,
                headers=None, operation_id=R1):
-        return self.client.put(COMMANDS, headers=headers or self.auth, json={
+        return self.client.put(COMMANDS, headers=self.auth if headers is None else headers, json={
             "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
             "operationId": operation_id, "commandType": classification_authority.CREATE,
             "classificationId": classification_id, "kind": kind, "name": name,
             "parentId": parent, "iconKey": None, "colorKey": None})
 
     def rename(self, classification_id, name, expected=1, headers=None, operation_id=R2):
-        return self.client.put(COMMANDS, headers=headers or self.auth, json={
+        return self.client.put(COMMANDS, headers=self.auth if headers is None else headers, json={
             "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
             "operationId": operation_id, "commandType": classification_authority.RENAME,
             "classificationId": classification_id, "name": name,

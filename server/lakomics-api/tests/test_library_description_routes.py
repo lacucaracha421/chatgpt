@@ -20,7 +20,7 @@ class DescriptionRouteTests(unittest.TestCase):
         self.ids = list(self.assets)
 
     def put(self, body, headers=None):
-        return self.client.put(description.PREFIX, headers=headers or self.publisher, json=body)
+        return self.client.put(description.PREFIX, headers=self.publisher if headers is None else headers, json=body)
 
     def get(self, **params):
         return self.client.get(description.SEARCH, headers=self.client_auth, params=params)

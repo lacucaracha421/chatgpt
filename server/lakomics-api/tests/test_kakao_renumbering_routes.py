@@ -41,11 +41,11 @@ class KakaoRenumberingRouteTests(unittest.TestCase):
             volumeId="edition-31", volumeNumber=31, editionIndex=1, sortOrder=99,
             displayLabel="special", coverArtworkId="cover", sourceProvider="mangadex",
             sourceCoverId="special-cover", deleted=False, expectedRevision=0))
-        fixture.ok(fixture.command("setOwnershipTracking", workId="a", editionIndex=0,
+        fixture.ok(fixture.command("setOwnershipTracking", headers=fixture.publisher, workId="a", editionIndex=0,
             count=31, expectedCount=None, expectedRevision=None))
-        fixture.ok(fixture.command("setVolumeOwnership", workId="a", volumeNumber=31,
+        fixture.ok(fixture.command("setVolumeOwnership", headers=fixture.publisher, workId="a", volumeNumber=31,
             editionIndex=1, physical=True, digital=True, expectedRevision=0))
-        fixture.ok(fixture.command("setReleaseSubscription", workId="a", enabled=True,
+        fixture.ok(fixture.command("setReleaseSubscription", headers=fixture.publisher, workId="a", enabled=True,
             expectedEnabled=False, expectedRevision=None))
         before = self.rows()
         additions = [dict(initial[0], itemId="new:32", volumeNumber=32, title="던전밥 32")] if new else []
