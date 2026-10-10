@@ -112,6 +112,8 @@ const GALLERY_LONG_PRESS_MS = 450;
 const GALLERY_LONG_PRESS_MOVE_PX = 10;
 const GALLERY_TILE_GAP = 10;
 const GALLERY_ROW_GAP = GALLERY_TILE_GAP;
+/** A typical tile is about three-quarters as wide as it is tall; the static placeholder pattern uses it for its column count. */
+const GALLERY_PLACEHOLDER_ASPECT = .75;
 
 type GalleryRowItem = {asset: Asset; width: number; index: number; globalIndex?:number};
 
@@ -296,7 +298,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     pagedExtent.current.height=Math.max(pagedExtent.current.height,viewportTop-introHeight+viewportHeight);
   const canvasHeight=Math.max(reportedHeight,sparse?0:pagedExtent.current.height);
   const target=rowHeight(density,width);
-  const columns=Math.max(1,Math.floor((width+GALLERY_TILE_GAP)/(target+GALLERY_TILE_GAP)));
+  const columns=Math.max(1,Math.round((width+GALLERY_TILE_GAP)/(target*GALLERY_PLACEHOLDER_ASPECT+GALLERY_TILE_GAP)));
   const tileWidth=(width-GALLERY_TILE_GAP*(columns-1))/columns;
   // The background exists even when momentum moves beyond every mounted virtual row.
   // No offset-dependent placeholder DOM or scroll state is needed to paint it.

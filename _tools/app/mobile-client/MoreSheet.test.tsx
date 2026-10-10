@@ -1,6 +1,8 @@
 import {cleanup, fireEvent, render, screen, within} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
 import {MoreButton, MoreSheet, type MoreOptions} from './MoreSheet';
+import {beginScreenTiming, cancelScreenTiming} from './perf';
+import {resetPerfEnabledForTests} from './perfEnabled';
 
 afterEach(cleanup);
 function options(overrides: Partial<MoreOptions> = {}): MoreOptions {
@@ -31,4 +33,18 @@ it('uses the accessible More label and a review-only capped corner count', () =>
   fireEvent.click(screen.getByRole('button',{name:'더보기'}));expect(open).toHaveBeenCalledOnce();
   expect(view.container.querySelector('.header-badge')?.textContent).toBe('99+');
   view.rerender(<MoreButton count={0} onOpen={open}/>);expect(view.container.querySelector('.header-badge')).toBeNull();
+});
+it('reports More ready once its portal content is shown, not canceled', () => {
+  resetPerfEnabledForTests(); vi.useFakeTimers();
+  const request = vi.fn(); window.LakomicsNative = {request, cancel: vi.fn(), perfEnabled: () => true};
+  try {
+    beginScreenTiming('more', 'open');
+    render(<MoreSheet {...options()} onClose={vi.fn()}/>);
+    vi.advanceTimersByTime(32);
+    const lines = request.mock.calls.map(call => JSON.parse(call[2]));
+    expect(lines).toEqual([expect.objectContaining({event: 'screen', screen: 'more', trigger: 'open', status: 'ok'})]);
+    expect(lines[0].readyMs).toBeGreaterThanOrEqual(0);
+  } finally {
+    cancelScreenTiming(); vi.clearAllTimers(); vi.useRealTimers(); delete window.LakomicsNative; resetPerfEnabledForTests();
+  }
 });

@@ -46,7 +46,7 @@ it('observes the existing splash leaving and removal without ending it',async()=
 it('never logs dynamic route segments, query strings or arbitrary operation names',()=>{
   expect(startupRoute('api',{path:'/v1/library/assets?token=secret'})).toBe('library.assets');
   expect(startupRoute('api',{path:'/v1/home/covers/private-name/media-ticket?token=secret'})).toBe('home.coverTicket');
-  expect(startupRoute('api',{path:'/v1/collections/private-title?token=secret'})).toBe('collections.detail');
+  expect(startupRoute('api',{path:'/v1/collections/private-title?token=secret'})).toBe('collections.work');
   expect(startupRoute('api',{path:'/v1/collections?type=private-title'})).toBe('collections');
   expect(startupRoute('private-title',{})).toBe('other');
 });
@@ -69,6 +69,18 @@ it.each([
   ['/v1/library/assets?classification_id=private','library.assets'],
   ['/v1/library/search/description?q=private','library.search.description'],
   ['/v1/collections/bindings/search/private?query=private','collections.detail'],
+  ['/v1/collections/private-id?token=private','collections.work'],
+  ['/v1/collections/people/private-id','collections.people'],
+  ['/v1/collections/private-id/artworks/private-art/media-ticket','collections.artworkTicket'],
+  ['/v1/collections/authority/status','collections.authority.status'],
+  ['/v1/collections/authority/baseline?after=private','collections.authority.baseline'],
+  ['/v1/collections/authority/changes?after=private','collections.authority.changes'],
+  ['/v1/collections/authority/trash','collections.authority.trash'],
+  ['/v1/collections/authority/commands','collections.authority.commands'],
+  ['/v1/collections/personal-edits','collections.personal-edits'],
+  ['/v1/collections/releases','collections.releases'],
+  ['/v1/collections/releases/acknowledge','collections.releases.acknowledge'],
+  ['/v1/collections/status','collections.status'],
 ])('classifies %s without retaining any query or identity',(path,name)=>{
   expect(startupRoute('api',{path})).toBe(name);
 });

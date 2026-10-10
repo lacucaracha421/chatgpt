@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { invoke } from "@tauri-apps/api/core";
 import { beginNativePhase, nativePerfEnabled } from "./nativePerf";
-import { flushPcPerf, initPcPerfLog, pcFolderReady, pcFolderScope, pcHomeReady, pcNavigation, pcStartupMark, pcStartupRead, pcTabShown, resetPcPerfForTests } from "./pcPerfLog";
+import { flushPcPerf, initPcPerfLog, pcFolderReady, pcFolderScope, pcHomeReady, pcNavigation, pcStartupMark, pcStartupRead, pcTabShown, pcViewerClosed, pcViewerOpened, resetPcPerfForTests } from "./pcPerfLog";
 
 let observed: PerformanceObserverCallback;
 let frames: Map<number, FrameRequestCallback>;
@@ -171,4 +171,85 @@ it("IPC and observer failures do not escape", async () => {
   vi.stubGlobal("PerformanceObserver", class { constructor() { throw new Error("unavailable"); } });
   await expect(init(ipc(true))).resolves.toBeUndefined();
   expect(() => pcNavigation("home", "assets")).not.toThrow();
+});
+const rect = { width: 40, height: 40, top: 0, bottom: 40, left: 0, right: 40, x: 0, y: 0, toJSON() {} };
+const interactions = (send: ReturnType<typeof ipc>, name: string) => rows(send).filter(row => row.event === "interaction" && row.name === name);
+it("viewer open runs from the tile click to the thumbnail, the decoded image and the painted image", async () => {
+  const send = ipc(true); await init(send);
+  const tile = document.createElement("div"); tile.dataset.assetId = "private-id"; document.body.append(tile);
+  tile.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  vi.advanceTimersByTime(40);
+  pcViewerOpened();
+  const preview = document.createElement("img"); preview.dataset.viewerZoomPreview = "true"; document.body.append(preview);
+  const request = beginNativePhase("viewer.request")!;
+  request.afterPaint("mounted-paint"); paint();
+  vi.advanceTimersByTime(60);
+  beginNativePhase("viewer.decode")!.mark("done");
+  vi.advanceTimersByTime(30);
+  request.mark("visible"); flushPcPerf();
+  expect(interactions(send, "viewer.open").map(row => [row.label, row.status, row.durationMs])).toEqual([
+    ["first-visible", "ok", 40], ["full-res-decoded", "ok", 100], ["full-res-visible", "ok", 130],
+  ]);
+  expect(JSON.stringify(rows(send))).not.toContain("private-id");
+});
+it("viewer open without a zoom preview counts the full image as the first picture, and closing early cancels the rest", async () => {
+  const send = ipc(true); await init(send);
+  pcViewerOpened();
+  beginNativePhase("viewer.request")!.afterPaint("mounted-paint"); paint();
+  expect(interactions(send, "viewer.open")).toHaveLength(0);
+  pcViewerClosed(); flushPcPerf();
+  expect(interactions(send, "viewer.open").map(row => [row.label, row.status])).toEqual([
+    ["first-visible", "cancelled"], ["full-res-decoded", "cancelled"], ["full-res-visible", "cancelled"],
+  ]);
+  pcViewerOpened();
+  const request = beginNativePhase("viewer.request")!;
+  request.mark("visible"); flushPcPerf();
+  expect(interactions(send, "viewer.open").slice(3).map(row => [row.label, row.status])).toEqual([["first-visible", "ok"], ["full-res-visible", "ok"]]);
+});
+it("disabled logging adds no intent listeners and viewer hooks do nothing", async () => {
+  const add = vi.spyOn(document, "addEventListener");
+  const send = ipc(false); await init(send);
+  pcViewerOpened(); pcViewerClosed();
+  expect(add).not.toHaveBeenCalledWith("dblclick", expect.anything(), true);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+it("opening a work inside Collections ends when the work screen is shown, and is cancelled by leaving", async () => {
+  const send = ipc(true); await init(send);
+  pcNavigation("collections", "collections", undefined, undefined, false, true);
+  paint(); flushPcPerf();
+  expect(interactions(send, "collections.work")).toHaveLength(0);
+  pcTabShown("collection-work"); paint(); flushPcPerf();
+  expect(interactions(send, "collections.work")).toMatchObject([{ label: "open", status: "ok" }]);
+  pcNavigation("collections", "collections", undefined, undefined, false, true);
+  pcNavigation("collections", "home"); flushPcPerf();
+  expect(interactions(send, "collections.work").map(row => row.status)).toEqual(["ok", "cancelled"]);
+});
+it("warm Collections re-entry completes from covers that are already decoded", async () => {
+  const send = ipc(true); await init(send);
+  const host = document.createElement("div"); host.dataset.motionView = "collections";
+  const cover = document.createElement("div"); cover.className = "collection-card__cover";
+  const image = document.createElement("img"); image.src = "https://private.example/cover.jpg";
+  cover.append(image); host.append(cover); document.body.append(host);
+  vi.spyOn(host, "getBoundingClientRect").mockReturnValue(rect); vi.spyOn(image, "getBoundingClientRect").mockReturnValue(rect);
+  Object.defineProperties(image, { complete: { value: true }, naturalWidth: { value: 40 } });
+  image.decode = vi.fn(async () => undefined);
+  pcNavigation("home", "collections", undefined, undefined, true);
+  pcTabShown("collections"); paint();
+  await vi.advanceTimersByTimeAsync(0); paint(); paint(); flushPcPerf();
+  expect(image.decode).toHaveBeenCalledOnce();
+  expect(interactions(send, "collections.open")).toMatchObject([{ label: "first", status: "ok" }]);
+});
+it("warm Collections re-entry does not complete from an empty list or an undecoded cover", async () => {
+  const send = ipc(true); await init(send);
+  const host = document.createElement("div"); host.dataset.motionView = "collections"; document.body.append(host);
+  pcNavigation("home", "collections", undefined, undefined, true);
+  pcTabShown("collections"); paint(); paint(); flushPcPerf();
+  expect(interactions(send, "collections.open")).toHaveLength(0);
+  const cover = document.createElement("div"); cover.className = "collection-card__cover";
+  const image = document.createElement("img"); image.src = "https://private.example/cover.jpg"; cover.append(image); host.append(cover);
+  vi.spyOn(host, "getBoundingClientRect").mockReturnValue(rect); vi.spyOn(image, "getBoundingClientRect").mockReturnValue(rect);
+  await vi.advanceTimersByTimeAsync(0); paint(); paint(); flushPcPerf();
+  expect(interactions(send, "collections.open")).toHaveLength(0);
+  pcNavigation("collections", "home"); flushPcPerf();
+  expect(interactions(send, "collections.open")).toMatchObject([{ status: "cancelled" }]);
 });

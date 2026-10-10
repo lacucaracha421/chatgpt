@@ -45,6 +45,12 @@ library, excluding hidden prompts and pending Kakao requests, regardless of filt
 ``price`` and ``publisher``; ``isbn13`` was already supported. Detail reads enrich
 these from live authority volume sources without rewriting older projections.
 Lists remain compact and the replica byte cap/version stay unchanged.
+
+``avPeopleNames`` (read side only; the PC sends nothing for it): while the Collections
+authority is active, list and detail ``av.people`` entries also carry the person's name
+source, ``stashdbProfile`` (``{"name"}`` only, or null), ``profileOverrides`` (only
+``displayName``/``nameJa``) and ``entityRevision``, so the tablet resolves Latin performer
+names without reading the authority baseline.
 """
 from __future__ import annotations
 
@@ -80,7 +86,7 @@ ImageMime = Literal["image/jpeg", "image/png", "image/webp", "image/gif", "image
 CollectionType = Literal["game", "manga", "movie", "av"]
 COLLECTION_TYPES = ("game", "manga", "movie", "av")
 #: Optional replica fields this server accepts (see the module docstring).
-REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview", "volumeDetails")
+REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview", "volumeDetails", "avPeopleNames")
 #: Allowed item ``status`` values per Collection type (feature ``workRecord``); the same
 #: list validates a mobile ``status`` edit (personal-edit version 3).
 ITEM_STATUSES = personal_edits.ITEM_STATUSES
@@ -621,7 +627,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
 
     def finalize(db, active, payload, *, include_review=False):
         if active is not None:
-            collection_authority.finalize_item(db, active["libraryId"], payload, include_review=include_review)
+            collection_authority.finalize_item(db, active["libraryId"], payload, include_review=include_review, av_names=True)
             collection_authority.volume_details(db, active["libraryId"], payload)
         return payload
 
@@ -891,7 +897,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             payloads = [json.loads(row["payload"]) for row in rows[:limit]]
             review_meta = {}
             if active is not None:
-                collection_authority.finalize_items(db, active["libraryId"], payloads, include_review=kakaoReview)
+                collection_authority.finalize_items(db, active["libraryId"], payloads, include_review=kakaoReview, av_names=True)
                 if kakaoReview and type == "manga":
                     review_meta["kakaoUnlinkedCount"] = collection_authority.kakao_unlinked_count(db, active["libraryId"])
             elif kakaoReview and type == "manga":

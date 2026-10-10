@@ -5,11 +5,17 @@ import { viewportImages, viewportImageDecoded } from "./motion/viewportImages";
 export type Tab = "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault" | "manage";
 export type FolderKind = "series" | "plain" | "character" | "album" | "other";
 type Milestone = "firstReactRender" | "homeDataReady" | "homeViewportImagesReady" | "splashLeaving" | "splashEnd" | "homeFullyShown";
-type Interaction = { name: string; startMs: number; phase: ReturnType<typeof beginNativePhase>; label: Tab | FolderKind | "first" | "warm"; scope?: string; done: boolean; stop?: () => void };
+type ViewerStage = "first-visible" | "full-res-decoded" | "full-res-visible";
+const VIEWER_STAGES: readonly ViewerStage[] = ["first-visible", "full-res-decoded", "full-res-visible"];
+type Interaction = { name: string; startMs: number; phase: ReturnType<typeof beginNativePhase>; label: Tab | FolderKind | "first" | "warm" | "open"; scope?: string; done: boolean; stop?: () => void };
+type ViewerOpen = { startMs: number; emitted: Set<ViewerStage>; done: boolean };
 let enabled = false, initialized = false, firstCollection = true;
 let pendingCheck = false;
 let queue: string[] = [];
-let tab: Interaction | undefined, folder: Interaction | undefined, collection: Interaction | undefined;
+let tab: Interaction | undefined, folder: Interaction | undefined, collection: Interaction | undefined, work: Interaction | undefined;
+let viewer: ViewerOpen | undefined;
+let viewerIntent: { startMs: number; used: boolean } | undefined;
+let warmCoverStop: (() => void) | undefined;
 const milestones = new Map<Milestone, number>();
 let startup: ReturnType<typeof beginNativePhase>;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -63,6 +69,7 @@ function end(interaction: Interaction | undefined, status: "ok" | "cancelled", t
   if (!interaction || interaction.done) return;
   interaction.done = true;
   interaction.stop?.();
+  if (interaction === collection) { warmCoverStop?.(); warmCoverStop = undefined; }
   const endMs = performance.now();
   enqueue({ event: "interaction", name: interaction.name, label: interaction.label, status, startMs: interaction.startMs, durationMs: endMs - interaction.startMs, ...(tileCount === undefined ? {} : { tileCount }) });
   interaction.phase?.cancel();
@@ -76,22 +83,26 @@ function cancelStartup() {
   enqueue({ event: "interaction", name: "startup", label: "home", status: "cancelled", startMs: 0, durationMs: performance.now() });
 }
 /** scope is an in-memory stale-result guard; never serialized. */
-export function pcNavigation(from: Tab, to: Tab, folderKind?: FolderKind, scope?: string, collectionsOpen = false) {
+export function pcNavigation(from: Tab, to: Tab, folderKind?: FolderKind, scope?: string, collectionsOpen = false, workOpen = false) {
   if (!enabled) return;
   safely(() => {
-    end(tab, "cancelled"); end(folder, "cancelled"); end(collection, "cancelled");
+    end(tab, "cancelled"); end(folder, "cancelled"); end(collection, "cancelled"); end(work, "cancelled");
     if (from === "home" && to !== "home") cancelStartup();
     collectionShown = from === to; coverReady = false;
     tab = from !== to ? interaction("tab.switch", to) : undefined;
     folder = folderKind ? interaction("library.folder-switch", folderKind, scope) : undefined;
     collection = collectionsOpen ? interaction("collections.open", firstCollection ? "first" : "warm") : undefined;
     if (collectionsOpen) firstCollection = false;
+    work = workOpen ? interaction("collections.work", "open") : undefined;
   });
 }
 export function pcTabShown(destination: string) {
   if (!enabled) return;
-  if (destination === "collection-work") destination = "collections";
-  if (destination === "collections") { collectionShown = true; finishCollection(); }
+  if (destination === "collection-work") {
+    if (work && !work.done) safely(() => { const current = work!; current.phase?.mark("committed"); current.stop = current.phase?.afterPaint("ready"); });
+    destination = "collections";
+  }
+  if (destination === "collections") { collectionShown = true; finishCollection(); watchWarmCovers(); }
   if (!tab || tab.label !== destination || tab.done) return;
   safely(() => {
     const current = tab!;
@@ -100,8 +111,24 @@ export function pcTabShown(destination: string) {
     current.stop = stop;
   });
 }
+const COVER_SELECTOR = ".cs-front img, .collection-card__cover img:not(.physical-cover__shell)";
+/**
+ * Warm re-entry: covers that are already decoded raise no load event, so the kit's cover phase can
+ * stay silent. Once the destination is shown, accept their decoded state.
+ */
+function watchWarmCovers() {
+  if (!collection || collection.done || coverReady || warmCoverStop) return;
+  const host = document.querySelector<HTMLElement>('[data-motion-view="collections"]');
+  if (!host) return;
+  const current = collection;
+  const stop = observeImages(host, count => {
+    warmCoverStop = undefined;
+    if (count > 0 && collection === current && !current.done) { coverReady = true; finishCollection(); }
+  }, true);
+  warmCoverStop = stop;
+}
 /** Observes existing loads. Never promotes lazy images or starts a fetch. */
-function observeImages(host: HTMLElement, ready: (count: number) => void) {
+function observeImages(host: HTMLElement, ready: (count: number) => void, covers = false) {
   let stopped = false, frame = 0, scheduled = false;
   const decoding = new WeakSet<HTMLImageElement>();
   const decoded = new WeakMap<HTMLImageElement, string>();
@@ -113,7 +140,8 @@ function observeImages(host: HTMLElement, ready: (count: number) => void) {
     if (!host.isConnected || host.closest('[inert], [aria-hidden="true"], [style*="visibility: hidden"], [style*="display: none"]')) {
       schedule(); return;
     }
-    const images = viewportImages(host);
+    // covers: ready once one visible cover is decoded (warm re-entry); an empty or failed list never is.
+    const images = covers ? viewportImages(host).filter(image => image.matches(COVER_SELECTOR)) : viewportImages(host);
     for (const image of images) {
       if (viewportImageDecoded(image)) decoded.set(image, source(image));
       if (decoded.get(image) === source(image) || decoding.has(image) || !image.complete || !image.naturalWidth) continue;
@@ -125,7 +153,7 @@ function observeImages(host: HTMLElement, ready: (count: number) => void) {
         schedule();
       }, () => { decoding.delete(image); });
     }
-    if (images.every(image => decoded.get(image) === source(image))) {
+    if (covers ? images.some(image => decoded.get(image) === source(image)) : images.every(image => decoded.get(image) === source(image))) {
       stop();
       ready(images.length);
     }
@@ -170,6 +198,13 @@ function phaseCompleted(name: string, phase: string, phaseStartMs: number) {
     if (name === "collections.open" && phase === "ready") end(collection, "ok");
     if (name === "tab.switch" && phase === "ready") end(tab, "ok");
     if (name === "library.folder-switch" && phase === "ready") end(folder, "ok", folderTileCount);
+    if (name === "collections.work" && phase === "ready") end(work, "ok");
+    if (name === "viewer.decode" && phase === "done") viewerStage("full-res-decoded");
+    if (name === "viewer.request") {
+      // The zoom preview is the thumbnail already on screen; without one, the full image is the first picture.
+      if (phase === "mounted-paint" && document.querySelector("[data-viewer-zoom-preview]")) viewerStage("first-visible");
+      if (phase === "visible") { viewerStage("first-visible"); viewerStage("full-res-visible"); }
+    }
     if (name === "collections.list-to-first-cover" && collection && !collection.done && phaseStartMs >= collection.startMs) {
       if (phase === "list-committed") collection.phase?.mark("list-committed");
       if (phase === "visible") { coverReady = true; finishCollection(); }
@@ -178,6 +213,46 @@ function phaseCompleted(name: string, phase: string, phaseStartMs: number) {
 }
 function finishCollection() {
   if (collection && !collection.done && collectionShown && coverReady) collection.stop = collection.phase?.afterPaint("ready");
+}
+function viewerStage(stage: ViewerStage) {
+  if (!viewer || viewer.done || viewer.emitted.has(stage)) return;
+  viewer.emitted.add(stage);
+  enqueue({ event: "interaction", name: "viewer.open", label: stage, status: "ok", startMs: viewer.startMs, durationMs: performance.now() - viewer.startMs });
+  if (stage === "full-res-visible") viewer.done = true;
+}
+function endViewer() {
+  const current = viewer;
+  viewer = undefined;
+  if (!current || current.done) return;
+  current.done = true;
+  const durationMs = performance.now() - current.startMs;
+  for (const stage of VIEWER_STAGES) {
+    if (!current.emitted.has(stage)) enqueue({ event: "interaction", name: "viewer.open", label: stage, status: "cancelled", startMs: current.startMs, durationMs });
+  }
+}
+/** The viewer just mounted. Its start is the last tile click/Enter within 2 s, else now. */
+export function pcViewerOpened() {
+  if (!enabled) return;
+  safely(() => {
+    endViewer();
+    const now = performance.now();
+    const intent = viewerIntent && !viewerIntent.used && now - viewerIntent.startMs < 2000 ? viewerIntent : undefined;
+    if (viewerIntent) viewerIntent.used = true;
+    viewer = { startMs: intent?.startMs ?? now, emitted: new Set(), done: false };
+  });
+}
+export function pcViewerClosed() {
+  if (enabled) safely(endViewer);
+}
+const INTENT_TARGET = "[data-asset-id], .asset-gallery__scroll [role='option']";
+const INTENT_EVENTS = ["click", "dblclick", "keydown"] as const;
+function onViewerIntent(event: Event) {
+  safely(() => {
+    if (event.type === "keydown" && (event as KeyboardEvent).key !== "Enter") return;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest(".asset-viewer, .viewer") || !target.closest(INTENT_TARGET)) return;
+    viewerIntent = { startMs: performance.now(), used: false };
+  });
 }
 /** First time a named startup input becomes ready (e.g. one Home gate). Opt-in log only. */
 const seenInputs = new Set<string>();
@@ -218,7 +293,7 @@ export function pcHomeReady(host?: HTMLElement | null) {
   });
 }
 function pagehide() {
-  safely(() => { end(tab, "cancelled"); end(folder, "cancelled"); end(collection, "cancelled"); cancelStartup(); flushPcPerf(); });
+  safely(() => { end(tab, "cancelled"); end(folder, "cancelled"); end(collection, "cancelled"); end(work, "cancelled"); endViewer(); cancelStartup(); flushPcPerf(); });
 }
 /** One startup check, concurrent with React. Nothing waits for logging. */
 export async function initPcPerfLog(ipc: typeof invoke = invoke) {
@@ -239,6 +314,7 @@ export async function initPcPerfLog(ipc: typeof invoke = invoke) {
     if (pendingHome !== undefined) pcHomeReady(pendingHome);
     timer = setInterval(flushPcPerf, 1000);
     window.addEventListener("pagehide", pagehide);
+    for (const type of INTENT_EVENTS) document.addEventListener(type, onViewerIntent, true);
   } catch {
     enabled = false; configurePcPerf(false); queue = [];
     safely(() => observer?.disconnect());
@@ -249,8 +325,9 @@ export function resetPcPerfForTests() {
   if (timer) clearInterval(timer);
   observer?.disconnect(); startupImagesStop?.();
   window.removeEventListener("pagehide", pagehide);
-  end(tab, "cancelled"); end(folder, "cancelled"); end(collection, "cancelled"); startup?.cancel();
+  for (const type of INTENT_EVENTS) document.removeEventListener(type, onViewerIntent, true);
+  end(tab, "cancelled"); end(folder, "cancelled"); end(collection, "cancelled"); end(work, "cancelled"); warmCoverStop?.(); startup?.cancel();
   enabled = false; initialized = false; pendingCheck = false; firstCollection = true;
-  queue = []; tab = folder = collection = undefined; observer = undefined; startupImagesStop = undefined; milestones.clear(); seenInputs.clear(); pendingHome = undefined; startupFinishing = false; startupCancelled = false;
+  queue = []; tab = folder = collection = work = undefined; viewer = viewerIntent = undefined; warmCoverStop = undefined; observer = undefined; startupImagesStop = undefined; milestones.clear(); seenInputs.clear(); pendingHome = undefined; startupFinishing = false; startupCancelled = false;
   configurePcPerf(false);
 }

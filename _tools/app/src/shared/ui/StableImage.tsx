@@ -51,7 +51,9 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
     if (!perfName) return;
     const phase = beginNativePhase(`${perfName}.request`);
     trace.current = phase;
-    return () => { phase?.cancel(); trace.current = null; };
+    // Paint of the slot's mount: with the viewer's zoom preview, the first picture on screen.
+    const stopPaint = phase?.afterPaint("mounted-paint");
+    return () => { stopPaint?.(); phase?.cancel(); trace.current = null; };
   }, [src, perfName]);
   useLayoutEffect(() => {
     if (slots[active]?.src !== src || !slots[active]?.ready) return;

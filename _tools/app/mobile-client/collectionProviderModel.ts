@@ -51,6 +51,16 @@ export function providerPreview(value: string | null, signal: AbortSignal) {
     }, {once: true});
   });
 }
+// Bindings are immutable for a given authority cursor, so one session never pages the same
+// baseline twice for a work: the manifest (small) names the cursor, the cache answers from there.
+const BINDING_CACHE_LIMIT = 64;
+const bindingCache = new Map<string, string | null>();
+export const clearProviderBindingCache = () => bindingCache.clear();
+function cacheBinding(key: string, externalId: string | null) {
+  bindingCache.delete(key); bindingCache.set(key, externalId);
+  if (bindingCache.size > BINDING_CACHE_LIMIT) bindingCache.delete(bindingCache.keys().next().value!);
+  return externalId;
+}
 /** The existing read projection omits bindings. Read only that baseline section, with its frozen cursor. */
 export async function readProviderBinding(identity: AuthorityIdentity, workId: string, provider: Provider, signal: AbortSignal) {
   const connection = outboxConnection();
@@ -59,6 +69,8 @@ export async function readProviderBinding(identity: AuthorityIdentity, workId: s
   const base = '/v1/collections/authority/baseline';
   const manifest = await api<AuthorityIdentity & {snapshotCursor: number}>(`${base}?${params}`, signal, undefined, 'GET', false, connection);
   if (!sameAuthority(manifest, identity)) throw new Error('라이브러리가 변경되었습니다. 다시 열어 주세요.');
+  const key = [connection, identity.libraryId, identity.epoch, manifest.snapshotCursor, workId, provider].join('|');
+  if (bindingCache.has(key)) return cacheBinding(key, bindingCache.get(key)!);
   params.set('snapshot', String(manifest.snapshotCursor)); params.set('section', 'bindings');
   let after: string | null = null;
   do {
@@ -66,11 +78,11 @@ export async function readProviderBinding(identity: AuthorityIdentity, workId: s
     const page = await api<AuthorityIdentity & {items: {workId: string; provider: string; bound: boolean; externalId: string}[]; hasMore: boolean; nextAfter: string | null}>(`${base}?${params}`, signal, undefined, 'GET', false, connection);
     if (!sameAuthority(page, identity) || connection !== outboxConnection()) throw new Error('라이브러리가 변경되었습니다. 다시 열어 주세요.');
     const binding = page.items.find(row => row.workId === workId && row.provider === provider && row.bound);
-    if (binding) return binding.externalId;
+    if (binding) return cacheBinding(key, binding.externalId);
     after = page.hasMore ? page.nextAfter : null;
     if (page.hasMore && !after) throw new Error('연결 정보를 확인하지 못했습니다.');
   } while (after);
-  return null;
+  return cacheBinding(key, null);
 }
 /** The relay's thumbnail when it is a well-formed WebP receipt; the shelf falls back to the original otherwise. */
 function validThumbnail(blob: BlobReceipt | null | undefined): BlobReceipt | null {

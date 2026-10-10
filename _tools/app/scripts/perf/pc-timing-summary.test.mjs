@@ -41,3 +41,34 @@ test('CLI accepts multiple files and writes JSON using the same report', async (
     assert.equal(JSON.parse(await readFile(out, 'utf8')).launches.length, 2);
   } finally { await rm(directory, { recursive:true, force:true }); }
 });
+test('summarizes native-startup, startup-detail reads, startup inputs and viewer/work interactions', () => {
+  const summary = summarize(parseTimingLog([
+    { launchId: 'a', event: 'native-startup', name: 'db.open', processMs: 40, fields: { durationMs: 12.5, line: 1 } },
+    { launchId: 'a', event: 'native-startup', name: 'ipc.dispatch', processMs: 50, fields: { command: 'list_collections', durationMs: 3 } },
+    { launchId: 'a', event: 'native-startup', name: 'media.response', processMs: 60, fields: { serveMs: 7 } },
+    { launchId: 'a', event: 'native-startup', name: 'launch.maintenance.ready', processMs: 900, fields: {} },
+    { launchId: 'a', event: 'startup-detail', name: 'home.media.issued', startMs: 100 },
+    { launchId: 'a', event: 'startup-detail', name: 'home.media.reply', startMs: 160, durationMs: 60, status: 'ok' },
+    { launchId: 'a', event: 'startup-detail', name: 'home.media.reply', startMs: 200, durationMs: 5, status: 'error' },
+    { launchId: 'a', event: 'startup-input', name: 'home.shelf', startMs: 300 },
+    { launchId: 'a', event: 'startup-input', name: 'home.shelf', startMs: 250 },
+    { launchId: 'a', event: 'interaction', name: 'viewer.open', label: 'full-res-visible', status: 'ok', durationMs: 120 },
+    { launchId: 'a', event: 'interaction', name: 'viewer.open', label: 'first-visible', status: 'cancelled', durationMs: 1 },
+    { launchId: 'a', event: 'interaction', name: 'collections.work', label: 'open', status: 'ok', durationMs: 80 },
+  ].map(JSON.stringify).join('\n')).rows);
+  assert.equal(summary.metrics['native.db.open'].median, 12.5);
+  assert.equal(summary.metrics['native.ipc.dispatch.list_collections'].median, 3);
+  assert.equal(summary.metrics['native.media.response'].median, 7);
+  assert.equal(summary.metrics['startup-read.home.media'].count, 1);
+  assert.equal(summary.metrics['startup-read.home.media'].cancelled, 1);
+  assert.equal(summary.metrics['viewer.open.full-res-visible'].median, 120);
+  assert.equal(summary.metrics['viewer.open.first-visible'].cancelled, 1);
+  assert.equal(summary.metrics['collections.work.open'].median, 80);
+  const launch = summary.launches[0];
+  assert.equal(launch.inputs['home.shelf'], 250);
+  assert.deepEqual(launch.points['native.launch.maintenance.ready'], { count: 1, firstMs: 900, clock: 'process' });
+  assert.equal(launch.points['detail.home.media.issued'].firstMs, 100);
+  const table = timingTable(summary);
+  assert.match(table, /home.shelf \| 250.00/);
+  assert.match(table, /native.launch.maintenance.ready \| 1 \| 900.00 \| process/);
+});

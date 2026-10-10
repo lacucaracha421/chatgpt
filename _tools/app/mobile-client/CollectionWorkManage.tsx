@@ -30,14 +30,14 @@ function ManageRow({icon: Icon, label, detail, danger = false, disabled = false,
 
 /**
  * 작품 관리 for the open work: 컬렉션 편집, the provider rows its type supports, and 컬렉션 삭제.
- * Mounted while the work is open (the provider binding is read then); `sheet` is owned by the
+ * Mounted while the work is open; the provider binding is read only once 작품 관리 opens; `sheet` is owned by the
  * screen so Back closes the innermost layer. `entityRevision` is the revision the shown detail
  * was read at, which the delete expects; `refreshing` while a change confirmed since then has
  * not been read back yet.
  */
 export function WorkManage({item, confirmed = item, items = [], avRetry, authority, status, active, entityRevision, refreshing = false, searchKind = 'movie', sheet, onSheet, onForm, onDeleted}: {item: CollectionDetail; confirmed?: CollectionDetail; items?: CollectionSummary[]; avRetry?: CommandIntent; authority: Authority; status: ProviderStatusState; active: boolean;
   entityRevision?: number | null; refreshing?: boolean; searchKind?: 'movie' | 'tv'; sheet: ManageSheet; onSheet(sheet: ManageSheet): void; onForm(form: WorkForm): void; onDeleted(workId: string): void}) {
-  const binding = useProviderBinding(item, authority, status, active);
+  const binding = useProviderBinding(item, authority, status, active && sheet !== null);
   const [failure, setFailure] = useState('');
   const close = () => { setFailure(''); onSheet(null); };
   const provider = binding.provider, name = provider ? providerName(provider) : '';
@@ -47,6 +47,7 @@ export function WorkManage({item, confirmed = item, items = [], avRetry, authori
     : entityRevision == null ? '서버를 업데이트하면 삭제할 수 있습니다' : null;
   // A failed binding read keeps its row usable as the retry.
   const connectBlocked = binding.failure && binding.blocked === binding.failure ? null : binding.blocked;
+  const connectText = binding.failure && binding.blocked === binding.failure ? null : binding.blockedText;
   const act = (run: () => void) => { try { run(); } catch (reason) { setFailure(errorText(reason)); } };
   const remove = () => act(() => {
     authority.enqueue({commandType: 'deleteWork', workId: item.id, expectedRevision: entityRevision!}, item.name);
@@ -60,10 +61,10 @@ export function WorkManage({item, confirmed = item, items = [], avRetry, authori
       </div>
       {provider && <div className="collection-manage-group" role="group" aria-label="외부 정보">
         <ManageRow icon={binding.externalId ? ArrowPathIcon : LinkIcon} label={binding.externalId ? `${name} 새로고침` : `${name}에 연결`}
-          detail={binding.failure && !connectBlocked ? `${binding.failure} · 눌러서 다시 확인` : connectBlocked} disabled={!!connectBlocked}
+          detail={binding.failure && !connectBlocked ? `${binding.failure} · 눌러서 다시 확인` : connectText} disabled={!!connectBlocked}
           onClick={() => binding.failure ? binding.retry() : binding.externalId ? act(() => { binding.refresh(); close(); }) : onSheet('search')}/>
         <ManageRow icon={PhotoIcon} label={artworkLabel(provider)} disabled={!!binding.blocked || !binding.externalId}
-          detail={binding.blocked ?? (binding.externalId ? null : `${name}에 연결하면 이미지를 고를 수 있습니다.`)} onClick={() => onSheet('artwork')}/>
+          detail={binding.blockedText ?? (binding.blocked || binding.externalId ? null : `${name}에 연결하면 이미지를 고를 수 있습니다.`)} onClick={() => onSheet('artwork')}/>
       </div>}
       <div className="collection-manage-group" role="group" aria-label="삭제">
         <ManageRow icon={TrashIcon} label="컬렉션 삭제" danger disabled={!!deleteBlocked} detail={deleteBlocked} onClick={() => onSheet('delete')}/>

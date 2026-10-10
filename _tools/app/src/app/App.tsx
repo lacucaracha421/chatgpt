@@ -478,7 +478,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     const folderKind = next.kind === "classification"
       ? next.characterId || next.characterGroupId ? "character" : characterHub.series.some(series => series.classificationId === next.classificationId) ? "series" : "plain"
       : next.kind === "album" ? "album" : workspaceArea(next) === "assets" ? "other" : undefined;
-    pcNavigation(workspaceArea(view), workspaceArea(next), folderKind, pcFolderScope(next), next.kind === "collections" && view.kind !== "collections");
+    pcNavigation(workspaceArea(view), workspaceArea(next), folderKind, pcFolderScope(next), next.kind === "collections" && view.kind !== "collections", next.kind === "collection" && view.kind !== "collection");
   }
   function navigateView(next: AssetView, options: { fromHome?: boolean } = {}) {
     setHomeAssetLeaving(false);

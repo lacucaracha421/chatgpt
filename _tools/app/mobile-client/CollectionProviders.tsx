@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
+import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {Badge, Button, Dialog, DialogDescription, Field, SegmentedControl, TextInput} from './ui';
 import {api, errorText} from './transport';
 import {outboxConnection} from './outboxConnection';
@@ -40,8 +41,9 @@ export function providerUnavailable(provider: Provider, status: ProviderStatusSt
 }
 
 /**
- * The work's stored provider binding, read while the work is open, and what its 작품 관리 rows
- * need: connect when unbound, otherwise refresh and change artwork.
+ * The work's stored provider binding, and what its 작품 관리 rows need: connect when unbound,
+ * otherwise refresh and change artwork. `active` is true only while 작품 관리 (or one of its
+ * sheets) is open: opening a work alone never reads the baseline.
  */
 export function useProviderBinding(item: CollectionDetail, authority: Authority, status: ProviderStatusState, active: boolean) {
   const provider = providerFor(item.type), identity = authority.identity;
@@ -56,15 +58,21 @@ export function useProviderBinding(item: CollectionDetail, authority: Authority,
     }, reason => { if (!controller.signal.aborted) { setBusy(false); setFailure(errorText(reason)); } });
     return () => controller.abort();
   }, [active, item.id, provider, identity?.libraryId, identity?.epoch, status.status?.[provider!], accepted, retry]);
-  const externalId = provider && binding?.workId === item.id && binding.provider === provider ? binding.externalId : null;
+  const known = !!provider && binding?.workId === item.id && binding.provider === provider;
+  const externalId = known ? binding!.externalId : null;
+  // Until the first read starts, the menu must not offer "connect" for a binding it has not looked up.
+  const reading = busy || active && !!provider && !!identity && !!status.status?.[provider] && !known && !failure;
+  const checking = useDelayedBusy(reading, {delay: 400});
   const waiting = authority.rows.some(row => row.command.workId === item.id && row.state === 'pending');
   const refresh = () => {
     if (!provider || !externalId) return;
     authority.enqueue({commandType: 'providerApply', workId: item.id, operation: 'refresh', provider, externalId});
   };
-  return {provider, externalId, busy, failure, waiting, refresh, retry: () => setRetry(value => value + 1),
-    /** Why the rows are disabled, or null: the server, then the binding read, then queued changes. */
-    blocked: !provider ? null : providerUnavailable(provider, status) ?? (!identity ? '서버 연결을 확인해 주세요.' : busy ? '연결 확인 중…' : failure || (waiting ? '보내는 중인 변경이 있습니다' : null))};
+  /** Why the rows are disabled, or null: the server, then the binding read, then queued changes. */
+  const blocked = !provider ? null : providerUnavailable(provider, status) ?? (!identity ? '서버 연결을 확인해 주세요.' : reading ? '연결 확인 중…' : failure || (waiting ? '보내는 중인 변경이 있습니다' : null));
+  return {provider, externalId, busy, failure, waiting, refresh, retry: () => setRetry(value => value + 1), blocked,
+    /** `blocked` as text: the binding read's own label waits ~400 ms so a quick read never flashes it. */
+    blockedText: reading && !checking ? null : blocked};
 }
 
 export function ProviderThumb({url}: {url: string | null}) {

@@ -1113,7 +1113,8 @@ export function App() {
   };
   useLayoutEffect(()=>{
     if(!catalogPerfEnabled())return;
-    if(moreOpen){screenReady('more',appRef.current?.querySelector<HTMLElement>('.tablet-more')??null);return;}
+    // More reports its own readiness from the sheet (rendered in the dialog portal); no tab is ready behind it.
+    if(moreOpen)return;
     const host=appRef.current?.querySelector<HTMLElement>(`[data-motion-view="${motionTab}"]`);
     if(!host||!tabReady(host,motionTab))return;
     if(motionTab==='library'){

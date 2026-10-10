@@ -301,7 +301,11 @@ Fixed route additions in both native and JS are `albums.commands/baseline/change
 `classifications.authority.commands/baseline/changes`, `home.upcoming.wishlist`,
 `collections.bindings.status/requests/search.kakao/search.mangadex`,
 `library.assets.subtree`, `library.assets.search` (tag/artist filters), and
-`library.search.description`. Subtree classification takes precedence when combined
+`library.search.description`. Since 2026-10-11 the former `collections.detail` bucket is split into
+`collections.work` (one work), `collections.people`, `collections.artworkTicket`,
+`collections.authority.status/baseline/changes/trash/commands`, `collections.personal-edits` and
+`collections.releases.acknowledge`; `collections.detail` now only catches unlisted paths.
+Subtree classification takes precedence when combined
 with a tag/artist query. Dynamic binding request identities collapse to `requests`.
 
 `sessionHttp` counts CloudClient HTTP attempts, including API, conditional reads,

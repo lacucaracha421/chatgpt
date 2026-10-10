@@ -3,7 +3,7 @@ import {setOutboxConnection} from './outboxConnection';
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), ...mocks}));
 import {ApiError} from './transport';
-import {artworkCommands, providerPreview, providerImagePath, providerDetailPath, readProviderBinding} from './collectionProviderModel';
+import {artworkCommands, providerPreview, providerImagePath, providerDetailPath, readProviderBinding, clearProviderBindingCache} from './collectionProviderModel';
 import {AUTHORITY_STATUS_PATH, COMMAND_PATH, enqueueCommand, enqueueCommands, flushCommands, providerApplyBody, readCommands, reconcileCommands, type AuthorityIdentity, type ProviderApply} from './collectionCommandOutbox';
 import type {CollectionDetail} from './collectionModel';
 
@@ -12,7 +12,7 @@ const item: CollectionDetail = {id: 'work-1', name: '작품', type: 'movie', sho
 const candidate = {kind: 'poster', path: '/a.jpg', previewUrl: '/v1/providers/image?provider=tmdb&path=%2Fa.jpg&size=w342', width: 500, height: 750};
 const receipt = {provider: 'tmdb', providerImageId: '/a.jpg', original: {sha256: 'a'.repeat(64), sizeBytes: 123, contentType: 'image/jpeg'}, width: 500, height: 750};
 const connection = 'https://test.example';
-beforeEach(() => { localStorage.clear(); setOutboxConnection(connection); mocks.api.mockReset(); mocks.native.mockReset(); vi.restoreAllMocks(); });
+beforeEach(() => { localStorage.clear(); clearProviderBindingCache(); setOutboxConnection(connection); mocks.api.mockReset(); mocks.native.mockReset(); vi.restoreAllMocks(); });
 const apply = (patch: Partial<ProviderApply> = {}) => enqueueCommand(identity, {commandType: 'providerApply', operation: 'create', workId: crypto.randomUUID(), provider: 'tmdb', externalId: 'tv:42', type: 'movie', ...patch});
 const respond = () => mocks.api.mockImplementation(async (path, _signal, body) => {
   if (path === AUTHORITY_STATUS_PATH) return {...identity, active: true};
@@ -122,6 +122,25 @@ it('reads paginated binding identities from the existing authority baseline', as
   });
   expect(await readProviderBinding(identity, item.id, 'tmdb', new AbortController().signal)).toBe('tv:42');
   expect(mocks.api).toHaveBeenCalledTimes(3);
+});
+
+it('pages the baseline once per cursor and work, then answers from the session cache', async () => {
+  clearProviderBindingCache();
+  let cursor = 20;
+  mocks.api.mockImplementation(async path => {
+    const params = new URL(path, connection).searchParams;
+    if (!params.has('snapshot')) return {...identity, snapshotCursor: cursor};
+    return {...identity, items: [{workId: item.id, provider: 'tmdb', bound: true, externalId: 'tv:42'}], hasMore: false, nextAfter: null};
+  });
+  const signal = new AbortController().signal, pages = () => mocks.api.mock.calls.filter(([path]) => String(path).includes('snapshot=')).length;
+  expect(await readProviderBinding(identity, item.id, 'tmdb', signal)).toBe('tv:42');
+  expect(await readProviderBinding(identity, item.id, 'tmdb', signal)).toBe('tv:42');
+  expect(pages()).toBe(1);
+  expect(await readProviderBinding(identity, 'other-work', 'tmdb', signal)).toBeNull();
+  expect(pages()).toBe(2);
+  cursor = 21;
+  expect(await readProviderBinding(identity, item.id, 'tmdb', signal)).toBe('tv:42');
+  expect(pages()).toBe(3);
 });
 
 it('sends provider previews a few at a time so a long candidate sheet never overflows the native lane', async () => {

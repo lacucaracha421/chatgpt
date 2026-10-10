@@ -528,9 +528,41 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(u64, u64), Box<dyn st
 }
 
 // ---------------------------------------------------------------------------------
-// Process CPU (Linux) for background settle
+// Process CPU for background settle (Linux /proc; Windows GetProcessTimes)
 // ---------------------------------------------------------------------------------
 
+#[cfg(windows)]
+fn process_cpu_ms() -> Option<f64> {
+    use windows_sys::Win32::{
+        Foundation::FILETIME,
+        System::Threading::{GetCurrentProcess, GetProcessTimes},
+    };
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: the pseudo handle of the current process is always valid, and every
+    // out-pointer refers to a live local FILETIME.
+    let ok = unsafe {
+        GetProcessTimes(
+            GetCurrentProcess(),
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let hundred_ns = |time: FILETIME| {
+        ((u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)) as f64
+    };
+    Some((hundred_ns(kernel) + hundred_ns(user)) / 10_000.0)
+}
+
+#[cfg(not(windows))]
 fn process_cpu_ms() -> Option<f64> {
     let stat = fs::read_to_string("/proc/self/stat").ok()?;
     let after_name = &stat[stat.rfind(')')? + 2..];
@@ -540,6 +572,8 @@ fn process_cpu_ms() -> Option<f64> {
     Some(ticks * 10.0) // USER_HZ is 100 on Linux.
 }
 
+/// Linux only. Windows would need the Toolhelp snapshot API (windows-sys feature
+/// `Win32_System_Diagnostics_ToolHelp`, not enabled here), so it reports no count.
 fn thread_count() -> Option<u64> {
     fs::read_to_string("/proc/self/status")
         .ok()?
@@ -1955,6 +1989,22 @@ fn safe_relative_path(path: &str) -> bool {
 #[cfg(test)]
 mod series_switch_tests {
     use super::*;
+    #[test]
+    fn process_cpu_time_is_available_and_does_not_go_backwards() {
+        let Some(before) = process_cpu_ms() else {
+            // Platforms without a reader keep the fixed settle sleep.
+            assert!(!cfg!(any(windows, target_os = "linux")));
+            return;
+        };
+        let started = Instant::now();
+        let mut sink = 0u64;
+        while started.elapsed() < Duration::from_millis(60) {
+            sink = sink.wrapping_add(std::hint::black_box(7));
+        }
+        std::hint::black_box(sink);
+        let after = process_cpu_ms().expect("second reading");
+        assert!(before >= 0.0 && after >= before, "{before} -> {after}");
+    }
     #[test]
     fn thumbnail_audit_never_reads_outside_the_library() {
         assert!(safe_relative_path("thumbnails/aa/image.webp"));

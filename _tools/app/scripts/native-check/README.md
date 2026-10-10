@@ -1,5 +1,9 @@
 # Native check and performance kit
 
+**Linux only.** This runner drives a WebKitGTK window through `tauri-driver` and does not run on
+Windows. For the Windows main PC use the release-app session in
+[`../perf/README.md`](../perf/README.md#windows-session-release-app-on-the-main-pc).
+
 Drives a real Linux Lakomics WebKitGTK window on a disposable **test library**.
 Screenshot mode is preserved. Performance mode records a single JSON scenario suite,
 WebView marks, motion frame intervals and app process samples. It never builds the app.

@@ -26,12 +26,24 @@ public final class StartupPerfTest {
    {"/v1/collections?type=movie","collections.movie"},
    {"/v1/collections?type=private","collections"},
    {"/v1/collections/bindings/search/private?query=private","collections.detail"},
+   {"/v1/collections/private-id?token=private","collections.work"},
+   {"/v1/collections/people/private-id","collections.people"},
+   {"/v1/collections/private-id/artworks/private-art/media-ticket","collections.artworkTicket"},
+   {"/v1/collections/authority/status","collections.authority.status"},
+   {"/v1/collections/authority/baseline?after=private","collections.authority.baseline"},
+   {"/v1/collections/authority/changes?after=private","collections.authority.changes"},
+   {"/v1/collections/authority/trash","collections.authority.trash"},
+   {"/v1/collections/authority/commands","collections.authority.commands"},
+   {"/v1/collections/personal-edits","collections.personal-edits"},
+   {"/v1/collections/releases","collections.releases"},
+   {"/v1/collections/releases/acknowledge","collections.releases.acknowledge"},
+   {"/v1/collections/status","collections.status"},
   };
   for(String[] row:cases){
    if(!row[1].equals(StartupPerf.route(row[0])))throw new AssertionError("Fixed route mismatch: "+row[1]);
    if(!StartupPerf.jsName(row[1]))throw new AssertionError("JS vocabulary mismatch: "+row[1]);
   }
   if(StartupPerf.jsName("private")||StartupPerf.jsName("collections.bindings.search.private"))throw new AssertionError("Dynamic JS name admitted");
-  System.out.println("StartupPerfTest: 22 route/JS-name pairs and 2 rejected names passed");
+  System.out.println("StartupPerfTest: 34 route/JS-name pairs and 2 rejected names passed");
  }
 }

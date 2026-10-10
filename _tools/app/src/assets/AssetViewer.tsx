@@ -15,7 +15,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
 import { artistHandle } from "../artists/format";
@@ -34,6 +34,7 @@ import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { StableImage } from "../shared/ui/StableImage";
 import { popToggle } from "../shared/motion/togglePop";
+import { pcViewerClosed, pcViewerOpened } from "../shared/pcPerfLog";
 import { VIDEO_SEEK_STEP_SECONDS, VideoPlayer, type VideoPlayerHandle } from "../video/VideoPlayer";
 import { assetThumbnailUrl, assetUrl, vaultAssetUrl, vaultThumbnailUrl } from "./mediaUrl";
 
@@ -170,6 +171,12 @@ export function AssetViewer({
   }, []);
 
   useEffect(() => () => clearTimeout(stripGrowTimer.current), []);
+  // Opt-in PC timing log: open intent to first picture and to the decoded full image. No-ops when off.
+  useLayoutEffect(() => {
+    if (!viewerOpen) return;
+    pcViewerOpened();
+    return pcViewerClosed;
+  }, [viewerOpen]);
 
   useEffect(() => {
     if (!viewerOpen) {

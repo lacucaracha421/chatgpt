@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), ...mocks}));
 import {ProviderArtworkSheet, ProviderSearchSheet, ProviderThumb, useProviderStatus} from './CollectionProviders';
 import {WorkManage, type ManageSheet} from './CollectionWorkManage';
+import {clearProviderBindingCache} from './collectionProviderModel';
 import {AUTHORITY_STATUS_PATH, COMMAND_PATH, readCommands} from './collectionCommandOutbox';
 import {useCollectionAuthority} from './useCollectionAuthority';
 import type {CollectionDetail} from './collectionModel';
@@ -17,7 +18,7 @@ const poster = {kind: 'poster', path: '/poster.jpg', previewUrl: '/v1/providers/
 const detail = {binding: {provider: 'tmdb', externalId: 'tv:42'}, metadata: {name: '선택한 영화', originalTitle: 'Original', year: 2025, overview: '줄거리'}, artwork: [poster, {...poster, kind: 'backdrop', path: '/back.jpg'}, {...poster, kind: 'season_poster', path: '/season.jpg', seasonNumber: 1}]};
 let configured: boolean, offline: boolean, bound: boolean;
 beforeEach(() => {
-  localStorage.clear(); setOutboxConnection('https://test.example'); mocks.api.mockReset(); mocks.native.mockReset(); configured = true; offline = true; bound = true;
+  localStorage.clear(); clearProviderBindingCache(); setOutboxConnection('https://test.example'); mocks.api.mockReset(); mocks.native.mockReset(); configured = true; offline = true; bound = true;
   mocks.native.mockResolvedValue({url: 'data:image/jpeg;base64,YQ=='});
   mocks.api.mockImplementation(async (path: string, _signal: unknown, body?: Record<string, unknown>) => {
     if (path === '/v1/providers/status') return {tmdb: configured, igdb: configured};
@@ -40,13 +41,14 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-function Harness({mode = 'actions', work = item, entityRevision = 3, onClose = () => {}, onForm = () => {}}: {mode?: 'connect' | 'actions' | 'artwork'; work?: CollectionDetail; entityRevision?: number | null; onClose?: () => void; onForm?: () => void}) {
+function Harness({mode = 'actions', startSheet = 'menu', work = item, entityRevision = 3, onClose = () => {}, onForm = () => {}}: {mode?: 'connect' | 'actions' | 'artwork'; startSheet?: ManageSheet; work?: CollectionDetail; entityRevision?: number | null; onClose?: () => void; onForm?: () => void}) {
   const authority = useCollectionAuthority(true, () => {}), status = useProviderStatus(true);
-  const [sheet, setSheet] = useState<ManageSheet>('menu');
+  const [sheet, setSheet] = useState<ManageSheet>(startSheet);
   useEffect(() => authority.observeLibrary(identity.libraryId), []);
   if (!authority.identity) return null;
   return mode === 'connect' ? <ProviderSearchSheet item={work} provider="tmdb" authority={authority} onClose={onClose}/>
-    : mode === 'actions' ? <WorkManage item={work} authority={authority} status={status} active entityRevision={entityRevision} sheet={sheet} onSheet={setSheet} onForm={onForm} onDeleted={() => {}}/>
+    : mode === 'actions' ? <><button type="button" onClick={() => setSheet('menu')}>관리 열기</button>
+      <WorkManage item={work} authority={authority} status={status} active entityRevision={entityRevision} sheet={sheet} onSheet={setSheet} onForm={onForm} onDeleted={() => {}}/></>
     : <ProviderArtworkSheet item={work} provider="tmdb" externalId="tv:42" authority={authority} onClose={onClose}/>;
 }
 const menu = () => screen.findByRole('dialog', {name: '작품 관리'});
@@ -73,6 +75,30 @@ it.each([
   expect(within(sheet).getAllByRole('group').map(group => group.getAttribute('aria-label'))).toEqual(groups);
   expect(within(sheet).getAllByRole('group').flatMap(group => within(group).getAllByRole('button').map(button => button.querySelector('span > span')!.textContent))).toEqual(rows);
   expect(within(sheet).getByRole('button', {name: /^컬렉션 삭제/})).toHaveClass('is-danger');
+});
+
+const baselinePages = () => mocks.api.mock.calls.filter(([path]) => String(path).includes('snapshot=')).length;
+it('reads the binding only when 작품 관리 opens and answers a reopen from the cache', async () => {
+  render(<Harness startSheet={null}/>);
+  await waitFor(() => expect(mocks.api.mock.calls.some(([path]) => path === '/v1/providers/status')).toBe(true));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(mocks.api.mock.calls.some(([path]) => String(path).includes('/authority/baseline'))).toBe(false);
+  fireEvent.click(screen.getByRole('button', {name: '관리 열기'}));
+  const refresh = await within(await menu()).findByRole('button', {name: /^TMDB 새로고침/});
+  await waitFor(() => expect(refresh).toBeEnabled());
+  expect(baselinePages()).toBe(1);
+  fireEvent.keyDown(document.activeElement ?? document.body, {key: 'Escape'});
+  await waitFor(() => expect(screen.queryByRole('dialog', {name: '작품 관리'})).toBeNull());
+  fireEvent.click(screen.getByRole('button', {name: '관리 열기'}));
+  const again = await within(await menu()).findByRole('button', {name: /^TMDB 새로고침/});
+  await waitFor(() => expect(again).toBeEnabled());
+  expect(baselinePages()).toBe(1);
+});
+
+it('does not offer connect before the binding read has started', async () => {
+  render(<Harness/>);
+  const sheet = await menu();
+  expect(within(sheet).queryByRole('button', {name: /^TMDB에 연결/})).toBeNull();
 });
 
 it('offers connect while unbound and keeps artwork waiting for a binding', async () => {

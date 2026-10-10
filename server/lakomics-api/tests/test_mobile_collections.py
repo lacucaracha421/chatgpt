@@ -517,7 +517,7 @@ class MobileCollectionsTests(unittest.TestCase):
 
     def test_status_advertises_replica_features(self):
         status = self.client.get("/v1/collections/status", headers=AUTH).json()
-        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview", "volumeDetails"])
+        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage", "avCreditName", "kakaoReview", "volumeDetails", "avPeopleNames"])
 
     def test_bad_optional_kakao_review_cannot_reject_replica(self):
         import mobile_collections as mobile

@@ -44,3 +44,25 @@ it('never caches a person reply from the previous connection',async()=>{
  personReply({person:{id:'p',stashdbProfile:{name:'Old Server Name'},profileOverrides:{}}},'p','https://previous-read.example');
  render(<PerformerName person={{id:'p',name:'日本名'}}/>);expect(screen.getByText('日本名')).toBeVisible();expect(screen.queryByText('Old Server Name')).toBeNull();
 });
+
+it('reads no authority baseline when the list items already carry their name source', async () => {
+ setOutboxConnection('https://name-source-in-items.example');
+ const person = {name: '日本名', nameJa: '日本名', role: 'performer' as const, order: 0};
+ const items = [{id: 'work', type: 'av' as const, name: '작품', showcase: false, av: {genres: [], people: [
+  {...person, id: 'p', stashdbProfile: {name: 'Roman Name'}, profileOverrides: {}, entityRevision: 3},
+  {...person, id: 'q', name: '別名', nameJa: '別名', stashdbProfile: null, profileOverrides: {}, entityRevision: 1}]}}];
+ const loaded = await loadedPerformerNames(items);
+ expect(mock.api).not.toHaveBeenCalled();
+ render(<><PerformerName person={loaded[0].av!.people[0]!}/><PerformerName person={loaded[0].av!.people[1]!}/></>);
+ expect(screen.getByText('Roman Name')).toBeVisible();expect(screen.getByText('別名')).toBeVisible();
+ await loadedPerformerNames(items);expect(mock.api).not.toHaveBeenCalled();
+});
+it('still lets a strictly newer remembered edit replace the source carried by an item', async () => {
+ setOutboxConnection('https://newer-edit.example');
+ const items = [{id: 'work', type: 'av' as const, name: '작품', showcase: false, av: {genres: [], people: [
+  {id: 'p', name: '日本名', nameJa: '日本名', role: 'performer' as const, order: 0, stashdbProfile: {name: 'Roman Name'}, profileOverrides: {}, entityRevision: 3}]}}];
+ await loadedPerformerNames(items);
+ rememberPersonNames([{id: 'p', entityRevision: 4, stashdbProfile: {name: 'Edited Name'}, profileOverrides: {}}]);
+ render(<PerformerName person={items[0].av.people[0]!}/>);
+ expect(screen.getByText('Edited Name')).toBeVisible();expect(mock.api).not.toHaveBeenCalled();
+});

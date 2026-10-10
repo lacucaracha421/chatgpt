@@ -107,9 +107,15 @@ class CollectionAuthorityVerifyTests(unittest.TestCase):
         staged = self.ok(self.client.put(PREFIX + '/staging', headers=self.publisher, json=self.doc))
         self.ok(self.client.post(PREFIX + '/activate', headers=self.publisher,
                                  json={'libraryId': LIBRARY, 'expectedStagedDigest': staged['stagedDigest']}))
-        self.assertEqual(self.client.get('/v1/collections', headers=AUTH).json()['items'], before)
+        # Activation only adds the read-time AV name sources (avPeopleNames); everything else is unchanged.
+        def without_name_sources(item):
+            for person in (item.get('av') or {}).get('people', []):
+                for key in ('stashdbProfile', 'profileOverrides', 'entityRevision'):
+                    person.pop(key, None)
+            return item
+        self.assertEqual([without_name_sources(i) for i in self.client.get('/v1/collections', headers=AUTH).json()['items']], before)
         for work_id, expected in details.items():
-            self.assertEqual(self.client.get('/v1/collections/' + work_id, headers=AUTH).json()['item'], expected)
+            self.assertEqual(without_name_sources(self.client.get('/v1/collections/' + work_id, headers=AUTH).json()['item']), expected)
         for person_id, expected in people.items():
             self.assertEqual(self.client.get('/v1/collections/people/' + person_id, headers=AUTH).json(), expected)
         with api_app.get_db() as db:

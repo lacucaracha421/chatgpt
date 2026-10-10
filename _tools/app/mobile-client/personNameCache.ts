@@ -32,17 +32,20 @@ export function rememberPersonNames(people: PersonSource[], connection = outboxC
 }
 export function personWithNameSource<T extends ProfilePerson & {id?: string; personId?: string}>(person: T): T {
   session();
-  if (hasOwn(person, 'stashdbProfile')) return person;
   const source = sources.get(person.id ?? person.personId ?? '');
+  // A person that carries its own source (new server lists) still yields to a strictly newer remembered edit.
+  if (hasOwn(person, 'stashdbProfile') && (!source || (source.entityRevision ?? 0) <= (person.entityRevision ?? 0))) return person;
   return source ? {...person, stashdbProfile: source.stashdbProfile, profileOverrides: source.profileOverrides} : person;
 }
 /** Await one shared source read before publishing a list, so names never swap after paint. */
 export async function loadedPerformerNames<T extends CollectionSummary>(items: T[]): Promise<T[]> {
   const connection = session();
   for (const item of items) rememberPersonNames(item.avPeople ?? item.av?.people ?? []);
-  const missing = items.some(item => item.av?.people.some(person => !/\p{Script=Hangul}/u.test(person.displayName ?? person.name) && !personWithNameSource(person).stashdbProfile?.name && !person.profile?.name));
+  // A server with `avPeopleNames` sends each person's name source (`stashdbProfile`, even when null) in the
+  // list and detail items themselves, so those names are final and no baseline read is needed.
+  const missing = items.some(item => item.av?.people.some(person => !/\p{Script=Hangul}/u.test(person.displayName ?? person.name) && !person.profile?.name && !hasOwn(personWithNameSource(person), 'stashdbProfile')));
   if (connection && missing && !baseline) {
-    // The plain list omits source metadata; the authority baseline already supplies avPeople in pages.
+    // Only an older server omits source metadata from the plain list; the authority baseline then supplies avPeople in pages.
     // This is one session read for all lists, never a person read from a rendered name.
     const readGeneration = generation;
     baseline = (async () => {

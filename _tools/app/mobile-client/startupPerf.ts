@@ -13,7 +13,7 @@ export function startupRoute(operation:string, payload:Record<string,unknown>) {
   const [plain,query]=path.split('?',2);
   const params=new URLSearchParams(query);
   if(plain==='/v1/library/assets')return params.get('subtree')==='1'?'library.assets.subtree':(params.has('tag')||params.has('artist'))?'library.assets.search':'library.assets';
-  if(/^\/v1\/(library\/search\/description|albums\/(commands|baseline|changes)|classifications\/authority\/(commands|baseline|changes)|home\/upcoming\/wishlist|collections\/bindings\/(status|requests|search\/(kakao|mangadex)))$/.test(plain))return plain.slice(4).replace(/\//g,'.');
+  if(/^\/v1\/(library\/search\/description|albums\/(commands|baseline|changes)|classifications\/authority\/(commands|baseline|changes)|home\/upcoming\/wishlist|collections\/(bindings\/(status|requests|search\/(kakao|mangadex))|authority\/(status|baseline|changes|trash|commands)|personal-edits|releases\/acknowledge))$/.test(plain))return plain.slice(4).replace(/\//g,'.');
   if(/^\/v1\/collections\/bindings\/requests\/[^/]+(?:\/cancel)?$/.test(plain))return 'collections.bindings.requests';
   if(plain==='/v1/collections') {
     const type=new URLSearchParams(query).get('type');
@@ -21,6 +21,9 @@ export function startupRoute(operation:string, payload:Record<string,unknown>) {
   }
   if(/^\/v1\/(library\/(assets|summary|classifications|characters|characters\/status|characters\/review|similarity\/review|revisit|list-generation|media-tickets)|captures\/pending|home\/(upcoming|av-pick)|collections\/(status|releases|releases\/counts)|mobile-catalog\/(status|refresh|count|duplicates)|albums\/(likes|assets)|sync\/status)$/.test(plain))return plain.slice(4).replace(/\//g,'.');
   if(plain.startsWith('/v1/notes/'))return 'notes';
+  if(/^\/v1\/collections\/people\/[^/]+$/.test(plain))return 'collections.people';
+  if(/^\/v1\/collections\/[^/]+\/artworks\/[^/]+\/media-ticket$/.test(plain))return 'collections.artworkTicket';
+  if(/^\/v1\/collections\/[^/]+$/.test(plain))return 'collections.work';
   if(plain.startsWith('/v1/collections/'))return 'collections.detail';
   if(plain.startsWith('/v1/home/covers/'))return 'home.coverTicket';
   if(plain.startsWith('/v1/library/assets/'))return 'library.assetTicket';

@@ -1222,10 +1222,46 @@ def volume_details(db, library_id, item):
     return item
 
 
-def finalize_items(db, library_id, items, *, detail=False, today=None, include_review=False):
+def av_name_sources(db, library_id, items):
+    """Attach each AV person's display-name source to served list and detail items.
+
+    Feature ``avPeopleNames``: ``stashdbProfile`` (only ``name``), ``profileOverrides``
+    (only ``displayName``/``nameJa``) and ``entityRevision`` per ``av.people`` entry, the
+    same name inputs the baseline ``avPeople`` carries, so a tablet needs no baseline read to
+    show a Latin name. Resolved at read time (older stored projections lack it); a person
+    without an authority row still gets the keys, empty. Never part of staging comparisons.
+    """
+    refs = [person for item in items for person in (item.get("av") or {}).get("people") or []
+            if isinstance(person, dict) and person.get("id")]
+    ids = sorted({person["id"] for person in refs})
+    rows = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        for row in db.execute(
+                "SELECT person_id,payload,entity_revision FROM collection_authority_people"
+                " WHERE library_id=? AND person_id IN (" + ",".join("?" for _ in chunk) + ")",
+                [library_id, *chunk]):
+            rows[row["person_id"]] = row
+    for person in refs:
+        row = rows.get(person["id"])
+        if row is None:
+            person["stashdbProfile"], person["profileOverrides"] = None, {}
+            continue
+        payload = json.loads(row["payload"])
+        source = _profile_metadata(payload)["stashdbProfile"]
+        overrides = payload.get("profileOverrides") or {}
+        person["stashdbProfile"] = {"name": source.get("name")} if isinstance(source, dict) else None
+        person["profileOverrides"] = {key: overrides[key] for key in ("displayName", "nameJa") if key in overrides}
+        person["entityRevision"] = row["entity_revision"]
+    return items
+
+
+def finalize_items(db, library_id, items, *, detail=False, today=None, include_review=False, av_names=False):
     """Resolve a page's visible member counts/covers without loading member IDs."""
     if not items:
         return items
+    if av_names:
+        av_name_sources(db, library_id, items)
     asset_visibility.install(db)
     has_view = db.execute(
         "SELECT 1 FROM sqlite_temp_master WHERE type='view' AND name='visible_assets'").fetchone()
@@ -1297,9 +1333,10 @@ def finalize_items(db, library_id, items, *, detail=False, today=None, include_r
     return items
 
 
-def finalize_item(db, library_id, item, today=None, *, include_review=False):
+def finalize_item(db, library_id, item, today=None, *, include_review=False, av_names=False):
     """Detail reads also resolve date-dependent volume release status."""
-    return finalize_items(db, library_id, [item], detail=True, today=today, include_review=include_review)[0]
+    return finalize_items(db, library_id, [item], detail=True, today=today, include_review=include_review,
+                          av_names=av_names)[0]
 
 
 def projection_artwork(db, work_id, artwork_id):

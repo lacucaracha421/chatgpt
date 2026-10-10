@@ -450,6 +450,60 @@ class CollectionAuthorityTests(unittest.TestCase):
                     'people': [], 'expectedRevision': 3}))
         self.assertIsNone(self.ok(self.detail('av'))['item']['av']['people'][0]['creditName'])
 
+    def test_av_people_carry_only_the_name_source_in_list_and_detail(self):
+        self.ready()
+        self.ok(self.create('av', 'AV', type_='av'))
+        credits = [{'personId': 'p1', 'role': 'performer', 'order': 0, 'creditName': None},
+                   {'personId': 'p2', 'role': 'performer', 'order': 1, 'creditName': None}]
+        people = [{'personId': 'p1', 'displayName': '日本名', 'nameJa': '日本名'},
+                  {'personId': 'p2', 'displayName': '別名', 'nameJa': '別名'}]
+        self.ok(self.command('setAvCredits', workId='av', credits=credits, people=people, expectedRevision=1))
+        def store(person_id, **changes):
+            with api_app.get_db() as db:
+                payload = json.loads(db.execute('SELECT payload FROM collection_authority_people WHERE person_id=?',
+                                                [person_id]).fetchone()[0])
+                payload.update(changes)
+                db.execute('UPDATE collection_authority_people SET payload=? WHERE person_id=?', [ca.encode(payload), person_id])
+                db.commit()
+        heavy = {'source': 'stashdb', 'name': 'Roman Name', 'aliases': ['x'] * 5, 'heightCm': 160, 'urls': []}
+        store('p1', stashdbProfile=heavy, profileOverrides={'displayName': '내 이름', 'heightCm': 170})
+        store('p2', profile={'source': 'stashdb', 'name': 'Legacy Roman'})
+        def people_of(item):
+            return {person['id']: person for person in item['av']['people']}
+        detail = self.detail('av')
+        for person in (people_of(self.ok(detail)['item']), people_of(self.listing(type='av')['items'][0])):
+            self.assertEqual(person['p1']['stashdbProfile'], {'name': 'Roman Name'})
+            self.assertEqual(person['p1']['profileOverrides'], {'displayName': '내 이름'})
+            self.assertEqual(person['p2']['stashdbProfile'], {'name': 'Legacy Roman'})
+            self.assertEqual(person['p2']['profileOverrides'], {})
+            for entry in person.values():
+                self.assertIsInstance(entry['entityRevision'], int)
+                self.assertIn(entry['name'], ('日本名', '別名'))
+        # Read-time only: the stored projection (and so the replica revision) is unchanged.
+        with api_app.get_db() as db:
+            stored_people = json.loads(db.execute("SELECT payload FROM collection_authority_projection WHERE id='av'").fetchone()[0])['av']['people']
+        self.assertTrue(all('stashdbProfile' not in entry for entry in stored_people))
+        # The conditional detail read still validates against the enriched body.
+        etag = detail.headers['etag']
+        self.assertEqual(self.client.get('/v1/collections/av', headers={**AUTH, 'If-None-Match': etag}).status_code, 304)
+        store('p1', profileOverrides={'displayName': '바뀐 이름'})
+        changed = self.client.get('/v1/collections/av', headers={**AUTH, 'If-None-Match': etag})
+        self.assertEqual(changed.status_code, 200)
+        self.assertNotEqual(changed.headers['etag'], etag)
+        self.assertEqual(people_of(changed.json()['item'])['p1']['profileOverrides'], {'displayName': '바뀐 이름'})
+        # A credit whose person row is gone still carries empty keys, so no client falls back to a baseline read.
+        with api_app.get_db() as db:
+            db.execute("DELETE FROM collection_authority_people WHERE person_id='p2'")
+            db.commit()
+        gone = people_of(self.ok(self.detail('av'))['item'])['p2']
+        self.assertEqual((gone['stashdbProfile'], gone['profileOverrides']), (None, {}))
+        self.assertNotIn('entityRevision', gone)
+        # Non-AV items are untouched and staging comparisons never see the extra fields.
+        self.assertIsNone(self.ok(self.detail('a'))['item'].get('av'))
+        with api_app.get_db() as db:
+            projected = ca.finalize_items(db, LIBRARY, [{'id': 'av', 'av': {'people': [{'id': 'p1'}]}}])
+        self.assertEqual(projected[0]['av']['people'], [{'id': 'p1'}])
+
     def test_av_credits_revision_conflict_limits_and_atomic_people(self):
         self.ready()
         self.ok(self.create('av', 'AV', type_='av'))

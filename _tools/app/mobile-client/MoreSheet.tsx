@@ -1,8 +1,10 @@
+import {useCallback} from 'react';
 import {EllipsisHorizontalIcon, InboxIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
 import {MoreEntryList} from '../src/layout/MorePanel';
 import {MORE_LABELS, NAVIGATION_GROUP_LABELS, type NavigationEntry} from '../src/shared/findEntries';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {BottomSheet} from './BottomSheet';
+import {screenReady} from './perf';
 import {CountBadge, IconButton} from './ui';
 import './moreSheet.css';
 
@@ -33,7 +35,10 @@ export function tabletMoreEntries(options: MoreOptions): NavigationEntry[] {
 
 export function MoreSheet({onClose, ...options}: MoreOptions & {onClose(): void}) {
   const entries = tabletMoreEntries(options);
-  return <BottomSheet title="더보기" onClose={onClose}><div className="tablet-more">
+  // The sheet renders in the dialog's portal, outside the app root, and after this component's own
+  // commit; its content reports itself shown as it attaches, so More's screen timing can complete.
+  const shown = useCallback((element: HTMLDivElement | null) => { if (element) screenReady('more', element); }, []);
+  return <BottomSheet title="더보기" onClose={onClose}><div className="tablet-more" ref={shown}>
     <MoreEntryList entries={entries.filter(entry => entry.group === 'queue')} heading={NAVIGATION_GROUP_LABELS.queue} onRun={onClose}/>
     <MoreEntryList entries={entries.filter(entry => entry.group === 'go')} heading={NAVIGATION_GROUP_LABELS.go} onRun={onClose}/>
   </div></BottomSheet>;

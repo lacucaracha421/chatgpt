@@ -171,7 +171,7 @@ it.each([0, .5, 1, 1.5, 2].flatMap(density => [320, 800, 1280].map(width => ({de
   const scroll = mount({density});
   const canvas = scroll.querySelector<HTMLElement>('.gallery-canvas')!;
   const available = width - 32, target = rowHeight(density, available);
-  const columns = Math.max(1, Math.floor((available + 10) / (target + 10)));
+  const columns = Math.max(1, Math.round((available + 10) / (target * .75 + 10)));
   expect(canvas.style.getPropertyValue('--gallery-placeholder-height')).toBe(`${target}px`);
   expect(canvas.style.getPropertyValue('--gallery-placeholder-pitch')).toBe(`${target + 10}px`);
   const tileWidth = parseFloat(canvas.style.getPropertyValue('--gallery-placeholder-width'));

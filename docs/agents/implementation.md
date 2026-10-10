@@ -124,9 +124,16 @@ node _tools/app/scripts/native-check/run.mjs --perf _tools/app/scripts/native-ch
 (cd _tools/app && node scripts/perf/run.mjs --out /tmp/pc-perf.json)
 # Tablet jsdom counts; device adb collection is documented in android/tools/PERFORMANCE.md.
 (cd _tools/app && npm run mobile:test -- --maxWorkers=2 --reporter=verbose mobile-client/perf.test.ts mobile-client/Collections.perf.test.tsx mobile-client/thumbnailWarm.perf.test.ts)
+# Windows main PC, real release app: attach over WebView2 DevTools (long tasks, CPU profile,
+# process CPU/memory, scroll frame times). Recipe in _tools/app/scripts/perf/README.md.
+(cd _tools/app && node scripts/perf/windows-session.mjs --seconds 30 --cpu-profile --scroll)
 # Local synthetic server instance only; never a production target.
 (cd server/lakomics-api && timeout 300 .venv/bin/python tools/poll_benchmark.py --runs 200 --json /tmp/server-perf.json)
 ```
+
+The Linux native kit does not run on Windows. On the Windows main PC, measure the real release
+app with the opt-in `LAKOMICS_PERF=1` timing log plus `scripts/perf/windows-session.mjs`
+(see the [Windows session recipe](../../_tools/app/scripts/perf/README.md#windows-session-release-app-on-the-main-pc)).
 
 Native output is `perf.json` + `perf.md` (interaction/settle durations, motion rAF p50/p95
 and jank, supported long tasks/heap, sampled process CPU/RSS). Native and PC commands
