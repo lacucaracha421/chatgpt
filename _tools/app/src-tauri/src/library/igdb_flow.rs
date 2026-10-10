@@ -1235,6 +1235,29 @@ mod tests {
     };
 
     #[test]
+    fn igdb_flow_authority_screenshot_hero_import_and_replace_keep_gallery_labels() {
+        let (_temp, library, _) = provider_fixture("game", None, "42", serde_json::json!({}));
+        let png = provider_png();
+        let created = library.apply_fetched_igdb_game(
+            request(None, Some("screenshot-1")), two_screenshot_remote(),
+            None, Some(&png), &[Some(png.clone()), Some(png.clone())],
+        ).unwrap();
+        let gallery = library.list_collection_work_artworks(&created.id).unwrap();
+        assert_eq!(gallery.len(), 2);
+        assert!(gallery.iter().all(|art| art.kind == "screenshot"));
+        assert!(gallery.iter().any(|art| Some(&art.id) == created.selected_hero_artwork_id.as_ref()));
+        let replaced = library.replace_fetched_igdb_game_artwork(
+            artwork_request(&created.id, IgdbArtworkDecision::Keep,
+                IgdbArtworkDecision::Select { image_id: "screenshot-2".into() }),
+            two_screenshot_remote(), None, Some(&png),
+        ).unwrap();
+        let gallery = library.list_collection_work_artworks(&created.id).unwrap();
+        assert!(gallery.iter().all(|art| art.kind == "screenshot"));
+        assert!(gallery.iter().any(|art| Some(&art.id) == replaced.selected_hero_artwork_id.as_ref()));
+        assert_ne!(created.selected_hero_artwork_id, replaced.selected_hero_artwork_id);
+    }
+
+    #[test]
     fn igdb_flow_authority_invalid_screenshot_keeps_import_successful() {
         let (_temp, library, _) = provider_fixture("game", None, "42", serde_json::json!({}));
         let result = library
@@ -2030,6 +2053,10 @@ mod tests {
             width: Some(1280),
             height: Some(720),
         });
+        fetched.snapshot_json = serde_json::json!({
+            "id": 42,
+            "screenshots": [{"image_id": "screenshot-1"}, {"image_id": "screenshot-2"}]
+        }).to_string();
         fetched
     }
 
@@ -2082,6 +2109,9 @@ mod tests {
             2
         );
         assert_eq!(artwork_file_count(&library), 2);
+        let gallery = library.list_collection_work_artworks(&created.id).unwrap();
+        assert!(gallery.iter().all(|art| art.kind == "screenshot"));
+        assert_eq!(gallery.iter().filter(|art| art.selected).count(), 2);
     }
 
     #[test]
@@ -2147,6 +2177,8 @@ mod tests {
         );
         assert!(replaced.selected_hero_artwork_id.is_some());
         assert_eq!(artwork_file_count(&library), 2);
+        let gallery = library.list_collection_work_artworks(&created.id).unwrap();
+        assert!(gallery.iter().all(|art| art.kind == "screenshot"));
 
         library
             .replace_fetched_igdb_game_artwork(
@@ -2175,6 +2207,9 @@ mod tests {
             ]
         );
         assert_eq!(artwork_file_count(&library), 3);
+        let gallery = library.list_collection_work_artworks(&created.id).unwrap();
+        assert_eq!(gallery.iter().filter(|art| art.kind == "hero").count(), 1);
+        assert_eq!(gallery.iter().filter(|art| art.kind == "screenshot").count(), 2);
 
         let cleared = library
             .replace_fetched_igdb_game_artwork(

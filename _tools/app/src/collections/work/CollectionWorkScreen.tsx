@@ -148,7 +148,7 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
       </div>
       {data.collection.type === "av" && <div className="work-flat-slot" style={mode === "flat" ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={mode !== "flat"} inert={mode !== "flat"}><FlatJacket key={data.collection.id} data={caseData} stageBox={stageBox} onReady={() => { flatReady.current = true; if (desired.current === "flat") setMode("flat"); }} /></div>}
       </WorkZoomObject>
-      {artwork && <div className="work-art" style={mode === "case" || mode === "open" || mode === "flat" ? { visibility: "hidden", pointerEvents: "none" } : undefined} aria-hidden={mode === "case" || mode === "open" || mode === "flat"}>{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <StableImage src={workArtworkUrl(artwork.id)} alt={`${data.case.title} 아트워크`} draggable={false} onLoad={async event => {
+      {artwork && <div className="work-art" style={mode === "case" || mode === "open" || mode === "flat" ? { visibility: "hidden", pointerEvents: "none" } : undefined} aria-hidden={mode === "case" || mode === "open" || mode === "flat"}>{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <StableImage src={workArtworkUrl(artwork.id)} alt={`${data.case.title} ${artwork.kind === "screenshot" ? "스크린샷" : "아트워크"}`} draggable={false} onLoad={async event => {
         const image = event.currentTarget; try { await image.decode?.(); } catch { /* Settled artwork remains navigable. */ }
         if (desired.current === artwork.id) setMode(artwork.id);
       }} onError={() => { if (desired.current === artwork.id) setMode(artwork.id); }} onPreloadError={() => { pick("case", false); }} />}</div>}

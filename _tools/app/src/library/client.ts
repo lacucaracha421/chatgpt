@@ -110,7 +110,6 @@ import type {
   AlbumOutboxFlushResult,
   AlbumSyncStatus,
   AuthoritySyncHealth,
-  CloudCollectionsPublishResult,
   CloudLibraryRestoreReport,
   CatalogWorkDetail,
   CollectionCover,
@@ -387,11 +386,6 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<ExtensionPairingLink>("create_extension_pairing"),
   pushCloudMetadataBackup: () =>
     invoke<CloudMetadataBackupResult>("push_cloud_metadata_backup"),
-  pushCloudCollections: (onProgress) => {
-    const channel = new Channel<import("./publicationJobs").PublishProgress>();
-    channel.onmessage = (value) => onProgress?.(value);
-    return invoke<CloudCollectionsPublishResult>("push_cloud_collections", { onProgress: channel });
-  },
   runDueMobilePublications: (orderIds) => invoke<void>("run_due_mobile_publications", {orderIds}),
   verifyCollectionAuthorityBaseline: (onProgress) => {
     const channel = new Channel<import("./publicationJobs").PublishProgress>();

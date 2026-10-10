@@ -500,10 +500,35 @@ impl Library {
     ) -> Result<Vec<WorkArtworkSummary>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, kind, selected FROM collection_work_artworks
-             WHERE collection_id = ?1
-             ORDER BY CASE kind WHEN 'cover' THEN 0 WHEN 'hero' THEN 1 ELSE 2 END,
-                      selected DESC, created_at, id",
+            // `kind` stores the selection role. Label the source image in the gallery,
+            // including artwork staged before its provider snapshot is confirmed.
+            "WITH igdb_snapshots(snapshot) AS (
+                 SELECT provider_data_json FROM collection_external_bindings
+                 WHERE collection_id = ?1 AND provider = 'igdb'
+                 UNION ALL
+                 SELECT CASE command_type WHEN 'createWork'
+                     THEN json_extract(payload, '$.binding.snapshot')
+                     ELSE json_extract(payload, '$.snapshot') END
+                 FROM collection_authority_outbox
+                 WHERE state IN ('pending','blocked')
+                   AND command_type IN ('createWork','applyProviderSnapshot')
+                   AND json_extract(payload, '$.workId') = ?1
+                   AND COALESCE(json_extract(payload, '$.provider'),
+                       json_extract(payload, '$.binding.provider')) = 'igdb'
+             )
+             SELECT a.id, CASE WHEN a.provider = 'igdb' AND a.kind = 'hero'
+                 AND EXISTS (
+                     SELECT 1 FROM igdb_snapshots,
+                     json_each(CASE WHEN json_valid(snapshot)
+                         THEN snapshot ELSE '{}' END, '$.screenshots') s
+                     WHERE (json_extract(s.value, '$.image_id') = a.provider_image_id
+                         OR substr(a.provider_image_id, 1,
+                             length(json_extract(s.value, '$.image_id')) + 6)
+                            = json_extract(s.value, '$.image_id') || ':hero:')
+                 ) THEN 'screenshot' ELSE a.kind END, a.selected
+             FROM collection_work_artworks a WHERE a.collection_id = ?1
+             ORDER BY CASE a.kind WHEN 'cover' THEN 0 WHEN 'hero' THEN 1 ELSE 2 END,
+                      a.selected DESC, a.created_at, a.id",
         )?;
         let artworks = statement
             .query_map([collection_id], |row| {

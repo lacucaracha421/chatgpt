@@ -94,7 +94,7 @@ describe("merged work screen", () => {
     fireEvent.click(screen.getByRole('button', { name: '펼친 표지' }));
     fireEvent.wheel(stage, { deltaY: -100 }); const flatZoom = object.getAttribute('data-zoom');
     expect(object.querySelector('.work-flat')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '아트워크 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '스크린샷 1' }));
     const wheel = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true });
     fireEvent(stage, wheel); expect(wheel.defaultPrevented).toBe(false); expect(object.getAttribute('data-zoom')).toBe(flatZoom);
     expect(container.querySelector('.work-backdrop')).toBeNull();
@@ -176,7 +176,7 @@ describe("merged work screen", () => {
     const data = { ...value(), artworks: [{ id: "screenshot", kind: "screenshot", selected: false }] };
     const { container } = view(data);
     expect(container.querySelector(".work-strip-separator")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "아트워크 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "스크린샷 1" }));
     expect(screen.getByRole("group", { name: "케이스" })).toBeInTheDocument();
     const image = container.querySelector<HTMLImageElement>(".work-art img")!;
     let ready!: () => void;
@@ -185,14 +185,14 @@ describe("merged work screen", () => {
     expect(screen.getByRole("group", { name: "케이스" })).toBeInTheDocument();
     await act(async () => ready());
     expect(screen.queryByRole("group", { name: "케이스" })).toBeNull();
-    expect(screen.getByRole("img", { name: "게임 하나 아트워크" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "아트워크 1" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", {name: "아트워크 1"}));
+    expect(screen.getByRole("img", { name: "게임 하나 스크린샷" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "스크린샷 1" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", {name: "스크린샷 1"}));
     expect(screen.getByRole("group", {name: "케이스"})).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(screen.getByRole("button", {name: "아트워크 1"}));
+    fireEvent.click(screen.getByRole("button", {name: "스크린샷 1"}));
     await act(async () => fireEvent.load(container.querySelector(".work-art img")!));
     expect(screen.queryByRole("group", {name: "케이스"})).toBeNull();
-    fireEvent.click(screen.getByRole("img", {name: "게임 하나 아트워크"}));
+    fireEvent.click(screen.getByRole("img", {name: "게임 하나 스크린샷"}));
     expect(screen.queryByRole("group", {name: "케이스"})).toBeNull();
     fireEvent.click(container.querySelector(".work-art")!);
     expect(screen.getByRole("group", {name: "케이스"})).toHaveAttribute("aria-expanded", "false");

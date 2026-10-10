@@ -66,6 +66,14 @@ struct Authority {
     contract: i64,
     cursor: i64,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LifecycleIntentFailure {
+    pub asset_id: String,
+    pub desired: String,
+    pub reason: String,
+}
+
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSyncResult {
@@ -76,6 +84,7 @@ pub struct AssetSyncResult {
     pub stopped: bool,
     pub held: bool,
     pub materialization_failures: u32,
+    pub lifecycle_failures: Vec<LifecycleIntentFailure>,
 }
 
 /// Retry metadata lives in the existing error slot; no schema upgrade is needed.
@@ -1042,6 +1051,9 @@ impl Library {
                         record_rejection(&tx, &id, "assetTombstoned")?;
                         tx.commit()?;
                         result.applied_changes += 1;
+                        result.lifecycle_failures.push(LifecycleIntentFailure {
+                            asset_id: id, desired, reason: "assetTombstoned".into(),
+                        });
                         continue;
                     }
                     apply(&tx, &p)?;
@@ -1063,6 +1075,9 @@ impl Library {
                         // exact operation and payload and is retried next pass; a server
                         // fault is never turned into lost user intent.
                         result.stopped = true;
+                        result.lifecycle_failures.push(LifecycleIntentFailure {
+                            asset_id: id, desired, reason: code,
+                        });
                         return Ok(());
                     }
                     // (`similarityKeptByTabletDecision`: the tablet's server-applied similarity
@@ -1088,6 +1103,9 @@ impl Library {
                         record_rejection(&tx, &id, &code)?;
                     }
                     tx.commit()?;
+                    result.lifecycle_failures.push(LifecycleIntentFailure {
+                        asset_id: id, desired, reason: code,
+                    });
                 }
                 Err(LibraryError::CloudUnauthorized) => {
                     super::credential_broker::broker()
@@ -3142,6 +3160,35 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_restore_keeps_asset_detail_in_the_result_and_status() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        library.trash_assets(&[ID.into()]).unwrap();
+        let (client, worker) = command_server(vec![(200, trash_accepted(&library, &p, 2))]);
+        library.flush_assets(&client, "publisher", &authority_of(&library), &mut AssetSyncResult::default()).unwrap();
+        worker.join().unwrap();
+        library.restore_assets(&[ID.into()]).unwrap();
+        let (client, worker) = command_server(vec![
+            (409, json!({"detail":{"code":"lifecycleTransitionRefused","assetId":ID}})),
+        ]);
+        let mut result = AssetSyncResult::default();
+        library.flush_assets(&client, "publisher", &authority_of(&library), &mut result).unwrap();
+        let sent = worker.join().unwrap();
+        assert_eq!(sent[0]["commandType"], "restoreAsset");
+        assert_eq!(result.lifecycle_failures, vec![LifecycleIntentFailure {
+            asset_id: ID.into(), desired: "normal".into(), reason: "lifecycleTransitionRefused".into(),
+        }]);
+        let name: String = library.connection().unwrap().query_row(
+            "SELECT original_name FROM assets WHERE id=?", [ID], |row| row.get(0),
+        ).unwrap();
+        let health = library.authority_sync_health().unwrap();
+        assert_eq!(health.assets.rejected_assets[0].asset_id, ID);
+        assert_eq!(health.assets.rejected_assets[0].name, name);
+        assert_eq!(health.assets.rejected_assets[0].reason, "lifecycleTransitionRefused");
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='trash'"), 1);
+    }
+
+    #[test]
     fn a_refused_head_intent_falls_back_to_server_state_and_does_not_block() {
         let (_temp, library, p) = setup();
         ingest(&library, &p, &media()).unwrap();
@@ -3158,6 +3205,9 @@ mod tests {
             .unwrap();
         assert_eq!(worker.join().unwrap().len(), 2);
         assert!(!result.stopped);
+        assert_eq!(result.lifecycle_failures, vec![LifecycleIntentFailure {
+            asset_id: ID.into(), desired: "trash".into(), reason: "lifecycleTransitionRefused".into(),
+        }]);
         assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
         let db = library.connection().unwrap();
         assert_eq!(db.query_row("SELECT status FROM assets WHERE id=?", [ID], |r| r.get::<_, String>(0)).unwrap(), "normal",
@@ -3286,6 +3336,10 @@ mod tests {
                 .unwrap();
             assert_eq!(worker.join().unwrap().len(), 1, "the pass stops at the head");
             assert!(result.stopped);
+            assert_eq!(result.lifecycle_failures.len(), 1);
+            assert_eq!(result.lifecycle_failures[0].asset_id, ID);
+            assert_eq!(result.lifecycle_failures[0].desired, "trash");
+            assert!(!result.lifecycle_failures[0].reason.is_empty());
             assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 2);
             assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='trash'"), 2,
                        "a server fault never undoes the user's trash");

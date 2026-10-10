@@ -240,6 +240,7 @@ const DROP_REASON_TEXT: Record<string, string> = {
   invalidClassificationAssignment: "서버에 없는 파일의 분류 변경",
   lifecycleTransitionRefused: "서버가 상태 변경을 거절함",
   operationConflict: "다른 기기의 변경과 충돌",
+  similarityKeptByTabletDecision: "태블릿에서 유지하기로 한 파일",
   epochChanged: "서버 라이브러리가 다시 설정됨",
 };
 
@@ -273,6 +274,11 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
     problemCount += 1;
     problems.push("휴지통·복원 변경 전송이 멈춤");
   }
+  const materializationFailures = health.assets.materializationFailures ?? 0;
+  if (materializationFailures > 0) {
+    problemCount += materializationFailures;
+    problems.push(`파일 다운로드 미적용 ${materializationFailures.toLocaleString()}개`);
+  }
   // Both lanes share one credential and connection, so one cause is reported once.
   const failures = new Set([health.authorityPassFailure?.code, health.assetLaneFailure?.code].filter((code): code is string => Boolean(code)));
   failures.forEach((code) => problems.push(`서버 동기화 실패 · ${LANE_FAILURE_TEXT[code] ?? "알 수 없는 오류"}`));
@@ -293,6 +299,9 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
       ?? health.assets.rejectedReason;
     const reason = latest ? DROP_REASON_TEXT[latest] ?? "서버 상태가 우선함" : null;
     notes.push(`서버가 받지 않은 변경 ${dropped.toLocaleString()}개${reason ? ` · 최근: ${reason}` : ""}`);
+  }
+  for (const asset of health.assets.rejectedAssets ?? []) {
+    notes.push(`휴지통·복원 미적용 · ${asset.name} · ${DROP_REASON_TEXT[asset.reason] ?? "서버 상태가 우선함"}`);
   }
   const skipped = health.characterExclusions?.skippedCount ?? 0;
   if (skipped > 0) {

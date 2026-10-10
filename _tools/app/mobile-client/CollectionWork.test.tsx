@@ -233,7 +233,7 @@ it('keeps only thumbnails, returns to the case on a repeated artwork tap or empt
   const view = render(<CaseWork {...props}/>);
   expect(screen.queryByRole('button', {name: '케이스'})).toBeNull();
   expect(screen.queryByRole('button', {name: '안쪽'})).toBeNull();
-  const tile = screen.getByRole('button', {name: '아트워크 1'});
+  const tile = screen.getByRole('button', {name: '스크린샷 1'});
   fireEvent.click(tile);
   expect(screen.queryByRole('group', {name: '케이스'})).toBeNull();
   fireEvent.click(tile);

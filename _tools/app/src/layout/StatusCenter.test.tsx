@@ -23,7 +23,7 @@ import { WorkspaceNavigation } from "./WorkspaceNavigation";
 afterEach(() => {
   cleanup();
   dismissPublication("catalog");
-  dismissPublication("collections");
+  dismissPublication("characters");
   resetVaultImportJob();
   resetVaultExportJob();
   workload.native = false;
@@ -252,6 +252,20 @@ it("hides server sync when every authority count is zero", async () => {
   render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} authorityHealth={healthy} onNavigate={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "상태" }));
   expect(screen.queryByRole("region", { name: "서버 동기화" })).not.toBeInTheDocument();
+});
+
+it("identifies rejected lifecycle assets and pending download failures in the existing status block", async () => {
+  const user = userEvent.setup();
+  render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} onNavigate={vi.fn()} authorityHealth={{
+    ...healthy,
+    assets: { ...healthy.assets, rejectedCount: 1, rejectedReason: "lifecycleTransitionRefused",
+      rejectedAssets: [{ assetId: "asset-1", name: "photo.jpg", reason: "lifecycleTransitionRefused" }],
+      materializationFailures: 2 },
+  }} />);
+  await user.click(screen.getByRole("button", { name: "상태 · 문제 2개" }));
+  const block = screen.getByRole("region", { name: "서버 동기화" });
+  expect(block).toHaveTextContent("휴지통·복원 미적용 · photo.jpg · 서버가 상태 변경을 거절함");
+  expect(block).toHaveTextContent("파일 다운로드 미적용 2개");
 });
 
 it("shows waiting and dropped changes as information without a problem count", async () => {

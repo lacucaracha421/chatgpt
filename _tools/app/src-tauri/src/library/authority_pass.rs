@@ -175,7 +175,7 @@ impl AuthorityPassOutcome {
 }
 
 /// What one Asset lane run did.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct AssetLaneOutcome {
     /// Local Asset state changed.
     pub changed: bool,
@@ -183,6 +183,8 @@ pub(crate) struct AssetLaneOutcome {
     /// definitively refused; it is retried on the next pass.
     pub stopped: bool,
     pub held: bool,
+    pub materialization_failures: u32,
+    pub lifecycle_failures: Vec<super::asset_authority::LifecycleIntentFailure>,
 }
 
 impl AuthorityPassOutcome {
@@ -272,6 +274,8 @@ impl Library {
             changed: result.applied_changes > 0 || result.materialized > 0 || result.flushed > 0,
             stopped: result.stopped,
             held: result.held,
+            materialization_failures: result.materialization_failures,
+            lifecycle_failures: result.lifecycle_failures,
         })
     }
 
@@ -492,6 +496,16 @@ pub(crate) struct AssetSyncHealth {
     /// The last lane run stopped at an unresolved head intent (runtime state).
     pub stopped: bool,
     pub held: bool,
+    pub rejected_assets: Vec<AssetIntentRejection>,
+    pub materialization_failures: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AssetIntentRejection {
+    pub asset_id: String,
+    pub name: String,
+    pub reason: String,
 }
 
 /// Mobile character exclusions this PC consumed without applying (durable receipts).
@@ -605,6 +619,24 @@ impl Library {
             }
         }
         drop(rejected);
+        // Keep the panel short; the total above includes all rejected Assets.
+        health.assets.rejected_assets = connection.prepare(
+            "SELECT s.asset_id, COALESCE(a.original_name, s.asset_id), s.last_error
+             FROM asset_authority_state s LEFT JOIN assets a ON a.id = s.asset_id
+             WHERE s.last_error LIKE 'lifecycleRejected:%'
+             ORDER BY s.asset_id LIMIT 5",
+        )?.query_map([], |row| {
+            let error: String = row.get(2)?;
+            Ok(AssetIntentRejection {
+                asset_id: row.get(0)?, name: row.get(1)?,
+                reason: error.strip_prefix(super::asset_authority::LIFECYCLE_REJECTED)
+                    .unwrap_or(&error).to_owned(),
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        health.assets.materialization_failures = connection.query_row(
+            "SELECT COUNT(*) FROM asset_authority_state WHERE materialization IN ('pending','conflict')
+             AND json_valid(last_error) AND lifecycle = 'normal'", [], |row| row.get(0),
+        )?;
         let (skipped, last): (i64, Option<(String, String)>) = (
             connection.query_row(
                 "SELECT COUNT(*) FROM mobile_character_exclusion_receipts WHERE skip_reason IS NOT NULL",
@@ -1052,6 +1084,29 @@ mod tests {
     }
 
     #[test]
+    fn sync_health_reports_pending_and_parked_materialization_failures_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        {
+            let db = library.connection().unwrap();
+            for (id, lifecycle, state, error) in [
+                ("retry", "normal", "pending", Some(r#"{"code":"materializationRetry"}"#)),
+                ("parked", "normal", "conflict", Some(r#"{"code":"identityOrIntegrityConflict"}"#)),
+                ("done", "normal", "complete", Some(r#"{"code":"materializationRetry"}"#)),
+                ("trash", "trash", "pending", Some(r#"{"code":"materializationRetry"}"#)),
+                ("clean", "normal", "pending", None),
+                ("rejected", "normal", "pending", Some("lifecycleRejected:operationConflict")),
+            ] {
+                db.execute("INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,projection,materialization,last_error) VALUES(?1,?2,1,'{}',?3,?4)",
+                    rusqlite::params![id, lifecycle, state, error]).unwrap();
+            }
+        }
+        let health = library.authority_sync_health().unwrap();
+        assert_eq!(health.assets.materialization_failures, 2);
+        assert_eq!(health.assets.rejected_count, 1);
+    }
+
+    #[test]
     fn sync_health_counts_blocked_waiting_dropped_and_rejected() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
@@ -1101,6 +1156,11 @@ mod tests {
             Some("2026-09-25T01:00:00Z")
         );
         assert_eq!(health.assets.rejected_count, 3);
+        assert_eq!(health.assets.rejected_assets.len(), 3);
+        assert_eq!(health.assets.rejected_assets[0], AssetIntentRejection {
+            asset_id: "a1".into(), name: "a1".into(), reason: "assetTombstoned".into(),
+        });
+        assert_eq!(health.assets.rejected_assets[2].reason, "operationConflict");
         assert_eq!(
             health.assets.rejected_reason.as_deref(),
             Some("assetTombstoned")

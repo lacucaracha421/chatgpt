@@ -803,7 +803,13 @@ fn start_timers(app: tauri::AppHandle) {
                         let _reset = Reset(&ASSETS_BUSY);
                         let (changed, failure, stopped, held) =
                             match lib.run_asset_lane(&status, restricted) {
-                                Ok(lane) => (lane.changed, None, lane.stopped, lane.held),
+                                Ok(lane) => {
+                                    if lane.materialization_failures > 0 || !lane.lifecycle_failures.is_empty() {
+                                        eprintln!("Asset sync: materialization failures={}, lifecycle failures={:?}",
+                                            lane.materialization_failures, lane.lifecycle_failures);
+                                    }
+                                    (lane.changed, None, lane.stopped, lane.held)
+                                },
                                 Err(error) => (
                                     false,
                                     Some(CloudFailureReason::from_error(&error).code()),

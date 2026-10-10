@@ -3,6 +3,11 @@ import {afterEach, expect, it, vi} from 'vitest';
 import {WorkStrip} from './WorkStage';
 
 afterEach(cleanup);
+it('labels screenshot sources separately from artwork, including a selected hero screenshot', () => {
+  render(<WorkStrip av={false} mode="shot" artworks={[{id: 'shot', kind: 'screenshot'}, {id: 'art', kind: 'hero'}]} privacy={false} onPick={vi.fn()}/>);
+  expect(screen.getByRole('button', {name: '스크린샷 1'})).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', {name: '아트워크 2'})).toHaveAttribute('aria-pressed', 'false');
+});
 const props = {av: false, mode: 'case', artworks: [{id: 'art'}], privacy: false, thumbnailUrl: (id: string) => `/thumb/${id}`, onPick: vi.fn()};
 it('has only label-less artwork buttons, no case/inside buttons or separator, and toggles a selected tile back to the case', () => {
   const {container, rerender} = render(<WorkStrip {...props}/>);

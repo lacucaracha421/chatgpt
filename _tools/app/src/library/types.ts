@@ -168,7 +168,6 @@ export type CloudCredentialStatus = { configured: boolean };
 export type CloudCaptureConnectionStatus = { pendingCount: number };
 export type ExtensionPairingLink = { pairingUrl: string; expiresAt: string };
 export type CloudMetadataBackupResult = { byteSize: number };
-export type CloudCollectionsPublishResult = { collections: number; artworks: number; uploaded: number; revision: string };
 export type CollectionAuthorityVerifyReport = {
   version: 1;
   verdict: "lossless" | "differences" | "blocked";
@@ -252,7 +251,10 @@ export type AuthoritySyncHealth = {
   albums: AuthorityDomainHealth;
   classifications: AuthorityDomainHealth;
   collections?: AuthorityDomainHealth;
-  assets: { rejectedCount: number; rejectedReason: string | null; stopped: boolean; held?: boolean };
+  assets: { rejectedCount: number; rejectedReason: string | null; stopped: boolean; held?: boolean;
+    rejectedAssets?: { assetId: string; name: string; reason: string }[];
+    materializationFailures?: number;
+  };
   /** Mobile character exclusions this PC could never apply (e.g. the character was deleted). */
   characterExclusions: { skippedCount: number; lastSkipReason: string | null; lastSkippedAt: string | null };
   authorityPassFailure: AuthorityLaneFailure | null;
@@ -1502,7 +1504,6 @@ export interface LibraryGateway {
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
   createExtensionPairing?(): Promise<ExtensionPairingLink>;
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
-  pushCloudCollections?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CloudCollectionsPublishResult>;
   verifyCollectionAuthorityBaseline?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CollectionAuthorityVerifyResult>;
   listCollectionTrash?(): Promise<CollectionTrashPage>;
   /** Cached cover bytes of a trashed work; rejects when there is none. */
