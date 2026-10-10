@@ -1,6 +1,5 @@
 //! Capability-gated Kakao intents. Unresolved intent bodies survive response loss and
 //! feature withdrawal in notes_state; only a deliberate different selection replaces one.
-use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use serde_json::{json, Value};
 use super::{collection_authority::server_kakao_bind_advertised, error::LibraryError,
@@ -30,16 +29,8 @@ impl Library {
         server_kakao_bind_advertised(&*self.connection()?)
     }
 
-    fn kakao_intent_key(&self, work: &str) -> Result<String, LibraryError> {
-        let config = self.cloud_sync_config()?;
-        Ok(format!("serverKakaoIntent:{}:{}", config.api_base_url.as_deref().unwrap_or_default(), work))
-    }
-
     pub fn has_server_kakao_intent(&self, work: &str) -> Result<bool, LibraryError> {
-        // Resolve the key first: it reads settings through its own connection guard.
-        let key = self.kakao_intent_key(work)?;
-        Ok(self.connection()?.query_row("SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?1)",
-            [key], |row| row.get(0))?)
+        self.has_server_bind_intent(work, "kakao")
     }
 
     pub fn search_server_kakao(&self, query: &str) -> Result<Vec<AladinSeriesCandidate>, LibraryError> {
@@ -54,8 +45,8 @@ impl Library {
 
     pub fn apply_server_kakao(&self, request: AladinApplyRequest) -> Result<KakaoOperationResult, LibraryError> {
         let (client, token) = self.authority_client()?.ok_or(LibraryError::CloudRequestUnavailable)?;
-        self.apply_server_kakao_with(request, &|body| client.kakao_intent_post(
-            "/v1/collections/bindings/requests", body, token.expose()), &|| self.pull_kakao_authority())
+        self.apply_server_kakao_with(request, &|body| client.collection_intent_post(
+            "/v1/collections/bindings/requests", body, token.expose()), &|| self.pull_bind_authority())
     }
 
     pub fn apply_kakao_routed(&self, request: AladinApplyRequest) -> Result<KakaoOperationResult, LibraryError> {
@@ -79,52 +70,17 @@ impl Library {
         if request.groups.is_empty() || request.groups.len() > 10 || request.query.trim().chars().count() < 2 {
             return Err(LibraryError::InvalidAladinResponse);
         }
-        let key = self.kakao_intent_key(&request.collection_id)?;
         let choice = json!({"query":request.query,"groups":request.groups,"title":request.query});
-        let body = {
-            let mut db = self.connection()?;
-            let tx = db.transaction()?;
-            let existing: Option<String> = tx.query_row("SELECT value FROM notes_state WHERE key=?1", [&key], |r| r.get(0)).optional()?;
-            let existing = existing.map(|raw| serde_json::from_str::<Value>(&raw).map_err(|_| LibraryError::InvalidCloudResponse)).transpose()?;
-            let body = match existing {
-                Some(body) if body["choice"] == choice => body,
-                _ => {
-                    // The server captures the full binding revision/config at enqueue. This
-                    // explicit observation also protects first binds and same-anchor reconnects.
-                    let external: Option<String> = tx.query_row("SELECT external_id FROM collection_external_bindings WHERE collection_id=?1 AND provider='kakao'",
-                        [&request.collection_id], |r| r.get(0)).optional()?;
-                    json!({"version":1,"operationId":uuid::Uuid::new_v4().to_string(),"collectionId":request.collection_id,
-                        "provider":"kakao","choice":choice,"expected":{"externalId":external}})
-                }
-            };
-            tx.execute("INSERT INTO notes_state(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,body.to_string()])?;
-            tx.commit()?; body
-        };
-        let reply = post(&body)?;
-        if reply["detail"]["code"].is_string() {
-            // The server checks operationId replay before readiness and validation, so a
-            // coded refusal proves this ID was never accepted: drop it so the work is not
-            // pinned to the server route after the feature is withdrawn.
-            self.connection()?.execute("DELETE FROM notes_state WHERE key=?1 AND value=?2", params![key,body.to_string()])?;
-            return Ok(KakaoOperationResult::Server {outcome:"failed".into(), message:reply["detail"]["message"].as_str().map(str::to_owned)});
-        }
-        let row = &reply["request"];
-        if reply["version"] != 1 || row["operationId"] != body["operationId"] || row["collectionId"] != body["collectionId"]
-            || row["provider"] != "kakao" || row["executor"] != "server" {
-            return Err(LibraryError::InvalidCloudResponse);
-        }
-        let state = row["state"].as_str().ok_or(LibraryError::InvalidCloudResponse)?;
-        if !matches!(state, "pending" | "applied" | "failed" | "superseded") { return Err(LibraryError::InvalidCloudResponse); }
-        if state == "applied" { pull()?; }
-        if state != "pending" { self.connection()?.execute("DELETE FROM notes_state WHERE key=?1 AND value=?2", params![key,body.to_string()])?; }
-        Ok(KakaoOperationResult::Server {outcome:state.into(), message:row["reason"]["message"].as_str().map(str::to_owned)})
+        let result = self.apply_server_bind_intent_with(&request.collection_id, "kakao", choice,
+            &|left, right| left == right, post, pull)?;
+        Ok(KakaoOperationResult::Server {outcome:result.outcome, message:result.message})
     }
 
     pub fn refresh_server_kakao(&self, work: &str) -> Result<KakaoOperationResult, LibraryError> {
         let (client, token) = self.authority_client()?.ok_or(LibraryError::CloudRequestUnavailable)?;
-        let reply = client.kakao_intent_post("/v1/collections/release-checks/run",
+        let reply = client.collection_intent_post("/v1/collections/release-checks/run",
             &json!({"provider":"kakao","workId":work}), token.expose())?;
-        refresh_reply(&reply, work, &|| self.pull_kakao_authority())
+        refresh_reply(&reply, work, &|| self.pull_bind_authority())
     }
 }
 

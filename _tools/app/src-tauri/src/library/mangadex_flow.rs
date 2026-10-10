@@ -421,6 +421,7 @@ mod tests {
         MangaDexApplyRequest {
             target: MangaDexApplyTarget::New { name: name.into() },
             manga_id: MANGA_ID.into(),
+            title: None,
         }
     }
 
@@ -472,6 +473,7 @@ mod tests {
                         name: "  던전밥 소장판  ".into(),
                     },
                     manga_id: MANGA_ID.into(),
+                    title: None,
                 },
                 fetched("snapshot-v1"),
                 Some(&cover_bytes()),
@@ -566,6 +568,7 @@ mod tests {
                         collection_id: existing.id.clone(),
                     },
                     manga_id: MANGA_ID.into(),
+                    title: None,
                 },
                 fetched("snapshot-v1"),
                 Some(&cover_bytes()),
@@ -621,6 +624,7 @@ mod tests {
                         name: "로컬 제목".into(),
                     },
                     manga_id: MANGA_ID.into(),
+                    title: None,
                 },
                 fetched("snapshot-v1"),
                 Some(&cover_bytes()),
@@ -705,6 +709,7 @@ mod tests {
                         collection_id: id.into(),
                     },
                     manga_id: MANGA_ID.into(),
+                    title: None,
                 },
                 work,
                 Some(&cover_bytes()),
@@ -875,6 +880,7 @@ mod tests {
                         collection_id: created.id.clone(),
                     },
                     manga_id: new_id.into(),
+                    title: None,
                 },
                 provider_work(new_id, "new"),
                 None,
@@ -934,6 +940,7 @@ mod tests {
                         collection_id: created.id.clone(),
                     },
                     manga_id: new_id.into(),
+                    title: None,
                 },
                 provider_work(new_id, "new"),
                 None,

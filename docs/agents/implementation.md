@@ -77,7 +77,7 @@ Use read-only Git inspection such as `show`, `log`, and `diff`; no fetch, checko
 
 ## Project health commands
 
-Run targeted Rust tests through `bash scripts/cargo-test.sh -- <filters>` for process preflight, lock/hang visibility, and a timeout; workers use `CARGO_TARGET_DIR=_tools/app/src-tauri/target-worker` from the repository root.
+Run targeted Rust tests through `bash scripts/cargo-test.sh -- <filter>` (several filters: `-- -- <f1> <f2>`) for process preflight, lock/hang visibility, and a timeout; workers use `CARGO_TARGET_DIR=_tools/app/src-tauri/target-worker` from the repository root.
 
 From the repository root, run `bash scripts/check-project.sh` before a batch delivery.
 It runs PC and tablet Vitest, both TypeScript checks, `cargo test --lib`, server

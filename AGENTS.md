@@ -51,7 +51,7 @@
 
 ## Verification
 
-- Run targeted Rust tests through `bash scripts/cargo-test.sh -- <filters>` for process preflight, lock/hang visibility, and a timeout; workers use `CARGO_TARGET_DIR=_tools/app/src-tauri/target-worker` from the repository root.
+- Run targeted Rust tests through `bash scripts/cargo-test.sh -- <filter>` (several filters: `-- -- <f1> <f2>`) for process preflight, lock/hang visibility, and a timeout; workers use `CARGO_TARGET_DIR=_tools/app/src-tauri/target-worker` from the repository root.
 - Run `bash scripts/check-project.sh` for the full pre-commit check (suite table and logs; `CARGO_BUILD_JOBS` defaults to 2).
 - Start with the most relevant targeted check; broaden only for real behavioral risk or evidence of a cross-module problem. Add tests when requested or when a realistic regression would otherwise escape existing coverage.
 - Before reporting a code change, review its actual diff for bugs; a worker's or your own summary is not a review. Use a separate reviewer when risk warrants and tools allow; otherwise disclose that the review was inline.

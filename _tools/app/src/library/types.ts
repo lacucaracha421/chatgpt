@@ -585,6 +585,13 @@ export type MangaDexApplyTarget =
 export type MangaDexApplyRequest = {
   target: MangaDexApplyTarget;
   mangaId: string;
+  title?: string;
+};
+
+export type MangaDexApplyResult = CollectionSummary | {
+  outcome: 'pending' | 'applied' | 'failed' | 'superseded';
+  message: string | null;
+  collection?: CollectionSummary;
 };
 
 export type MangaDexConnection = {
@@ -1589,9 +1596,9 @@ export interface LibraryGateway {
   patchAssetAlbums(patch: AssetAlbumPatch): Promise<void>;
   getAssetAlbums(assetId: string): Promise<string[]>;
   listCollections(): Promise<CollectionSummary[]>;
-  searchMangaDex(query: string): Promise<MangaDexSearchResult[]>;
+  searchMangaDex(query: string, collectionId?: string): Promise<MangaDexSearchResult[]>;
   previewMangaDex(mangaId: string): Promise<MangaDexWorkPreview>;
-  applyMangaDex(request: MangaDexApplyRequest): Promise<CollectionSummary>;
+  applyMangaDex(request: MangaDexApplyRequest): Promise<MangaDexApplyResult>;
   refreshMangaDex(collectionId: string): Promise<CollectionSummary>;
   getMangaDexConnection(collectionId: string): Promise<MangaDexConnection | null>;
   getKakaoCredentialStatus(): Promise<KakaoCredentialStatus>;

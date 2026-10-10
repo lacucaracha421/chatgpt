@@ -1034,6 +1034,8 @@ pub enum MangaDexApplyTarget {
 pub struct MangaDexApplyRequest {
     pub target: MangaDexApplyTarget,
     pub manga_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1742,6 +1744,7 @@ mod tests {
                 collection_id: "work-1".into(),
             },
             manga_id: "manga-1".into(),
+            title: None,
         })
         .unwrap();
 

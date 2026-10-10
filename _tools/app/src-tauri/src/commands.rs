@@ -1162,10 +1162,11 @@ pub async fn list_collections(
 #[tauri::command]
 pub async fn search_mangadex(
     query: String,
+    collection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<MangaDexSearchResult>, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.search_mangadex(&query))
+    tauri::async_runtime::spawn_blocking(move || library.search_mangadex_routed(&query, collection_id.as_deref()))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
@@ -1187,9 +1188,9 @@ pub async fn preview_mangadex(
 pub async fn apply_mangadex(
     request: MangaDexApplyRequest,
     state: State<'_, AppState>,
-) -> Result<CollectionSummary, CommandError> {
+) -> Result<crate::library::server_mangadex_binds::MangaDexOperationResult, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.apply_mangadex(request))
+    tauri::async_runtime::spawn_blocking(move || library.apply_mangadex_routed(request))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

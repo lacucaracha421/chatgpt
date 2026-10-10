@@ -6,6 +6,7 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
+import { BusyLabel } from "../shared/ui/BusyLabel";
 
 export type MangaDexImportTarget =
   | { kind: "new" }
@@ -26,8 +27,10 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
   const [selected, setSelected] = useState<MangaDexSearchResult | null>(null);
   const [busy, setBusy] = useState<"search" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   async function search() {
+    if (busy) return;
     const trimmed = query.trim();
     if (!trimmed) {
       setError("검색어를 입력해 주세요.");
@@ -36,9 +39,12 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
     setBusy("search");
     setError(null);
     try {
-      const nextResults = await gateway.searchMangaDex(trimmed);
+      const nextResults = target.kind === "existing"
+        ? await gateway.searchMangaDex(trimmed, target.collection.id)
+        : await gateway.searchMangaDex(trimmed);
       setResults(nextResults);
       setSelected(null);
+      setPending(false);
     } catch (searchError) {
       setError(commandErrorMessage(searchError, "MangaDex에서 검색하지 못했습니다."));
     } finally {
@@ -47,22 +53,38 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
   }
 
   function selectResult(result: MangaDexSearchResult) {
+    if (busy) return;
     setSelected(result);
     setError(null);
+    setPending(false);
   }
 
   async function apply() {
-    if (!selected) return;
+    if (!selected || busy) return;
     setBusy("apply");
     setError(null);
     try {
-      const collection = await gateway.applyMangaDex({
+      const result = await gateway.applyMangaDex({
         target: target.kind === "new"
           ? { kind: "new", name: selected.title }
           : { kind: "existing", collectionId: target.collection.id },
         mangaId: selected.mangaId,
+        title: selected.title,
       });
-      await onApplied(collection);
+      if ('outcome' in result) {
+        if (result.outcome === 'pending') {
+          setPending(true); setBusy(null); return;
+        }
+        if (result.outcome === 'failed' || result.outcome === 'superseded') {
+          setPending(false);
+          setError(result.message || '연결이 적용되지 않았습니다. 현재 연결을 확인하고 다시 선택해 주세요.');
+          setBusy(null); return;
+        }
+        if (!result.collection) throw new Error('연결된 작품 정보를 확인하지 못했습니다. 다시 시도해 주세요.');
+        await onApplied(result.collection);
+      } else {
+        await onApplied(result);
+      }
       onClose();
     } catch (applyError) {
       setError(commandErrorMessage(applyError, "MangaDex 정보를 적용하지 못했습니다."));
@@ -71,7 +93,7 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
   }
 
   return (
-    <Dialog open={open} title={target.kind === "new" ? "새 작품 추가" : "MangaDex 연결"} variant="medium" onClose={onClose}>
+    <Dialog open={open} title={target.kind === "new" ? "새 작품 추가" : "MangaDex 연결"} variant="medium" onClose={() => { if (!busy) onClose(); }}>
       <div className="mangadex-import">
         <div className="mangadex-import__search">
           <TextField
@@ -79,22 +101,24 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
             type="search"
             value={query}
             onChange={(event) => { setQuery(event.target.value); setError(null); }}
-            onKeyDown={(event) => { if (event.key === "Enter") void search(); }}
+            onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) void search(); }}
           />
           <Button type="button" disabled={busy !== null} onClick={() => void search()}>검색</Button>
         </div>
 
         {error && <p className="mangadex-import__error" role="alert">{error}</p>}
+        {pending && <p role="status">연결 대기 · 서버에서 처리 중</p>}
         <p className="mangadex-import__provider-note">
           MangaDex에서 작품 정보를 검색합니다. 한국 정발 정보는 작품 생성 후 Kakao에 연결할 수 있습니다.
         </p>
-        {busy === "search" && <Skeleton className="mangadex-import__loading" label="검색 중" />}
+        <BusyLabel busy={busy === "search"}>{results.length === 0 ? <Skeleton className="mangadex-import__loading" label="검색 중" /> : <p role="status">검색 중…</p>}</BusyLabel>
 
         <div className="mangadex-import__results" aria-label="검색 결과">
           {results.map((result) => (
             <button
               key={result.mangaId}
               type="button"
+              disabled={busy !== null}
               className="mangadex-import__result"
               aria-pressed={selected?.mangaId === result.mangaId}
               onClick={() => selectResult(result)}

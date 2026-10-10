@@ -270,6 +270,8 @@ def capabilities(db=None):
     result = {"version": 1, "mangadexSearch": True, "kakaoSearch": kakao_key() is not None, "bindRequests": True}
     if kakao_bind_worker.features(db):
         result["kakaoApply"] = True
+    if kakao_bind_worker.features(db, "mangadex"):
+        result["mangadexApply"] = True
     return result
 
 
@@ -321,14 +323,16 @@ def http_get(url, params, headers, max_bytes, timeout, deadline=None):
         raise Upstream("invalid")
     try:
         with _http().stream("GET", url, params=params, headers={"User-Agent": USER_AGENT, **headers},
-                            timeout=httpx.Timeout(timeout, connect=10.0)) as response:
+                            timeout=httpx.Timeout(timeout, connect=min(10.0, timeout))) as response:
             if not 200 <= response.status_code < 300:
                 raise Upstream("status", response.status_code, _retry_after(response.headers))
             body = bytearray()
             for chunk in response.iter_bytes():
                 body.extend(chunk)
                 if len(body) > max_bytes:
-                    raise Upstream("invalid")
+                    error = Upstream("invalid")
+                    error.too_large = True  # callers that distinguish size keep "invalid" for the rest
+                    raise error
                 if deadline is not None and time.monotonic() > deadline:
                     raise Upstream("timeout")
             return bytes(body)
@@ -384,7 +388,7 @@ def _uuid_ok(value):
         return False
 
 
-def mangadex_item(data):
+def mangadex_item(data, *, detail=False):
     """One ``MangaDexSearchResult`` (camelCase) or None when the record is unusable."""
     if not isinstance(data, dict) or not _uuid_ok(data.get("id")) or str(UUID(data["id"])) != data["id"]:
         return None
@@ -417,12 +421,24 @@ def mangadex_item(data):
         return None
     year = attributes.get("year")
     status = attributes.get("status")
-    return {"mangaId": manga_id, "title": title, "alternateTitles": alternates,
+    item = {"mangaId": manga_id, "title": title, "alternateTitles": alternates,
             "author": " · ".join(people) if people else None,
             "year": year if isinstance(year, int) and not isinstance(year, bool) else None,
             "status": status if isinstance(status, str) else None,
             "primaryCoverFileName": file_name,
             "coverUrl": f"{MANGADEX_UPLOADS}/covers/{manga_id}/{file_name}.256.jpg" if file_name else None}
+    if detail:
+        def localized(values):
+            values = values if isinstance(values, dict) else {}
+            return next((v for key in (*LOCALE_PRIORITY, *sorted(values))
+                         if (v := _nonempty(values.get(key)))), None)
+        tags = [localized((tag.get("attributes") or {}).get("name"))
+                for tag in attributes.get("tags") or [] if isinstance(tag, dict)]
+        item.update(originalTitle=next((v for locale in ("ja", "ja-ro") for m in maps
+                                       if (v := _nonempty(m.get(locale)))), None),
+                    overview=localized(attributes.get("description")),
+                    genres=", ".join(v for v in tags if v) or None)
+    return item
 
 
 def parse_mangadex(body):
@@ -1115,10 +1131,10 @@ def store_request(db, *, operation_id, collection_id, provider, choice_json, exp
         if existing["payload_digest"] != digest:
             fail(409, "operationConflict", "다른 내용으로 연결 요청을 재사용할 수 없습니다.")
         return {"version": 1, "request": _request(existing)}
-    server = provider == "kakao" and kakao_bind_worker.enabled()
+    server = provider in ("kakao", "mangadex") and kakao_bind_worker.enabled(provider)
     try:
         pin = kakao_bind_worker.capture(db, collection_id,
-              None if expected_json is None else json.loads(expected_json)) if server else None
+              None if expected_json is None else json.loads(expected_json), provider) if server else None
     except kakao_bind_worker.Refused as error:
         db.rollback()
         fail(503, error.code, error.message)

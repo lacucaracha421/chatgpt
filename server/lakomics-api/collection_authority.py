@@ -2154,15 +2154,15 @@ def _unbind(ctx, entity, payload_sha):
     state = work_state(require_work(ctx, work_id))
     existing = binding_row(ctx.db, ctx.library_id, work_id, provider)
     if existing is None or not existing["bound"]:
-        if provider == "kakao":
+        if provider in ("kakao", "mangadex"):
             import kakao_bind_worker
-            kakao_bind_worker.supersede(ctx.db, work_id, ctx.now)
+            kakao_bind_worker.supersede(ctx.db, work_id, ctx.now, provider)
         return _finish(ctx, payload_sha, f"{work_id}:{provider}")
     if entity["expectedRevision"] != existing["entity_revision"]:
         conflict(ctx, "binding", binding_projection(existing))
-    if provider == "kakao":
+    if provider in ("kakao", "mangadex"):
         import kakao_bind_worker
-        kakao_bind_worker.supersede(ctx.db, work_id, ctx.now)
+        kakao_bind_worker.supersede(ctx.db, work_id, ctx.now, provider)
     # PC deletes the binding row; the snapshot (merge base) goes with it.
     _write_binding(ctx, work_id=work_id, provider=provider, external_id=existing["external_id"],
                    config=None, snapshot=None, values=None, snapshot_external_id=None,
@@ -4082,7 +4082,7 @@ def advertised_features():
     import release_wishlist
     import kakao_bind_worker
     return ["personProfileFields", "kakaoReview", *collection_release_checks.features(), *release_calendar.features(),
-            *release_wishlist.features(), *kakao_bind_worker.features()]
+            *release_wishlist.features(), *kakao_bind_worker.features(), *kakao_bind_worker.features(provider="mangadex")]
 
 
 def register(app, get_db, require_client, require_publisher):

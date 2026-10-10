@@ -36,6 +36,7 @@ import type {
   LibraryGateway,
   LibrarySummary,
   MangaDexApplyRequest,
+  MangaDexApplyResult,
   MangaDexConnection,
   MangaDexSearchResult,
   MangaDexWorkPreview,
@@ -552,12 +553,12 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
       return items;
     } finally { phase?.cancel(); }
   },
-  searchMangaDex: (query) =>
-    invoke<MangaDexSearchResult[]>("search_mangadex", { query }),
+  searchMangaDex: (query, collectionId) =>
+    invoke<MangaDexSearchResult[]>("search_mangadex", { query, collectionId }),
   previewMangaDex: (mangaId) =>
     invoke<MangaDexWorkPreview>("preview_mangadex", { mangaId }),
   applyMangaDex: (request: MangaDexApplyRequest) =>
-    invoke<CollectionSummary>("apply_mangadex", { request }),
+    invoke<MangaDexApplyResult>("apply_mangadex", { request }),
   refreshMangaDex: (collectionId) =>
     invoke<CollectionSummary>("refresh_mangadex", { collectionId }),
   getMangaDexConnection: (collectionId) =>

@@ -976,7 +976,7 @@ import kakao_bind_worker
 import notes
 import similarity_review
 
-kakao_bind_worker.register(app, get_db)
+kakao_bind_worker.register(app, get_db, lambda: _s3, lambda: R2_BUCKET)
 
 
 def publisher_log_heads(db):

@@ -27,7 +27,7 @@ fn definitive_refusal(status: u16, value: Option<Value>) -> Value {
 impl CloudClient {
     /// Client-owned intent routes. A lost response is always an unknown outcome; callers
     /// retain the operation ID and never use it as permission for a local provider apply.
-    pub(crate) fn kakao_intent_post(&self, path: &str, body: &Value, token: &str) -> Result<Value, LibraryError> {
+    pub(crate) fn collection_intent_post(&self, path: &str, body: &Value, token: &str) -> Result<Value, LibraryError> {
         if !matches!(path, "/v1/collections/bindings/requests" | "/v1/collections/release-checks/run") {
             return Err(LibraryError::InvalidCloudResponse);
         }

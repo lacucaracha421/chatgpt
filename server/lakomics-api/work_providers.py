@@ -940,12 +940,13 @@ def artwork_thumbnail(data):
         return None
 
 
-def _stored_blob(client, storage_bucket, data, mime, *, deadline=None):
+def _stored_blob(client, storage_bucket, data, mime, *, deadline=None, stop=lambda: False):
     """Put one content-addressed blob (once) and confirm its storage receipt."""
     sha = hashlib.sha256(data).hexdigest()
     key = artwork_key(sha)
 
     def check_budget():
+        check_artwork_stop(stop)
         if deadline is not None and time.monotonic() >= deadline:
             fail(504, "providerTimeout", "Provider artwork request budget exceeded.")
 
@@ -970,15 +971,54 @@ def store_artwork(body, deadline, get_db, storage, bucket, *, automatic=False,
     url = image_url(body.provider, body.path, body.size)
     data, mime = outbound(url, deadline=deadline, limit=byte_limit, image=True,
         socket_seconds=1 if automatic else 5)
+    return store_artwork_bytes(data, mime, deadline, get_db, storage, bucket,
+        provider=body.provider, provider_image_id=body.path, automatic=automatic, byte_limit=byte_limit)
+
+
+def check_artwork_stop(stop):
+    if stop():
+        from collection_bindings import SearchCancelled
+        raise SearchCancelled()
+
+
+def mangadex_ready():
+    # Probe decoder support without constructing a storage client or fetching bytes.
+    try:
+        from PIL import Image, features
+        return bool(Image and features.check("jpg") and features.check("webp") and features.check("zlib"))
+    except ImportError:
+        return False
+
+
+def mangadex_image(manga_id, file_name, deadline):
+    from collection_bindings import _valid_cover_identity
+    if str(uuid.UUID(manga_id)) != manga_id or not _valid_cover_identity(file_name):
+        fail(422, "providerImageInvalid", "이미지 정보가 올바르지 않습니다.")
+    return outbound(f"https://uploads.mangadex.org/covers/{manga_id}/{file_name}",
+                    deadline=deadline, limit=MAX_ARTWORK_BYTES, image=True, socket_seconds=1)
+
+
+def store_artwork_bytes(data, mime, deadline, get_db, storage, bucket, *, provider, provider_image_id,
+                        automatic=False, byte_limit=MAX_ARTWORK_BYTES, stop=lambda: False,
+                        strict_deadline=False):
+    """Shared verified-byte staging; never called inside an authority transaction."""
+    def check_budget():
+        check_artwork_stop(stop)
+        if strict_deadline and time.monotonic() >= deadline:
+            fail(504, "providerTimeout", "Provider artwork request budget exceeded.")
+    check_budget()
+    if len(data) > byte_limit:
+        fail(413, "providerResponseTooLarge", "외부 응답 크기가 허용 범위를 초과했습니다.")
     width, height = image_dimensions(data, mime,
         max_pixels=MAX_AUTO_IMAGE_PIXELS if automatic else None)
+    check_budget()
     thumbnail_data = artwork_thumbnail(data)
+    check_budget()
     try:
         client, storage_bucket = storage(), bucket()
         owned_client = None
         if automatic:
-            # The service's shared R2 transfer client waits 60s and retries. Use
-            # the existing factory with short, non-retrying sockets for this lane.
+            # Reuse the automatic-artwork bounded, non-retrying storage client.
             import r2
             if hasattr(r2, "_R2Client") and isinstance(client, r2._R2Client):
                 remaining = deadline - time.monotonic()
@@ -990,12 +1030,14 @@ def store_artwork(body, deadline, get_db, storage, bucket, *, automatic=False,
                     retries={"mode": "standard", "total_max_attempts": 1}, max_pool_connections=1))
         storage_deadline = deadline if automatic else None
         try:
-            blob = _stored_blob(client, storage_bucket, data, mime, deadline=storage_deadline)
+            blob = _stored_blob(client, storage_bucket, data, mime, deadline=storage_deadline, stop=stop)
+            check_budget()
             thumbnail = None if thumbnail_data is None else _stored_blob(
-                client, storage_bucket, thumbnail_data, ARTWORK_THUMBNAIL_MIME, deadline=storage_deadline)
+                client, storage_bucket, thumbnail_data, ARTWORK_THUMBNAIL_MIME, deadline=storage_deadline, stop=stop)
         finally:
             if owned_client is not None:
                 owned_client.close()
+        check_budget()
         with get_db() as db:
             for receipt in (blob, thumbnail):
                 if receipt is not None:
@@ -1006,8 +1048,10 @@ def store_artwork(body, deadline, get_db, storage, bucket, *, automatic=False,
     except HTTPException:
         raise
     except Exception:
+        check_artwork_stop(stop)
         fail(502, "providerArtworkStorageUnavailable", "이미지를 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.")
-    return {"provider": body.provider, "providerImageId": body.path, "original": blob,
+    check_budget()
+    return {"provider": provider, "providerImageId": provider_image_id, "original": blob,
             "thumbnail": thumbnail, "width": width, "height": height}
 
 

@@ -48,7 +48,8 @@ it('opens server Kakao selection while the PC is absent without promising PC pro
   routes.status = {version: 1, mangadexSearch: true, kakaoSearch: true, kakaoApply: true, bindRequests: true, publisherSeenAt: null};
   render(<CollectionBindings item={base} active refreshKey="one" sheet="kakao" onSheet={vi.fn()}/>);
   expect(await screen.findByText('국내 출판 제목으로 찾으세요. 고르면 서버에서 권 목록과 발매 정보를 연결해요.')).toBeTruthy();
-  expect(screen.queryByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeNull();
+  expect(within(screen.getByRole('dialog', {name: '카카오 연결'})).queryByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeNull();
+  expect(screen.getAllByText(/MangaDex 연결은 아직 서버에서 처리하지 못해요./).length).toBeGreaterThan(0);
 });
 
 beforeEach(() => {
@@ -104,7 +105,7 @@ it('shows each connection from the published schedule and reads the requests for
   expect(screen.queryByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeNull();
 });
 
-it('shows unconnected providers, and a note when no PC has read the bind requests yet', async () => {
+it('shows unconnected providers and explains missing server capabilities', async () => {
   routes.status = {version: 1, mangadexSearch: true, kakaoSearch: true, bindRequests: true, publisherSeenAt: null};
   await renderArea();
   // Not connected: the prominent panel, with Kakao (신간 알림) as the primary choice.
@@ -113,7 +114,8 @@ it('shows unconnected providers, and a note when no PC has read the bind request
   expect(row('카카오')).toBe(within(area()).getByRole('button', {name: '카카오 연결'}));
   expect(row('카카오').classList.contains('is-primary')).toBe(true);
   expect(row('MangaDex').classList.contains('is-primary')).toBe(false);
-  expect(await screen.findByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeTruthy();
+  expect(area().querySelector('.collection-bindings-note')?.textContent).toBe('MangaDex 연결은 아직 서버에서 처리하지 못해요. 카카오 연결은 아직 서버에서 처리하지 못해요.');
+  expect(area().textContent).not.toMatch(/PC가 켜|PC 앱을 업데이트/);
 });
 
 it('shows a pending request waiting for the PC and a failed one with its reason', async () => {
@@ -435,4 +437,66 @@ it.each(['MangaDex','카카오'] as const)('masks %s work-link candidates withou
     expect(sheet.querySelector('img[src]')).toBeNull();
     expect(sheet.querySelector('.privacy-mask')).toBeTruthy();
   } finally {localStorage.clear();}
+});
+
+it.each([[false, false], [true, false], [false, true], [true, true]])(
+  'uses provider-specific copy for MangaDex=%s Kakao=%s', async (mangadexApply, kakaoApply) => {
+    routes.status = {version: 1, mangadexSearch: true, kakaoSearch: true, mangadexApply, kakaoApply, bindRequests: true, publisherSeenAt: null};
+    await renderArea();
+    const panel = area();
+    const note = panel.querySelector('.collection-bindings-note');
+    expect(!!note).toBe(!(mangadexApply && kakaoApply));
+    if (!mangadexApply && !kakaoApply) expect(note?.textContent).toBe('MangaDex 연결은 아직 서버에서 처리하지 못해요. 카카오 연결은 아직 서버에서 처리하지 못해요.');
+    expect(panel.textContent).not.toMatch(/PC가 켜|PC 앱을 업데이트/);
+    if (mangadexApply && !kakaoApply) expect(note?.textContent).toBe('카카오 연결은 아직 서버에서 처리하지 못해요.');
+    if (!mangadexApply && kakaoApply) expect(note?.textContent).toBe('MangaDex 연결은 아직 서버에서 처리하지 못해요.');
+    const sheet = await openSheet('MangaDex');
+    expect(sheet.textContent).toContain(mangadexApply ? '고르면 서버에서 작품 정보와 일본판 표지를 연결해요.' : 'MangaDex 연결은 아직 서버에서 처리하지 못해요.');
+    expect(within(sheet).queryByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeNull();
+    expect(sheet.textContent).not.toMatch(/PC가 켜/);
+    fireEvent.click(within(await within(sheet).findByRole('list', {name: 'MangaDex 검색 결과'})).getAllByRole('button')[0]);
+    const confirm = await screen.findByRole('dialog', {name: '이 작품으로 연결할까요?'});
+    expect(confirm.textContent).not.toMatch(/PC가 켜|PC 앱을 업데이트/);
+    if (!mangadexApply) expect(confirm.textContent).toContain('MangaDex 연결은 아직 서버에서 처리하지 못해요.');
+    expect(confirm.textContent).toContain(mangadexApply ? '내가 고친 값과 고른 표지는 그대로예요.' : '내가 고친 값은 덮어쓰지 않아요.');
+    fireEvent.click(within(confirm).getByRole('button', {name: '취소'}));
+    fireEvent.click(within(sheet).getByRole('button', {name: '닫기'}));
+    const kakao = await openSheet('카카오');
+    expect(kakao.textContent).toContain(kakaoApply ? '고르면 서버에서 권 목록과 발매 정보를 연결해요.' : '카카오 연결은 아직 서버에서 처리하지 못해요.');
+    expect(within(kakao).queryByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeNull();
+    expect(kakao.textContent).not.toMatch(/PC가 켜/);
+  },
+);
+
+it('keeps MangaDex server ownership wording after capability withdrawal', async () => {
+  routes.requests = {version: 1, items: [request({provider: 'mangadex', executor: 'server'})], pending: null};
+  const {rerender} = render(<CollectionBindings item={base} active refreshKey="one" sheet={null} onSheet={vi.fn()}/>);
+  expect(await screen.findByText(/서버에서 처리 중/)).toBeTruthy();
+  routes.requests = {version: 1, items: [request({provider: 'mangadex', executor: 'server', state: 'applied'})], pending: null};
+  rerender(<CollectionBindings item={base} active refreshKey="two" sheet={null} onSheet={vi.fn()}/>);
+  expect(await screen.findByText('MangaDex 서버에서 연결 확인됨')).toBeTruthy();
+  rerender(<CollectionBindings item={{...base, releaseSchedule: connected}} active refreshKey="three" sheet={null} onSheet={vi.fn()}/>);
+  fireEvent.click(within(area()).getByRole('button', {name: /^연결/}));
+  expect(row('MangaDex').textContent).toContain('연결됨');
+});
+
+it('waits for the initial capability before opening the search sheet', async () => {
+  let ready!: (value: unknown) => void;
+  routes.status = () => new Promise(resolve => { ready = resolve; });
+  render(<CollectionBindings item={base} active refreshKey="one" sheet="mangadex" onSheet={vi.fn()}/>);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByText(/고르면 PC가 켜질 때/)).toBeNull();
+  await act(async () => ready({version: 1, mangadexSearch: true, kakaoSearch: true, mangadexApply: true, bindRequests: true, publisherSeenAt: null}));
+  expect(await screen.findByRole('dialog', {name: 'MangaDex 연결'})).toBeTruthy();
+  expect(screen.getByText(/고르면 서버에서 작품 정보와 일본판 표지를 연결해요./)).toBeTruthy();
+});
+
+it('retries initial capability failure without flashing PC copy', async () => {
+  routes.status = new Error('offline');
+  render(<CollectionBindings item={base} active refreshKey="one" sheet="mangadex" onSheet={vi.fn()}/>);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  routes.status = {version: 1, mangadexSearch: true, kakaoSearch: true, mangadexApply: true, bindRequests: true, publisherSeenAt: null};
+  fireEvent.click(screen.getByRole('button', {name: '다시 시도'}));
+  expect(await screen.findByRole('dialog', {name: 'MangaDex 연결'})).toBeTruthy();
 });

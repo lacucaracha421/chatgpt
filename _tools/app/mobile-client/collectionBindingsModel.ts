@@ -19,7 +19,11 @@ export const BIND_REQUESTS_PATH = `${BINDINGS_PREFIX}/requests`;
 export const searchPath = (provider: BindProvider, query: string) => `${BINDINGS_PREFIX}/search/${provider}?${new URLSearchParams({query})}`;
 export const requestsPath = (collectionId: string) => `${BIND_REQUESTS_PATH}?${new URLSearchParams({collectionId, state: 'all', limit: '20'})}`;
 
-export type BindStatus = {version: 1; mangadexSearch: boolean; kakaoSearch: boolean; kakaoApply?: boolean; bindRequests: boolean; publisherSeenAt: string | null};
+export type BindStatus = {version: 1; mangadexSearch: boolean; kakaoSearch: boolean; kakaoApply?: boolean; mangadexApply?: boolean; bindRequests: boolean; publisherSeenAt: string | null};
+/** Search availability does not grant server execution; legacy missing fields are false. */
+export const providerCanApply = (status: BindStatus | null, provider: BindProvider) =>
+  (provider === 'mangadex' ? status?.mangadexApply : status?.kakaoApply) === true;
+
 export type MangaDexCandidate = {mangaId: string; title: string; alternateTitles: string[]; author: string | null; year: number | null; status: string | null; primaryCoverFileName?: string | null; coverUrl: string | null};
 export type KakaoCandidate = {
   anchorItemId: string; groupFingerprint: string; title: string; author: string | null; publisher: string | null;

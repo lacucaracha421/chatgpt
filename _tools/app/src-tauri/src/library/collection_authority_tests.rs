@@ -1453,6 +1453,7 @@ fn collection_authority_mangadex_apply_defers_fields_and_projects_original_title
                 collection_id: "w".into(),
             },
             manga_id,
+            title: None,
         },
         fetched,
         None,

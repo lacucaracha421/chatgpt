@@ -253,6 +253,10 @@ pub(super) fn server_kakao_bind_advertised(db: &Connection) -> Result<bool, Libr
     Ok(local(db)?.is_some() && cached_profile_features(db)?.iter().any(|f| f == "serverKakaoBinds"))
 }
 
+pub(super) fn server_mangadex_bind_advertised(db: &Connection) -> Result<bool, LibraryError> {
+    Ok(local(db)?.is_some() && cached_profile_features(db)?.iter().any(|f| f == "serverMangaDexBinds"))
+}
+
 pub(crate) fn fence_collection_operation(db: &Connection) -> Result<(), LibraryError> {
     if local(db)?.is_some() {
         return Err(LibraryError::CollectionAuthorityOperationUnavailable);
@@ -294,8 +298,8 @@ fn pending_restore(db: &Connection, work: &str, revision: i64) -> Result<bool, L
 }
 
 impl Library {
-    /// Confirm server Kakao completion only after its authority cursor is in this replica.
-    pub(super) fn pull_kakao_authority(&self) -> Result<(), LibraryError> {
+    /// Confirm server bind completion only after its authority cursor is in this replica.
+    pub(super) fn pull_bind_authority(&self) -> Result<(), LibraryError> {
         let (client, token) = self.authority_client()?.ok_or(LibraryError::CloudRequestUnavailable)?;
         let aggregate = client.sync_status(token.expose())?;
         self.sync_collection_authority(&client, token.expose(), None, &aggregate, false)?;

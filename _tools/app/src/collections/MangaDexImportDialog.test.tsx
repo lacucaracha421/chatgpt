@@ -44,12 +44,13 @@ function renderDialog(target: { kind: "new" } | { kind: "existing"; collection: 
   } as unknown as LibraryGateway;
   const onApplied = vi.fn().mockResolvedValue(undefined);
 
+  const onClose = vi.fn();
   render(
     <LibraryProvider gateway={gateway}>
-      <MangaDexImportDialog open target={target} onClose={() => undefined} onApplied={onApplied} />
+      <MangaDexImportDialog open target={target} onClose={onClose} onApplied={onApplied} />
     </LibraryProvider>,
   );
-  return { gateway, onApplied };
+  return { gateway, onApplied, onClose };
 }
 
 describe("MangaDexImportDialog", () => {
@@ -75,6 +76,7 @@ describe("MangaDexImportDialog", () => {
     await waitFor(() => expect(gateway.applyMangaDex).toHaveBeenCalledWith({
       target: { kind: "new", name: "던전밥" },
       mangaId: "manga-1",
+      title: "던전밥",
     }));
     expect(onApplied).toHaveBeenCalledWith(collection);
   });
@@ -86,7 +88,7 @@ describe("MangaDexImportDialog", () => {
     const box = screen.getByRole("searchbox", { name: "만화 검색" });
     expect(box).toHaveValue("ダンジョン飯");
     await user.click(screen.getByRole("button", { name: "검색" }));
-    expect(gateway.searchMangaDex).toHaveBeenCalledWith("ダンジョン飯");
+    expect(gateway.searchMangaDex).toHaveBeenCalledWith("ダンジョン飯", collection.id);
   });
 
   it("starts empty for a new work or a manga without an original title", () => {
@@ -115,6 +117,47 @@ describe("MangaDexImportDialog", () => {
     expect(gateway.applyMangaDex).toHaveBeenCalledWith({
       target: { kind: "existing", collectionId: "collection-9" },
       mangaId: "manga-1",
+      title: "던전밥",
     });
   });
+});
+
+async function selectExisting() {
+  const user = userEvent.setup();
+  const rendered = renderDialog({kind: "existing", collection});
+  await user.type(screen.getByRole("searchbox", {name: "만화 검색"}), "던전밥");
+  await user.click(screen.getByRole("button", {name: "검색"}));
+  await user.click(await screen.findByRole("button", {name: /던전밥/}));
+  return {user, ...rendered};
+}
+
+it("keeps pending open and confirms only after the pulled collection arrives", async () => {
+  const {user, gateway, onApplied, onClose} = await selectExisting();
+  vi.mocked(gateway.applyMangaDex).mockResolvedValueOnce({outcome: 'pending', message: null});
+  await user.click(screen.getByRole('button', {name: '연결'}));
+  expect(await screen.findByText('연결 대기 · 서버에서 처리 중')).toBeInTheDocument();
+  expect(onApplied).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+  vi.mocked(gateway.applyMangaDex).mockResolvedValueOnce({outcome: 'applied', message: null, collection});
+  await user.click(screen.getByRole('button', {name: '연결'}));
+  await waitFor(() => expect(onApplied).toHaveBeenCalledWith(collection));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it.each(['failed', 'superseded'] as const)('shows a %s outcome inline without confirming', async outcome => {
+  const {user, gateway, onApplied, onClose} = await selectExisting();
+  vi.mocked(gateway.applyMangaDex).mockResolvedValueOnce({outcome, message: '다시 선택해 주세요.'});
+  await user.click(screen.getByRole('button', {name: '연결'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('다시 선택해 주세요.');
+  expect(onApplied).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', {name: /던전밥/})).toHaveAttribute('aria-pressed', 'true');
+});
+
+it('does not confirm applied without a confirmed collection', async () => {
+  const {user, gateway, onApplied} = await selectExisting();
+  vi.mocked(gateway.applyMangaDex).mockResolvedValueOnce({outcome: 'applied', message: null});
+  await user.click(screen.getByRole('button', {name: '연결'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('연결된 작품 정보를 확인하지 못했습니다.');
+  expect(onApplied).not.toHaveBeenCalled();
 });

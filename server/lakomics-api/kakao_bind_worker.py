@@ -1,4 +1,4 @@
-"""Dormant, serial Kakao bind executor. Importing this module needs only stdlib.
+"""Dormant, serial Kakao/MangaDex bind executor. Importing this module needs only stdlib.
 
 OFF is a hard stop: pinned requests remain pending for restart with ON. Schema
 additions run only with ON; legacy rows default to PC and are never reassigned.
@@ -17,8 +17,9 @@ NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://lakomics.invalid/serverKakao
 _current = None
 
 
-def enabled():
-    return os.environ.get(ENV, "").strip().lower() in ("1", "true", "yes", "on")
+def enabled(provider="kakao"):
+    name = ENV if provider == "kakao" else "LAKOMICS_MANGADEX_BINDS"
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def has_metadata(db):
@@ -26,7 +27,7 @@ def has_metadata(db):
 
 
 def startup_db(db):
-    if not enabled():
+    if not any(enabled(p) for p in ("kakao", "mangadex")):
         return
     columns = {row[1] for row in db.execute("PRAGMA table_info(collection_binding_requests)")}
     additions = {"executor": "TEXT NOT NULL DEFAULT 'pc'", "library_id": "TEXT", "authority_epoch": "INTEGER",
@@ -42,26 +43,27 @@ def pc_clause(db):
     return " AND executor='pc'" if has_metadata(db) else ""
 
 
-def features(db=None):
+def features(db=None, provider="kakao"):
+    feature = FEATURE if provider == "kakao" else "serverMangaDexBinds"
     worker = _current
-    if not enabled() or worker is None or not worker.alive():
+    if not enabled(provider) or worker is None or not worker.alive():
         return []
     if db is not None:
-        return [FEATURE] if worker.ready(db) else []
+        return [feature] if worker.ready(db, provider) else []
     with worker.get_db() as connection:
-        return [FEATURE] if worker.ready(connection) else []
+        return [feature] if worker.ready(connection, provider) else []
 
 
 def wake():
-    if _current is not None and enabled():
+    if _current is not None and any(enabled(p) for p in ("kakao", "mangadex")):
         _current.wake_event.set()
 
 
-def supersede(db, work_id, now):
+def supersede(db, work_id, now, provider="kakao"):
     if has_metadata(db):
         db.execute("UPDATE collection_binding_requests SET state='superseded',updated_at=?,resolved_at=?"
-                   " WHERE collection_id=? AND provider='kakao' AND executor='server' AND state='pending'",
-                   (now, now, work_id))
+                   " WHERE collection_id=? AND provider=? AND executor='server' AND state='pending'",
+                   (now, now, work_id, provider))
 
 
 def observation(binding, cursor):
@@ -72,17 +74,27 @@ def observation(binding, cursor):
             "digest": binding["snapshot_digest"] if binding is not None else None, "cursor": cursor}
 
 
-def capture(db, work_id, expected):
+def capture(db, work_id, expected, provider="kakao"):
     """Enqueue-time fence, in the request transaction; replay runs before this."""
     worker = _current
-    if worker is None or not worker.alive() or not worker.ready(db):
-        raise Refused("kakaoApplyUnavailable", "서버 연결을 준비 중입니다. 잠시 후 다시 시도해 주세요.")
+    if worker is None or not worker.alive() or not worker.ready(db, provider):
+        raise Refused(provider + "ApplyUnavailable", "서버 연결을 준비 중입니다. 잠시 후 다시 시도해 주세요.")
     domain = worker.domain(db)
-    binding = worker.ca.binding_row(db, domain["libraryId"], work_id, "kakao")
+    binding = worker.ca.binding_row(db, domain["libraryId"], work_id, provider)
     pre = observation(binding, domain["cursor"])
     if expected is not None and expected["externalId"] != (pre["externalId"] if pre["bound"] else None):
         worker.ca.fail(409, "bindingChanged", "연결 정보가 변경되었습니다. 다시 선택해 주세요.")
+    if provider == "mangadex":
+        pre["selectionReceipt"] = selection_receipt(db, domain, work_id)
     return domain["libraryId"], domain["epoch"], json.dumps(pre, sort_keys=True)
+
+
+def selection_receipt(db, domain, work_id):
+    # Includes unchanged explicit clears, which do not advance the change cursor.
+    row = db.execute("SELECT operation_id FROM collection_authority_receipts WHERE library_id=?"
+                     " AND epoch=? AND command_type='selectArtwork' AND entity_key=? ORDER BY rowid DESC LIMIT 1",
+                     (domain["libraryId"], domain["epoch"], work_id)).fetchone()
+    return row[0] if row else None
 
 
 class Refused(Exception):
@@ -92,7 +104,7 @@ class Refused(Exception):
 
 class Worker:
     def __init__(self, get_db, *, bindings=None, planner=None, ca=None,
-                 now=lambda: datetime.now(timezone.utc)):
+                 now=lambda: datetime.now(timezone.utc), manga=None, storage=None, bucket=None):
         # Injection lets the core run in standard-library-only fixtures.
         if bindings is None:
             import collection_bindings as bindings
@@ -101,12 +113,18 @@ class Worker:
         if ca is None:
             import collection_authority as ca
         self.get_db, self.bindings, self.planner, self.ca, self.now = get_db, bindings, planner, ca, now
+        if manga is None:
+            import mangadex_bind as manga
+            manga = manga.Provider(bindings, ca, get_db, storage, bucket)
+        self.manga = manga
+        self.commit_lock = threading.RLock()
         self.stop_event, self.wake_event = threading.Event(), threading.Event()
         self.lane = threading.Lock()
         self.thread = None
 
-    def ready(self, db):
-        return self.domain(db) is not None and self.bindings.kakao_key() is not None
+    def ready(self, db, provider="kakao"):
+        return self.domain(db) is not None and (self.bindings.kakao_key() is not None if provider == "kakao"
+                                                  else self.manga.ready())
 
     def domain(self, db):
         return self.ca.authority.active_domain(db, self.ca.DOMAIN)
@@ -115,18 +133,19 @@ class Worker:
         return self.thread is not None and self.thread.is_alive() and not self.stop_event.is_set()
 
     def start(self):
-        if not enabled() or self.alive():
+        if not any(enabled(p) for p in ("kakao", "mangadex")) or self.alive():
             return
         with self.get_db() as db:
             startup_db(db)
             db.commit()
         self.stop_event.clear()
-        self.thread = threading.Thread(target=self.run, name="kakao-binds", daemon=True)
+        self.thread = threading.Thread(target=self.run, name="provider-binds", daemon=True)
         self.thread.start()
 
     def drain(self):
-        self.stop_event.set()
-        self.wake_event.set()
+        with self.commit_lock:
+            self.stop_event.set()
+            self.wake_event.set()
 
     def stop(self):
         self.drain()
@@ -142,17 +161,18 @@ class Worker:
                 wait = self.run_once()
             except Exception:
                 # Do not log provider bodies, URLs, queries or exception strings.
-                logging.getLogger(__name__).warning("Kakao bind cycle deferred")
+                logging.getLogger(__name__).warning("Provider bind cycle deferred")
             self.wake_event.wait(wait)
 
     def run_once(self):
-        if not enabled() or self.stop_event.is_set() or not self.lane.acquire(blocking=False):
+        if not any(enabled(p) for p in ("kakao", "mangadex")) or self.stop_event.is_set() or not self.lane.acquire(blocking=False):
             return 30
         try:
             with self.get_db() as db:
-                rows = db.execute("SELECT sequence,next_attempt_at FROM collection_binding_requests"
-                                  " WHERE executor='server' AND provider='kakao' AND state='pending'"
+                rows = db.execute("SELECT sequence,next_attempt_at,provider FROM collection_binding_requests"
+                                  " WHERE executor='server' AND provider IN ('kakao','mangadex') AND state='pending'"
                                   " ORDER BY sequence").fetchall()
+            rows = [row for row in rows if enabled(row["provider"])]
             for row in rows:
                 retry = self.planner.parse_time(row["next_attempt_at"])
                 if retry is None or retry <= self.now():
@@ -167,6 +187,9 @@ class Worker:
         row = db.execute("SELECT * FROM collection_binding_requests WHERE sequence=?", (sequence,)).fetchone()
         if row is None or row["state"] != "pending" or row["executor"] != "server":
             return None
+        provider = row["provider"]
+        if provider not in ("kakao", "mangadex"):
+            return None
         domain = self.domain(db)
         if domain is None or (domain["libraryId"], domain["epoch"]) != (row["library_id"], row["authority_epoch"]):
             raise Refused("bindingChanged", "라이브러리 연결 정보가 변경되었습니다. 다시 선택해 주세요.")
@@ -175,13 +198,15 @@ class Worker:
         if work is None or work["lifecycle"] != "live" or work["type"] != "manga":
             raise Refused("collectionUnavailable", "연결할 만화 작품을 찾을 수 없습니다.")
         latest = db.execute("SELECT MAX(sequence) FROM collection_binding_requests WHERE collection_id=?"
-                            " AND provider='kakao'", (work_id,)).fetchone()[0]
+                            " AND provider=?", (work_id, provider)).fetchone()[0]
         if latest != sequence:
             raise Refused("bindingChanged", "더 새로운 연결 요청이 있습니다. 다시 확인해 주세요.")
-        binding = self.ca.binding_row(db, domain["libraryId"], work_id, "kakao")
+        binding = self.ca.binding_row(db, domain["libraryId"], work_id, provider)
         stored = json.loads(row["binding_precondition"])
         current = observation(binding, domain["cursor"])
-        if {k: v for k, v in stored.items() if k != "cursor"} != {k: v for k, v in current.items() if k != "cursor"}:
+        if {k: v for k, v in stored.items() if k not in ("cursor", "selectionReceipt")} != {k: v for k, v in current.items() if k not in ("cursor", "selectionReceipt")}:
+            if provider == "mangadex":
+                raise Refused("bindingChanged", "연결 정보가 변경되었습니다. 다시 선택해 주세요.")
             # Only proven, contiguous review-only revisions can be merged. This
             # refuses snapshot races conservatively and never waives an ABA cycle.
             revisions = []
@@ -198,8 +223,9 @@ class Worker:
                     or stored["bound"] != current["bound"] or stored["externalId"] != current["externalId"]
                     or stored["digest"] != current["digest"] or clean(stored["config"]) != clean(current["config"])):
                 raise Refused("bindingChanged", "연결 정보가 변경되었습니다. 다시 선택해 주세요.")
-        batch = str(uuid.uuid5(NAMESPACE, f"{domain['libraryId']}:{domain['epoch']}:{row['operation_id']}"))
-        payload = {"origin": "serverKakaoBind", "workId": work_id, "requestOperationId": row["operation_id"],
+        namespace = NAMESPACE if provider == "kakao" else self.manga.NAMESPACE
+        batch = str(uuid.uuid5(namespace, f"{domain['libraryId']}:{domain['epoch']}:{row['operation_id']}"))
+        payload = {"origin": "serverKakaoBind" if provider == "kakao" else "serverMangaDexBind", "workId": work_id, "requestOperationId": row["operation_id"],
                    "payloadDigest": row["payload_digest"]}
         _, _, cached = self.ca.command_batch_receipt(db, library_id=domain["libraryId"], epoch=domain["epoch"],
                                                     operation_id=batch, request_payload=payload)
@@ -207,10 +233,15 @@ class Worker:
                 "batch": batch, "payload": payload, "cached": cached}
 
     def execute(self, sequence):
-        if not enabled() or self.stop_event.is_set():
+        if self.stop_event.is_set() or not any(enabled(p) for p in ("kakao", "mangadex")):
             return
+        provider = "kakao"
         try:
             with self.get_db() as db:
+                target = db.execute("SELECT provider FROM collection_binding_requests WHERE sequence=?", (sequence,)).fetchone()
+                if target is None or not enabled(target["provider"]):
+                    return
+                provider = target["provider"]
                 db.execute("BEGIN")
                 try:
                     pre = self.preflight(db, sequence)
@@ -218,8 +249,16 @@ class Worker:
                     db.rollback()
             if pre is None:
                 return
+            provider = pre["row"]["provider"]
+            if not enabled(provider) or self.stop_event.is_set():
+                return
             if pre["cached"] is not None:
                 items = None
+            elif provider == "mangadex":
+                if not self.manga.ready():
+                    raise self.planner.RefreshError(self.planner.UNAVAILABLE, "mangadexApplyUnavailable", "connection")
+                items = self.manga.fetch(json.loads(pre["row"]["choice_json"])["mangaId"],
+                                         stop=lambda: self.stop_event.is_set() or not enabled(provider))
             else:
                 key = self.bindings.kakao_key()
                 if key is None:
@@ -234,20 +273,26 @@ class Worker:
                                                               stop=self.stop_event.is_set)
                 finally:
                     slot.release()
-            if self.stop_event.is_set() or not enabled():
+            if self.stop_event.is_set() or not enabled(provider):
                 return
-            with self.get_db() as db:
+            with self.commit_lock, self.get_db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 try:
                     current = self.preflight(db, sequence)
-                    if current is None or self.stop_event.is_set() or not enabled():
+                    if current is None or self.stop_event.is_set() or not enabled(provider):
                         db.rollback()
                         return
                     now = self.planner.iso(self.now())
                     if current["cached"] is None:
-                        self.apply(db, current, items, now)
+                        if provider == "mangadex":
+                            self.manga.apply(db, current, items, now)
+                        else:
+                            self.apply(db, current, items, now)
                     db.execute("UPDATE collection_binding_requests SET state='applied',reason_code=NULL,reason_message=NULL,"
                                "updated_at=?,resolved_at=?,next_attempt_at=NULL WHERE sequence=?", (now, now, sequence))
+                    if self.stop_event.is_set() or not enabled(provider):
+                        db.rollback()
+                        return
                     db.commit()
                 except BaseException:
                     db.rollback()
@@ -255,7 +300,7 @@ class Worker:
         except self.bindings.SearchCancelled:
             return
         except Exception as error:
-            self.remember(sequence, error)
+            self.remember(sequence, error, provider)
 
     def apply(self, db, pre, items, now):
         ca = self.ca
@@ -313,9 +358,11 @@ class Worker:
         ca.apply_command_batch(db, library_id=library_id, epoch=epoch, operation_id=pre["batch"],
                                request_payload=pre["payload"], commands=commands, now=now)
 
-    def remember(self, sequence, error):
-        if self.stop_event.is_set() or not enabled():
+    def remember(self, sequence, error, provider="kakao"):
+        if self.stop_event.is_set() or not enabled(provider):
             return
+        if provider == "mangadex":
+            error = self.manga.classify(error, self.planner)
         permanent = isinstance(error, (Refused, self.planner.Ambiguous))
         failure = self.planner.classify(error)
         code, message = "bindApplyFailed", "연결을 적용할 수 없습니다. 선택한 작품을 다시 확인해 주세요."
@@ -350,12 +397,12 @@ class Worker:
             db.commit()
 
 
-def register(app, get_db):
+def register(app, get_db, storage=None, bucket=None):
     from app_lifecycle import lifecycle
     global _current
     # Construction imports providers but performs no I/O; OFF never starts a thread
     # or migrates request metadata.
-    worker = Worker(get_db)
+    worker = Worker(get_db, storage=storage, bucket=bucket)
     _current = worker
     hooks = lifecycle(app)
     hooks.on_startup(worker.start)

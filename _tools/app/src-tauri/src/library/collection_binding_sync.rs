@@ -734,6 +734,7 @@ impl Library {
                         collection_id: item.collection_id.clone(),
                     },
                     manga_id,
+                    title: None,
                 },
                 &check,
             ),
