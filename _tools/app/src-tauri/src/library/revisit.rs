@@ -746,13 +746,13 @@ mod tests {
     use crate::library::Library;
     use rusqlite::params;
 
-    fn fixture() -> (tempfile::TempDir, Library) {
+    pub(super) fn fixture() -> (tempfile::TempDir, Library) {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         (temp, library)
     }
 
-    fn insert_asset(library: &Library, id: &str, collected_at: &str) {
+    pub(super) fn insert_asset(library: &Library, id: &str, collected_at: &str) {
         library
             .connection()
             .unwrap()
@@ -1048,6 +1048,50 @@ mod tests {
     }
 }
 impl super::Library {
+    /// Home anniversaries are a read projection, independent of recommendation history.
+    pub fn get_home_revisit_slate(
+        &self,
+        day: &str,
+        now_utc: &str,
+    ) -> Result<RevisitSlate, LibraryError> {
+        parse_local_date(day)?;
+        parse_utc_timestamp(now_utc)?;
+        let sql = format!(
+            "WITH revisit_assets AS (SELECT id, collected_at FROM assets WHERE status = 'normal' AND media_kind IN ('image', 'gif', 'animated_gif'))\n{}",
+            include_str!("../../../../../server/lakomics-api/home_revisit.sql")
+        );
+        self.connection()?.with_lock(|connection| {
+            let mut statement = connection.prepare(&sql)?;
+            let selected = statement
+                .query_map(rusqlite::named_params! { ":day": day }, |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut bundles = Vec::new();
+            if let Some((_, distance)) = selected.first() {
+                let title = if *distance == 0 {
+                    "1년 전 오늘"
+                } else {
+                    "1년 전 이맘때"
+                };
+                bundles.push(RevisitBundle {
+                    id: format!("home-anniversary-v1-{day}"),
+                    kind: "date".into(),
+                    title: title.into(),
+                    reason: title.into(),
+                    revision: 0,
+                    asset_ids: selected.into_iter().map(|(id, _)| id).collect(),
+                });
+            }
+            Ok(RevisitSlate {
+                local_date: day.into(),
+                created_at: now_utc.into(),
+                revision: 0,
+                bundles,
+            })
+        })
+    }
+
     pub fn get_or_create_revisit_slate(&self, local_date: &str, now_utc: &str) -> Result<RevisitSlate, LibraryError> {
         self.connection()?.with_lock(|connection| get_or_create_revisit_slate(connection, local_date, now_utc))
     }
@@ -1088,6 +1132,74 @@ impl super::Library {
             )?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod home_anniversary_tests {
+    #[test]
+    fn home_anniversary_matches_shared_server_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../server/lakomics-api/tests/fixtures/home_revisit.json"
+        ))
+        .unwrap();
+        let (_temp, library) = super::tests::fixture();
+        for asset in fixture["assets"].as_array().unwrap() {
+            super::tests::insert_asset(
+                &library,
+                asset["id"].as_str().unwrap(),
+                asset["collected_at"].as_str().unwrap(),
+            );
+        }
+        for case in fixture["cases"].as_array().unwrap() {
+            let slate = library
+                .get_home_revisit_slate(case["day"].as_str().unwrap(), "2026-10-10T00:00:00Z")
+                .unwrap();
+            let ids: Vec<String> = slate
+                .bundles
+                .into_iter()
+                .flat_map(|bundle| bundle.asset_ids)
+                .collect();
+            let expected: Vec<String> = serde_json::from_value(case["ids"].clone()).unwrap();
+            assert_eq!(ids, expected, "day {}", case["day"]);
+        }
+    }
+
+    #[test]
+    fn home_anniversary_is_read_only_and_caps_at_twenty_visible_images() {
+        let (_temp, library) = super::tests::fixture();
+        for index in 0..24 {
+            super::tests::insert_asset(
+                &library,
+                &format!("image-{index:02}"),
+                "2025-10-10T00:00:00Z",
+            );
+        }
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE assets SET status = 'trash' WHERE id = 'image-00'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE assets SET media_kind = 'video' WHERE id = 'image-01'",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        let slate = library
+            .get_home_revisit_slate("2026-10-10", "2026-10-10T00:00:00Z")
+            .unwrap();
+        assert_eq!(slate.bundles[0].asset_ids.len(), 20);
+        assert_eq!(slate.bundles[0].asset_ids[0], "image-02");
+        let count: i64 = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM revisit_slates", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }
 

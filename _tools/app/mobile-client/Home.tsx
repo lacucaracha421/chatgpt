@@ -4,7 +4,7 @@ import {RectangleStackIcon} from '@heroicons/react/24/outline';
 import {artworkVariant, collectionCover, type CollectionSummary} from './collectionModel';
 import {localToday} from './collectionReleasesModel';
 import {Cover} from './CoverGroup';
-import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type UpcomingHomeEntry} from './homeDashboard';
+import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisitRead, useHomeUpcoming, type HomeCover, type UpcomingHomeEntry} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchangeModel';
 import {api, native} from './transport';
@@ -148,7 +148,8 @@ export function Home(props: HomeProps) {
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
   useEffect(() => {if (memos && !memos.locked) setTabletTrashCount(props.scope, 'notes', deletedTrashNotes(memos.notes).length);}, [props.scope, memos]);
   const upcoming = useHomeUpcoming(!paused, props.scope, d.refreshKey);
-  const revisit = useHomeRevisit(!paused, props.scope, d.refreshKey);
+  const revisitRead = useHomeRevisitRead(!paused, props.scope, d.refreshKey);
+  const revisit = revisitRead.value;
   const homeScroll = useRef<HTMLDivElement>(null);
   const refreshHome = () => { d.retry(); props.onRefresh?.(); };
   const pull = usePullToRefresh(homeScroll, refreshHome, props.busy, paused);
@@ -216,7 +217,7 @@ export function Home(props: HomeProps) {
   const playing = (shelf?.works ?? []).filter(work => work.type === 'game' && work.status === 'playing' || work.type === 'movie' && work.status === 'watching');
   const attentionPending = !memos || reviewRows.some(row => row.count === null);
   const quiet = rows.length === 0 && !attentionPending;
-  const daily = useTabletHomeDaily(!paused && revisit !== null && !dateGroup && quiet, props.scope, today, d.refreshKey);
+  const daily = useTabletHomeDaily(!paused && revisit !== null && !dateGroup && quiet, props.scope, revisitRead.day, d.refreshKey);
   const dayPending = revisit === null || quiet && !dateGroup && !daily.value && !daily.failed;
   // Full publication paging can occupy the bridge for many pages. Let the small
   // first-screen reads finish first, while keeping the existing first-load and
@@ -259,9 +260,9 @@ export function Home(props: HomeProps) {
       else if (row.key === 'connection:exchange') props.onExchange();
       else if (row.key.startsWith('connection:')) props.onSettings();
     }} /></div>}
-    <div className="home-tablet-day"><HomeDay data={day.data} failed={daily.failed} quiet={day.quiet} privacyMode={privacy} image={image} emptyAnniversary anniversaryCount={day.group?.count}
+    <div className="home-tablet-day"><HomeDay data={day.data} failed={daily.failed || revisitRead.failed} pending={revisitRead.pending} quiet={day.quiet} privacyMode={privacy} image={image} emptyAnniversary anniversaryCount={day.group?.count}
       onOpenAsset={day.group && props.onRevisit ? () => props.onRevisit?.('date', day.group!.title) : undefined} />
-      {daily.failed && <button className="home-interest-action" onClick={refreshHome}>다시 시도</button>}
+      {(daily.failed || revisitRead.failed) && <button className="home-interest-action" onClick={refreshHome}>다시 시도</button>}
     </div></div>
     <div className="home-tablet-media-column">
     <div className="home-tablet-playing"><HomePlayingShelf onOpen={props.onWork} works={playing.map(work => ({id: work.id, name: work.name, platform: work.ownedPlatform || work.platforms || KIND_LABEL[work.type], score: work.myScore ?? null,

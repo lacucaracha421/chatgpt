@@ -87,3 +87,19 @@ it('uses the safety interval for Home sources without a dedicated publication si
   await act(async () => {await vi.advanceTimersByTimeAsync(9 * 60_000);});
   expect(read).toHaveBeenCalledTimes(1);
 });
+
+it('retains a day source until ready while clearing content on a connection scope change', async () => {
+  let finish!: (value: string) => void;
+  const read = vi.fn().mockResolvedValueOnce('old').mockImplementation(() => new Promise<string>(resolve => {finish = resolve;}));
+  const view = renderHook(({scope, source}) => useCachedHomeSourceRead({
+    ...options(read), scope, source, keepOnSourceChange: true,
+  }), {initialProps: {scope: 'library-a', source: 'day-one'}});
+  await act(async () => {});
+  view.rerender({scope: 'library-a', source: 'day-two'});
+  expect(view.result.current.value).toBe('old');
+  expect(view.result.current.ready).toBe(false);
+  await act(async () => {finish('new');});
+  expect(view.result.current.value).toBe('new');
+  view.rerender({scope: 'library-b', source: 'day-two'});
+  expect(view.result.current.value).toBe('');
+});

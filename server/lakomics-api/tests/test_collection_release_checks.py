@@ -259,7 +259,7 @@ class ReleaseCheckTests(unittest.TestCase):
     def test_check_records_sources_slots_events_and_binding_through_authority_commands(self):
         anchor = self.bind()
         cursor = self.cursor()
-        self.assertTrue(self.check())
+        self.assertFalse(self.check())
         self.assertGreater(self.cursor(), cursor)
         sources = self.sources()
         self.assertEqual(sorted(sources), [1, 2])
@@ -274,12 +274,10 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual([slots[n]["sort_order"] for n in (1, 2)], [1, 2])
         self.assertEqual(binding["externalId"], anchor)
         self.assertEqual(binding["lastSyncedAt"], rc.iso(self.moment))
-        # No source existed yet: both volumes are new, the PC rule for a first refresh.
-        self.assertEqual([(e["kind"], e["volume_number"], e["provider"]) for e in self.events()],
-                         [("new_volume", 1, "kakao"), ("new_volume", 2, "kakao")])
-        # The work feed carries them (derived.releaseEvents) and the tablet store lists them.
-        self.assertEqual(self.work("a")["derived"]["unreadReleaseCount"], 2)
-        self.assertEqual(self.ok(self.client.get("/v1/collections/releases", headers=self.auth))["counts"]["unread"], 2)
+        # No source history: establish a quiet baseline on the first refresh.
+        self.assertEqual(self.events(), [])
+        self.assertEqual(self.work("a")["derived"].get("unreadReleaseCount", 0), 0)
+        self.assertEqual(self.ok(self.client.get("/v1/collections/releases", headers=self.auth))["counts"]["unread"], 0)
         self.assertEqual(self.state()["last_checked_at"], rc.iso(self.moment))
 
         # Volume 3 appears a day later: exactly one new event, rows of 1 and 2 are untouched.
@@ -287,7 +285,7 @@ class ReleaseCheckTests(unittest.TestCase):
         before = {n: dict(row) for n, row in self.sources().items()}
         self.assertTrue(self.check(day=1))
         self.assertEqual([(e["kind"], e["volume_number"]) for e in self.events()],
-                         [("new_volume", 1), ("new_volume", 2), ("new_volume", 3)])
+                         [("new_volume", 3)])
         after = self.sources()
         self.assertEqual({n: after[n] for n in (1, 2)}, {n: before[n] for n in (1, 2)})
         self.assertEqual(sorted(after), [1, 2, 3])
@@ -321,8 +319,17 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertIn(str(uuid.uuid5(uuid.UUID(batch), "upsertVolumeSource:1")), ids)
         self.assertIn(str(uuid.uuid5(uuid.UUID(batch), "upsertVolume:2")), ids)
         ident = rc.event_id("a", change, rc.iso(self.moment)[:10])
-        self.assertIn(str(uuid.uuid5(uuid.UUID(batch), f"recordReleaseEvent:{ident}")), ids)
-        self.assertEqual({e["event_id"] for e in self.events()} & {ident}, {ident})
+        self.assertNotIn(str(uuid.uuid5(uuid.UUID(batch), f"recordReleaseEvent:{ident}")), ids)
+        self.assertEqual(self.events(), [])
+        self.catalog["던전밥"] = [book(1), book(2), book(3)]
+        self.check(day=1)
+        next_batch = uuid.uuid5(rc.NAMESPACE, f"a:kakao:{rc.iso(self.moment)[:10]}")
+        change["volumeNumber"] = 3
+        next_ident = rc.event_id("a", change, rc.iso(self.moment)[:10])
+        with api_app.get_db() as db:
+            self.assertIsNotNone(db.execute("SELECT 1 FROM collection_authority_receipts WHERE operation_id=?",
+                (str(uuid.uuid5(next_batch, f"recordReleaseEvent:{next_ident}")),)).fetchone())
+        self.assertEqual({e["event_id"] for e in self.events()}, {next_ident})
         # The day is part of the id: the same change on another day is another event.
         self.assertNotEqual(ident, rc.event_id("a", change, "2030-01-02"))
 
@@ -456,12 +463,14 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assert_sources_without_events()
 
     def test_events_only_inside_the_volume_range(self):
-        self.catalog["던전밥"] = [book(n) for n in range(1, 6)]
+        self.catalog["던전밥"] = [book(1)]
         self.bind()
+        self.check()
+        self.catalog["던전밥"] = [book(n) for n in range(1, 6)]
         self.ok(self.command("setVolumeRange", workId="a", minVolume=3, maxVolume=4, hideConnectionPrompt=False,
                              expectedRange={"minVolume": None, "maxVolume": None, "hideConnectionPrompt": False},
                              expectedRevision=None))
-        self.assertTrue(self.check())
+        self.assertTrue(self.check(day=1))
         self.assertEqual(sorted(self.sources()), [1, 2, 3, 4, 5])
         self.assertEqual([e["volume_number"] for e in self.events()], [3, 4])
 
@@ -578,7 +587,14 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual(self.state()["last_error_code"], None)
 
     def test_a_rejected_batch_rolls_back_whole_and_defers_only_that_work(self):
+        self.catalog["던전밥"] = [book(1)]
         self.bind()
+        self.check()
+        baseline_sources = self.sources("a")
+        receipts = self.rows("SELECT * FROM collection_authority_receipts WHERE entity_key='a'"
+                             " AND command_type='providerApply'")
+        self.moment += timedelta(hours=25)
+        self.catalog["던전밥"] = [book(1), book(2), book(3)]
         self.catalog["나의 만화"] = [book(1, title="나의 만화", publisher="다른출판")]
         self.bind("s", "나의 만화", watch=False)  # no events: its batch is accepted
         cursor = self.cursor()
@@ -592,11 +608,11 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual(status["lastFailure"], {
             "collectionId": "a", "detectedAt": rc.iso(self.moment), "kind": "authority",
             "endpoint": "releaseEventLimit", "httpStatus": None, "retryAfterSeconds": None})
-        # Nothing of "a" survived the rollback: no source, slot, event or receipt.
-        self.assertEqual((self.sources("a"), self.events()), ({}, []))
+        # Nothing of the failed refresh survived; its baseline remains intact.
+        self.assertEqual((self.sources("a"), self.events()), (baseline_sources, []))
         self.assertEqual(self.rows("SELECT * FROM collection_authority_volumes WHERE work_id='a'"), slots)
-        self.assertEqual(self.rows("SELECT 1 FROM collection_authority_receipts WHERE entity_key='a'"
-                                   " AND command_type='providerApply'"), [])
+        self.assertEqual(self.rows("SELECT * FROM collection_authority_receipts WHERE entity_key='a'"
+                                   " AND command_type='providerApply'"), receipts)
         self.assertEqual(sorted(self.sources("s")), [1])
         self.assertGreater(self.cursor(), cursor)  # only "s" advanced the feed
         broken = self.state("a")
@@ -606,7 +622,7 @@ class ReleaseCheckTests(unittest.TestCase):
         # A day later the work is tried again, and now succeeds.
         self.moment += timedelta(hours=25)
         self.worker.run_batch()
-        self.assertEqual(sorted(self.sources("a")), [1, 2])
+        self.assertEqual(sorted(self.sources("a")), [1, 2, 3])
 
     def test_another_rejected_batch_code_is_logged_and_kept_in_the_status(self):
         self.bind()
@@ -875,12 +891,12 @@ class ReleaseCheckTests(unittest.TestCase):
 
     def test_a_pc_event_then_the_servers_check_records_the_change_once(self):
         self.bind()
-        self.check()  # sources and the two first events exist
+        self.check()  # quiet source baseline exists
         self.catalog["던전밥"] = [book(1), book(2), book(3, "2026-12-01")]
         self.ok(self.release("pc-random", volume=3, current="2026-12-01",
                              detected=rc.iso(self.moment + timedelta(days=1))))
         self.check(day=1)
-        self.assertEqual([e["volume_number"] for e in self.events() if e["kind"] == "new_volume"], [1, 2, 3])
+        self.assertEqual([e["volume_number"] for e in self.events() if e["kind"] == "new_volume"], [3])
 
 
 if __name__ == "__main__":

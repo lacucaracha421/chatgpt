@@ -47,6 +47,7 @@ export type HomeSourceOptions<T> = {
   initial: T;
   forceKey?: unknown;
   forceOnMount?: boolean;
+  keepOnSourceChange?: boolean;
   read(signal: AbortSignal): Promise<T>;
   onError?(reason: unknown): void;
 };
@@ -56,7 +57,7 @@ export type HomeSourceOptions<T> = {
  * bounded by source and connection scope, and uses the existing sync signal plus visibility
  * timer to decide when a fresh read is needed.
  */
-export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, initial, forceKey, forceOnMount = false, read, onError}: HomeSourceOptions<T>) {
+export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, initial, forceKey, forceOnMount = false, keepOnSourceChange = false, read, onError}: HomeSourceOptions<T>) {
   const key = cacheKey(scope, source);
   const readRef = useRef(read); readRef.current = read;
   const errorRef = useRef(onError); errorRef.current = onError;
@@ -89,10 +90,12 @@ export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, i
     wasLive.current = signalsLive;
   }, [signalsLive, key]);
 
+  const previousScope = useRef(scope);
   useEffect(() => {
     const entry = currentEntry(scope, source);
     if (entry) setValue(entry.value as T);
-    else setValue(initial);
+    else if (!keepOnSourceChange || previousScope.current !== scope) setValue(initial);
+    previousScope.current = scope;
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

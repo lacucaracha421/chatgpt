@@ -6,7 +6,8 @@ compatibility hooks are resolved at call time, including test monkeypatches.
 import base64
 import binascii
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from types import ModuleType
 from typing import Literal
 
@@ -17,6 +18,40 @@ import classification_authority
 
 
 api: ModuleType
+
+HOME_REVISIT_SQL = Path(__file__).with_name("home_revisit.sql").read_text(encoding="utf-8")
+KST = timezone(timedelta(hours=9))
+
+
+def home_revisit_rows(db, day: str):
+    """Use the same read-only anniversary selection as the native Home command."""
+    try:
+        if datetime.strptime(day, "%Y-%m-%d").strftime("%Y-%m-%d") != day:
+            raise ValueError()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Home day")
+    selected = db.execute(
+        "WITH revisit_assets AS (SELECT id, collected_at FROM visible_assets "
+        "WHERE committed = 1 AND kind IN ('image', 'gif', 'animated_gif'))\n" + HOME_REVISIT_SQL,
+        {"day": day},
+    ).fetchall()
+    rows = []
+    for entry in selected:
+        row = db.execute("SELECT * FROM visible_assets WHERE id = ?", (entry["id"],)).fetchone()
+        rows.append(row)
+    return rows, selected[0]["distance"] if selected else None
+
+
+def list_home_revisit(authorization: str | None = Header(default=None), day: str | None = None):
+    api.require_auth(authorization)
+    day = day or datetime.now(KST).date().isoformat()
+    with api.get_db() as db:
+        db.execute("BEGIN")
+        rows, distance = home_revisit_rows(db, day)
+        memberships = api._mobile_memberships(db, rows)
+    title = "1년 전 오늘" if distance == 0 else "1년 전 이맘때"
+    return {"day": day, "bundles": [{"kind": "date", "title": title,
+            "items": [api.mobile_asset_item(row, memberships.get(row["id"], [])) for row in rows]}]}
 
 
 def encode_revisit_date_cursor(rank: int, sort_at: str, asset_id: str) -> str:
@@ -179,6 +214,8 @@ def _revisit_creator_groups(db, limit: int, *, day: int | None = None) -> list[d
 def list_mobile_revisit(
     authorization: str | None = Header(default=None),
     limit: int = Query(default=12, ge=1, le=50),
+    home: bool = False,
+    day: str | None = None,
 ):
     """Mobile Home 다시보기. PC revisit.rs의 묶음 유형 중 복제본에서 계산
     가능한 두 가지를 제공한다:
@@ -193,6 +230,8 @@ def list_mobile_revisit(
     복제본에 없어 제공하지 않는다. 정렬은 결정론적(collected_at DESC,
     id DESC)이며 랜덤 SQL 정렬은 없다. 읽기 전용 엔드포인트다.
     """
+    if home:
+        return list_home_revisit(authorization, day)
     api.require_auth(authorization)
     with api.get_db() as db:
         date_bundle = api._revisit_date_bundle(db, limit)

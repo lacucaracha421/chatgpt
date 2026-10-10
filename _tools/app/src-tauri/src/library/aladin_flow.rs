@@ -380,7 +380,7 @@ impl BookFlow<'_> {
                 }),
             }
         }
-        self.reconcile_aladin_at(collection_id, &config.query, picked, checked_at, None)
+        self.reconcile_aladin_at(collection_id, &config.query, picked, checked_at, false, None)
     }
 
     pub fn get_aladin_connection(
@@ -481,6 +481,7 @@ impl BookFlow<'_> {
                 &request.query,
                 picked,
                 &checked_at,
+                true,
                 check,
             )?
             .sync_result)
@@ -517,7 +518,7 @@ impl BookFlow<'_> {
             }
         }
         Ok(self.reconcile_aladin_at(&request.collection_id, &request.query, picked,
-            &chrono::Utc::now().to_rfc3339(), check)?.sync_result)
+            &chrono::Utc::now().to_rfc3339(), true, check)?.sync_result)
     }
 
     /// Writes the merged volumes of the picked groups and the binding. Groups are ordered
@@ -530,6 +531,7 @@ impl BookFlow<'_> {
         query: &str,
         mut picked: Vec<PickedGroup>,
         checked_at: &str,
+        quiet_bind: bool,
         check: Option<CommitCheck<'_>>,
     ) -> Result<AladinReconcileOutcome, LibraryError> {
         if picked.is_empty() {
@@ -629,7 +631,21 @@ impl BookFlow<'_> {
             |row| row.get::<_, bool>(0),
         )?;
         let volume_range = load_transaction(&transaction, collection_id)?;
+        // A subscription row (even with a check timestamp) is not provider history.
+        // Bind/rebind is always quiet; a migrated binding first records its sources.
+        let baseline_established = !quiet_bind && transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM collection_volume_sources WHERE collection_id=?1 AND provider=?2)",
+            params![collection_id, self.provider],
+            |row| row.get::<_, bool>(0),
+        )?;
         for item in merged.values() {
+            // Check before reconciliation inserts the provider's edition-0 slot.
+            // Other editions and providers also establish that this number is known.
+            let volume_exists = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM collection_volumes WHERE collection_id=?1 AND volume_number=?2)",
+                params![collection_id, item.volume_number],
+                |row| row.get::<_, bool>(0),
+            )?;
             let existing = reconcile_source(
                 self.provider,
                 &transaction,
@@ -640,7 +656,7 @@ impl BookFlow<'_> {
             )?;
             if let Some(previous_checked_at) = subscription_last_checked_at
                 .as_ref()
-                .filter(|_| tracks_ownership)
+                .filter(|_| tracks_ownership && baseline_established)
             {
                 for change in pending_release_changes(
                     existing.as_ref(),
@@ -648,6 +664,9 @@ impl BookFlow<'_> {
                     previous_checked_at.as_deref(),
                     checked_at,
                 ) {
+                    if event_kind_str(change.kind) == "new_volume" && volume_exists {
+                        continue;
+                    }
                     if !volume_range.contains(change.volume_number) {
                         continue;
                     }
@@ -1416,6 +1435,72 @@ mod tests {
             unrelated,
         );
         assert!(matches!(error, Err(LibraryError::AmbiguousAladinBinding)));
+    }
+
+    #[test]
+    fn kakao_first_check_is_quiet_and_existing_numbers_never_notify() {
+        for (owned, found) in [
+            (13, vec![1, 2, 3, 4, 5, 6]),
+            (15, vec![1, 2, 4, 5, 7, 8, 9, 12, 13, 14]),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            let id = create_work(&library, "Series");
+            let products = |numbers: Vec<i64>| numbers.into_iter().map(|n|
+                item(&format!("item-{n}"), "Series", n, "A", None, None)
+            ).collect::<Vec<_>>();
+            let initial = products(found);
+            let candidate = group_items(initial.clone()).remove(0);
+            store_kakao_binding(&library, &id, &candidate.anchor_item_id,
+                serde_json::json!({"version": 1, "query": "Series",
+                    "groupFingerprint": candidate.group_fingerprint}).to_string());
+            library.set_owned_volume_count(&id, 0, owned).unwrap();
+            library.set_release_watch_enabled(&id, true).unwrap();
+            {
+                let connection = library.connection().unwrap();
+                for n in 1..=owned {
+                    connection.execute("INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,created_at,updated_at) VALUES(?1,?2,?3,0,?3,'t','t')",
+                        rusqlite::params![format!("slot-{n}"), id, n]).unwrap();
+                }
+                // A historical subscription timestamp must not manufacture a baseline.
+                connection.execute("UPDATE release_watch_subscriptions SET last_checked_at='2026-10-06T00:00:00Z' WHERE collection_id=?1", [&id]).unwrap();
+            }
+            let first = library.book_flow().refresh_aladin_items_at(&id, initial, "2026-10-09T00:00:00Z").unwrap();
+            assert_eq!(first.release_event_count, 0);
+            assert!(library.list_unread_release_changes().unwrap().is_empty());
+            let later = products((1..=i64::from(owned) + 1).collect());
+            let next = library.book_flow().refresh_aladin_items_at(&id, later.clone(), "2026-10-10T00:00:00Z").unwrap();
+            assert_eq!(next.release_event_count, 1);
+            let events = library.list_unread_release_changes().unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].volume_number, i64::from(owned) + 1);
+            assert_eq!(events[0].kind, ReleaseWatchEventKind::NewVolume);
+            assert_eq!(library.book_flow().refresh_aladin_items_at(&id, later, "2026-10-11T00:00:00Z").unwrap().release_event_count, 0);
+        }
+    }
+
+    #[test]
+    fn kakao_rebind_is_quiet_then_genuine_new_volume_notifies() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "Series");
+        let products = |publisher: &str, count: i64| (1..=count).map(|n|
+            item(&format!("{publisher}-{n}"), "Series", n, publisher, None, None)
+        ).collect::<Vec<_>>();
+        let initial = products("A", 1);
+        library.book_flow().apply_aladin_items(request(&id, &initial), initial).unwrap();
+        library.set_owned_volume_count(&id, 0, 1).unwrap();
+        library.set_release_watch_enabled(&id, true).unwrap();
+        let rebound = products("B", 2);
+        library.book_flow().apply_aladin_items(request(&id, &rebound), rebound).unwrap();
+        assert!(library.list_unread_release_changes().unwrap().is_empty());
+        // A slot in another edition also makes this number already known.
+        library.connection().unwrap().execute("INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,created_at,updated_at) VALUES('edition-slot',?1,3,1,3,'t','t')", [&id]).unwrap();
+        let later = products("B", 4);
+        assert_eq!(library.book_flow().refresh_aladin_items_at(&id, later, "2026-10-10T00:00:00Z").unwrap().release_event_count, 1);
+        let events = library.list_unread_release_changes().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].volume_number, 4);
     }
 
     #[test]

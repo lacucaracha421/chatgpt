@@ -296,7 +296,7 @@ def source_row(item):
 
 
 def plan_refresh(*, stored_config, external_id, items, checked_at, existing_sources, existing_slots,
-                 gating, previous_checked_at):
+                 gating, previous_checked_at, baseline_established=None, existing_volume_numbers=None):
     """The PC's Kakao refresh of one binding as data (nothing is written here).
 
     * ``stored_config`` / ``external_id``: the binding's ``provider_config_json`` and anchor.
@@ -306,6 +306,10 @@ def plan_refresh(*, stored_config, external_id, items, checked_at, existing_sour
     * ``existing_slots``: volume numbers that already have an edition-0 slot.
     * ``gating``: ``{"releaseWatch", "tracksOwnership", "minVolume", "maxVolume"}``.
     * ``previous_checked_at``: the subscription's previous check time, or None.
+    * ``baseline_established``: whether this binding has provider history; defaults to
+      live source history for standalone planners. Timestamps alone do not establish it.
+    * ``existing_volume_numbers``: all live slot numbers, across editions/providers;
+      defaults to ``existing_slots``. Only edition-0 slots control slot creation.
 
     Returns ``{"config", "externalId", "snapshot", "sources", "newSlots", "events", "result"}``;
     raises ``Ambiguous`` when a stored group cannot be re-found.
@@ -327,8 +331,10 @@ def plan_refresh(*, stored_config, external_id, items, checked_at, existing_sour
             same["known"].extend(bound["knownItemIds"])
         else:
             picked.append({"anchor": bound["anchorItemId"], "known": list(bound["knownItemIds"]), "series": series})
+    if baseline_established is None:
+        baseline_established = bool(existing_sources)
     return reconcile(stored_config, config["query"], picked, checked_at, existing_sources, existing_slots,
-                     gating, previous_checked_at)
+                     gating, previous_checked_at, baseline_established, existing_volume_numbers)
 
 
 def plan_bind(*, choice, items, checked_at, stored_config, existing_sources, existing_slots):
@@ -357,7 +363,7 @@ def plan_bind(*, choice, items, checked_at, stored_config, existing_sources, exi
 
 
 def reconcile(stored_config, query, picked, checked_at, existing_sources, existing_slots, gating,
-              previous_checked_at):
+              previous_checked_at, baseline_established=False, existing_volume_numbers=None):
     """``reconcile_aladin_at``: groups ordered by lowest volume (then fingerprint), the first
     anchor becomes the binding identity, a volume offered by several groups keeps the product
     ``compare_duplicate_preference`` prefers (the others count as ignored)."""
@@ -384,7 +390,8 @@ def reconcile(stored_config, query, picked, checked_at, existing_sources, existi
         new_config["reviewDismissedVolumes"] = volumes
     result = {"added": 0, "updated": 0, "unchanged": 0, "ignored": ignored}
     sources, events = [], []
-    track = gating["releaseWatch"] and gating["tracksOwnership"]
+    track = baseline_established and gating["releaseWatch"] and gating["tracksOwnership"]
+    live_volumes = existing_slots if existing_volume_numbers is None else existing_volume_numbers
     for number in volumes:
         item = merged[number]
         existing = existing_sources.get(number)
@@ -398,6 +405,8 @@ def reconcile(stored_config, query, picked, checked_at, existing_sources, existi
         sources.append(row)
         if track:
             for change in pending_release_changes(existing, item, previous_checked_at, checked_at):
+                if change["kind"] == "new_volume" and number in live_volumes:
+                    continue
                 low, high = gating.get("minVolume"), gating.get("maxVolume")
                 if (low is None or change["volumeNumber"] >= low) and (high is None or change["volumeNumber"] <= high):
                     events.append(change)
@@ -850,10 +859,24 @@ class Worker:
         slots = {row["volume_number"] for row in db.execute(
             "SELECT volume_number FROM collection_authority_volumes WHERE library_id=? AND work_id=?"
             " AND edition_index=0 AND deleted=0", (library_id, work_id))}
+        live_volumes = {row["volume_number"] for row in db.execute(
+            "SELECT volume_number FROM collection_authority_volumes WHERE library_id=? AND work_id=?"
+            " AND deleted=0", (library_id, work_id))}
+        # Adoption timestamps and subscription history are not a Kakao baseline.
+        # A rebind may retain old sources/snapshot as a merge base; its snapshot
+        # must still describe the current identity and selected groups.
+        config = parse_config(json.loads(pre["config"]), binding["external_id"])
+        snapshot = json.loads(binding["snapshot"]) if binding["snapshot"] else {}
+        candidates = snapshot.get("groups", [snapshot]) if isinstance(snapshot, dict) else []
+        baseline = (bool(existing) and binding["snapshot_external_id"] == binding["external_id"]
+                    and isinstance(candidates, list) and all(isinstance(c, dict) for c in candidates)
+                    and {c.get("groupFingerprint") for c in candidates}
+                    == {g["groupFingerprint"] for g in config["groups"]})
         plan = plan_refresh(stored_config=json.loads(pre["config"]) if pre["config"] else None,
                             external_id=binding["external_id"], items=items, checked_at=checked_at,
                             existing_sources=existing, existing_slots=slots, gating=gating,
-                            previous_checked_at=previous)
+                            previous_checked_at=previous, baseline_established=baseline,
+                            existing_volume_numbers=live_volumes)
         batch = uuid.UUID(pre["batch"])
 
         def command(kind, key, **fields):

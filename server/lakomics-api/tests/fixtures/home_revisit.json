@@ -1,0 +1,22 @@
+{
+  "assets": [
+    {"id": "oct9", "collected_at": "2025-10-09T14:59:59Z"},
+    {"id": "oct10-b", "collected_at": "2025-10-09T15:00:00Z"},
+    {"id": "oct10-a", "collected_at": "2025-10-09T15:00:00Z"},
+    {"id": "oct11", "collected_at": "2025-10-11T00:00:00Z"},
+    {"id": "wrong-year", "collected_at": "2024-10-09T15:00:00Z"},
+    {"id": "recent", "collected_at": "2026-10-09T15:00:00Z"},
+    {"id": "offset", "collected_at": "2025-10-10T11:00:00+09:00"},
+    {"id": "invalid", "collected_at": "invalid"},
+    {"id": "leap", "collected_at": "2023-02-28T00:00:00Z"},
+    {"id": "year-edge", "collected_at": "2024-12-31T15:00:00Z"}
+  ],
+  "cases": [
+    {"day": "2026-10-09", "ids": ["oct9"]},
+    {"day": "2026-10-10", "ids": ["offset", "oct10-a", "oct10-b"]},
+    {"day": "2026-10-12", "ids": ["oct11", "offset", "oct10-a", "oct10-b", "oct9"]},
+    {"day": "2026-11-01", "ids": []},
+    {"day": "2024-02-29", "ids": ["leap"]},
+    {"day": "2026-01-01", "ids": ["year-edge"]}
+  ]
+}

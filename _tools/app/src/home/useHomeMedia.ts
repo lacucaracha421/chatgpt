@@ -8,6 +8,7 @@ export type HomeMediaSnapshot = HomeMedia & { anniversary: RevisitBundle | null 
 export function useHomeMedia(gateway: LibraryGateway, localDate: string, active: boolean, refreshVersion: string | number) {
   const [data, setData] = useState<HomeMediaSnapshot | null>(null);
   const [failed, setFailed] = useState(false);
+  const [readDay, setReadDay] = useState<string | null>(null);
   useEffect(() => {
     if (!active) return;
     let live = true;
@@ -18,8 +19,9 @@ export function useHomeMedia(gateway: LibraryGateway, localDate: string, active:
       if (!live) return;
       setData({ ...media, anniversary: slate?.bundles.find(bundle => bundle.kind === 'date' && bundle.assetIds.length > 0) ?? null });
       setFailed(false);
+      setReadDay(localDate);
     }, () => { if (live) setFailed(true); });
     return () => { live = false; pcStartupEvent('home.media.invalidated'); };
   }, [gateway, localDate, active, refreshVersion]);
-  return { data, failed };
+  return { data, failed, pending: active && readDay !== localDate };
 }

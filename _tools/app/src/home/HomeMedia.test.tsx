@@ -11,7 +11,7 @@ function Fixture({ gateway, active = true, date = '2026-10-04', privacy = false,
   gateway: LibraryGateway; active?: boolean; date?: string; privacy?: boolean; quiet?: boolean; open?: (id: string) => void;
 }) {
   const read = useHomeMedia(gateway, date, active, 0);
-  return <HomeDay data={read.data} failed={read.failed} quiet={quiet} privacyMode={privacy} onOpenAsset={open} />;
+  return <HomeDay data={read.data} failed={read.failed} pending={read.pending} quiet={quiet} privacyMode={privacy} onOpenAsset={open} />;
 }
 
 it('opens the daily favorite, masks both images in privacy, and hides it on a busy day', async () => {
@@ -37,8 +37,10 @@ it('retains the previous day while refreshing, including failed re-entry reads',
   read.mockReturnValueOnce(new Promise<HomeMedia>(resolve => { finish = resolve; }));
   view.rerender(<Fixture gateway={gateway} date="2026-10-05" />);
   expect(screen.getByText('2023.7.18에 저장')).toBeTruthy();
+  expect(view.container.querySelector('.home-day')?.hasAttribute('inert')).toBe(true);
   await act(async () => finish({ ...media, dailyAsset: { ...media.dailyAsset!, collectedAt: '2024-01-02T12:00:00Z' } }));
   await screen.findByText('2024.1.2에 저장');
+  expect(view.container.querySelector('.home-day')?.hasAttribute('inert')).toBe(false);
   view.rerender(<Fixture gateway={gateway} date="2026-10-05" active={false} />);
   read.mockRejectedValueOnce(new Error('offline'));
   view.rerender(<Fixture gateway={gateway} date="2026-10-05" />);
@@ -52,4 +54,17 @@ it('prefers the anniversary mosaic and keeps its five tiles and overflow count',
   expect(await screen.findByText('+3')).toBeTruthy();
   expect(screen.getAllByRole('button', { name: '1년 전 오늘 이미지 열기' })).toHaveLength(5);
   expect(screen.queryByText('오늘의 한 장')).toBeNull();
+});
+
+it('keeps mosaic image slots mounted so replacements can decode without blanking', async () => {
+  const gateway = {getHomeMedia: vi.fn().mockResolvedValue(media), getRevisitSlate: vi.fn()
+    .mockResolvedValueOnce({bundles: [{kind: 'date', assetIds: ['before']}]})
+    .mockResolvedValueOnce({bundles: [{kind: 'date', assetIds: ['after']}]})} as unknown as LibraryGateway;
+  const view = render(<Fixture gateway={gateway} />);
+  const cell = await screen.findByRole('button', {name: '1년 전 오늘 이미지 열기'});
+  const image = cell.querySelector('img');
+  view.rerender(<Fixture gateway={gateway} date="2026-10-05" />);
+  await waitFor(() => expect(cell.querySelectorAll('img')).toHaveLength(2));
+  expect(screen.getByRole('button', {name: '1년 전 오늘 이미지 열기'})).toBe(cell);
+  expect(cell.contains(image)).toBe(true);
 });

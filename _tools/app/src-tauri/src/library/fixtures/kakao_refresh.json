@@ -328,7 +328,7 @@
     "snapshot": {"anchorItemId": "u1", "groupFingerprint": "bc3f0d7e2a47bd78d2382f3f745dc02e7ebca9a39af9912b0620dc8b2f339378", "title": "별의 아이", "author": "작가", "publisher": "출판", "volumes": [{"volumeNumber": 1, "providerItemId": "u1", "title": "별의 아이", "publicationDate": "2025-05-05", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
     "sources": [{"volumeNumber": 1, "providerItemId": "u1", "title": "별의 아이", "author": "작가", "publisher": "출판", "isbn13": null, "publicationDate": "2025-05-05", "itemUrl": null}],
     "newSlots": [1],
-    "events": [{"kind": "new_volume", "volumeNumber": 1, "previousValue": null, "currentValue": "2025-05-05"}],
+    "events": [],
     "result": {"added": 1, "updated": 0, "unchanged": 0, "ignored": 0}
    }
   },
@@ -379,7 +379,7 @@
     "externalId": "r1",
     "config": {"version": 1, "query": "봇치 더 록", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "knownItemIds": ["r1"]}
    },
-   "existingSources": [],
+   "existingSources": [{"providerItemId": "r1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null, "volume": 1}],
    "existingSlots": [],
    "products": [
     {"id": "r1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "date": "2026-11-01", "url": null},
@@ -396,7 +396,7 @@
     "sources": [{"volumeNumber": 1, "providerItemId": "r1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "r2", "title": "봇치 더 록 2", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "r3", "title": "봇치 더 록 3", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 4, "providerItemId": "r4", "title": "봇치 더 록 4", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 5, "providerItemId": "r5", "title": "봇치 더 록 5", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}],
     "newSlots": [1, 2, 3, 4, 5],
     "events": [{"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2026-11-01"}, {"kind": "new_volume", "volumeNumber": 4, "previousValue": null, "currentValue": "2026-11-01"}],
-    "result": {"added": 5, "updated": 0, "unchanged": 0, "ignored": 0}
+    "result": {"added": 4, "updated": 0, "unchanged": 1, "ignored": 0}
    }
   },
   {

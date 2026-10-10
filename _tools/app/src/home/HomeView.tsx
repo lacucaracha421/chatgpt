@@ -31,6 +31,7 @@ import { HomeDay } from "./HomeRevisit";
 import { HomePlaying } from "./HomePlaying";
 import { HomeReleaseGrid } from "./HomeReleaseGrid";
 import { useHomeMedia } from "./useHomeMedia";
+import { useHomeRevisitDay } from "./useHomeRevisitDay";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useLaunchReady } from "../shared/launch/LaunchSplash";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
@@ -125,7 +126,8 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
     collections.map(work => [work.id, work.updatedAt]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   ), [collections]);
   const mediaVersion = JSON.stringify([root, refreshVersion, shelfRetry, collectionVersion]);
-  const media = useHomeMedia(gateway, today, mediaActive, mediaVersion);
+  const revisitDay = useHomeRevisitDay(now);
+  const media = useHomeMedia(gateway, revisitDay, mediaActive, mediaVersion);
   const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number; visit: number } | null>(null);
   const [calendarSnapshot, setCalendarSnapshot] = useState<ReleaseCalendar | null>(null);
   useEffect(() => {
@@ -366,7 +368,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
         else todos.find(todo => todo.key === row.key)?.open();
       }} />}
       {reviewUnknown.some(row => row.failed) && <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p>}
-      <HomeDay data={firstLoad ? null : media.data} failed={media.failed} quiet={!todayRows.length && !attentionPending && !reviewUnknown.length} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />
+      <HomeDay data={firstLoad ? null : media.data} failed={media.failed} pending={media.pending} quiet={!todayRows.length && !attentionPending && !reviewUnknown.length} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />
       </div>
     </div></div>
     {dialogs}

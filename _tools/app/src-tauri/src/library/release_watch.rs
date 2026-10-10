@@ -617,7 +617,7 @@ mod tests {
 
         assert_eq!(calls, vec!["never", "oldest", "exact"]);
         assert_eq!(result.checked, 3);
-        assert_eq!(result.changed_collections, 1);
+        assert_eq!(result.changed_collections, 0); // Missing source history is a quiet baseline.
         assert_eq!(result.skipped, 0);
         assert_eq!(result.stop_reason, None);
     }
@@ -654,7 +654,7 @@ mod tests {
 
         assert_eq!(calls, vec!["broken", "later"]);
         assert_eq!(result.checked, 1);
-        assert_eq!(result.changed_collections, 1);
+        assert_eq!(result.changed_collections, 0); // First successful observation is quiet.
         assert_eq!(result.skipped, 1);
         assert_eq!(result.stop_reason, None);
     }

@@ -758,7 +758,7 @@ pub async fn get_revisit_slate(
     tauri::async_runtime::spawn_blocking(move || {
         let _work = crate::perf_log::StartupSpan::start("command.get_revisit_slate.work");
         library
-            .get_or_create_revisit_slate(&local_date, &now_utc)
+            .get_home_revisit_slate(&local_date, &now_utc)
             .map_err(CommandError::from)
     })
     .await

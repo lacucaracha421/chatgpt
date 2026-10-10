@@ -13,6 +13,7 @@ import type {Asset, Revisit} from './types';
 import type {Note, NotesState} from '../src/notes/store';
 import {daysAfter,UPCOMING_DAYS} from '../src/home/homeModel';
 import {displayDate} from '../src/shared/displayDate';
+import {useHomeRevisitDay} from '../src/home/useHomeRevisitDay';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
 
 export {clockLabel,daysAfter,UPCOMING_DAYS} from '../src/home/homeModel';
@@ -147,27 +148,33 @@ export function revisitGroups(reply: Revisit | null | undefined, now = Date.now(
   }
   return groups;
 }
-export const REVISIT_PATH = '/v1/library/revisit?limit=12';
+export const REVISIT_PATH = '/v1/library/revisit?limit=20&home=true';
 /** Keep a bounded, same-day revisit snapshot in the existing Home cache for first paint. */
 export function useHomeRevisit(enabled: boolean, scope: string, forceKey?: unknown) {
-  const today = localToday();
+  return useHomeRevisitRead(enabled, scope, forceKey).value;
+}
+
+export function useHomeRevisitRead(enabled: boolean, scope: string, forceKey?: unknown) {
+  const today = useHomeRevisitDay();
+  const snapshotDay = `anniversary-v1:${today}`;
   const saved = readHomeSnapshot(scope).revisit;
-  const initial = saved?.day === today && Array.isArray(saved.groups) ? saved.groups : null;
+  const initial = saved?.day === snapshotDay && Array.isArray(saved.groups) ? saved.groups : null;
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [scope]);
-  const {value} = useCachedHomeSourceRead<RevisitGroup[] | null>({
-    enabled, scope, source: `revisit:${today}`, signalKey: 'listGeneration', initial, forceKey,
+  const {value, ready} = useCachedHomeSourceRead<RevisitGroup[] | null>({
+    enabled, scope, source: `revisit:${snapshotDay}`, signalKey: 'listGeneration', initial, forceKey, keepOnSourceChange: true,
     read: async signal => {
-      const groups = revisitGroups(await api<Revisit>(REVISIT_PATH, signal));
+      setFailed(false);
+      const groups = revisitGroups(await api<Revisit>(`${REVISIT_PATH}&day=${today}`, signal));
       if (!signal.aborted) {
-        writeHomeSnapshot({...readHomeSnapshot(scope), revisit: {day: today,
-          groups: groups.filter(group => group.key === 'date').map(group => ({...group, items: group.items.slice(0, 7)}))}});
+        writeHomeSnapshot({...readHomeSnapshot(scope), revisit: {day: snapshotDay,
+          groups: groups.filter(group => group.key === 'date')}});
       }
       return groups;
     },
     onError: () => setFailed(true),
   });
-  return value ?? (failed ? [] : null);
+  return {value: value ?? (failed ? [] : null), pending: enabled && !ready, failed, day: today};
 }
 
 export type HomeMemos = {notes: Note[]; locked: boolean} | null;
