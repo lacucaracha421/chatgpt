@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Realistic Game Case</title>
+<style>
+/* ===== Tokens copied from _tools/app/src/styles/tokens.css (dark, the app's only theme) ===== */
+@font-face { font-family: "Pretendard Variable"; src: url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"), url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2"); font-weight: 45 920; font-display: swap; }
+@font-face { font-family: "Noto Sans KR"; src: url("../../../_tools/app/src/styles/fonts/NotoSansKR-700-korean.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+:root {
+  color-scheme: dark;
+  --color-bg: #161718; --color-surface: #222324; --color-surface-elevated: #292a2b; --color-control: #232425; --color-control-hover: #2d2e2f;
+  --color-viewer-bg: #070a0f; --color-text: #e7e9ec; --color-muted: #a0a3a5; --color-faint: #7d8184; --color-accent: #ddd8ca; --color-on-accent: #202628;
+  --color-border: #363739; --color-border-strong: #55585a; --color-focus: #7db1ff;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+  --type-body: 15px; --type-meta: 12px; --line-meta: 18px; --radius-mark: 2px;
+  --ease-out: cubic-bezier(.2, 0, 0, 1); --ease-standard: var(--ease-out); --ease-sheet: var(--ease-out);
+  --font-ui: "Pretendard Variable", "Pretendard", "Segoe UI", "Malgun Gothic", sans-serif;
+  --font-spine: "Noto Sans KR", var(--font-ui);
+}
+:root[data-theme="light"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--color-bg); color: var(--color-text); font: 400 var(--type-body)/1.6 var(--font-ui); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+
+/* ===== Page chrome ===== */
+.page { max-width: 1320px; margin: 0 auto; padding: var(--space-8) var(--space-4) 64px; display: grid; gap: var(--space-8); }
+header h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+header p { margin: var(--space-2) 0 0; color: var(--color-muted); max-width: 72ch; text-wrap: pretty; }
+h2 { margin: 0 0 var(--space-1); font-size: var(--type-body); font-weight: 700; }
+.sub { margin: 0 0 var(--space-4); color: var(--color-muted); font-size: 13px; max-width: 80ch; }
+.toolbar { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); align-items: center; padding: var(--space-3) var(--space-4); margin: 0 calc(var(--space-4) * -1); background: color-mix(in srgb, var(--color-bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--color-border); }
+.toolbar .lbl { color: var(--color-faint); font-size: var(--type-meta); }
+.btn { font: 600 13px/1 var(--font-ui); color: var(--color-text); background: var(--color-control); border: 1px solid var(--color-border); border-radius: var(--radius-mark); padding: 8px 12px; cursor: pointer; transition: background 160ms var(--ease-out); }
+.btn:hover { background: var(--color-control-hover); }
+.btn:focus-visible, .chip:focus-within { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 280px; min-width: 0; }
+.page > * { min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--type-meta); color: var(--color-muted); background: var(--color-control); border: 1px solid var(--color-border); border-radius: var(--radius-mark); padding: 5px 9px; cursor: pointer; user-select: none; }
+.chip input { appearance: none; width: 10px; height: 10px; margin: 0; border: 1px solid var(--color-border-strong); border-radius: 0; }
+.chip input:checked { background: var(--color-accent); border-color: var(--color-accent); }
+.chip:has(input:checked) { color: var(--color-text); }
+
+/* ===== 2 x 2 comparison ===== */
+.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.col-head { font-size: 13px; font-weight: 700; color: var(--color-muted); padding: 0 2px; }
+.stage { position: relative; height: 470px; background: radial-gradient(ellipse 58% 46% at 50% 70%, #141820, var(--color-viewer-bg) 72%); border-radius: 4px; overflow: hidden; cursor: pointer; touch-action: pan-y; }
+.stage .tag { position: absolute; left: 12px; top: 10px; z-index: 5; font-size: var(--type-meta); color: var(--color-faint); }
+.stage .act { position: absolute; right: 10px; bottom: 10px; z-index: 5; }
+@media (max-width: 900px) { .compare { grid-template-columns: minmax(0, 1fr); } .col-head.second { display: none; } .stage { height: 430px; } }
+
+/* ===== Detail crops ===== */
+.crops { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--space-4); }
+.card { background: var(--color-surface); border-radius: 4px; overflow: hidden; display: grid; grid-template-rows: auto 1fr; }
+.crop { position: relative; height: 230px; overflow: hidden; background: radial-gradient(ellipse 80% 70% at 50% 60%, #121620, var(--color-viewer-bg) 80%); cursor: crosshair; touch-action: pan-y; }
+.crop.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-border); }
+.crop.split > div { position: relative; overflow: hidden; background: radial-gradient(ellipse 80% 70% at 50% 60%, #121620, var(--color-viewer-bg) 80%); }
+.crop .mini-tag { position: absolute; left: 8px; top: 6px; z-index: 5; font-size: 11px; color: var(--color-faint); }
+.card .txt { padding: var(--space-3) var(--space-4) var(--space-4); display: grid; gap: var(--space-2); align-content: start; }
+.card h3 { margin: 0; font-size: 14px; font-weight: 700; }
+.card p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--color-muted); text-wrap: pretty; }
+.meta { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 2px 0 0; font-size: var(--type-meta); line-height: 1.5; }
+.meta dt { color: var(--color-faint); }
+.meta dd { margin: 0; color: var(--color-text); }
+.badge { display: inline-block; padding: 0 5px; border: 1px solid var(--color-border-strong); border-radius: 0; font-size: 11px; line-height: 16px; color: var(--color-muted); margin-right: 4px; }
+
+/* ===== Summary table ===== */
+.table-wrap { overflow-x: auto; border-radius: 4px; background: var(--color-surface); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+th { color: var(--color-faint); font-weight: 600; font-size: var(--type-meta); }
+td:first-child { font-weight: 600; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.pick { display: grid; gap: var(--space-2); padding: var(--space-4); background: var(--color-surface); border-radius: 4px; font-size: 14px; }
+.pick ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--color-muted); }
+.pick b { color: var(--color-text); }
+
+/* ===== Shelf strip ===== */
+.shelves { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+@media (max-width: 900px) { .shelves { grid-template-columns: minmax(0, 1fr); } }
+.shelf { position: relative; padding: 18px 14px 0; background: linear-gradient(#0b0e13, #0d1117); border-radius: 4px; overflow: hidden; }
+.shelf-row { position: relative; display: flex; gap: 10px; justify-content: center; height: 176px; }
+.shelf-plank { height: 14px; margin: 0 -14px; background: linear-gradient(#2a2c30, #1c1d20 30%, #131416); box-shadow: 0 6px 14px rgba(0,0,0,.6); }
+.shelf .mini-tag { position: absolute; left: 10px; top: 6px; font-size: 11px; color: var(--color-faint); }
+
+/* ===== Extras ===== */
+.extras { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-4); }
+.extra .crop { height: 190px; display: grid; place-items: center; perspective: 900px; cursor: default; }
+.later { justify-self: start; font-size: 11px; color: var(--color-muted); border: 1px solid var(--color-border-strong); padding: 0 6px; line-height: 18px; }
+
+/* =====================================================================
+   CURRENT CASE — copied from CollectionCase.css, CaseMaterials.css, CaseInside.css (disc tray, game booklet).
+   ===================================================================== */
+.collection-case { --ch: 330px; --cw: calc(var(--ch) * var(--ratio)); --cd: 24px; position: relative; width: 100%; height: 100%; display: grid; place-items: center; }
+.collection-case-object { position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); width: var(--cw); height: var(--ch); perspective: var(--persp, 2200px); scale: var(--fit, 1); }
+.collection-case::before { content: ""; position: absolute; top: calc(50% + var(--ch) * var(--fit, 1) / 2 - var(--ch) * .16); height: calc(var(--ch) * .34); left: 50%; width: calc(var(--ch) * 2.6); transform: translateX(-50%); background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--color-text) 9%, transparent), color-mix(in srgb, var(--color-text) 3%, transparent) 45%, transparent 70%); }
+.collection-case .floor-shadow { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 50%; top: calc(50% + var(--ch) * var(--fit, 1) / 2 - 3px); height: 10px; width: calc(var(--cw) * 1.02); background: var(--case-contact); filter: blur(5px); box-shadow: 0 calc(var(--ch) * .03) calc(var(--ch) * .09) calc(var(--ch) * .035) var(--case-contact-spread); transition: width 560ms var(--ease-standard); }
+.collection-case.is-open .floor-shadow { width: calc(var(--cw) * 2.05); }
+.tilt { position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d; transform: rotateX(calc(var(--tx, 0) * 1deg)) rotateY(calc(var(--ty, 0) * 1deg)); }
+.collection-case .kase { --u: calc(var(--ch) / 340); --ry: 32deg; --open: 0; --gloss: 50%; --d: calc(var(--cd) / 2); --t: 2px;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d;
+  transform: rotateX(-5deg) rotateY(var(--ry)) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5)); transition: transform 560ms var(--ease-standard); }
+.collection-case .kase, .collection-case .kase * { -webkit-user-select: none; user-select: none; }
+.collection-case .k-hinge, .collection-case .k-lid { transition: transform 560ms var(--ease-standard); }
+.no-anim .kase, .no-anim .k-hinge, .no-anim .k-lid, .no-anim .floor-shadow { transition: none !important; }
+.collection-case .kase > span, .collection-case .k-hinge > span, .collection-case .k-lid > span { position: absolute; display: block; backface-visibility: hidden; }
+.collection-case .kase > .k-hinge { backface-visibility: visible; left: 0; top: 0; width: var(--cd); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: translateZ(calc(var(--cd) / -2)) rotateY(calc(-90deg - var(--open) * 90deg)); }
+.collection-case .k-hinge > .k-lid { backface-visibility: visible; left: 100%; top: 0; width: var(--cw); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: rotateY(calc(90deg - var(--open) * 90deg)); }
+.collection-case .k-front, .collection-case .k-back, .collection-case .k-spine { background: var(--case-material); }
+.collection-case .k-front, .collection-case .k-inner { inset: 0; border-radius: var(--case-front-radius); }
+.collection-case .k-back { inset: 0; border-radius: 6px 3px 3px 6px; transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); }
+.collection-case .k-floor { inset: 0; border-radius: 3px; transform: translateZ(calc(var(--cd) / -2 + var(--t))); background-color: #111213; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 24px rgba(0,0,0,.85); }
+.collection-case .k-inner { border-radius: 3px; transform: translateZ(calc(var(--t) * -1)) rotateY(180deg); background-color: #161719; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 20px rgba(0,0,0,.6); }
+.collection-case .k-spine, .collection-case .k-spine-in { inset: 0; }
+.collection-case .k-spine-in { transform: translateZ(calc(var(--t) * -1)) rotateY(180deg); background-color: #161719; box-shadow: inset 2px 0 3px rgba(0,0,0,.6), inset -2px 0 3px rgba(0,0,0,.6); }
+.collection-case .k-floor, .collection-case .k-inner, .collection-case .k-spine-in { background-image: var(--grain), linear-gradient(160deg, rgba(255,255,255,.035), rgba(0,0,0,.18)), linear-gradient(var(--plastic), var(--plastic)); background-blend-mode: normal, normal, multiply; }
+.collection-case .k-spine-in::before, .collection-case .k-spine-in::after { content: ""; position: absolute; top: 2%; bottom: 2%; width: 2px; background: rgba(0,0,0,.55); box-shadow: 1px 0 0 rgba(255,255,255,.05); }
+.collection-case .k-spine-in::before { left: 22%; }
+.collection-case .k-spine-in::after { right: 22%; }
+.collection-case .k-wall, .collection-case .k-ridge { background: linear-gradient(var(--wall-shade), var(--wall-shade)), var(--case-material); background-blend-mode: multiply, normal; }
+.collection-case .k-wall-top, .collection-case .k-wall-top-in, .collection-case .k-wall-bottom, .collection-case .k-wall-bottom-in { left: 0; width: var(--cw); top: calc(50% - var(--d) / 2); height: var(--d); }
+.collection-case .k-wall-outer, .collection-case .k-wall-outer-in { top: 0; height: var(--ch); left: calc(50% - var(--d) / 2); width: var(--d); }
+.collection-case .k-wall-top { --wall-shade: #26282c; transform: translateZ(calc(var(--d) / -2)) rotateX(90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case .k-wall-top-in { --wall-shade: #0e0f11; transform: translateZ(calc(var(--d) / -2)) rotateX(-90deg) translateZ(calc(var(--ch) / -2 + var(--t))); }
+.collection-case .k-wall-bottom { --wall-shade: #141518; transform: translateZ(calc(var(--d) / -2)) rotateX(-90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case .k-wall-bottom-in { --wall-shade: #1a1c1f; transform: translateZ(calc(var(--d) / -2)) rotateX(90deg) translateZ(calc(var(--ch) / -2 + var(--t))); }
+.collection-case .k-wall-outer { --wall-shade: #1f2124; transform: translateZ(calc(var(--d) / -2)) rotateY(90deg) translateZ(calc(var(--cw) / 2)); }
+.collection-case .k-wall-outer-in { --wall-shade: #15171a; transform: translateZ(calc(var(--d) / -2)) rotateY(-90deg) translateZ(calc(var(--cw) / -2 + var(--t))); }
+.collection-case .k-lip { background: linear-gradient(rgba(255,255,255,.08), rgba(255,255,255,.08)), var(--case-material); }
+.collection-case .k-lip-top { left: 0; width: var(--cw); top: 0; height: var(--t); }
+.collection-case .k-lip-bottom { left: 0; width: var(--cw); bottom: 0; height: var(--t); }
+.collection-case .k-lip-outer { top: 0; height: var(--ch); right: 0; width: var(--t); }
+.collection-case .k-base-lip { transform: translateZ(0); }
+.collection-case .k-lid-lip { transform: translateZ(calc(var(--d) * -1)) rotateY(180deg); }
+.collection-case .k-ridge { --wall-shade: #1a1c1f; top: 0; height: var(--ch); width: calc(var(--d) / 2); left: calc(50% - var(--d) / 4); transform: translateZ(calc(var(--cd) / -2 + var(--d) / 4)) rotateY(90deg) translateZ(calc(var(--cw) / -2 + var(--t))); }
+.collection-case .tray-ledge { position: absolute; inset: 4px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.55), inset 0 0 0 2px rgba(255,255,255,.035); pointer-events: none; }
+.collection-case .ins { position: absolute; inset: var(--case-rim) var(--case-rim) var(--case-rim) 0; overflow: hidden; border-radius: 0 2px 2px 0; display: block; background: var(--color-surface); }
+.collection-case .k-spine .ins { inset: var(--case-rim) 0; border-radius: 0; }
+.collection-case .k-back .ins { inset: var(--case-rim) 0 var(--case-rim) var(--case-rim); border-radius: 2px 0 0 2px; }
+.collection-case .ins.bare { background: transparent; display: flex; align-items: center; justify-content: center; }
+.collection-case .tray-media { position: absolute; inset: 0; pointer-events: none; }
+.collection-case .media-label { position: absolute; background-color: #2b2c2f; background-image: var(--cover); background-position: center 25%; background-size: cover; background-repeat: no-repeat; overflow: hidden; }
+.collection-case .holder { position: absolute; left: 50%; top: 46%; width: 86%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: #0c0d0e; box-shadow: inset 0 3px 6px rgba(0,0,0,.9), inset 0 -1px 0 rgba(255,255,255,.06), 0 1px 0 rgba(255,255,255,.05); }
+.collection-case .thumb { position: absolute; top: 50%; width: 12%; height: 22%; margin-top: -11%; background: #08090a; box-shadow: inset 0 2px 3px rgba(0,0,0,.9); }
+.collection-case .thumb-left { left: -7%; border-radius: 40% 0 0 40%; }
+.collection-case .thumb-right { right: -7%; border-radius: 0 40% 40% 0; }
+.collection-case .disc { position: absolute; inset: 3%; border-radius: 50%; background: #c5c9cf; box-shadow: 0 2px 4px rgba(0,0,0,.7); }
+.collection-case .disc .media-label { inset: 0; border-radius: inherit; }
+.collection-case .disc::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle, transparent 0 18%, #d9dbdf 18% 23%, transparent 23%); }
+.collection-case .hub { position: absolute; left: 50%; top: 50%; width: 27%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, #2a2c30 0 34%, #111214 34% 38%, transparent 38%), repeating-conic-gradient(from 0deg, #26282c 0 20deg, #0f1012 20deg 24deg); box-shadow: 0 1px 2px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.1); }
+.collection-case .hub::after { content: ""; position: absolute; inset: 30%; border-radius: 50%; box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 1px 1px rgba(0,0,0,.7); }
+.collection-case .disc-note { position: absolute; left: 50%; bottom: 4%; transform: translateX(-50%); font: 800 calc(9 * var(--u))/1 var(--font-ui); letter-spacing: .3em; color: #121315; text-shadow: 0 1px 0 rgba(255,255,255,.07), 0 -1px 0 rgba(0,0,0,.6); white-space: nowrap; }
+.collection-case .cv { display: block; width: 100%; height: 100%; object-fit: fill; }
+.case-spine-art { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.case-spine-art .spine-title { display: block; max-height: 92%; overflow: hidden; white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .5); line-height: 1; letter-spacing: .02em; color: rgba(255,255,255,.92); }
+.collection-case {
+  --case-rim: 3px; --case-front-radius: 3px 6px 6px 3px;
+  --case-material: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e;
+  --case-contact: rgba(0, 0, 0, .85); --case-contact-spread: rgba(0, 0, 0, .5);
+}
+.collection-case .k-front::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(104deg, rgba(255,255,255,0) 38%, rgba(255,255,255,.2) 47%, rgba(255,255,255,.05) 53%, rgba(255,255,255,0) 60%) var(--gloss) 0 / 260% 100% no-repeat,
+    linear-gradient(90deg, rgba(0,0,0,.34), rgba(0,0,0,0) 5%, rgba(255,255,255,.1) 6.5%, rgba(0,0,0,0) 9%);
+}
+.collection-case .k-spine::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0,0,0,.4), rgba(255,255,255,.12) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.35)); }
+/* CaseInside.css (game booklet) */
+.collection-case .case-booklet { position: absolute; display: flex; flex-direction: column; background: #f1ede4; color: #1d1f22; transform: rotate(-.8deg); box-shadow: calc(2 * var(--u)) calc(2 * var(--u)) 0 #d6d2c9, calc(4 * var(--u)) calc(4 * var(--u)) 0 #b9b5ad, calc(1 * var(--u)) calc(6 * var(--u)) calc(10 * var(--u)) rgba(0,0,0,.5); font-family: var(--font-ui); }
+.collection-case .case-manual { left: 12%; right: 10%; top: 7%; bottom: 9%; }
+.collection-case .case-tab { position: absolute; left: 7%; width: 10%; height: 6%; z-index: 2; border-radius: calc(2 * var(--u)) calc(5 * var(--u)) calc(5 * var(--u)) calc(2 * var(--u)); background: linear-gradient(180deg, #34373c, #1f2125); box-shadow: inset 0 calc(1 * var(--u)) 0 rgba(255,255,255,.14), calc(2 * var(--u)) calc(3 * var(--u)) calc(3 * var(--u)) rgba(0,0,0,.65); }
+.collection-case .case-tab::after { content: ""; position: absolute; right: 18%; top: 30%; bottom: 30%; width: calc(1 * var(--u)); background: rgba(0,0,0,.45); }
+.collection-case .case-tab-one { top: 17%; }
+.collection-case .case-tab-two { top: 62%; }
+.collection-case .case-staple { position: absolute; left: 3%; width: calc(2 * var(--u)); height: 7%; background: linear-gradient(90deg, #8d9096, #d8dadd, #8d9096); z-index: 1; }
+.collection-case .case-staple-one { top: 18%; }
+.collection-case .case-staple-two { top: 72%; }
+.collection-case .case-manual-cover { flex: none; height: 30%; background: #d6d2c9 var(--cover) center 30% / cover no-repeat; }
+.collection-case .case-manual-title { flex: none; margin: 6% 8% 0; text-wrap: balance; word-break: keep-all; font-size: calc(12 * var(--u)); font-weight: 800; line-height: 1.25; }
+.collection-case .case-booklet-subtitle { flex: none; margin: calc(2 * var(--u)) 8% 0; font-size: calc(8 * var(--u)); letter-spacing: .2em; color: #6b6e73; white-space: nowrap; }
+.collection-case .case-manual-form { flex: none; margin: 7% 8% 0; border: calc(1 * var(--u)) solid #1d1f22; }
+.collection-case .case-manual-form > div { display: grid; grid-template-columns: auto minmax(0, 1fr); border-top: calc(1 * var(--u)) solid rgba(29,31,34,.35); font-size: calc(9 * var(--u)); line-height: 1; }
+.collection-case .case-manual-form > div:first-child { border-top: 0; }
+.collection-case .case-manual-form dt { padding: calc(6 * var(--u)) calc(5 * var(--u)); white-space: nowrap; background: #1d1f22; color: #f1ede4; font-weight: 700; letter-spacing: .08em; }
+.collection-case .case-manual-form dd { margin: 0; padding: calc(6 * var(--u)) calc(5 * var(--u)); display: flex; align-items: center; font-size: calc(8 * var(--u)); min-width: 0; overflow: hidden; white-space: nowrap; }
+.collection-case .case-status { display: flex; flex-wrap: wrap; gap: calc(5 * var(--u)); }
+.collection-case .case-status-box { display: inline-flex; gap: calc(3 * var(--u)); align-items: center; color: #6b6e73; white-space: nowrap; }
+.collection-case .case-status-box::before { content: ""; flex: none; width: calc(7 * var(--u)); height: calc(7 * var(--u)); border: calc(1 * var(--u)) solid #1d1f22; }
+.collection-case .case-status-box.is-filled { color: #1d1f22; font-weight: 700; }
+.collection-case .case-status-box.is-filled::before { background: #1d1f22; }
+.collection-case .case-manual-footer { margin-top: auto; padding: 6% 8%; font-size: calc(7.5 * var(--u)); letter-spacing: .06em; color: #6b6e73; display: flex; flex-wrap: wrap; justify-content: space-between; gap: calc(4 * var(--u)) calc(8 * var(--u)); }
+
+/* Extra parts used only by the proposal stay hidden on the current model. */
+.collection-case .x { display: none; }
+
+/* =====================================================================
+   PROPOSAL — .real. Every technique is a separate layer toggled by a body class (fx-*).
+   Light inputs written by the page script: --lx/--ly (-1..1 light direction), --gloss (%), --sheen (deg), --fres (0.55..1).
+   ===================================================================== */
+.real { --lx: -.35; --ly: -.55; --gloss: 50%; --sheen: 30; --fres: .7; }
+.real .x { display: block; position: absolute; pointer-events: none; }
+.real .k-front::after, .real .k-spine::after { content: none; }
+
+/* --- base material: smoky clear plastic over a dark shell (no toggle; replaces the flat tint) --- */
+.real { --case-material: linear-gradient(rgba(150,160,172,.16), rgba(150,160,172,.16)), #121316; }
+.real .k-floor, .real .k-inner { background-color: #0f1012; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05), inset 0 0 calc(30 * var(--u)) rgba(0,0,0,.9), inset 0 calc(10 * var(--u)) calc(16 * var(--u)) rgba(0,0,0,.5); }
+.real .tray-reflect { inset: 0; border-radius: inherit; background: linear-gradient(calc(118deg + var(--lx) * 14deg), transparent 30%, rgba(255,255,255,.05) 40%, rgba(255,255,255,.11) 44%, transparent 52%), linear-gradient(calc(118deg + var(--lx) * 14deg), transparent 58%, rgba(255,255,255,.04) 61%, transparent 64%); }
+.real .mold { inset: 3.5%; border-radius: calc(5 * var(--u)); box-shadow: inset 0 calc(1 * var(--u)) 0 rgba(255,255,255,.07), inset 0 calc(-1 * var(--u)) 0 rgba(0,0,0,.6), 0 calc(1 * var(--u)) 0 rgba(255,255,255,.05), 0 calc(-1 * var(--u)) 0 rgba(0,0,0,.5); }
+
+/* 1. clear sleeve over the printed cover */
+.real .sleeve { display: none; inset: 0; border-radius: inherit;
+  background:
+    linear-gradient(104deg, rgba(255,255,255,0) 37%, rgba(255,255,255,.07) 44%, rgba(255,255,255,calc(.2 + var(--fres) * .2)) 48.6%, rgba(255,255,255,.09) 51%, rgba(255,255,255,0) 57%) var(--gloss) 0 / 290% 100% no-repeat,
+    radial-gradient(ellipse 95% 70% at calc(50% + var(--lx) * 48%) calc(36% + var(--ly) * 42%), rgba(225,235,245,calc(.11 * var(--fres))), rgba(225,235,245,0) 68%),
+    linear-gradient(rgba(170,182,196,calc((var(--fres) - .5) * .16)), rgba(170,182,196,calc((var(--fres) - .5) * .16)));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), inset 0 1px 0 1px rgba(255,255,255,calc(.05 - var(--ly) * .05)), inset 0 -1px 0 rgba(0,0,0,.35); }
+.fx-sleeve .real .sleeve { display: block; }
+.fx-sleeve .real .k-front .ins, .fx-sleeve .real .k-back .ins { inset: calc(5 * var(--u)) calc(5 * var(--u)) calc(5 * var(--u)) calc(2 * var(--u)); box-shadow: 0 0 0 .5px rgba(0,0,0,.7); }
+.fx-sleeve .real .k-back .ins { inset: calc(5 * var(--u)) calc(2 * var(--u)) calc(5 * var(--u)) calc(5 * var(--u)); }
+.fx-sleeve .real .k-front .ins::after, .fx-sleeve .real .k-back .ins::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 calc(4 * var(--u)) rgba(0,0,0,.45); pointer-events: none; }
+.real .spine-sleeve { display: none; inset: 0;
+  background: linear-gradient(90deg, rgba(0,0,0,.5), rgba(255,255,255,calc(.07 + var(--fres) * .1)) calc(30% + var(--lx) * 18%), rgba(255,255,255,0) 62%, rgba(0,0,0,.38)),
+    linear-gradient(180deg, rgba(255,255,255,0) calc(40% + var(--ly) * 30%), rgba(255,255,255,.07) calc(48% + var(--ly) * 30%), rgba(255,255,255,0) calc(58% + var(--ly) * 30%)); }
+.fx-sleeve .real .spine-sleeve { display: block; }
+
+/* 2. rounded corners and lit edges: radius on faces, bevel lines and curved ends on the thickness walls */
+.fx-edge .real { --case-front-radius: calc(4 * var(--u)) calc(10 * var(--u)) calc(10 * var(--u)) calc(4 * var(--u)); }
+.fx-edge .real .k-back { border-radius: calc(10 * var(--u)) calc(4 * var(--u)) calc(4 * var(--u)) calc(10 * var(--u)); }
+.fx-edge .real .k-front { box-shadow: inset 0 0 0 1px rgba(255,255,255,.06), inset calc(-1.5 * var(--u)) 0 calc(1.5 * var(--u)) rgba(255,255,255,calc(.06 + var(--lx) * .06)), inset 0 calc(1.5 * var(--u)) calc(1.5 * var(--u)) rgba(255,255,255,calc(.07 - var(--ly) * .07)); }
+.fx-edge .real .k-wall-top, .fx-edge .real .k-wall-bottom { background:
+    linear-gradient(90deg, rgba(255,255,255,.16), rgba(255,255,255,0) 4%, rgba(255,255,255,0) 96%, rgba(255,255,255,.16)),
+    linear-gradient(180deg, rgba(255,255,255,.22) 0 1px, rgba(255,255,255,0) 2px calc(100% - 2px), rgba(255,255,255,.12) calc(100% - 1px)),
+    linear-gradient(rgba(255,255,255,calc(.05 - var(--ly) * .05)), rgba(255,255,255,calc(.05 - var(--ly) * .05))),
+    linear-gradient(var(--wall-shade), var(--wall-shade)), var(--case-material); background-blend-mode: normal, normal, normal, multiply, normal; }
+.fx-edge .real .k-wall-bottom { background:
+    linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,0) 4%, rgba(255,255,255,0) 96%, rgba(255,255,255,.08)),
+    linear-gradient(180deg, rgba(255,255,255,.12) 0 1px, rgba(255,255,255,0) 2px),
+    linear-gradient(var(--wall-shade), var(--wall-shade)), var(--case-material); background-blend-mode: normal, normal, multiply, normal; }
+.fx-edge .real .k-wall-outer { background:
+    linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,0) 3%, rgba(255,255,255,0) 97%, rgba(255,255,255,.1)),
+    linear-gradient(90deg, rgba(255,255,255,.2) 0 1px, rgba(255,255,255,0) 2px calc(100% - 2px), rgba(255,255,255,.1) calc(100% - 1px)),
+    linear-gradient(90deg, rgba(255,255,255,0) calc(30% + var(--lx) * 25%), rgba(255,255,255,calc(.04 + var(--lx) * .05)) calc(50% + var(--lx) * 25%), rgba(255,255,255,0) calc(70% + var(--lx) * 25%)),
+    linear-gradient(var(--wall-shade), var(--wall-shade)), var(--case-material); background-blend-mode: normal, normal, normal, multiply, normal; }
+.fx-edge .real .k-lip { background: linear-gradient(rgba(255,255,255,.2), rgba(255,255,255,.2)), var(--case-material); }
+.fx-edge .real .k-spine { border-radius: 1px; }
+
+/* 3. micro scratches and fingerprints, shown only where the light falls */
+.real .wear { display: none; inset: 0; border-radius: inherit; mix-blend-mode: screen;
+  background: var(--fp) 64% 24% / calc(56 * var(--u)) auto no-repeat, var(--fp2) 22% 84% / calc(48 * var(--u)) auto no-repeat, var(--scratch) 0 0 / calc(230 * var(--u)) auto, var(--scratch2) 30% 20% / calc(310 * var(--u)) auto;
+  -webkit-mask-image: radial-gradient(ellipse 70% 58% at calc(50% + var(--lx) * 48%) calc(36% + var(--ly) * 42%), #000, rgba(0,0,0,.35) 55%, rgba(0,0,0,.14) 100%);
+  mask-image: radial-gradient(ellipse 70% 58% at calc(50% + var(--lx) * 48%) calc(36% + var(--ly) * 42%), #000, rgba(0,0,0,.35) 55%, rgba(0,0,0,.14) 100%);
+  opacity: calc(.5 + var(--fres) * .4); }
+.fx-wear .real .wear { display: block; }
+.real .rub { display: none; inset: 0; background:
+    radial-gradient(circle at 100% 0, rgba(240,236,226,.55), rgba(240,236,226,0) calc(5 * var(--u))),
+    radial-gradient(circle at 100% 100%, rgba(240,236,226,.45), rgba(240,236,226,0) calc(4 * var(--u))),
+    linear-gradient(90deg, rgba(240,236,226,0) calc(100% - 1.5px), rgba(240,236,226,.25));
+  -webkit-mask-image: var(--rubmask); mask-image: var(--rubmask); -webkit-mask-size: calc(90 * var(--u)) auto; mask-size: calc(90 * var(--u)) auto; }
+.fx-wear .real .rub { display: block; }
+
+/* 4. hinge: two scored grooves beside the spine outside, knuckles and ribs inside */
+.real .groove { display: none; top: 0; bottom: 0; left: 0; width: calc(16 * var(--u));
+  background: linear-gradient(90deg, rgba(0,0,0,.5), rgba(0,0,0,0) 16%, rgba(255,255,255,calc(.10 - var(--lx) * .06)) 28%, rgba(0,0,0,.42) 36%, rgba(255,255,255,.05) 46%, rgba(0,0,0,0) 54%, rgba(255,255,255,calc(.08 - var(--lx) * .05)) 66%, rgba(0,0,0,.36) 74%, rgba(0,0,0,0) 90%); }
+.k-back .groove { left: auto; right: 0; transform: scaleX(-1); }
+.fx-hinge .real .groove { display: block; }
+.real .spine-score { display: none; inset: 0; background: linear-gradient(90deg, rgba(0,0,0,.55) 0 1px, rgba(255,255,255,.12) 1px 2px, rgba(0,0,0,0) 3px calc(100% - 3px), rgba(255,255,255,.1) calc(100% - 2px) calc(100% - 1px), rgba(0,0,0,.55) calc(100% - 1px)); }
+.fx-hinge .real .spine-score { display: block; }
+.real .k-spine-in .knuckle { display: none; left: 12%; right: 12%; height: 5.5%; border-radius: calc(2 * var(--u));
+  background: linear-gradient(90deg, #0b0c0e, #2c2f34 22%, #3a3d43 34%, #1b1d21 62%, #0b0c0e);
+  box-shadow: 0 calc(1.5 * var(--u)) calc(2 * var(--u)) rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.14), inset 0 -1px 0 rgba(0,0,0,.6); }
+.real .knuckle-1 { top: 5%; } .real .knuckle-2 { top: 47%; } .real .knuckle-3 { top: 89.5%; }
+.real .k-spine-in .ribs { display: none; inset: 0; background: repeating-linear-gradient(90deg, rgba(0,0,0,.45) 0 1px, rgba(255,255,255,.05) 1px 2px, rgba(0,0,0,0) 2px calc(4 * var(--u))); opacity: .8; }
+.fx-hinge .real .k-spine-in .knuckle, .fx-hinge .real .k-spine-in .ribs { display: block; }
+
+/* 5. clear retention clips over the booklet */
+.fx-clips .real .case-tab { left: 3.5%; width: 15%; height: 7.5%; border-radius: calc(3 * var(--u)) calc(11 * var(--u)) calc(11 * var(--u)) calc(3 * var(--u));
+  background: linear-gradient(180deg, rgba(255,255,255,.42), rgba(255,255,255,.10) 18%, rgba(255,255,255,.03) 50%, rgba(255,255,255,.12) 82%, rgba(255,255,255,.40)),
+    linear-gradient(90deg, rgba(14,16,20,.55), rgba(14,16,20,.12) 46%, rgba(220,230,240,.06));
+  box-shadow: inset 0 0 0 calc(.8 * var(--u)) rgba(255,255,255,.32), inset calc(-3 * var(--u)) 0 calc(4 * var(--u)) rgba(255,255,255,.14), calc(2 * var(--u)) calc(4 * var(--u)) calc(4 * var(--u)) rgba(0,0,0,.42), calc(1 * var(--u)) calc(1 * var(--u)) calc(1 * var(--u)) rgba(0,0,0,.35); }
+.fx-clips .real .case-tab::after { right: 16%; top: 20%; bottom: 20%; width: calc(1.6 * var(--u)); border-radius: 2px; background: rgba(255,255,255,.65); }
+.fx-clips .real .case-tab::before { content: ""; position: absolute; left: 0; top: 14%; bottom: 14%; width: 30%; border-radius: inherit; background: linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.1)); }
+
+/* 6. disc: printed label ring, clear inner band, mirror rim, rainbow that turns with the light */
+.fx-disc .real .disc { inset: 2.5%; background: conic-gradient(from calc(var(--sheen) * 1deg), #d8dbdf, #858b93 12%, #f4f5f6 25%, #7a8088 37%, #d8dbdf 50%, #858b93 62%, #f4f5f6 75%, #7a8088 87%, #d8dbdf);
+  box-shadow: 0 calc(2 * var(--u)) calc(6 * var(--u)) rgba(0,0,0,.75), 0 0 0 calc(.6 * var(--u)) rgba(0,0,0,.6); }
+.fx-disc .real .disc .media-label { -webkit-mask-image: radial-gradient(circle closest-side, transparent 0 37.6%, #000 38% 95.6%, transparent 96%); mask-image: radial-gradient(circle closest-side, transparent 0 37.6%, #000 38% 95.6%, transparent 96%); background-position: center 30%; filter: saturate(.92) contrast(1.04); }
+.fx-disc .real .disc::after { background: radial-gradient(circle closest-side, transparent 0 30.6%, rgba(255,255,255,.5) 30.8% 31.4%, rgba(0,0,0,.3) 31.6% 32%, transparent 32.2% 37%, rgba(0,0,0,.45) 37.2% 37.8%, transparent 38% 99%, rgba(0,0,0,.35) 99.4%); }
+.real .rainbow { display: none; inset: 0; border-radius: 50%; mix-blend-mode: hard-light; opacity: .85;
+  background: conic-gradient(from calc(var(--sheen) * 1deg + 12deg), #ff3d6e, #ffb02e, #e8ff3a, #2effa0, #2ec8ff, #6a4dff, #e04dff, #ff3d6e, #ffb02e, #e8ff3a, #2effa0, #2ec8ff, #6a4dff, #e04dff, #ff3d6e);
+  -webkit-mask-image: radial-gradient(circle closest-side, transparent 0 28%, #000 28.5% 37.6%, rgba(0,0,0,.16) 38% 95.6%, #000 96%), conic-gradient(from calc(var(--sheen) * 1deg), rgba(0,0,0,.08), #000 26deg, rgba(0,0,0,.08) 64deg, rgba(0,0,0,.08) 180deg, #000 206deg, rgba(0,0,0,.08) 244deg, rgba(0,0,0,.08));
+  -webkit-mask-composite: source-in; mask-image: radial-gradient(circle closest-side, transparent 0 28%, #000 28.5% 37.6%, rgba(0,0,0,.16) 38% 95.6%, #000 96%), conic-gradient(from calc(var(--sheen) * 1deg), rgba(0,0,0,.08), #000 26deg, rgba(0,0,0,.08) 64deg, rgba(0,0,0,.08) 180deg, #000 206deg, rgba(0,0,0,.08) 244deg, rgba(0,0,0,.08)); mask-composite: intersect; }
+.real .disc-spec { display: none; inset: 0; border-radius: 50%; mix-blend-mode: screen;
+  background: linear-gradient(calc(var(--sheen) * 1deg + 90deg), rgba(255,255,255,0) 38%, rgba(255,255,255,.2) 49%, rgba(255,255,255,.06) 54%, rgba(255,255,255,0) 62%); }
+.real .disc-print { display: none; inset: 0; border-radius: 50%; color: #f4f1e8; font-family: var(--font-ui); text-shadow: 0 0 calc(2 * var(--u)) rgba(0,0,0,.6); }
+.disc-print .dp-pc { position: absolute; left: 9%; top: 41%; padding: calc(2 * var(--u)) calc(4 * var(--u)); border: calc(1.2 * var(--u)) solid #f4f1e8; border-radius: calc(2 * var(--u)); font: 800 calc(10 * var(--u))/1 var(--font-ui); letter-spacing: .04em; }
+.disc-print .dp-disc { position: absolute; left: 9%; top: 52%; font: 700 calc(6.5 * var(--u))/1.35 var(--font-ui); letter-spacing: .08em; }
+.disc-print .dp-title { position: absolute; left: 0; right: 0; bottom: 14%; text-align: center; font: 700 calc(15 * var(--u))/1 Georgia, "Times New Roman", serif; letter-spacing: .12em; color: #e8f3e6; }
+.disc-print .dp-code { position: absolute; left: 0; right: 0; bottom: 8.5%; text-align: center; font: 600 calc(5 * var(--u))/1 var(--font-ui); letter-spacing: .14em; opacity: .85; }
+.disc-print .dp-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.disc-print .dp-ring text { font: 600 2.1px var(--font-ui); letter-spacing: .25px; fill: rgba(20,22,26,.7); }
+.disc-print .dp-pub { position: absolute; right: 8%; top: 45%; font: 800 calc(6.5 * var(--u))/1.1 var(--font-ui); letter-spacing: .06em; text-align: right; color: #f0c97a; }
+.fx-disc .real .rainbow, .fx-disc .real .disc-spec, .fx-disc .real .disc-print { display: block; }
+.fx-disc .real .holder { box-shadow: inset 0 calc(3 * var(--u)) calc(7 * var(--u)) rgba(0,0,0,.95), inset 0 -1px 0 rgba(255,255,255,.08), 0 0 0 calc(2 * var(--u)) #16181b, 0 0 0 calc(2.6 * var(--u)) rgba(255,255,255,.09), 0 calc(1 * var(--u)) 0 calc(2.6 * var(--u)) rgba(0,0,0,.6); }
+
+/* 7. hub teeth and the PUSH tab */
+.fx-hub .real .hub { width: 24%; background: radial-gradient(circle, #0b0c0e 0 40%, transparent 40.5%), repeating-conic-gradient(from calc(var(--sheen) * .1deg), #3b3e44 0 3deg, #23262a 3deg 19deg, #050506 19deg 30deg);
+  -webkit-mask-image: radial-gradient(circle, #000 0 69%, transparent 70%); mask-image: radial-gradient(circle, #000 0 69%, transparent 70%); box-shadow: none; }
+.fx-hub .real .hub::after { inset: 31%; background: radial-gradient(circle at calc(42% + var(--lx) * 12%) calc(36% + var(--ly) * 12%), #5a5e66, #26282d 46%, #111215 74%); box-shadow: inset 0 calc(1 * var(--u)) 0 rgba(255,255,255,.18), 0 calc(1 * var(--u)) calc(2 * var(--u)) rgba(0,0,0,.9), 0 0 0 calc(1.5 * var(--u)) #0a0b0c, 0 0 0 calc(2.2 * var(--u)) rgba(255,255,255,.07); }
+.real .hub-ring { display: none; left: 50%; top: 50%; width: 27.5%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: inset 0 0 0 calc(1.5 * var(--u)) rgba(10,11,12,.9), inset 0 0 0 calc(2.2 * var(--u)) rgba(255,255,255,.06), 0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0,0,0,.5); }
+.fx-hub .real .hub-ring { display: block; }
+.fx-hub .real .disc-note { bottom: 1.6%; padding: calc(4 * var(--u)) calc(10 * var(--u)); border-radius: calc(9 * var(--u)) calc(9 * var(--u)) calc(4 * var(--u)) calc(4 * var(--u)); font-size: calc(7.5 * var(--u)); color: #0d0e10; letter-spacing: .26em;
+  background: linear-gradient(180deg, #222428, #15171a); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -1px 0 rgba(0,0,0,.6), 0 0 0 calc(1.5 * var(--u)) #0a0b0c, 0 0 0 calc(2.2 * var(--u)) rgba(255,255,255,.05); text-shadow: 0 1px 0 rgba(255,255,255,.12), 0 -1px 0 rgba(0,0,0,.7); }
+
+/* 8. paper: fibre grain, aged edges, worn corners, uneven sheet stack */
+.fx-paper .real .case-booklet { background: var(--paper) 0 0 / calc(150 * var(--u)) auto, linear-gradient(100deg, #e4ddcd, #f0ebe0 26%, #ece6d9 70%, #ddd5c4); background-blend-mode: multiply, normal;
+  box-shadow: calc(1.4 * var(--u)) calc(.8 * var(--u)) 0 -.3px #d9d2c2, calc(2.8 * var(--u)) calc(2.2 * var(--u)) 0 -.6px #cbc4b3, calc(3.6 * var(--u)) calc(3.4 * var(--u)) 0 -.9px #bcb5a4, 0 calc(4 * var(--u)) calc(12 * var(--u)) rgba(0,0,0,.5), 0 calc(1 * var(--u)) calc(2 * var(--u)) rgba(0,0,0,.4); }
+.real .paper-wear { display: none; inset: 0; z-index: 1;
+  background: radial-gradient(circle at 100% 0, rgba(255,252,244,.8), rgba(255,252,244,0) calc(7 * var(--u))), radial-gradient(circle at 100% 100%, rgba(255,252,244,.6), rgba(255,252,244,0) calc(6 * var(--u))),
+    linear-gradient(90deg, rgba(60,45,20,.14), rgba(60,45,20,0) 9%, rgba(60,45,20,0) 88%, rgba(60,45,20,.08)),
+    linear-gradient(178deg, rgba(255,255,255,0) 58%, rgba(255,255,255,.18) 61%, rgba(0,0,0,.05) 63%, rgba(0,0,0,0) 67%);
+  box-shadow: inset 0 0 calc(10 * var(--u)) rgba(130,105,60,.22), inset 0 0 0 calc(.6 * var(--u)) rgba(255,253,246,.6); }
+.real .sheet2 { display: none; left: 22%; right: 6%; top: 10%; bottom: 7%; transform: rotate(1.6deg); background: var(--paper) 0 0 / calc(150 * var(--u)) auto, linear-gradient(95deg, #d9d1bf, #e6dfcf 60%, #d3cab6); background-blend-mode: multiply, normal; box-shadow: 0 calc(3 * var(--u)) calc(8 * var(--u)) rgba(0,0,0,.5), inset 0 0 calc(8 * var(--u)) rgba(110,85,40,.25); }
+.real .sheet2 ul { position: absolute; right: 8%; top: 26%; width: 34%; margin: 0; padding: 0; list-style: none; font: 700 calc(6.5 * var(--u))/2.1 Georgia, serif; letter-spacing: .08em; color: #2a2620; border-top: calc(.8 * var(--u)) solid #2a2620; }
+.real .sheet2 li { border-bottom: calc(.5 * var(--u)) solid rgba(42,38,32,.4); white-space: nowrap; }
+.fx-paper .real .paper-wear, .fx-paper .real .sheet2 { display: block; }
+.real .print-grain { display: none; inset: 0; background: var(--paper) 0 0 / calc(150 * var(--u)) auto; mix-blend-mode: multiply; opacity: .55; }
+.fx-paper .real .print-grain { display: block; }
+
+/* 9. contact shadow: a tight line where it touches, a soft penumbra, a wide ambient shadow; widths follow the turned footprint */
+.real .floor-shadow { width: calc(var(--foot) * 1px); transition: none; }
+.fx-shadow .real .floor-shadow { top: calc(50% + var(--ch) * var(--fit, 1) / 2 - 2px); height: calc(4 * var(--u)); filter: blur(calc(1.6 * var(--u))); background: rgba(0,0,0,.95); box-shadow: none; transform: translateX(calc(-50% + var(--lx) * -6px)); }
+.real .fs { display: none; position: absolute; left: 50%; border-radius: 50%; pointer-events: none; }
+.fx-shadow .real .fs { display: block; }
+.real .fs-pen { top: calc(50% + var(--ch) * var(--fit, 1) / 2 - 6px * var(--fit, 1)); height: calc(20 * var(--u)); width: calc(var(--foot) * 1.04px); transform: translateX(calc(-50% + var(--lx) * -14px)); background: rgba(0,0,0,.6); filter: blur(calc(8 * var(--u))); }
+.real .fs-amb { top: calc(50% + var(--ch) * var(--fit, 1) / 2 - 24px); height: calc(80 * var(--u)); width: calc(var(--foot) * 1.4px); transform: translateX(calc(-50% + var(--lx) * -26px)); background: radial-gradient(ellipse 50% 50%, rgba(0,0,0,.55), rgba(0,0,0,0) 70%); }
+.real .fs-bounce { top: calc(50% + var(--ch) * var(--fit, 1) / 2 - 2px); height: calc(30 * var(--u)); width: calc(var(--foot) * .9px); transform: translateX(-50%); background: radial-gradient(ellipse 50% 50% at 50% 0, rgba(120,170,150,.06), rgba(0,0,0,0) 70%); }
+
+.fx-shadow .real::before { background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--color-text) 15%, transparent), color-mix(in srgb, var(--color-text) 5%, transparent) 45%, transparent 70%); }
+/* reduced motion */
+@media (prefers-reduced-motion: reduce) { .collection-case .kase, .collection-case .k-hinge, .collection-case .k-lid, .collection-case .floor-shadow { transition: none; } }
+
+/* ===== Shelf cases (LightCase.css copy + light proposal) ===== */
+.lc { --face-height: 160px; --W: calc(var(--face-height) * .71); --d: calc(var(--face-height) * .08); --lead: calc(var(--d) * .6); position: relative; width: calc(var(--W) + var(--lead)); height: 168px; perspective: 480px; perspective-origin: 35% 30%; flex: none; }
+.lc::after { content: ""; position: absolute; left: var(--lead); top: calc(168px - 3px); width: calc(var(--W) * 1.02); height: 10px; background: rgba(0,0,0,.85); filter: blur(5px); box-shadow: 0 5px 14px 6px rgba(0,0,0,.5); border-radius: 50%; }
+.lc .cs-box { position: absolute; z-index: 1; left: var(--lead); top: 8px; width: var(--W); height: var(--face-height); transform-style: preserve-3d; transform-origin: 0 100%; transform: rotateX(-6deg) rotateY(34deg); }
+.lc .cs-front, .lc .cs-spine, .lc .cs-top { position: absolute; overflow: hidden; backface-visibility: hidden; background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; display: block; }
+.lc .cs-front { inset: 0; border-radius: 3px 6px 6px 3px; }
+.lc .cs-front .ins { position: absolute; inset: 3px 3px 3px 0; overflow: hidden; border-radius: 0 2px 2px 0; }
+.lc .cs-front img { width: 100%; height: 100%; display: block; }
+.lc .cs-front::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(104deg, rgba(255,255,255,0) 38%, rgba(255,255,255,.2) 47%, rgba(255,255,255,.05) 53%, rgba(255,255,255,0) 60%) 84% 0 / 260% 100% no-repeat, linear-gradient(90deg, rgba(0,0,0,.34), rgba(0,0,0,0) 5%, rgba(255,255,255,.1) 6.5%, rgba(0,0,0,0) 9%); }
+.lc .cs-spine { left: calc(var(--d) * -1); top: 0; width: var(--d); height: 100%; transform-origin: 100% 50%; transform: rotateY(-90deg); }
+.lc .cs-spine::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(0,0,0,.4), rgba(255,255,255,.12) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.35)); }
+.lc .cs-spine span { position: absolute; inset: 0; display: grid; place-items: center; writing-mode: vertical-rl; font: 700 calc(var(--d) * .5)/1 var(--font-spine); color: rgba(255,255,255,.9); white-space: nowrap; overflow: hidden; }
+.lc .cs-top { left: 0; top: calc(var(--d) * -1); width: 100%; height: var(--d); transform-origin: 50% 100%; transform: rotateX(90deg); }
+/* light proposal for many cases: static sleeve band + edge bevel + rounded corners + 2-layer contact shadow; no masks, no live light */
+.lc.lite .cs-front { border-radius: 4px 9px 9px 4px; background: linear-gradient(rgba(150,160,172,.16), rgba(150,160,172,.16)), #121316; box-shadow: inset 0 0 0 1px rgba(255,255,255,.07), inset 0 1.5px 1px rgba(255,255,255,.08); }
+.lc.lite .cs-front .ins { inset: 4px 4px 4px 1.5px; box-shadow: 0 0 0 .5px rgba(0,0,0,.7), inset 0 0 3px rgba(0,0,0,.5); }
+.lc.lite .cs-front .ins::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 4px rgba(0,0,0,.5); }
+.lc.lite .cs-front::after { background: linear-gradient(104deg, rgba(255,255,255,0) 37%, rgba(255,255,255,.07) 44%, rgba(255,255,255,.3) 48.6%, rgba(255,255,255,.09) 51%, rgba(255,255,255,0) 57%) 80% 0 / 290% 100% no-repeat, linear-gradient(90deg, rgba(0,0,0,.5), rgba(0,0,0,0) 2%, rgba(255,255,255,.1) 3.4%, rgba(0,0,0,.4) 4.4%, rgba(0,0,0,0) 6%), linear-gradient(rgba(170,182,196,.04), rgba(170,182,196,.04)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.lc.lite .cs-top { background: linear-gradient(90deg, rgba(255,255,255,.16), rgba(255,255,255,0) 5%, rgba(255,255,255,0) 95%, rgba(255,255,255,.16)), linear-gradient(180deg, rgba(255,255,255,.22) 0 1px, rgba(255,255,255,0) 2px), linear-gradient(rgba(150,160,172,.16), rgba(150,160,172,.16)), #2a2c31; }
+.lc.lite::after { top: calc(168px - 2px); height: 4px; filter: blur(1.5px); background: rgba(0,0,0,.95); box-shadow: none; }
+.lc.lite::before { content: ""; position: absolute; left: calc(var(--lead) - 6px); top: calc(168px - 8px); width: calc(var(--W) * 1.12); height: 20px; border-radius: 50%; background: radial-gradient(ellipse 50% 50%, rgba(0,0,0,.6), rgba(0,0,0,0) 72%); }
+
+/* ===== Extras (optional parts) ===== */
+.xo { position: relative; transform-style: preserve-3d; transition: transform 420ms var(--ease-out); }
+.extra .crop:hover .xo { transform: rotateX(8deg) rotateY(-10deg) translateY(-4px); }
+.xo-book { width: 112px; height: 150px; transform: rotateX(18deg) rotateZ(-8deg); background: var(--cover) center / cover; border-radius: 1px 3px 3px 1px; box-shadow: 4px 5px 0 -1px #ddd6c7, 7px 8px 0 -2px #cfc8b8, 6px 14px 20px rgba(0,0,0,.6); }
+.xo-book::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(0,0,0,.45), rgba(255,255,255,.18) 3%, rgba(0,0,0,0) 7%), var(--paper) 0 0 / 120px auto; mix-blend-mode: multiply; }
+.xo-book::after { content: "MANUAL"; position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font: 700 9px/1 Georgia, serif; letter-spacing: .3em; color: #f0ead8; }
+.xo-card { width: 104px; height: 146px; border-radius: 6px; transform: rotateX(14deg) rotateZ(6deg); background: var(--cover) center 35% / cover; box-shadow: 0 0 0 3px #f2efe8, 6px 14px 20px rgba(0,0,0,.6); overflow: hidden; }
+.xo-card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(125deg, rgba(255,255,255,0) 30%, rgba(255,120,200,.28) 42%, rgba(120,255,220,.3) 50%, rgba(255,240,120,.26) 58%, rgba(255,255,255,0) 70%); mix-blend-mode: color-dodge; }
+.xo-map { width: 190px; height: 124px; transform: rotateX(38deg) rotateZ(-4deg); display: grid; grid-template-columns: repeat(3, 1fr); box-shadow: 8px 16px 22px rgba(0,0,0,.55); }
+.xo-map span { background: var(--paper) 0 0 / 120px auto, var(--map) center / 300% 100%, #d8cdb3; background-blend-mode: multiply, multiply, normal; }
+.xo-map span:nth-child(1) { background-position: 0 0, 0% 0, 0 0; transform: rotateY(-8deg); transform-origin: 100% 50%; box-shadow: inset -10px 0 14px rgba(0,0,0,.25); }
+.xo-map span:nth-child(2) { background-position: 0 0, 50% 0, 0 0; box-shadow: inset 8px 0 10px rgba(255,255,255,.18), inset -8px 0 12px rgba(0,0,0,.18); }
+.xo-map span:nth-child(3) { background-position: 0 0, 100% 0, 0 0; transform: rotateY(8deg); transform-origin: 0 50%; box-shadow: inset 10px 0 14px rgba(255,255,255,.2); }
+.xo-sticker { width: 170px; height: 120px; transform: rotateX(30deg) rotateZ(5deg); background: var(--paper) 0 0 / 120px auto, #ebe5d8; background-blend-mode: multiply; border-radius: 2px; box-shadow: 6px 14px 20px rgba(0,0,0,.55); }
+.xo-sticker i { position: absolute; border-radius: 50%; border: 3px solid #fbfaf6; box-shadow: 0 1px 2px rgba(0,0,0,.35); background: var(--cover) center 28% / 260% auto; }
+.xo-sticker i:nth-child(1) { left: 12px; top: 12px; width: 58px; height: 58px; }
+.xo-sticker i:nth-child(2) { left: 82px; top: 16px; width: 38px; height: 38px; background: radial-gradient(circle at 60% 40%, #e8f0dc 0 30%, #0d2a2a 31%); }
+.xo-sticker i:nth-child(3) { left: 128px; top: 20px; width: 28px; height: 70px; border-radius: 14px; background: linear-gradient(#c9a35a, #6b4c1c); }
+.xo-sticker i:nth-child(4) { left: 82px; top: 66px; width: 34px; height: 34px; background: radial-gradient(circle, #8ff5cf 0 20%, #0a2622 22%); }
+</style>
+</head>
+<body class="fx-sleeve fx-edge fx-wear fx-hinge fx-clips fx-disc fx-hub fx-paper fx-shadow fx-light">
+<main class="page">
+  <header>
+    <h1>게임 케이스 실물감 시안</h1>
+    <p>참고 이미지(PC DVD 케이스)처럼 손에 잡히는 물건으로 보이게 하는 방법을 하나씩 나눠 보여 줍니다. 위는 지금 앱과 제안을 닫힘·열림으로 나란히, 아래는 기법별 확대 장면입니다. 마우스를 올리면 빛과 기울기가 따라오고, 케이스를 누르면 열리고 닫힙니다. 툴바의 효과 단추로 기법을 하나씩 끄고 켜서 비교해 보세요. 표지는 저작권 없는 임시 그림입니다.</p>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="시안 조작">
+    <button class="btn" type="button" id="toggle-all">모두 열기</button>
+    <span class="lbl">효과</span>
+    <div class="chips" id="fx-chips"></div>
+  </div>
+
+  <section aria-labelledby="h-compare">
+    <h2 id="h-compare">1 · 지금과 제안</h2>
+    <p class="sub">같은 표지, 같은 각도입니다. 오른쪽(제안)은 아래 10가지 기법이 모두 켜진 상태입니다.</p>
+    <div class="compare">
+      <div class="col-head">지금 앱</div><div class="col-head second">제안</div>
+      <div class="stage" data-case="cur" data-open="0"><span class="tag">지금 · 닫힘</span><button class="btn act" type="button">열기</button></div>
+      <div class="stage" data-case="real" data-open="0"><span class="tag">제안 · 닫힘</span><button class="btn act" type="button">열기</button></div>
+      <div class="stage" data-case="cur" data-open="1"><span class="tag">지금 · 열림</span><button class="btn act" type="button">닫기</button></div>
+      <div class="stage" data-case="real" data-open="1"><span class="tag">제안 · 열림</span><button class="btn act" type="button">닫기</button></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-crops">
+    <h2 id="h-crops">2 · 기법별 확대</h2>
+    <p class="sub">참고 이미지의 아래 줄처럼 한 부분씩 가까이 봅니다. 모두 실제로 움직이는 장면이라 마우스를 올리면 빛이 따라옵니다. 각 카드 아래에 만드는 방법과 부담, 어디까지 쓸지를 적었습니다.</p>
+    <div class="crops" id="crops"></div>
+  </section>
+
+  <section aria-labelledby="h-shelf">
+    <h2 id="h-shelf">3 · 선반에서는 가볍게</h2>
+    <p class="sub">선반에는 케이스가 수십 개 있어서, 움직이는 빛·무지개·흠집은 넣지 않고 멈춰 있는 광택 띠, 둥근 모서리, 가장자리 빛, 2겹 접촉 그림자만 씁니다. 그것만으로도 차이가 납니다.</p>
+    <div class="shelves">
+      <div class="shelf"><span class="mini-tag">지금 선반</span><div class="shelf-row" id="shelf-cur"></div><div class="shelf-plank"></div></div>
+      <div class="shelf"><span class="mini-tag">선반용 가벼운 제안</span><div class="shelf-row" id="shelf-lite"></div><div class="shelf-plank"></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-extras">
+    <h2 id="h-extras">4 · 구성품 (선택 · 나중에)</h2>
+    <p class="sub">참고 이미지의 오른쪽 열처럼 케이스 안에 든 실물을 따로 보여 주는 자리입니다. 지금은 작품마다 구성품 정보가 없어 보류하고, 모양만 미리 봅니다. 넣는다면 직접 찍은 사진이나 구성품 목록이 있는 작품에만 나옵니다.</p>
+    <div class="extras" id="extras"></div>
+  </section>
+
+  <section aria-labelledby="h-sum">
+    <h2 id="h-sum">5 · 고르기 위한 정리</h2>
+    <p class="sub">부담은 화면이 다시 그려야 하는 양 기준입니다. "가벼움"은 선반 전체에 써도 되는 수준, "보통"은 작품 화면의 케이스 하나, "무거움"은 움직이는 동안 계속 다시 그려서 한 번에 하나만 쓰는 쪽입니다.</p>
+    <div class="table-wrap"><table id="sum"></table></div>
+    <div class="pick" style="margin-top: var(--space-4)">
+      <b>실물감에 가장 크게 효과가 있는 순서 (제 판단)</b>
+      <ol>
+        <li><b>디스크 인쇄 구역과 무지개 반사</b>: 열었을 때 "진짜 CD다"라고 느끼게 하는 가장 큰 단서입니다.</li>
+        <li><b>투명 슬리브와 빛 따라오기</b>: 표지가 비닐 아래에 있고 빛이 미끄러지는 느낌만으로도 평면 그림에서 물건으로 바뀝니다.</li>
+        <li><b>바닥 접촉 그림자 3겹</b>: 공중에 뜬 느낌이 사라지고 바닥에 놓입니다.</li>
+        <li><b>둥근 모서리와 가장자리 빛</b>: 두께가 플라스틱으로 읽힙니다. 선반에도 그대로 쓸 수 있습니다.</li>
+        <li><b>종이 질감, 투명 클립, 허브 톱니, 힌지</b>: 열었을 때 가까이 보면 차이가 나는 마무리입니다.</li>
+        <li><b>흠집·지문</b>: 마지막 양념입니다. 세게 넣으면 지저분해 보여서, 빛이 지날 때만 아주 옅게 보이게 했습니다.</li>
+      </ol>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ---------- generated artwork (no copyrighted art; drawn here) ---------- */
+const enc = s => `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(s)}")`;
+function coverSVG(p) {
+  return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 710 1000' width='710' height='1000'>
+<defs>
+<linearGradient id='bg' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='${p.bg0}'/><stop offset='.55' stop-color='${p.bg1}'/><stop offset='1' stop-color='#04080a'/></linearGradient>
+<radialGradient id='glow' cx='.5' cy='.42' r='.5'><stop offset='0' stop-color='${p.glow}' stop-opacity='.5'/><stop offset='.6' stop-color='${p.glow}' stop-opacity='.08'/><stop offset='1' stop-color='${p.glow}' stop-opacity='0'/></radialGradient>
+<radialGradient id='orb'><stop offset='0' stop-color='#fff8d8'/><stop offset='.35' stop-color='${p.orb}'/><stop offset='1' stop-color='${p.orb}' stop-opacity='0'/></radialGradient>
+<linearGradient id='tt' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#f6f0d8'/><stop offset='1' stop-color='${p.title}'/></linearGradient>
+<filter id='b18'><feGaussianBlur stdDeviation='18'/></filter><filter id='b4'><feGaussianBlur stdDeviation='4'/></filter>
+<filter id='gr'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/></filter>
+</defs>
+<rect width='710' height='1000' fill='url(#bg)'/>
+<circle cx='355' cy='430' r='360' fill='url(#glow)'/>
+<g fill='none' stroke='${p.line}' stroke-opacity='.4'>
+<circle cx='355' cy='430' r='255' stroke-width='2.5'/><circle cx='355' cy='430' r='236' stroke-width='1.2' stroke-dasharray='2 10'/>
+<circle cx='355' cy='430' r='300' stroke-width='1.4' stroke-dasharray='46 14 6 14'/><circle cx='355' cy='430' r='170' stroke-width='1' stroke-opacity='.25'/>
+<path d='M355 175 L571 555 L139 555 Z M355 685 L139 305 L571 305 Z' stroke-width='1.2' stroke-opacity='.22'/>
+</g>
+<circle cx='540' cy='150' r='54' fill='#eef3e0'/><circle cx='562' cy='136' r='50' fill='${p.bg0}'/>
+<g fill='#fff' opacity='.7'><circle cx='90' cy='120' r='1.6'/><circle cx='180' cy='60' r='1.2'/><circle cx='630' cy='300' r='1.4'/><circle cx='70' cy='360' r='1'/><circle cx='420' cy='70' r='1.1'/><circle cx='260' cy='150' r='.9'/></g>
+<path d='M0 760 L70 700 L120 730 L190 640 L240 690 L262 600 L292 610 L300 700 L420 720 L470 650 L500 655 L520 590 L545 600 L560 690 L620 700 L710 620 L710 1000 L0 1000Z' fill='${p.ridge}'/>
+<ellipse cx='355' cy='820' rx='420' ry='70' fill='${p.glow}' opacity='.18' filter='url(#b18)'/>
+<path d='M355 292 c-34 0 -54 30 -56 58 c-2 22 5 38 12 48 c-46 20 -70 66 -82 132 c-16 94 -44 186 -80 272 l132 -24 l74 34 l74 -34 l132 24 c-36 -86 -64 -178 -80 -272 c-12 -66 -36 -112 -82 -132 c7 -10 14 -26 12 -48 c-2 -28 -22 -58 -56 -58z' fill='#03100f'/>
+<path d='M355 292 c-34 0 -54 30 -56 58 c-2 22 5 38 12 48 c-46 20 -70 66 -82 132 c-16 94 -44 186 -80 272 l132 -24 l74 34 l74 -34 l132 24 c-36 -86 -64 -178 -80 -272 c-12 -66 -36 -112 -82 -132 c7 -10 14 -26 12 -48 c-2 -28 -22 -58 -56 -58z' fill='none' stroke='${p.line}' stroke-width='2.4' stroke-opacity='.65' filter='url(#b4)'/>
+<circle cx='343' cy='352' r='3.2' fill='${p.line}'/><circle cx='367' cy='352' r='3.2' fill='${p.line}'/>
+<line x1='470' y1='300' x2='452' y2='800' stroke='#b48c4a' stroke-width='7' stroke-linecap='round'/>
+<circle cx='472' cy='290' r='46' fill='url(#orb)'/>
+<g fill='${p.orb}'><circle cx='150' cy='520' r='2.5' opacity='.8'/><circle cx='560' cy='470' r='2' opacity='.7'/><circle cx='220' cy='640' r='1.8' opacity='.6'/><circle cx='600' cy='610' r='2.6' opacity='.7'/><circle cx='520' cy='380' r='1.6' opacity='.8'/></g>
+<text x='355' y='895' text-anchor='middle' font-family='Georgia, Times New Roman, serif' font-size='${p.size}' font-weight='700' letter-spacing='5' fill='url(#tt)'>${p.name}</text>
+<text x='355' y='938' text-anchor='middle' font-family='Georgia, serif' font-size='24' letter-spacing='10' fill='#d9e8dc' opacity='.82'>${p.sub}</text>
+<text x='355' y='980' text-anchor='middle' font-family='Segoe UI, sans-serif' font-size='14' font-weight='700' letter-spacing='4' fill='#e9c983' opacity='.85'>LANTERN WORKS</text>
+<rect width='710' height='1000' filter='url(#gr)'/>
+</svg>`;
+}
+const palettes = [
+  { bg0: '#0a2226', bg1: '#0b2d2b', glow: '#5effc0', line: '#8ff5cf', orb: '#ffb347', ridge: '#04100f', title: '#bfe7c8', name: 'NOCTURNE', sub: 'THE ASHEN CROWN', size: 108 },
+  { bg0: '#26101a', bg1: '#3a1424', glow: '#ff6a8a', line: '#ffb3c4', orb: '#ffe28a', ridge: '#12060b', title: '#f7c9d2', name: 'VERMILION', sub: 'SONG OF EMBERS', size: 96 },
+  { bg0: '#0c1430', bg1: '#162350', glow: '#6aa8ff', line: '#b9d4ff', orb: '#fff1b0', ridge: '#060a1a', title: '#cfe0ff', name: 'SKYWARD', sub: 'TALES OF THE DRIFT', size: 104 },
+  { bg0: '#1f1a0c', bg1: '#3a2f10', glow: '#ffcf5e', line: '#ffe6a6', orb: '#ff8a4a', ridge: '#110d04', title: '#fbe8b8', name: 'GILDHOLLOW', sub: 'THE LAST VAULT', size: 88 },
+  { bg0: '#12121a', bg1: '#20202e', glow: '#b48aff', line: '#d9c8ff', orb: '#8affd9', ridge: '#08080d', title: '#e3d9ff', name: 'ECHOFALL', sub: 'BENEATH THE TIDE', size: 100 },
+];
+const covers = palettes.map(p => enc(coverSVG(p)).slice(5, -2));   // data URL strings
+const coverURL = covers[0];
+const backSVG = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 710 1000'><rect width='710' height='1000' fill='#0b1a1c'/><rect x='50' y='60' width='610' height='250' fill='#123a36'/><circle cx='355' cy='185' r='90' fill='none' stroke='#8ff5cf' stroke-opacity='.4' stroke-width='3'/>
+<g fill='#cfe6d6' opacity='.55'><rect x='50' y='350' width='560' height='12'/><rect x='50' y='378' width='600' height='12'/><rect x='50' y='406' width='520' height='12'/><rect x='50' y='434' width='580' height='12'/></g>
+<g><rect x='50' y='490' width='190' height='110' fill='#1c4a43'/><rect x='260' y='490' width='190' height='110' fill='#2b3f5a'/><rect x='470' y='490' width='190' height='110' fill='#4a3a22'/></g>
+<rect x='0' y='870' width='710' height='130' fill='#1a1b1e'/><rect x='520' y='895' width='140' height='80' fill='#fff'/><g fill='#111'>${Array.from({length: 30}, (_, i) => `<rect x='${528 + i * 4.2}' y='902' width='${i % 3 ? 1.6 : 2.8}' height='56'/>`).join('')}</g></svg>`;
+
+/* procedural textures */
+function rng(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+const scratchSVG = (seed, rot) => {
+  const r = rng(seed); let out = '';
+  for (let i = 0; i < 46; i++) {
+    const x = r() * 400, y = r() * 400, len = 5 + r() ** 2 * 60, a = (rot + (r() - .5) * (r() < .7 ? 30 : 180)) * Math.PI / 180;
+    out += `<line x1='${x.toFixed(1)}' y1='${y.toFixed(1)}' x2='${(x + Math.cos(a) * len).toFixed(1)}' y2='${(y + Math.sin(a) * len).toFixed(1)}' stroke-opacity='${(.25 + r() * .55).toFixed(2)}' stroke-width='${(.35 + r() * .45).toFixed(2)}'/>`;
+  }
+  for (let i = 0; i < 9; i++) {
+    const cx = r() * 400, cy = r() * 400, rad = 60 + r() * 170, a0 = r() * Math.PI * 2, a1 = a0 + .12 + r() * .45;
+    out += `<path d='M${(cx + Math.cos(a0) * rad).toFixed(1)} ${(cy + Math.sin(a0) * rad).toFixed(1)} A${rad.toFixed(1)} ${rad.toFixed(1)} 0 0 1 ${(cx + Math.cos(a1) * rad).toFixed(1)} ${(cy + Math.sin(a1) * rad).toFixed(1)}' fill='none' stroke-opacity='${(.12 + r() * .25).toFixed(2)}' stroke-width='.4'/>`;
+  }
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400' stroke='#fff' stroke-linecap='round'>${out}</svg>`;
+};
+const fingerprintSVG = seed => `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='240' viewBox='0 0 200 240'><defs><radialGradient id='f'><stop offset='0' stop-color='#fff'/><stop offset='.65' stop-color='#fff' stop-opacity='.7'/><stop offset='1' stop-color='#fff' stop-opacity='0'/></radialGradient><mask id='m'><ellipse cx='100' cy='120' rx='92' ry='112' fill='url(#f)'/></mask><filter id='w'><feTurbulence type='fractalNoise' baseFrequency='.035' numOctaves='2' seed='${seed}'/><feDisplacementMap in='SourceGraphic' scale='14'/></filter></defs><g mask='url(#m)' filter='url(#w)' fill='none' stroke='#fff' stroke-opacity='.3' stroke-width='1.8'>${Array.from({length: 17}, (_, i) => `<ellipse cx='100' cy='${132 - i * .8}' rx='${8 + i * 5.4}' ry='${11 + i * 6.6}'/>`).join('')}</g></svg>`;
+const paperSVG = `<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' seed='9' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .45 0 0 0 0 .38 0 0 0 0 .28 0 0 0 .55 -.12'/></filter><filter id='q'><feTurbulence type='fractalNoise' baseFrequency='.012 .35' numOctaves='2' seed='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .4 0 0 0 0 .33 0 0 0 0 .25 0 0 0 .7 -.38'/></filter><rect width='300' height='300' fill='#fff'/><rect width='300' height='300' filter='url(#p)'/><rect width='300' height='300' filter='url(#q)' transform='rotate(12 150 150)'/></svg>`;
+const rubSVG = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='r'><feTurbulence type='fractalNoise' baseFrequency='.18' numOctaves='3' seed='5' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 3.2 -1.2'/></filter><rect width='200' height='200' filter='url(#r)'/></svg>`;
+const mapSVG = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 120'><rect width='300' height='120' fill='#d8cdb3'/><g fill='none' stroke='#5a4630' stroke-width='1.2' opacity='.7'><path d='M10 80 C40 40 80 100 120 60 S200 20 230 70 S280 90 295 40'/><path d='M30 20 C60 40 70 10 110 30' stroke-dasharray='3 3'/><circle cx='120' cy='60' r='8'/><circle cx='230' cy='70' r='5'/><path d='M160 90 l10 -14 l10 14 z'/></g><text x='150' y='112' font-family='Georgia' font-size='9' text-anchor='middle' fill='#5a4630'>THE DRIFT</text></svg>`;
+
+const root = document.documentElement.style;
+root.setProperty('--cover', `url("${coverURL}")`);
+root.setProperty('--scratch', enc(scratchSVG(7, -28)));
+root.setProperty('--scratch2', enc(scratchSVG(19, 34)));
+root.setProperty('--fp', enc(fingerprintSVG(3)));
+root.setProperty('--fp2', enc(fingerprintSVG(11)));
+root.setProperty('--paper', enc(paperSVG));
+root.setProperty('--rubmask', enc(rubSVG));
+root.setProperty('--map', enc(mapSVG));
+const backURL = enc(backSVG).slice(5, -2);
+
+/* ---------- case markup (mirrors CollectionCase.tsx / CaseInside.tsx; .x parts exist only for the proposal) ---------- */
+const walls = tray => ['top', 'bottom', 'outer'].map(w => `<span class="k-wall k-${tray}-wall k-wall-${w}"></span><span class="k-wall k-${tray}-wall k-wall-${w}-in"></span><span class="k-lip k-${tray}-lip k-lip-${w}"></span>`).join('');
+const ringText = 'NCT-0471 · © 2026 LANTERN WORKS · ALL RIGHTS RESERVED · UNAUTHORISED COPYING PROHIBITED · ';
+let ringId = 0;
+function caseHTML(variant) {
+  const rid = `ring${ringId++}`;
+  return `<div class="collection-case ${variant === 'real' ? 'real' : ''} no-anim" style="--ratio:.71; --plastic: rgba(120,128,136,.38)">
+  <span class="x fs fs-amb"></span><span class="x fs fs-pen"></span><span class="x fs fs-bounce"></span>
+  <span class="floor-shadow"></span>
+  <div class="collection-case-object"><div class="tilt">
+  <div class="kase" role="group" aria-label="케이스">
+    <span class="k-back"><span class="ins"><img class="cv" alt="" src="${backURL}"><span class="x print-grain"></span><span class="x rub"></span></span><span class="x groove"></span><span class="x sleeve"></span></span>
+    <span class="k-floor"><span class="x mold"></span><span class="x tray-reflect"></span><span class="tray-media tray-media--disc">
+      <span class="holder"><span class="thumb thumb-left"></span><span class="thumb thumb-right"></span>
+        <span class="disc"><span class="media-label"></span>
+          <span class="x disc-print"><span class="dp-pc">PC</span><span class="dp-disc">DISC 1<br>GAME DISC</span><span class="dp-pub">LANTERN<br>WORKS</span><span class="dp-title">NOCTURNE</span><span class="dp-code">NCT-0471 · MADE IN KOREA</span>
+            <svg class="dp-ring" viewBox="0 0 100 100"><defs><path id="${rid}" d="M 50,33.4 a 16.6,16.6 0 1,1 0,33.2 a 16.6,16.6 0 1,1 0,-33.2"/></defs><text><textPath href="#${rid}">${ringText}</textPath></text></svg></span>
+          <span class="x rainbow"></span><span class="x disc-spec"></span>
+        </span><span class="x hub-ring"></span><span class="hub"></span>
+      </span><span class="disc-note">PUSH</span>
+    </span></span>
+    ${walls('base')}<span class="k-ridge"></span>
+    <span class="k-hinge"><span class="k-spine"><span class="ins bare"><span class="case-spine-art"><span class="spine-title">NOCTURNE</span></span></span><span class="x spine-sleeve"></span><span class="x spine-score"></span></span>
+      <span class="k-spine-in"><span class="x ribs"></span><span class="x knuckle knuckle-1"></span><span class="x knuckle knuckle-2"></span><span class="x knuckle knuckle-3"></span></span>
+      <span class="k-lid">
+        <span class="k-front"><span class="ins"><img class="cv" alt="NOCTURNE 앞면" src="${coverURL}"><span class="x print-grain"></span><span class="x rub"></span></span><span class="x groove"></span><span class="x sleeve"></span><span class="x wear"></span></span>
+        <span class="k-inner"><span class="x tray-reflect"></span><span class="tray-ledge"></span>
+          <span class="x sheet2"><ul><li>GAME DISC</li><li>MANUAL</li><li>ART CARD</li><li>MAP</li><li>STICKER</li></ul></span>
+          <span class="case-tab case-tab-one"></span><span class="case-tab case-tab-two"></span>
+          <div class="case-booklet case-manual"><span class="x paper-wear"></span>
+            <span class="case-staple case-staple-one"></span><span class="case-staple case-staple-two"></span>
+            <div class="case-manual-cover"></div>
+            <b class="case-manual-title">녹턴: 잿빛 왕관</b><span class="case-booklet-subtitle">취급 설명서</span>
+            <dl class="case-manual-form">
+              <div><dt>상태</dt><dd><span class="case-status"><span class="case-status-box">다 함</span><span class="case-status-box is-filled">하는 중</span><span class="case-status-box">안 함</span></span></dd></div>
+              <div><dt>내 별점</dt><dd>★★★★☆</dd></div><div><dt>기기</dt><dd>PC</dd></div>
+            </dl>
+            <div class="case-manual-footer"><span>Lantern Works</span><span>2026.03.12</span></div>
+          </div>
+        </span>
+        ${walls('lid')}
+      </span>
+    </span>
+  </div></div></div></div>`;
+}
+
+/* ---------- interaction: eased open/close, pointer tilt and light, per-instance ---------- */
+function bezier(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const sx = t => ((ax * t + bx) * t + cx) * t, sy = t => ((ay * t + by) * t + cy) * t, dx = t => (3 * ax * t + 2 * bx) * t + cx;
+  return x => { let t = x; for (let i = 0; i < 8; i++) { const e = sx(t) - x, d = dx(t); if (Math.abs(e) < 1e-5 || !d) break; t -= e / d; } return sy(Math.min(1, Math.max(0, t))); };
+}
+const ease = bezier(.2, 0, 0, 1);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const cases = [];
+function mount(host, variant, opts = {}) {
+  host.insertAdjacentHTML('beforeend', caseHTML(variant));
+  const el = host.lastElementChild;
+  const c = { el, host, kase: el.querySelector('.kase'), tilt: el.querySelector('.tilt'), obj: el.querySelector('.collection-case-object'),
+    open: !!opts.open, t: opts.open ? 1 : 0, from: 0, start: 0, closedRy: opts.closedRy ?? 28, openRy: opts.openRy ?? -10, tiltAmt: opts.tiltAmt ?? 1,
+    tgt: { lx: 0, ly: 0 }, cur: { lx: 0, ly: 0 }, hover: false, ch: opts.ch ?? 330, cd: opts.cd ?? 24, persp: opts.persp ?? 2200, fit: 1 };
+  el.style.setProperty('--ch', c.ch + 'px'); el.style.setProperty('--cd', c.cd + 'px'); el.style.setProperty('--persp', c.persp + 'px');
+  apply(c, true);
+  cases.push(c);
+  const sense = opts.sense ?? host;
+  sense.addEventListener('pointermove', e => { const r = sense.getBoundingClientRect(); c.tgt.lx = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1)); c.tgt.ly = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height) * 2 - 1)); c.hover = true; wake(); });
+  sense.addEventListener('pointerleave', () => { c.tgt.lx = 0; c.tgt.ly = 0; c.hover = false; wake(); });
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('no-anim')));
+  return c;
+}
+function setOpen(c, open) { if (c.open === open) return; c.from = c.t; c.open = open; c.start = performance.now(); c.el.classList.toggle('is-open', open); wake(); }
+function apply(c, force) {
+  const now = performance.now();
+  if (c.start) { const k = reduce ? 1 : Math.min(1, (now - c.start) / 560); const e = ease(k); c.t = c.from + ((c.open ? 1 : 0) - c.from) * e; if (k >= 1) c.start = 0; }
+  const fl = document.body.classList.contains('fx-light');
+  c.cur.lx += (c.tgt.lx - c.cur.lx) * .12; c.cur.ly += (c.tgt.ly - c.cur.ly) * .12;
+  const lx = c.cur.lx, ly = c.cur.ly;
+  const tx = -ly * 7 * c.tiltAmt, ty = lx * 12 * c.tiltAmt;
+  const baseRy = c.closedRy + (c.openRy - c.closedRy) * c.t;
+  const ry = baseRy + ty;
+  const rad = ry * Math.PI / 180;
+  const lightX = fl ? -.35 + lx * .9 : -.35, lightY = fl ? -.55 + ly * .7 : -.55;
+  const cw = c.ch * .71;
+  const closedFoot = cw * Math.abs(Math.cos(rad)) + c.cd * Math.abs(Math.sin(rad));
+  const openFoot = (2 * cw + c.cd) * Math.abs(Math.cos(rad)) + c.cd * .5 * Math.abs(Math.sin(rad));
+  const s = c.el.style, k = c.kase.style;
+  k.setProperty('--ry', baseRy + 'deg'); k.setProperty('--open', c.open ? 1 : 0);
+  c.tilt.style.setProperty('--tx', tx.toFixed(3)); c.tilt.style.setProperty('--ty', ty.toFixed(3));
+  s.setProperty('--lx', Math.max(-1, Math.min(1, lightX)).toFixed(3)); s.setProperty('--ly', Math.max(-1, Math.min(1, lightY)).toFixed(3));
+  s.setProperty('--gloss', (50 + ry * 1.1 + (fl ? lx * 28 : 0)).toFixed(2) + '%');
+  s.setProperty('--sheen', (ry * 3 + (fl ? lx * 70 + ly * 25 : 0)).toFixed(2));
+  s.setProperty('--fres', (.55 + .45 * Math.abs(Math.sin(rad))).toFixed(3));
+  s.setProperty('--foot', ((closedFoot + (openFoot - closedFoot) * c.t) * c.fit).toFixed(1));
+  const moving = !!c.start || Math.abs(c.tgt.lx - c.cur.lx) > .002 || Math.abs(c.tgt.ly - c.cur.ly) > .002;
+  return moving;
+}
+let raf = 0;
+function frame() { raf = 0; let any = false; for (const c of cases) if (apply(c)) any = true; if (any) raf = requestAnimationFrame(frame); }
+function wake() { if (!raf) raf = requestAnimationFrame(frame); }
+
+/* ---------- 1. comparison stages ---------- */
+const stages = [...document.querySelectorAll('.stage')];
+stages.forEach(st => {
+  const open = st.dataset.open === '1';
+  const c = mount(st, st.dataset.case, { open });
+  const btn = st.querySelector('.act'), tag = st.querySelector('.tag');
+  const label = () => { btn.textContent = c.open ? '닫기' : '열기'; tag.textContent = `${st.dataset.case === 'cur' ? '지금' : '제안'} · ${c.open ? '열림' : '닫힘'}`; };
+  st.addEventListener('click', () => { setOpen(c, !c.open); label(); });
+  st._case = c; st._label = label;
+});
+function fitStages() {
+  for (const st of stages) { const c = st._case; const need = (2 * c.ch * .71 + c.cd) * 1.08 + 24; c.fit = Math.min(1, st.clientWidth / need); c.obj.style.setProperty('--fit', c.fit.toFixed(3)); c.el.style.setProperty('--fit', c.fit.toFixed(3)); apply(c, true); }
+}
+addEventListener('resize', fitStages); fitStages();
+document.getElementById('toggle-all').addEventListener('click', e => {
+  const anyClosed = stages.some(st => !st._case.open);
+  stages.forEach(st => { setOpen(st._case, anyClosed); st._label(); });
+  e.currentTarget.textContent = anyClosed ? '모두 닫기' : '모두 열기';
+});
+
+/* ---------- 2. detail crops: a live proposal case zoomed onto one part ---------- */
+const techniques = [
+  { id: 'sleeve', fx: 'fx-sleeve', name: '투명 슬리브', crop: { open: 0, closedRy: 12, focus: '.k-front', fx: .2, fy: .14, zoom: 2.4 },
+    text: '표지 위에 얇은 투명 비닐이 한 겹 있는 느낌입니다. 빛 띠가 기울기를 따라 미끄러지고, 비스듬히 볼수록 더 번쩍입니다. 표지는 테두리 안쪽으로 살짝 들어가 있어 가장자리에 플라스틱이 보입니다.',
+    how: '그림 없이 가능', cost: '가벼움', where: '선반 전체 (빛 따라오기는 작품 화면만)' },
+  { id: 'edge', fx: 'fx-edge', name: '둥근 모서리 · 가장자리 빛', crop: { open: 0, closedRy: -26, focus: '.k-front', fx: .95, fy: .05, zoom: 3 },
+    text: '모서리를 실제 케이스처럼 둥글게 하고, 두께 면의 가장자리마다 가는 빛줄기를 넣어 플라스틱 두께가 읽히게 합니다. 윗면은 빛이 위에서 올 때 더 밝아집니다.',
+    how: '그림 없이 가능', cost: '가벼움', where: '선반 전체' },
+  { id: 'wear', fx: 'fx-wear', name: '잔 흠집 · 지문', crop: { open: 0, closedRy: 6, focus: '.k-front', fx: .62, fy: .3, zoom: 2.6 },
+    text: '아주 옅은 잔 흠집과 지문 자국, 표지 모서리의 하얗게 닳은 부분입니다. 평소엔 거의 안 보이고, 빛이 지나가는 자리에서만 드러납니다. 진짜 케이스도 그렇습니다.',
+    how: '무늬를 코드로 만들어 씀 (사진 없음)', cost: '보통', where: '작품 화면의 케이스 하나' },
+  { id: 'hinge', fx: 'fx-hinge', name: '힌지 구조', crop: { open: 1, focus: '.k-spine-in', fx: .5, fy: .12, zoom: 3.2 },
+    text: '열었을 때 가운데 접히는 부분의 관절 마디와 세로 골, 닫혔을 때 앞면 왼쪽에 보이는 접힘 홈 두 줄입니다. 실제 DVD 케이스와 같은 접힘 구조로 읽힙니다.',
+    how: '그림 없이 가능', cost: '가벼움', where: '바깥 홈은 선반도 가능, 안쪽은 열린 케이스만' },
+  { id: 'clips', fx: 'fx-clips', name: '설명서 고정 클립', crop: { open: 1, focus: '.case-tab-one', fx: .5, fy: .6, zoom: 3.6 },
+    text: '설명서를 붙잡는 투명 플라스틱 집게입니다. 집게 아래로 종이가 비쳐 보이고, 굽은 면에 빛이 맺히며, 종이 위에 작은 그림자를 떨어뜨립니다.',
+    how: '그림 없이 가능', cost: '가벼움', where: '열린 케이스만' },
+  { id: 'disc', fx: 'fx-disc', name: '디스크 인쇄 · 무지개 반사', crop: { open: 1, focus: '.disc', fx: .3, fy: .45, zoom: 2.3 },
+    text: '그림이 인쇄된 띠, 안쪽 투명 링, 바깥 은색 테두리를 나누고, 은색 부분에만 무지개 반사가 빛을 따라 돕니다. DISC 1, 품번, 둘레 글자도 인쇄돼 있습니다.',
+    how: '그림 없이 가능 (표지 그림을 라벨로 재사용)', cost: '보통 (움직일 때 다시 그림)', where: '열린 케이스만' },
+  { id: 'hub', fx: 'fx-hub', name: '허브 톱니 · PUSH', crop: { open: 1, focus: '.hub', fx: .5, fy: .62, zoom: 3.2 },
+    text: '디스크를 물고 있는 가운데 꽃 모양 톱니와 누르는 단추, 아래쪽 PUSH 홈입니다. 단추의 둥근 윗면이 빛 방향을 따라 반짝입니다.',
+    how: '그림 없이 가능', cost: '가벼움', where: '열린 케이스만' },
+  { id: 'paper', fx: 'fx-paper', name: '종이 질감 · 사용감', crop: { open: 1, focus: '.case-manual', fx: .72, fy: .8, zoom: 2.5 },
+    text: '설명서와 끼움 종이에 섬유 결, 누렇게 바랜 가장자리, 닳은 모서리, 고르지 않게 겹친 종이 가장자리를 넣습니다. 뒤에 구성품 목록 종이가 한 장 더 비칩니다.',
+    how: '무늬를 코드로 만들어 씀', cost: '가벼움', where: '열린 케이스만 (표지 결은 아주 옅게 선반도 가능)' },
+  { id: 'shadow', fx: 'fx-shadow', name: '바닥 접촉 그림자', split: true, crop: { open: 0, closedRy: 28, focus: '.k-front', fx: .5, fy: 1, zoom: 1.3 },
+    text: '바닥에 닿는 선의 진한 그림자, 그 옆의 부드러운 번짐, 넓은 주변 그림자 3겹입니다. 케이스를 돌리면 폭이 실제 발자국을 따라가고, 빛 반대쪽으로 살짝 밀립니다.',
+    how: '그림 없이 가능', cost: '보통 (흐림 3장)', where: '작품 화면. 선반은 2겹을 고정해서' },
+  { id: 'light', fx: 'fx-light', name: '빛 따라오기', crop: { open: 1, focus: '.k-spine-in', fx: .5, fy: .5, zoom: .58, tilt: 1 },
+    text: '마우스를 따라 광택, 무지개, 흠집 노출, 단추 반짝임이 함께 움직입니다. 태블릿은 손가락을 댄 위치를 따릅니다 (기울기 센서는 나중에 선택).',
+    how: '그림 없이 가능', cost: '다소 무거움 (움직이는 동안 계속 다시 그림)', where: '작품 화면의 케이스 하나만' },
+];
+const cropHost = document.getElementById('crops');
+const zoomJobs = [];
+for (const t of techniques) {
+  const card = document.createElement('article'); card.className = 'card';
+  card.innerHTML = `<div class="crop${t.split ? ' split' : ''}"></div><div class="txt"><h3>${t.name}</h3><p>${t.text}</p><dl class="meta"><dt>만드는 법</dt><dd>${t.how}</dd><dt>부담</dt><dd>${t.cost}</dd><dt>쓰는 곳</dt><dd>${t.where}</dd></dl></div>`;
+  cropHost.appendChild(card);
+  const crop = card.querySelector('.crop');
+  const hosts = t.split ? ['cur', 'real'].map(v => { const d = document.createElement('div'); d.innerHTML = `<span class="mini-tag">${v === 'cur' ? '지금' : '제안'}</span>`; crop.appendChild(d); return [d, v]; }) : [[crop, 'real']];
+  for (const [h, v] of hosts) {
+    const c = mount(h, v, { open: !!t.crop.open, closedRy: t.crop.closedRy ?? 28, openRy: -10, tiltAmt: t.crop.tilt ?? .3, sense: crop });
+    zoomJobs.push({ c, h, ...t.crop });
+  }
+}
+function layoutZooms() {
+  for (const j of zoomJobs) {
+    const { c, h } = j;
+    // measure the focus point at 1x, then scale the model (crisp, not a bitmap zoom) and move that point to the crop centre
+    c.ch = 330; c.cd = 24; c.persp = 2200;
+    for (const [p, v] of [['--ch', 330], ['--cd', 24], ['--persp', 2200]]) c.el.style.setProperty(p, v + 'px');
+    c.el.style.transform = '';
+    c.el.classList.add('no-anim'); apply(c, true);
+    const target = c.el.querySelector(j.focus).getBoundingClientRect();
+    const box = h.getBoundingClientRect();
+    const px = target.left + target.width * j.fx - (box.left + box.width / 2);
+    const py = target.top + target.height * j.fy - (box.top + box.height / 2);
+    const z = j.zoom;
+    c.ch = 330 * z; c.cd = 24 * z; c.persp = 2200 * z;
+    for (const [p, v] of [['--ch', c.ch], ['--cd', c.cd], ['--persp', c.persp]]) c.el.style.setProperty(p, v + 'px');
+    c.el.style.transform = `translate(${(-px * z).toFixed(1)}px, ${(-py * z).toFixed(1)}px)`;
+    apply(c, true);
+    requestAnimationFrame(() => requestAnimationFrame(() => c.el.classList.remove('no-anim')));
+  }
+}
+addEventListener('resize', layoutZooms);
+
+/* ---------- 3. shelves ---------- */
+function shelfCase(lite, i) {
+  return `<div class="lc${lite ? ' lite' : ''}" style="--plastic: rgba(120,128,136,.38)"><div class="cs-box"><span class="cs-front"><span class="ins"><img alt="" src="${covers[i]}"></span></span><span class="cs-spine"><span>${palettes[i].name}</span></span><span class="cs-top"></span></div></div>`;
+}
+document.getElementById('shelf-cur').innerHTML = palettes.map((_, i) => shelfCase(false, i)).join('');
+document.getElementById('shelf-lite').innerHTML = palettes.map((_, i) => shelfCase(true, i)).join('');
+
+/* ---------- 4. extras ---------- */
+const extras = [
+  ['설명서', 'xo-book', '', '표지와 같은 그림의 얇은 책자. 열면 페이지가 넘어가는 것까지는 하지 않습니다.'],
+  ['아트 카드', 'xo-card', '', '두꺼운 카드에 은은한 홀로그램 광택.'],
+  ['접이식 지도', 'xo-map', '<span></span><span></span><span></span>', '세 번 접힌 종이. 접힌 선마다 빛과 그림자가 갈립니다.'],
+  ['스티커 시트', 'xo-sticker', '<i></i><i></i><i></i><i></i>', '흰 테두리로 잘린 스티커들이 종이 위에 살짝 떠 있습니다.'],
+];
+document.getElementById('extras').innerHTML = extras.map(([n, cls, inner, txt]) => `<article class="card extra"><div class="crop"><div class="xo ${cls}">${inner}</div></div><div class="txt"><span class="later">선택 · 나중에</span><h3>${n}</h3><p>${txt}</p></div></article>`).join('');
+
+/* ---------- 5. summary table ---------- */
+document.getElementById('sum').innerHTML = `<thead><tr><th>기법</th><th>만드는 법</th><th>부담</th><th>쓰는 곳</th></tr></thead><tbody>${techniques.map(t => `<tr><td>${t.name}</td><td>${t.how}</td><td>${t.cost}</td><td>${t.where}</td></tr>`).join('')}</tbody>`;
+
+/* ---------- effect toggles ---------- */
+const chips = document.getElementById('fx-chips');
+for (const t of techniques) {
+  const l = document.createElement('label'); l.className = 'chip';
+  l.innerHTML = `<input type="checkbox" checked> ${t.name}`;
+  l.querySelector('input').addEventListener('change', e => { document.body.classList.toggle(t.fx, e.target.checked); cases.forEach(c => apply(c, true)); });
+  chips.appendChild(l);
+}
+
+/* hash shortcuts for screenshots: #open opens the top-row stages */
+if (location.hash === '#open') stages.forEach(st => { setOpen(st._case, true); st._label(); });
+document.fonts.ready.then(() => { layoutZooms(); fitStages(); });
+layoutZooms();
+</script>
+</body>
+</html>
