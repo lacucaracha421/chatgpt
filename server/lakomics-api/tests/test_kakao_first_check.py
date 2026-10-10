@@ -36,10 +36,22 @@ class FirstCheckTests(unittest.TestCase):
                              "READ_LOG_DAYS", "READ_LOG_MAX", "RECEIPTS_RETAINED"} for t in node.targets)))
         # Model validation is covered by the normal HTTP/authority suite.
         releases.Event = fixtures.ModelAdapter
-        modules = mock.patch.dict("sys.modules", {"collection_releases": releases,
-                                 "pydantic": types.SimpleNamespace(ValidationError=ValueError)})
-        modules.start()
-        self.addCleanup(modules.stop)
+        # Swap only these two entries. patch.dict("sys.modules") would roll back the whole
+        # table on stop and drop real modules first imported during the test, so later
+        # suites would load second copies with different exception classes.
+        import sys
+        patched = {"collection_releases": releases,
+                   "pydantic": types.SimpleNamespace(ValidationError=ValueError)}
+        saved = {name: sys.modules.get(name) for name in patched}
+        sys.modules.update(patched)
+
+        def restore():
+            for name, module in saved.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+        self.addCleanup(restore)
         releases.startup_db(self.db)
         self.rc.startup_db(self.db)
         self.db.commit()
