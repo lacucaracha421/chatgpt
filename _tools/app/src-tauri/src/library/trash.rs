@@ -167,36 +167,28 @@ impl Library {
     }
 
     pub fn empty_trash(&self) -> Result<PurgeSummary, LibraryError> {
-        let _trash_guard = self
-            .trash_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.settle_purge_pending()?;
         let connection = self.connection()?;
         let asset_ids = connection
             .prepare(&format!(
-                "SELECT id FROM assets WHERE status = 'trash' AND {NOT_PURGE_PENDING}"
+                "SELECT id, trashed_at FROM assets WHERE status = 'trash' AND {NOT_PURGE_PENDING}"
             ))?
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<Vec<String>, _>>()?;
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
         drop(connection);
         let mut summary = self.purge_candidates(asset_ids)?;
         summary
             .failed_asset_ids
-            .extend(self.delete_accepted_purge_files_locked()?);
+            .extend(self.sweep_accepted_purge_files()?);
         Ok(summary)
     }
 
     pub fn purge_expired_trash(&self, now: DateTime<Utc>) -> Result<PurgeSummary, LibraryError> {
         if crate::workload::is_restricted() { return Ok(PurgeSummary { deleted_count: 0, failed_asset_ids: Vec::new() }); }
-        let _trash_guard = self
-            .trash_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // App start: finish any purge whose tombstone was accepted before a crash, and
         // settle purge-pending rows that lost their queued intent.
         self.settle_purge_pending()?;
-        let pending_failures = self.delete_accepted_purge_files_locked()?;
+        let pending_failures = self.sweep_accepted_purge_files()?;
         let connection = self.connection()?;
         let retention_days: Option<u32> = connection.query_row(
             "SELECT trash_retention_days FROM library_settings WHERE singleton = 1",
@@ -223,9 +215,9 @@ impl Library {
             .filter_map(|(id, trashed_at)| {
                 DateTime::parse_from_rfc3339(&trashed_at)
                     .ok()
-                    .map(|timestamp| (id, timestamp.with_timezone(&Utc)))
+                    .map(|timestamp| (id, trashed_at, timestamp.with_timezone(&Utc)))
             })
-            .filter_map(|(id, trashed_at)| (trashed_at <= cutoff).then_some(id))
+            .filter_map(|(id, trashed_at, timestamp)| (timestamp <= cutoff).then_some((id, Some(trashed_at))))
             .collect();
         drop(connection);
         let mut summary = self.purge_candidates(asset_ids)?;
@@ -234,6 +226,7 @@ impl Library {
     }
 
     fn settle_purge_pending(&self) -> Result<(), LibraryError> {
+        let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         super::asset_authority::reconcile_purge_pending(&transaction)?;
@@ -243,27 +236,18 @@ impl Library {
 
     /// Delete the files of purges whose tombstone the server has accepted.
     pub(crate) fn delete_accepted_purge_files(&self) -> Result<Vec<String>, LibraryError> {
-        let _trash_guard = self
-            .trash_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.delete_accepted_purge_files_locked()
+        self.sweep_accepted_purge_files()
     }
 
-    /// Caller holds `trash_lock`. Returns the Asset ids whose deletion must be retried.
+    /// Claims each item with lifecycle and ingestion gates; returns ids to retry.
     ///
     /// Guards, each re-checked here rather than trusted from the acceptance step: the Asset
     /// must be tombstoned in the confirmed server state and absent locally; every path is a
     /// recorded path of this Asset, relative, inside the library root and not shared with any
     /// other remaining record. The file primitives never follow a symlink out of the root.
     #[cfg(any(windows, target_os = "linux"))]
-    fn delete_accepted_purge_files_locked(&self) -> Result<Vec<String>, LibraryError> {
-        // Lock order: trash -> ingestion -> database. Ingestion holds this gate
-        // from staging through file installation, registration and rollback.
-        let _files = self
-            .ingestion_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    fn sweep_accepted_purge_files(&self) -> Result<Vec<String>, LibraryError> {
+        // Lock order per item: trash -> ingestion -> database; no gate is held across items.
         let rows = {
             let connection = self.connection()?;
             let rows = connection
@@ -287,6 +271,8 @@ impl Library {
         let mut failed = Vec::new();
         let (mut removed, mut kept_shared) = (0_u32, 0_u32);
         for (asset_id, recorded) in rows {
+            let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _files = self.ingestion_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let paths = {
                 let connection = self.connection()?;
                 let tombstoned: bool = connection.query_row(
@@ -331,7 +317,7 @@ impl Library {
     }
 
     #[cfg(not(any(windows, target_os = "linux")))]
-    fn delete_accepted_purge_files_locked(&self) -> Result<Vec<String>, LibraryError> {
+    fn sweep_accepted_purge_files(&self) -> Result<Vec<String>, LibraryError> {
         Ok(Vec::new())
     }
 
@@ -350,205 +336,81 @@ impl Library {
     }
 
     #[cfg(any(windows, target_os = "linux"))]
-    fn purge_candidates(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
-        let _files = self
-            .ingestion_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // The library connection lock is not reentrant, so the legacy branch must be
-        // decided without holding a second handle to it.
-        let authority_adopted = {
-            let connection = self.connection()?;
-            connection.query_row("SELECT EXISTS(SELECT 1 FROM asset_authority)",[],|r|r.get::<_,bool>(0))?
-        };
-        if !authority_adopted {
-            return self.purge_candidates_legacy(asset_ids);
-        }
-        let mut connection = self.connection()?;
-        // Partition by explicit canonical ownership. A trashed Asset the server has never
-        // committed has no tombstone to send: the server cannot resolve a lifecycle
-        // command for an Asset it does not own, and its managed file has no server-side GC
-        // that would ever reclaim it, so purge must remove the bytes locally. A
-        // server-owned Asset keeps its bytes because physical deletion belongs to the
-        // server's own GC, exactly as before.
-        let mut server_known: Vec<String> = Vec::new();
-        let mut local_only_paths: Vec<(String, ManagedAssetPaths)> = Vec::new();
-        let mut failed_asset_ids = Vec::new();
-        {
-            let tx = connection.transaction()?;
-            // An open incoming review would make deleting its existing Asset fail the
-            // review's CHECK through `ON DELETE SET NULL`.
-            super::similarity::release_incoming_reviews_without_existing(&tx, None)?;
-            for id in asset_ids {
-                let row = tx
-                    .query_row(
-                        "SELECT relative_path, thumbnail_relative_path, media_kind
-                         FROM assets WHERE id = ?1 AND status = 'trash'",
-                        [&id],
-                        |row| {
-                            let media_kind = row.get::<_, String>(2)?;
-                            Ok(ManagedAssetPaths {
-                                original: Some(row.get(0)?),
-                                thumbnail: row.get(1)?,
-                                video_directory: (media_kind == "video")
-                                    .then(|| format!("video-media/{id}")),
-                            })
-                        },
-                    )
-                    .optional()?;
-                let Some(recorded) = row else { continue };
-                let paths = unshared_paths(&tx, &id, &recorded)?;
-                let owned = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM asset_authority_state WHERE asset_id=?)",
-                    [&id],
-                    |r| r.get::<_, bool>(0))?;
+    fn purge_candidates(&self, asset_ids: Vec<(String, Option<String>)>) -> Result<PurgeSummary, LibraryError> {
+        let mut summary = PurgeSummary { deleted_count: 0, failed_asset_ids: Vec::new() };
+        for (id, trashed_at) in asset_ids {
+            run_before_purge_claim_hook();
+            // Claim one item with the lifecycle/file gates, not the database mutex.
+            // Restores and ingestion can proceed between items. Authority projection
+            // transactions take the same lifecycle gate before the database.
+            let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _files = self.ingestion_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let paths = {
+                let mut connection = self.connection()?;
+                let tx = connection.transaction()?;
+                let recorded = tx.query_row(
+                    "SELECT relative_path, thumbnail_relative_path, media_kind FROM assets
+                     WHERE id=?1 AND status='trash' AND trashed_at IS ?2 AND NOT EXISTS
+                     (SELECT 1 FROM asset_purge_pending WHERE asset_id=?1)",
+                    params![id, trashed_at], |row| Ok(ManagedAssetPaths {
+                        original: Some(row.get(0)?), thumbnail: row.get(1)?,
+                        video_directory: (row.get::<_,String>(2)? == "video").then(|| format!("video-media/{id}")),
+                    }),
+                ).optional()?;
+                let Some(recorded) = recorded else { continue };
+                super::similarity::release_incoming_reviews_without_existing(&tx, None)?;
+                let owned: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM asset_authority_state WHERE asset_id=?)", [&id], |r| r.get(0),
+                )?;
                 if owned {
-                    server_known.push(id);
-                } else if !recorded_paths_deletable(&recorded) {
-                    // The row is still ours: refuse and keep it (ADR-0011), never drop it
-                    // silently while its file stays behind.
-                    failed_asset_ids.push(id);
-                } else {
-                    local_only_paths.push((id, paths));
+                    let now = chrono::Utc::now().to_rfc3339();
+                    tx.execute("DELETE FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=?", [&id])?;
+                    tx.execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=? AND desired<>'tombstoned'", [&id])?;
+                    tx.execute("INSERT OR IGNORE INTO asset_purge_pending(asset_id,requested_at) VALUES(?1,?2)", params![id,now])?;
+                    super::asset_authority::enqueue(&tx, &[id.clone()], "tombstoned")?;
+                    tx.commit()?;
+                    summary.deleted_count += 1;
+                    continue;
                 }
+                if !recorded_paths_deletable(&recorded) {
+                    summary.failed_asset_ids.push(id);
+                    continue;
+                }
+                let paths = unshared_paths(&tx, &id, &recorded)?;
+                tx.commit()?;
+                paths
+            };
+            // No connection or transaction lives across disk I/O. The item claim
+            // prevents restoration or installation of a new shared path until finalization.
+            if self.remove_managed_paths(&paths).is_err() {
+                summary.failed_asset_ids.push(id);
+                continue;
+            }
+            let mut connection = self.connection()?;
+            let tx = connection.transaction()?;
+            let deleted = tx.execute("DELETE FROM assets WHERE id=?1 AND status='trash' AND trashed_at IS ?2", params![id, trashed_at])?;
+            if deleted > 0 {
+                let now = chrono::Utc::now().to_rfc3339();
+                tx.execute("DELETE FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=?", [&id])?;
+                tx.execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=? AND desired<>'tombstoned'", [&id])?;
+                let purged = [id];
+                super::album_authority::drop_album_intents_for_assets(&tx, &purged, super::album_authority::DROP_ASSET_PURGED, &now)?;
+                super::classification_authority::drop_classification_intents_for_assets(&tx, &purged, super::album_authority::DROP_ASSET_PURGED, &now)?;
             }
             tx.commit()?;
+            summary.deleted_count += deleted as u64;
         }
-
-        // File removal happens outside the transaction, as in the legacy path.
-        let mut purged_local: Vec<String> = Vec::new();
-        for (id, paths) in local_only_paths {
-            if self.remove_managed_paths(&paths).is_ok() {
-                purged_local.push(id);
-            } else {
-                failed_asset_ids.push(id);
-            }
-        }
-
-        let tx = connection.transaction()?;
-        let now = chrono::Utc::now().to_rfc3339();
-        let mut deleted_count = server_known.len() as u64;
-        for id in server_known.iter().chain(purged_local.iter()) {
-            // A purged Asset must never be published afterwards, so any queued legacy
-            // upload work and any non-tombstone lifecycle desire for it is cancelled.
-            tx.execute("DELETE FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=?", [id])?;
-            tx.execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=? AND desired<>'tombstoned'", [id])?;
-        }
-        // Two-phase purge for server-owned Assets: the row and its files stay (hidden as
-        // purge pending) until the server accepts the tombstone; `retire_local_row` then
-        // deletes the row and records the files, which `delete_accepted_purge_files`
-        // removes. A restore on another device before acceptance therefore still wins.
-        // `enqueue` selects by canonical state, so the server-owned subset is exactly the
-        // set that receives a tombstone command.
-        for id in &server_known {
-            tx.execute(
-                "INSERT OR IGNORE INTO asset_purge_pending(asset_id, requested_at) VALUES(?1, ?2)",
-                params![id, now],
-            )?;
-        }
-        super::asset_authority::enqueue(&tx, &server_known, "tombstoned")?;
-        for id in &purged_local {
-            tx.execute("DELETE FROM assets WHERE id=?", [id])?;
-        }
-        // A purged Asset the server never owned can never receive a relation, so its
-        // queued Album/Classification intents are retired now instead of waiting at the
-        // send half for an upload that was just cancelled.
-        super::album_authority::drop_album_intents_for_assets(
-            &tx,
-            &purged_local,
-            super::album_authority::DROP_ASSET_PURGED,
-            &now,
-        )?;
-        super::classification_authority::drop_classification_intents_for_assets(
-            &tx,
-            &purged_local,
-            super::album_authority::DROP_ASSET_PURGED,
-            &now,
-        )?;
-        deleted_count += purged_local.len() as u64;
-        tx.commit()?;
-        Ok(PurgeSummary { deleted_count, failed_asset_ids })
+        Ok(summary)
     }
 
     #[cfg(not(any(windows, target_os = "linux")))]
-    fn purge_candidates_legacy(&self, _asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
-        Err(LibraryError::UnsupportedManagedFileDeletion)
-    }
-
-    #[cfg(any(windows, target_os = "linux"))]
-    fn purge_candidates_legacy(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
-        let connection = self.connection()?;
-        // Before any file is removed: an open incoming review against a purged Asset would
-        // fail the row delete below through its CHECK.
-        super::similarity::release_incoming_reviews_without_existing(&connection, None)?;
-        let mut deleted_count = 0;
-        let mut failed_asset_ids = Vec::new();
-        for asset_id in asset_ids {
-            let paths = connection
-                .query_row(
-                    "SELECT relative_path, thumbnail_relative_path, media_kind
-                     FROM assets WHERE id = ?1 AND status = 'trash'",
-                    [&asset_id],
-                    |row| {
-                        let media_kind = row.get::<_, String>(2)?;
-                        Ok(ManagedAssetPaths {
-                            original: Some(row.get(0)?),
-                            thumbnail: row.get(1)?,
-                            video_directory: (media_kind == "video")
-                                .then(|| format!("video-media/{asset_id}")),
-                        })
-                    },
-                )
-                .optional()?;
-            let Some(paths) = paths else {
-                continue;
-            };
-            if !recorded_paths_deletable(&paths) {
-                failed_asset_ids.push(asset_id);
-                continue;
-            }
-            let paths = unshared_paths(&connection, &asset_id, &paths)?;
-            if self.remove_managed_paths(&paths).is_err() {
-                failed_asset_ids.push(asset_id);
-                continue;
-            }
-            let deleted = connection.execute(
-                "DELETE FROM assets WHERE id = ?1 AND status = 'trash'",
-                [&asset_id],
-            )?;
-            if deleted > 0 {
-                // Same rule as the authority path: a purged Asset's queued relation
-                // intents can never apply, so they are retired with the purge.
-                let now = chrono::Utc::now().to_rfc3339();
-                let purged = [asset_id.clone()];
-                super::album_authority::drop_album_intents_for_assets(
-                    &connection,
-                    &purged,
-                    super::album_authority::DROP_ASSET_PURGED,
-                    &now,
-                )?;
-                super::classification_authority::drop_classification_intents_for_assets(
-                    &connection,
-                    &purged,
-                    super::album_authority::DROP_ASSET_PURGED,
-                    &now,
-                )?;
-            }
-            deleted_count += deleted as u64;
-        }
-        Ok(PurgeSummary {
-            deleted_count,
-            failed_asset_ids,
-        })
-    }
-
-    #[cfg(not(any(windows, target_os = "linux")))]
-    fn purge_candidates(&self, _asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
+    fn purge_candidates(&self, _asset_ids: Vec<(String, Option<String>)>) -> Result<PurgeSummary, LibraryError> {
         Err(LibraryError::UnsupportedManagedFileDeletion)
     }
 
     #[cfg(any(windows, target_os = "linux"))]
     fn remove_managed_paths(&self, paths: &ManagedAssetPaths) -> Result<(), ()> {
+        run_during_purge_removal_hook();
         let canonical_root = fs::canonicalize(&self.root).map_err(|_| ())?;
         if let Some(original) = &paths.original {
             delete_managed_file(&canonical_root, original)?;
@@ -936,6 +798,26 @@ fn run_before_accepted_unlink_hook() {
     });
 }
 
+#[cfg(test)]
+thread_local! {
+    static BEFORE_PURGE_CLAIM: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static DURING_PURGE_REMOVAL: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn run_before_purge_claim_hook() {
+    #[cfg(test)]
+    BEFORE_PURGE_CLAIM.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() { hook(); }
+    });
+}
+
+fn run_during_purge_removal_hook() {
+    #[cfg(test)]
+    DURING_PURGE_REMOVAL.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() { hook(); }
+    });
+}
+
 fn decode_cursor(after: Option<AssetCursor>) -> Result<Option<TrashCursor>, LibraryError> {
     after
         .map(|cursor| {
@@ -977,6 +859,83 @@ mod tests {
     use crate::library::Library;
 
     use super::set_after_trash_count_hook;
+
+    #[test]
+    fn purge_rechecks_a_restored_candidate_before_deleting_its_files() {
+        for mode in ["legacy", "local", "server"] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            if mode != "legacy" {
+                let id = library.library_id().unwrap();
+                library.connection().unwrap().execute("INSERT INTO asset_authority VALUES(1,?1,1,1,0)", [id]).unwrap();
+            }
+            insert_trashed_asset(&library, "restored", "2026-08-02T00:00:00Z");
+            if mode == "server" {
+                library.connection().unwrap().execute("INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,projection) VALUES('restored','trash',1,'{}')", []).unwrap();
+            }
+            let original = write(&library, "assets/restored.png");
+            let thumbnail = write(&library, "thumbnails/restored.webp");
+            let restoring = library.clone();
+            super::BEFORE_PURGE_CLAIM.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    // The candidate list has already been read. Another thread's
+                    // restore must be able to win before this item's claim.
+                    std::thread::spawn(move || {
+                        if mode == "server" {
+                            // The canonical projection here is a stub, so restore the row directly.
+                            restoring.connection().unwrap().execute("UPDATE assets SET status='normal',trashed_at=NULL WHERE id='restored'", []).unwrap();
+                        } else {
+                            restoring.restore_asset("restored").unwrap();
+                        }
+                    }).join().unwrap();
+                }));
+            });
+            let summary = library.empty_trash().unwrap();
+            assert_eq!(summary.deleted_count, 0);
+            assert!(summary.failed_asset_ids.is_empty());
+            assert!(original.is_file() && thumbnail.is_file());
+            assert_eq!(library.get_asset("restored").unwrap().id, "restored");
+            assert_eq!(library.list_trash(None, 20).unwrap().total_count, 0);
+        }
+    }
+
+    #[test]
+    fn purge_releases_the_database_during_slow_file_removal() {
+        for mode in ["legacy", "local", "accepted"] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            if mode == "local" {
+                let id = library.library_id().unwrap();
+                library.connection().unwrap().execute("INSERT INTO asset_authority VALUES(1,?1,1,1,0)", [id]).unwrap();
+            }
+            let original = write(&library, "assets/gone.png");
+            if mode == "accepted" {
+                accepted_purge(&library, "gone", "tombstoned", "assets/gone.png", "thumbnails/gone.webp");
+            } else {
+                insert_trashed_asset(&library, "gone", "2026-08-02T00:00:00Z");
+            }
+            let reading = library.clone();
+            super::DURING_PURGE_REMOVAL.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    let (tx, rx) = mpsc::channel();
+                    let worker = std::thread::spawn(move || {
+                        reading.connection().unwrap().execute("UPDATE library_settings SET trash_retention_days=45 WHERE singleton=1", []).unwrap();
+                        let _ = tx.send(());
+                    });
+                    // The fake remover remains active until an unrelated DB write
+                    // completes; no timing-dependent sleep is needed.
+                    assert!(rx.recv_timeout(Duration::from_secs(2)).is_ok(), "database held during {mode} file deletion");
+                    worker.join().unwrap();
+                }));
+            });
+            if mode == "accepted" {
+                assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+            } else {
+                assert_eq!(library.empty_trash().unwrap().deleted_count, 1);
+            }
+            assert!(!original.exists());
+        }
+    }
 
     #[test]
     fn list_trash_waits_for_the_lifecycle_lock() {

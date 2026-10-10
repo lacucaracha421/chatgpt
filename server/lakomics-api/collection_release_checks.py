@@ -390,11 +390,18 @@ def reconcile(stored_config, query, picked, checked_at, existing_sources, existi
         new_config["reviewDismissedVolumes"] = volumes
     result = {"added": 0, "updated": 0, "unchanged": 0, "ignored": ignored}
     sources, events = [], []
+    incoming_numbers = {item["itemId"]: number for number, item in merged.items()}
+    retired_sources = [row for number, row in sorted(existing_sources.items())
+                       if row["providerItemId"] in incoming_numbers
+                       and incoming_numbers[row["providerItemId"]] != number]
+    moved_sources = {row["providerItemId"]: row for row in retired_sources}
+    retired_numbers = {row["volumeNumber"] for row in retired_sources}
     track = baseline_established and gating["releaseWatch"] and gating["tracksOwnership"]
     live_volumes = existing_slots if existing_volume_numbers is None else existing_volume_numbers
     for number in volumes:
         item = merged[number]
-        existing = existing_sources.get(number)
+        # A slot vacated by a moved product no longer holds its old row.
+        existing = (None if number in retired_numbers else existing_sources.get(number))             or moved_sources.get(item["itemId"])
         row = source_row(item)
         if existing is None:
             result["added"] += 1
@@ -404,15 +411,35 @@ def reconcile(stored_config, query, picked, checked_at, existing_sources, existi
             result["updated"] += 1
         sources.append(row)
         if track:
-            for change in pending_release_changes(existing, item, previous_checked_at, checked_at):
+            # Compare a moved product with its own history, even during a swap.
+            previous = moved_sources.get(item["itemId"], existing)
+            for change in pending_release_changes(previous, item, previous_checked_at, checked_at):
                 if change["kind"] == "new_volume" and number in live_volumes:
                     continue
                 low, high = gating.get("minVolume"), gating.get("maxVolume")
                 if (low is None or change["volumeNumber"] >= low) and (high is None or change["volumeNumber"] <= high):
                     events.append(change)
     return {"config": new_config, "externalId": picked[0]["anchor"], "snapshot": snapshot, "sources": sources,
+            "retiredSources": retired_sources,
             "newSlots": [number for number in volumes if number not in existing_slots], "events": events,
             "result": result}
+
+
+def source_move_commands(plan, revisions, command):
+    """Release same-work identities before any destination write in the batch.
+
+    Slots, ownership and presentation stay in place. A swapped destination uses
+    the revision after its retirement, so the whole batch remains optimistic.
+    """
+    commands = []
+    for row in plan["retiredSources"]:
+        number = row["volumeNumber"]
+        fields = {key: value for key, value in row.items() if key != "volumeNumber"}
+        commands.append(command(ca.UPSERT_VOLUME_SOURCE, f"retire:{number}",
+                                volumeNumber=number, provider=PROVIDER, **fields,
+                                deleted=True, expectedRevision=revisions[number]))
+        revisions[number] += 1
+    return commands
 
 
 # --- failures: the PC's backoff table (collection_updates.rs) -----------------------------
@@ -893,8 +920,8 @@ class Worker:
             known = db.execute("SELECT 1 FROM collection_release_events WHERE event_id=?", (ident,)).fetchone()
             if known is None and not ca._release_seen_recently(db, values, detected_ms):
                 events.setdefault(change["volumeNumber"], []).append((ident, change))
-        commands = []
-        data_changed = False  # a source row or slot is written
+        commands = source_move_commands(plan, revisions, command)
+        data_changed = bool(commands)  # a source row or slot is written
         for row in plan["sources"]:
             number = row["volumeNumber"]
             if existing.get(number) != row:

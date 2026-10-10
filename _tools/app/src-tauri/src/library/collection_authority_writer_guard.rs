@@ -230,6 +230,7 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
         "set_collection_volume_range",
     ),
     ("library/aladin_flow.rs", "reconcile_source"),
+    ("library/aladin_flow.rs", "retire_moved_sources"),
     ("library/av_artwork.rs", "apply_av_artwork"),
     ("library/av_detail.rs", "save_av_person_memo"),
     ("library/av_portrait.rs", "set_av_portrait_crop"),
@@ -321,6 +322,7 @@ fn remaining_source(file: &str, source: &str) -> String {
                 || body.contains("enqueue_artwork(")
                 || body.contains("enqueue_artwork_selection(")
                 || body.contains("enqueue_volume_changes(")
+                || body.contains("enqueue_volume_source_changes(")
                 || body.contains("import_authority_artwork_files(")
                 || body.contains("enqueue_provider_snapshot(")
                 || body.contains("enqueue_release_event(")

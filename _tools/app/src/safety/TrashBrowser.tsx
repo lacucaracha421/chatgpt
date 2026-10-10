@@ -50,6 +50,9 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
   const [page, setPage] = useState<TrashPage | null>(null);
   const [policy, setPolicy] = useState<TrashPolicy | null>(null);
   const [retentionDays, setRetentionDays] = useState("");
+  const [retentionDirty, setRetentionDirty] = useState(false);
+  const retentionDirtyRef = useRef(false);
+  const savedPolicyRef = useRef<TrashPolicy | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const [policyError, setPolicyError] = useState<string | null>(null);
@@ -82,7 +85,8 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
       .then((nextPolicy) => {
         if (generation !== loadGenerationRef.current) return;
         setPolicy(nextPolicy);
-        setRetentionDays(nextPolicy.retentionDays?.toString() ?? "");
+        savedPolicyRef.current = nextPolicy;
+        if (!retentionDirtyRef.current) setRetentionDays(nextPolicy.retentionDays?.toString() ?? "");
       })
       .catch((error: unknown) => {
         if (generation === loadGenerationRef.current) setPolicyError(commandErrorMessage(error, "보존 기간을 불러오지 못했습니다."));
@@ -177,6 +181,12 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
     setPendingMutation(null);
   }
 
+  function resetRetentionDraft(nextPolicy = savedPolicyRef.current) {
+    retentionDirtyRef.current = false;
+    setRetentionDirty(false);
+    setRetentionDays(nextPolicy?.retentionDays?.toString() ?? "");
+  }
+
   async function restore(assetId: string) {
     if (!beginMutation("restore")) return;
     try {
@@ -196,7 +206,8 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
     try {
       await gateway.setTrashPolicy(nextPolicy);
       setPolicy(nextPolicy);
-      setRetentionDays(nextPolicy.retentionDays?.toString() ?? "");
+      savedPolicyRef.current = nextPolicy;
+      resetRetentionDraft(nextPolicy);
       load();
     } catch (error) {
       setMessage(commandErrorMessage(error, "자동 삭제 설정을 변경하지 못했습니다."));
@@ -211,7 +222,8 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
     try {
       await gateway.setTrashPolicy({ retentionDays: days });
       setPolicy({ retentionDays: days });
-      setRetentionDays(days.toString());
+      savedPolicyRef.current = { retentionDays: days };
+      resetRetentionDraft(savedPolicyRef.current);
       setMessage("보존 기간을 저장했습니다.");
       load();
     } catch (error) {
@@ -239,7 +251,7 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
   }
 
   const automaticDeletion = policy !== null && policy.retentionDays !== null;
-  const retentionError = automaticDeletion ? retentionErrorMessage(retentionDays) : undefined;
+  const retentionError = automaticDeletion || retentionDirty ? retentionErrorMessage(retentionDays) : undefined;
   const loadError = pageError ?? policyError;
   const mutationPending = pendingMutation !== null;
   const visibleCollectionItems = collectionPage?.items.filter(item => !privacyMode || item.type !== "av") ?? [];
@@ -254,11 +266,11 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
     <Tabs label="휴지통 섹션" tabs={trashTabs({ assets: page?.totalCount, collections: collectionPage?.items.length, notes: notesState?.ready ? deletedNotes.length : undefined }, { collections: collectionPage?.hasMore })} value={section} onChange={chooseSection} />
     <div inert={section !== shownSection}>
     <div className="trash-browser__section" hidden={shownSection !== "assets"}>
-    <details className="trash-browser__policy">
+    <details className="trash-browser__policy" onToggle={(event) => { if (event.currentTarget.open) resetRetentionDraft(); }}>
       <summary>보존 설정 <span><BusyLabel busy={!policy} idle={policy && (automaticDeletion ? `${policy.retentionDays}일 후 자동 삭제` : "자동 삭제 안 함")}>설정 확인 중…</BusyLabel></span></summary>
       <div className="trash-browser__policy-controls" role="group" aria-label="보존 기간 설정">
       <Toggle checked={automaticDeletion} disabled={!policy || mutationPending} onChange={(event) => void setAutomaticDeletion(event.target.checked)}>자동 삭제</Toggle>
-      {automaticDeletion && <div className="trash-browser__retention"><TextField label="보존 기간" type="number" min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} value={retentionDays} error={retentionError} disabled={mutationPending} onChange={(event) => setRetentionDays(event.target.value)} /><Button onClick={() => void saveRetention()} disabled={Boolean(retentionError) || mutationPending}>저장</Button></div>}
+      {(automaticDeletion || retentionDirty) && <div className="trash-browser__retention"><TextField label="보존 기간" type="number" min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} value={retentionDays} error={retentionError} disabled={mutationPending} onChange={(event) => { retentionDirtyRef.current = true; setRetentionDirty(true); setRetentionDays(event.target.value); }} /><Button onClick={() => void saveRetention()} disabled={Boolean(retentionError) || mutationPending}>저장</Button>{retentionDirty && <Button onClick={() => resetRetentionDraft()} disabled={mutationPending}>취소</Button>}</div>}
       </div>
     </details>
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}

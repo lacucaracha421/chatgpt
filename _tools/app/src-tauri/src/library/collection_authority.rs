@@ -2932,7 +2932,29 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
                 tx.execute("UPDATE collection_volumes SET cover_artwork_id=?2,source_provider=?3,source_cover_id=?4,sort_order=?5 WHERE id=?1",params![text(&body,"volumeId")?,sql_value(&body["coverArtworkId"])?,sql_value(&body["sourceProvider"])?,sql_value(&body["sourceCoverId"])?,integer(&body,"sortOrder")?])?;
             }
             Some("upsertVolumeSource") => {
-                tx.execute("UPDATE collection_volume_sources SET provider_item_id=?4,title=?5,author=?6,publisher=?7,isbn13=?8,publication_date=?9,item_url=?10,provider_data_json=?11 WHERE collection_id=?1 AND volume_number=?2 AND provider=?3",params![text(&body,"workId")?,integer(&body,"volumeNumber")?,text(&body,"provider")?,text(&body,"providerItemId")?,text(&body,"title")?,sql_value(&body["author"])?,sql_value(&body["publisher"])?,sql_value(&body["isbn13"])?,sql_value(&body["publicationDate"])?,sql_value(&body["itemUrl"])?,body["data"].to_string()])?;
+                let (work, number, provider, item) = (text(&body, "workId")?, integer(&body, "volumeNumber")?, text(&body, "provider")?, text(&body, "providerItemId")?);
+                // Replay never blocks delivery: a trashed work, or a product another work now
+                // holds, is skipped (never stolen); a failed write leaves the replica as it is.
+                let work_exists = tx.query_row("SELECT EXISTS(SELECT 1 FROM collections WHERE id=?1)", [work], |r| r.get::<_, bool>(0))?;
+                if work_exists {
+                    let replay = || -> Result<(), LibraryError> {
+                        if body["deleted"].as_bool().unwrap_or(false) {
+                            // A stale retire must not remove a different product now in the slot.
+                            tx.execute("DELETE FROM collection_volume_sources WHERE collection_id=?1 AND volume_number=?2 AND provider=?3 AND provider_item_id=?4", params![work, number, provider, item])?;
+                            return Ok(());
+                        }
+                        if tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_volume_sources WHERE collection_id<>?1 AND provider=?2 AND provider_item_id=?3)", params![work, provider, item], |r| r.get::<_, bool>(0))? {
+                            return Ok(());
+                        }
+                        // Pending commands replay in order over the current state. A product that
+                        // moved volumes holds its identity in another slot until its own retire/upsert
+                        // pair replays, so release it from the same work's other slots first.
+                        tx.execute("DELETE FROM collection_volume_sources WHERE collection_id=?1 AND provider=?3 AND provider_item_id=?4 AND volume_number<>?2", params![work, number, provider, item])?;
+                        tx.execute("INSERT INTO collection_volume_sources(collection_id,volume_number,provider,provider_item_id,title,author,publisher,isbn13,publication_date,item_url,provider_data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12) ON CONFLICT(collection_id,volume_number,provider) DO UPDATE SET provider_item_id=excluded.provider_item_id,title=excluded.title,author=excluded.author,publisher=excluded.publisher,isbn13=excluded.isbn13,publication_date=excluded.publication_date,item_url=excluded.item_url,provider_data_json=excluded.provider_data_json", params![work, number, provider, item, text(&body, "title")?, sql_value(&body["author"])?, sql_value(&body["publisher"])?, sql_value(&body["isbn13"])?, sql_value(&body["publicationDate"])?, sql_value(&body["itemUrl"])?, body["data"].to_string(), &created_at])?;
+                        Ok(())
+                    };
+                    let _ = replay();
+                }
             }
             Some("updateWork") => {
                 if let Some(changes) = body["changes"].as_object() {

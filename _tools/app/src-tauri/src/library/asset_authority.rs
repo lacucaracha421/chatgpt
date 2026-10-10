@@ -77,6 +77,30 @@ pub struct AssetSyncResult {
     pub held: bool,
     pub materialization_failures: u32,
 }
+
+/// Retry metadata lives in the existing error slot; no schema upgrade is needed.
+/// A conflict uses the existing terminal materialization state and needs recovery.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializationFailure {
+    code: String,
+    attempts: u32,
+    retry_at: i64,
+    at: String,
+    /// Consecutive downloads whose bytes did not match the replica's hash or size.
+    #[serde(default)]
+    integrity_attempts: u32,
+}
+
+const MATERIALIZATION_RETRY_BASE_SECONDS: i64 = 30;
+const MATERIALIZATION_RETRY_MAX_SECONDS: i64 = 60 * 60;
+/// A post-download hash/size mismatch can be a truncated or corrupted transfer, so it is
+/// retried with backoff and parked only after this many consecutive mismatches.
+const MATERIALIZATION_INTEGRITY_MAX_ATTEMPTS: u32 = 3;
+/// Parked because another local Asset already holds the same content; released by the
+/// materialization pass once that local row is gone.
+const LOCAL_HASH_CONFLICT: &str = "localHashConflict";
+
 fn invalid<T>() -> Result<T, LibraryError> {
     Err(LibraryError::InvalidCloudResponse)
 }
@@ -384,7 +408,7 @@ fn resolve_tombstone_conflict(
     )?;
     if current.lifecycle == "normal" && !present {
         db.execute(
-            "UPDATE asset_authority_state SET materialization='pending',last_error=NULL WHERE asset_id=?",
+            "UPDATE asset_authority_state SET materialization='pending',last_error=NULL WHERE asset_id=? AND materialization<>'conflict'",
             [&current.asset_id],
         )?;
     }
@@ -498,7 +522,7 @@ fn apply_baseline(db: &Connection, p: &AssetProjection) -> Result<(), LibraryErr
     {
         return invalid();
     }
-    db.execute("UPDATE asset_authority_state SET lifecycle=?,entity_revision=?,sha256=?,size_bytes=?,projection=?,materialization=CASE WHEN ? THEN materialization ELSE 'pending' END WHERE asset_id=?",params![p.lifecycle,p.entity_revision,p.sha256,p.size_bytes.map(|size|size as i64),serde_json::to_string(p).map_err(|_|LibraryError::InvalidCloudResponse)?,local.is_some(),p.asset_id])?;
+    db.execute("UPDATE asset_authority_state SET lifecycle=?,entity_revision=?,sha256=?,size_bytes=?,projection=?,materialization=CASE WHEN ? OR materialization='conflict' THEN materialization ELSE 'pending' END WHERE asset_id=?",params![p.lifecycle,p.entity_revision,p.sha256,p.size_bytes.map(|size|size as i64),serde_json::to_string(p).map_err(|_|LibraryError::InvalidCloudResponse)?,local.is_some(),p.asset_id])?;
     local_projection(db, &p.asset_id)
 }
 /// Re-issue or drop lifecycle intents composed for another authority identity.
@@ -815,6 +839,7 @@ impl Library {
                 .as_bool()
                 .ok_or(LibraryError::InvalidCloudResponse)?;
             if !more {
+                let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let mut db = self.connection()?;
                 let tx = db.transaction()?;
                 // Keep byte-progress for identities present in both snapshots; replace confirmed rows only.
@@ -892,6 +917,7 @@ impl Library {
             {
                 return invalid();
             }
+            let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut db = self.connection()?;
             let tx = db.transaction()?;
             if authority(&tx)?
@@ -966,6 +992,7 @@ impl Library {
                     }) {
                         return invalid();
                     }
+                    let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     let mut db = self.connection()?;
                     let tx = db.transaction()?;
                     if let Some(p) = p {
@@ -991,6 +1018,7 @@ impl Library {
                     if asset_id != id {
                         return invalid();
                     }
+                    let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     let mut db = self.connection()?;
                     let tx = db.transaction()?;
                     let mut p = projection(&tx, &id)?.ok_or(LibraryError::InvalidCloudResponse)?;
@@ -1048,6 +1076,7 @@ impl Library {
                     // replica state (kept current by the change feed) and the intent is
                     // dropped with a durable reason. Uncertain transport outcomes still keep
                     // the exact operation and payload for receipt retry (the arm below).
+                    let _trash = self.trash_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     let mut db = self.connection()?;
                     let tx = db.transaction()?;
                     if code == "assetNotFound" {
@@ -1071,8 +1100,85 @@ impl Library {
         Ok(())
     }
     fn pending_materializations(&self, restricted: bool) -> Result<Vec<String>, LibraryError> {
-        let candidates=self.connection()?.prepare("SELECT projection FROM asset_authority_state WHERE materialization='pending' AND lifecycle='normal' AND NOT EXISTS (SELECT 1 FROM asset_lifecycle_outbox o WHERE o.asset_id=asset_authority_state.asset_id AND o.desired<>'normal') ORDER BY asset_id LIMIT ?1")?.query_map([if restricted { 5 } else { 25 }],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        let candidates=self.connection()?.prepare("SELECT projection FROM asset_authority_state
+            WHERE materialization='pending' AND lifecycle='normal'
+            AND CASE WHEN json_valid(last_error) THEN COALESCE(json_extract(last_error,'$.retryAt'),0) ELSE 0 END <= ?2
+            AND NOT EXISTS (SELECT 1 FROM asset_lifecycle_outbox o WHERE o.asset_id=asset_authority_state.asset_id AND o.desired<>'normal')
+            ORDER BY asset_id LIMIT ?1")?.query_map(params![if restricted { 5 } else { 25 }, chrono::Utc::now().timestamp()],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
         Ok(candidates)
+    }
+
+    fn record_materialization_failure(&self, p: &AssetProjection, error: &LibraryError, now: chrono::DateTime<chrono::Utc>) -> Result<(), LibraryError> {
+        let connection = self.connection()?;
+        let previous: Option<String> = connection.query_row(
+            "SELECT last_error FROM asset_authority_state WHERE asset_id=?", [&p.asset_id], |r| r.get(0),
+        )?;
+        let previous = previous.as_deref().and_then(|raw| serde_json::from_str::<MaterializationFailure>(raw).ok());
+        let attempts = previous.as_ref().map_or(1, |failure| failure.attempts.saturating_add(1));
+        let integrity_attempts = if matches!(error, LibraryError::DuplicateOriginalCorrupt) {
+            previous.as_ref().map_or(1, |failure| failure.integrity_attempts.saturating_add(1))
+        } else {
+            0
+        };
+        // An identity rejection (another local Asset owns this content) shows up as an
+        // invalid response, either from the pre-download check or from ingestion's race check.
+        let local_conflict = matches!(error, LibraryError::InvalidCloudResponse) && match p.sha256.as_deref() {
+            Some(digest) => connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM assets WHERE content_hash=?1 AND id<>?2)",
+                params![digest, p.asset_id], |r| r.get::<_, bool>(0),
+            )?,
+            None => false,
+        };
+        let persistent = local_conflict
+            || integrity_attempts >= MATERIALIZATION_INTEGRITY_MAX_ATTEMPTS
+            || matches!(error, LibraryError::InvalidCloudResponse | LibraryError::UnsupportedImage | LibraryError::CloudCaptureTooLarge);
+        let delay = (MATERIALIZATION_RETRY_BASE_SECONDS * (1_i64 << attempts.saturating_sub(1).min(7)))
+            .min(MATERIALIZATION_RETRY_MAX_SECONDS);
+        let failure = MaterializationFailure {
+            code: if local_conflict { LOCAL_HASH_CONFLICT } else if persistent { "identityOrIntegrityConflict" } else { "materializationRetry" }.into(),
+            attempts,
+            retry_at: if persistent { 0 } else { now.timestamp().saturating_add(delay) },
+            at: now.to_rfc3339(),
+            integrity_attempts,
+        };
+        connection.execute(
+            "UPDATE asset_authority_state SET materialization=?1,last_error=?2
+             WHERE asset_id=?3 AND entity_revision=?4 AND materialization='pending'",
+            params![if persistent { "conflict" } else { "pending" }, serde_json::to_string(&failure).map_err(|_| LibraryError::InvalidCloudResponse)?, p.asset_id, p.entity_revision],
+        )?;
+        Ok(())
+    }
+
+    /// Re-queue assets parked behind a local duplicate that no longer exists (purged,
+    /// retired or otherwise removed). Evaluated each pass, so every row-deleting path is covered.
+    fn release_resolved_local_conflicts(&self) -> Result<(), LibraryError> {
+        self.connection()?.execute(
+            "UPDATE asset_authority_state SET materialization='pending',last_error=NULL
+             WHERE materialization='conflict' AND lifecycle='normal'
+             AND CASE WHEN json_valid(last_error) THEN json_extract(last_error,'$.code') ELSE NULL END = ?1
+             AND NOT EXISTS (SELECT 1 FROM assets a WHERE a.content_hash=asset_authority_state.sha256
+                             AND a.id<>asset_authority_state.asset_id)",
+            [LOCAL_HASH_CONFLICT],
+        )?;
+        Ok(())
+    }
+
+    /// Surface durable recovery trouble even on an idle pass or after restarting.
+    pub(crate) fn asset_materialization_recovery_failure(&self) -> Result<Option<super::authority_pass::LaneFailure>, LibraryError> {
+        let row: Option<(Option<String>, String)> = self.connection()?.query_row(
+            "SELECT last_error,projection FROM asset_authority_state WHERE materialization='conflict' AND lifecycle='normal' ORDER BY asset_id LIMIT 1",
+            [], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?;
+        row.map(|(error, raw)| {
+            // Lifecycle-rejection evidence shares last_error. Even if it replaced
+            // the materialization detail, the durable conflict must stay visible.
+            let at = if let Some(failure) = error.as_deref().and_then(|raw| serde_json::from_str::<MaterializationFailure>(raw).ok()) {
+                failure.at
+            } else {
+                serde_json::from_str::<AssetProjection>(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?.updated_at
+            };
+            Ok(super::authority_pass::LaneFailure { code: "identity_or_integrity_conflict", at })
+        }).transpose()
     }
     fn materialize_candidates(
         &self,
@@ -1081,6 +1187,7 @@ impl Library {
         result: &mut AssetSyncResult,
         restricted: bool,
     ) -> Result<(), LibraryError> {
+        self.release_resolved_local_conflicts()?;
         let candidates = self.pending_materializations(restricted)?;
         for (index, raw) in candidates.into_iter().enumerate() {
             if crate::workload::is_restricted() && index >= 5 { break; }
@@ -1091,15 +1198,7 @@ impl Library {
                 Ok(()) => result.materialized += 1,
                 Err(error) => {
                     result.materialization_failures += 1;
-                    let code = if matches!(error, LibraryError::InvalidCloudResponse) {
-                        "identityOrIntegrityConflict"
-                    } else {
-                        "materializationRetry"
-                    };
-                    self.connection()?.execute(
-                        "UPDATE asset_authority_state SET last_error=? WHERE asset_id=?",
-                        params![code, p.asset_id],
-                    )?;
+                    self.record_materialization_failure(&p, &error, chrono::Utc::now())?;
                 }
             }
         }
@@ -1113,6 +1212,13 @@ impl Library {
     ) -> Result<(), LibraryError> {
         p.validate()?;
         let digest = p.sha256.clone().ok_or(LibraryError::InvalidCloudResponse)?;
+        // Identity rejection remains in ingestion to catch races too. A known
+        // local conflict is decided before any ticket request or original download.
+        let conflict: bool = self.connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE content_hash=?1 AND id<>?2)",
+            params![digest, p.asset_id], |r| r.get(0),
+        )?;
+        if conflict { return invalid(); }
         let size = p
             .size_bytes
             .filter(|size| *size > 0 && *size <= 512 * 1024 * 1024)
@@ -1142,18 +1248,24 @@ impl Library {
             &format!("/v1/library/assets/{}/media-ticket", p.asset_id),
             Some(&json!({"variant":"original"})),
             token,
-        )?;
+        ).map_err(|error| {
+            // A malformed ticket response can be a transient gateway/server error.
+            // Only validated media/identity failures below are parked permanently.
+            if matches!(error, LibraryError::InvalidCloudResponse) { LibraryError::CloudRequestUnavailable } else { error }
+        })?;
         let download = RemoteCaptureDownloadTicket {
             method: "GET".into(),
             download_url: ticket["url"]
                 .as_str()
-                .ok_or(LibraryError::InvalidCloudResponse)?
+                .ok_or(LibraryError::CloudRequestUnavailable)?
                 .into(),
             required_headers: Default::default(),
         };
-        let copied = client.download_capture_media(&download, file.path(), size)?;
+        let copied = client.download_capture_media(&download, file.path(), size).map_err(|error| {
+            if matches!(error, LibraryError::InvalidCloudResponse) { LibraryError::CloudRequestUnavailable } else { error }
+        })?;
         if copied != size {
-            return invalid();
+            return Err(LibraryError::DuplicateOriginalCorrupt);
         }
         let identity = MaterializationIdentity {
             asset_id: p.asset_id.clone(),
@@ -1196,6 +1308,153 @@ mod tests {
         assert_eq!(library.pending_materializations(true).unwrap().len(), 5);
         assert_eq!(library.pending_materializations(false).unwrap().len(), 25);
         assert_eq!(library.connection().unwrap().query_row("SELECT count(*) FROM asset_authority_state WHERE materialization='pending'", [], |r| r.get::<_, i64>(0)).unwrap(), 30);
+    }
+
+    #[test]
+    fn known_hash_identity_conflict_is_parked_without_a_ticket_or_download() {
+        let (temp, library, p) = setup();
+        library.connection().unwrap().execute(
+            "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at)
+             VALUES('local',?1,'image','local.png','assets/local.png','thumbnails/local.webp',1,1,1,'2026')",
+            [p.sha256.as_deref().unwrap()],
+        ).unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}",server.server_addr())).unwrap();
+        let mut first = AssetSyncResult::default();
+        library.materialize_candidates(&client,"test",&mut first,false).unwrap();
+        assert_eq!(first.materialization_failures,1);
+        assert!(library.pending_materializations(false).unwrap().is_empty());
+        assert!(library.asset_materialization_recovery_failure().unwrap().is_some());
+        drop(library);
+        let reopened = Library::open(temp.path()).unwrap();
+        // Persisted conflicts are still parked after app restart.
+        let mut second = AssetSyncResult::default();
+        reopened.materialize_candidates(&client,"test",&mut second,false).unwrap();
+        assert_eq!(second.materialization_failures,0);
+        assert!(reopened.asset_materialization_recovery_failure().unwrap().is_some());
+        assert!(server.recv_timeout(std::time::Duration::from_millis(50)).unwrap().is_none());
+        assert_eq!(count(&reopened,"SELECT count(*) FROM assets WHERE id='local'"),1);
+    }
+
+    #[test]
+    fn downloaded_integrity_mismatch_is_retried_then_parked_and_not_downloaded_again() {
+        let (_temp, library, p) = setup();
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let base = format!("http://{}",server.server_addr());
+        let client = CloudClient::new(&base).unwrap();
+        let serve_corrupt = || {
+            let serving = server.clone();
+            let base = base.clone();
+            std::thread::spawn(move || {
+                let ticket = serving.recv_timeout(std::time::Duration::from_secs(5)).unwrap().unwrap();
+                assert!(ticket.url().ends_with("/media-ticket"));
+                ticket.respond(tiny_http::Response::from_string(json!({"url":format!("{base}/original")}).to_string())).unwrap();
+                let original = serving.recv_timeout(std::time::Duration::from_secs(5)).unwrap().unwrap();
+                assert_eq!(original.url(),"/original");
+                let mut corrupt = media();
+                corrupt[0] ^= 1;
+                original.respond(tiny_http::Response::from_data(corrupt)).unwrap();
+            })
+        };
+        let state = |library: &Library| -> String {
+            library.connection().unwrap().query_row("SELECT materialization FROM asset_authority_state WHERE asset_id=?",[ID],|r|r.get(0)).unwrap()
+        };
+        for attempt in 1..=3 {
+            let worker = serve_corrupt();
+            let mut pass = AssetSyncResult::default();
+            library.materialize_candidates(&client,"test",&mut pass,false).unwrap();
+            worker.join().unwrap();
+            assert_eq!(pass.materialization_failures,1);
+            if attempt < 3 {
+                // Corrupted-but-sized bytes are retried with backoff, not parked yet.
+                assert_eq!(state(&library),"pending");
+                assert!(library.pending_materializations(false).unwrap().is_empty());
+                assert!(library.asset_materialization_recovery_failure().unwrap().is_none());
+                library.connection().unwrap().execute("UPDATE asset_authority_state SET last_error=json_set(last_error,'$.retryAt',0) WHERE asset_id=?",[ID]).unwrap();
+            }
+        }
+        assert_eq!(state(&library),"conflict");
+        assert_eq!(count(&library,"SELECT count(*) FROM assets"),0);
+        // A changed lifecycle and a regressed baseline cannot restart the loop.
+        let mut changed = p.clone();
+        changed.entity_revision = 2;
+        apply(&library.connection().unwrap(),&changed).unwrap();
+        apply_baseline(&library.connection().unwrap(),&p).unwrap();
+        let mut after = AssetSyncResult::default();
+        library.materialize_candidates(&client,"test",&mut after,false).unwrap();
+        assert_eq!(after.materialization_failures,0);
+        assert!(server.recv_timeout(std::time::Duration::from_millis(50)).unwrap().is_none());
+        assert_eq!(library.asset_materialization_recovery_failure().unwrap().unwrap().code,"identity_or_integrity_conflict");
+    }
+
+    #[test]
+    fn parked_local_hash_conflict_is_requeued_after_the_local_duplicate_is_removed() {
+        let (_temp, library, p) = setup();
+        library.connection().unwrap().execute(
+            "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at)
+             VALUES('local',?1,'image','local.png','assets/local.png','thumbnails/local.webp',1,1,1,'2026')",
+            [p.sha256.as_deref().unwrap()],
+        ).unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}",server.server_addr())).unwrap();
+        let mut pass = AssetSyncResult::default();
+        library.materialize_candidates(&client,"test",&mut pass,false).unwrap();
+        assert_eq!(pass.materialization_failures,1);
+        assert!(library.asset_materialization_recovery_failure().unwrap().is_some());
+        // While the duplicate exists the park holds.
+        library.materialize_candidates(&client,"test",&mut pass,false).unwrap();
+        assert!(library.pending_materializations(false).unwrap().is_empty());
+        library.connection().unwrap().execute("DELETE FROM assets WHERE id='local'",[]).unwrap();
+        let worker = std::thread::spawn(move || {
+            // The re-queued asset is attempted again: it reaches the ticket request.
+            let request = server.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            assert!(request.is_some());
+        });
+        library.materialize_candidates(&client,"test",&mut pass,false).unwrap();
+        worker.join().unwrap();
+        assert!(library.asset_materialization_recovery_failure().unwrap().is_none());
+    }
+
+    #[test]
+    fn transient_materialization_retry_is_persisted_exponential_and_bounded() {
+        let (temp, library, p) = setup();
+        let now = chrono::Utc::now();
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let client = CloudClient::new(&format!("http://{}",server.server_addr())).unwrap();
+        let serving = server.clone();
+        let worker = std::thread::spawn(move || {
+            serving.recv_timeout(std::time::Duration::from_secs(5)).unwrap().unwrap()
+                .respond(tiny_http::Response::from_string("{}").with_status_code(503)).unwrap();
+        });
+        let mut first = AssetSyncResult::default();
+        library.materialize_candidates(&client,"test",&mut first,false).unwrap();
+        worker.join().unwrap();
+        assert_eq!(first.materialization_failures,1);
+        assert!(library.pending_materializations(false).unwrap().is_empty());
+        assert!(library.asset_materialization_recovery_failure().unwrap().is_none());
+        drop(library);
+        let library = Library::open(temp.path()).unwrap();
+        assert!(library.pending_materializations(false).unwrap().is_empty());
+        let retry = |library: &Library| {
+            let raw: String = library.connection().unwrap().query_row("SELECT last_error FROM asset_authority_state WHERE asset_id=?",[ID],|r|r.get(0)).unwrap();
+            serde_json::from_str::<MaterializationFailure>(&raw).unwrap()
+        };
+        assert_eq!(retry(&library).attempts,1);
+        assert!(retry(&library).retry_at >= now.timestamp() + MATERIALIZATION_RETRY_BASE_SECONDS);
+        library.record_materialization_failure(&p,&LibraryError::CloudRequestUnavailable,now).unwrap();
+        assert_eq!(retry(&library).retry_at,now.timestamp()+60);
+        for _ in 0..20 {
+            library.record_materialization_failure(&p,&LibraryError::CloudRequestUnavailable,now).unwrap();
+        }
+        assert_eq!(retry(&library).retry_at,now.timestamp()+MATERIALIZATION_RETRY_MAX_SECONDS);
+        let mut second = AssetSyncResult::default();
+        library.materialize_candidates(&client,"test",&mut second,false).unwrap();
+        assert_eq!(second.materialization_failures,0);
+        assert!(server.recv_timeout(std::time::Duration::from_millis(50)).unwrap().is_none());
+        // Once due, a row is selectable again; attempt count survives the wait.
+        library.connection().unwrap().execute("UPDATE asset_authority_state SET last_error=json_set(last_error,'$.retryAt',0) WHERE asset_id=?",[ID]).unwrap();
+        assert_eq!(library.pending_materializations(false).unwrap().len(),1);
+        assert_eq!(retry(&library).attempts,22);
     }
     fn media() -> Vec<u8> {
         let mut data = Cursor::new(Vec::new());

@@ -632,24 +632,22 @@ pub async fn list_classifications(
 }
 
 #[tauri::command]
-pub fn create_classification(
+pub async fn create_classification(
     request: CreateClassification,
     state: State<'_, AppState>,
 ) -> Result<ClassificationEntry, CommandError> {
-    current_required(state)?
-        .create_classification(request)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.create_classification(request).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn rename_classification(
+pub async fn rename_classification(
     id: String,
     name: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .rename_classification(&id, &name)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.rename_classification(&id, &name).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -953,13 +951,12 @@ pub async fn get_asset(
 }
 
 #[tauri::command]
-pub fn update_asset_metadata(
+pub async fn update_asset_metadata(
     request: AssetMetadataPatch,
     state: State<'_, AppState>,
 ) -> Result<AssetSummary, CommandError> {
-    current_required(state)?
-        .update_asset_metadata(request)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.update_asset_metadata(request).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -1038,25 +1035,23 @@ pub async fn purge_expired_trash(state: State<'_, AppState>) -> Result<PurgeSumm
 }
 
 #[tauri::command]
-pub fn set_asset_favorite(
+pub async fn set_asset_favorite(
     asset_id: String,
     favorite: bool,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .set_asset_favorite(&asset_id, favorite)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.set_asset_favorite(&asset_id, favorite).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn set_assets_favorite(
+pub async fn set_assets_favorite(
     asset_ids: Vec<String>,
     favorite: bool,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .set_assets_favorite(&asset_ids, favorite)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.set_assets_favorite(&asset_ids, favorite).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -1138,13 +1133,12 @@ pub async fn get_asset_albums(
 }
 
 #[tauri::command]
-pub fn patch_asset_albums(
+pub async fn patch_asset_albums(
     patch: AssetAlbumPatch,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .patch_asset_albums(patch)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.patch_asset_albums(patch).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -3014,7 +3008,7 @@ pub async fn authority_sync_health(
         let (authority, assets, stopped, authority_held, asset_held) =
             crate::workload::lane_health(library.root());
         health.authority_pass_failure = authority;
-        health.asset_lane_failure = assets;
+        health.asset_lane_failure = assets.or(library.asset_materialization_recovery_failure()?);
         health.assets.stopped = stopped;
         health.assets.held = asset_held;
         health.authority_held = authority_held;

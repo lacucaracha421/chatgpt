@@ -331,7 +331,7 @@ class Worker:
             return {"libraryId": library_id, "epoch": epoch, "contractVersion": ca.CONTRACT_VERSION,
                     "operationId": str(uuid.uuid5(uuid.UUID(pre["batch"]), f"{kind}:{key}")), "commandType": kind,
                     "workId": work_id, **fields}
-        commands = []
+        commands = self.planner.source_move_commands(plan, revisions, command)
         for source in plan["sources"]:
             number = source["volumeNumber"]
             if existing.get(number) != source:

@@ -638,6 +638,8 @@ impl BookFlow<'_> {
             params![collection_id, self.provider],
             |row| row.get::<_, bool>(0),
         )?;
+        let moved_sources =
+            retire_moved_sources(self.provider, &transaction, collection_id, &merged)?;
         for item in merged.values() {
             // Check before reconciliation inserts the provider's edition-0 slot.
             // Other editions and providers also establish that this number is known.
@@ -651,6 +653,7 @@ impl BookFlow<'_> {
                 &transaction,
                 collection_id,
                 item,
+                moved_sources.get(&item.item_id),
                 checked_at,
                 &mut result,
             )?;
@@ -659,7 +662,7 @@ impl BookFlow<'_> {
                 .filter(|_| tracks_ownership && baseline_established)
             {
                 for change in pending_release_changes(
-                    existing.as_ref(),
+                    moved_sources.get(&item.item_id).or(existing.as_ref()),
                     item,
                     previous_checked_at.as_deref(),
                     checked_at,
@@ -741,11 +744,83 @@ impl BookFlow<'_> {
     }
 }
 
+fn retire_moved_sources(
+    provider: &str,
+    transaction: &Transaction<'_>,
+    collection_id: &str,
+    incoming: &BTreeMap<i64, AladinItem>,
+) -> Result<BTreeMap<String, StoredAladinSource>, LibraryError> {
+    let authority = super::collection_authority::collection_write_status(transaction)?;
+    let mut moved = BTreeMap::new();
+    // Release all old identities before inserting destinations, including swaps.
+    // Only source rows move; slot IDs, ownership, editions and covers stay put.
+    for item in incoming.values() {
+        let previous_number: Option<i64> = transaction
+            .query_row(
+                "SELECT volume_number FROM collection_volume_sources
+             WHERE collection_id=?1 AND provider=?2 AND provider_item_id=?3",
+                params![collection_id, provider, item.item_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(number) = previous_number.filter(|number| *number != item.volume_number) else {
+            continue;
+        };
+        let before = if authority.active {
+            super::collection_authority::volume_source_state(
+                transaction,
+                collection_id,
+                number,
+                provider,
+            )?
+        } else {
+            serde_json::Value::Null
+        };
+        let previous = transaction.query_row(
+            "SELECT provider_item_id,title,author,publisher,isbn13,
+                    publication_date,item_url,provider_data_json
+             FROM collection_volume_sources
+             WHERE collection_id=?1 AND volume_number=?2 AND provider=?3",
+            params![collection_id, number, provider],
+            |row| {
+                Ok(StoredAladinSource {
+                    provider_item_id: row.get(0)?,
+                    title: row.get(1)?,
+                    author: row.get(2)?,
+                    publisher: row.get(3)?,
+                    isbn13: row.get(4)?,
+                    publication_date: row.get(5)?,
+                    item_url: row.get(6)?,
+                    provider_data_json: row.get(7)?,
+                })
+            },
+        )?;
+        transaction.execute(
+            "DELETE FROM collection_volume_sources
+             WHERE collection_id=?1 AND volume_number=?2 AND provider=?3",
+            params![collection_id, number, provider],
+        )?;
+        if authority.active {
+            let mut retired = before.clone();
+            retired["deleted"] = serde_json::json!(true);
+            super::collection_authority::enqueue_volume_source_changes(
+                transaction,
+                &authority,
+                &before,
+                retired,
+            )?;
+        }
+        moved.insert(item.item_id.clone(), previous);
+    }
+    Ok(moved)
+}
+
 fn reconcile_source(
     provider: &str,
     transaction: &Transaction<'_>,
     collection_id: &str,
     item: &AladinItem,
+    moved_source: Option<&StoredAladinSource>,
     now: &str,
     result: &mut AladinSyncResult,
 ) -> Result<Option<StoredAladinSource>, LibraryError> {
@@ -786,7 +861,8 @@ fn reconcile_source(
                 })
             },
         )
-        .optional()?;
+        .optional()?
+        .or_else(|| moved_source.cloned());
     let current = StoredAladinSource {
         provider_item_id: item.item_id.clone(),
         title: item.title.trim().to_owned(),
@@ -1477,6 +1553,104 @@ mod tests {
             assert_eq!(events[0].kind, ReleaseWatchEventKind::NewVolume);
             assert_eq!(library.book_flow().refresh_aladin_items_at(&id, later, "2026-10-11T00:00:00Z").unwrap().release_event_count, 0);
         }
+    }
+
+    fn check_kakao_renumbering(initial_numbers: &[i64], next_numbers: &[i64], new_volume: bool) {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "Series");
+        let products = |numbers: &[i64]| numbers.iter().enumerate().map(|(index, number)| {
+            item(&format!("product-{index}"), "Series", *number, "A", None, Some("2026-10-01"))
+        }).collect::<Vec<_>>();
+        let initial = products(initial_numbers);
+        library.book_flow().apply_aladin_items(request(&id, &initial), initial).unwrap();
+        library.set_owned_volume_count(&id, 0, 31).unwrap();
+        library.set_release_watch_enabled(&id, true).unwrap();
+        let before = {
+            let connection = library.connection().unwrap();
+            // Covers and manual presentation belong to slots, not products.
+            connection.execute("INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,language,selected,created_at,updated_at) VALUES('manual-cover',?1,'mangadex','manual-cover','volume_cover','cover.jpg','image/jpeg',100,150,'ja',0,'t','t')", [&id]).unwrap();
+            connection.execute("UPDATE collection_volumes SET cover_artwork_id='manual-cover',sort_order=42,source_provider='mangadex',source_cover_id='cover-id' WHERE collection_id=?1", [&id]).unwrap();
+            connection.execute("INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,cover_artwork_id,source_provider,source_cover_id,created_at,updated_at) VALUES('other-edition',?1,31,1,99,'manual-cover','mangadex','special-cover','t','t')", [&id]).unwrap();
+            connection.execute("UPDATE release_watch_subscriptions SET last_checked_at='2026-10-09T00:00:00Z' WHERE collection_id=?1", [&id]).unwrap();
+            let rows = connection.prepare("SELECT id,volume_number,edition_index,sort_order,cover_artwork_id,source_provider,source_cover_id FROM collection_volumes WHERE collection_id=?1 ORDER BY id").unwrap()
+                .query_map([&id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?))).unwrap()
+                .collect::<Result<Vec<_>,_>>().unwrap();
+            rows
+        };
+        let ownership = || {
+            let connection = library.connection().unwrap();
+            let rows = connection.prepare("SELECT volume_number,edition_index,physical,digital FROM collection_volume_ownership WHERE collection_id=?1 ORDER BY volume_number,edition_index").unwrap()
+                .query_map([&id], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?))).unwrap()
+                .collect::<Result<Vec<_>,_>>().unwrap();
+            rows
+        };
+        let ownership_before = ownership();
+        let next = products(next_numbers);
+        let outcome = library.book_flow().refresh_aladin_items_at(&id, next.clone(), "2026-10-10T00:00:00Z").unwrap();
+        let mut expected = next.iter().map(|item| (item.volume_number, item.item_id.clone())).collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(kakao_sources(&library, &id), expected);
+        assert_eq!(outcome.release_event_count, u64::from(new_volume));
+        assert_eq!(outcome.sync_result.added, u64::from(new_volume));
+        let events = library.list_unread_release_changes().unwrap();
+        if new_volume {
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].volume_number, *next_numbers.last().unwrap());
+            assert_eq!(events[0].kind, ReleaseWatchEventKind::NewVolume);
+        } else {
+            assert!(events.is_empty());
+        }
+        assert_eq!(ownership(), ownership_before);
+        {
+            let connection = library.connection().unwrap();
+            for row in before {
+                let after = connection.query_row("SELECT id,volume_number,edition_index,sort_order,cover_artwork_id,source_provider,source_cover_id FROM collection_volumes WHERE id=?1", [&row.0], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?))).unwrap();
+                assert_eq!(after, row);
+            }
+        }
+        assert_eq!(library.book_flow().refresh_aladin_items_at(&id, next, "2026-10-11T00:00:00Z").unwrap().release_event_count, 0);
+    }
+
+    #[test]
+    fn kakao_renumbering_31_to_30_preserves_slots_and_is_quiet() {
+        check_kakao_renumbering(&[31], &[30], false);
+    }
+
+    #[test]
+    fn kakao_renumbering_swap_preserves_slots_and_is_quiet() {
+        check_kakao_renumbering(&[30, 31], &[31, 30], false);
+    }
+
+    #[test]
+    fn kakao_renumbering_with_new_volume_notifies_only_new_product() {
+        check_kakao_renumbering(&[31], &[30, 32], true);
+    }
+
+    #[test]
+    fn kakao_renumbering_authority_retires_before_destination_commands() {
+        use crate::library::collection_authority::tests::{adopt, fixture, work};
+        let (_temp, library, status) = fixture();
+        adopt(&library, &status, serde_json::json!({"works":[work("w", 1)]}));
+        let initial = vec![
+            item("product-x", "Series", 30, "A", None, None),
+            item("product-y", "Series", 31, "A", None, None),
+        ];
+        library.book_flow().apply_aladin_items(request("w", &initial), initial).unwrap();
+        let next = vec![
+            item("product-y", "Series", 30, "A", None, None),
+            item("product-x", "Series", 31, "A", None, None),
+        ];
+        // The authority outbox keeps the binding server-side, so rebind through the same apply path.
+        library.book_flow().apply_aladin_items(request("w", &next), next).unwrap();
+        assert_eq!(kakao_sources(&library, "w"), vec![(30, "product-y".into()), (31, "product-x".into())]);
+        let connection = library.connection().unwrap();
+        let commands = connection.prepare("SELECT payload FROM collection_authority_outbox WHERE command_type='upsertVolumeSource' ORDER BY seq").unwrap()
+            .query_map([], |row| row.get::<_,String>(0)).unwrap()
+            .map(|raw| serde_json::from_str::<serde_json::Value>(&raw.unwrap()).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(commands.iter().map(|body| body["deleted"].as_bool().unwrap()).collect::<Vec<_>>(), vec![false, false, true, true, false, false]);
+        assert_eq!(commands.iter().map(|body| body["expectedRevision"].as_i64().unwrap()).collect::<Vec<_>>(), vec![0, 0, 1, 1, 2, 2]);
     }
 
     #[test]

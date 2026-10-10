@@ -72,6 +72,69 @@ it("keeps retention controls disabled until the policy is loaded", async () => {
   expect(screen.queryByRole("spinbutton", { name: "보존 기간" })).not.toBeInTheDocument();
 });
 
+it("preserves a dirty retention draft during refresh and cancels to the latest saved value", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getTrashPolicy).mockResolvedValue({ retentionDays: 30 });
+  renderTrash(<TrashBrowser />, gateway);
+  await user.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
+  const input = await screen.findByRole("spinbutton", { name: "보존 기간" });
+  await waitFor(() => expect(input).toHaveValue(30));
+  await user.clear(input);
+  await user.type(input, "90");
+  vi.mocked(gateway.getTrashPolicy).mockResolvedValue({ retentionDays: 45 });
+  act(() => { window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT)); });
+  await screen.findByText("45일 후 자동 삭제");
+  expect(input).toHaveValue(90);
+  await user.click(screen.getByRole("button", { name: "취소" }));
+  expect(input).toHaveValue(45);
+  expect(gateway.setTrashPolicy).not.toHaveBeenCalled();
+});
+
+it("keeps the draft when automatic deletion is remotely disabled and resets after save and reopen", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getTrashPolicy).mockResolvedValue({ retentionDays: 30 });
+  renderTrash(<TrashBrowser />, gateway);
+  const summary = screen.getByText("보존 설정", { exact: false, selector: "summary" });
+  await user.click(summary);
+  const input = await screen.findByRole("spinbutton", { name: "보존 기간" });
+  await waitFor(() => expect(input).toHaveValue(30));
+  await user.clear(input);
+  await user.type(input, "90");
+  vi.mocked(gateway.getTrashPolicy).mockResolvedValue({ retentionDays: null });
+  act(() => { window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT)); });
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: "자동 삭제" })).not.toBeChecked());
+  expect(input).toHaveValue(90);
+  vi.mocked(gateway.getTrashPolicy).mockResolvedValue({ retentionDays: 90 });
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(gateway.setTrashPolicy).toHaveBeenCalledWith({ retentionDays: 90 }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "취소" })).not.toBeInTheDocument());
+  await user.clear(input);
+  await user.type(input, "60");
+  await user.click(summary);
+  await user.click(summary);
+  await waitFor(() => expect(input).toHaveValue(90));
+});
+
+it("preserves edits made while a background policy request is still pending", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  let resolvePolicy!: (value: { retentionDays: number | null }) => void;
+  const refresh = new Promise<{ retentionDays: number | null }>(resolve => { resolvePolicy = resolve; });
+  vi.mocked(gateway.getTrashPolicy).mockResolvedValueOnce({ retentionDays: 30 }).mockReturnValueOnce(refresh);
+  renderTrash(<TrashBrowser />, gateway);
+  await user.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
+  const input = await screen.findByRole("spinbutton", { name: "보존 기간" });
+  await waitFor(() => expect(input).toHaveValue(30));
+  act(() => { window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT)); });
+  await waitFor(() => expect(gateway.getTrashPolicy).toHaveBeenCalledTimes(2));
+  await user.clear(input);
+  await user.type(input, "120");
+  await act(async () => { resolvePolicy({ retentionDays: 45 }); await refresh; });
+  expect(input).toHaveValue(120);
+});
+
 it("keeps a loaded trash page visible when the policy request fails and retries both", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();

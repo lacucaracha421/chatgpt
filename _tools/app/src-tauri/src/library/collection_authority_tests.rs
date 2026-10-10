@@ -5473,3 +5473,58 @@ fn collection_authority_user_mangadex_cover_pick_survives_a_server_bump() {
     let cover: Option<String> = l.connection().unwrap().query_row("SELECT source_cover_id FROM collection_volumes WHERE id='v'", [], |r| r.get(0)).unwrap();
     assert_eq!(cover.as_deref(), Some("picked"));
 }
+
+fn pending_source(library: &Library, status: &CollectionAuthorityStatus, work: &str, number: i64, item: &str, deleted: bool) {
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    enqueue_volume_source_changes(&tx, status, &Value::Null, json!({"workId":work,"volumeNumber":number,"provider":"kakao","providerItemId":item,"title":item,"author":null,"publisher":null,"isbn13":null,"publicationDate":null,"itemUrl":null,"data":{},"deleted":deleted})).unwrap();
+    tx.commit().unwrap();
+}
+
+fn put_source(library: &Library, work: &str, number: i64, item: &str) {
+    library.connection().unwrap().execute("INSERT INTO collection_volume_sources(collection_id,volume_number,provider,provider_item_id,title,provider_data_json,created_at,updated_at) VALUES(?1,?2,'kakao',?3,?3,'{}','t','t')", params![work, number, item]).unwrap();
+}
+
+fn source_rows(library: &Library) -> Vec<(String, i64, String)> {
+    let db = library.connection().unwrap();
+    let rows = db.prepare("SELECT collection_id,volume_number,provider_item_id FROM collection_volume_sources ORDER BY collection_id,volume_number").unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+    rows
+}
+
+fn replay(library: &Library) {
+    let mut db = library.connection().unwrap();
+    let tx = db.transaction().unwrap();
+    reapply_pending_core_edits(&tx).unwrap();
+    tx.commit().unwrap();
+}
+
+#[test]
+fn collection_authority_source_replay_skips_a_trashed_work() {
+    let (_temp, library, status) = fixture();
+    adopt(&library, &status, json!({"works":[work("w", 1)]}));
+    pending_source(&library, &status, "w", 1, "p1", false);
+    library.connection().unwrap().execute("DELETE FROM collections WHERE id='w'", []).unwrap();
+    replay(&library);
+    assert!(source_rows(&library).is_empty());
+}
+
+#[test]
+fn collection_authority_source_replay_does_not_take_a_product_from_another_work() {
+    let (_temp, library, status) = fixture();
+    adopt(&library, &status, json!({"works":[work("w", 1), work("v", 1)]}));
+    put_source(&library, "v", 1, "p1");
+    pending_source(&library, &status, "w", 1, "p1", false);
+    replay(&library);
+    assert_eq!(source_rows(&library), vec![("v".to_string(), 1, "p1".to_string())]);
+}
+
+#[test]
+fn collection_authority_source_replay_stale_retire_keeps_a_different_product() {
+    let (_temp, library, status) = fixture();
+    adopt(&library, &status, json!({"works":[work("w", 1)]}));
+    put_source(&library, "w", 1, "p2");
+    pending_source(&library, &status, "w", 1, "p1", true);
+    replay(&library);
+    assert_eq!(source_rows(&library), vec![("w".to_string(), 1, "p2".to_string())]);
+}

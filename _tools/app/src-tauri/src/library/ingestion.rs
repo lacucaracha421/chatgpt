@@ -124,7 +124,9 @@ impl Library {
         )?;
         if let Some(identity) = identity {
             if identity.sha256 != content_hash || identity.size_bytes != byte_size {
-                return Err(LibraryError::InvalidCloudResponse);
+                // Bytes differ from the replica's identity: an integrity mismatch, retried
+                // a bounded number of times by the materialization pass.
+                return Err(LibraryError::DuplicateOriginalCorrupt);
             }
         }
         run_staging_hook(&staging_path);
