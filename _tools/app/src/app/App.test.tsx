@@ -1644,6 +1644,12 @@ describe("App", () => {
 
   it("does not start native drag after Escape and reports native failures in the work tray", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    // The gallery only renders tiles with a measured size; do not rely on an earlier test having left one (HOME-OPT-001).
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
+    });
+    Object.defineProperties(window, { innerWidth: { configurable: true, value: 1000 }, innerHeight: { configurable: true, value: 700 } });
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     const startAssetDrag = vi.fn().mockRejectedValue(new Error("탐색기 복사 실패"));

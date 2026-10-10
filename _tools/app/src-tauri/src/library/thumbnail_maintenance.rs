@@ -330,7 +330,9 @@ fn write_and_replace(temp_path: &Path, destination: &Path, bytes: &[u8]) -> std:
 #[cfg(windows)]
 fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     use std::{os::windows::ffi::OsStrExt, ptr};
-    use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH};
+    use windows_sys::Win32::Storage::FileSystem::{
+        ReplaceFileW, REPLACEFILE_IGNORE_ACL_ERRORS, REPLACEFILE_WRITE_THROUGH,
+    };
 
     let source = source
         .as_os_str()
@@ -347,7 +349,7 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
             destination.as_ptr(),
             source.as_ptr(),
             ptr::null(),
-            REPLACEFILE_WRITE_THROUGH,
+            REPLACEFILE_WRITE_THROUGH | REPLACEFILE_IGNORE_ACL_ERRORS,
             ptr::null(),
             ptr::null(),
         )
@@ -501,6 +503,7 @@ mod tests {
             },
         )
         .unwrap();
+        assert_eq!(first.failures, Vec::<String>::new());
         assert_eq!(first.recompressed, 1);
         assert!(!first.scan_complete);
         assert_eq!(first.failed, 0);

@@ -17,7 +17,11 @@ function mockApi() {
   }});
 }
 beforeEach(() => { vi.stubGlobal('matchMedia', () => ({matches: false, addEventListener() {}, removeEventListener() {}})); });
-afterEach(() => {
+afterEach(async () => {
+  // Module-level swap state outlives a test: settle whatever it left running (HOME-OPT-001, shuffle order).
+  cancelSegmentSwap(owner);
+  for (const entry of pending ?? []) entry.finish();
+  await Promise.resolve(); await Promise.resolve();
   document.body.replaceChildren();
   if (descriptor) Object.defineProperty(document, 'startViewTransition', descriptor); else Reflect.deleteProperty(document, 'startViewTransition');
   document.documentElement.removeAttribute('data-view-swap');

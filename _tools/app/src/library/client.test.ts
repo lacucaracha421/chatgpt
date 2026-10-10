@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -562,6 +562,8 @@ it("routes Manga index identities and selected folder paths through the library 
 
 describe("heart album membership", () => {
   beforeEach(() => { invoke.mockReset(); });
+  // The persistent rejection below must not reach tests that only mockClear (order independence).
+  afterEach(() => { invoke.mockReset(); });
   it("adopts or creates the likes album before adding/removing membership and kicks sync", async () => {
     invoke.mockImplementation(async command => command === "ensure_likes_album" ? { id: "designated-id" } : undefined);
     await libraryGateway.setAssetFavorite("one", true);

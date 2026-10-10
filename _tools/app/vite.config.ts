@@ -34,6 +34,10 @@ export default defineConfig(async ({ mode }) => {
       exclude: [...configDefaults.exclude, "**/.tmp/**", "mobile-client/**", "scripts/**/*.test.mjs"], // node --test suites for the perf kit
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
+      // 300+ jsdom files run in parallel threads; a rendered App screen needs several seconds on a
+      // loaded host (HOME-OPT-001). Timeouts only bound a genuine hang, they never wait on a pass.
+      testTimeout: 20_000,
+      hookTimeout: 20_000,
       css: { include: [/src\/styles\/(?:tokens|global)\.css$/] },
     },
   };
