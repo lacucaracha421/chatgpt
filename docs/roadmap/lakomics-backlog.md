@@ -10,7 +10,7 @@ Updated 2026-10-10 (evening): the user-approved 2026-10-09 server-independence s
 
 1. **PERF-ALL-001 — measured performance pass:** measure the remaining PC/tablet scenarios before optimizing.
 2. **KAKAO-NOTIFY-001 — first-check bulk new-volume notifications:** investigate notifications for already-existing volumes; expected quiet baseline, cause unverified.
-3. **Remaining previous order:** remaining `TABLET-PARITY-001` → `AUTO-TAG-001` follow-through (production import/apply approved 2026-10-07) → `PC-REVIEW-001` → `CLOUD-POST-001` → `HOME-OPT-001` test debt → `CHAR-AUTO-007`. Authority 1B/1C and tablet creation are delivered; the priority of residual `USER-REQ-20260924` diagnostics is (to confirm with the user). Other low-priority and held requests retain their recorded order; no other new priorities are assigned.
+3. **Remaining previous order:** remaining `TABLET-PARITY-001` → `AUTO-TAG-001` follow-through (production import/apply approved 2026-10-07) → `PC-REVIEW-001` → `CLOUD-POST-001` → `HOME-OPT-001` test debt. `CHAR-AUTO-007` was dropped from the order by the user on 2026-10-10. Authority 1B/1C and tablet creation are delivered; the priority of residual `USER-REQ-20260924` diagnostics is (to confirm with the user). Other low-priority and held requests retain their recorded order; no other new priorities are assigned.
 
 ## Waiting on the user (device/native checks)
 
@@ -225,13 +225,13 @@ Keep classification-capacity research bounded and on hold: inference stays on PC
 <a id="char-auto-007--evidence-based-accuracy-plan-2026-09-23-re-analysis"></a>
 ## CHAR-AUTO-007 — S36 enablement and case follow-up
 
-Status: `IN_PROGRESS` — enable/watch the recorded S36 results on the user's 백합 series and spot-check acceptances; no new extraction is required. Evaluator, shadow scoring/review and per-series live switch are implemented (`9b72e87e`, `7f9d7bef`, `d8546dba`, `bc8770df`, `c9e13eb1`, `f87a67f1`).
+Status: `HOLD` — **dropped from the priority order by the user on 2026-10-10** ("캐릭터 자동 지정은 이제 빼도 될듯"); reopen only if the user asks. Previous plan: enable/watch the recorded S36 results on the user's 백합 series and spot-check acceptances; no new extraction is required. Evaluator, shadow scoring/review and per-series live switch are implemented (`9b72e87e`, `7f9d7bef`, `d8546dba`, `bc8770df`, `c9e13eb1`, `f87a67f1`).
 Retain 안조 follow-up: choose anchor regions for `e60e44a1` (#1/#2) and `90394071` (#4), add four manual acceptances as supporting references (unverified 2026-10-10). Keep manual truth, same-series competition and strict automatic guards; production enablement/writes need their own approval.
 
 <a id="char-auto-008--multi-form-characters-and-reference-quality-hints"></a>
 ## CHAR-AUTO-008 — Multi-form reference hints
 
-Status: `TODO` — measure first with the chronological evaluator. Explore user-confirmable form/outfit clusters and same-form voting; use at least six references per form as the existing workaround. Flag isolated references rather than a whole minority form.
+Status: `HOLD` — follows `CHAR-AUTO-007`, dropped by the user on 2026-10-10. Previous plan: measure first with the chronological evaluator. Explore user-confirmable form/outfit clusters and same-form voting; use at least six references per form as the existing workaround. Flag isolated references rather than a whole minority form.
 Recheck 수나 `aeffff69`, `5c2ca1c1`, `ec4e8499` and 모니에 `720276e7`, `f29f450c`; thresholds need evaluator evidence. Multi-person competition is a later concrete-case follow-up (user 2026-09-24), not a permanent reopened accuracy pass.
 
 <a id="char-model-001--mature-data-rebenchmark-and-new-candidate-models"></a>
