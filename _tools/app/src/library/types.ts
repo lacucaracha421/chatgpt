@@ -756,7 +756,7 @@ export type KakaoSyncResult = {
   updated: number;
   unchanged: number;
   ignored: number;
-};
+} | {outcome: 'pending' | 'applied' | 'failed' | 'superseded' | 'notDue'; message: string | null};
 
 export type KakaoVolumeCandidate = {
   volumeNumber: number;

@@ -7,6 +7,33 @@ import { KakaoConnectDialog } from "./KakaoConnectDialog";
 
 afterEach(cleanup);
 
+it('keeps a server-pending selection separate from confirmed completion and checks the same choice again', async () => {
+  const user = userEvent.setup();
+  const applyKakao = vi.fn().mockResolvedValueOnce({outcome: 'pending', message: null}).mockResolvedValueOnce({outcome: 'applied', message: null});
+  const {onApplied, onClose} = renderDialog({applyKakao});
+  await user.click(screen.getByRole('button', {name: '검색'}));
+  await user.click(await screen.findByRole('button', {name: /던전밥.*쿠이 료코/}));
+  await user.click(screen.getByRole('button', {name: '연결'}));
+  expect(await screen.findByText('연결 대기 · 서버에서 처리 중')).toBeInTheDocument();
+  expect(onApplied).not.toHaveBeenCalled(); expect(onClose).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', {name: '연결 상태 확인'}));
+  expect(applyKakao.mock.calls[0][0]).toEqual(applyKakao.mock.calls[1][0]);
+  expect(onApplied).toHaveBeenCalledWith({outcome: 'applied', message: null});
+});
+
+it('shows a server failure and allows a new deliberate request', async () => {
+  const user = userEvent.setup();
+  const applyKakao = vi.fn().mockResolvedValue({outcome: 'failed', message: '연결이 바뀌었습니다. 다시 선택해 주세요.'});
+  const {onApplied, onClose} = renderDialog({applyKakao});
+  await user.click(screen.getByRole('button', {name: '검색'}));
+  await user.click(await screen.findByRole('button', {name: /던전밥.*쿠이 료코/}));
+  await user.click(screen.getByRole('button', {name: '연결'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('연결이 바뀌었습니다. 다시 선택해 주세요.');
+  expect(onApplied).not.toHaveBeenCalled(); expect(onClose).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', {name: '다시 시도'}));
+  expect(applyKakao).toHaveBeenCalledTimes(2);
+});
+
 it("preselects only already bound groups when multiple editions exactly match", async () => {
   const editions = ["bound", "other"].map(groupFingerprint => ({...candidates[0], groupFingerprint}));
   const gateway = {searchKakao: vi.fn().mockResolvedValue(editions)} as unknown as LibraryGateway;

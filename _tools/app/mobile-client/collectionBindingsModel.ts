@@ -19,7 +19,7 @@ export const BIND_REQUESTS_PATH = `${BINDINGS_PREFIX}/requests`;
 export const searchPath = (provider: BindProvider, query: string) => `${BINDINGS_PREFIX}/search/${provider}?${new URLSearchParams({query})}`;
 export const requestsPath = (collectionId: string) => `${BIND_REQUESTS_PATH}?${new URLSearchParams({collectionId, state: 'all', limit: '20'})}`;
 
-export type BindStatus = {version: 1; mangadexSearch: boolean; kakaoSearch: boolean; bindRequests: boolean; publisherSeenAt: string | null};
+export type BindStatus = {version: 1; mangadexSearch: boolean; kakaoSearch: boolean; kakaoApply?: boolean; bindRequests: boolean; publisherSeenAt: string | null};
 export type MangaDexCandidate = {mangaId: string; title: string; alternateTitles: string[]; author: string | null; year: number | null; status: string | null; primaryCoverFileName?: string | null; coverUrl: string | null};
 export type KakaoCandidate = {
   anchorItemId: string; groupFingerprint: string; title: string; author: string | null; publisher: string | null;
@@ -28,6 +28,7 @@ export type KakaoCandidate = {
 };
 export type SearchReply<T> = {version: 1; provider: BindProvider; query: string; items: T[]};
 export type BindRequest = {
+  executor?: 'pc' | 'server';
   requestId: number; operationId: string; collectionId: string; provider: BindProvider; choice: Record<string, unknown>;
   expected: {externalId: string | null} | null; state: 'pending' | 'applied' | 'failed' | 'superseded';
   reason: {code: string; message: string} | null; replaces: number | null; createdAt: string; updatedAt: string; resolvedAt: string | null;
@@ -65,6 +66,8 @@ export function latestRequest(reply: RequestsReply | null, provider: BindProvide
 }
 
 export const chosenTitle = (request: BindRequest) => typeof request.choice.title === 'string' ? request.choice.title : '';
+// Ownership is pinned by the request, even after the server feature switches off.
+export const serverOwned = (request: BindRequest) => request.executor === 'server';
 const count = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null;
 /**
  * What a request picked, for the row beside the cover: the title, and for a Kakao bind the
@@ -174,11 +177,11 @@ export function searchFailure(error: unknown, provider: BindProvider): BindFailu
   return {text: errorText(error) || `${name}에서 검색하지 못했어요.`, retry: true};
 }
 /** What a failed bind request says; the server's own Korean message where it has one. */
-export function requestFailure(error: unknown): BindFailure {
+export function requestFailure(error: unknown, serverApply = false): BindFailure {
   const detail = detailOf(error), code = typeof detail?.code === 'string' ? detail.code : '';
   if (code === 'collectionNotFound') return {text: '이 작품을 서버에서 찾지 못했어요. 새로고침한 뒤 다시 시도해 주세요.', retry: false};
   if (code === 'collectionNotManga') return {text: '만화 작품만 연결할 수 있어요.', retry: false};
-  if (code === 'bindRequestLimit') return {text: 'PC가 아직 적용하지 않은 연결 요청이 너무 많아요. PC를 켠 뒤 다시 시도해 주세요.', retry: false};
+  if (code === 'bindRequestLimit') return {text: serverApply ? serverMessage(detail?.message) || '아직 적용되지 않은 연결 요청이 너무 많아요. 잠시 후 다시 시도해 주세요.' : 'PC가 아직 적용하지 않은 연결 요청이 너무 많아요. PC를 켠 뒤 다시 시도해 주세요.', retry: false};
   if (code) return {text: serverMessage(detail?.message) || '연결 요청을 보내지 못했어요.', retry: code !== 'invalidBindRequest' && code !== 'bindRequestTooLarge' && code !== 'operationConflict'};
   if (error instanceof ApiError && error.status === 404) return {text: '서버를 업데이트해야 여기서 연결할 수 있어요.', retry: false};
   if (offline()) return {text: '오프라인이에요. 네트워크를 확인한 뒤 다시 시도해 주세요.', retry: true};

@@ -14,6 +14,8 @@ pub(crate) const MAX_CURSOR: i64 = 9_007_199_254_740_991;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BindRequest {
+    #[serde(default)]
+    pub executor: Option<String>,
     pub request_id: i64,
     pub collection_id: String,
     pub provider: String,
@@ -94,9 +96,12 @@ pub(crate) fn validate_log_page(
         }
         previous = item.request_id;
     }
-    if page.next_cursor != previous
+    // The server scans every sequence but omits server-owned requests from publisher
+    // items. Gaps and an empty advancing page are therefore valid, not a bad cursor.
+    if page.next_cursor < previous
         || page.last_sequence < page.next_cursor
-        || (page.has_more && page.items.is_empty())
+        || page.next_cursor > MAX_CURSOR
+        || (page.has_more && page.next_cursor <= after)
         || page
             .oldest_pending_sequence
             .is_some_and(|oldest| !(1..=page.last_sequence).contains(&oldest))
@@ -104,4 +109,24 @@ pub(crate) fn validate_log_page(
         return invalid;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    #[test]
+    fn publisher_pages_can_advance_over_omitted_server_requests() {
+        let page: BindLogPage = serde_json::from_value(serde_json::json!({"version":1,"after":0,"lastSequence":20,
+            "nextCursor":10,"hasMore":true,"items":[]})).unwrap();
+        validate_log_page(&page, 0, 50).unwrap();
+        let mut invalid = page; invalid.next_cursor = 0;
+        assert!(validate_log_page(&invalid,0,50).is_err());
+    }
+    #[test]
+    fn request_executor_is_optional_and_pinned() {
+        let mut row = serde_json::json!({"requestId":1,"collectionId":"w","provider":"kakao","state":"pending"});
+        assert!(serde_json::from_value::<BindRequest>(row.clone()).unwrap().executor.is_none());
+        row["executor"] = serde_json::json!("server");
+        assert_eq!(serde_json::from_value::<BindRequest>(row).unwrap().executor.as_deref(),Some("server"));
+    }
 }

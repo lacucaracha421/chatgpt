@@ -34,6 +34,23 @@ const apiError = (status: number, code: string, extra = {}) => new ApiError('서
 const calls = (fragment: string) => mocks.api.mock.calls.filter(([path]) => String(path).includes(fragment));
 const posts = () => mocks.api.mock.calls.filter(([path, , , method]) => path === '/v1/collections/bindings/requests' && method === 'POST').map(([, , body]) => body as Record<string, unknown>);
 
+it('shows pinned server pending and applied copy with an old status response', async () => {
+  routes.requests = {version: 1, items: [request({provider: 'kakao', executor: 'server'})], pending: null};
+  const {rerender} = render(<CollectionBindings item={base} active refreshKey="one" sheet={null} onSheet={vi.fn()}/>);
+  expect(await screen.findByText(/서버에서 처리 중/)).toBeTruthy();
+  expect(screen.queryByText('카카오 연결됨')).toBeNull();
+  routes.requests = {version: 1, items: [request({provider: 'kakao', executor: 'server', state: 'applied'})], pending: null};
+  rerender(<CollectionBindings item={base} active refreshKey="two" sheet={null} onSheet={vi.fn()}/>);
+  expect(await screen.findByText('카카오 서버에서 연결 확인됨')).toBeTruthy();
+});
+
+it('opens server Kakao selection while the PC is absent without promising PC processing', async () => {
+  routes.status = {version: 1, mangadexSearch: true, kakaoSearch: true, kakaoApply: true, bindRequests: true, publisherSeenAt: null};
+  render(<CollectionBindings item={base} active refreshKey="one" sheet="kakao" onSheet={vi.fn()}/>);
+  expect(await screen.findByText('국내 출판 제목으로 찾으세요. 고르면 서버에서 권 목록과 발매 정보를 연결해요.')).toBeTruthy();
+  expect(screen.queryByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeNull();
+});
+
 beforeEach(() => {
   mocks.api.mockReset();
   routes = {

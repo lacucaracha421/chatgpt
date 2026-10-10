@@ -10,7 +10,7 @@ import {SIGNAL_FALLBACK_MS, useSyncSignal} from './syncSignals';
 import type {CollectionDetail} from './collectionModel';
 import {
   BINDINGS_STATUS_PATH, MAX_KAKAO_GROUPS, PROVIDER_NAMES, chosenSummary, connectionOf, fileBindRequest, kakaoCommand, kakaoVolumes, latestRequest,
-  mangaDexCommand, mangaDexStatus, mergeSummary, orderGroups, requestFailure, requestsPath, safeImageUrl, searchFailure, searchPath,
+  mangaDexCommand, mangaDexStatus, mergeSummary, orderGroups, requestFailure, requestsPath, safeImageUrl, searchFailure, searchPath, serverOwned,
   type BindFailure, type BindProvider, type BindRequest, type BindStatus, type Connection, type KakaoCandidate, type MangaDexCandidate,
   type RequestsReply, type SearchReply,
 } from './collectionBindingsModel';
@@ -28,9 +28,9 @@ export const KAKAO_GROUPS_HINT = '같은 작품이 권수별로 나뉘어 있으
 
 type RowState = {text: string; detail: string; tone: 'ok' | 'idle' | 'pending' | 'failed'; again: boolean};
 function rowState(connection: Connection, request: BindRequest | null): RowState {
-  if (request?.state === 'pending') return {text: PENDING_TEXT, detail: chosenSummary(request), tone: 'pending', again: true};
+  if (request?.state === 'pending') return {text: serverOwned(request) ? '연결 대기 · 서버에서 처리 중' : PENDING_TEXT, detail: chosenSummary(request), tone: 'pending', again: true};
   if (request?.state === 'failed') return {text: '연결 실패', detail: request.reason?.message || '이유를 알 수 없어요.', tone: 'failed', again: true};
-  if (request?.state === 'applied' && connection !== 'connected') return {text: 'PC에서 적용됨', detail: chosenSummary(request), tone: 'ok', again: true};
+  if (request?.state === 'applied' && connection !== 'connected') return {text: serverOwned(request) ? '서버에서 연결 확인됨' : 'PC에서 적용됨', detail: chosenSummary(request), tone: 'ok', again: true};
   switch (connection) {
     case 'connected': return {text: '연결됨', detail: '', tone: 'ok', again: true};
     case 'aladin': return {text: '알라딘 연결', detail: '카카오로 다시 연결해 주세요.', tone: 'idle', again: true};
@@ -71,7 +71,7 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet, pa
   // The just-filed request stands until a read includes it (or something newer).
   const latest = (provider: BindProvider) => {
     const mine = filed[provider];
-    return mine && !requests?.items.some(entry => entry.requestId >= mine.requestId) ? mine : latestRequest(requests, provider);
+    return mine?.collectionId === item.id && !requests?.items.some(entry => entry.provider === provider && entry.requestId >= mine.requestId) ? mine : latestRequest(requests, provider);
   };
   const waiting = PROVIDERS.some(provider => latest(provider)?.state === 'pending');
   // A filed request or its result moves `signals.bindingRequests`: read again at once. Without
@@ -85,7 +85,7 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet, pa
   });
   const notes = <>
     {legacy && <p className="collection-bindings-note">{LEGACY_NOTE}</p>}
-    {!legacy && status?.publisherSeenAt === null && <p className="collection-bindings-note">{PUBLISHER_UPDATE_NOTE}</p>}
+    {!legacy && status?.publisherSeenAt === null && !status.kakaoApply && <p className="collection-bindings-note">{PUBLISHER_UPDATE_NOTE}</p>}
     {loadError && <div className="collection-bindings-note is-error" role="alert"><span>연결 요청 상태를 불러오지 못했어요.</span><Button size="sm" variant="ghost" onClick={() => setNonce(n => n + 1)}>다시 시도</Button></div>}
   </>;
   const searchSheet = sheet && !legacy && <BindSearchSheet key={sheet} item={item} provider={sheet} status={status} connection={connectionOf(item, sheet)} onClose={() => onSheet(null)}
@@ -98,7 +98,7 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet, pa
         {providers.map(({provider, name, state}, index) => <span key={provider} className="collection-bindings-fold__item">
           {index > 0 && <span className="collection-bindings-fold__sep" aria-hidden="true"/>}
           {state.tone === 'pending' ? <span className="collection-bindings-fold__wait"><i aria-hidden="true"/>{name} {state.text}</span>
-            : state.tone === 'failed' ? <span className="collection-bindings-fold__failed">{name} {state.text}</span>
+            : state.tone === 'failed' ? <span className="collection-bindings-fold__failed" title={state.detail}>{name} {state.text} · {state.detail}</span>
             : <span className="collection-bindings-fold__ok"><CheckIcon aria-label="연결됨"/>{name}</span>}
         </span>)}
         <ChevronDownIcon className="collection-bindings-fold__chevron" aria-hidden="true"/>
@@ -118,7 +118,7 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet, pa
 
   const panel = <section className="collection-bind-panel" aria-label="연결">
     <h2><LinkIcon aria-hidden="true"/>작품 연결</h2>
-    <p>{PANEL_TEXT}</p>
+    <p>{status?.kakaoApply ? '카카오 연결은 서버에서 처리합니다. 연결이 확인되면 권 목록과 발매 정보가 표시됩니다.' : PANEL_TEXT}</p>
     <div className="collection-bind-choices">{providers.map(({provider, name, connection, state}) => {
       const verb = `${name} ${state.again ? '다시 연결' : '연결'}`;
       const primary = provider === 'kakao';
@@ -127,7 +127,7 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet, pa
         return <div key={provider} className={`collection-bind-choice is-done is-${state.tone}`} data-provider={provider}>
           {state.tone === 'pending' ? <i className="collection-bind-choice__wait" aria-hidden="true"/> : <CheckIcon aria-hidden="true"/>}
           <span className="collection-bind-choice__text">{state.tone === 'pending'
-            ? <><strong>{name} 연결 대기</strong><small>{['PC가 켜지면 적용', state.detail].filter(Boolean).join(' · ')}</small></>
+            ? <><strong>{name} 연결 대기</strong><small>{[state.text.split(' · ')[1], state.detail].filter(Boolean).join(' · ')}</small></>
             : <><strong>{name} {state.text}</strong><small>{state.detail || PROVIDER_GAINS[provider]}</small></>}</span>
           {!legacy && <Button size="sm" variant="ghost" aria-label={verb} onClick={() => onSheet(provider)}>다시 연결</Button>}
         </div>;
@@ -248,13 +248,13 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
       setSending(false); onRequested(reply.request);
     }, reason => {
       if (controller.signal.aborted) return;
-      setSending(false); setSendFailure(requestFailure(reason));
+      setSending(false); setSendFailure(requestFailure(reason, provider === 'kakao' && status?.kakaoApply === true));
     });
   };
 
   const searchDisabled = busy || sending || unavailable || wait > 0;
   return <Dialog open title={`${name} 연결`} onClose={onClose}>
-    <DialogDescription className="collection-sheet-label">{provider === 'mangadex' ? 'MangaDex에서 작품을 찾아 고르면 PC가 켜질 때 작품 정보와 권별 표지를 가져와요.' : '국내 출판 제목으로 찾으세요. 고르면 PC가 켜질 때 출판사별 권 목록과 발매 정보를 연결해요.'}</DialogDescription>
+    <DialogDescription className="collection-sheet-label">{provider === 'mangadex' ? 'MangaDex에서 작품을 찾아 고르면 PC가 켜질 때 작품 정보와 권별 표지를 가져와요.' : status?.kakaoApply ? '국내 출판 제목으로 찾으세요. 고르면 서버에서 권 목록과 발매 정보를 연결해요.' : '국내 출판 제목으로 찾으세요. 고르면 PC가 켜질 때 출판사별 권 목록과 발매 정보를 연결해요.'}</DialogDescription>
     <div className="library-sheet bind-sheet">
       {reviewMode && <div className="book-connect__work">{workCover}<span><strong>{item.name}</strong><small>보유 {item.kakaoReview?.ownedCount ?? 0}권</small></span></div>}
       <form className="bind-search" role="search" onSubmit={submit}>
@@ -262,7 +262,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
         <input ref={input} type="search" enterKeyHint="search" aria-label={`${name} 검색어`} value={query} disabled={sending} maxLength={100} onChange={event => setQuery(event.target.value)}/>
         <Button type="submit" variant="primary" disabled={searchDisabled}><BusyLabel busy={!!(busy)} idle={'검색'}>검색 중…</BusyLabel></Button>
       </form>
-      {status?.publisherSeenAt === null && <p className="collection-bindings-note">{PUBLISHER_UPDATE_NOTE}</p>}
+      {status?.publisherSeenAt === null && !(provider === 'kakao' && status.kakaoApply) && <p className="collection-bindings-note">{PUBLISHER_UPDATE_NOTE}</p>}
       {unavailable && <p className="bind-message is-error" role="alert">{KAKAO_UNAVAILABLE}</p>}
       {failure && <div className="bind-message is-error" role="alert"><span>{failure.text}{failure.waitSeconds ? (wait > 0 ? ` ${wait}초 후에 다시 검색할 수 있어요.` : ' 이제 다시 검색할 수 있어요.') : ''}</span>
         {failure.retry && <Button size="sm" variant="ghost" disabled={searchDisabled} onClick={() => run(lastQuery.current)}>다시 시도</Button>}</div>}
@@ -296,7 +296,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
     </div>
     {reviewMode && sendFailure && <div role="alert" className="bind-message is-error">{sendFailure.text}{sendFailure.retry && <Button disabled={sending} onClick={pickKakao}>다시 시도</Button>}</div>}
     {picked && !reviewMode && <Dialog open title="이 작품으로 연결할까요?" onClose={() => { send.current?.abort(); setSending(false); setPicked(null); setSendFailure(null); }}>
-      <DialogDescription className="collection-sheet-label">PC가 켜지면 {name} 정보를 가져와 적용해요. {provider === 'kakao' ? '작품명과 고른 표지는 그대로예요.' : '내가 고친 값은 덮어쓰지 않아요.'}</DialogDescription>
+      <DialogDescription className="collection-sheet-label">{provider === 'kakao' && status?.kakaoApply ? '서버에서 카카오 정보를 가져와 연결해요.' : `PC가 켜지면 ${name} 정보를 가져와 적용해요.`} {provider === 'kakao' ? '작품명과 고른 표지는 그대로예요.' : '내가 고친 값은 덮어쓰지 않아요.'}</DialogDescription>
       <div className="library-sheet bind-confirm">
         <div className="bind-result is-static"><BindThumb url={picked.thumbnail} provider={provider}/><span className="bind-result-text"><strong>{picked.title}</strong>{picked.subtitle && <small>{picked.subtitle}</small>}</span></div>
         {picked.groups && <ul className="bind-groups" aria-label="고른 묶음">{picked.groups.map(group => <li key={group.key}><span>{group.title}</span><span className="numeric">{group.range}</span></li>)}</ul>}

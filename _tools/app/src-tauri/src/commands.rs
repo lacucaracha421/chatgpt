@@ -27,7 +27,7 @@ use crate::{
         },
         metadata_import::{self, MetadataImportPlan},
         models::{
-            AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
+            AladinApplyRequest, AladinConnection, AladinSeriesCandidate,
             AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetDateBucket,
             AssetDateBucketQuery, AssetMetadataPatch, AssetPage, AssetQuery, AssetSummary,
             CatalogBlockedTag, CatalogLanguage, CatalogSearchPage, CatalogSearchQuery,
@@ -1456,6 +1456,9 @@ pub async fn search_kakao(
 ) -> Result<Vec<AladinSeriesCandidate>, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
+        if library.server_kakao_binds_enabled()? {
+            return library.search_server_kakao(&query);
+        }
         let key = credential::read_kakao_key()?;
         library.search_kakao(&key, &query)
     })
@@ -1468,11 +1471,10 @@ pub async fn search_kakao(
 pub async fn apply_kakao(
     request: AladinApplyRequest,
     state: State<'_, AppState>,
-) -> Result<AladinSyncResult, CommandError> {
+) -> Result<crate::library::server_kakao_binds::KakaoOperationResult, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let key = credential::read_kakao_key()?;
-        library.apply_kakao(&key, request)
+        library.apply_kakao_routed(request)
     })
     .await
     .map_err(|_| background_task_error())?
@@ -1483,11 +1485,14 @@ pub async fn apply_kakao(
 pub async fn refresh_kakao(
     collection_id: String,
     state: State<'_, AppState>,
-) -> Result<AladinSyncResult, CommandError> {
+) -> Result<crate::library::server_kakao_binds::KakaoOperationResult, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
+        if library.server_kakao_binds_enabled()? && library.server_release_checks_enabled("kakao") {
+            return library.refresh_server_kakao(&collection_id);
+        }
         let key = credential::read_kakao_key()?;
-        library.refresh_kakao(&key, &collection_id)
+        library.refresh_kakao(&key, &collection_id).map(crate::library::server_kakao_binds::KakaoOperationResult::Local)
     })
     .await
     .map_err(|_| background_task_error())?

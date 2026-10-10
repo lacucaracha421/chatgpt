@@ -247,6 +247,12 @@ pub(crate) fn collection_write_status(
     Ok(status)
 }
 
+/// Advertisement is meaningful even while this PC is adopting the baseline. The
+/// provider handover must not fall through to local fetching during that window.
+pub(super) fn server_kakao_bind_advertised(db: &Connection) -> Result<bool, LibraryError> {
+    Ok(local(db)?.is_some() && cached_profile_features(db)?.iter().any(|f| f == "serverKakaoBinds"))
+}
+
 pub(crate) fn fence_collection_operation(db: &Connection) -> Result<(), LibraryError> {
     if local(db)?.is_some() {
         return Err(LibraryError::CollectionAuthorityOperationUnavailable);
@@ -288,6 +294,22 @@ fn pending_restore(db: &Connection, work: &str, revision: i64) -> Result<bool, L
 }
 
 impl Library {
+    /// Confirm server Kakao completion only after its authority cursor is in this replica.
+    pub(super) fn pull_kakao_authority(&self) -> Result<(), LibraryError> {
+        let (client, token) = self.authority_client()?.ok_or(LibraryError::CloudRequestUnavailable)?;
+        let aggregate = client.sync_status(token.expose())?;
+        self.sync_collection_authority(&client, token.expose(), None, &aggregate, false)?;
+        let value = client.collection_authority_read("/v1/collections/authority/status", token.expose())?;
+        let status: CollectionAuthorityStatus = serde_json::from_value(value).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let db = self.connection()?;
+        let current = local(&db)?.ok_or(LibraryError::CollectionAuthorityNotAdopted)?;
+        let id = status.identity(&db)?.ok_or(LibraryError::CollectionAuthorityMismatch)?;
+        let pending: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE state='pending')", [], |r| r.get(0))?;
+        if pending || !current.adopted || !same(&current.id, &id) || current.id.cursor < id.cursor {
+            return Err(LibraryError::CloudRequestUnavailable);
+        }
+        Ok(())
+    }
     pub(crate) fn list_collection_trash(&self) -> Result<CollectionTrashPage, LibraryError> {
         let status = collection_write_status(&*self.connection()?)?;
         if !status.active {
@@ -3666,11 +3688,12 @@ impl Library {
                 .and_then(|m| m.strip_prefix(BIND_RETRY_MARKER))
                 .and_then(|n| n.parse::<i64>().ok())
                 .unwrap_or(0);
-            // Only a different identity is a user's choice; a config-only difference is the
-            // refresh worker's (or the server checker's) newer binding and is adopted.
+            // A same-anchor reconnect can still select different groups. Only adopt
+            // background history changes when the query and group selection agree.
             let identity_differs = !(adopted
                 && current["bound"] == true
-                && current["externalId"] == body["externalId"]);
+                && current["externalId"] == body["externalId"]
+                && (body["provider"] != "kakao" || super::server_kakao_binds::same_selection(&current["config"], &body["config"])));
             if attempt < BIND_RETRY_LIMIT && !superseded && identity_differs {
                 // Snapshots composed for this bind would run before it; drop them and refetch
                 // once the bind is applied.

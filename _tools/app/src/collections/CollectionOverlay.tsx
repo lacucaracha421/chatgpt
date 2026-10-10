@@ -540,7 +540,13 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
   );
 }
 
-function kakaoResultMessage(result: { added: number; updated: number; unchanged: number; ignored: number }) {
+function kakaoResultMessage(result: import('../library/types').KakaoSyncResult) {
+  if ('outcome' in result) {
+    if (result.outcome === 'pending') return '서버에서 발매 정보를 확인하도록 요청했습니다. 완료되면 동기화됩니다.';
+    if (result.outcome === 'applied') return '서버에서 연결을 확인했습니다.';
+    if (result.outcome === 'notDue') return '최근 확인한 서버 발매 정보를 동기화했습니다. 아직 새로 확인할 시간이 아닙니다.';
+    return result.message || '서버에서 적용하지 못했습니다. 다시 시도해 주세요.';
+  }
   return `국내 발매 정보: 추가 ${result.added}권, 갱신 ${result.updated}권, 유지 ${result.unchanged}권, 제외 ${result.ignored}개`;
 }
 

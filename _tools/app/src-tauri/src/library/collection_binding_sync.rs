@@ -606,7 +606,7 @@ impl Library {
                 self.update_binding_sync_state(endpoint, |s| s.epoch = epoch)?;
             }
             for item in &page.items {
-                if item.state == "pending" {
+                if item.state == "pending" && item.executor.as_deref() != Some("server") {
                     if applies >= MAX_APPLIES {
                         return Ok(Pass::More);
                     }
@@ -681,6 +681,9 @@ impl Library {
                     s.etag = None;
                 }
             })?;
+            // After every executable item has settled, also advance over sequence
+            // positions omitted because their executor is the server.
+            self.update_binding_sync_state(endpoint, |s| s.cursor = page.next_cursor)?;
             if !page.has_more {
                 return Ok(Pass::Done);
             }

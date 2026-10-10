@@ -5286,17 +5286,17 @@ fn collection_authority_config_only_bind_conflict_is_adopted_and_a_bind_with_sna
     };
     // M2: the identity is unchanged, only the config differs: adopt, queue nothing.
     let (_temp, l, s) = fixture();
-    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server_binding("book-1", json!({"k":1}), 1)]}));
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server_binding("book-1", json!({"version":1,"query":"Series","groupFingerprint":"one","knownItemIds":["book-1"]}), 1)]}));
     {
         let mut db = l.connection().unwrap();
         let tx = db.transaction().unwrap();
-        enqueue_provider_snapshot(&tx, &s, "w", &input("book-1", Some("{\"k\":2}"), None)).unwrap();
+        enqueue_provider_snapshot(&tx, &s, "w", &input("book-1", Some("{\"version\":1,\"query\":\"Series\",\"groupFingerprint\":\"one\",\"knownItemIds\":[\"book-1\",\"book-2\"]}"), None)).unwrap();
         tx.commit().unwrap();
     }
-    l.flush_collection_outbox_with(&s, &|_| Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server_binding("book-1", json!({"k":3}), 2)}}))), 0).unwrap();
+    l.flush_collection_outbox_with(&s, &|_| Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server_binding("book-1", json!({"version":1,"query":"Series","groupFingerprint":"one","knownItemIds":["book-1","book-3"]}), 2)}}))), 0).unwrap();
     assert_eq!(outbox_rows(&l).len(), 1);
     let config: String = l.connection().unwrap().query_row("SELECT provider_config_json FROM collection_external_bindings WHERE collection_id='w'", [], |r| r.get(0)).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&config).unwrap(), json!({"k":3}));
+    assert_eq!(serde_json::from_str::<Value>(&config).unwrap()["knownItemIds"], json!(["book-1","book-3"]));
     // A different identity with a snapshot: the bind is re-asserted, the snapshot composed
     // for it is dropped and refetched once the bind has been applied.
     let (_temp, l, s) = fixture();
@@ -5326,6 +5326,36 @@ fn collection_authority_config_only_bind_conflict_is_adopted_and_a_bind_with_sna
     let rows = outbox_rows(&l);
     assert_eq!(rows[1].2.as_deref(), Some("dependencyDropped"));
     assert_eq!(*refreshed.borrow(), vec![json!({"workId":"w","provider":"kakao"})]);
+}
+
+#[test]
+fn collection_authority_same_anchor_different_groups_reconnect_survives_conflict() {
+    let (_temp, l, s) = fixture();
+    let config = |fingerprint: &str| json!({"version":2,"query":"Series","groups":[{"anchorItemId":"book-1","groupFingerprint":fingerprint,"knownItemIds":["book-1"]}]});
+    let server = |fingerprint: &str, revision: i64| {
+        let mut b = binding(); b["provider"] = json!("kakao"); b["externalId"] = json!("book-1");
+        b["config"] = config(fingerprint); b["entityRevision"] = json!(revision); b
+    };
+    adopt(&l, &s, json!({"works":[work("w",1)],"bindings":[server("original",1)]}));
+    {
+        let mut db = l.connection().unwrap(); let tx = db.transaction().unwrap();
+        enqueue_provider_snapshot(&tx, &s, "w", &super::super::models::ExternalBindingInput {
+            provider:"kakao".into(),external_id:"book-1".into(),provider_config_json:Some(config("selected").to_string()),provider_data_json:None,last_synced_at:None
+        }).unwrap(); tx.commit().unwrap();
+    }
+    let sent = RefCell::new(Vec::new());
+    l.flush_collection_outbox_with(&s, &|body| {
+        sent.borrow_mut().push(body.clone());
+        if sent.borrow().len()==1 {
+            Ok(CollectionDelivery::Conflict(json!({"code":"revisionConflict","current":{"binding":server("concurrent",2)}})))
+        } else {
+            assert_eq!(body["config"]["groups"][0]["groupFingerprint"],"selected");
+            Ok(delivery_accepted(&s,body,5,json!({"bindings":[server("selected",3)]})))
+        }
+    },0).unwrap();
+    assert_eq!(sent.borrow().len(),2);
+    let raw: String = l.connection().unwrap().query_row("SELECT provider_config_json FROM collection_external_bindings WHERE collection_id='w' AND provider='kakao'",[],|r|r.get(0)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&raw).unwrap(),config("selected"));
 }
 
 #[test]

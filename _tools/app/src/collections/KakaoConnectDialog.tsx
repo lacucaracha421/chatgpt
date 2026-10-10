@@ -41,6 +41,7 @@ export function KakaoConnectDialog({
   const selected = (results ?? []).filter((candidate) => selectedKeys.includes(candidate.groupFingerprint));
   const [busy, setBusy] = useState<"search" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const [failedAction, setFailedAction] = useState<"search" | "apply" | "skip" | null>(null);
   const [searchValid, setSearchValid] = useState(false);
   const searchGeneration = useRef(0);
@@ -50,6 +51,7 @@ export function KakaoConnectDialog({
   }, [open, collectionId]);
 
   function toggle(fingerprint: string) {
+    setPending(false);
     setSelectedKeys((keys) =>
       keys.includes(fingerprint) ? keys.filter((key) => key !== fingerprint) : [...keys, fingerprint],
     );
@@ -60,6 +62,7 @@ export function KakaoConnectDialog({
   }
 
   async function search() {
+    setPending(false);
     const generation = ++searchGeneration.current;
     const trimmed = query.trim();
     setSearchValid(false); setFailedAction("search");
@@ -97,6 +100,18 @@ export function KakaoConnectDialog({
         query: submittedQuery,
         groups: selected.map(({ anchorItemId, groupFingerprint }) => ({ anchorItemId, groupFingerprint })),
       });
+      if ('outcome' in result) {
+        if (result.outcome === 'failed' || result.outcome === 'superseded') {
+          setPending(false);
+          setError(result.message || '연결이 적용되지 않았습니다. 현재 연결을 확인하고 다시 선택해 주세요.');
+          setBusy(null);
+          return;
+        }
+        if (result.outcome === 'pending') {
+          setPending(true); setFailedAction(null); setBusy(null);
+          return;
+        }
+      }
       await onApplied(result);
       onClose();
     } catch (applyError) {
@@ -125,6 +140,7 @@ export function KakaoConnectDialog({
         </div>
 
         {error && <p className="book-connect__error" role="alert">{error}</p>}
+        {pending && <p role="status">연결 대기 · 서버에서 처리 중</p>}
         <p className="book-connect__note">국내 출판 제목으로 검색하세요. 출판사별 권 목록과 발매 정보를 연결합니다.</p>
         {(results?.[0]?.unparsedCount ?? 0) > 0 && (
           <p className="book-connect__note">권 번호를 알 수 없거나 세트·가이드라서 제외된 상품 {results?.[0]?.unparsedCount}개</p>
@@ -151,7 +167,7 @@ export function KakaoConnectDialog({
                     className="book-connect__result"
                     aria-pressed={checked}
                     disabled={busy !== null}
-                    onClick={() => { setSelectedKeys([candidate.groupFingerprint]); setError(null); }}
+                    onClick={() => { setSelectedKeys([candidate.groupFingerprint]); setError(null); setPending(false); }}
                   >
                     <strong>{candidate.title}</strong>
                     <small>{[candidate.author, candidate.publisher, volumeSummary(candidate)].filter(Boolean).join(" · ")}</small>
@@ -196,7 +212,7 @@ export function KakaoConnectDialog({
           {error && failedAction !== "skip" && <Button variant="ghost" disabled={!!busy} onClick={() => { if (failedAction === "apply") void apply(); else void search(); }}>다시 시도</Button>}
           <Button type="button" disabled={busy !== null} onClick={close}>취소</Button>
           <Button type="button" variant="primary" disabled={selected.length === 0 || !searchValid || busy !== null} onClick={() => void apply()}>
-            <BusyLabel busy={!!(busy === "apply")} idle={selected.length > 1 ? `${selected.length}개 연결` : "연결"}>연결 중…</BusyLabel>
+            <BusyLabel busy={!!(busy === "apply")} idle={pending ? "연결 상태 확인" : selected.length > 1 ? `${selected.length}개 연결` : "연결"}>연결 중…</BusyLabel>
           </Button>
         </div>
       </div>

@@ -26,9 +26,9 @@ beforeEach(() => {
   });
 });
 afterEach(() => {cleanup(); vi.useRealTimers(); vi.unstubAllGlobals();});
-function Harness({features = ['kakaoReview']}: {features?: string[]} = {}) {
+function Harness({features = ['kakaoReview'], initialRequests = []}: {features?: string[]; initialRequests?: BindRequest[]} = {}) {
   const [items, setItems] = useState([work('a'), work('b'), work('c', {bound: true, volumes: Array.from({length: 12}, (_, i) => i + 1)})]);
-  const [requests, setRequests] = useState<BindRequest[]>([]);
+  const [requests, setRequests] = useState<BindRequest[]>(initialRequests);
   const authority = {features, failure: '', work: (item: CollectionSummary) => item,
     enqueue: (command: {workId: string; commandType: string; dismissed?: boolean; hideConnectionPrompt?: boolean}) => {
       mocks.enqueue(command);
@@ -38,6 +38,30 @@ function Harness({features = ['kakaoReview']}: {features?: string[]} = {}) {
   return <KakaoReviewOverlay open active onClose={vi.fn()} authority={authority} cover={() => <span/>}
     queue={{items, requests, ready: true, revision: 'r', status, error: '', refresh: vi.fn(), filed: request => setRequests([request])}}/>;
 }
+it('labels pinned server pending requests independently of old status and shows failed reasons inline', async () => {
+  render(<Harness initialRequests={[{...pending, executor: 'server'}, {...pending, requestId: 2, collectionId: 'b', executor: 'server', state: 'failed', reason: {code: 'bindingChanged', message: '현재 연결을 확인하고 다시 선택해 주세요.'}}]}/>);
+  expect(screen.getByText('서버에서 연결 처리 중 1')).toBeInTheDocument();
+  expect(screen.queryByText('PC 적용 대기 1')).not.toBeInTheDocument();
+  expect(screen.getByText('연결 실패 · 현재 연결을 확인하고 다시 선택해 주세요.')).toBeInTheDocument();
+  expect(screen.getByRole('button', {name: 'Dungeon b 찾기'})).toBeInTheDocument();
+});
+
+it('retains the previous queue while rereading and a stale older request cannot replace a just-filed choice', async () => {
+  const original = mocks.api.getMockImplementation()!;
+  const {result} = renderHook(() => useKakaoReviewQueue(true, 0));
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  let finish!: (value: unknown) => void;
+  mocks.api.mockImplementation((path: string, ...args: unknown[]) => path.includes('/bindings/requests?') ? new Promise(resolve => {finish = resolve;}) : original(path, ...args));
+  act(() => result.current.refresh());
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(result.current.items.map(item => item.id)).toEqual(['a']);
+  const fresh = {...pending, requestId: 10, executor: 'server' as const};
+  act(() => result.current.filed(fresh));
+  await act(async () => finish({version: 1, items: [{...pending, requestId: 9}], nextCursor: null}));
+  expect(result.current.requests).toEqual([fresh]);
+  expect(result.current.items.map(item => item.id)).toEqual(['a']);
+  expect(new URL(mocks.api.mock.calls.find(([path]) => String(path).includes('/bindings/requests?'))![0], 'https://fixture').searchParams.get('state')).toBe('all');
+});
 it('prefills the Korean title, checks an exact match and files one request directly into the waiting fold', async () => {
   render(<Harness/>);
   fireEvent.click(screen.getByRole('button', {name: 'Dungeon a 찾기'}));

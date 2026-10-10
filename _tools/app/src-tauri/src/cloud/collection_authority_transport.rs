@@ -25,6 +25,23 @@ fn definitive_refusal(status: u16, value: Option<Value>) -> Value {
 }
 
 impl CloudClient {
+    /// Client-owned intent routes. A lost response is always an unknown outcome; callers
+    /// retain the operation ID and never use it as permission for a local provider apply.
+    pub(crate) fn kakao_intent_post(&self, path: &str, body: &Value, token: &str) -> Result<Value, LibraryError> {
+        if !matches!(path, "/v1/collections/bindings/requests" | "/v1/collections/release-checks/run") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let _permit = self.send_permit()?;
+        let mut response = self.coded_agent()?.post(self.endpoint(path)?)
+            .header("Authorization", bearer(token)?).send_json(body)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        match response.status().as_u16() {
+            200 => read_json_bounded(&mut response, 256 * 1024),
+            401 | 403 => Err(LibraryError::CloudUnauthorized),
+            404 | 409 | 422 | 429 | 503 => read_json_bounded(&mut response, 64 * 1024),
+            _ => Err(LibraryError::CloudRequestUnavailable),
+        }
+    }
     /// `GET /v1/collections/release-checks/status`; `None` while the server has the checks off.
     pub(crate) fn release_checks_status(&self, token: &str) -> Result<Option<Value>, LibraryError> {
         let mut response = self

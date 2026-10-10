@@ -4,7 +4,7 @@ import {Button, IconButton, SegmentedControl, Skeleton} from './ui';
 import {Overlay} from './Overlay';
 import {BottomSheet} from './BottomSheet';
 import {BindSearchSheet} from './CollectionBindings';
-import {BINDINGS_STATUS_PATH, BIND_REQUESTS_PATH, type BindRequest, type BindStatus, type RequestsReply} from './collectionBindingsModel';
+import {BINDINGS_STATUS_PATH, BIND_REQUESTS_PATH, serverOwned, type BindRequest, type BindStatus, type RequestsReply} from './collectionBindingsModel';
 import {collectionPath, type CollectionPage, type CollectionSummary, type CollectionDetail} from './collectionModel';
 import {api, errorText} from './transport';
 import {outboxConnection} from './outboxConnection';
@@ -50,7 +50,7 @@ export function useKakaoReviewQueue(active: boolean, refreshKey: number) {
       } while (cursor && !controller.signal.aborted);
       let before: number | null = null;
       do {
-        const params = new URLSearchParams({state: 'pending', limit: '50', paged: 'true'});
+        const params = new URLSearchParams({state: 'all', limit: '50', paged: 'true'});
         if (before !== null) params.set('before', String(before));
         const page = await api<RequestsReply & {nextCursor?: number | null}>(`${BIND_REQUESTS_PATH}?${params}`, controller.signal);
         pending.push(...page.items.filter(request => request.provider === 'kakao'));
@@ -59,9 +59,19 @@ export function useKakaoReviewQueue(active: boolean, refreshKey: number) {
         before = next;
       } while (before !== null && !controller.signal.aborted);
       if (controller.signal.aborted) return;
+      // A bind can complete between the work pages and the request pages. Keep the
+      // displayed snapshot until both belong to an unchanged projection revision.
+      const current = await api<CollectionPage>(collectionPath('manga', '', false, null), controller.signal);
+      if (controller.signal.aborted) return;
+      if (!current.ready || current.revision !== revision) { refresh(); return; }
       for (const [id, filed] of justFiled.current) {
-        if (filed.at >= startedAt && !pending.some(request => request.requestId === id)) pending.push(filed.request);
-        else justFiled.current.delete(id);
+        const observed = pending.find(request => request.collectionId === filed.request.collectionId && request.requestId >= id);
+        if (!observed || (filed.at >= startedAt && observed.requestId === id && observed.state === 'pending')) {
+          // Never let an in-flight read restore the request superseded by this choice.
+          const older = pending.filter(request => request.collectionId === filed.request.collectionId);
+          for (const request of older) pending.splice(pending.indexOf(request), 1);
+          pending.push(filed.request);
+        } else justFiled.current.delete(id);
       }
       setSnapshot({connection, items, revision: revision ?? '', readKey}); setRequests(pending); setError('');
     };
@@ -95,10 +105,18 @@ export function KakaoReviewOverlay({open, active, onClose, queue, authority, cov
   useEffect(() => () => { cancelSegmentSwap(swap); timers.current.forEach(clearTimeout); }, [swap]);
   useEffect(() => { if (!open) { setSearch(null); setMenu(null); } }, [open]);
   const items = queue.items.map(work => authority.work(work));
-  const waiting = new Set(queue.requests.filter(request => request.state === 'pending').map(request => request.collectionId));
+  const latest = new Map<string, BindRequest>();
+  for (const request of queue.requests) {
+    if (!latest.has(request.collectionId) || latest.get(request.collectionId)!.requestId < request.requestId) latest.set(request.collectionId, request);
+  }
+  const waiting = new Set([...latest.values()].filter(request => request.state === 'pending').map(request => request.collectionId));
+  const segmentOf = (work: CollectionSummary) => {
+    const natural = kakaoReviewSegment(work.kakaoReview!);
+    return natural ?? (latest.get(work.id)?.state === 'failed' ? (work.kakaoReview!.bound ? 'partial' : 'unlinked') : null);
+  };
   const eligible = items.filter(work => work.kakaoReview && !waiting.has(work.id));
-  const count = (value: KakaoReviewSegment) => eligible.filter(work => kakaoReviewSegment(work.kakaoReview!) === value).length;
-  const rows = items.map(work => held[work.id] ?? work).filter(work => work.kakaoReview && (!waiting.has(work.id) || held[work.id]) && kakaoReviewSegment(work.kakaoReview) === segment);
+  const count = (value: KakaoReviewSegment) => eligible.filter(work => segmentOf(work) === value).length;
+  const rows = items.map(work => held[work.id] ?? work).filter(work => work.kakaoReview && (!waiting.has(work.id) || held[work.id]) && segmentOf(work) === segment);
   const rowIds = useRef<string[]>([]); rowIds.current = rows.map(work => work.id);
   const focus = (id?: string) => {
     const target = id ? list.current?.querySelector<HTMLButtonElement>(`[data-review-id="${CSS.escape(id)}"] button`) : null;
@@ -157,13 +175,17 @@ export function KakaoReviewOverlay({open, active, onClose, queue, authority, cov
           return <div key={work.id} data-review-id={work.id} className={`kakao-review-tablet__row${folding[work.id] ? ' is-folding' : ''}${entering[work.id] ? ' is-entering' : ''}`}>
             <button type="button" className="kakao-review-tablet__target" onClick={() => { if (segment === 'excluded') void mark(work, false).catch(reason => setNotice({text: errorText(reason)})); else setSearch(work); }} aria-label={`${work.name} ${segment === 'excluded' ? '다시 점검' : review.bound ? '다시 연결' : '찾기'}`}>
               <KakaoReviewIdentity name={work.name} subtitle={subtitle} cover={<span className="kakao-review__cover">{cover(work, queue.revision)}</span>}/>
+              {latest.get(work.id)?.state === 'failed' && <span className="kakao-review-tablet__failure" title={latest.get(work.id)?.reason?.message}>연결 실패 · {latest.get(work.id)?.reason?.message || '다시 연결해 주세요.'}</span>}
               {review.bound && <span className="kakao-review-tablet__partial"><KakaoReviewVolumes review={review}/></span>}
             </button>
             {authority.features.includes('kakaoReview') && <IconButton label={`${work.name} 더보기`} icon={EllipsisHorizontalIcon} onClick={() => setMenu(work)}/>}
           </div>;
         })}
       </div>
-      {waiting.size > 0 && <details className="kakao-review-tablet__pending"><summary>PC 적용 대기 {waiting.size}</summary>{items.filter(work => waiting.has(work.id)).map(work => <p key={work.id}>{work.name}</p>)}</details>}
+      {[true, false].map(server => {
+        const group = items.filter(work => waiting.has(work.id) && serverOwned(latest.get(work.id)!) === server);
+        return group.length > 0 && <details key={String(server)} className="kakao-review-tablet__pending"><summary>{server ? '서버에서 연결 처리 중' : 'PC 적용 대기'} {group.length}</summary>{group.map(work => <p key={work.id}>{work.name}</p>)}</details>;
+      })}
       {menu && <BottomSheet title={menu.name} onClose={() => setMenu(null)}><Button variant="ghost" onClick={() => void mark(menu, segment !== 'excluded').catch(reason => setNotice({text: errorText(reason)}))}>{segment === 'excluded' ? '다시 점검' : menu.kakaoReview?.bound ? '이대로 두기' : '연결 안 함'}</Button></BottomSheet>}
       {search && <BindSearchSheet key={search.id} item={{...search, volumes: search.volumes ?? [], artworks: []} as CollectionDetail} provider="kakao" status={queue.status} connection={search.kakaoReview?.bound ? 'connected' : 'unbound'}
         reviewQuery={search.kakaoReview!.query} workCover={<span className="kakao-review__cover">{cover(search, queue.revision)}</span>}
