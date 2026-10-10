@@ -39,6 +39,7 @@ import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterR
 import { readDuplicateCount } from "./duplicateCount";
 import { shadowPageSource, type CharacterReviewSource } from "./characterReviewSource";
 import { pcStartupInput, pcStartupRead } from "../shared/pcPerfLog";
+import { readCalendarSourcesCache, readWishlistCache, writeCalendarSourcesCache, writeWishlistCache } from "./homeReleaseCache";
 import "./home.css";
 
 const ShadowReview = lazy(() => import("../characters/ShadowReview").then((module) => ({ default: module.ShadowReview })));
@@ -107,9 +108,21 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const inbox = useMemo(() => groupInbox(release.data?.inbox ?? []), [release.data]);
 
   const calendarApi = gateway.releaseCalendar;
-  const [wishlist, setWishlist] = useState<ReleaseWishlistItem[]>([]);
-  const [wishlistReady, setWishlistReady] = useState(!calendarApi);
+  // The last server reply Home read is kept on disk (homeReleaseCache) and shown at once; the
+  // read of the current one runs after the first load and swaps in without a flash.
+  const releaseCache = useRef<{ root: string | null; wishlist: ReleaseWishlistItem[] | null; calendar: ReleaseCalendar | null }>({ root: null, wishlist: null, calendar: null });
+  if (releaseCache.current.root !== root) releaseCache.current = { root, wishlist: calendarApi ? readWishlistCache(root) : null, calendar: calendarApi ? readCalendarSourcesCache(root) : null };
+  const [wishlistFresh, setWishlistFresh] = useState<{ root: string; items: ReleaseWishlistItem[] } | null>(null);
+  const [calendarFresh, setCalendarFresh] = useState<{ root: string; value: ReleaseCalendar } | null>(null);
+  const wishlist = wishlistFresh?.root === root ? wishlistFresh.items : releaseCache.current.wishlist ?? NO_WISHLIST;
+  const calendarSnapshot = calendarFresh?.root === root ? calendarFresh.value : releaseCache.current.calendar;
+  const shownWishlist = useRef(wishlist);
+  shownWishlist.current = wishlist;
+  const shownCalendar = useRef(calendarSnapshot);
+  shownCalendar.current = calendarSnapshot;
+  const wishlistReady = !calendarApi || wishlistFresh?.root === root || releaseCache.current.wishlist !== null;
   const [wishlistError, setWishlistError] = useState(false);
+  const [startupSettled, setStartupSettled] = useState(false);
   const [releaseDetail, setReleaseDetail] = useState<ReleaseTitle | null>(null);
   const [shelfRetry, setShelfRetry] = useState(0);
   // Wait for the already-pending first collection read. Later refreshes keep the old
@@ -129,23 +142,48 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const revisitDay = useHomeRevisitDay(now);
   const media = useHomeMedia(gateway, revisitDay, mediaActive, mediaVersion);
   const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number; visit: number } | null>(null);
-  const [calendarSnapshot, setCalendarSnapshot] = useState<ReleaseCalendar | null>(null);
+  // With a saved wishlist, the first load shows it and the library connection stays free for the
+  // reads the first load needs; the reads start once Home is shown (or after a few seconds).
+  const deferReleaseReads = !startupSettled && releaseCache.current.wishlist !== null;
   useEffect(() => {
-    if (!calendarApi || !active) return;
+    if (startupSettled || !active) return;
+    const timer = window.setTimeout(() => setStartupSettled(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, [startupSettled, active]);
+  useEffect(() => {
+    if (!calendarApi || !active || deferReleaseReads) return;
     let live = true;
+    const acceptWishlist = (items: ReleaseWishlistItem[]) => {
+      if (!live) return;
+      // Same content keeps the shown array (no re-render churn); the saved copy is always renewed.
+      const same = JSON.stringify(shownWishlist.current) === JSON.stringify(items);
+      writeWishlistCache(root, items);
+      setWishlistFresh(previous => previous?.root === root && same ? previous : { root, items: same ? shownWishlist.current : items });
+    };
+    const acceptCalendar = (value: ReleaseCalendar | null) => {
+      if (!live || !value) return;
+      const next = { rangeStart: value.rangeStart, rangeEnd: value.rangeEnd, entries: [], sources: value.sources ?? [] };
+      const same = JSON.stringify(shownCalendar.current?.sources) === JSON.stringify(next.sources);
+      writeCalendarSourcesCache(root, next);
+      setCalendarFresh(previous => previous?.root === root && same ? previous : { root, value: same && shownCalendar.current ? shownCalendar.current : next });
+    };
     const wishlistRead = pcStartupRead("home.wishlist", () => calendarApi.wishlist()).then((items) => {
-      if (live) { setWishlist(items ?? []); setWishlistReady(true); setWishlistError(false); }
+      acceptWishlist(items ?? []);
+      if (live) setWishlistError(false);
       return true;
     }, () => { if (live) setWishlistError(true); return false; });
-    const releaseRead = pcStartupRead("home.calendar", () => calendarApi.calendar()).then(value => { if (live) setCalendarSnapshot(value); return true; }, () => false);
+    const releaseRead = pcStartupRead("home.calendar", () => calendarApi.calendar()).then(value => { acceptCalendar(value); return true; }, () => false);
     void Promise.all([wishlistRead, releaseRead]).then(results => {
       if (live && results.every(Boolean)) setCalendarRead({ api: calendarApi, root, retry: shelfRetry, visit: visitNumber });
     });
+    // The native reads answer from disk and revalidate with the server behind them; a change
+    // they find arrives here as an event.
     const stop = calendarApi.subscribeChanged?.(() => {
-      void calendarApi.calendar().then(value => { if (live) setCalendarSnapshot(value); }).catch(() => undefined);
+      void calendarApi.calendar().then(acceptCalendar).catch(() => undefined);
+      void calendarApi.wishlist().then(items => acceptWishlist(items ?? [])).catch(() => undefined);
     });
     return () => { stop?.(); live = false; };
-  }, [calendarApi, root, shelfRetry, active, visitNumber]);
+  }, [calendarApi, root, shelfRetry, active, visitNumber, deferReleaseReads]);
 
   const [queueRead, setQueueRead] = useState(0);
   const [overview, setOverview] = useState<HomeOverview | null>(null);
@@ -279,7 +317,10 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   };
   const openUpcoming = (row: UpcomingRow) => row.collectionId ? onNavigate({ kind: 'collection', collectionId: row.collectionId }) : onNavigate(calendarView(row.kind === 'movie' ? 'movie' : 'game'));
   const problems = connectionRows.filter(row => row.tone === 'off' || row.tone === 'idle');
-  if (overview?.server?.configured && !overview.server.live && !problems.some(row => row.key === 'server')) problems.unshift({ key: 'server', label: '서버', value: '연결 안 됨', tone: 'off', view: { kind: 'settings', section: 'connection' } });
+  // Where the client reports sync health, the connection rows above already follow the live state the
+  // status center shows. The overview's one-shot reading of the server watch is only the fallback: it
+  // can predate the first watch result and would keep "연결 안 됨" until the next overview read.
+  if (!gateway.authoritySyncHealth && overview?.server?.configured && !overview.server.live && !problems.some(row => row.key === 'server')) problems.unshift({ key: 'server', label: '서버', value: '연결 안 됨', tone: 'off', view: { kind: 'settings', section: 'connection' } });
   // Keep a late count's row in place for this visit, including a zero result.
   const duplicateSlot = useRef(false);
   const reservedTodos = duplicateSlot.current || duplicateCount === null
@@ -326,6 +367,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
     layoutShown.current = true;
   }
   const firstLoad = !layoutShown.current;
+  useEffect(() => { if (!firstLoad) setStartupSettled(true); }, [firstLoad]);
   // On app start the launch splash covers this first load, then leaves with Home's first images.
   const launchHost = useRef<HTMLDivElement>(null);
   useLaunchReady(!firstLoad, launchHost);
@@ -382,6 +424,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   </div>;
 }
 
+const NO_WISHLIST: ReleaseWishlistItem[] = [];
 const noopSubscribe = () => () => undefined;
 const EMPTY_NOTES = { notes: [], keyringLocked: false } as unknown as ReturnType<NotesStore["snapshot"]>;
 const emptyNotes = () => EMPTY_NOTES;

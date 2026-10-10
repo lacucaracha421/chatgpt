@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readHomeVisit, writeHomeVisit } from "./homeAttentionModel";
+import { readWishlistCache, writeWishlistCache } from "./homeReleaseCache";
 import { resetReleaseDataForTests } from "../collections/releaseData";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import type { AuthoritySyncHealth, HomeOverview, ReleaseWishlistItem } from "../library/types";
@@ -326,6 +327,53 @@ describe("Home visit read acknowledgement", () => {
     await screen.findByText("Recovered release");
     await waitFor(() => expect(readHomeVisit("fixture").lastVisit).toBe(NOW.toISOString()));
     expect(readHomeVisit("fixture").pending).toContain("title:retry:2026-09-25:");
+  });
+});
+
+describe("Home server-owned release reads", () => {
+  it("shows the saved wishlist at once, reads the server reply after the first load, and swaps it in", async () => {
+    writeWishlistCache("fixture", [title("saved", "Saved release", "game", "2026-09-26")]);
+    let finish!: (items: ReleaseWishlistItem[]) => void;
+    gateway.releaseCalendar.wishlist.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { view } = renderHome();
+    await within(await screen.findByRole("region", { name: /2주 안에 발매/ })).findByText("Saved release");
+    expect(view.container.querySelector(".home-pc-layout")?.getAttribute("aria-busy")).toBe("false");
+    await waitFor(() => expect(gateway.releaseCalendar.wishlist).toHaveBeenCalledOnce());
+    expect(screen.getByText("Saved release")).toBeVisible();
+    await act(async () => { finish([title("saved", "Saved release", "game", "2026-09-26"), title("fresh", "Fresh release", "game", "2026-09-26")]); });
+    await within(screen.getByRole("region", { name: /2주 안에 발매/ })).findByText("Fresh release");
+    expect(screen.getByText("Saved release")).toBeVisible();
+    expect(readWishlistCache("fixture")?.map(item => item.id)).toEqual(["saved", "fresh"]);
+  });
+  it("saves the first server reply, an empty list included, for the next start", async () => {
+    renderHome();
+    await waitFor(() => expect(readWishlistCache("fixture")).toEqual([]));
+  });
+  it("waits for the server reply on the very first start, when nothing is saved", async () => {
+    let finish!: (items: ReleaseWishlistItem[]) => void;
+    gateway.releaseCalendar.wishlist.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { view } = renderHome();
+    await act(async () => {});
+    expect(view.container.querySelector(".home-pc-layout")?.getAttribute("aria-busy")).toBe("true");
+    await act(async () => finish([]));
+    await waitFor(() => expect(view.container.querySelector(".home-pc-layout")?.getAttribute("aria-busy")).toBe("false"));
+  });
+});
+
+describe("Home server row", () => {
+  const serverRow = () => screen.queryByRole("button", { name: /서버/ });
+  it("follows the live connection state instead of the overview's startup reading", async () => {
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 10, today: 0, week: 1 }, { live: false }));
+    renderHome();
+    await act(async () => {});
+    await waitFor(() => expect(gateway.authoritySyncHealth).toHaveBeenCalled());
+    await act(async () => {});
+    expect(serverRow()).toBeNull();
+  });
+  it("shows the row while the live state reports an outage", async () => {
+    gateway.authoritySyncHealth.mockResolvedValue({ ...healthy, authorityPassFailure: { code: "network", at: iso(14, 0) } as never });
+    renderHome();
+    expect(await screen.findByRole("button", { name: /서버.*연결 안 됨/ })).toBeVisible();
   });
 });
 
