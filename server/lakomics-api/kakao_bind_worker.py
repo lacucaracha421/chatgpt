@@ -36,6 +36,9 @@ def startup_db(db):
     for name, declaration in additions.items():
         if name not in columns:
             db.execute(f"ALTER TABLE collection_binding_requests ADD COLUMN {name} {declaration}")
+    if enabled("mangadex"):
+        import mangadex_bind
+        mangadex_bind.startup_db(db)
 
 
 def pc_clause(db):
@@ -173,11 +176,16 @@ class Worker:
                                   " WHERE executor='server' AND provider IN ('kakao','mangadex') AND state='pending'"
                                   " ORDER BY sequence").fetchall()
             rows = [row for row in rows if enabled(row["provider"])]
+            executed = False
             for row in rows:
                 retry = self.planner.parse_time(row["next_attempt_at"])
                 if retry is None or retry <= self.now():
                     self.execute(row["sequence"])
-                    return 1
+                    executed = True
+                    break
+            filled = self.manga.fill_volume_covers(self) if enabled("mangadex") else 0
+            if executed or filled:
+                return 1
             waits = [(self.planner.parse_time(row["next_attempt_at"]) - self.now()).total_seconds() for row in rows]
             return max(1, min([30, *waits]))
         finally:

@@ -1,11 +1,11 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { KakaoSeriesCandidate, LibraryGateway } from "../library/types";
 import { KakaoConnectDialog } from "./KakaoConnectDialog";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 it('keeps a server-pending selection separate from confirmed completion and checks the same choice again', async () => {
   const user = userEvent.setup();
@@ -63,7 +63,7 @@ function renderDialog(overrides: Partial<LibraryGateway> = {}) {
   } as unknown as LibraryGateway;
   const onClose = vi.fn();
   const onApplied = vi.fn().mockResolvedValue(undefined);
-  render(
+  const view = render(
     <LibraryProvider gateway={gateway}>
       <KakaoConnectDialog
         open
@@ -74,7 +74,7 @@ function renderDialog(overrides: Partial<LibraryGateway> = {}) {
       />
     </LibraryProvider>,
   );
-  return { gateway, onClose, onApplied };
+  return { gateway, onClose, onApplied, ...view };
 }
 
 describe("KakaoConnectDialog", () => {
@@ -200,5 +200,151 @@ describe("KakaoConnectDialog", () => {
     vi.mocked(gateway.searchKakao).mockRejectedValueOnce(new Error("검색 실패"));
     await user.click(screen.getByRole("button", { name: "검색" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("검색 실패");
+  });
+});
+
+async function prepareRecheck() {
+  const user = userEvent.setup();
+  const rendered = renderDialog();
+  await user.click(screen.getByRole("button", { name: "검색" }));
+  await user.click(await screen.findByRole("button", { name: /던전밥.*쿠이 료코/ }));
+  return { ...rendered, apply: vi.mocked(rendered.gateway.applyKakao) };
+}
+
+async function startPending(apply: Awaited<ReturnType<typeof prepareRecheck>>["apply"]) {
+  vi.useFakeTimers();
+  apply.mockResolvedValue({ outcome: 'pending', message: null });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '연결' })); });
+  expect(screen.getByText('연결 대기 · 서버에서 처리 중')).toBeInTheDocument();
+}
+
+async function advanceRecheck(milliseconds: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); });
+}
+
+describe('pending bind rechecks', () => {
+  it('rechecks after 1.5 seconds with the same request and confirms once', async () => {
+    const { apply, onApplied, onClose } = await prepareRecheck();
+    await startPending(apply);
+    const applied = { outcome: 'applied' as const, message: null };
+    apply.mockResolvedValueOnce(applied);
+    await advanceRecheck(1_499);
+    expect(apply).toHaveBeenCalledTimes(1);
+    await advanceRecheck(1);
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(apply.mock.calls[1][0]).toEqual(apply.mock.calls[0][0]);
+    expect(onApplied).toHaveBeenCalledExactlyOnceWith(applied);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await advanceRecheck(120_000);
+    expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['failed', 'superseded', 'error'] as const)('shows %s and stops checking', async outcome => {
+    const { apply, onApplied, onClose } = await prepareRecheck();
+    await startPending(apply);
+    if (outcome === 'error') apply.mockRejectedValueOnce(new Error('연결 확인 실패'));
+    else apply.mockResolvedValueOnce({ outcome, message: '연결 확인 실패' });
+    await advanceRecheck(1_500);
+    expect(screen.getByRole('alert')).toHaveTextContent('연결 확인 실패');
+    expect(screen.queryByText('연결 대기 · 서버에서 처리 중')).not.toBeInTheDocument();
+    await advanceRecheck(120_000);
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('stops scheduled checks on unmount', async () => {
+    const { apply, unmount, onApplied } = await prepareRecheck();
+    await startPending(apply);
+    unmount();
+    await advanceRecheck(120_000);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(onApplied).not.toHaveBeenCalled();
+  });
+
+  it('stops scheduled checks when open becomes false', async () => {
+    const { apply, gateway, rerender, onApplied, onClose } = await prepareRecheck();
+    await startPending(apply);
+    rerender(<LibraryProvider gateway={gateway}><KakaoConnectDialog open={false} collectionId="collection-1" initialQuery="던전밥" onApplied={onApplied} onClose={onClose} /></LibraryProvider>);
+    await advanceRecheck(120_000);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('replays every selected group and the submitted query', async () => {
+    const user = userEvent.setup();
+    const editions = [candidates[0], { ...candidates[0], anchorItemId: 'item-2', groupFingerprint: 'fingerprint-b', publisher: '다른 출판사' }];
+    const { gateway, onApplied, onClose } = renderDialog({ searchKakao: vi.fn().mockResolvedValue(editions) });
+    await user.click(screen.getByRole('button', { name: '검색' }));
+    const choices = await screen.findAllByRole('checkbox', { name: '던전밥 1–3권 함께 연결' });
+    await user.click(choices[0]);
+    await user.click(choices[1]);
+    const apply = vi.mocked(gateway.applyKakao);
+    vi.useFakeTimers();
+    apply.mockResolvedValueOnce({ outcome: 'pending', message: null }).mockResolvedValueOnce({ outcome: 'applied', message: null });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '2개 연결' })); });
+    fireEvent.change(screen.getByRole('searchbox', { name: '카카오 작품 검색' }), { target: { value: '다른 검색어' } });
+    await advanceRecheck(1_500);
+    const request = {
+      collectionId: 'collection-1', query: '던전밥',
+      groups: editions.map(({ anchorItemId, groupFingerprint }) => ({ anchorItemId, groupFingerprint })),
+    };
+    expect(apply.mock.calls.map(([argument]) => argument)).toEqual([request, request]);
+    expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops on cancel even before the parent removes the dialog', async () => {
+    const { apply, onClose } = await prepareRecheck();
+    await startPending(apply);
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    await advanceRecheck(120_000);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps pending steady during a slow check and never overlaps calls', async () => {
+    const { apply, onApplied, onClose } = await prepareRecheck();
+    await startPending(apply);
+    let resolve!: (result: Awaited<ReturnType<typeof apply>>) => void;
+    apply.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    await advanceRecheck(1_500);
+    await advanceRecheck(10_000);
+    const check = screen.getByRole('button', { name: '연결 상태 확인' });
+    expect(check).toBeDisabled();
+    fireEvent.click(check);
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('연결 대기 · 서버에서 처리 중')).toBeInTheDocument();
+    expect(screen.queryByText('연결 중…')).not.toBeInTheDocument();
+    // Closing an in-flight background request also ignores its eventual reply.
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    await act(async () => { resolve({ outcome: 'applied' as const, message: null }); });
+    await advanceRecheck(120_000);
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses three-second intervals, stops at two minutes and allows a manual check', async () => {
+    const { apply, onApplied } = await prepareRecheck();
+    await startPending(apply);
+    await advanceRecheck(1_500);
+    expect(apply).toHaveBeenCalledTimes(2);
+    await advanceRecheck(2_999);
+    expect(apply).toHaveBeenCalledTimes(2);
+    await advanceRecheck(1);
+    expect(apply).toHaveBeenCalledTimes(3);
+    await advanceRecheck(115_500);
+    expect(apply).toHaveBeenCalledTimes(41);
+    expect(screen.getByText('연결 대기 · 서버에서 처리 중')).toBeInTheDocument();
+    await advanceRecheck(120_000);
+    expect(apply).toHaveBeenCalledTimes(41);
+    const check = screen.getByRole('button', { name: '연결 상태 확인' });
+    expect(check).toBeEnabled();
+    apply.mockResolvedValueOnce({ outcome: 'applied' as const, message: null });
+    await act(async () => { fireEvent.click(check); });
+    expect(apply).toHaveBeenCalledTimes(42);
+    expect(onApplied).toHaveBeenCalledTimes(1);
   });
 });

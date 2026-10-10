@@ -51,6 +51,7 @@ class MangaDexBindTests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.db, self.ca, self.bindings, self.rc = self.base.db, self.base.ca, self.base.bindings, self.base.rc
+        kb.startup_db(self.db)
         self.db.execute("CREATE TABLE mobile_collection_artwork(sha256 TEXT PRIMARY KEY,size_bytes INTEGER,content_type TEXT)")
         self.db.commit()
         self.pipe = artwork_core(self.ca)
@@ -142,6 +143,168 @@ class MangaDexBindTests(unittest.TestCase):
 
     def work(self):
         return self.ca.work_state(self.ca.work_row(self.db, LIBRARY, "a"))
+
+    def volumes(self):
+        return self.db.execute("SELECT * FROM collection_authority_volumes WHERE work_id='a'"
+                               " ORDER BY volume_number,edition_index").fetchall()
+
+    def choose_volume_cover(self, number, artwork_id):
+        row = next(v for v in self.volumes() if v["volume_number"] == number)
+        self.slot(row["volume_id"], number, coverArtworkId=artwork_id,
+                  sourceProvider=row["source_provider"], sourceCoverId=row["source_cover_id"],
+                  expectedRevision=row["entity_revision"])
+
+    def test_volume_fill_cap_continuation_snapshot_filename_and_quiet_selection(self):
+        self.covers = [self.extra_cover(n) for n in range(1, 12)]
+        request = self.submit()
+        self.worker.run_once()
+        self.assertEqual(self.row(request)["state"], "applied")
+        self.assertEqual(sum(v["cover_artwork_id"] is not None for v in self.volumes()), 9)
+        selection = self.work()["selection"]
+        # Changing the fake response cannot affect the stored filenames used by the fill.
+        for cover in self.covers:
+            cover["attributes"]["fileName"] = "client-change.jpg"
+        self.worker.run_once()
+        self.assertTrue(all(v["cover_artwork_id"] for v in self.volumes()))
+        self.assertEqual(self.work()["selection"], selection)
+        images = [c for c in self.calls if isinstance(c, tuple) and "uploads.mangadex.org" in c[0]]
+        self.assertEqual(len(images), 11)
+        self.assertTrue(all(c[0].endswith("/valid.jpg") for c in images))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_release_events").fetchone()[0], 0)
+        calls = len(self.calls)
+        self.worker.run_once()
+        self.assertEqual(len(self.calls), calls)
+
+    def test_volume_fill_preserves_chosen_cover_before_and_during_fetch(self):
+        self.covers = [self.extra_cover(n) for n in (1, 2, 3)]
+        self.apply()
+        artwork_id = self.volumes()[0]["cover_artwork_id"]
+        self.choose_volume_cover(2, artwork_id)
+        image = self.pipe.outbound
+        def choose(url, **kwargs):
+            self.choose_volume_cover(3, artwork_id)
+            return image(url, **kwargs)
+        self.pipe.outbound = choose
+        self.worker.run_once()
+        self.assertEqual([v["cover_artwork_id"] for v in self.volumes()], [artwork_id] * 3)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_authority_artworks").fetchone()[0], 1)
+
+    def test_volume_fill_reuses_existing_artwork_without_fetch(self):
+        self.covers = [self.extra_cover(n) for n in (1, 2)]
+        self.apply()
+        original = json.loads(self.db.execute("SELECT original FROM collection_authority_artworks").fetchone()[0])
+        self.db.execute("BEGIN IMMEDIATE")
+        self.ca.apply_command_batch(self.db, library_id=LIBRARY, epoch=1, operation_id=str(uuid.uuid4()),
+            request_payload={"fixture": "existing artwork", "workId": "a"}, now=self.rc.iso(NOW), commands=[dict(
+                libraryId=LIBRARY, epoch=1, contractVersion=1, operationId=str(uuid.uuid4()),
+                commandType="addArtwork", workId="a", artworkId="existing", kind="cover", provider="mangadex",
+                providerImageId=self.covers[1]["id"], language="ja", original=original,
+                thumbnail=None, width=120, height=180)])
+        self.db.commit()
+        calls = len(self.calls)
+        self.worker.run_once()
+        self.assertEqual(self.volumes()[1]["cover_artwork_id"], "existing")
+        self.assertEqual(len(self.calls), calls)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_authority_artworks").fetchone()[0], 2)
+
+    def test_volume_fill_permanent_image_failures_survive_restart(self):
+        self.covers = [self.extra_cover(n) for n in range(1, 5)]
+        self.apply()
+        errors = [self.pipe.UpstreamStatus(404),
+                  HTTPError(422, {"code": "providerImageInvalid"}),
+                  HTTPError(413, {"code": "providerResponseTooLarge"})]
+        with mock.patch.object(self.pipe, "outbound", side_effect=errors) as fetch:
+            self.worker.run_once()
+            self.assertEqual(fetch.call_count, 3)
+            restarted = kb.Worker(self.base.connection, bindings=self.bindings, planner=self.rc, ca=self.ca,
+                                  now=lambda: NOW, manga=self.manga)
+            restarted.run_once()
+            self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(self.db.execute("SELECT SUM(skipped) FROM mangadex_volume_cover_attempts").fetchone()[0], 3)
+        self.assertTrue(all(v["cover_artwork_id"] is None for v in self.volumes()[1:]))
+
+    def test_volume_fill_rate_limit_backoff_restart_and_resume(self):
+        self.covers = [self.extra_cover(n) for n in (1, 2)]
+        self.apply()
+        with mock.patch.object(self.pipe, "outbound", side_effect=self.pipe.UpstreamStatus(429, 900)) as fetch:
+            self.worker.run_once()
+            restarted = kb.Worker(self.base.connection, bindings=self.bindings, planner=self.rc, ca=self.ca,
+                                  now=lambda: NOW, manga=self.manga)
+            restarted.run_once()
+            self.assertEqual(fetch.call_count, 1)
+        row = self.db.execute("SELECT * FROM mangadex_volume_cover_attempts").fetchone()
+        later = NOW + __import__("datetime").timedelta(seconds=900)
+        self.assertEqual((row["skipped"], row["retry_count"], row["next_attempt_at"]), (0, 1, self.rc.iso(later)))
+        restarted.now = lambda: later
+        restarted.run_once()
+        self.assertIsNotNone(self.volumes()[1]["cover_artwork_id"])
+
+    def test_volume_fill_off_and_off_during_fetch_are_inert(self):
+        self.covers = [self.extra_cover(n) for n in (1, 2)]
+        self.apply()
+        before = list(self.db.iterdump())
+        with mock.patch.dict(os.environ, {"LAKOMICS_MANGADEX_BINDS": "0"}):
+            self.manga.fill_volume_covers(self.worker)
+            self.worker.run_once()
+        self.assertEqual(list(self.db.iterdump()), before)
+        image = self.pipe.outbound
+        def off(url, **kwargs):
+            os.environ["LAKOMICS_MANGADEX_BINDS"] = "0"
+            return image(url, **kwargs)
+        self.pipe.outbound = off
+        self.worker.run_once()
+        self.assertEqual(list(self.db.iterdump()), before)
+
+    def test_volume_fill_authority_binding_without_server_request(self):
+        self.covers = [self.extra_cover(n) for n in (1, 2)]
+        fetched = self.manga.fetch(MANGA, stop=lambda: False)
+        self.command("bindProvider", workId="a", provider="mangadex", externalId=MANGA, config=None, expectedRevision=0)
+        self.command("applyProviderSnapshot", workId="a", provider="mangadex", externalId=MANGA,
+                     snapshot=fetched["snapshot"], values=fetched["values"], details=None, baseSnapshotDigest=None)
+        for n, cover in enumerate(self.covers, 1):
+            self.slot(f"authority-{n}", n, sourceProvider="mangadex", sourceCoverId=cover["id"])
+        self.worker.run_once()
+        self.assertTrue(all(v["cover_artwork_id"] for v in self.volumes()))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_binding_requests").fetchone()[0], 0)
+
+    def test_volume_fill_eligibility_and_binding_race(self):
+        self.covers = [self.extra_cover(n) for n in range(1, 6)]
+        self.apply()
+        row = self.volumes()[1]
+        self.slot(row["volume_id"], 2, sourceProvider="kakao", sourceCoverId=row["source_cover_id"],
+                  expectedRevision=row["entity_revision"])
+        binding = self.ca.binding_row(self.db, LIBRARY, "a", "mangadex")
+        snapshot = json.loads(binding["snapshot"])
+        snapshot["covers"]["data"][2]["attributes"]["locale"] = "en"
+        self.command("applyProviderSnapshot", workId="a", provider="mangadex", externalId=MANGA,
+                     snapshot=snapshot, values=json.loads(binding["snapshot_values"]), details=None,
+                     baseSnapshotDigest=binding["snapshot_digest"])
+        # A delete during the first eligible image fetch prevents all later attaches.
+        image = self.pipe.outbound
+        def unbind(url, **kwargs):
+            current = self.ca.binding_row(self.db, LIBRARY, "a", "mangadex")
+            if current["bound"]:
+                self.command("unbindProvider", workId="a", provider="mangadex", expectedRevision=current["entity_revision"])
+            return image(url, **kwargs)
+        self.pipe.outbound = unbind
+        self.worker.run_once()
+        self.assertTrue(all(v["cover_artwork_id"] is None for v in self.volumes()[1:]))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_authority_artworks").fetchone()[0], 1)
+        skipped = self.db.execute("SELECT volume_id FROM mangadex_volume_cover_attempts WHERE skipped=1").fetchall()
+        self.assertEqual([r[0] for r in skipped], [self.volumes()[2]["volume_id"]])
+
+    def test_volume_fill_commit_failure_rolls_back_artwork_and_volume(self):
+        self.covers = [self.extra_cover(n) for n in (1, 2)]
+        self.apply()
+        original = self.ca.apply_command_batch
+        def failed(*args, **kwargs):
+            original(*args, **kwargs)
+            raise OSError("commit unavailable")
+        with mock.patch.object(self.ca, "apply_command_batch", side_effect=failed):
+            self.worker.run_once()
+        self.assertIsNone(self.volumes()[1]["cover_artwork_id"])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_authority_artworks").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT skipped FROM mangadex_volume_cover_attempts").fetchone()[0], 0)
 
     def test_rust_fixture_normalization_full_snapshot_original_receipt_quiet_replay(self):
         request = self.apply(expected={"externalId": None})
@@ -422,7 +585,12 @@ class MangaDexBindTests(unittest.TestCase):
             db.executescript(self.bindings.DDL)
             kb.startup_db(db)
             self.assertFalse(kb.has_metadata(db))
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='mangadex_volume_cover_attempts'").fetchone())
+            os.environ[kb.ENV] = "1"
+            kb.startup_db(db)
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='mangadex_volume_cover_attempts'").fetchone())
             db.close()
+            os.environ[kb.ENV] = "0"
             worker = kb.Worker(lambda: (_ for _ in ()).throw(AssertionError("OFF I/O")),
                                bindings=self.bindings, planner=self.rc, ca=self.ca, manga=self.manga)
             worker.start()

@@ -8,8 +8,21 @@ import os
 import re
 import time
 import uuid
+from datetime import timedelta
 
-from kakao_bind_worker import Refused, selection_receipt
+from kakao_bind_worker import Refused, enabled, selection_receipt
+
+VOLUME_COVERS_PER_WAKE = 8
+
+
+def startup_db(db):
+    if enabled("mangadex"):
+        db.execute("""CREATE TABLE IF NOT EXISTS mangadex_volume_cover_attempts(
+            library_id TEXT NOT NULL, epoch INTEGER NOT NULL, volume_id TEXT NOT NULL,
+            manga_id TEXT NOT NULL, cover_id TEXT NOT NULL,
+            skipped INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TEXT,
+            PRIMARY KEY(library_id,epoch,volume_id,manga_id,cover_id))""")
 
 NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://lakomics.invalid/serverMangaDexBind")
 MESSAGES = {
@@ -187,22 +200,182 @@ class Provider:
         picked = representative(covers)
         receipt = None
         if picked is not None:
-            artwork = self.pipeline()
-            image_deadline = min(deadline, self.clock() + 30)
-            try:
-                data, mime = self.admitted(lambda: artwork.mangadex_image(
-                    manga_id, picked["fileName"], image_deadline), image_deadline, stop)
-                self.check(deadline, stop)
-                receipt = artwork.store_artwork_bytes(data, mime, image_deadline, self.get_db, self.storage, self.bucket,
-                    provider="mangadex", provider_image_id=picked["coverId"], automatic=True, stop=stop,
-                    strict_deadline=True)
-                self.check(deadline, stop)
-            except artwork.UpstreamStatus as error:
-                if error.status == 404:
-                    refuse("mangadexCoverInvalid")
-                raise self.bindings.Upstream("status", error.status, error.retry_after) from None
+            receipt = self.fetch_cover(manga_id, picked, deadline, stop)
         return {"mangaId": manga_id, "snapshot": snapshot, "covers": covers, "representative": picked,
                 "artwork": receipt, "values": {k: item[k] for k in ("year", "author", "genres", "overview", "originalTitle")}}
+
+    def fetch_cover(self, manga_id, cover, deadline, stop):
+        artwork = self.pipeline()
+        image_deadline = min(deadline, self.clock() + 30)
+        try:
+            data, mime = self.admitted(lambda: artwork.mangadex_image(
+                manga_id, cover["fileName"], image_deadline), image_deadline, stop)
+            receipt = artwork.store_artwork_bytes(data, mime, image_deadline, self.get_db, self.storage, self.bucket,
+                provider="mangadex", provider_image_id=cover["coverId"], automatic=True, stop=stop,
+                strict_deadline=True)
+            self.check(deadline, stop)
+            return receipt
+        except artwork.UpstreamStatus as error:
+            if error.status == 404:
+                refuse("mangadexCoverInvalid")
+            raise self.bindings.Upstream("status", error.status, error.retry_after) from None
+
+    def cover_candidates(self, db, domain, now):
+        # Authority works include PC-published bindings, not just server request rows.
+        return db.execute("""SELECT v.*, b.external_id AS manga_id, b.snapshot,
+                b.snapshot_digest, b.entity_revision AS binding_revision,
+                a.retry_count
+            FROM collection_authority_volumes v
+            JOIN collection_authority_works w USING(library_id,work_id)
+            JOIN collection_authority_bindings b USING(library_id,work_id)
+            LEFT JOIN mangadex_volume_cover_attempts a ON a.library_id=v.library_id
+                AND a.epoch=? AND a.volume_id=v.volume_id AND a.manga_id=b.external_id
+                AND a.cover_id=v.source_cover_id
+            WHERE v.library_id=? AND w.lifecycle='live' AND w.type='manga'
+                AND b.provider='mangadex' AND b.bound=1 AND b.snapshot IS NOT NULL
+                AND b.snapshot_external_id=b.external_id
+                AND v.deleted=0 AND v.source_provider='mangadex'
+                AND v.source_cover_id IS NOT NULL AND v.cover_artwork_id IS NULL
+                AND (json_extract(w.derived,'$.volumeRange.minVolume') IS NULL
+                     OR v.volume_number>=json_extract(w.derived,'$.volumeRange.minVolume'))
+                AND (json_extract(w.derived,'$.volumeRange.maxVolume') IS NULL
+                     OR v.volume_number<=json_extract(w.derived,'$.volumeRange.maxVolume'))
+                AND COALESCE(a.skipped,0)=0
+                AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=?)
+            ORDER BY b.updated_at DESC,
+                (SELECT MAX(r.sequence) FROM collection_binding_requests r
+                 WHERE r.collection_id=v.work_id AND r.provider='mangadex' AND r.state='applied') DESC,
+                v.work_id, v.volume_number, v.edition_index
+            LIMIT ?""", (domain["epoch"], domain["libraryId"], now, VOLUME_COVERS_PER_WAKE)).fetchall()
+
+    def existing_cover(self, db, row):
+        return db.execute("SELECT artwork_id FROM collection_authority_artworks WHERE library_id=?"
+                          " AND work_id=? AND provider='mangadex' AND provider_image_id=? ORDER BY artwork_id LIMIT 1",
+                          (row["library_id"], row["work_id"], row["source_cover_id"])).fetchone()
+
+    def snapshot_cover(self, row):
+        if not canonical_uuid(row["manga_id"]):
+            refuse("invalidMangaDexIdentity")
+        try:
+            snapshot = json.loads(row["snapshot"])
+            covers = parse_covers(snapshot["covers"], row["manga_id"], self.bindings)
+        except (ValueError, KeyError, TypeError):
+            refuse("invalidMangaDexResponse")
+        cover = next((c for c in covers if c["coverId"] == row["source_cover_id"]
+                      and c["language"] == "ja"), None)
+        if cover is None:
+            refuse("mangadexCoverInvalid")
+        return cover
+
+    def fill_volume_covers(self, worker):
+        stop = lambda: worker.stop_event.is_set() or not enabled("mangadex")
+        if stop() or not self.ready():
+            return 0
+        with self.get_db() as db:
+            domain = worker.domain(db)
+            if domain is None:
+                return 0
+            rows = self.cover_candidates(db, domain, worker.planner.iso(worker.now()))
+        for row in rows:
+            if stop():
+                break
+            try:
+                cover = self.snapshot_cover(row)
+                with self.get_db() as db:
+                    old = self.existing_cover(db, row)
+                receipt = None if old else self.fetch_cover(row["manga_id"], cover, self.clock() + 90, stop)
+                with worker.commit_lock, self.get_db() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    try:
+                        live_domain = worker.domain(db)
+                        binding = self.ca.binding_row(db, domain["libraryId"], row["work_id"], "mangadex")
+                        work = self.ca.work_row(db, domain["libraryId"], row["work_id"])
+                        live = db.execute("SELECT * FROM collection_authority_volumes WHERE library_id=? AND volume_id=?",
+                                          (domain["libraryId"], row["volume_id"])).fetchone()
+                        if (stop() or live_domain is None or live_domain["epoch"] != domain["epoch"]
+                                or live_domain["libraryId"] != domain["libraryId"]
+                                or work is None or work["lifecycle"] != "live" or work["type"] != "manga"
+                                or binding is None or not binding["bound"]
+                                or binding["entity_revision"] != row["binding_revision"]
+                                or binding["snapshot_digest"] != row["snapshot_digest"]
+                                or binding["external_id"] != row["manga_id"]
+                                or live is None or live["deleted"] or live["cover_artwork_id"] is not None
+                                or live["work_id"] != row["work_id"] or live["source_provider"] != "mangadex"
+                                or live["source_cover_id"] != row["source_cover_id"]):
+                            db.rollback()
+                            continue
+                        volume_range = self.ca.work_state(work)["derived"].get("volumeRange") or {}
+                        if ((volume_range.get("minVolume") is not None
+                             and live["volume_number"] < volume_range["minVolume"])
+                                or (volume_range.get("maxVolume") is not None
+                                    and live["volume_number"] > volume_range["maxVolume"])):
+                            db.rollback()
+                            continue
+                        self.attach_cover(db, live, receipt, domain, row["manga_id"], worker.planner.iso(worker.now()))
+                        if stop():
+                            db.rollback()
+                        else:
+                            db.commit()
+                    except BaseException:
+                        db.rollback()
+                        raise
+            except self.bindings.SearchCancelled:
+                break
+            except Exception as error:
+                self.remember_cover(worker, domain, row, error)
+        return len(rows)
+
+    def attach_cover(self, db, row, receipt, domain, manga_id, now):
+        ca = self.ca
+        old = self.existing_cover(db, row)
+        # A reused artwork might have been removed while another cover was fetched.
+        if old is None and receipt is None:
+            return
+        artwork_id = old[0] if old else str(uuid.uuid5(NAMESPACE,
+            f"{row['work_id']}:mangadex:{row['source_cover_id']}"))
+        batch = str(uuid.uuid4())
+        def command(command_type, **fields):
+            return dict(libraryId=domain["libraryId"], epoch=domain["epoch"], contractVersion=ca.CONTRACT_VERSION,
+                        operationId=str(uuid.uuid5(uuid.UUID(batch), command_type)), commandType=command_type,
+                        workId=row["work_id"], **fields)
+        commands = []
+        if old is None:
+            commands.append(command(ca.ADD_ARTWORK, artworkId=artwork_id, kind="cover", provider="mangadex",
+                providerImageId=row["source_cover_id"], language="ja",
+                **{k: receipt[k] for k in ("original", "thumbnail", "width", "height")}))
+        commands.append(command(ca.UPSERT_VOLUME, volumeId=row["volume_id"], volumeNumber=row["volume_number"],
+            editionIndex=row["edition_index"], sortOrder=row["sort_order"], displayLabel=row["display_label"],
+            coverArtworkId=artwork_id, sourceProvider=row["source_provider"], sourceCoverId=row["source_cover_id"],
+            deleted=False, expectedRevision=row["entity_revision"]))
+        ca.apply_command_batch(db, library_id=domain["libraryId"], epoch=domain["epoch"], operation_id=batch,
+            request_payload={"origin": "serverMangaDexVolumeCover", "workId": row["work_id"], "volumeId": row["volume_id"],
+                             "coverId": row["source_cover_id"]}, commands=commands, now=now)
+        db.execute("DELETE FROM mangadex_volume_cover_attempts WHERE library_id=? AND epoch=? AND volume_id=?"
+                   " AND manga_id=? AND cover_id=?", (domain["libraryId"], domain["epoch"], row["volume_id"],
+                                                   manga_id, row["source_cover_id"]))
+
+    def remember_cover(self, worker, domain, row, error):
+        if worker.stop_event.is_set() or not enabled("mangadex"):
+            return
+        error = self.classify(error, worker.planner)
+        permanent = isinstance(error, Refused)
+        failure = worker.planner.classify(error)
+        count = min((row["retry_count"] or 0) + 1, 1000)
+        seconds = (error.wait if isinstance(error, self.bindings.PageBudget) else
+                   worker.planner.retry_seconds(failure.reason, failure.http_status, failure.retry_after, count))
+        retry = None if permanent else worker.planner.iso(worker.now() + timedelta(seconds=max(1, seconds)))
+        with worker.commit_lock, self.get_db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if worker.stop_event.is_set() or not enabled("mangadex"):
+                db.rollback()
+                return
+            db.execute("INSERT OR REPLACE INTO mangadex_volume_cover_attempts VALUES(?,?,?,?,?,?,?,?)",
+                (domain["libraryId"], domain["epoch"], row["volume_id"], row["manga_id"], row["source_cover_id"],
+                 int(permanent), count, retry))
+            if worker.stop_event.is_set() or not enabled("mangadex"):
+                db.rollback()
+            else:
+                db.commit()
 
     def untouched_selection(self, db, pre):
         domain, work_id = pre["domain"], pre["row"]["collection_id"]

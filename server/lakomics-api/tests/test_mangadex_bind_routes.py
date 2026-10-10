@@ -4,6 +4,7 @@ Requires the server's FastAPI test dependencies. Not run in the Windows plain-
 Python sandbox; the controller runs this with the full server-stage suite.
 """
 import hashlib
+import copy
 import json
 import os
 import types
@@ -130,6 +131,30 @@ class MangaDexBindRouteTests(unittest.TestCase):
         self.assertEqual(detail["volumes"][0]["coverArtworkId"], "cover")
         with fixtures.api_app.get_db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM collection_release_events").fetchone()[0], 0)
+
+    def test_remaining_volume_covers_project_after_bounded_worker_wakes(self):
+        self.covers = [copy.deepcopy(self.covers[0]) for _ in range(11)]
+        for number, cover in enumerate(self.covers, 1):
+            cover["id"] = str(uuid.uuid4())
+            cover["attributes"].update(volume=str(number), locale="ja", fileName="valid.jpg")
+        request = self.submit(self.body("s"))
+        self.worker.run_once()
+        self.assertEqual(self.listing(collectionId="s")["items"][0]["state"], "applied")
+        def detail():
+            return self.fixture.ok(self.fixture.client.get("/v1/collections/s", headers=self.fixture.auth))["item"]
+        first = detail()
+        self.assertEqual([v["volumeNumber"] for v in first["volumes"]], list(range(1, 12)))
+        self.assertEqual(sum(v["coverArtworkId"] is not None for v in first["volumes"]), 9)
+        selected = first["selectedWorkArtworkId"]
+        self.worker.run_once()
+        filled = detail()
+        self.assertTrue(all(v["coverArtworkId"] for v in filled["volumes"]))
+        self.assertEqual(filled["selectedWorkArtworkId"], selected)
+        by_id = {art["id"]: art for art in filled["artworks"]}
+        self.assertTrue(all(v["coverArtworkId"] in by_id for v in filled["volumes"]))
+        with fixtures.api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM collection_release_events").fetchone()[0], 0)
+        self.assertEqual(self.submit({**self.body("s"), "operationId": request["operationId"]})["state"], "applied")
 
     def test_publisher_log_result_fence_and_failure_reason_visibility(self):
         request = self.submit(self.body("s"))
