@@ -375,6 +375,96 @@ fn deterministic_failures_are_skipped_and_the_cursor_still_advances() {
     );
 }
 
+fn tag_pair(f: &Fixture, target: &Target, asset: &str, reason: &str) {
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_tagger_candidates(target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+             SELECT ?1,id,content_hash,?3,0.9,0.9,'now' FROM assets WHERE id=?2",
+            params![target.id, asset, reason],
+        )
+        .unwrap();
+}
+
+fn folder_of(f: &Fixture, asset: &str) -> String {
+    f.library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT classification_id FROM asset_classifications WHERE asset_id=?1",
+            [asset],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn a_tag_recommendation_accepted_outside_the_series_moves_the_image_in_like_the_desktop() {
+    let f = Fixture::new();
+    let target = f.target("Tag target");
+    let id = adopt(&f, ENDPOINT);
+    // asset-5 is in the series folder, asset-6 outside it; both are 태그 추천.
+    tag_pair(&f, &target, "asset-5", "recommendation");
+    tag_pair(&f, &target, "asset-6", "recommendation");
+    assert_eq!(folder_of(&f, "asset-6"), f.outside);
+    let outcome = f
+        .library
+        .apply_character_review_page(
+            ENDPOINT,
+            &id,
+            &[
+                entry(1, &target.id, "asset-5", "accepted", Some("0")),
+                entry(2, &target.id, "asset-6", "accepted", Some("0")),
+            ],
+        )
+        .unwrap();
+    assert_eq!((outcome.changed, outcome.skipped), (2, 0));
+    // The outside image now lives in the series, accepted by a person; the inside one did not move.
+    assert_eq!(folder_of(&f, "asset-6"), f.series);
+    assert_eq!(folder_of(&f, "asset-5"), f.series);
+    let (_, decision, origin) = latest(&f, &target, "asset-6").unwrap();
+    assert_eq!((decision.as_str(), origin.as_str()), ("accepted", "manual"));
+    assert_eq!(latest(&f, &target, "asset-5").unwrap().1, "accepted");
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-6").unwrap(),
+        vec![target.id.clone()]
+    );
+    assert_eq!(
+        receipts(&f).into_iter().map(|r| r.1).collect::<Vec<_>>(),
+        ["applied", "applied"]
+    );
+    // Both pairs left the tag list.
+    assert!(f.library.confirm_tag_pairs().unwrap().is_empty());
+}
+
+#[test]
+fn a_tag_rejection_is_stored_and_a_plain_accept_outside_the_series_is_still_skipped() {
+    let f = Fixture::new();
+    let target = f.target("Plain target");
+    let id = adopt(&f, ENDPOINT);
+    // asset-6 is outside the series but no tag pair: the old eligibility rule holds.
+    tag_pair(&f, &target, "asset-5", "recommendation");
+    let outcome = f
+        .library
+        .apply_character_review_page(
+            ENDPOINT,
+            &id,
+            &[
+                entry(1, &target.id, "asset-6", "accepted", Some("0")),
+                entry(2, &target.id, "asset-5", "rejected", Some("0")),
+            ],
+        )
+        .unwrap();
+    assert_eq!((outcome.changed, outcome.skipped), (1, 1));
+    assert_eq!(folder_of(&f, "asset-6"), f.outside);
+    assert_eq!(latest(&f, &target, "asset-5").unwrap().1, "rejected");
+    assert_eq!(
+        receipts(&f).into_iter().map(|r| r.1).collect::<Vec<_>>(),
+        ["skipped:ineligible", "applied"]
+    );
+}
+
 #[test]
 fn replays_are_no_ops_and_gaps_or_conflicts_hold_the_cursor() {
     let f = Fixture::new();

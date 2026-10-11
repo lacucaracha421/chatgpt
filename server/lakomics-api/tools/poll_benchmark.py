@@ -215,7 +215,8 @@ def populate(root: Path):
             "INSERT INTO mobile_character_review_targets VALUES(?,?,?,?,?)",
             [(f"target-{i:02d}", f"Character {i}", "series-1", sha(f"fp-{i}"), "[]") for i in range(40)])
         db.executemany(
-            "INSERT INTO mobile_character_review_items VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO mobile_character_review_items(position,target_id,asset_id,s36,b36,doubtful,verdict,knn3,basis)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
             [(i + 1, f"target-{i % 40:02d}", f"asset-{(i * 13) % SIZES['assets']:05d}", 1, 0, 0,
               "candidate", 0.5, "s36") for i in range(SIZES["character_review_items"])])
 

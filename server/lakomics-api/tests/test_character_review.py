@@ -111,7 +111,7 @@ class CharacterReviewTests(unittest.TestCase):
         self.assertEqual(page['revision'], revision)
         self.assertEqual([(i['targetId'], i['assetId']) for i in page['items']],
                          [('c', 'a'), ('c', 'cand-1'), ('d', 'cand-2'), ('d', 'cand-3')])
-        self.assertEqual(page['counts'], {'total': 4, 's36': 2, 'b36': 2, 'doubtful': 1, 'pendingPc': 0, 'skipped': 0})
+        self.assertEqual(page['counts'], {'total': 4, 's36': 2, 'b36': 2, 'doubtful': 1, 'tagger': 0, 'pendingPc': 0, 'skipped': 0})
         self.assertEqual(page['items'][1]['sources'], ['s36', 'b36'])
         self.assertEqual(page['items'][1]['asset']['id'], 'cand-1')
         self.assertNotIn('private/', json.dumps(page))
@@ -136,6 +136,48 @@ class CharacterReviewTests(unittest.TestCase):
         self.assertEqual(self.put_feed(body).status_code, 200)
         stale = self.client.get(REVIEW, headers=self.auth, params={'cursor': first['nextCursor']})
         self.assertEqual(self.code(stale), 'characterReviewChanged')
+
+    def test_tag_recommendations_are_accepted_counted_and_advertised(self):
+        """태그 추천 items ride the same feed: their own source, count and filter; old rows migrate."""
+        self.assertEqual(self.read()['itemSources'], ['s36', 'b36', 'doubtful', 'tagger'])  # Before adoption too.
+        self.ready(self.snapshot(0))
+        feed = feed_fixture()
+        feed['items'] += [{'assetId': 'other', 'targetId': 'c', 'sources': ['tagger'], 'verdict': 'recommended',
+                           'basis': '0'},
+                          {'assetId': 'cand-2', 'targetId': 'c', 'sources': ['s36', 'tagger', 'doubtful'],
+                           'verdict': 'recommended', 'knn3': 0.5, 'basis': '3'}]
+        reply = self.put_feed(feed)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        page = self.read()
+        self.assertEqual(page['itemSources'], ['s36', 'b36', 'doubtful', 'tagger'])
+        self.assertEqual((page['counts']['total'], page['counts']['tagger']), (6, 2))
+        tagged = {i['assetId']: i['sources'] for i in page['items']}
+        self.assertEqual(tagged['other'], ['tagger'])
+        self.assertEqual(tagged['cand-2'], ['s36', 'doubtful', 'tagger'])
+        only = self.read(source='tagger')
+        self.assertEqual((only['counts']['total'], [i['assetId'] for i in only['items']]), (2, ['other', 'cand-2']))
+        self.assertEqual(sum(e['pending'] for e in only['countsByTarget']), 2)
+        # A tag item is decided like any other feed pair, and leaves the counts until undone.
+        self.assertEqual(self.decide(self.command(asset='other')).status_code, 200)
+        self.assertEqual(self.read()['counts']['tagger'], 1)
+        self.assertEqual(self.decide(self.command(asset='other', decision='cleared')).status_code, 200)
+        self.assertEqual(self.read()['counts']['tagger'], 2)
+        # A source the server does not know is still refused whole.
+        bad = feed_fixture(); bad['items'][0]['sources'] = ['pixai']
+        self.assertEqual(self.put_feed(bad).status_code, 422)
+
+    def test_startup_adds_the_tagger_column_to_an_older_items_table(self):
+        with api_app.get_db() as db:
+            db.executescript("""DROP TABLE mobile_character_review_items;
+                CREATE TABLE mobile_character_review_items (
+                 position INTEGER PRIMARY KEY, target_id TEXT NOT NULL, asset_id TEXT NOT NULL,
+                 s36 INTEGER NOT NULL, b36 INTEGER NOT NULL, doubtful INTEGER NOT NULL,
+                 verdict TEXT NOT NULL, knn3 REAL, basis TEXT NOT NULL, UNIQUE(target_id, asset_id));
+                INSERT INTO mobile_character_review_items VALUES(0,'c','a',1,0,0,'recommended',NULL,'1');""")
+            character_review.migrate(db)
+            character_review.migrate(db)  # Idempotent.
+            self.assertEqual(db.execute("SELECT tagger FROM mobile_character_review_items").fetchall()[0][0], 0)
+            db.commit()
 
     def test_exact_counts_by_target_and_series_filter(self):
         body = self.snapshot(0)

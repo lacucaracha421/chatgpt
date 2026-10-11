@@ -631,6 +631,146 @@ fn unchanged_feed_skips_five_minute_build_and_verifies_after_thirty_without_io()
     assert_eq!(publish(), FeedOutcome::NotDue);
 }
 
+/// A pending tag pair of the tag projection (`character_tagger_pending`).
+fn tag_pair(f: &Fixture, target: &Target, asset: &str, reason: &str) {
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_tagger_candidates(target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+             SELECT ?1,id,content_hash,?3,0.9,0.9,'now' FROM assets WHERE id=?2",
+            params![target.id, asset, reason],
+        )
+        .unwrap();
+}
+
+#[test]
+fn tag_recommendations_and_vetoes_join_the_feed_and_match_the_desktop_counts() {
+    let f = Fixture::new();
+    let tagged = f.target("Tagged");
+    let other = f.target("Other");
+    // asset-6 sits outside the series folder: the tablet's 맞음 has to move it in.
+    tag_pair(&f, &tagged, "asset-5", "recommendation");
+    tag_pair(&f, &tagged, "asset-6", "recommendation");
+    tag_pair(&f, &other, "asset-5", "veto");
+    for id in ["asset-5", "asset-6"] {
+        commit(&f, id);
+    }
+    let feed = f.library.character_review_feed_content().unwrap();
+    let got = feed
+        .items
+        .iter()
+        .map(|i| {
+            (
+                i.target_id.as_str(),
+                i.asset_id.as_str(),
+                i.sources.clone(),
+                i.verdict.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    // 태그 추천 first, then 다시 확인: a veto is the older source (`doubtful`).
+    assert_eq!(
+        got,
+        [
+            (tagged.id.as_str(), "asset-5", vec!["tagger"], "recommended"),
+            (tagged.id.as_str(), "asset-6", vec!["tagger"], "recommended"),
+            (other.id.as_str(), "asset-5", vec!["doubtful"], "veto"),
+        ]
+    );
+    assert_eq!(feed.items[0].basis, "0");
+    assert_eq!(
+        feed.targets.keys().cloned().collect::<BTreeSet<_>>(),
+        BTreeSet::from([tagged.id.clone(), other.id.clone()])
+    );
+    let counts = f.library.character_confirm_counts(None).unwrap();
+    assert_eq!((counts.tag, counts.recognition, counts.recheck), (2, 0, 1));
+    assert_eq!(
+        feed.items.len() as i64,
+        (counts.tag + counts.recognition + counts.recheck) as i64
+    );
+    // A manual decision consumes the pair, like on the desktop.
+    f.library
+        .record_character_decisions(DecisionRequest {
+            target_id: tagged.id.clone(),
+            expected_fingerprint: tagged.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: DecisionKind::Rejected,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    let feed = f.library.character_review_feed_content().unwrap();
+    assert_eq!(feed.items.len(), 2);
+    assert!(feed
+        .items
+        .iter()
+        .all(|i| i.target_id != tagged.id || i.asset_id != "asset-5"));
+    // Only committed uploads are listed.
+    f.library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM cloud_sync_queue WHERE entity_id='asset-6'", [])
+        .unwrap();
+    assert_eq!(
+        f.library
+            .character_review_feed_content()
+            .unwrap()
+            .items
+            .iter()
+            .map(|i| i.asset_id.as_str())
+            .collect::<Vec<_>>(),
+        ["asset-5"]
+    );
+}
+
+#[test]
+fn an_older_server_gets_the_feed_without_tag_recommendations() {
+    let upgraded = r#"{"version":1,"itemSources":["s36","b36","doubtful","tagger"]}"#;
+    let older = r#"{"version":1,"revision":null}"#;
+    let mut bodies = Vec::new();
+    for reply in [upgraded, older] {
+        let f = Fixture::new();
+        let tagged = f.target("Tagged");
+        let other = f.target("Other");
+        tag_pair(&f, &tagged, "asset-5", "recommendation");
+        tag_pair(&f, &other, "asset-6", "veto");
+        for id in ["asset-5", "asset-6"] {
+            commit(&f, id);
+        }
+        let (base, handle) = scripted(vec![
+            ("/v1/library/characters/review?limit=1", 200, reply.into()),
+            ("/v1/library/characters/review/feed", 200, receipt('a')),
+        ]);
+        bind(&f, &base);
+        let client = CloudClient::new(&base).unwrap();
+        assert!(matches!(
+            f.library
+                .publish_due_character_review_feed_with(&client, "publisher", "shared", &base)
+                .unwrap(),
+            FeedOutcome::Published { .. }
+        ));
+        let seen = handle.join().unwrap();
+        assert_eq!(seen[0].1.as_deref(), Some("Bearer shared"));
+        assert_eq!(seen[1].1.as_deref(), Some("Bearer publisher"));
+        let body: serde_json::Value = serde_json::from_str(&seen[1].2).unwrap();
+        bodies.push((body, tagged.id, other.id));
+    }
+    let (full, tagged, _) = &bodies[0];
+    assert_eq!(full["items"].as_array().unwrap().len(), 2);
+    assert_eq!(full["items"][0]["sources"], serde_json::json!(["tagger"]));
+    assert!(full["targets"].get(tagged).is_some());
+    let (older, tagged, other) = &bodies[1];
+    // The veto stays (an older server knows `doubtful`); the 태그 추천 and the character only it named go.
+    assert_eq!(older["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        older["items"][0]["sources"],
+        serde_json::json!(["doubtful"])
+    );
+    assert_eq!(older["items"][0]["targetId"], other.as_str());
+    assert!(older["targets"].get(tagged).is_none());
+}
+
 #[test]
 fn the_feed_leaves_out_what_the_desktop_folds_and_still_matches_the_counts() {
     let f = Fixture::new();
@@ -647,14 +787,15 @@ fn the_feed_leaves_out_what_the_desktop_folds_and_still_matches_the_counts() {
         ],
     );
     // Both are pending on the desktop list; the far character's is folded away there.
+    // Both share a score, so their list order is a tie broken by random ids: compare as a set.
     let all = f.library.shadow_review_items(None).unwrap();
-    assert_eq!(
-        all.items
-            .iter()
-            .map(|i| (i.asset_id.as_str(), i.folded))
-            .collect::<Vec<_>>(),
-        [("asset-9", false), ("asset-8", true)]
-    );
+    let mut folded = all
+        .items
+        .iter()
+        .map(|i| (i.asset_id.as_str(), i.folded))
+        .collect::<Vec<_>>();
+    folded.sort();
+    assert_eq!(folded, [("asset-8", true), ("asset-9", false)]);
     let feed = f.library.character_review_feed_content().unwrap();
     assert_eq!(
         pairs(&feed),

@@ -1001,6 +1001,28 @@ impl Library {
         Ok(page_of(&assemble(&prepared, doubtful, &targets), &query))
     }
 
+    /// The pending tag pairs (target, asset, reason) of the 확인 list, sorted: every pair of the
+    /// pending view except those the taggers judged correct by agreement, which
+    /// [`Self::character_confirm_counts`] leaves out in the same way. `reason` is
+    /// `recommendation` (태그 추천) or `veto` (다시 확인).
+    pub(crate) fn confirm_tag_pairs(&self) -> Result<Vec<(String, String, String)>> {
+        let cache = open_shadow_cache(&self.root)?;
+        let connection = self.connection()?;
+        let mut tags = pending_tag_rows(&connection, None)?;
+        let agreed = agreed_pairs_of(
+            &connection,
+            cache.as_ref(),
+            &tags
+                .iter()
+                .map(|(target, asset, _)| (target.as_str(), asset.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        tags.retain(|(target, asset, _)| !agreed.contains(&(target.clone(), asset.clone())));
+        tags.sort();
+        tags.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+        Ok(tags)
+    }
+
     /// All pending items of the `candidates` (default) or `doubtful` list.
     pub(crate) fn shadow_review_items(&self, mode: Option<&str>) -> Result<ShadowReviewItems> {
         let doubtful = shadow_review_mode(mode)?;

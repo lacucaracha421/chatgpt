@@ -155,6 +155,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             """)
             db.executescript(character_exclusions.DDL)
             db.executescript(character_review.DDL)
+            character_review.migrate(db)
             db.executescript(similarity_review.DDL)
             db.commit()
 

@@ -33,7 +33,9 @@ MAX_REFERENCES = 4
 MAX_SKIPPED = 1_000
 SKIPPED_RETAINED = 1_000
 MAX_COMMAND_BYTES = 8192
-SOURCES = ("s36", "b36", "doubtful")
+# `tagger` (태그 추천) joined later: a server that predates it refuses a whole feed naming it, so the
+# PC reads `itemSources` from the review route first and leaves tag items out when it is absent.
+SOURCES = ("s36", "b36", "doubtful", "tagger")
 ID = exclusions.ID
 LIBRARY = exclusions.LIBRARY
 DIGEST = exclusions.DIGEST
@@ -42,7 +44,7 @@ DIGEST = exclusions.DIGEST
 Token = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:+-]{1,128}$")]
 Reason = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:-]{1,64}$")]
 Verdict = Annotated[str, StringConstraints(pattern=r"^[a-z_]{1,32}$")]
-Source = Literal["s36", "b36", "doubtful"]
+Source = Literal["s36", "b36", "doubtful", "tagger"]
 Decision = Literal["accepted", "rejected", "cleared"]
 
 DDL = """
@@ -57,7 +59,8 @@ CREATE TABLE IF NOT EXISTS mobile_character_review_targets (
 CREATE TABLE IF NOT EXISTS mobile_character_review_items (
  position INTEGER PRIMARY KEY, target_id TEXT NOT NULL, asset_id TEXT NOT NULL,
  s36 INTEGER NOT NULL, b36 INTEGER NOT NULL, doubtful INTEGER NOT NULL,
- verdict TEXT NOT NULL, knn3 REAL, basis TEXT NOT NULL, UNIQUE(target_id, asset_id));
+ verdict TEXT NOT NULL, knn3 REAL, basis TEXT NOT NULL, tagger INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(target_id, asset_id));
 CREATE TABLE IF NOT EXISTS mobile_character_review_decisions (
  sequence INTEGER PRIMARY KEY, operation_id TEXT NOT NULL UNIQUE, payload_digest TEXT NOT NULL,
  target_id TEXT NOT NULL, asset_id TEXT NOT NULL, decision TEXT NOT NULL, origin TEXT NOT NULL,
@@ -67,6 +70,13 @@ CREATE INDEX IF NOT EXISTS mobile_character_review_decisions_pair
 CREATE TABLE IF NOT EXISTS mobile_character_review_skipped (
  sequence INTEGER PRIMARY KEY, reason TEXT NOT NULL);
 """
+
+def migrate(db):
+    """Add `tagger` to an items table created before 태그 추천 (rows keep 0 until the next feed)."""
+    columns = {row[1] for row in db.execute("PRAGMA table_info(mobile_character_review_items)")}
+    if "tagger" not in columns:
+        db.execute("ALTER TABLE mobile_character_review_items ADD COLUMN tagger INTEGER NOT NULL DEFAULT 0")
+
 
 # The newest decision for a feed item's pair that the given cursor has not covered yet.
 # A pending accept/reject hides the candidate; a pending `cleared` (undo) shows it again.
@@ -96,7 +106,7 @@ class Target(Strict):
 class Item(Strict):
     assetId: ID
     targetId: ID
-    sources: list[Source] = Field(min_length=1, max_length=3)
+    sources: list[Source] = Field(min_length=1, max_length=len(SOURCES))
     verdict: Verdict
     knn3: float | None = None
     basis: Token
@@ -353,9 +363,11 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             db.executemany("INSERT INTO mobile_character_review_targets VALUES(?,?,?,?,?)",
                            ((k, t.name, t.seriesId, t.fingerprint, json.dumps(t.referenceAssetIds))
                             for k, t in feed.targets.items()))
-            db.executemany("INSERT INTO mobile_character_review_items VALUES(?,?,?,?,?,?,?,?,?)",
+            db.executemany("""INSERT INTO mobile_character_review_items
+                (position,target_id,asset_id,s36,b36,doubtful,verdict,knn3,basis,tagger)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""",
                            ((position, i.targetId, i.assetId, int("s36" in i.sources), int("b36" in i.sources),
-                             int("doubtful" in i.sources), i.verdict, i.knn3, i.basis)
+                             int("doubtful" in i.sources), i.verdict, i.knn3, i.basis, int("tagger" in i.sources))
                             for position, i in enumerate(kept)))
             db.executemany("INSERT OR REPLACE INTO mobile_character_review_skipped VALUES(?,?)",
                            ((s.sequence, s.reason) for s in feed.skipped))
@@ -382,7 +394,8 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
     def empty(extra=None):
         return {"version": 1, "ready": False, "libraryId": None, "revision": None, "generatedAt": None,
                 "policyVersion": None, "decisionCursor": 0, "appliedDecisionCursor": 0,
-                "counts": {"total": 0, "s36": 0, "b36": 0, "doubtful": 0, "pendingPc": 0, "skipped": 0},
+                "itemSources": list(SOURCES),
+                "counts": {"total": 0, "s36": 0, "b36": 0, "doubtful": 0, "tagger": 0, "pendingPc": 0, "skipped": 0},
                 "countsByTarget": [], "countsBySeries": [],
                 "items": [], "targets": {}, "nextCursor": None, "hasMore": False, **(extra or {})}
 
@@ -406,7 +419,7 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             selected = {k for k, n in nodes.items() if (target is None or k == target)
                         and (series_id is None or n["seriesId"] == series_id)}
             params = [json.dumps(sorted(selected)), current["feed_cursor"]]
-            counts = db.execute(f"SELECT COUNT(*),SUM(i.s36),SUM(i.b36),SUM(i.doubtful) {base}", params).fetchone()
+            counts = db.execute(f"SELECT COUNT(*),SUM(i.s36),SUM(i.b36),SUM(i.doubtful),SUM(i.tagger) {base}", params).fetchone()
             # `source` is a closed Literal, so naming its column is not an injection.
             where = f" AND i.{source}=1" if source is not None else ""
             # Exact per-character/per-series counts over every published character (not
@@ -455,8 +468,10 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                     "revision": current["feed_revision"], "generatedAt": current["generated_at"],
                     "policyVersion": current["policy_version"],
                     "decisionCursor": current["last_sequence"], "appliedDecisionCursor": current["feed_cursor"],
+                    "itemSources": list(SOURCES),
                     "counts": {"total": total, "s36": counts[1] or 0, "b36": counts[2] or 0,
-                               "doubtful": counts[3] or 0, "pendingPc": pending, "skipped": skipped},
+                               "doubtful": counts[3] or 0, "tagger": counts[4] or 0,
+                               "pendingPc": pending, "skipped": skipped},
                     "countsByTarget": by_target,
                     "countsBySeries": [{"seriesId": k, "pending": v} for k, v in sorted(by_series.items())],
                     "items": items, "targets": described,

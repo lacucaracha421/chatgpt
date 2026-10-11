@@ -1315,6 +1315,29 @@ impl Library {
         decision: DecisionKind,
         allow_originals_source: bool,
     ) -> Result<u64> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let moved = self.move_assets_to_characters_in(
+            &transaction,
+            targets,
+            asset_ids,
+            decision,
+            allow_originals_source,
+        )?;
+        transaction.commit()?;
+        Ok(moved)
+    }
+
+    /// The move inside a caller's transaction (the mobile review receive pass applies a
+    /// 태그 추천 맞음 for an image outside the series this way). Commits nothing.
+    pub(super) fn move_assets_to_characters_in(
+        &self,
+        transaction: &Connection,
+        targets: Vec<CharacterMoveTarget>,
+        asset_ids: Vec<String>,
+        decision: DecisionKind,
+        allow_originals_source: bool,
+    ) -> Result<u64> {
         let asset_ids = asset_ids.into_iter().collect::<BTreeSet<_>>();
         let target_ids = targets
             .iter()
@@ -1330,11 +1353,9 @@ impl Library {
             ));
         }
         let asset_ids = asset_ids.into_iter().collect::<Vec<_>>();
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
         let mut resolved = Vec::with_capacity(targets.len());
         for request in &targets {
-            let target = self.read_character_target(&transaction, &request.target_id)?;
+            let target = self.read_character_target(transaction, &request.target_id)?;
             if target.fingerprint != request.expected_fingerprint {
                 return Err(Error::Stale);
             }
@@ -1373,7 +1394,7 @@ impl Library {
             if let Some(classification_id) = classifications.first() {
                 if !allow_originals_source
                     && super::classification::classification_in_role_scope(
-                        &transaction,
+                        transaction,
                         classification_id,
                         "originals",
                     )?
@@ -1398,7 +1419,7 @@ impl Library {
         }
         for (_, target, series_id) in &resolved {
             if super::classification::classification_in_role_scope(
-                &transaction,
+                transaction,
                 series_id,
                 "originals",
             )? {
@@ -1408,7 +1429,7 @@ impl Library {
                 )));
             }
             for asset_id in &asset_ids {
-                if super::character_hub::series_asset_excluded(&transaction, series_id, asset_id)? {
+                if super::character_hub::series_asset_excluded(transaction, series_id, asset_id)? {
                     return Err(Error::InvalidMessage(format!(
                         "{}: 캐릭터 분류에서 제외된 자산입니다. 먼저 제외를 해제해 주세요.",
                         target.display_name
@@ -1417,7 +1438,7 @@ impl Library {
             }
         }
         Self::set_asset_classification_in(
-            &transaction,
+            transaction,
             &super::models::SetAssetClassification {
                 asset_ids: asset_ids.clone(),
                 classification_id: Some(destination_series_id.clone()),
@@ -1425,7 +1446,7 @@ impl Library {
         )?;
         for (request, target, _) in &resolved {
             self.write_character_decisions_in(
-                &transaction,
+                transaction,
                 DecisionRequest {
                     target_id: target.id.clone(),
                     expected_fingerprint: request.expected_fingerprint.clone(),
@@ -1437,9 +1458,7 @@ impl Library {
                 Some(&destination_series_id),
             )?;
         }
-        let moved = asset_ids.len() as u64;
-        transaction.commit()?;
-        Ok(moved)
+        Ok(asset_ids.len() as u64)
     }
 
     pub fn character_assign_suggestions(

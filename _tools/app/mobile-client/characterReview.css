@@ -72,3 +72,18 @@
 .overview-caption .numeric { color:var(--color-accent); font-weight:600; }
 .overview-character:active .overview-portrait, .overview-series-head:active { opacity:.75; }
 .overview-rest { margin:0; font-size:13px; color:var(--color-muted); }
+
+/* Marking mode: the tools row (marks list, direct-decision switch), the save row, and the list of marked cards. */
+.review-tools { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); min-height:var(--touch, 44px); padding:0 var(--mobile-gutter, 16px); }
+.review-save { padding:var(--space-2) var(--mobile-gutter, 16px) 0; }
+.review-save button { width:100%; min-height:var(--touch, 44px); justify-content:center; }
+.review-save svg { width:18px; height:18px; }
+.review-caption .ui-button { margin-left:auto; }
+.review-marked { list-style:none; margin:0; padding:0; }
+.review-marked li { display:flex; align-items:center; gap:var(--space-3); min-height:var(--row-height-2, 64px); border-bottom:1px solid var(--color-border); }
+.review-marked-thumb { flex:none; display:flex; align-items:center; justify-content:center; width:48px; height:48px; background:var(--color-surface); overflow:hidden; color:var(--color-muted); }
+.review-marked-thumb img { width:100%; height:100%; object-fit:cover; }
+.review-marked-thumb svg { width:20px; height:20px; }
+.review-marked-name { display:flex; flex:1; flex-direction:column; gap:var(--space-1); min-width:0; }
+.review-marked-name strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.review-marked-name .muted { color:var(--color-muted); font-size:var(--type-meta); }

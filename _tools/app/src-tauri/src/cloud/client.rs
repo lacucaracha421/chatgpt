@@ -2451,6 +2451,24 @@ impl CloudClient {
         Ok(read_json_bounded::<Feed>(&mut response, 1024 * 1024)?.revision)
     }
 
+    /// Whether the server takes 태그 추천 items in the review feed (shared token): an upgraded
+    /// server lists `tagger` among the `itemSources` its review route answers with, an older one
+    /// sends none and would refuse a whole feed naming the source.
+    pub(crate) fn character_review_accepts_tag_recommendations(&self, token: &str) -> Result<bool, LibraryError> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Sources { item_sources: Option<Vec<String>> }
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint("/v1/library/characters/review?limit=1")?)
+            .header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            status => return Err(character_review_status_error(status, &mut response)),
+        }
+        Ok(read_json_bounded::<Sources>(&mut response, 1024 * 1024)?
+            .item_sources
+            .is_some_and(|sources| sources.iter().any(|source| source == crate::library::character_review_feed::TAGGER_SOURCE)))
+    }
+
     /// One page of the ordered mobile similarity-review decision log (publisher token), or
     /// `None` when the route is absent (an older server). Before adoption the server answers
     /// `200` with no items; a coded `409` `similarityReviewUnsupported` means the server

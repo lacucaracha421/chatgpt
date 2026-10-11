@@ -27,8 +27,9 @@ import type {Asset} from './types';
 export const REVIEW_PATH = '/v1/library/characters/review';
 export const REVIEW_DECISIONS_PATH = '/v1/library/characters/review/decisions';
 
-export type ReviewSource = 's36' | 'b36' | 'doubtful';
-export type ReviewCounts = {total: number; s36: number; b36: number; doubtful: number; pendingPc: number; skipped: number};
+/** `tagger` (태그 추천) comes only from a server that lists it in `itemSources`; an older one never sends it. */
+export type ReviewSource = 's36' | 'b36' | 'doubtful' | 'tagger';
+export type ReviewCounts = {total: number; s36: number; b36: number; doubtful: number; tagger?: number; pendingPc: number; skipped: number};
 export type ReviewItem = {targetId: string; assetId: string; sources: ReviewSource[]; verdict: string; knn3: number | null; basis: string; asset: Asset};
 export type ReviewTarget = {name: string; seriesId: string; seriesName: string | null; references: Asset[]};
 /** One character's exact waiting count (an upgraded server; `name`/`seriesName` only if it sends them). */

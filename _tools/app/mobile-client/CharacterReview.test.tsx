@@ -1,4 +1,4 @@
-import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {setOutboxConnection} from './outboxConnection';
 const CONNECTION='https://a.example';
@@ -16,7 +16,7 @@ import {ApiError} from './transport';
 import {warmThumbnail} from './media';
 import {CharacterReview,CharacterReviewEntry} from './CharacterReview';
 import {CharacterAddSheet} from './CharacterAddSheet';
-import {commitReviewDecision,readReviewIntents} from './characterReviewOutbox';
+import {commitReviewDecision,readReviewIntents,REVIEW_OUTBOX_FULL} from './characterReviewOutbox';
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 const LIBRARY='e'.repeat(32);
@@ -45,7 +45,11 @@ const swipe=(dx:number,dy=0)=>{const card=candidate();fireEvent.pointerDown(card
 afterEach(()=>{cleanup();localStorage.clear();});
 beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();vi.mocked(warmThumbnail).mockClear();});
 
-describe('character review screen',()=>{
+const MODE_KEY='lakomics.characters.review.mode.v1',MARKED_KEY='lakomics.characters.review.marked.v1';
+const marked=()=>JSON.parse(localStorage.getItem(MARKED_KEY)||'[]') as string[];
+
+describe('character review screen, deciding one card at a time',()=>{
+  beforeEach(()=>{localStorage.setItem(MODE_KEY,'direct');});
   it('uses plain vocabulary for learning, base and doubtful candidates and reference zoom',async()=>{
     install(feed({items:[item('a1','c',['s36']),item('a2','c',['b36']),item('a3','d',['doubtful'])]}));const {back}=mount();
     const retired=/PixAI|canary|B36|S36|태거/i;
@@ -203,6 +207,141 @@ describe('character review screen',()=>{
   it('shows pending and PC-skipped counts', async()=>{
     install(feed({counts:{total:3,s36:2,b36:1,doubtful:0,pendingPc:4,skipped:2}}));mount();
     expect(await screen.findByText('0 / 3 · PC 반영 대기 4 · PC가 건너뜀 2')).toBeTruthy();
+  });
+});
+
+describe('character review screen, marking only the wrong ones',()=>{
+  const press=(name:string|RegExp)=>fireEvent.click(screen.getByRole('button',{name}));
+  const confirmSave=async()=>fireEvent.click(within(await screen.findByRole('dialog',{name:'저장할까요?'})).getByRole('button',{name:'저장'}));
+  it('marks 아님 on a left swipe and moves on without deciding; the rest is saved after a confirmation',async()=>{
+    install(feed());mount();
+    await screen.findByText('루미');
+    swipe(-420);
+    expect(readReviewIntents()).toEqual({});
+    expect(marked()).toEqual(['c:a1']);
+    expect(await screen.findByText('0 / 3 · 본 1장 · 아님 1장')).toBeTruthy();
+    expect(screen.getByRole('button',{name:'아님 1장 저장'})).toBeTruthy();
+    // 다음 moves on without any decision either.
+    press('다음');
+    expect(await screen.findByText('둘째')).toBeTruthy();
+    expect(readReviewIntents()).toEqual({});
+    press('아님 1장 빼고 나머지 맞음');
+    const dialog=await screen.findByRole('dialog',{name:'저장할까요?'});
+    expect(dialog.textContent).toContain('본 2장 중 아님 1장, 맞음 1장');
+    fireEvent.click(within(dialog).getByRole('button',{name:'저장'}));
+    await waitFor(()=>expect(readReviewIntents()['c:a1']).toMatchObject({decision:'rejected',origin:'feed',basis:'b1',libraryId:LIBRARY}));
+    expect(readReviewIntents()['c:a2']).toMatchObject({decision:'accepted',origin:'feed'});
+    // The card still on screen was not seen yet: it is left alone.
+    expect(readReviewIntents()['d:a3']).toBeUndefined();
+    expect(marked()).toEqual([]);
+    expect(await screen.findByText('2 / 3 · PC 반영 대기 2')).toBeTruthy();
+    expect(screen.getByText('둘째')).toBeTruthy();
+    expect(screen.queryByRole('button',{name:/나머지 맞음|모두 맞음|저장$/})).toBeNull();
+  });
+  it('says when there is nothing left to look at and saves everything seen as 맞음 when nothing is marked',async()=>{
+    install(feed());mount();
+    await screen.findByText('루미');
+    for(let i=0;i<3;i+=1)press('다음');
+    expect(await screen.findByText('끝까지 봤습니다')).toBeTruthy();
+    expect(screen.getByText('본 3장을 아래 버튼으로 저장해 주세요.')).toBeTruthy();
+    press('본 3장 모두 맞음');
+    await confirmSave();
+    await waitFor(()=>expect(Object.values(readReviewIntents()).map(intent=>intent.decision)).toEqual(['accepted','accepted','accepted']));
+    expect(await screen.findByText('모두 확인했습니다')).toBeTruthy();
+  });
+  it('shows the mark on the card and unmarks from the card or from the list of marks',async()=>{
+    install(feed());mount();
+    await screen.findByText('루미');
+    swipe(-420);
+    fireEvent.click(await screen.findByRole('button',{name:'표시한 1장'}));
+    const sheet=await screen.findByRole('dialog',{name:'표시한 1장'});
+    expect(within(sheet).getByText('루미')).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button',{name:'표시 해제'}));
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'표시한 1장'})).toBeNull());
+    expect(marked()).toEqual([]);
+    expect(await screen.findByRole('button',{name:'본 1장 모두 맞음'})).toBeTruthy();
+    // A mark kept from an earlier visit shows on its card and can be removed there.
+    cleanup();localStorage.setItem(MARKED_KEY,JSON.stringify(['c:a1']));
+    install(feed());mount();
+    expect(await screen.findByText('아님 표시')).toBeTruthy();
+    press('표시 해제');
+    await waitFor(()=>expect(screen.queryByText('아님 표시')).toBeNull());
+    expect(marked()).toEqual([]);
+  });
+  it('keeps the marks when the screen is left and takes them back on the next visit',async()=>{
+    install(feed());mount();
+    await screen.findByText('루미');
+    swipe(-420);
+    await screen.findByText('0 / 3 · 본 1장 · 아님 1장');
+    cleanup();
+    install(feed());mount();
+    // a1 is still waiting, shown with its mark.
+    expect(await screen.findByText('아님 표시')).toBeTruthy();
+    expect(readReviewIntents()).toEqual({});
+  });
+  it('undoes a mark, a move on and a whole save',async()=>{
+    install(feed());mount();
+    await screen.findByText('루미');
+    swipe(-420);
+    press(/되돌리기/);
+    expect(await screen.findByText('0 / 3')).toBeTruthy();
+    expect(marked()).toEqual([]);
+    expect(screen.queryByRole('button',{name:/나머지 맞음|모두 맞음|저장$/})).toBeNull();
+    swipe(-420);
+    press('다음');
+    await screen.findByText('0 / 3 · 본 2장 · 아님 1장');
+    press('아님 1장 빼고 나머지 맞음');
+    await confirmSave();
+    await waitFor(()=>expect(Object.keys(readReviewIntents())).toHaveLength(2));
+    expect(await screen.findByText('맞음 1장 · 아님 1장 저장')).toBeTruthy();
+    press(/되돌리기/);
+    await waitFor(()=>expect(readReviewIntents()).toEqual({}));
+    expect(await screen.findByText('0 / 3 · 본 2장 · 아님 1장')).toBeTruthy();
+    expect(marked()).toEqual(['c:a1']);
+  });
+  it('keeps what could not be saved marked and seen, and says why',async()=>{
+    for(let i=0;i<499;i+=1)commitReviewDecision({libraryId:LIBRARY,targetId:'x',assetId:`z${i}`,decision:'accepted',origin:'feed',basis:null});
+    install(feed());mount();
+    await screen.findByText('루미');
+    swipe(-420);
+    press('다음');
+    press('다음');
+    await screen.findByText('끝까지 봤습니다');
+    press('아님 1장 빼고 나머지 맞음');
+    await confirmSave();
+    const alert=await screen.findByRole('alert');
+    expect(alert.textContent).toContain(REVIEW_OUTBOX_FULL);
+    expect(alert.textContent).toContain('나머지 2장은 그대로 남겨 두었습니다.');
+    // The first one went through; the other two are still seen and wait for another try.
+    expect(readReviewIntents()['c:a1']).toMatchObject({decision:'rejected'});
+    expect(readReviewIntents()['c:a2']).toBeUndefined();
+    expect(screen.getByRole('button',{name:'본 2장 모두 맞음'})).toBeTruthy();
+  });
+  it('labels 태그 추천 and switches to deciding every swipe at once',async()=>{
+    install(feed({items:[item('a1','c',['tagger']),item('a2','c',['doubtful'])]}));mount();
+    expect(await screen.findByText('태그 추천')).toBeTruthy();
+    expect(screen.queryByRole('button',{name:'맞음'})).toBeNull();
+    fireEvent.click(screen.getByRole('switch',{name:'한 장씩 바로 판단'}));
+    expect(localStorage.getItem(MODE_KEY)).toBe('direct');
+    press('맞음');
+    expect(readReviewIntents()['c:a1']).toMatchObject({decision:'accepted',origin:'feed'});
+    expect(await screen.findByText('다시 확인')).toBeTruthy();
+    fireEvent.click(screen.getByRole('switch',{name:'한 장씩 바로 판단'}));
+    expect(screen.getByRole('button',{name:'다음'})).toBeTruthy();
+  });
+  it('Back closes the confirmation and the list of marks before the screen',async()=>{
+    install(feed());const {back,onClose}=mount();
+    await screen.findByText('루미');
+    swipe(-420);
+    fireEvent.click(await screen.findByRole('button',{name:'표시한 1장'}));
+    await screen.findByRole('dialog',{name:'표시한 1장'});
+    act(()=>{expect(back.current?.()).toBe(true);});
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'표시한 1장'})).toBeNull());
+    press('아님 1장 저장');
+    await screen.findByRole('dialog',{name:'저장할까요?'});
+    act(()=>{expect(back.current?.()).toBe(true);});
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'저장할까요?'})).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 

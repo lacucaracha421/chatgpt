@@ -12,6 +12,8 @@
 //!   fingerprint read in the same transaction: a decision still applies after the character's
 //!   references changed (user decision 3). `rejected` goes through
 //!   `write_inbound_character_rejection`, which also holds for an asset moved out of the series.
+//!   A 맞음 for a pending 태그 추천 whose image lies outside the character's series moves the
+//!   image into the series (`move_assets_to_characters_in`), exactly like the desktop 확인 list.
 //! * `superseded`: a newer local decision for the pair, made outside this channel and newer
 //!   than the entry's `basis` (the latest decision sequence the PC published for the pair),
 //!   wins. A viewer entry without a basis is an explicit request and is not superseded.
@@ -30,7 +32,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use super::characters::{DecisionKind, DecisionRequest, Error as CharacterError};
+use super::characters::{
+    CharacterMoveTarget, DecisionKind, DecisionRequest, Error as CharacterError,
+};
 use super::{error::LibraryError, Library};
 use crate::cloud::client::CloudClient;
 use crate::library::credential;
@@ -165,6 +169,28 @@ fn latest_decision(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?)
+}
+
+/// Whether the pair is a pending 태그 추천 (or tag veto) whose image is not in the character's
+/// series folder, so a 맞음 has to move it in, as the desktop 확인 list does.
+fn tag_pair_outside_series(
+    connection: &Connection,
+    target: &super::characters::Target,
+    asset_id: &str,
+) -> Result<bool, LibraryError> {
+    let Some(series) = target.series_classification_id.as_deref() else {
+        return Ok(false);
+    };
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM character_tagger_pending WHERE target_id=?1 AND asset_id=?2)
+            AND NOT EXISTS(
+                WITH RECURSIVE scope(id) AS (
+                    SELECT ?3 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
+                SELECT 1 FROM asset_classifications ac
+                WHERE ac.asset_id=?2 AND ac.classification_id IN (SELECT id FROM scope))",
+        params![target.id, asset_id, series],
+        |row| row.get(0),
+    )?)
 }
 
 impl Library {
@@ -588,6 +614,29 @@ impl Library {
                 Err(CharacterError::InboundTargetNotFound | CharacterError::NotFound) => {
                     Ok(EntryOutcome::Skipped("assetMissing"))
                 }
+                Err(error) => Err(hold(error)),
+            };
+        }
+        // 태그 추천 맞음 for an image that sits outside the character's series: the desktop 확인
+        // list moves it into the series (the user judged this exact image), so this does too.
+        if tag_pair_outside_series(transaction, &target, &item.asset_id)? {
+            return match self.move_assets_to_characters_in(
+                transaction,
+                vec![CharacterMoveTarget {
+                    target_id: target.id.clone(),
+                    expected_fingerprint: target.fingerprint.clone(),
+                }],
+                vec![item.asset_id.clone()],
+                DecisionKind::Accepted,
+                true,
+            ) {
+                Ok(_) => Ok(EntryOutcome::Applied(written(transaction)?)),
+                Err(
+                    CharacterError::Invalid(_)
+                    | CharacterError::InvalidMessage(_)
+                    | CharacterError::Stale
+                    | CharacterError::NotFound,
+                ) => Ok(EntryOutcome::Skipped("ineligible")),
                 Err(error) => Err(hold(error)),
             };
         }

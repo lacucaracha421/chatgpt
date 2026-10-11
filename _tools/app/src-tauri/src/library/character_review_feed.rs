@@ -1,12 +1,16 @@
 //! Mobile character-candidate review: export and publish the PC's candidate feed.
 //!
 //! The feed lists `(targetId, assetId)` pairs the user can judge on mobile. It carries the
-//! same pairs as the desktop 확인 list (minus the tag-recommendation kind, which mobile cannot
-//! show yet), merged from two PC-local sources:
+//! same pairs as the desktop 확인 list, merged from PC-local sources:
 //!
 //! * `s36`: pending S36 shadow candidates (`automatic` / `recommended`) of every series, the
 //!   desktop 인식 추천 list.
-//! * `doubtful`: existing automatic acceptances S36 does not support (desktop 다시 확인).
+//! * `tagger`: the pending 태그 추천 pairs of the tag projection (`character_tagger_pending`),
+//!   minus those the taggers judged correct by agreement, exactly as `character_confirm_counts`
+//!   counts them. A server that predates this source refuses a whole feed naming it, so the
+//!   publication asks the server first (`itemSources`) and leaves these pairs out otherwise.
+//! * `doubtful`: existing automatic acceptances S36 does not support, plus the tag projection's
+//!   vetoes (desktop 다시 확인; an older server accepts both).
 //!
 //! Saved B36 scan recommendations (`b36_recommended_pairs`) are deliberately not listed: the
 //! desktop 확인 list does not contain them (only the much smaller tagger projection), and on a
@@ -118,11 +122,37 @@ fn valid_token(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b".:_+-".contains(&b))
 }
 
+/// The source that marks a 태그 추천 pair; the only one an older server does not know.
+pub(crate) const TAGGER_SOURCE: &str = "tagger";
+
 fn source_rank(source: &str) -> usize {
     match source {
         "s36" => 0,
         "b36" => 1,
-        _ => 2,
+        "doubtful" => 2,
+        _ => 3,
+    }
+}
+
+impl FeedContent {
+    /// The feed an older server can take: no 태그 추천 pairs (and no character only they named).
+    pub(crate) fn without_tag_recommendations(&mut self) {
+        self.items.retain_mut(|item| {
+            item.sources.retain(|source| *source != TAGGER_SOURCE);
+            !item.sources.is_empty()
+        });
+        let named = self
+            .items
+            .iter()
+            .map(|item| item.target_id.as_str())
+            .collect::<BTreeSet<_>>();
+        self.targets.retain(|id, _| named.contains(id.as_str()));
+    }
+
+    pub(crate) fn has_tag_recommendations(&self) -> bool {
+        self.items
+            .iter()
+            .any(|item| item.sources.contains(&TAGGER_SOURCE))
     }
 }
 
@@ -142,13 +172,14 @@ fn character_error(error: CharacterError) -> LibraryError {
 }
 
 impl Library {
-    /// Build the candidate feed from the S36 shadow lists: every pending pair the desktop 확인
-    /// list shows as 인식 추천 or 다시 확인, each pair once.
+    /// Build the candidate feed from the S36 shadow lists and the tag projection: every pending
+    /// pair the desktop 확인 list shows as 인식 추천, 태그 추천 or 다시 확인, each pair once.
     pub(crate) fn character_review_feed_content(&self) -> Result<FeedContent, LibraryError> {
         let candidates = self.shadow_review_items(None).map_err(character_error)?;
         let doubtful = self
             .shadow_review_items(Some("doubtful"))
             .map_err(character_error)?;
+        let tags = self.confirm_tag_pairs().map_err(character_error)?;
         // Every target the feed may name, read before taking the lock below so their
         // reference file checks run without it.
         let wanted = candidates
@@ -157,6 +188,7 @@ impl Library {
             .filter(|item| !item.folded)
             .map(|item| item.target_id.clone())
             .chain(doubtful.items.iter().map(|item| item.target_id.clone()))
+            .chain(tags.iter().map(|(target_id, _, _)| target_id.clone()))
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -238,6 +270,14 @@ impl Library {
                 item.knn3,
             );
         }
+        // 태그 추천 follows 인식 추천, 다시 확인 (S36's doubtful list, then the tag vetoes) comes last,
+        // like the desktop list's kinds.
+        for (target_id, asset_id, reason) in &tags {
+            if reason == "veto" || target(target_id)?.is_none() {
+                continue;
+            }
+            add(target_id, asset_id, TAGGER_SOURCE, "recommended", None);
+        }
         for item in &doubtful.items {
             if target(&item.target_id)?.is_none() {
                 continue;
@@ -249,6 +289,12 @@ impl Library {
                 &item.verdict,
                 item.knn3,
             );
+        }
+        for (target_id, asset_id, reason) in &tags {
+            if reason != "veto" || target(target_id)?.is_none() {
+                continue;
+            }
+            add(target_id, asset_id, "doubtful", "veto", None);
         }
 
         let mut committed = connection.prepare(
@@ -342,12 +388,13 @@ impl Library {
                     (SELECT MAX(updated_at) || ':' || COUNT(*) || ':' || SUM(revision) FROM character_targets),
                     (SELECT broad_folder_scope FROM character_autotag_control WHERE singleton=1),
                     (SELECT COUNT(*) FROM character_target_tagger_tags) || ':' ||
-                    (SELECT COUNT(*) FROM asset_tagger_coverage)",
+                    (SELECT COUNT(*) FROM asset_tagger_coverage) || ':' ||
+                    (SELECT COUNT(*) || ':' || COALESCE(MAX(created_at), '') FROM character_tagger_candidates)",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )?;
         // The broad-folder setting hides or shows candidates, and so do the taggers' readings
-        // (a pair they agree on needs no person), so both are part of the input.
+        // (a pair they agree on needs no person) and their saved 태그 추천, so all are part of the input.
         let input = serde_json::json!([decisions, scored, targets, acknowledged, broad, tagger]);
         Ok(hex(input.to_string()))
     }
@@ -460,7 +507,13 @@ impl Library {
             params![endpoint, library_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )?;
-        let content = self.character_review_feed_content()?;
+        let mut content = self.character_review_feed_content()?;
+        // An older server refuses a whole feed that names 태그 추천: ask before sending it.
+        if content.has_tag_recommendations()
+            && !client.character_review_accepts_tag_recommendations(api_token)?
+        {
+            content.without_tag_recommendations();
+        }
         // The skipped decisions acknowledged since the previous feed, bounded like the server.
         let mut cursor = acknowledged.max(published_cursor);
         let mut skipped = self

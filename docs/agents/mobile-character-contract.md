@@ -311,3 +311,22 @@ runtime modules, publish only with authorization for the
 selected library, package/install Android and test with PC off. Preserve separate
 Windows and Linux native publication evidence, real-library parity/count checks,
 and device media acceptance. No such rollout action was performed here.
+
+## Review feed: 태그 추천 (2026-10-12)
+
+The PC review feed (`PUT /v1/library/characters/review/feed`) carries the same pairs as the PC
+확인 list. Item `sources` are `s36` and `b36` (인식 추천), `doubtful` (다시 확인, which also
+carries the tag projection's vetoes) and `tagger` (태그 추천: the pending `character_tagger_pending`
+pairs minus those the taggers agree on, as `character_confirm_counts` counts them). `counts` gains
+`tagger`, and every review GET answers `itemSources` (the sources the server accepts).
+
+- **Deploy order: server first.** A server that predates `tagger` refuses a whole feed naming it,
+  so the PC reads `itemSources` before publishing and leaves 태그 추천 pairs out (vetoes still go
+  as `doubtful`) when `tagger` is not listed. An older tablet shows an unknown source as an empty chip.
+- The server adds `mobile_character_review_items.tagger` at startup (`character_review.migrate`).
+- A tablet 맞음 on a tag pair whose image lies outside the character's series moves the image
+  into the series on the PC, exactly like the PC 확인 list (the receive pass uses
+  `move_assets_to_characters_in`); 아님 stores the ordinary rejection.
+- The tablet saves decisions only when the person confirms: swiping left marks 아님 locally,
+  `아님 N장 빼고 나머지 맞음` then queues 아님 for the marked and 맞음 for every other card seen
+  in the session (unseen cards untouched) through the same review outbox as before.
