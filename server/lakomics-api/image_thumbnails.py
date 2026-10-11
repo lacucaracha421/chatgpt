@@ -85,9 +85,10 @@ LEASE_SECONDS = 300.0
 #: Input bound, matching the capture download limit: an original larger than this is not
 #: a thumbnail candidate and must not be streamed.
 MAX_SOURCE_BYTES = 50 * 1024 * 1024
-# Video captures can be larger, but thumbnailing never downloads the full capture
-# service's 512 MiB maximum on this shared host.
-MAX_VIDEO_SOURCE_BYTES = 128 * 1024 * 1024
+# Video captures can be larger (a 142 MB clip failed at the former 128 MiB bound). The
+# download lands in the service's PrivateTmp, which is RAM-backed tmpfs (~819 MB on the
+# 1.6 GB host), so the bound stays well below the capture service's 512 MiB maximum.
+MAX_VIDEO_SOURCE_BYTES = 256 * 1024 * 1024
 
 #: Absolute wall-clock bound on one source download, measured with a monotonic clock.
 #: ``MAX_SOURCE_BYTES`` bounds how much is read but not how long it takes: a peer that
@@ -96,6 +97,10 @@ MAX_VIDEO_SOURCE_BYTES = 128 * 1024 * 1024
 #: The storage client's own socket timeouts remain the controller's concern; this is
 #: the total-budget guard that catches a slow-but-progressing stream either way.
 DOWNLOAD_TIMEOUT_SECONDS = 60.0
+#: A video original may be up to ``MAX_VIDEO_SOURCE_BYTES``; at the same budget per byte
+#: as 50 MiB in 60 s that would be 5 minutes, but the job lease is 300 s and a video encode
+#: may take 60 s more, so videos get 180 s (about 1.4 MB/s for a full 256 MiB clip).
+VIDEO_DOWNLOAD_TIMEOUT_SECONDS = 180.0
 
 #: Child-process wall-clock bound. The child applies its own CPU, address-space and
 #: priority limits, so this is the only bound the parent must supply — it is the one
@@ -687,7 +692,7 @@ class ImageThumbnailWorker:
         every read, and a digest/size check before anything downstream sees the file.
         """
         self._check_stop()
-        deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
+        deadline = time.monotonic() + (VIDEO_DOWNLOAD_TIMEOUT_SECONDS if source_limit == MAX_VIDEO_SOURCE_BYTES else DOWNLOAD_TIMEOUT_SECONDS)
         hasher = hashlib.sha256()
         total = 0
         try:
