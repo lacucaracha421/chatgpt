@@ -1016,7 +1016,7 @@ describe('asset search scope navigation',()=>{
       return original(path);
     });
     render(<App/>);
-    await screen.findByRole('button',{name:'찾기'});openScreenSearch();
+    await screen.findByRole('heading',{name:'에셋'});openScreenSearch();
     fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'검색'}});
     fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^${names[kind]}`)}));
     const chip=await screen.findByRole('button',{name:`${names[kind]} 범위 빼기`});
