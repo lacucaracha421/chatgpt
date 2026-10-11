@@ -341,7 +341,7 @@ impl Library {
     pub(super) fn character_shadow_backfill_available(&self) -> Result<()> {
         if crate::workload::is_restricted() {
             return Err(Error::Invalid(
-                "절약 모드가 끝난 뒤 과거 이미지 채점을 시작해 주세요.",
+                "절약 모드가 끝난 뒤 기존 이미지 학습 인식 준비를 시작해 주세요.",
             ));
         }
         let engine = self
@@ -356,7 +356,7 @@ impl Library {
                 .is_some_and(|config| config.shadow_model.is_some())
         {
             return Err(Error::Invalid(
-                "분석 환경과 S36 시험 채점을 켠 뒤 다시 시도해 주세요.",
+                "분석 환경과 학습 인식 준비를 켠 뒤 다시 시도해 주세요.",
             ));
         }
         Ok(())

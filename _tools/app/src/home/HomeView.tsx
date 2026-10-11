@@ -280,7 +280,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const fieldFailed = (field: HomeOverview["failed"][number]) => overviewError || Boolean(overview?.failed.includes(field));
   const reviewUnknown = [
     {key: "character", label: "캐릭터", unknown: Boolean(shadowQueueApi) && !restricted && (characterQueue === null || characterError), failed: characterError},
-    {key: "tagger", label: "태거", unknown: Boolean(gateway.getHomeOverview) && (!overview || fieldFailed("tagger")), failed: fieldFailed("tagger")},
+    {key: "tagger", label: "확인", unknown: Boolean(gateway.getHomeOverview) && (!overview || fieldFailed("tagger")), failed: fieldFailed("tagger")},
     {key: "duplicates", label: "중복 판본", unknown: duplicateCount === null || duplicateError, failed: duplicateError},
     {key: "unsorted", label: "미분류 에셋", unknown: unsortedCount === null, failed: false},
     {key: "av-link", label: "AV 품번", unknown: !privacyMode && avLinkCount === null, failed: false},
@@ -297,7 +297,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   };
   const todos = [
     { key: "character", label: "캐릭터", count: characterQueue?.total ?? 0, open: () => setReviewOverview(true) },
-    { key: "tagger", label: "태거", count: taggerQueueCounts?.total ?? 0, open: openTaggerReview },
+    { key: "tagger", label: "확인", count: taggerQueueCounts?.total ?? 0, open: openTaggerReview },
     { key: "similar", label: "유사 이미지 검토", count: reviewCount, unit: "쌍", open: go({ kind: "similarity_review" }) },
     { key: "duplicates", label: "중복 판본", count: duplicateCount ?? 0, open: () => setDialog({ kind: "duplicates" }) },
     { key: "unsorted", label: "미분류 에셋", count: unsortedCount ?? 0, open: go({ kind: "unsorted" }) },

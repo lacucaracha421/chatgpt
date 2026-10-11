@@ -53,15 +53,15 @@ describe('character review overview',()=>{
     expect(reads()[0].get('limit')).toBe('1');
     expect(screen.getByText('대기 11건 · 시리즈 2')).toBeTruthy();
     // Names and portraits come from the character index.
-    expect(within(yuri).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['백합 전체 검토 7건','라라 검토 5건','마리 검토 2건']);
+    expect(within(yuri).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['백합 전체 확인 7건','라라 확인 5건','마리 확인 2건']);
     expect(section(/^명조/).textContent).toContain('방랑자4');
     expect(screen.queryByText(/^외/)).toBeNull();
     await vi.waitFor(()=>expect([...yuri.querySelectorAll('img')].map(img=>img.getAttribute('src'))).toEqual(['thumb:cover-yuri','thumb:p-lara']));
-    fireEvent.click(screen.getByRole('button',{name:'백합 전체 검토 7건'}));
+    fireEvent.click(screen.getByRole('button',{name:'백합 전체 확인 7건'}));
     expect(onOpen).toHaveBeenLastCalledWith({series:{id:'yuri',name:'백합'},serverSeries:true});
-    fireEvent.click(screen.getByRole('button',{name:'마리 검토 2건'}));
+    fireEvent.click(screen.getByRole('button',{name:'마리 확인 2건'}));
     expect(onOpen).toHaveBeenLastCalledWith({target:{id:'mari',name:'마리'}});
-    fireEvent.click(screen.getByRole('button',{name:'전체 검토'}));
+    fireEvent.click(screen.getByRole('button',{name:'전체 확인'}));
     expect(onOpen).toHaveBeenLastCalledWith({target:null});
     expect(back.current?.()).toBe(true);
     expect(onClose).toHaveBeenCalled();
@@ -78,10 +78,10 @@ describe('character review overview',()=>{
     const {onOpen,rerender}=mount(0);
     expect(await screen.findByRole('region',{name:'백합 8건'})).toBeTruthy();
     expect(reads().map(query=>[query.get('limit'),query.get('cursor')])).toEqual([['1',null],[String(OVERVIEW_PAGE),null],[String(OVERVIEW_PAGE),'1'],[String(OVERVIEW_PAGE),'2']]);
-    expect(screen.getByRole('button',{name:'라라 검토 5건'})).toBeTruthy();
-    expect(screen.getByRole('button',{name:'마리 검토 3건'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'라라 확인 5건'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'마리 확인 3건'})).toBeTruthy();
     expect(screen.queryByText(/^외/)).toBeNull();
-    fireEvent.click(screen.getByRole('button',{name:'명조 전체 검토 1건'}));
+    fireEvent.click(screen.getByRole('button',{name:'명조 전체 확인 1건'}));
     expect(onOpen).toHaveBeenLastCalledWith({series:{id:'wuwa',name:'명조'},serverSeries:false});
     // A review closed over it: counts are read again.
     pages[0]=candidates([['lara',3]]);
@@ -100,7 +100,7 @@ describe('character review overview',()=>{
     const shown=OVERVIEW_PAGES*OVERVIEW_PAGE;
     expect(await screen.findByRole('region',{name:`백합 ${shown}건`})).toBeTruthy();
     expect(reads()).toHaveLength(OVERVIEW_PAGES+1);
-    expect(screen.getByText(/^외/).textContent).toBe(`외 ${5000-shown}건 · 전체 검토에서 이어서 볼 수 있습니다.`);
+    expect(screen.getByText(/^외/).textContent).toBe(`외 ${5000-shown}건 · 전체 확인에서 이어서 볼 수 있습니다.`);
   });
 
   it('offline: shows the last overview with its time, or a clear offline state',async()=>{
@@ -118,7 +118,7 @@ describe('character review overview',()=>{
     mocks.api.mockRejectedValue(new ApiError('offline',null,null));
     mount();
     expect(await screen.findByText(`${clockLabel(at)} 기준`)).toBeTruthy();
-    expect(screen.getByRole('button',{name:'라라 검토 3건'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'라라 확인 3건'})).toBeTruthy();
   });
 
   it('says when no PC has published a review list yet',async()=>{

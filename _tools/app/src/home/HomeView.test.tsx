@@ -183,7 +183,7 @@ describe('Home attention', () => {
     gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 10, week: 41 }, { capturesPending: 3 }, { tagger: { total: 7, recommendation: 7, veto: 0 } }));
     const { onNavigate } = renderHome({ props: { unsortedCount: 27, reviewCount: 2 } });
     const today = await screen.findByRole('region', { name: '오늘 할 것' });
-    await waitFor(() => expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋27', '□유사 이미지 검토2쌍', '□처리 대기3', '□태거7']));
+    await waitFor(() => expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋27', '□유사 이미지 검토2쌍', '□처리 대기3', '□확인7']));
     fireEvent.click(within(today).getByRole('button', { name: /미분류 에셋/ }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'unsorted' });
     fireEvent.click(within(today).getByRole('button', { name: /유사 이미지 검토/ }));

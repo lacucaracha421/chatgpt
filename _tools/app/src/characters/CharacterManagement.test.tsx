@@ -119,7 +119,7 @@ it("opens the curated-folder character conversion directly", async () => {
   render(<LibraryProvider gateway={gateway}><CharacterFolderOrganizer folderId="child" classifications={fixtureClassifications} targets={[fixtureTarget()]} privacyMode={false} onClose={()=>{}} onSingleSaved={()=>{}} /></LibraryProvider>);
   const dialog=await screen.findByRole("dialog",{name:"한 캐릭터 폴더 정리"});
   expect(screen.queryByRole("button",{name:/여러 캐릭터가 섞인 폴더/})).not.toBeInTheDocument();
-  expect(within(dialog).queryByText(/기준 이미지/)).not.toBeInTheDocument();
+  expect(within(dialog).queryByText(/레퍼런스/)).not.toBeInTheDocument();
   expect(within(dialog).getByText(/대표 이미지/)).toBeInTheDocument();
 });
 

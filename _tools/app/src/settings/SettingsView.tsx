@@ -534,7 +534,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <SettingsGroup title="자동 태그" help="자동 태그 파일을 가져오면 기존 직접 태그를 건드리지 않고 자동 태그만 갱신합니다.">
             {library ? <AutoTagSettings disabled={pending} /> : <p className="settings-view__status">라이브러리 없음</p>}
           </SettingsGroup>
-          <SettingsGroup title="태거 검토" help="미리보기에서 수량을 확인한 뒤 태거 판정을 적용합니다.">
+          <SettingsGroup title="자동 태그 판단 적용" help="미리보기에서 수량을 확인한 뒤 자동 태그 판단을 적용합니다.">
             {library ? <TaggerReviewSettings disabled={pending} /> : <p className="settings-view__status">라이브러리 없음</p>}
           </SettingsGroup>
         </div>}

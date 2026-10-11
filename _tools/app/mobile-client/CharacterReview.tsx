@@ -24,7 +24,7 @@ function writeSkippedPairs(keys: Set<string>) {
 function rememberSkippedPair(key: string) { const keys = readSkippedPairs(); keys.delete(key); keys.add(key); writeSkippedPairs(keys); }
 function forgetSkippedPair(key: string) { const keys = readSkippedPairs(); if (keys.delete(key)) writeSkippedPairs(keys); }
 
-const SOURCE_LABEL: Record<ReviewSource, string> = {s36: 'S36 추천', b36: 'B36 추천', doubtful: '다시 확인'};
+const SOURCE_LABEL: Record<ReviewSource, string> = {s36: '인식 추천', b36: '인식 추천', doubtful: '다시 확인'};
 const UNDO_DEPTH = 5;
 const PAGE = 20;
 /** Horizontal share of the card width that commits a swipe, and a fling speed in px/ms. */
@@ -178,7 +178,7 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
     try {
       const feed = await api<ReviewFeed>(reviewPath({target: target?.id, series: serverSeries ? series?.id : null, cursor: restart ? null : cursor.current, limit: PAGE}));
       if (!alive.current) return;
-      if (feed?.version !== 1 || !Array.isArray(feed.items)) throw new Error('캐릭터 검토 응답을 확인할 수 없습니다.');
+      if (feed?.version !== 1 || !Array.isArray(feed.items)) throw new Error('확인 응답을 확인할 수 없습니다.');
       cursor.current = feed.hasMore ? feed.nextCursor : null;
       setCounts(feed.counts);
       setTargets(current => ({...current, ...feed.targets}));
@@ -207,7 +207,7 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
         return await load(true);
       }
       const offline = reason instanceof ApiError ? reason.status === null : !(reason instanceof DOMException);
-      if (restart) setState({phase: 'error', message: (reason as ApiError)?.status === 404 ? '서버에 캐릭터 검토 업데이트가 필요합니다.' : errorText(reason), offline: offline && (reason as ApiError)?.status !== 404});
+      if (restart) setState({phase: 'error', message: (reason as ApiError)?.status === 404 ? '서버에 확인 업데이트가 필요합니다.' : errorText(reason), offline: offline && (reason as ApiError)?.status !== 404});
       else setNotice(errorText(reason));
     } finally {
       more.current = false;
@@ -327,31 +327,31 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
     const timer = setTimeout(() => setSnackVisible(false), 2500);
     return () => clearTimeout(timer);
   }, [undo.length, lastUndo]);
-  const title = target ? `${target.name} 검토` : series ? `${series.name} 검토` : '캐릭터 검토';
+  const title = target ? `${target.name} 확인` : series ? `${series.name} 확인` : '확인';
   // A series walks pages that may hold none of its candidates: keep loading until the feed ends.
   const walking = !!series && !!cursor.current;
   const {width} = size();
   return <div className="review-overlay" role="dialog" aria-modal="true" aria-label={title}>
     <header className="review-bar">
-      <IconButton label="검토 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
+      <IconButton label="확인 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
       <div className="review-title"><h1>{title}</h1>
         {state.phase === 'ready' && state.ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{pending > 0 && ` · PC 반영 대기 ${pending}`}{(counts?.skipped ?? 0) > 0 && ` · PC가 건너뜀 ${counts!.skipped}`}</p>}
       </div>
       {undo.length > 0 && !snackVisible && <IconButton label="마지막 판단 되돌리기" icon={ArrowUturnLeftIcon} onClick={revert}/>}
     </header>
     {notice && <p className="error-message review-notice" role="alert">{notice}</p>}
-    <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
-    {state.phase === 'error' && <EmptyState className="review-empty" title={state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'} hint={state.offline ? (queued ? `저장된 결정 ${queued}개는 연결되면 PC로 전송됩니다.` : '연결을 확인한 뒤 다시 시도해 주세요.') : state.message}>
+    <LoadingLine label={(state.phase === 'loading')&&'확인 목록 불러오는 중'}/>
+    {state.phase === 'error' && <EmptyState className="review-empty" title={state.offline ? '오프라인입니다' : '확인 목록을 불러오지 못했습니다'} hint={state.offline ? (queued ? `저장된 결정 ${queued}개는 연결되면 PC로 전송됩니다.` : '연결을 확인한 뒤 다시 시도해 주세요.') : state.message}>
       <Button onClick={() => { setState({phase: 'loading'}); void load(true); }}>다시 시도</Button>
     </EmptyState>}
-    {state.phase === 'ready' && !state.ready && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 캐릭터 검토 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 검토할 수 있습니다."/>}
-    <LoadingLine label={(state.phase === 'ready' && state.ready && !current && walking && !notice)&&'검토 목록 불러오는 중'}/>
-    {state.phase === 'ready' && state.ready && !current && (!walking || !!notice) && <EmptyState className="review-empty" title="모두 검토했습니다" hint={pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 캐릭터 갤러리에 나타납니다.` : 'PC가 새 후보를 보내면 여기에 나타납니다.'}>
+    {state.phase === 'ready' && !state.ready && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 확인 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 확인할 수 있습니다."/>}
+    <LoadingLine label={(state.phase === 'ready' && state.ready && !current && walking && !notice)&&'확인 목록 불러오는 중'}/>
+    {state.phase === 'ready' && state.ready && !current && (!walking || !!notice) && <EmptyState className="review-empty" title="모두 확인했습니다" hint={pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 캐릭터 갤러리에 나타납니다.` : 'PC가 새 후보를 보내면 여기에 나타납니다.'}>
       {!cursor.current && deferred.current.length > 0 && <Button onClick={replaySkipped}>건너뛴 {deferred.current.length}개 다시 보기</Button>}
     </EmptyState>}
     {state.phase === 'ready' && state.ready && current && <div className="review-body">
       <div ref={card} className="review-card" data-hint={hint} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; setOffset({x: 0, y: 0}); }}
-        style={{transform: `translate(${offset.x}px, ${Math.min(0, offset.y)}px) rotate(${(offset.x / width) * 12}deg)`}} aria-label="검토 후보">
+        style={{transform: `translate(${offset.x}px, ${Math.min(0, offset.y)}px) rotate(${(offset.x / width) * 12}deg)`}} aria-label="확인 후보">
         <ReviewImage asset={current.asset} className="review-candidate" label={`${info?.name ?? '캐릭터'} 후보`}/>
         <div className="review-caption">
           <strong>{info?.name ?? current.targetId}</strong>
@@ -360,9 +360,9 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
         </div>
         {hint && <span className="review-stamp" data-hint={hint} aria-hidden="true">{hint === 'accept' ? '맞음' : hint === 'reject' ? '아님' : '건너뛰기'}</span>}
       </div>
-      {!!info?.references.length && <div className="review-references" aria-label="기준 이미지">
-        {info.references.slice(0, 4).map(reference => <button key={reference.id} className="review-reference" aria-label="기준 이미지 크게 보기" onClick={() => setZoom(reference)}>
-          <ReviewImage asset={reference} label="기준 이미지"/>
+      {!!info?.references.length && <div className="review-references" aria-label="레퍼런스">
+        {info.references.slice(0, 4).map(reference => <button key={reference.id} className="review-reference" aria-label="레퍼런스 크게 보기" onClick={() => setZoom(reference)}>
+          <ReviewImage asset={reference} label="레퍼런스"/>
         </button>)}
       </div>}
     </div>}
@@ -375,25 +375,25 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
       <span>{lastUndo.action === 'accepted' ? '맞음으로 저장' : lastUndo.action === 'rejected' ? '아님으로 저장' : '건너뜀'}</span>
       <Button variant="ghost" onClick={revert}><ArrowUturnLeftIcon aria-hidden="true"/>되돌리기</Button>
     </div>}
-    {zoom && <div className="review-zoom" role="dialog" aria-modal="true" aria-label="기준 이미지">
+    {zoom && <div className="review-zoom" role="dialog" aria-modal="true" aria-label="레퍼런스">
       <IconButton label="크게 보기 닫기" icon={XMarkIcon} onClick={() => setZoom(null)}/>
-      <ReviewImage asset={zoom} label="기준 이미지"/>
+      <ReviewImage asset={zoom} label="레퍼런스"/>
     </div>}
   </div>;
 }
 
-/** Library → 분류 entry row: "캐릭터 검토 N", shown only with the capability and N > 0. */
+/** Library → 분류 entry row: "확인 N", shown only with the capability and N > 0. */
 export function CharacterReviewEntry({enabled, refreshKey, onOpen}: {enabled: boolean; refreshKey: unknown; onOpen(): void}) {
   const count = useCharacterReviewCount(enabled, null, refreshKey);
   if (!count) return null;
-  return <button className="review-entry" onClick={onOpen} aria-label={`캐릭터 검토 ${count}개`}>
-    <UserIcon aria-hidden="true"/><strong>캐릭터 검토</strong><span className="numeric muted">{count}</span><ChevronRightIcon aria-hidden="true"/>
+  return <button className="review-entry" onClick={onOpen} aria-label={`확인 ${count}개`}>
+    <UserIcon aria-hidden="true"/><strong>확인</strong><span className="numeric muted">{count}</span><ChevronRightIcon aria-hidden="true"/>
   </button>;
 }
 
-/** Character page chip: "검토 N" opens the review filtered to this character. */
+/** Character page chip: "확인 N" opens the review filtered to this character. */
 export function CharacterReviewChip({enabled, targetId, refreshKey, onOpen}: {enabled: boolean; targetId: string; refreshKey: unknown; onOpen(): void}) {
   const count = useCharacterReviewCount(enabled, targetId, refreshKey);
   if (!count) return null;
-  return <div className="review-entry-chip"><Button size="sm" variant="secondary" onClick={onOpen} aria-label={`이 캐릭터 검토 ${count}개`}>검토 {count}</Button></div>;
+  return <div className="review-entry-chip"><Button size="sm" variant="secondary" onClick={onOpen} aria-label={`이 캐릭터 확인 ${count}개`}>확인 {count}</Button></div>;
 }

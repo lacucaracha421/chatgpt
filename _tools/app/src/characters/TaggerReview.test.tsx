@@ -42,8 +42,8 @@ function fixture(items: TaggerReviewItem[], folders: Record<string, string[]> = 
 }
 
 async function openCharacter() {
-  await userEvent.setup().click(await screen.findByRole("button", { name: "백합 › 라라 태거 검토 2건" }));
-  return screen.findByRole("grid", { name: "라라 태거 후보" });
+  await userEvent.setup().click(await screen.findByRole("button", { name: "백합 › 라라 확인 2건" }));
+  return screen.findByRole("grid", { name: "라라 확인" });
 }
 
 it("stores tile judgments as direct manual decisions", async () => {
@@ -58,6 +58,28 @@ it("stores tile judgments as direct manual decisions", async () => {
   expect(api.decide).toHaveBeenLastCalledWith({
     targetId: "char", expectedFingerprint: "fp-char", assetIds: ["a2"], decision: "rejected", baselineFingerprint: null, scanId: null,
   });
+});
+
+it("uses plain vocabulary in the overview, candidate grid and preview", async () => {
+  const candidate = item("a1");
+  candidate.crop = { box: [.1, .2, .6, .8], distance: .234 };
+  fixture([candidate, item("a2", "veto")]);
+  const retired = /PixAI|canary|B36|S36|태거/i;
+  const assertPlain = () => {
+    expect(document.body.textContent).not.toMatch(retired);
+    document.querySelectorAll("[aria-label], [aria-description], img[alt]").forEach(element => {
+      expect([element.getAttribute("aria-label"), element.getAttribute("aria-description"), element.getAttribute("alt")].filter(Boolean).join(" ")).not.toMatch(retired);
+    });
+  };
+  await screen.findByRole("button", { name: "백합 › 라라 확인 2건" });
+  assertPlain();
+  const grid = await openCharacter();
+  assertPlain();
+  expect(within(grid).getByText("자동 태그 확실")).toHaveAttribute("title", "PixAI 0.91 · canary 0.94");
+  expect(within(grid).getByText("자동 태그 불확실")).toHaveAttribute("title", "PixAI 0.11 · canary 0.18");
+  expect(within(grid).getByText("인식 추천")).toHaveAttribute("title", "B36 0.234");
+  await userEvent.setup().click(within(grid).getByRole("img", { name: "a1.png — 라라 후보" }).closest("button")!);
+  assertPlain();
 });
 
 it("uses the manual batch command for 모두 맞음", async () => {
@@ -94,7 +116,7 @@ it("moves grid focus with arrows, toggles bulk checks, and returns with Escape",
   await user.keyboard("{ArrowRight}");
   expect(cells[1]).toHaveFocus();
   await user.keyboard("{Escape}");
-  expect(screen.queryByRole("grid", { name: "라라 태거 후보" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("grid", { name: "라라 확인" })).not.toBeInTheDocument();
   expect(screen.getByRole("region", { name: "백합" })).toBeInTheDocument();
 });
 
@@ -108,7 +130,7 @@ it("renders normalized crop percentages within the contained image and uses orig
   expect(parseFloat(box.style.height)).toBeCloseTo(60);
   expect(box.parentElement).toHaveStyle({ height: "100%" });
   expect(parseFloat(box.parentElement!.style.width)).toBeCloseTo(100 * 100 / 120);
-  expect(within(grid).getByText("0.234")).toBeInTheDocument();
+  expect(within(grid).getByText("인식 추천")).toHaveAttribute("title", "B36 0.234");
   await userEvent.setup().click(within(grid).getAllByRole("gridcell")[0]);
   const preview = screen.getByRole("region", { name: "이미지 미리보기" });
   expect(within(preview).getByAltText("a1.png — 라라 후보")).toHaveAttribute("src", "http://lakomics.localhost/asset/a1");
@@ -158,7 +180,7 @@ it("keeps outside-series acceptance and failed decisions on the same preview pat
 it("selects all, clears, and shift-selects a range before the existing batch confirmation", async () => {
   const { api } = fixture([item("a1"), item("a2"), item("a3"), item("a4")]);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "백합 › 라라 태거 검토 4건" }));
+  await user.click(screen.getByRole("button", { name: "백합 › 라라 확인 4건" }));
   await user.click(screen.getByRole("button", { name: "모두 아님" }));
   await user.click(screen.getByRole("button", { name: "선택 해제" }));
   expect(screen.getAllByRole("checkbox").every((box) => !(box as HTMLInputElement).checked)).toBe(true);
@@ -220,20 +242,20 @@ it("does not reopen a preview closed during a pending decision or submit twice",
   expect(screen.queryByRole("region", { name: "이미지 미리보기" })).not.toBeInTheDocument();
 });
 
-it("records 맞음 · 영역 틀림 as membership without learning, inside and outside the folder", async () => {
+it("records 맞음 · 위치 틀림 as membership without learning, inside and outside the folder", async () => {
   const crop = { box: [0.1, 0.1, 0.5, 0.6] as [number, number, number, number], distance: 0.12 };
   const { api } = fixture([{ ...item("a1"), crop }, { ...item("a2"), crop }, item("a3")], { a2: ["other"] });
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "백합 › 라라 태거 검토 3건" }));
-  const grid = await screen.findByRole("grid", { name: "라라 태거 후보" });
+  await user.click(await screen.findByRole("button", { name: "백합 › 라라 확인 3건" }));
+  const grid = await screen.findByRole("grid", { name: "라라 확인" });
   await waitFor(() => expect(api.classifications).toHaveBeenCalledTimes(3));
   // Only a tile with a drawn box can say the box was wrong.
-  expect(within(grid).queryByRole("button", { name: "a3.png 맞음 · 영역 틀림" })).not.toBeInTheDocument();
-  await user.click(within(grid).getByRole("button", { name: "a1.png 맞음 · 영역 틀림" }));
+  expect(within(grid).queryByRole("button", { name: "a3.png 맞음 · 위치 틀림" })).not.toBeInTheDocument();
+  await user.click(within(grid).getByRole("button", { name: "a1.png 맞음 · 위치 틀림" }));
   expect(api.decide).toHaveBeenCalledWith({
     targetId: "char", expectedFingerprint: "fp-char", assetIds: ["a1"], decision: "accepted_wrong_region", baselineFingerprint: null, scanId: null,
   });
-  await user.click(within(grid).getByRole("button", { name: "a2.png 맞음 · 영역 틀림" }));
+  await user.click(within(grid).getByRole("button", { name: "a2.png 맞음 · 위치 틀림" }));
   expect(api.move).toHaveBeenCalledWith("char", "fp-char", ["a2"], false);
   expect(within(grid).queryByRole("button", { name: "a1.png 맞음" })).not.toBeInTheDocument();
 });

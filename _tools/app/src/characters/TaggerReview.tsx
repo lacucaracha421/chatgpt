@@ -1,4 +1,5 @@
 import { SectionLabel } from "../shared/ui/SectionLabel";
+import { Badge } from "../shared/ui/Badge";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { ArrowLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -79,9 +80,9 @@ function groupItems(items: readonly TaggerReviewItem[], targets: readonly Charac
 function Split({ items }: { items: readonly TaggerReviewItem[] }) {
   const counts = taggerCounts(items);
   return <span className="crv-split">
-    {counts.recommendation > 0 && <span>태거 추천 <span className="numeric">{counts.recommendation.toLocaleString()}</span></span>}
+    {counts.recommendation > 0 && <span>태그 추천 <span className="numeric">{counts.recommendation.toLocaleString()}</span></span>}
     {counts.recommendation > 0 && counts.veto > 0 && <span aria-hidden="true"> · </span>}
-    {counts.veto > 0 && <span>검토로 돌림 <span className="numeric">{counts.veto.toLocaleString()}</span></span>}
+    {counts.veto > 0 && <span>다시 확인 <span className="numeric">{counts.veto.toLocaleString()}</span></span>}
   </span>;
 }
 
@@ -274,7 +275,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
     tiles[Math.max(0, Math.min(tiles.length - 1, next))]?.focus();
   }
 
-  const index = <nav className="crv-index" aria-label="태거 검토 시리즈">
+  const index = <nav className="crv-index" aria-label="확인 시리즈">
     {groups.length > 0 && <>
       <SectionLabel as="h2" className="workspace-section-label" title="시리즈" />
       <IndexRow label="전체" count={total} current={!currentGroup} onClick={() => { setSelectedSeries(ALL); setSelectedTarget(null); }} />
@@ -290,7 +291,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); goBack(); }
     }}>
       <ViewToolbar title={`${character.group.seriesName} › ${character.targetName}`}
-        leadingAction={<Button size="icon" variant="ghost" aria-label="태거 검토 목록으로 돌아가기" onClick={goBack}><ArrowLeftIcon aria-hidden="true" /></Button>}
+        leadingAction={<Button size="icon" variant="ghost" aria-label="확인 목록으로 돌아가기" onClick={goBack}><ArrowLeftIcon aria-hidden="true" /></Button>}
         titleAccessory={<span className="tagger-review__title-count numeric">{character.items.length.toLocaleString()}건</span>}
         chrome={{ navigation: index }} />
       <div className="tagger-review__detail">
@@ -313,12 +314,12 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
           </div>
           <ReviewImage key={previewItem.asset.id} item={previewItem} privacyMode={privacyMode} large />
           <Scores item={previewItem} />
-          {membership.get(previewItem.asset.id) === "outside" && <p className="tagger-review__notice">폴더 밖 · 확정하면 캐릭터 폴더로 이동합니다.</p>}
+          {membership.get(previewItem.asset.id) === "outside" && <p className="tagger-review__notice">폴더 밖 · 확정하면 캐릭터 소속으로 이동합니다.</p>}
           {["loading", "error"].includes(membership.get(previewItem.asset.id) ?? "loading") && <p role="status" className="tagger-review__notice">폴더 위치를 확인할 수 있을 때 확정할 수 있습니다.</p>}
           <div className="tagger-review__preview-toolbar">
             <Button disabled={busy || !["inside", "outside"].includes(membership.get(previewItem.asset.id) ?? "")} onClick={() => void decideOne(previewItem, "accepted")}>확정 (A)</Button>
             {previewItem.crop && <Button disabled={busy || !["inside", "outside"].includes(membership.get(previewItem.asset.id) ?? "")}
-              onClick={() => void decideOne(previewItem, "accepted_wrong_region")}>확정 · 영역 틀림 (W)</Button>}
+              onClick={() => void decideOne(previewItem, "accepted_wrong_region")}>확정 · 위치 틀림 (W)</Button>}
             <Button disabled={busy} onClick={() => void decideOne(previewItem, "rejected")}>거부 (X)</Button>
           </div>
           {error && <p className="tagger-review__notice is-error" role="alert">{error}</p>}
@@ -343,7 +344,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
         </div>
         {acceptingUnresolved && <p className="tagger-review__notice" role="status">폴더 위치를 확인하는 동안 맞음 저장을 기다려 주세요.</p>}
         {error && <p className="tagger-review__notice is-error" role="alert">{error}</p>}
-        <div className={`tagger-review__grid tagger-review__grid--${tileSize}`} role="grid" aria-label={`${character.targetName} 태거 후보`}>
+        <div className={`tagger-review__grid tagger-review__grid--${tileSize}`} role="grid" aria-label={`${character.targetName} 확인`}>
           {character.items.map((item) => {
             const key = taggerItemKey(item);
             const state = membership.get(item.asset.id) ?? "loading";
@@ -363,7 +364,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
               }}>
               <div className="tagger-review__image">
                 <ReviewImage item={item} privacyMode={privacyMode} />
-                <span className={`tagger-review__badge tagger-review__badge--${item.evidence.reason}`}>{item.evidence.reason === "recommendation" ? "태거 추천" : "검토로 돌림"}</span>
+                <span className={`tagger-review__badge tagger-review__badge--${item.evidence.reason}`}>{item.evidence.reason === "recommendation" ? "태그 추천" : "다시 확인"}</span>
                 {state === "outside" && <span className="tagger-review__outside">폴더 밖</span>}
                 {bulkDecision && <label className="tagger-review__check"><input type="checkbox" checked={isChecked} disabled={busy}
                   aria-label={`${item.asset.originalName} 선택`} onClick={(event) => { event.stopPropagation(); toggle(item, event.shiftKey); }} onChange={() => {}} /><span aria-hidden="true" /></label>}
@@ -374,7 +375,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
                 <Button size="sm" variant="primary" disabled={acceptDisabled} aria-label={`${item.asset.originalName} 맞음`} onClick={() => void decideOne(item, "accepted")}>맞음</Button>
                 <Button size="sm" disabled={busy} aria-label={`${item.asset.originalName} 아님`} onClick={() => void decideOne(item, "rejected")}>아님</Button>
                 {item.crop && <Button size="sm" variant="ghost" className="tagger-review__wrong-region" disabled={acceptDisabled}
-                  aria-label={`${item.asset.originalName} 맞음 · 영역 틀림`} onClick={() => void decideOne(item, "accepted_wrong_region")}>맞음 · 영역 틀림</Button>}
+                  aria-label={`${item.asset.originalName} 맞음 · 위치 틀림`} onClick={() => void decideOne(item, "accepted_wrong_region")}>맞음 · 위치 틀림</Button>}
               </div>
             </article>;
           })}
@@ -387,9 +388,9 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
   return <div className="crv-view tagger-review" onKeyDown={(event) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onBack(); }
   }}>
-    <ViewToolbar title="태거 검토" leadingAction={<Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>} chrome={{ navigation: index }} />
+    <ViewToolbar title="확인" leadingAction={<Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>} chrome={{ navigation: index }} />
     <div className="crv-scroll"><div className="crv-page">
-      {groups.length === 0 ? <div className="crv-notice" role="status"><p>확인할 태거 후보가 없습니다.</p></div> : <>
+      {groups.length === 0 ? <div className="crv-notice" role="status"><p>확인할 항목이 없습니다.</p></div> : <>
         <div className="crv-summary">
           <span className="crv-count crv-count--lg numeric">{total.toLocaleString()}<small>건</small></span>
           <span className="crv-summary__t">{groups.length.toLocaleString()}개 시리즈 · {groups.reduce((sum, group) => sum + group.characters.length, 0).toLocaleString()}명 <Split items={remaining} /></span>
@@ -399,7 +400,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
             <header className="crv-group__head"><h3>{group.seriesName}</h3><span className="crv-count numeric">{group.items.length.toLocaleString()}<small>건</small></span><Split items={group.items} /></header>
             <div className="crv-characters">
               {group.characters.map((entry) => <button key={entry.targetId} type="button" className="crv-character"
-                aria-label={`${group.seriesName} › ${entry.targetName} 태거 검토 ${entry.items.length}건`}
+                aria-label={`${group.seriesName} › ${entry.targetName} 확인 ${entry.items.length}건`}
                 onClick={() => { setSelectedSeries(group.seriesId); setSelectedTarget(entry.targetId); setBulkDecision(null); setChecked(new Set()); }}>
                 <span className="crv-portrait" aria-hidden="true">{entry.thumbnailAssetId && !privacyMode
                   ? <AssetImage src={assetThumbnailUrl({ id: entry.thumbnailAssetId })} alt="" loading="lazy" decoding="async" /> : <UserIcon />}</span>
@@ -423,9 +424,8 @@ function IndexRow({ label, count, current, onClick }: { label: string; count: nu
 
 function Scores({ item }: { item: TaggerReviewItem }) {
   return <div className="tagger-review__meta">
-    <span>PixAI <b className="numeric">{item.evidence.pixaiScore.toFixed(2)}</b></span>
-    <span>Canary <b className="numeric">{item.evidence.canaryScore.toFixed(2)}</b></span>
-    {item.crop && <span>B36 <b className="numeric">{item.crop.distance.toFixed(3)}</b></span>}
+    <Badge title={`PixAI ${item.evidence.pixaiScore.toFixed(2)} · canary ${item.evidence.canaryScore.toFixed(2)}`}>자동 태그 {item.evidence.pixaiScore >= .85 && item.evidence.canaryScore >= .85 ? "확실" : "불확실"}</Badge>
+    {item.crop && <Badge title={`B36 ${item.crop.distance.toFixed(3)}`}>인식 추천</Badge>}
   </div>;
 }
 

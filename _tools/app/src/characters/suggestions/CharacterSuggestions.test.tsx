@@ -116,7 +116,7 @@ describe("character suggestions", () => {
     render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />);
     expect(await screen.findByText("이졸데")).toBeInTheDocument();
     expect(client.list).toHaveBeenCalledWith(5);
-    expect(screen.getByText("○ canary만 8")).toBeInTheDocument();
+    expect(screen.getByText("확실 0 · 불확실 8")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "시리즈 폴더 없음" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "시리즈 폴더 안에 있는 것만" }));
     expect(screen.queryByText("canary character")).not.toBeInTheDocument();
@@ -148,20 +148,20 @@ describe("character suggestions", () => {
   it("preselects five inside references and submits the edited selection with all others queued", async () => {
     const client = api(), onSaved = vi.fn(); dialog(client, "register", suggestion, onSaved);
     await screen.findByRole("button", { name: "a0 크게 보기" });
-    const refs = screen.getByRole("group", { name: "참조 이미지" });
+    const refs = screen.getByRole("group", { name: "레퍼런스" });
     expect(within(refs).getAllByRole("button")[0]).toHaveAccessibleName("a4 크게 보기");
-    expect(within(refs).getAllByLabelText(/빈 참조 슬롯/)).toHaveLength(3);
+    expect(within(refs).getAllByLabelText(/빈 레퍼런스 슬롯/)).toHaveLength(3);
     expect(within(refs).getByText("단독")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /a7/ })).not.toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "참조 바꾸기" })).getAllByRole("button")[0]).toHaveAccessibleName("a6 크게 보기");
+    expect(within(screen.getByRole("group", { name: "레퍼런스 바꾸기" })).getAllByRole("button")[0]).toHaveAccessibleName("a6 크게 보기");
     expect(screen.getByRole("checkbox", { name: "태그를 이 캐릭터에 연결" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "시리즈 폴더 밖 이미지도 후보로" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "a0 크게 보기" }));
-    fireEvent.click(screen.getByRole("button", { name: "참조에서 제거" }));
+    fireEvent.click(screen.getByRole("button", { name: "레퍼런스에서 제거" }));
     fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
-    expect(screen.getByText("참조 5장 미만: 수동 관리로 시작해요.")).toBeInTheDocument();
+    expect(screen.getByText("레퍼런스 5장 미만: 수동으로 시작해요.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "a5 크게 보기" }));
-    fireEvent.click(screen.getByRole("button", { name: "참조로" }));
+    fireEvent.click(screen.getByRole("button", { name: "레퍼런스로" }));
     fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "수정한 이름" } });
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
@@ -180,11 +180,11 @@ describe("character suggestions", () => {
   it("summarises candidates and can omit outside images without per-image exclusions", async () => {
     const client = api(); dialog(client);
     await screen.findByRole("button", { name: "a0 크게 보기" });
-    expect(screen.getByText(/^검토 후보 3장 —/)).toBeInTheDocument();
+    expect(screen.getByText(/^확인할 이미지 3장 —/)).toBeInTheDocument();
     expect(screen.queryByLabelText("검토 후보 이미지")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "a6 빼기" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "시리즈 폴더 밖 이미지도 후보로" }));
-    expect(screen.getByText(/^검토 후보 2장 —/)).toBeInTheDocument();
+    expect(screen.getByText(/^확인할 이미지 2장 —/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     await waitFor(() => expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ includeOutside: false, excludedAssetIds: [] })));
   });
@@ -193,7 +193,7 @@ describe("character suggestions", () => {
     render(<SuggestionDialog suggestion={suggestion} mode="register" privacyMode={false} api={api()} onClose={onClose} onSaved={vi.fn()} />);
     const opener = await screen.findByRole("button", { name: "a4 크게 보기" });
     opener.focus(); fireEvent.click(opener);
-    const preview = screen.getByRole("dialog", { name: "참조 이미지 크게 보기" });
+    const preview = screen.getByRole("dialog", { name: "레퍼런스 크게 보기" });
     fireEvent.keyDown(preview, { key: "Tab", shiftKey: true });
     expect(within(preview).getByRole("button", { name: "미리보기 닫기" })).toHaveFocus();
     fireEvent.keyDown(preview, { key: "Tab" });
@@ -211,7 +211,7 @@ describe("character suggestions", () => {
     await waitFor(() => expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a5")));
     fireEvent.click(within(preview).getByRole("button", { name: "다음 이미지" }));
     fireEvent.keyDown(preview, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "참조 이미지 크게 보기" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "레퍼런스 크게 보기" })).not.toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: "새 캐릭터 등록" })).toBeInTheDocument();
     expect(opener).toHaveFocus();

@@ -27,7 +27,7 @@ it("confirms the number of recommendations, cancels safely, and persists an unli
   dialog = screen.getByRole("dialog");
   await user.click(within(dialog).getByRole("button", { name: "연결 끊기" }));
   await waitFor(() => expect(api.unlink).toHaveBeenCalledWith("target", "alice", 98));
-  await screen.findByText("연결된 태거 태그가 없습니다.");
+  await screen.findByText("연결된 자동 태그 이름이 없습니다.");
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByText(/연결을 끊은 태그/).closest("details")?.open).toBe(false);
 });

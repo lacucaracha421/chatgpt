@@ -55,7 +55,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
       setTallies(value); setProgress(null);
     }, (e: unknown) => {
       if (!live) return;
-      setError(commandErrorMessage(e, "캐릭터 검토 목록을 읽지 못했습니다.")); setProgress(null);
+      setError(commandErrorMessage(e, "확인 목록을 읽지 못했습니다.")); setProgress(null);
     });
     return () => { live = false; };
   }, [source, restricted, version, retry]);
@@ -67,7 +67,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
   const shown = current ? [current] : groups;
   const reading = progress !== null;
 
-  const index = <nav className="crv-index" aria-label="캐릭터 검토 시리즈">
+  const index = <nav className="crv-index" aria-label="확인 시리즈">
     {!restricted && suggestionCount > 0 && <>
       <SectionLabel as="h2" className="workspace-section-label" title="제안" />
       <IndexRow label="새 캐릭터 제안" count={suggestionCount} current={false} onClick={() => document.getElementById("new-character-suggestions")?.scrollIntoView({ block: "start" })} />
@@ -84,7 +84,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
   if (restricted) {
     body = <div className="crv-notice" role="status">
       <p><b>절약 모드</b>에서는 후보 목록 전체를 읽지 않아 시리즈 · 캐릭터별로 나누어 보여 주지 않습니다. 절약 모드를 끄면 바로 셉니다.</p>
-      <Button size="sm" onClick={() => onOpen({})}>전체 후보 검토</Button>
+      <Button size="sm" onClick={() => onOpen({})}>전체 확인</Button>
     </div>;
   } else if (error) {
     body = <div className="crv-notice" role="alert"><p>{error}</p><Button size="sm" onClick={() => setRetry((value) => value + 1)}>다시 시도</Button></div>;
@@ -101,8 +101,8 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
             <span className="crv-count numeric">{group.total.toLocaleString()}<small>건</small></span>
             <Split automatic={group.automatic} recommended={group.recommended} />
             <span className="crv-space" />
-            {group.seriesId && <Button size="sm" variant="ghost" className="crv-group__open" aria-label={`${group.seriesName} 전체 검토 ${group.total}건`}
-              onClick={() => onOpen({ series: { id: group.seriesId!, name: group.seriesName } })}>시리즈 전체 검토<ChevronRightIcon aria-hidden="true" /></Button>}
+            {group.seriesId && <Button size="sm" variant="ghost" className="crv-group__open" aria-label={`${group.seriesName} 전체 확인 ${group.total}건`}
+              onClick={() => onOpen({ series: { id: group.seriesId!, name: group.seriesName } })}>시리즈 전체 확인<ChevronRightIcon aria-hidden="true" /></Button>}
           </header>
           <div className="crv-characters">
             {group.characters.map((character) => <CharacterRow key={character.targetId} group={group} character={character} privacyMode={privacyMode} onOpen={onOpen} />)}
@@ -113,7 +113,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
   }
 
   return <div className="crv-view">
-    <ViewToolbar title="캐릭터 검토"
+    <ViewToolbar title="확인"
       leadingAction={<Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>}
       chrome={{ navigation: index }} />
     <div className="crv-scroll">
@@ -124,7 +124,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
           <span className="crv-summary__t">{groups.length.toLocaleString()}개 시리즈 · {groups.reduce((sum, group) => sum + group.characters.length, 0).toLocaleString()}명
             <Split automatic={groups.reduce((sum, group) => sum + group.automatic, 0)} recommended={groups.reduce((sum, group) => sum + group.recommended, 0)} /></span>
           <span className="crv-space" />
-          <Button size="sm" onClick={() => onOpen({})}>전체 검토</Button>
+          <Button size="sm" onClick={() => onOpen({})}>전체 확인</Button>
         </div>}
         <BusyLabel busy={!restricted && !error && (!tallies || reading)}><Reading progress={progress} again={!!tallies} /></BusyLabel>
         {body}
@@ -149,7 +149,7 @@ function Split({ automatic, recommended }: { automatic: number; recommended: num
 }
 
 function CharacterRow({ group, character, privacyMode, onOpen }: { group: CharacterReviewGroup; character: CharacterReviewCharacter; privacyMode: boolean; onOpen: (scope: CharacterReviewScope) => void }) {
-  return <button type="button" className="crv-character" aria-label={`${group.seriesName} › ${character.name} 검토 ${character.count}건`}
+  return <button type="button" className="crv-character" aria-label={`${group.seriesName} › ${character.name} 확인 ${character.count}건`}
     onClick={() => onOpen({ ...(group.seriesId ? { series: { id: group.seriesId, name: group.seriesName } } : {}), target: { id: character.targetId, name: character.name } })}>
     <span className="crv-portrait" aria-hidden="true">
       {character.thumbnailAssetId && !privacyMode ? <AssetImage src={thumbnailUrl(character.thumbnailAssetId)} alt="" loading="lazy" decoding="async" /> : <UserIcon />}

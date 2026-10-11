@@ -125,7 +125,7 @@ fn failed_augmentation_model_verification_is_not_cached() {
     std::fs::write(&model, b"invalid weights").unwrap();
     for _ in 0..2 {
         assert!(matches!(check_augmentation_model(&model), Err(Error::Invalid(message))
-            if message == "설치된 보완 모델이 지원하는 S36 파일과 다릅니다. 보완 모델 설치를 확인해 주세요."));
+            if message == "설치된 보완 모델이 지원하는 학습 인식 파일과 다릅니다. 보완 모델 설치를 확인해 주세요."));
     }
     std::fs::write(&model, b"changed invalid weights").unwrap();
     assert!(check_augmentation_model(&model).is_err());

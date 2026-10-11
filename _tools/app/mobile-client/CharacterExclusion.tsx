@@ -77,7 +77,7 @@ function refusalCode(error:unknown):string|null {
 
 function refusalText(error:unknown):string {
   const code=refusalCode(error);
-  if(code==='characterReferenceProtected')return '기준 이미지로 쓰이는 자산은 이 캐릭터에서 뺄 수 없습니다.';
+  if(code==='characterReferenceProtected')return '레퍼런스로 쓰이는 자산은 이 캐릭터에서 뺄 수 없습니다.';
   if(code==='characterSnapshotChanged')return '캐릭터 보기가 변경되었습니다. 새로고침한 뒤 다시 시도해 주세요.';
   if(code==='characterExclusionUnsupported')return '서버에 캐릭터 제외 기능이 없습니다. 서버를 업데이트해 주세요.';
   if(code==='libraryMismatch')return '다른 라이브러리에 연결되어 제외를 적용하지 않았습니다.';

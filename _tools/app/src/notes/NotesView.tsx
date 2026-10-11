@@ -1,7 +1,7 @@
 import { EmptyState } from "../shared/ui/EmptyState";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
-import { displayDateTime } from "../shared/displayDate";
+import { displayDateTime, displayTime } from "../shared/displayDate";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ArrowLeftIcon, ArrowPathIcon, ArrowUturnLeftIcon, ChevronDownIcon, DocumentTextIcon, EllipsisHorizontalIcon, LockClosedIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useLibrary } from "../library/LibraryContext";
@@ -200,7 +200,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   }
   applyUndo.current=(field,value)=>edit(field==="checklist"?{items:value as ChecklistItem[]}:field==="title"?{title:value as string}:{type:"text",items:undefined,body:value as string});
   async function backup(operation:"export"|"import"){setBackupBusy(true);try{await store.backup(operation);}finally{setBackupBusy(false);}}
-  const syncTime=state.lastSyncedAt?new Date(state.lastSyncedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false}):"";
+  const syncTime=state.lastSyncedAt?displayTime(state.lastSyncedAt):"";
   const syncItem:MenuItem={id:"sync",label:`지금 동기화${syncTime?` · ${syncTime}`:""}`,disabled:state.syncing||state.saving,onSelect:()=>void store.sync()};
   const showProgress=useDelayedBusy(state.unlocked&&!editing&&!state.error&&(state.saving||state.syncing));
   const newItems:MenuItem[]=[{id:"text",label:"메모",onSelect:()=>newNote("text")},{id:"secret",label:"암호 메모",onSelect:()=>newNote("secret")},{id:"ledger",label:"가계부",onSelect:openLedger}];

@@ -137,7 +137,7 @@ impl Library {
             references.push(value);
         }
         if rows.len() > MAX_SOURCES {
-            return Err(Error::Invalid("기준 이미지가 스냅샷 한도를 넘었습니다."));
+            return Err(Error::Invalid("레퍼런스가 스냅샷 한도를 넘었습니다."));
         }
 
         // Select a bounded source set; fill all its current labels below.
@@ -299,7 +299,7 @@ impl Library {
             let asset_id = reference
                 .asset_id
                 .clone()
-                .ok_or(Error::Invalid("사용 가능한 기준 이미지에 자산이 없습니다."))?;
+                .ok_or(Error::Invalid("사용 가능한 레퍼런스에 자산이 없습니다."))?;
             // A reference whose bytes moved, whose fingerprint was cleared, or
             // which fell below the quality floor fails the whole snapshot: the
             // fitter cannot group it, and guessing would leak it into a group.

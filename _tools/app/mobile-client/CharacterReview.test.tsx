@@ -39,19 +39,37 @@ function mount(){
   render(<CharacterReview libraryId={LIBRARY} backRef={back} onClose={onClose}/>);
   return {back,onClose};
 }
-const candidate=()=>screen.getByLabelText('검토 후보');
+const candidate=()=>screen.getByLabelText('확인 후보');
 const swipe=(dx:number,dy=0)=>{const card=candidate();fireEvent.pointerDown(card,{pointerId:1,button:0,clientX:500,clientY:500});fireEvent.pointerMove(card,{pointerId:1,clientX:500+dx,clientY:500+dy});fireEvent.pointerUp(card,{pointerId:1,clientX:500+dx,clientY:500+dy});};
 
 afterEach(()=>{cleanup();localStorage.clear();});
 beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();vi.mocked(warmThumbnail).mockClear();});
 
 describe('character review screen',()=>{
+  it('uses plain vocabulary for learning, base and doubtful candidates and reference zoom',async()=>{
+    install(feed({items:[item('a1','c',['s36']),item('a2','c',['b36']),item('a3','d',['doubtful'])]}));const {back}=mount();
+    const retired=/PixAI|canary|B36|S36|태거/i;
+    const assertPlain=()=>{
+      expect(document.body.textContent).not.toMatch(retired);
+      document.querySelectorAll('[aria-label], [aria-description], img[alt]').forEach(element=>{
+        expect([element.getAttribute('aria-label'),element.getAttribute('aria-description'),element.getAttribute('alt')].filter(Boolean).join(' ')).not.toMatch(retired);
+      });
+    };
+    await screen.findByText('루미');assertPlain();
+    fireEvent.click(screen.getByLabelText('레퍼런스 크게 보기'));
+    expect(screen.getByRole('dialog',{name:'레퍼런스'})).toBeTruthy();assertPlain();
+    act(()=>{back.current?.();});
+    fireEvent.click(screen.getByRole('button',{name:/맞음/}));
+    await waitFor(()=>expect(screen.getByText('1 / 3 · PC 반영 대기 1')).toBeTruthy());assertPlain();
+    fireEvent.click(screen.getByRole('button',{name:/아님/}));
+    await screen.findByText('다시 확인');assertPlain();
+  });
   it('shows the candidate with its character, source and references, and warms the next ones',async()=>{
     install(feed());mount();
     expect(await screen.findByText('루미')).toBeTruthy();
     expect(screen.getByText('시리즈')).toBeTruthy();
-    expect(screen.getByText('S36 추천')).toBeTruthy();
-    expect(screen.getAllByLabelText('기준 이미지 크게 보기')).toHaveLength(1);
+    expect(screen.getByText('인식 추천')).toBeTruthy();
+    expect(screen.getAllByLabelText('레퍼런스 크게 보기')).toHaveLength(1);
     expect(screen.getByText('0 / 3')).toBeTruthy();
     // Warming runs in a passive effect, which React may flush after the DOM this test waited for.
     await waitFor(()=>expect(vi.mocked(warmThumbnail).mock.calls.map(([a])=>a.id)).toEqual(['a2','a3']));
@@ -66,14 +84,14 @@ describe('character review screen',()=>{
     });
     render(<CharacterReview libraryId={LIBRARY} series={{id:'s',name:'시리즈'}} backRef={{current:null}} onClose={vi.fn()}/>);
     expect(await screen.findByText('루미')).toBeTruthy();
-    expect(screen.getByRole('heading',{name:'시리즈 검토'})).toBeTruthy();
+    expect(screen.getByRole('heading',{name:'시리즈 확인'})).toBeTruthy();
     expect(screen.getByText('0 / 2')).toBeTruthy();
     // The series filter is local: no `target` goes to the server.
     expect(mocks.api.mock.calls.every(([path])=>!String(path).includes('target=')&&!String(path).includes('series='))).toBe(true);
     fireEvent.click(screen.getByRole('button',{name:/맞음/}));
     expect(await screen.findByText('둘째')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:/아님/}));
-    expect(await screen.findByText('모두 검토했습니다')).toBeTruthy();
+    expect(await screen.findByText('모두 확인했습니다')).toBeTruthy();
   });
   it('opens on one series filtered by an upgraded server, with its exact count',async()=>{
     install(feed({items:[item('a1'),item('a3','d')],countsByTarget:[{targetId:'c',seriesId:'s',pending:7},{targetId:'d',seriesId:'s',pending:2},{targetId:'o',seriesId:'x',pending:9}]}));
@@ -87,14 +105,14 @@ describe('character review screen',()=>{
     await screen.findByText('루미');
     fireEvent.click(screen.getByRole('button',{name:/맞음/}));
     expect(readReviewIntents()['c:a1']).toMatchObject({decision:'accepted',origin:'feed',basis:'b1',libraryId:LIBRARY});
-    expect(await screen.findByText('B36 추천')).toBeTruthy();
+    expect(await screen.findByText('인식 추천')).toBeTruthy();
     expect(screen.getByText('1 / 3 · PC 반영 대기 1')).toBeTruthy();
     swipe(-420);
     expect(readReviewIntents()['c:a2'].decision).toBe('rejected');
     expect(await screen.findByText('둘째')).toBeTruthy();
     swipe(0,-400);
     expect(readReviewIntents()['d:a3']).toBeUndefined();
-    expect(await screen.findByText('모두 검토했습니다')).toBeTruthy();
+    expect(await screen.findByText('모두 확인했습니다')).toBeTruthy();
     expect(screen.getByRole('button',{name:'건너뛴 1개 다시 보기'})).toBeTruthy();
     // A small drag snaps back instead of deciding.
     cleanup();install(feed());mount();
@@ -118,16 +136,16 @@ describe('character review screen',()=>{
     Object.defineProperty(HTMLElement.prototype,'animate',{value:animate,configurable:true,writable:true});
     try{
       install(feed());mount();
-      await screen.findByText('S36 추천');
+      await screen.findByText('인식 추천');
       const card=candidate();
       swipe(-420);
       expect(readReviewIntents()['c:a1'].decision).toBe('rejected');
       // The thrown card leaves as an inert copy to the left; the real card already shows the next candidate.
       const ghost=document.querySelector<HTMLElement>('.review-card[data-review-ghost]')!;
-      expect(ghost.getAttribute('aria-hidden')).toBe('true');expect(ghost.textContent).toContain('S36 추천');
+      expect(ghost.getAttribute('aria-hidden')).toBe('true');expect(ghost.textContent).toContain('인식 추천');
       const flight=animations.find(entry=>entry.element===ghost)!;
       expect(String(flight.frames.at(-1)!.transform)).toMatch(/^translate\(-/);
-      await screen.findByText('B36 추천');
+      expect(await screen.findAllByText('인식 추천')).toHaveLength(2);
       expect(candidate()).toBe(card);
       expect(animations.some(entry=>entry.element===card&&entry.frames[0]!.scale===.96)).toBe(true);
       flight.finish!();
@@ -138,13 +156,13 @@ describe('character review screen',()=>{
     install(feed());mount();
     await screen.findByText('루미');
     fireEvent.click(screen.getByRole('button',{name:/맞음/}));
-    await screen.findByText('B36 추천');
+    await screen.findByText('인식 추천');
     fireEvent.click(screen.getByRole('button',{name:/건너뛰기/}));
     await screen.findByText('둘째');
     fireEvent.click(screen.getByRole('button',{name:/되돌리기/}));
-    expect(await screen.findByText('B36 추천')).toBeTruthy();
+    expect(await screen.findByText('인식 추천')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:/되돌리기/}));
-    expect(await screen.findByText('S36 추천')).toBeTruthy();
+    expect(await screen.findByText('인식 추천')).toBeTruthy();
     expect(readReviewIntents()).toEqual({});
     expect(screen.getByText('0 / 3')).toBeTruthy();
     expect(screen.queryByRole('button',{name:/되돌리기/})).toBeNull();
@@ -153,19 +171,19 @@ describe('character review screen',()=>{
     install(feed());mount();
     await screen.findByText('루미');
     fireEvent.click(screen.getByRole('button',{name:/맞음/}));
-    await screen.findByText('B36 추천');
+    await screen.findByText('인식 추천');
     localStorage.clear(); // Confirmed by the server meanwhile.
     fireEvent.click(screen.getByRole('button',{name:/되돌리기/}));
     expect(readReviewIntents()['c:a1'].decision).toBe('cleared');
-    expect(await screen.findByText('S36 추천')).toBeTruthy();
+    expect(await screen.findByText('인식 추천')).toBeTruthy();
   });
   it('Back closes the reference zoom first, then the screen',async()=>{
     install(feed());const {back,onClose}=mount();
     await screen.findByText('루미');
-    fireEvent.click(screen.getByLabelText('기준 이미지 크게 보기'));
-    expect(screen.getByRole('dialog',{name:'기준 이미지'})).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('레퍼런스 크게 보기'));
+    expect(screen.getByRole('dialog',{name:'레퍼런스'})).toBeTruthy();
     act(()=>{expect(back.current?.()).toBe(true);});
-    expect(screen.queryByRole('dialog',{name:'기준 이미지'})).toBeNull();
+    expect(screen.queryByRole('dialog',{name:'레퍼런스'})).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     act(()=>{back.current?.();});
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -180,7 +198,7 @@ describe('character review screen',()=>{
     expect(screen.getByText('저장된 결정 1개는 연결되면 PC로 전송됩니다.')).toBeTruthy();
     cleanup();
     install(new ApiError('not found',404,null));mount();
-    expect(await screen.findByText('서버에 캐릭터 검토 업데이트가 필요합니다.')).toBeTruthy();
+    expect(await screen.findByText('서버에 확인 업데이트가 필요합니다.')).toBeTruthy();
   });
   it('shows pending and PC-skipped counts', async()=>{
     install(feed({counts:{total:3,s36:2,b36:1,doubtful:0,pendingPc:4,skipped:2}}));mount();
@@ -194,7 +212,7 @@ describe('review entry points and viewer add sheet',()=>{
     commitReviewDecision({libraryId:LIBRARY,targetId:'c',assetId:'a1',decision:'accepted',origin:'feed',basis:'b1'});
     const open=vi.fn();
     render(<CharacterReviewEntry enabled refreshKey={1} onOpen={open}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'캐릭터 검토 2개'}));
+    fireEvent.click(await screen.findByRole('button',{name:'확인 2개'}));
     expect(open).toHaveBeenCalled();
     cleanup();mocks.api.mockClear();
     render(<CharacterReviewEntry enabled={false} refreshKey={1} onOpen={open}/>);
@@ -219,7 +237,7 @@ it('masks review images and does not request current or prefetched media in priv
   vi.mocked(media.loadThumbnail).mockClear();vi.mocked(media.mediaTicket).mockClear();vi.mocked(media.warmThumbnail).mockClear();
   localStorage.setItem('lakomics.mobile.privacyMode','1');
   install(feed());mount();
-  await screen.findByLabelText('검토 후보');
+  await screen.findByLabelText('확인 후보');
   expect(document.querySelector('img[src]')).toBeNull();
   expect(document.querySelector('.privacy-mask')).toBeTruthy();
   expect(media.loadThumbnail).not.toHaveBeenCalled();expect(media.mediaTicket).not.toHaveBeenCalled();expect(media.warmThumbnail).not.toHaveBeenCalled();

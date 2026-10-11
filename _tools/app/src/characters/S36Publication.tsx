@@ -40,11 +40,11 @@ export function S36ScoringWarning({ disabled, onChanged }: { disabled?: boolean;
     if (busy) return;
     setBusy(true); setError(null);
     try { await enableS36Scoring(); onChanged?.(); }
-    catch (cause) { setError(commandErrorMessage(cause, "S36 채점을 켜지 못했습니다.")); }
+    catch (cause) { setError(commandErrorMessage(cause, "학습 인식 준비를 켜지 못했습니다.")); }
     finally { setBusy(false); }
   }
   return <>
-    <small className="s36-series__warning" role="status">S36 채점이 꺼져 있어 자동 분류가 멈춰 있습니다 <Button size="sm" variant="quiet" disabled={disabled || busy} onClick={() => void enable()}>켜기</Button></small>
+    <small className="s36-series__warning" role="status">학습 인식 준비가 꺼져 있어 자동 분류가 멈춰 있습니다 <Button size="sm" variant="quiet" disabled={disabled || busy} onClick={() => void enable()}>켜기</Button></small>
     {error && <small className="s36-series__message" role="alert">{error}</small>}
   </>;
 }
@@ -56,7 +56,7 @@ export function useS36Publication(api: S36PublicationApi) {
   useEffect(() => {
     let alive = true;
     const load = () => void api.get().then(value => { if (alive) { setSettings(value); setError(null); } })
-      .catch(e => { if (alive) setError(commandErrorMessage(e, "S36 설정을 불러오지 못했습니다.")); });
+      .catch(e => { if (alive) setError(commandErrorMessage(e, "학습 인식 설정을 불러오지 못했습니다.")); });
     load();
     window.addEventListener(EVENT, load);
     return () => { alive = false; window.removeEventListener(EVENT, load); };
@@ -67,7 +67,7 @@ export function useS36Publication(api: S36PublicationApi) {
       setSettings(await api.set(series, excluded));
       window.dispatchEvent(new Event(EVENT));
     } catch (e) {
-      setError(commandErrorMessage(e, "S36 설정을 저장하지 못했습니다."));
+      setError(commandErrorMessage(e, "학습 인식 설정을 저장하지 못했습니다."));
     }
   }, [api]);
   return { settings, error, save };
@@ -109,10 +109,10 @@ export function S36SeriesControl({ seriesId, seriesName, disabled, onChanged, re
     setClearing(true); setMessage(null);
     try {
       const count = await api.clear(seriesId);
-      setMessage(count ? `S36이 넣은 자동 분류 ${count.toLocaleString()}건을 해제했습니다.` : "해제할 S36 자동 분류가 없습니다.");
+      setMessage(count ? `학습 인식이 넣은 것 ${count.toLocaleString()}건을 되돌렸습니다.` : "되돌릴 학습 인식 분류가 없습니다.");
       onChanged?.();
     } catch (e) {
-      setMessage(commandErrorMessage(e, "S36 자동 분류를 해제하지 못했습니다."));
+      setMessage(commandErrorMessage(e, "학습 인식이 넣은 것을 되돌리지 못했습니다."));
     } finally {
       setClearing(false); setConfirming(false);
     }
@@ -120,17 +120,17 @@ export function S36SeriesControl({ seriesId, seriesName, disabled, onChanged, re
   return <div className="s36-series">
     <fieldset className="s36-series__choice" role="radiogroup" aria-label="자동 분류 방식">
       <span className="s36-series__label">자동 분류</span>
-      {([["기존", false], ["S36", true]] as const).map(([label, value]) => <label key={label}>
+      {([["기본 인식", false], ["학습 인식", true]] as const).map(([label, value]) => <label key={label}>
         <input type="radio" name={`s36-series-${seriesId}`} checked={s36 === value} disabled={disabled} onChange={() => choose(value)} />
         <span>{label}</span>
       </label>)}
     </fieldset>
-    {s36 && <Button size="sm" variant="ghost" disabled={disabled || clearing} onClick={() => setConfirming(true)}>S36 자동 분류 해제</Button>}
-    {readyCount > 0 && <small className="s36-series__ready" role="status">{s36 ? `제외한 캐릭터 중 ${readyCount}명은 S36을 켜도 됩니다` : `S36 켜도 되는 캐릭터 ${readyCount}명`}</small>}
+    {s36 && <Button size="sm" variant="ghost" disabled={disabled || clearing} onClick={() => setConfirming(true)}>학습 인식이 넣은 것 되돌리기</Button>}
+    {readyCount > 0 && <small className="s36-series__ready" role="status">{s36 ? `제외한 캐릭터 중 ${readyCount}명은 학습 인식을 켜도 됩니다` : `학습 인식을 켜도 되는 캐릭터 ${readyCount}명`}</small>}
     {s36 && !settings.scoringEnabled && <S36ScoringWarning disabled={disabled} onChanged={onChanged} />}
     {(message || error) && <small className="s36-series__message" role="status">{message || error}</small>}
-    {confirming && <Dialog open title="S36 자동 분류 해제" onClose={() => { if (!clearing) setConfirming(false); }}>
-      <p>{seriesName}에서 S36이 자동으로 넣고 아직 아무도 확인하지 않은 분류를 모두 해제합니다. 직접 판단한 것과 기존 분류기가 넣은 것은 그대로 둡니다.</p>
+    {confirming && <Dialog open title="학습 인식이 넣은 것 되돌리기" onClose={() => { if (!clearing) setConfirming(false); }}>
+      <p>{seriesName}에서 학습 인식이 자동으로 넣고 아직 아무도 확인하지 않은 분류를 모두 해제합니다. 직접 판단한 것과 기본 인식이 넣은 것은 그대로 둡니다.</p>
       <div className="dialog-actions">
         <Button variant="ghost" disabled={clearing} onClick={() => setConfirming(false)}>취소</Button>
         <Button variant="primary" disabled={clearing} onClick={() => void clear()}><BusyLabel busy={!!(clearing)} idle={"해제"}>해제하는 중…</BusyLabel></Button>
@@ -144,8 +144,8 @@ export function S36CharacterExclusion({ seriesId, targetId, disabled, api = s36P
   const { error, enabled, excluded, toggle } = useS36CharacterExclusion(seriesId, targetId, api);
   if (!enabled) return null;
   return <label className="s36-exclusion">
-    <input type="checkbox" checked={excluded} disabled={disabled} aria-description="이 캐릭터는 S36 자동 분류 대신 직접 확인과 추천만 사용합니다" onChange={toggle} />
-    <span>S36 제외{error && <small role="status">{error}</small>}</span>
+    <input type="checkbox" checked={excluded} disabled={disabled} aria-description="이 캐릭터는 학습 인식 자동 분류 대신 직접 확인과 추천만 사용합니다" onChange={toggle} />
+    <span>자동 인식 끄기{error && <small role="status">{error}</small>}</span>
   </label>;
 }
 
@@ -163,9 +163,9 @@ export function useS36Readiness(seriesId: string, refreshKey: unknown, api: S36P
 /** Short card line for a character that S36 does not classify yet. */
 export function readinessLabel(r: S36Readiness): string {
   switch (r.status) {
-    case "ready": return `S36 켜도 됨 · 확인 ${r.reviewed} · 틀림 ${r.wrong}`;
-    case "hold": return `S36 보류 · 확인 ${r.reviewed} · 틀림 ${r.wrong}`;
-    case "keep": return `S36 부적합 · 확인 ${r.reviewed} · 틀림 ${r.wrong}`;
-    default: return `S36 준비 중 · 확인 ${Math.min(r.reviewed, READY_REVIEWED)}/${READY_REVIEWED} · 예시 ${Math.min(r.examples, READY_EXAMPLES)}/${READY_EXAMPLES}`;
+    case "ready": return `학습 인식 · 확인 판단 ${r.reviewed} · 틀림 ${r.wrong}`;
+    case "hold": return `기본 인식 · 확인 판단 ${r.reviewed} · 틀림 ${r.wrong}`;
+    case "keep": return `기본 인식 · 확인 판단 ${r.reviewed} · 틀림 ${r.wrong}`;
+    default: return `학습 인식 준비 · 확인 판단 ${Math.min(r.reviewed, READY_REVIEWED)}/${READY_REVIEWED} · 맞음 예시 ${Math.min(r.examples, READY_EXAMPLES)}/${READY_EXAMPLES}`;
   }
 }

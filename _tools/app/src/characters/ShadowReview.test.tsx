@@ -22,21 +22,21 @@ function fixture(items: ShadowReviewItem[], summary = { ...emptyShadowSummary(),
 
 it("shows the first candidate with its character, references, verdict, native outcome and stats", async () => {
   fixture([item("a1", "automatic", 0.1234), item("a2", "recommended", 0.145)]);
-  const dialog = await screen.findByRole("dialog", { name: "S36 확인" });
+  const dialog = await screen.findByRole("dialog", { name: "확인" });
   expect(within(dialog).getByRole("heading", { level: 3, name: "히나" })).toBeInTheDocument();
   expect(within(dialog).getByText("자동 후보")).toBeInTheDocument();
-  expect(within(dialog).getByText("knn3 0.1234")).toBeInTheDocument();
-  expect(within(dialog).getByText(/기존 판정 없음/)).toHaveTextContent("a1.png");
+  expect(within(dialog).getByText("확실")).toHaveAttribute("title", "knn3 0.1234");
+  expect(within(dialog).getByText(/기존 판단 없음/)).toHaveTextContent("a1.png");
   expect(within(dialog).getByRole("list", { name: "히나 레퍼런스" }).querySelectorAll("img")).toHaveLength(2);
   expect(within(dialog).getByRole("img", { name: "a1.png — 히나 후보" })).toHaveAttribute("src", expect.stringContaining("/thumbnail/a1"));
   const stats = within(dialog).getByLabelText("진행 상황");
   expect(stats).toHaveTextContent("남은 항목2");
-  expect(stats).toHaveTextContent("자동 후보 정확도3/4");
+  expect(stats).toHaveTextContent("학습 인식 준비3/4");
   expect(stats).toHaveTextContent("추천 수락2/6");
   expect(within(dialog).getByRole("button", { name: /맞음/ })).toHaveTextContent("D");
   expect(within(dialog).getByRole("button", { name: /아님/ })).toHaveTextContent("A");
   expect(within(dialog).getByRole("button", { name: /건너뛰기/ })).toHaveTextContent("S");
-  expect(dialog.querySelector("[title]")).toBeNull();
+  expect(dialog.querySelector("[title]")).toHaveTextContent("확실");
 });
 
 it("accepts with the keyboard through the manual decision path, advances and updates stats", async () => {
@@ -48,12 +48,12 @@ it("accepts with the keyboard through the manual decision path, advances and upd
   expect(await screen.findByRole("heading", { level: 3, name: "키사키" })).toBeInTheDocument();
   expect(screen.getByText("추천")).toBeInTheDocument();
   expect(screen.getByLabelText("진행 상황")).toHaveTextContent("남은 항목1");
-  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("자동 후보 정확도4/5");
+  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("학습 인식 준비4/5");
   expect(onChanged).toHaveBeenCalledTimes(1);
   await user.keyboard("a");
   await waitFor(() => expect(decide).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: "kisaki", assetIds: ["a2"], decision: "rejected" })));
   expect(await screen.findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
-  expect(screen.getByText("새 이미지가 채점되면 여기에 나타납니다.")).toBeInTheDocument();
+  expect(screen.getByText("새 이미지의 학습 인식 준비가 끝나면 여기에 나타납니다.")).toBeInTheDocument();
   expect(screen.getByLabelText("진행 상황")).toHaveTextContent("추천 수락2/7");
 });
 
@@ -62,12 +62,12 @@ it("rejects and skips with buttons, then offers skipped items again", async () =
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /건너뛰기/ }));
   expect(decide).not.toHaveBeenCalled();
-  expect(screen.getByText(/기존 판정/)).toHaveTextContent("a2.png");
+  expect(screen.getByText(/기존 판단/)).toHaveTextContent("a2.png");
   await user.click(screen.getByRole("button", { name: /아님/ }));
   await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ assetIds: ["a2"], decision: "rejected" })));
   expect(await screen.findByRole("heading", { name: "건너뛴 항목만 남았습니다" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "건너뛴 항목 다시 보기" }));
-  expect(await screen.findByText(/기존 판정/)).toHaveTextContent("a1.png");
+  expect(await screen.findByText(/기존 판단/)).toHaveTextContent("a1.png");
 });
 
 it("undoes the last judgment by clearing it and brings the item back", async () => {
@@ -75,11 +75,11 @@ it("undoes the last judgment by clearing it and brings the item back", async () 
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /맞음/ }));
   await screen.findByRole("button", { name: /되돌리기: 히나 맞음/ });
-  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("자동 후보 정확도4/5");
+  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("학습 인식 준비4/5");
   await user.keyboard("z");
   await waitFor(() => expect(decide).toHaveBeenLastCalledWith(expect.objectContaining({ assetIds: ["a1"], decision: "cleared" })));
-  expect(await screen.findByText(/기존 판정/)).toHaveTextContent("a1.png");
-  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("자동 후보 정확도3/4");
+  expect(await screen.findByText(/기존 판단/)).toHaveTextContent("a1.png");
+  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("학습 인식 준비3/4");
   expect(screen.queryByRole("button", { name: /되돌리기/ })).not.toBeInTheDocument();
 });
 
@@ -89,7 +89,7 @@ it("keeps the item and shows the native error when a judgment is refused", async
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /맞음/ }));
   expect(await screen.findByRole("alert")).toHaveTextContent("시리즈 폴더 안의 지원되는 자산을 선택해 주세요.");
-  expect(screen.getByText(/기존 판정/)).toHaveTextContent("a1.png");
+  expect(screen.getByText(/기존 판단/)).toHaveTextContent("a1.png");
 });
 
 it("shows the empty state and a retryable load error", async () => {
@@ -108,7 +108,7 @@ it("loads more with an offset that skips what it already holds", async () => {
     .mockResolvedValueOnce({ items: first, nextOffset: 4, policyVersion: "v1", summary: { ...emptyShadowSummary(), automatic: { pending: 6, accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 } } })
     .mockResolvedValue({ items: [item("a4", "automatic", 0.2), item("a5", "automatic", 0.21)], nextOffset: null, policyVersion: "v1", summary: { ...emptyShadowSummary(), automatic: { pending: 6, accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 } } });
   render(<ShadowReview onClose={vi.fn()} api={{ ...idleApi(), page }} decisions={{ decide: vi.fn(async () => 1) }} />);
-  await screen.findByText(/기존 판정/);
+  await screen.findByText(/기존 판단/);
   await waitFor(() => expect(page).toHaveBeenCalledTimes(2));
   expect(page).toHaveBeenLastCalledWith({ offset: 4, limit: 40 });
 });
@@ -123,13 +123,13 @@ it("starts cached history scoring from the empty state, shows progress, cancels 
   api.cancel.mockResolvedValue({ ...idleStatus, total: 12, scored: 3, skipped: 2, cancelled: true });
   render(<ShadowReview onClose={vi.fn()} api={api} />);
   await screen.findByRole("heading", { name: "확인할 항목이 없습니다" });
-  const buttons = screen.getAllByRole("button", { name: "기존 이미지 채점" });
+  const buttons = screen.getAllByRole("button", { name: "기존 이미지도 준비" });
   expect(buttons).toHaveLength(2);
   await user.click(buttons[1]);
   expect(api.start).toHaveBeenCalledTimes(1);
-  expect(await screen.findByText(/기존 이미지 채점 3 \/ 12 · 건너뜀 2/)).toBeInTheDocument();
-  for (const button of screen.getAllByRole("button", { name: "기존 이미지 채점" })) expect(button).toBeDisabled();
-  await user.click(screen.getByRole("button", { name: "채점 취소" }));
+  expect(await screen.findByText(/기존 이미지도 준비 3 \/ 12 · 건너뜀 2/)).toBeInTheDocument();
+  for (const button of screen.getAllByRole("button", { name: "기존 이미지도 준비" })) expect(button).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "그만두기" }));
   expect(api.cancel).toHaveBeenCalledTimes(1);
   expect(await screen.findByText(/취소됨/)).toBeInTheDocument();
   await waitFor(() => expect(api.page).toHaveBeenCalledTimes(2));
@@ -140,9 +140,9 @@ it("polls a running job after reopening and refreshes on completion", async () =
   api.status.mockResolvedValueOnce({ ...idleStatus, running: true, total: 2 })
     .mockResolvedValue({ ...idleStatus, total: 2, scored: 1, skipped: 1 });
   render(<ShadowReview onClose={vi.fn()} api={api} />);
-  expect(await screen.findByRole("button", { name: "채점 취소" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "그만두기" })).toBeInTheDocument();
   await waitFor(() => expect(api.page).toHaveBeenCalledTimes(2), { timeout: 2500 });
-  expect(screen.queryByRole("button", { name: "채점 취소" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "그만두기" })).not.toBeInTheDocument();
 });
 
 it("shows separate origin precision and updates only the judged origin", async () => {
@@ -152,9 +152,9 @@ it("shows separate origin precision and updates only the judged origin", async (
   summary.byOrigin.live.automatic = { pending: 0, accepted: 5, rejected: 0 };
   fixture([{ ...item("a1", "automatic", 0.12), origin: "backfill" }], summary);
   await screen.findByRole("heading", { level: 3, name: "히나" });
-  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("자동 후보 정확도23/25 · 기존 18/20 · 신규 5/5");
+  expect(screen.getByLabelText("진행 상황")).toHaveTextContent("학습 인식 준비23/25 · 기존 18/20 · 신규 5/5");
   await userEvent.setup().keyboard("d");
-  await waitFor(() => expect(screen.getByLabelText("진행 상황")).toHaveTextContent("자동 후보 정확도24/26 · 기존 19/21 · 신규 5/5"));
+  await waitFor(() => expect(screen.getByLabelText("진행 상황")).toHaveTextContent("학습 인식 준비24/26 · 기존 19/21 · 신규 5/5"));
 });
 
 it("never shows a judged candidate again when a page requested before the judgment arrives later", async () => {
@@ -170,7 +170,7 @@ it("never shows a judged candidate again when a page requested before the judgme
   render(<ShadowReview onClose={vi.fn()} api={api} decisions={{ decide }} />);
   await screen.findByRole("heading", { level: 3, name: "히나" });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "기존 이미지 채점" }));
+  await user.click(screen.getByRole("button", { name: "기존 이미지도 준비" }));
   await waitFor(() => expect(page).toHaveBeenCalledTimes(2), { timeout: 3000 });
   await user.keyboard("{ArrowRight}");
   await screen.findByRole("heading", { level: 3, name: "키사키" });
@@ -214,7 +214,7 @@ it("scoped to one character, pages past the series' other characters and counts 
     : { items: second, nextOffset: null, policyVersion: "v1", summary });
   render(<ShadowReview onClose={vi.fn()} api={{ ...idleApi(), page }} decisions={{ decide: vi.fn(async () => 1) }}
     series={{ id: "blue", name: "블루 아카이브" }} target={{ id: "hina", name: "히나" }} />);
-  const dialog = await screen.findByRole("dialog", { name: "S36 확인" });
+  const dialog = await screen.findByRole("dialog", { name: "확인" });
   expect(await within(dialog).findByRole("heading", { level: 3, name: "히나" })).toBeInTheDocument();
   expect(within(dialog).getByText("블루 아카이브 › 히나")).toBeInTheDocument();
   expect(page).toHaveBeenCalledWith({ offset: 0, limit: 200, seriesId: "blue" });

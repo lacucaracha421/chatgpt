@@ -87,9 +87,7 @@ impl Library {
     ) -> Result<ScanStatus> {
         let target = self.get_character_target(target_id)?;
         if !target.ready {
-            return Err(Error::Invalid(
-                "시리즈 안의 기준 이미지 5장을 확인해 주세요.",
-            ));
+            return Err(Error::Invalid("시리즈 안의 레퍼런스 5장을 확인해 주세요."));
         }
         if target.fingerprint != expected_fingerprint {
             return Err(Error::Stale);
@@ -180,7 +178,7 @@ impl Library {
                     Ok(Err(Error::Stale)) => {
                         status.state = "stale".into();
                         status.error =
-                            Some("분석 중 캐릭터 설정이나 기준 이미지가 바뀌었습니다.".into());
+                            Some("분석 중 캐릭터 설정이나 레퍼런스가 바뀌었습니다.".into());
                     }
                     Ok(Err(error)) => {
                         status.state = "failed".into();

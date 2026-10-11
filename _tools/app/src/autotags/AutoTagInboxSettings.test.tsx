@@ -40,9 +40,9 @@ afterEach(cleanup);
 it("renders the nightly result and chooses the folder, review toggle and manual trigger", async () => {
   const user = userEvent.setup();
   render(<AutoTagSettings disabled={false} />);
-  expect(await screen.findByText(/태거 판정 12건 반영.*그림체 8,960장.*내용 검색 색인 9,103장/)).toBeTruthy();
+  expect(await screen.findByText(/자동 태그 판단 12건 반영.*그림체 8,960장.*내용 검색 색인 9,103장/)).toBeTruthy();
   expect(screen.getByText("/tmp/inbox")).toBeTruthy();
-  await user.click(screen.getByRole("switch", { name: "가져온 뒤 태거 판정 자동 반영" }));
+  await user.click(screen.getByRole("switch", { name: "가져온 뒤 자동 태그 판단 반영" }));
   expect(invoke).toHaveBeenCalledWith("set_auto_tag_inbox", { folder: "/tmp/inbox", applyTaggerReview: false });
   vi.mocked(open).mockResolvedValue("/tmp/daily");
   await user.click(screen.getByRole("button", { name: "폴더 선택" }));
@@ -84,8 +84,8 @@ it("keeps background success and errors in the shell status until dismissed", as
   const { result } = renderHook(useAutoTagInboxStatus);
   await waitFor(() => expect(listen).toHaveBeenCalled());
   const handler = vi.mocked(listen).mock.calls[0][1];
-  act(() => handler({ event: "library://auto-tag-inbox", id: 1, payload: { message: "태거 판정 12건 반영", error: false } }));
-  expect(result.current.status?.message).toBe("태거 판정 12건 반영");
+  act(() => handler({ event: "library://auto-tag-inbox", id: 1, payload: { message: "자동 태그 판단 12건 반영", error: false } }));
+  expect(result.current.status?.message).toBe("자동 태그 판단 12건 반영");
   act(() => handler({ event: "library://auto-tag-inbox", id: 1, payload: { message: "그림체 가져오기 실패", error: true } }));
   expect(result.current.status?.error).toBe(true);
   act(() => result.current.dismiss());

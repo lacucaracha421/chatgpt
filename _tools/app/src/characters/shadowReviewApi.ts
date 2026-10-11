@@ -55,7 +55,7 @@ export const emptyShadowSummary = (): ShadowReviewSummary => ({ ...emptyTiers(),
 
 export const shadowItemKey = (item: Pick<ShadowReviewItem, "assetId" | "targetId">) => `${item.assetId}:${item.targetId}`;
 
-export const verdictLabel = (verdict: ShadowReviewItem["verdict"]) => verdict === "automatic" ? "자동 후보" : verdict === "recommended" ? "추천" : "S36 미지지";
+export const verdictLabel = (verdict: ShadowReviewItem["verdict"]) => verdict === "automatic" ? "자동 후보" : verdict === "recommended" ? "추천" : "다시 확인";
 
 const NATIVE_OUTCOMES: Record<string, string> = {
   accepted_automatic: "자동 확정",

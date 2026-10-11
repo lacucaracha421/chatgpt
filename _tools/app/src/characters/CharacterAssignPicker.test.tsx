@@ -28,7 +28,7 @@ it("shows suggestions, recent characters and series groups in count order while 
       { targetId: "meguri", matched: 2, total: 2 },
     ])} />);
 
-  expect(await screen.findByText("2/2장 일치")).toBeVisible();
+  expect(await screen.findByText("2장 중 2장")).toBeVisible();
   const recommended = screen.getByRole("group", { name: "추천" });
   expect(within(recommended).getAllByRole("option").map(row => row.textContent)).toEqual([
     expect.stringContaining("미노시마 메구리"),

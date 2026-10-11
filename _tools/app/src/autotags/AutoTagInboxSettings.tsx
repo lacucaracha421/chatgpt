@@ -56,8 +56,8 @@ export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
       </dd>
     </dl>
     <dl className="settings-view__property">
-      <dt>가져온 뒤 태거 판정 자동 반영</dt>
-      <dd className="settings-view__inline-controls"><Switch disabled={locked} checked={settings?.applyTaggerReview ?? true} onChange={event => void setApplyTaggerReview(event.currentTarget.checked)} aria-label="가져온 뒤 태거 판정 자동 반영" /></dd>
+      <dt>가져온 뒤 자동 태그 판단 반영</dt>
+      <dd className="settings-view__inline-controls"><Switch disabled={locked} checked={settings?.applyTaggerReview ?? true} onChange={event => void setApplyTaggerReview(event.currentTarget.checked)} aria-label="가져온 뒤 자동 태그 판단 반영" /></dd>
     </dl>
     <dl className="settings-view__property">
       <dt>최근 자동 가져오기</dt>

@@ -113,8 +113,8 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
         onChange={referenceRegions => onChange({ ...draft, referenceRegions })} />}
     </section>
     {target && <div className="character-registry__automation">
-      <span>{target.manualOnly ? "수동 관리" : draft.enabled ? "자동 분류 켜짐" : "자동 분류 꺼짐"}{automationStatus ? ` · ${automationStatus}` : ""}</span>
-      {!target.manualOnly && !draft.enabled && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onChange({ ...draft, enabled: true })}>자동 분류 다시 사용</Button>}
+      <span>{target.manualOnly ? "수동" : draft.enabled ? "자동 인식 켜짐" : "자동 인식 꺼짐"}{automationStatus ? ` · ${automationStatus}` : ""}</span>
+      {!target.manualOnly && !draft.enabled && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onChange({ ...draft, enabled: true })}>자동 인식 켜기</Button>}
     </div>}
     <details className="character-registry__section" open={!target ? true : undefined}>
       <summary><span>{target ? "관리" : "설명·대표 이미지"}</span></summary>

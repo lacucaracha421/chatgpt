@@ -308,7 +308,7 @@ impl RuntimeConfig {
                     .runtime
                     .augmentation_model
                     .as_deref()
-                    .ok_or(Error::Invalid("설치된 S36 모델을 찾을 수 없습니다."))?,
+                    .ok_or(Error::Invalid("설치된 학습 인식 모델을 찾을 수 없습니다."))?,
             )?;
         }
         // Persist only the switch. Environment overrides must never turn into
@@ -377,7 +377,7 @@ impl RuntimeConfig {
             || !series.iter().all(valid)
             || !excluded_targets.iter().all(valid)
         {
-            return Err(Error::Invalid("S36 설정 값이 올바르지 않습니다."));
+            return Err(Error::Invalid("학습 인식 설정 값이 올바르지 않습니다."));
         }
         let before = std::fs::read(settings).ok();
         // Loading validates the file; only the two keys below are written.
@@ -496,7 +496,7 @@ fn check_augmentation_model(path: &Path) -> Result<()> {
         .collect::<String>();
     if hash != "484ad463f569ab95308cf47e91ba358b01c40bc53289b90b950b94fcde7f2628" {
         return Err(Error::Invalid(
-            "설치된 보완 모델이 지원하는 S36 파일과 다릅니다. 보완 모델 설치를 확인해 주세요.",
+            "설치된 보완 모델이 지원하는 학습 인식 파일과 다릅니다. 보완 모델 설치를 확인해 주세요.",
         ));
     }
     let current = std::fs::metadata(path)?;

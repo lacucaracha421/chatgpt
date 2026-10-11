@@ -262,7 +262,7 @@ describe('character exclusion confirmation',()=>{
 
   it('retires the pending operation only on an authoritative coded rejection',async()=>{
     const refused:[string,RegExp][] = [
-      ['characterReferenceProtected',/기준 이미지로 쓰이는 자산/],
+      ['characterReferenceProtected',/레퍼런스로 쓰이는 자산/],
       ['characterSnapshotChanged',/캐릭터 보기가 변경되었습니다/],
       ['characterExclusionUnsupported',/서버에 캐릭터 제외 기능이 없습니다/],
       ['libraryMismatch',/다른 라이브러리/],

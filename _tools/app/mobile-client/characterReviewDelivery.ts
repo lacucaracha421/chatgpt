@@ -61,11 +61,11 @@ export type ReviewReport = {
 
 /** Why a decision that can never succeed was dropped. */
 const REJECTED: Record<string, string> = {
-  characterReviewTargetMissing: '캐릭터가 PC에서 삭제되었거나 바뀌어 검토를 반영하지 못했습니다.',
-  characterReviewAssetMissing: '자산이 삭제되었거나 아직 서버에 없어 검토를 반영하지 못했습니다.',
-  characterReferenceProtected: '기준 이미지로 쓰이는 자산이라 검토를 반영하지 못했습니다.',
+  characterReviewTargetMissing: '캐릭터가 PC에서 삭제되었거나 바뀌어 확인을 반영하지 못했습니다.',
+  characterReviewAssetMissing: '자산이 삭제되었거나 아직 서버에 없어 확인을 반영하지 못했습니다.',
+  characterReferenceProtected: '레퍼런스로 쓰이는 자산이라 확인을 반영하지 못했습니다.',
   characterReviewOutsideSeries: '이 자산의 시리즈에 속하지 않은 캐릭터라 추가하지 못했습니다.',
-  invalidCharacterReviewDecision: '서버가 이 검토를 받지 않았습니다.',
+  invalidCharacterReviewDecision: '서버가 이 확인을 받지 않았습니다.',
 };
 
 const inFlight = new Set<string>();
@@ -135,7 +135,7 @@ async function deliver(intent: ReviewIntent, endpoint: string, attempt: number, 
       origin: intent.origin,
       basis: intent.basis,
     });
-    if (receipt?.operationId !== intent.operationId) throw new Error('검토 응답을 확인할 수 없습니다.');
+    if (receipt?.operationId !== intent.operationId) throw new Error('확인 응답을 확인할 수 없습니다.');
     return confirmReviewIntent(intent) ? 'confirmed' : 'superseded';
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;

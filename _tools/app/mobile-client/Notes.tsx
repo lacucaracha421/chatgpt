@@ -1,4 +1,5 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
+import {displayTime} from '../src/shared/displayDate';
 import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
@@ -234,7 +235,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   const pinned=scope!=='all'?[]:visible.filter(n=>n.pinned),recent=scope!=='all'?visible:visible.filter(n=>!n.pinned);
   const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   // Local saves remain immediate; an open editor only announces errors.
-  const syncTime=state.lastSyncedAt?new Date(state.lastSyncedAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false}):'';
+  const syncTime=state.lastSyncedAt?displayTime(state.lastSyncedAt):'';
   const listEntries:ScreenMenuEntry[]=[
     {id:'sync',group:'action',label:`지금 동기화${syncTime?` · ${syncTime}`:''}`,icon:<ArrowPathIcon/>,disabled:state.syncing,run:()=>{if(!state.syncing)void store.sync();}},
     {id:'recovery',group:'action',label:'복구키 보기',icon:<KeyIcon/>,run:()=>setSheet('recovery')},

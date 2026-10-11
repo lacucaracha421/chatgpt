@@ -249,7 +249,7 @@ const EXCLUSION_SKIP_TEXT: Record<string, string> = {
   targetMissing: "삭제된 캐릭터",
   assetMissing: "휴지통에 있거나 삭제된 이미지",
   assetChanged: "내용이 바뀐 이미지",
-  protectedReference: "캐릭터의 기준 이미지",
+  protectedReference: "캐릭터의 레퍼런스",
 };
 
 export type AuthoritySyncSummary = {

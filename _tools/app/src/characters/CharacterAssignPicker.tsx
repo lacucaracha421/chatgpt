@@ -68,7 +68,7 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
   const recommendedRows = suggestions.flatMap(suggestion => {
     const target = targetById.get(suggestion.targetId);
     if (!target || (activeScopeId && target.seriesClassificationId !== activeScopeId)) return [];
-    return [{ key: `recommended:${target.id}`, target, context: activeScopeId ? undefined : seriesName(target), right: `${suggestion.matched.toLocaleString("ko-KR")}/${suggestion.total.toLocaleString("ko-KR")}장 일치`, current: target.id === currentTargetId }];
+    return [{ key: `recommended:${target.id}`, target, context: activeScopeId ? undefined : seriesName(target), right: `${suggestion.total.toLocaleString("ko-KR")}장 중 ${suggestion.matched.toLocaleString("ko-KR")}장`, current: target.id === currentTargetId }];
   });
   const recentRows = recentIds.flatMap(id => {
     const target = targetById.get(id);

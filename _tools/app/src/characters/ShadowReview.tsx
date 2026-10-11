@@ -5,6 +5,7 @@ import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
+import { Badge } from "../shared/ui/Badge";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { assetUrl, thumbnailUrl } from "../assets/mediaUrl";
@@ -107,7 +108,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
       // just judged here); stop refilling until a reload instead of asking again forever.
       setHasMore(page.nextOffset !== null && (fresh.some(open) || passed > 0));
     } catch (e) {
-      setError(commandErrorMessage(e, "S36 확인 목록을 불러오지 못했습니다."));
+      setError(commandErrorMessage(e, "확인 목록을 불러오지 못했습니다."));
     } finally {
       loadingRef.current = false;
       setLoading(false);
@@ -148,7 +149,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
           inbound = applied;
         }
       } catch (e) {
-        if (!disposed) setBackfillError(commandErrorMessage(e, "채점 상태를 불러오지 못했습니다."));
+        if (!disposed) setBackfillError(commandErrorMessage(e, "학습 인식 준비 상태를 불러오지 못했습니다."));
       } finally {
         if (!disposed) timer = setTimeout(() => void poll(), workloadPollDelay(1000));
       }
@@ -169,18 +170,18 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     setStarting(true); setBackfillError(null);
     wasRunning.current = true;
     try { updateBackfill(await api.start()); }
-    catch (e) { setBackfillError(commandErrorMessage(e, "기존 이미지 채점을 시작하지 못했습니다.")); }
+    catch (e) { setBackfillError(commandErrorMessage(e, "기존 이미지 학습 인식 준비를 시작하지 못했습니다.")); }
     finally { setStarting(false); }
   }
   async function cancelBackfill() {
     try { updateBackfill(await api.cancel()); }
-    catch (e) { setBackfillError(commandErrorMessage(e, "채점을 취소하지 못했습니다.")); }
+    catch (e) { setBackfillError(commandErrorMessage(e, "학습 인식 준비를 그만두지 못했습니다.")); }
   }
   function originStats(tier: "automatic" | "recommended") {
     const old = summary.byOrigin.backfill[tier], live = summary.byOrigin.live[tier];
     return <small> · 기존 {old.accepted}/{old.accepted + old.rejected} · 신규 {live.accepted}/{live.accepted + live.rejected}</small>;
   }
-  const backfillButton = <Button size="sm" disabled={starting || backfill?.running} onClick={() => void startBackfill()}>기존 이미지 채점</Button>;
+  const backfillButton = <Button size="sm" disabled={starting || backfill?.running} onClick={() => void startBackfill()}>기존 이미지도 준비</Button>;
 
   const current = queue[0];
   // Another character already judged on this same image in this window.
@@ -246,7 +247,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
   const automaticJudged = summary.automatic.accepted + summary.automatic.rejected;
   const recommendedJudged = summary.recommended.accepted + summary.recommended.rejected;
 
-  return <Dialog open variant="fullscreen" title="S36 확인" onClose={onClose}
+  return <Dialog open variant="fullscreen" title="확인" onClose={onClose}
     onKeyDown={event => {
       if (event.altKey || event.ctrlKey || event.metaKey) return;
       const key = event.key.toLowerCase();
@@ -255,13 +256,13 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
       else if (key === "arrowdown" || key === "s") { event.preventDefault(); skip(); }
       else if (key === "z") { event.preventDefault(); void undo(); }
     }}>
-    <section className="shadow-review" aria-label="S36 확인">
+    <section className="shadow-review" aria-label="확인">
       <header className="shadow-review__header">
-        <h2>S36 확인</h2>
+        <h2>확인</h2>
         {(series || target) && <small className="shadow-review__scope">{[series?.name, target?.name].filter(Boolean).join(" › ")}</small>}
         <div className="shadow-review__modes" role="tablist" aria-label="확인 목록">
-          <button role="tab" aria-selected={mode === "candidates"} disabled={busy} onClick={() => chooseMode("candidates")}>새 후보</button>
-          <button role="tab" aria-selected={mode === "doubtful"} disabled={busy} onClick={() => chooseMode("doubtful")}>기존 자동 분류 점검</button>
+          <button role="tab" aria-selected={mode === "candidates"} disabled={busy} onClick={() => chooseMode("candidates")}>인식 추천</button>
+          <button role="tab" aria-selected={mode === "doubtful"} disabled={busy} onClick={() => chooseMode("doubtful")}>다시 확인</button>
         </div>
         {mode === "doubtful"
           ? <dl className="shadow-review__stats" aria-label="진행 상황">
@@ -270,16 +271,16 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
           </dl>
           : <dl className="shadow-review__stats" aria-label="진행 상황">
             <div><dt>남은 항목</dt><dd>{remainingLabel}</dd></div>
-            <div><dt>자동 후보 정확도</dt><dd>{summary.automatic.accepted}/{automaticJudged}{originStats("automatic")}</dd></div>
+            <div><dt>학습 인식 준비</dt><dd>{summary.automatic.accepted}/{automaticJudged}{originStats("automatic")}</dd></div>
             <div><dt>추천 수락</dt><dd>{summary.recommended.accepted}/{recommendedJudged}{originStats("recommended")}</dd></div>
           </dl>}
         {backfillButton}
-        <Button size="icon" variant="ghost" aria-label="S36 확인 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" aria-label="확인 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </header>
       {(starting || backfill?.running || (backfill?.total ?? 0) > 0 || backfill?.cancelled) && <div className="shadow-review__backfill" role="status">
-        <BusyLabel busy={!!(starting || backfill?.preparing)} idle={`기존 이미지 채점 ${backfill?.scored ?? 0} / ${backfill?.total ?? 0} · 건너뜀 ${backfill?.skipped ?? 0}`}>기존 이미지 확인 중…</BusyLabel>
+        <BusyLabel busy={!!(starting || backfill?.preparing)} idle={`기존 이미지도 준비 ${backfill?.scored ?? 0} / ${backfill?.total ?? 0} · 건너뜀 ${backfill?.skipped ?? 0}`}>기존 이미지 확인 중…</BusyLabel>
         {backfill?.cancelled && " · 취소됨"}
-        {backfill?.running && <Button size="sm" variant="ghost" onClick={() => void cancelBackfill()}>채점 취소</Button>}
+        {backfill?.running && <Button size="sm" variant="ghost" onClick={() => void cancelBackfill()}>그만두기</Button>}
       </div>}
       {(backfillError || backfill?.error) && <p className="character-message shadow-review__notice" role="alert">{backfillError || backfill?.error}</p>}
       <BusyLabel busy={loading && !current && !error}><p className="character-message shadow-review__notice" role="status">불러오는 중…</p></BusyLabel>
@@ -291,16 +292,16 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
             <aside className="shadow-review__panel" aria-label="후보 정보">
               <div className="shadow-review__verdict">
                 <span className={`shadow-review__badge shadow-review__badge--${current.verdict}`}>{verdictLabel(current.verdict)}</span>
-                <small>knn3 {current.knn3 === null ? "—" : current.knn3.toFixed(4)}</small>
+                <Badge title={`knn3 ${current.knn3 === null ? "—" : current.knn3.toFixed(4)}`}>{current.verdict === "automatic" ? "확실" : "불확실"}</Badge>
               </div>
               <h3 className="shadow-review__character">{current.targetName}</h3>
               {current.referenceAssetIds.length > 0 && <ul className="shadow-review__references" aria-label={`${current.targetName} 레퍼런스`}>
                 {current.referenceAssetIds.map(id => <li key={id}><AssetImage src={thumbnailUrl(id)} alt="" className={privacyMode ? "character-private" : undefined} loading="lazy" /></li>)}
               </ul>}
-              {mode === "doubtful" && <p className="shadow-review__same-image" role="note">이미 {current.targetName}(으)로 자동 분류된 이미지인데, S36은 이 분류를 지지하지 않습니다. 틀렸으면 아님을 눌러 주세요.</p>}
-              {mode !== "doubtful" && current.nativeOutcome === "accepted_automatic" && <p className="shadow-review__same-image" role="note">기존 분류기가 이미 {current.targetName}(으)로 자동 분류한 이미지입니다. 새 후보를 다 본 뒤에 나오며, 틀렸으면 아님을 눌러 주세요.</p>}
+              {mode === "doubtful" && <p className="shadow-review__same-image" role="note">이미 {current.targetName}(으)로 자동 분류된 이미지인데, 다시 확인이 필요합니다. 틀렸으면 아님을 눌러 주세요.</p>}
+              {mode !== "doubtful" && current.nativeOutcome === "accepted_automatic" && <p className="shadow-review__same-image" role="note">기존 분류기가 이미 {current.targetName}(으)로 자동 분류한 이미지입니다. 인식 추천을 다 본 뒤에 나오며, 틀렸으면 아님을 눌러 주세요.</p>}
               {sameImage.length > 0 && <p className="shadow-review__same-image" role="note">같은 이미지의 다른 캐릭터 후보입니다. 앞에서 {sameImage.map(j => `${j.item.targetName} ${j.decision === "accepted" ? "맞음" : "아님"}`).join(", ")}(으)로 판단했습니다. 이 캐릭터도 그림에 있으면 맞음을 누르세요.</p>}
-              <p className="shadow-review__meta">기존 판정 {nativeOutcomeLabel(current.nativeOutcome)}<span aria-hidden="true"> · </span>{current.originalName}</p>
+              <p className="shadow-review__meta">기존 판단 {nativeOutcomeLabel(current.nativeOutcome)}<span aria-hidden="true"> · </span>{current.originalName}</p>
               <div className="shadow-review__actions">
                 <Button variant="primary" disabled={busy} onClick={() => void judge("accepted")}>맞음 <kbd>→</kbd><kbd>D</kbd></Button>
                 <Button disabled={busy} onClick={() => void judge("rejected")}>아님 <kbd>←</kbd><kbd>A</kbd></Button>
@@ -315,7 +316,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
             : skipped.current.size > 0
               ? <EmptyState title="건너뛴 항목만 남았습니다"><Button size="sm" onClick={restoreSkipped}>건너뛴 항목 다시 보기</Button></EmptyState>
               : <EmptyState title="확인할 항목이 없습니다">
-                <p className="shadow-review__empty-copy">{mode === "doubtful" ? "S36이 지지하지 않는 기존 자동 분류가 없습니다. 기존 이미지 채점을 돌리면 대상이 채워집니다." : "새 이미지가 채점되면 여기에 나타납니다."}</p>
+                <p className="shadow-review__empty-copy">{mode === "doubtful" ? "다시 확인할 기존 자동 분류가 없습니다. 기존 이미지도 준비를 실행하면 대상이 채워집니다." : "새 이미지의 학습 인식 준비가 끝나면 여기에 나타납니다."}</p>
                 {last && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void undo()}>되돌리기: {last.item.targetName} {last.decision === "accepted" ? "맞음" : "아님"} <kbd>Z</kbd></Button>}
                 {decisionError && <p className="character-message" role="alert">{decisionError}</p>}
                 {backfillButton}

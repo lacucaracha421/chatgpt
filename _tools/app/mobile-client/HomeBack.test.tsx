@@ -166,7 +166,7 @@ it('forgets the Notes Home origin once the note opened from Home is trashed (Bac
 
 it('does not expose the character review overview from Home',async() => {
   await startHome();
-  expect(screen.queryByRole('button',{name:/캐릭터 검토/})).toBeNull();
+  expect(screen.queryByRole('button',{name:/확인/})).toBeNull();
   expect(screen.queryByRole('region',{name:'review-overview'})).toBeNull();
 });
 

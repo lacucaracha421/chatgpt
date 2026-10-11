@@ -37,7 +37,7 @@ export type ReviewIntent = {
 const INTENTS_KEY = connectionOutbox('lakomics.characters.review.outbox.v1');
 export const REVIEW_OUTBOX_LIMIT = 500;
 export const REVIEW_SAVE_FAILED = '기기에 저장하지 못했습니다.';
-export const REVIEW_OUTBOX_FULL = '전송을 기다리는 검토가 너무 많습니다. 연결된 뒤 다시 시도해 주세요.';
+export const REVIEW_OUTBOX_FULL = '전송을 기다리는 확인이 너무 많습니다. 연결된 뒤 다시 시도해 주세요.';
 /** Fired after the durable queue changes, so every screen re-reads it. */
 export const CHARACTER_REVIEW_EVENT = 'lakomics-character-review';
 

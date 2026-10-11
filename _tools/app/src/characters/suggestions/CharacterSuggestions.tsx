@@ -67,7 +67,7 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
   };
   useAutoDismiss(message, setMessage);
   const saved = (result: SuggestionResult) => {
-    setMessage(result.queuedCount > 0 ? `${result.target.displayName} · ${result.queuedCount.toLocaleString("ko-KR")}장을 태거 검토 후보로 넣었습니다.` : `${result.target.displayName} · 저장했습니다.`);
+    setMessage(result.queuedCount > 0 ? `${result.target.displayName} · ${result.queuedCount.toLocaleString("ko-KR")}장을 확인에 넣었습니다.` : `${result.target.displayName} · 저장했습니다.`);
     refresh();
   };
   return {
@@ -93,7 +93,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
     const group = groups.get(key) ?? []; group.push(row); groups.set(key, group);
   }
   return <section id="new-character-suggestions" className="character-suggestions" aria-label="새 캐릭터 제안">
-    <header className="character-suggestions__heading"><button type="button" aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}>새 캐릭터 제안 <span className="numeric">{state.rows.length}</span>명 <span aria-hidden="true">{collapsed ? "⌄" : "⌃"}</span></button><small>태거가 찾았지만 아직 등록하지 않은 캐릭터 · 자동으로 만들지 않아요</small></header>
+    <header className="character-suggestions__heading"><button type="button" aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}>새 캐릭터 제안 <span className="numeric">{state.rows.length}</span>명 <span aria-hidden="true">{collapsed ? "⌄" : "⌃"}</span></button><small>자동 태그가 읽었지만 아직 등록하지 않은 캐릭터 · 자동으로 만들지 않아요</small></header>
     {!collapsed && <>
       <div className="character-suggestions__filters">
         <label><select aria-label="최소 이미지 수" value={state.filters.minimum} onChange={event => state.setFilters({ ...state.filters, minimum: Number(event.target.value) })}>{[1,3,5,10,20].map(value => <option key={value} value={value}>{value}장 이상</option>)}</select></label>
@@ -137,7 +137,7 @@ export function CharacterSuggestionTile({ suggestion, state, privacyMode, onChan
     <AnchoredPanel open={open} onOpenChange={setOpen} title={suggestionName(suggestion.tag)} description={suggestion.tag}
       trigger={<button type="button" className="character-suggestion-tile" aria-label={`${suggestionName(suggestion.tag)} 제안 ${suggestion.imageCount}장`}>
         <span className="character-suggestion-tile__mosaic character-suggestion-tile__mosaic--suggestion">{!privacyMode && suggestion.sampleAssetIds.map(id => <AssetImage key={id} draggable={false} loading="lazy" src={thumbnailUrl(id, suggestion.sampleThumbnailRevisions?.[id])} alt="" />)}</span>
-        <span className="character-suggestion-tile__flag">제안</span><b>{suggestionName(suggestion.tag)}</b><small>{suggestion.imageCount}장 · {suggestion.bothCount ? "● 일치" : "○ 한 태거만"}</small>
+        <span className="character-suggestion-tile__flag">제안</span><b>{suggestionName(suggestion.tag)}</b><small>{suggestion.imageCount}장 · 확실 {suggestion.bothCount} · 불확실 {suggestion.imageCount - suggestion.bothCount}</small>
       </button>}
       footer={<SuggestionActions disabled={state.busy} onRegister={() => edit("register")} onMerge={() => edit("merge")} onIgnore={() => { setOpen(false); void state.ignore(suggestion.tag, true); }} onPostpone={() => state.postpone(suggestion.tag)} />}>
       <SuggestionCounts suggestion={suggestion} /><Samples suggestion={suggestion} privacyMode={privacyMode} /><Location suggestion={suggestion} />
@@ -147,8 +147,7 @@ export function CharacterSuggestionTile({ suggestion, state, privacyMode, onChan
 }
 
 function SuggestionCounts({ suggestion: row }: { suggestion: Suggestion }) {
-  const only = !row.pixaiCount ? "canary만" : !row.canaryCount ? "PixAI만" : "한 태거만";
-  return <div className="character-suggestion-count"><b><span className="numeric">{row.imageCount}</span>장</b><small className={row.bothCount ? "" : "character-suggestion-warning"}>{row.bothCount ? `● 일치 ${row.bothCount} · 한쪽 ${row.imageCount - row.bothCount}` : `○ ${only} ${row.imageCount}`}</small></div>;
+  return <div className="character-suggestion-count"><b><span className="numeric">{row.imageCount}</span>장</b><small>확실 {row.bothCount} · 불확실 {row.imageCount - row.bothCount}</small></div>;
 }
 function Samples({ suggestion, privacyMode }: { suggestion: Suggestion; privacyMode: boolean }) {
   return <div className="character-suggestion-samples" aria-label="표본 이미지">{suggestion.sampleAssetIds.map(id => <span key={id}>{!privacyMode && <AssetImage loading="lazy" draggable={false} src={thumbnailUrl(id, suggestion.sampleThumbnailRevisions?.[id])} alt="" />}</span>)}{suggestion.imageCount > 4 && <small>+{suggestion.imageCount - 4}</small>}</div>;

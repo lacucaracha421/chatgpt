@@ -90,37 +90,37 @@ export function CharacterReviewOverview({libraryId, characters, refreshKey, paus
   const scrubberSort=useMemo(()=>({kind:'fallback' as const}),[]);
   const stale = state.phase === 'ready' && state.stale;
   const serverSeries = !!value?.exact;
-  return <div className="review-overlay review-overview" role="dialog" aria-modal="true" aria-label="캐릭터 검토">
+  return <div className="review-overlay review-overview" role="dialog" aria-modal="true" aria-label="확인">
     <header className="review-bar">
       <IconButton label="홈으로" icon={ArrowLeftIcon} onClick={onClose}/>
-      <div className="review-title"><h1>캐릭터 검토</h1>
+      <div className="review-title"><h1>확인</h1>
         {value && <p className="numeric">대기 {value.total}건{value.groups.length > 0 && ` · 시리즈 ${value.groups.length}`}</p>}
       </div>
       {stale && <span className="review-stale numeric">{clockLabel(value!.at)} 기준</span>}
-      {value && value.total > 0 && <Button onClick={() => onOpen({target: null})}>전체 검토</Button>}
+      {value && value.total > 0 && <Button onClick={() => onOpen({target: null})}>전체 확인</Button>}
     </header>
-    <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
-    {state.phase === 'unready' && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 캐릭터 검토 목록을 보내지 않았습니다."/>}
-    {state.phase === 'error' && <EmptyState className="review-empty" title={state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'} hint={state.offline ? '연결되면 검토할 캐릭터를 보여 드립니다.' : state.message}>
+    <LoadingLine label={(state.phase === 'loading')&&'확인 목록 불러오는 중'}/>
+    {state.phase === 'unready' && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 확인 목록을 보내지 않았습니다."/>}
+    {state.phase === 'error' && <EmptyState className="review-empty" title={state.offline ? '오프라인입니다' : '확인 목록을 불러오지 못했습니다'} hint={state.offline ? '연결되면 확인할 캐릭터를 보여 드립니다.' : state.message}>
       <Button onClick={() => { setState({phase: 'loading'}); setRetry(n => n + 1); }}>다시 시도</Button>
     </EmptyState>}
-    {value && value.total === 0 && <EmptyState className="review-empty" title="모두 검토했습니다" hint="PC가 새 후보를 보내면 여기에 나타납니다."/>}
+    {value && value.total === 0 && <EmptyState className="review-empty" title="모두 확인했습니다" hint="PC가 새 후보를 보내면 여기에 나타납니다."/>}
     {value && value.total > 0 && <div ref={scroller} className="overview-scroll">
       {value.groups.map(group => <section key={group.seriesId} className="overview-series" aria-label={`${group.seriesName} ${group.count}건`}>
-        <button className="overview-series-head" onClick={() => onOpen({series: {id: group.seriesId, name: group.seriesName}, serverSeries})} aria-label={`${group.seriesName} 전체 검토 ${group.count}건`}>
+        <button className="overview-series-head" onClick={() => onOpen({series: {id: group.seriesId, name: group.seriesName}, serverSeries})} aria-label={`${group.seriesName} 전체 확인 ${group.count}건`}>
           <span className="overview-cover"><Portrait id={covers[group.seriesId]} rating={characters?.contentRatings?.[covers[group.seriesId]]} paused={paused}/></span>
           <strong>{group.seriesName}</strong>
           <span className="overview-count numeric">{group.count}</span>
           <ChevronRightIcon aria-hidden="true"/>
         </button>
         <div className="overview-characters">
-          {group.characters.map(entry => <button key={entry.id} className="overview-character" onClick={() => onOpen({target: {id: entry.id, name: entry.name}})} aria-label={`${entry.name} 검토 ${entry.count}건`}>
+          {group.characters.map(entry => <button key={entry.id} className="overview-character" onClick={() => onOpen({target: {id: entry.id, name: entry.name}})} aria-label={`${entry.name} 확인 ${entry.count}건`}>
             <span className="overview-portrait"><Portrait id={portraits[entry.id]} rating={characters?.contentRatings?.[portraits[entry.id]]} paused={paused}/></span>
             <span className="overview-caption"><strong>{entry.name}</strong><span className="numeric">{entry.count}</span></span>
           </button>)}
         </div>
       </section>)}
-      {value.rest > 0 && <p className="overview-rest">외 <span className="numeric">{value.rest}</span>건 · 전체 검토에서 이어서 볼 수 있습니다.</p>}
+      {value.rest > 0 && <p className="overview-rest">외 <span className="numeric">{value.rest}</span>건 · 전체 확인에서 이어서 볼 수 있습니다.</p>}
       <Scrubber scrollRef={scroller} total={value.groups.length} sort={scrubberSort} hidden={paused}/>
     </div>}
   </div>;

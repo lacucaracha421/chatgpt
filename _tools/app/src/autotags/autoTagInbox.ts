@@ -30,7 +30,7 @@ export function autoTagInboxResult(settings: AutoTagInbox): string {
     const result = label === "자동 태그" ? "자동 태그 가져옴"
       : label === "그림체" ? `그림체 ${(last.imported.imported ?? 0).toLocaleString("ko-KR")}장`
       : `내용 검색 색인 ${(last.imported.siglip ?? 0).toLocaleString("ko-KR")}장`;
-    const tagger = last.tagger ? ` · 태거 판정 ${(last.tagger.veto + last.tagger.recommend).toLocaleString("ko-KR")}건 반영` : "";
+    const tagger = last.tagger ? ` · 자동 태그 판단 ${(last.tagger.veto + last.tagger.recommend).toLocaleString("ko-KR")}건 반영` : "";
     return `${time} ${result}${tagger}`;
   }).join(" · ");
 }

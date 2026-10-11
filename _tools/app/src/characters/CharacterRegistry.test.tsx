@@ -42,7 +42,7 @@ it("puts reference registration and crop checks first, folds rare settings under
   }
   // Five references are below the automatic threshold, so one actionable line says so.
   expect(screen.getByRole("status")).toHaveTextContent("사용 가능 4장 · 6장 이상 권장");
-  expect(screen.getByText("자동 분류 켜짐")).toBeVisible();
+  expect(screen.getByText("자동 인식 켜짐")).toBeVisible();
   // Rename, description, portrait and host maintenance live in the closed 관리 section.
   for (const control of [screen.getByLabelText("캐릭터 이름"), screen.getByLabelText("설명"), screen.getByRole("button", { name: "과거 미분류 이미지 갱신" })]) {
     expect(control.closest("details")).toBe(management);

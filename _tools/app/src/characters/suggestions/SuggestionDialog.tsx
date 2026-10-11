@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { assetUrl, thumbnailUrl } from "../../assets/mediaUrl";
 import { commandErrorMessage } from "../../library/errorMessage";
 import { Button } from "../../shared/ui/Button";
+import { Badge } from "../../shared/ui/Badge";
 import { Dialog } from "../../shared/ui/Dialog";
 import { TextField } from "../../shared/ui/TextField";
 import type { CharacterGroup } from "../hubApi";
@@ -111,34 +112,34 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
           </>}
           <label><input type="checkbox" checked={linkTag} disabled={busy} onChange={event => setLinkTag(event.target.checked)} /> {mode === "register" ? "태그를 이 캐릭터에 연결" : "이 태그를 선택한 캐릭터로 기억"}</label>
           {!linkTag && <small>연결하지 않으면 이 태그가 다시 제안될 수 있어요.</small>}
-          <p className="character-suggestion-note">{mode === "register" ? "참조는 시리즈 폴더 안에서만 고를 수 있어요. 단독 이미지를 먼저 골라 두었어요." : "후보는 태거 검토에서 확인해요. 바로 확정하지 않아요."}</p>
+          <p className="character-suggestion-note">{mode === "register" ? "레퍼런스는 시리즈 폴더 안에서만 고를 수 있어요. 단독 이미지를 먼저 골라 두었어요." : "후보는 확인에서 볼 수 있어요. 바로 확정하지 않아요."}</p>
         </div>
         {mode === "register" && <div className="character-suggestion-dialog__images">
-          {!chosenSeries && <p>참조 이미지를 고를 시리즈 폴더를 선택해 주세요.</p>}
+          {!chosenSeries && <p>레퍼런스를 고를 시리즈 폴더를 선택해 주세요.</p>}
           <BusyLabel busy={!!(chosenSeries && !detail && !error)}><p role="status">이미지 불러오는 중…</p></BusyLabel>
           {detail && <>
-            <h3>참조 이미지 {references.length}<small>단독 우선 · 최대 8장</small></h3>
-            <div ref={stripWheel} className="character-suggestion-references" role="group" aria-label="참조 이미지">
+            <h3>레퍼런스 {references.length}<small>단독 우선 · 최대 8장</small></h3>
+            <div ref={stripWheel} className="character-suggestion-references" role="group" aria-label="레퍼런스">
               {Array.from({ length: 8 }, (_, index) => {
                 const id = references[index];
                 const image = detail.images.find(item => item.assetId === id);
                 return image ? <ImageChoice key={id} image={image} privacyMode={privacyMode} selected index={index + 1} disabled={busy} onClick={() => setPreviewId(id)} />
-                  : <div key={`empty-${index}`} className="character-suggestion-reference-empty" aria-label={`빈 참조 슬롯 ${index + 1}`}><span>{index + 1}</span></div>;
+                  : <div key={`empty-${index}`} className="character-suggestion-reference-empty" aria-label={`빈 레퍼런스 슬롯 ${index + 1}`}><span>{index + 1}</span></div>;
               })}
             </div>
-            {references.length < 5 && <p className="character-suggestion-warning">참조 5장 미만: 수동 관리로 시작해요.</p>}
-            <h3>참조 바꾸기<small>눌러서 크게 보기 · 단독 우선</small></h3>
-            <div className="character-suggestion-replacements" role="group" aria-label="참조 바꾸기">
+            {references.length < 5 && <p className="character-suggestion-warning">레퍼런스 5장 미만: 수동으로 시작해요.</p>}
+            <h3>레퍼런스 바꾸기<small>눌러서 크게 보기 · 단독 우선</small></h3>
+            <div className="character-suggestion-replacements" role="group" aria-label="레퍼런스 바꾸기">
               {replacements.map(image => <ImageChoice key={image.assetId} image={image} privacyMode={privacyMode} disabled={busy} onClick={() => setPreviewId(image.assetId)} />)}
-              {!replacements.length && <p className="character-suggestion-tag">바꿀 참조 이미지가 없습니다.</p>}
+              {!replacements.length && <p className="character-suggestion-tag">바꿀 레퍼런스가 없습니다.</p>}
             </div>
-            <p className="character-suggestion-candidate-summary">검토 후보 {candidateCount}장 — 등록하면 두 태거와 자동 분류가 모두 맞다고 한 그림은 자동으로 확정하고, 나머지는 태거 검토로 보내요.</p>
+            <p className="character-suggestion-candidate-summary">확인할 이미지 {candidateCount}장 — 등록하면 자동 태그가 확실하고 인식도 같다고 본 그림은 자동으로 확정하고, 나머지는 확인으로 보내요.</p>
           </>}
         </div>}
       </div>
       {error && <p role="alert">{error} <Button size="sm" disabled={busy} onClick={() => setRetry(value => value + 1)}>다시 시도</Button></p>}
       <div className="character-suggestion-dialog__footer">
-        <p>{mode === "register" ? <>{name || "캐릭터"}를 만들고 참조 {references.length}장 · 검토 후보 {candidateCount}장</> : <>{target?.displayName ?? "캐릭터"}에 최대 {detail?.images.length ?? 0}장을 검토 후보로 넣어요. 기존 참조·판단은 유지해요.</>}</p>
+        <p>{mode === "register" ? <>{name || "캐릭터"}를 만들고 레퍼런스 {references.length}장 · 확인할 이미지 {candidateCount}장</> : <>{target?.displayName ?? "캐릭터"}에 최대 {detail?.images.length ?? 0}장을 확인할 이미지로 넣어요. 기존 레퍼런스·판단은 유지해요.</>}</p>
         <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
         <Button variant="primary" disabled={busy || !detail || !context || (mode === "register" ? !name.trim() || !seriesId : !target)} onClick={() => void save()}><BusyLabel busy={!!(busy)} idle={mode === "register" ? "캐릭터 만들기" : "선택한 캐릭터에 합치기"}>저장 중…</BusyLabel></Button>
       </div>
@@ -156,7 +157,7 @@ function ImageChoice({ image, privacyMode, selected = false, index, disabled, on
   return <button type="button" className={`character-suggestion-image${selected ? " character-suggestion-image--selected" : ""}`} disabled={disabled} aria-pressed={selected} aria-label={`${image.assetId} 크게 보기`} onClick={onClick}>
     {!privacyMode && <AssetImage draggable={false} src={thumbnailUrl(image.assetId)} alt="" loading="lazy" />}
     {index && <b>{index}</b>}{image.solo && <span className="character-suggestion-image__solo">단독</span>}{!image.insideSeries && <span className="character-suggestion-image__outside">밖</span>}
-    <span className={`character-suggestion-image__score${both ? "" : " character-suggestion-warning"}`} aria-label={`PixAI ${image.pixaiScore.toFixed(3)} · canary ${image.canaryScore.toFixed(3)}`}>{Math.max(image.pixaiScore, image.canaryScore).toFixed(2)}</span>
+    <Badge variant="scrim" className="character-suggestion-image__score" title={`PixAI ${image.pixaiScore.toFixed(3)} · canary ${image.canaryScore.toFixed(3)}`}>{both ? "확실" : "불확실"}</Badge>
   </button>;
 }
 
@@ -175,7 +176,7 @@ function ImagePreview({ image, privacyMode, selected, canAdd, onMove, onToggle, 
       (opener?.isConnected ? opener : button)?.focus();
     };
   }, []);
-  return <div ref={surface} className="character-suggestion-preview" role="dialog" aria-modal="true" aria-label="참조 이미지 크게 보기" tabIndex={-1}
+  return <div ref={surface} className="character-suggestion-preview" role="dialog" aria-modal="true" aria-label="레퍼런스 크게 보기" tabIndex={-1}
     onKeyDown={event => {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault(); event.stopPropagation(); onMove(event.key === "ArrowLeft" ? -1 : 1);
@@ -188,13 +189,13 @@ function ImagePreview({ image, privacyMode, selected, canAdd, onMove, onToggle, 
       }
     }}>
     <div className="character-suggestion-preview__image">
-      {privacyMode ? <span>프라이버시 모드</span> : <AssetImage src={assetUrl(image.assetId)} alt="참조 미리보기" />}
+      {privacyMode ? <span>프라이버시 모드</span> : <AssetImage src={assetUrl(image.assetId)} alt="레퍼런스 미리보기" />}
     </div>
     <div className="character-suggestion-preview__controls">
       <Button aria-label="이전 이미지" onClick={() => onMove(-1)}>←</Button>
-      <span>{image.solo && "단독 · "}PixAI {image.pixaiScore.toFixed(2)} · canary {image.canaryScore.toFixed(2)}</span>
+      <span>{image.solo && "단독 · "}<Badge title={`PixAI ${image.pixaiScore.toFixed(2)} · canary ${image.canaryScore.toFixed(2)}`}>{image.pixaiScore >= .85 && image.canaryScore >= .85 ? "확실" : "불확실"}</Badge></span>
       <Button aria-label="다음 이미지" onClick={() => onMove(1)}>→</Button>
-      <Button disabled={!selected && !canAdd} onClick={onToggle}>{selected ? "참조에서 제거" : "참조로"}</Button>
+      <Button disabled={!selected && !canAdd} onClick={onToggle}>{selected ? "레퍼런스에서 제거" : "레퍼런스로"}</Button>
       <Button onClick={onClose}>미리보기 닫기</Button>
     </div>
   </div>;

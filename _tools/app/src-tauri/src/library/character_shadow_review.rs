@@ -384,7 +384,7 @@ fn shadow_review_mode(mode: Option<&str>) -> Result<bool> {
     match mode {
         None | Some("candidates") => Ok(false),
         Some("doubtful") => Ok(true),
-        Some(_) => Err(Error::Invalid("알 수 없는 S36 확인 목록입니다.")),
+        Some(_) => Err(Error::Invalid("알 수 없는 확인 목록입니다.")),
     }
 }
 
