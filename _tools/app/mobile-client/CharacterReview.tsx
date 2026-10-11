@@ -9,7 +9,7 @@ import {decodeImage, loadThumbnail, mediaTicket, warmThumbnail} from './media';
 import type {Asset} from './types';
 import {commitReviewDecision, queuedReviewPairs, readReviewIntents, reviewPairKey, undoReviewDecision, CHARACTER_REVIEW_EVENT} from './characterReviewOutbox';
 import {flushCharacterReview, isReviewInFlight, reviewPath, type ReviewCounts, type ReviewFeed, type ReviewItem, type ReviewSource, type ReviewTarget} from './characterReviewDelivery';
-import {useCharacterReviewCount} from './useCharacterReview';
+import {useCharacterReviewCount, useCharacterReviewSeriesCount} from './useCharacterReview';
 import {EASE_STANDARD, motionDefaults, motionTime, prefersReducedMotion} from '../src/shared/motion/curves';
 import './characterReview.css';
 
@@ -396,4 +396,11 @@ export function CharacterReviewChip({enabled, targetId, refreshKey, onOpen}: {en
   const count = useCharacterReviewCount(enabled, targetId, refreshKey);
   if (!count) return null;
   return <div className="review-entry-chip"><Button size="sm" variant="secondary" onClick={onOpen} aria-label={`이 캐릭터 확인 ${count}개`}>확인 {count}</Button></div>;
+}
+
+/** Series page chip: "확인 N" opens the 확인 list filtered to this series (shown only when the server can count by series). */
+export function CharacterReviewSeriesChip({enabled, series, refreshKey, onOpen}: {enabled: boolean; series: {id: string; name: string}; refreshKey: unknown; onOpen(): void}) {
+  const count = useCharacterReviewSeriesCount(enabled, series.id, refreshKey);
+  if (!count) return null;
+  return <div className="review-entry-chip"><Button size="sm" variant="secondary" onClick={onOpen} aria-label={`${series.name} 확인 ${count}개`}>확인 {count}</Button></div>;
 }

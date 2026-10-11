@@ -29,6 +29,7 @@ import {FolderShelf} from './FolderCards';
 import {useLevelMotion} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
 import {preloadImages} from '../src/shared/motion/viewportImages';
+import {CharacterReviewChip,CharacterReviewSeriesChip,type ReviewScope} from './CharacterReview';
 import './characters.css';
 
 /**
@@ -166,7 +167,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false,ratings}:{node:
   </button>;
 }
 
-export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,optionsHost,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,selection,onItems,moreRef,hiddenIds}:{classifications?:readonly import('./types').Classification[];onOpenFolder?(classificationId:string):void;search?:readonly AssetSearchName[];onSearch?(query?:string):void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** The host's view sheet receives the character scope's sort and filters. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void;
+export function CharacterBrowser({review,classifications=[],onOpenFolder,search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,optionsHost,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,selection,onItems,moreRef,hiddenIds}:{/** The 확인 list (only when the PC has published one): a "확인 N" chip on a series or character page opens it filtered to that page. */review?:{enabled:boolean;refreshKey:unknown;onOpen(scope:ReviewScope):void};classifications?:readonly import('./types').Classification[];onOpenFolder?(classificationId:string):void;search?:readonly AssetSearchName[];onSearch?(query?:string):void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** The host's view sheet receives the character scope's sort and filters. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void;
   /** Selection mode, as in the tablet's plain gallery (long press, then taps toggle). */hiddenIds?:ReadonlySet<string>;selection?:{ids:ReadonlySet<string>;onSelect(id:string):void;onToggle(id:string):void;onClear():void};
   /** The loaded items, for the host's selection bar and a viewer opened from here. */onItems?(items:Asset[]):void;
   /** Loads the next page; the host's viewer calls it near its end. */moreRef?:MutableRefObject<(()=>void)|null>}) {
@@ -476,6 +477,8 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
     {landscape&&node?.kind==='series'&&node.heroAssetId&&<div className="character-hero"><Preview id={node.heroAssetId} rating={index?.contentRatings?.[node.heroAssetId]} paused={!active||paused} label={`${characterNodeName(node)} 대표 이미지`}/></div>}
     {shelf}
     {filterControls}
+    {review&&node?.kind==='series'&&<CharacterReviewSeriesChip key={node.id} enabled={review.enabled&&active&&!paused} series={{id:node.sourceId,name:node.name}} refreshKey={review.refreshKey} onOpen={()=>review.onOpen({series:{id:node.sourceId,name:node.name},serverSeries:true})}/>}
+    {review&&node?.kind==='character'&&<CharacterReviewChip key={node.id} enabled={review.enabled&&active&&!paused} targetId={node.sourceId} refreshKey={review.refreshKey} onOpen={()=>review.onOpen({target:{id:node.sourceId,name:node.name}})}/>}
     {node?.description&&<p className="character-description">{node.description}</p>}
     {scope&&scope.sourceCount>scope.totalCount&&<p className="character-description">서버에 보관된 {scope.totalCount}개를 표시합니다. 아직 공유되지 않은 자산 {scope.sourceCount-scope.totalCount}개가 있습니다.</p>}
     {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<EmptyState title={where.node?(filterPending?'조건에 맞는 자산이 없습니다':node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}/>}

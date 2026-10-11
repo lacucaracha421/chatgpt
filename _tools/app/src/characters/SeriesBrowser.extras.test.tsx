@@ -9,7 +9,7 @@ import { createCharacterFixture, fixtureAssets, fixtureClassifications, fixtureT
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway } from "../library/types";
 import type { CharacterGroup, CharacterHubApi } from "./hubApi";
-import { emptyShadowSummary, type ShadowReviewApi } from "./shadowReviewApi";
+import { confirmSourceFor } from "./confirmTestKit";
 import type { characterExtrasApi, ExtrasSuggestion } from "./extrasApi";
 import type { ExtrasPromotionApi } from "./ExtrasPromotionDialog";
 
@@ -54,8 +54,7 @@ async function mount(options: Options = {}) {
   const hubApi = { seriesFolders: vi.fn().mockResolvedValue([]), browse, saveSeries: vi.fn(), series: vi.fn(), createManualCharacter: vi.fn(),
     completeReview: vi.fn().mockResolvedValue(1), setSeriesAssetExcluded: vi.fn(), excludedAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }),
     referenceCandidates: vi.fn(), confirmReferenceBatch: vi.fn(), requestReferenceRefresh } as unknown as CharacterHubApi;
-  const shadowApi = { page: vi.fn(async () => ({ items: [], nextOffset: null, policyVersion: null, summary: emptyShadowSummary() })), start: vi.fn(), cancel: vi.fn(),
-    status: vi.fn().mockResolvedValue({ running: false, preparing: false, total: 0, scored: 0, skipped: 0, cancelled: false, error: null }) } as unknown as ShadowReviewApi;
+  const confirmSource = confirmSourceFor();
   const extrasApi = {
     suggestions: vi.fn(async (targetId: string) => options.suggestions?.[targetId] ?? []),
     ensure: vi.fn(async () => ({ ...extrasOf("extras-ensured", null) })),
@@ -73,7 +72,7 @@ async function mount(options: Options = {}) {
   const browser = <SeriesBrowser series={{ classificationId: "series", heroAssetId: null, autoClassify: true }} targetId={options.targetId} groupId={options.groupId}
     targets={targets} extras={extras} groups={options.groups ?? [band]} classifications={fixtureClassifications} galleryLayout="masonry" onGalleryLayoutChange={vi.fn()}
     privacyMode={options.privacyMode ?? false} onPrivacyModeChange={vi.fn()} metadataVisible onMetadataVisibleChange={vi.fn()} thumbnailRowHeight={180} onThumbnailRowHeightChange={vi.fn()}
-    refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} extrasApi={extrasApi} promotionApi={promotionApi} />;
+    refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} confirmSource={confirmSource} extrasApi={extrasApi} promotionApi={promotionApi} />;
   const rendered = render(<LibraryProvider gateway={gateway}>{browser}</LibraryProvider>);
   const open = (targetId?: string, groupId?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId, groupId })}</LibraryProvider>);
   return { api, extrasApi, promotionApi, hubApi, navigate, changed, open };

@@ -19,6 +19,7 @@ vi.mock('./Home', () => ({Home:(props:HomeProps) => <div className="home-scroll"
   <button onClick={props.onRecent}>home 최근</button>
   <button onClick={props.onUnclassified}>home 미분류</button>
   <button onClick={props.onLibrary}>home 라이브러리</button>
+  <button onClick={props.onReview}>home 확인</button>
 </div>}));
 // The review overview and the review: stand-ins that close on Back like the real ones.
 vi.mock('./CharacterReviewOverview', () => ({CharacterReviewOverview:({backRef,onOpen,onClose,refreshKey}:{backRef:MutableRefObject<(() => boolean)|null>;onOpen(scope:unknown):void;onClose():void;refreshKey:unknown}) => {
@@ -64,6 +65,7 @@ beforeEach(() => {
   mocks.native.mockResolvedValue({configured:true,endpoint:'https://example.invalid'});
   mocks.api.mockImplementation(async(path:string) => {
     if (path === '/v1/library/list-generation') return {generation:'a'.repeat(64)};
+    if (path === '/v1/library/characters') return {version:1,authority:'pc',authorityEpoch:0,ready:false,revision:null,libraryId:'e'.repeat(32),capabilities:{read:true,characterReview:true},nodes:[],scopes:[],contentRatings:{}};
     if (path.includes('classifications')) return {items:[{id:'b',name:'분류 B',asset_count:1,parent_id:null}]};
     if (path.includes('revisit')) return {bundles:[]}; if (path.includes('captures')) return {captures:[]};
     return {items:path.includes('classification_id=b') ? b : a,has_more:false,next_cursor:null};
@@ -164,10 +166,21 @@ it('forgets the Notes Home origin once the note opened from Home is trashed (Bac
   expect(finished()).toBe(false);
 });
 
-it('does not expose the character review overview from Home',async() => {
-  await startHome();
-  expect(screen.queryByRole('button',{name:/확인/})).toBeNull();
-  expect(screen.queryByRole('region',{name:'review-overview'})).toBeNull();
+it('opens the 확인 overview from Home; a list opened from it returns to it, then Back returns to the same Home',async() => {
+  const home = await startHome();
+  fireEvent.click(screen.getByRole('button',{name:'home 확인'}));
+  await screen.findByRole('region',{name:'review-overview'});
+  fireEvent.click(screen.getByRole('button',{name:'overview 라라'}));
+  await screen.findByRole('region',{name:'review-screen'});
+  back();
+  await waitFor(() => expect(screen.queryByRole('region',{name:'review-screen'})).toBeNull());
+  expect(screen.getByRole('region',{name:'review-overview'})).toBeTruthy();
+  back();
+  await waitFor(() => expect(screen.queryByRole('region',{name:'review-overview'})).toBeNull());
+  expect(onHome()).toBe(true);
+  expect(screen.getByLabelText('홈 대시보드')).toBe(home);
+  expect(home.scrollTop).toBe(300);
+  expect(finished()).toBe(false);
 });
 
 it('opens the 발매 캘린더 from the Home shelf over Home, and Back returns to Home',async() => {

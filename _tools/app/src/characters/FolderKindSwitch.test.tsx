@@ -10,7 +10,7 @@ import { FolderKindSwitch } from "./CharacterFolderContent";
 import { createCharacterFixture, fixtureClassifications } from "./characterFixtures";
 import type { CharacterHubApi, SeriesFolder } from "./hubApi";
 import { SeriesBrowser } from "./SeriesBrowser";
-import { emptyShadowSummary, type ShadowReviewApi } from "./shadowReviewApi";
+import { confirmSourceFor } from "./confirmTestKit";
 import { suggestionApi } from "./suggestions/client";
 
 vi.mock("./suggestions/client", async importOriginal => {
@@ -113,13 +113,13 @@ it("opens a series from a plain folder only once its suggestion cards are in the
   const folders = deferred<SeriesFolder[]>();
   const hubApi = { browse: async () => ({ items: [], nextCursor: null, totalCount: 0 }), seriesFolders: () => folders.promise,
     excludedAssets: async () => ({ items: [], nextCursor: null, totalCount: 0 }) } as unknown as CharacterHubApi;
-  const shadowApi = { page: async () => ({ summary: emptyShadowSummary() }) } as unknown as ShadowReviewApi;
+  const confirmSource = confirmSourceFor();
   const view = render(<LibraryProvider gateway={{} as LibraryGateway}><FolderKindSwitch kind="plain"><Browser name="엔필" images={[]} /></FolderKindSwitch></LibraryProvider>);
   view.rerender(<LibraryProvider gateway={{} as LibraryGateway}><FolderKindSwitch kind="series"><SeriesBrowser
     series={{ classificationId: "series", heroAssetId: null, autoClassify: true }} targets={targets}
     classifications={fixtureClassifications} galleryLayout="masonry" privacyMode={false} metadataVisible thumbnailRowHeight={180} refreshVersion={0}
     onGalleryLayoutChange={() => undefined} onPrivacyModeChange={() => undefined} onMetadataVisibleChange={() => undefined}
-    onThumbnailRowHeightChange={() => undefined} onNavigate={() => undefined} onChanged={() => undefined} api={api} hubApi={hubApi} shadowApi={shadowApi}
+    onThumbnailRowHeightChange={() => undefined} onNavigate={() => undefined} onChanged={() => undefined} api={api} hubApi={hubApi} confirmSource={confirmSource}
   /></FolderKindSwitch></LibraryProvider>);
   await act(async () => { folders.resolve([]); });
   await new Promise(resolve => window.setTimeout(resolve, 80));

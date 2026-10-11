@@ -35,12 +35,15 @@ function queuedFeedDecisions(target?: string | null) {
 
 /**
  * Candidates left to review, or `null` while unknown or when the feature is off. The server
- * count already hides confirmed decisions; queued local ones are subtracted here.
+ * count already hides confirmed decisions; queued local ones are subtracted here. `settled` turns
+ * true once the first read for this scope has answered (with a count or not), so a screen can stop
+ * waiting for a count the server will never give.
  */
-export function useCharacterReviewCount(enabled: boolean, target: string | null, refreshKey: unknown): number | null {
+export function useCharacterReviewCountState(enabled: boolean, target: string | null, refreshKey: unknown, series: string | null = null): {count: number | null; settled: boolean} {
   const [total, setTotal] = useState<{key: string; value: number; queued: number} | null>(null);
+  const [settledKey, setSettledKey] = useState<string | null>(null);
   const [changed, setChanged] = useState(0);
-  const key = target ?? '';
+  const key = `${target ?? ''}|${series ?? ''}`;
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
@@ -48,11 +51,19 @@ export function useCharacterReviewCount(enabled: boolean, target: string | null,
       if (controller.signal.aborted) return;
       // The server count and the local queue are read together, so a decision confirmed in
       // between is never subtracted twice or not at all.
-      setTotal(feed?.ready === true && Number.isSafeInteger(feed.counts?.total)
-        ? {key, value: feed.counts.total, queued: queuedFeedDecisions(target)} : null);
-    }, () => { if (!controller.signal.aborted) setTotal(null); });
+      if (feed?.ready !== true || !Number.isSafeInteger(feed.counts?.total)) { setTotal(null); setSettledKey(key); return; }
+      if (series) {
+        // One series: the exact per-character counts, less this device's queued decisions in it; an older server sends none.
+        if (!Array.isArray(feed.countsByTarget)) { setTotal(null); setSettledKey(key); return; }
+        const queued = queuedByTarget();
+        const value = feed.countsByTarget.filter(row => row?.seriesId === series && Number.isSafeInteger(row.pending))
+          .reduce((sum, row) => sum + Math.max(0, row.pending - (queued[row.targetId] ?? 0)), 0);
+        setTotal({key, value, queued: 0});
+      } else setTotal({key, value: feed.counts.total, queued: queuedFeedDecisions(target)});
+      setSettledKey(key);
+    }, () => { if (!controller.signal.aborted) { setTotal(null); setSettledKey(key); } });
     return () => controller.abort();
-  }, [enabled, target, key, refreshKey, changed]);
+  }, [enabled, target, series, key, refreshKey, changed]);
   useEffect(() => {
     if (!enabled) return;
     // Re-read after local decisions settle (debounced: a review session fires many events).
@@ -62,8 +73,16 @@ export function useCharacterReviewCount(enabled: boolean, target: string | null,
     return () => { clearTimeout(timer); window.removeEventListener(CHARACTER_REVIEW_EVENT, read); };
   }, [enabled]);
   // A pause keeps the last known count so the row does not vanish and return; it is re-read on return.
-  if (!total || total.key !== key) return null;
-  return Math.max(0, total.value - total.queued);
+  const settled = settledKey === key;
+  if (!total || total.key !== key) return {count: null, settled};
+  return {count: Math.max(0, total.value - total.queued), settled};
+}
+export function useCharacterReviewCount(enabled: boolean, target: string | null, refreshKey: unknown): number | null {
+  return useCharacterReviewCountState(enabled, target, refreshKey).count;
+}
+/** Candidates left in one series (the 확인 N on its screen), or `null` when the server cannot split them. */
+export function useCharacterReviewSeriesCount(enabled: boolean, series: string | null, refreshKey: unknown): number | null {
+  return useCharacterReviewCountState(enabled && !!series, null, refreshKey, series).count;
 }
 
 /** One series' waiting candidates, split by character (most first). */

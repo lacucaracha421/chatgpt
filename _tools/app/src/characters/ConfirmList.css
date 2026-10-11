@@ -1,0 +1,52 @@
+/* 확인: one image at a time inside the fullscreen dialog. */
+.confirm-list { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; color: var(--color-text); background: var(--color-viewer-bg); }
+.confirm-list .numeric { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
+.confirm-list__header { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.confirm-list__header h2 { margin: 0; font-size: var(--type-body); font-weight: 600; line-height: var(--line-ui); }
+.confirm-list__header > .ui-button { margin-left: auto; }
+.confirm-list__scope { font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-muted); white-space: nowrap; }
+.confirm-list__remaining { font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-muted); white-space: nowrap; }
+.confirm-list__remaining b { margin-left: var(--space-1); font-weight: 500; font-size: var(--text-md); color: var(--color-text); }
+.confirm-list__tabs { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.confirm-list__tabs button { display: inline-flex; align-items: baseline; gap: var(--space-1); padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.confirm-list__tabs button[aria-selected=true] { background: var(--color-selected); color: var(--color-text); }
+.confirm-list__tabs button:disabled { cursor: default; }
+.confirm-list__notice { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); }
+.confirm-list__body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-4); flex: 1; min-height: 0; padding: var(--space-4); }
+/* The first content eases in; nothing pops in from an empty list. */
+@keyframes confirm-list-in { from { opacity: 0; } }
+.confirm-list__body, .confirm-list__strip { animation: confirm-list-in var(--motion-small) var(--ease-out); }
+.confirm-list__figure { position: relative; display: flex; align-items: center; justify-content: center; margin: 0; min-width: 0; min-height: 0; overflow: hidden; container-type: size; }
+.confirm-list__frame { position: relative; width: min(100cqw, calc(100cqh * var(--confirm-ratio, 1))); max-height: 100cqh; }
+.confirm-list__image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.confirm-list__image--pending { opacity: 0; pointer-events: none; }
+.confirm-list__crop { position: absolute; border: 2px solid var(--color-accent); border-radius: 1px; pointer-events: none; }
+.confirm-list__image-note { position: absolute; right: var(--space-2); bottom: var(--space-2); margin: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); font-size: var(--text-xs); line-height: var(--line-meta); color: var(--color-muted); }
+.confirm-list__panel { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); overflow: auto; }
+.confirm-list__badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.confirm-list__character { margin: 0; font-size: var(--text-title); line-height: var(--line-title); font-weight: 600; overflow-wrap: anywhere; }
+.confirm-list__references { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.confirm-list__references li { min-width: 0; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-tile); background: var(--color-surface-elevated); }
+.confirm-list__references img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.confirm-list__note { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--color-selected); font-size: var(--type-meta); line-height: var(--line-copy); }
+.confirm-list__meta { margin: 0; font-size: var(--type-meta); line-height: var(--line-copy); color: var(--color-muted); overflow-wrap: anywhere; }
+.confirm-list__actions { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+.confirm-list__actions > .ui-button { justify-content: space-between; width: 100%; }
+.confirm-list kbd { display: inline-block; min-width: 1.4em; margin-left: var(--space-1); padding: 0 var(--space-1); border: 1px solid currentColor; border-radius: var(--radius-sm); font: inherit; font-size: var(--text-xs); line-height: var(--line-meta); text-align: center; opacity: 0.8; }
+.confirm-list__undo { align-self: flex-start; }
+.confirm-list .ui-empty-state { flex: 1; }
+.confirm-list__empty-copy { max-width: 36rem; margin: 0; text-align: center; }
+
+/* The next images in line; the current one is full, the rest are quiet. */
+.confirm-list__strip { display: flex; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-4) var(--space-3); list-style: none; overflow-x: auto; border-top: 1px solid var(--color-border); }
+.confirm-list__strip li { flex: none; }
+.confirm-list__strip button { display: block; width: 56px; height: 56px; padding: 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-tile); background: var(--color-surface-elevated); opacity: .65; cursor: pointer; }
+.confirm-list__strip button[aria-current=true] { border-color: var(--color-accent); opacity: 1; }
+.confirm-list__strip button:disabled { cursor: default; }
+.confirm-list__strip img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+@media (max-width: 900px) {
+  .confirm-list__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .confirm-list__panel { max-height: 45vh; }
+  .confirm-list__header { flex-wrap: wrap; }
+}

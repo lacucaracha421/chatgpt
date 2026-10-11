@@ -72,18 +72,6 @@
       "pillRadius": 0,
       "legacyToken": 21
     },
-    "_tools/app/src/characters/ShadowReview.css": {
-      "offScaleSpacing": 2,
-      "offRoleFontSize": 0,
-      "pillRadius": 0,
-      "legacyToken": 7
-    },
-    "_tools/app/src/characters/TaggerReview.css": {
-      "offScaleSpacing": 14,
-      "offRoleFontSize": 6,
-      "pillRadius": 0,
-      "legacyToken": 0
-    },
     "_tools/app/src/characters/suggestions/CharacterSuggestions.css": {
       "offScaleSpacing": 5,
       "offRoleFontSize": 12,

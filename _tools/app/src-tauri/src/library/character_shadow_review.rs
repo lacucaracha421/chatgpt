@@ -119,6 +119,17 @@ pub struct ShadowReviewPendingSummary {
     pub targets: Vec<ShadowReviewPendingTarget>,
 }
 
+/// Pending counts of the one 확인 list, each (character, image) pair once. A pair more than one list
+/// brings up is a 다시 확인 when the tags or 학습 인식 doubt its placement, else an 인식 추천 when the
+/// recognition suggests it, else a 태그 추천.
+#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmCounts {
+    pub recognition: u32,
+    pub tag: u32,
+    pub recheck: u32,
+}
+
 #[derive(Debug, Clone)]
 struct ShadowRow {
     asset_id: String,
@@ -725,6 +736,65 @@ impl Library {
             recommended,
             targets: tallies.into_values().collect(),
         })
+    }
+
+    /// Exact pending counts of the 확인 list for the whole library or one series. Like the summary it
+    /// validates no reference files and builds no fingerprints, so Home and a series header can
+    /// afford it; the tag pairs are read from the same pending view the tag list uses.
+    pub fn character_confirm_counts(&self, series_id: Option<&str>) -> Result<ConfirmCounts> {
+        let candidates = self.shadow_rows_cached(false)?.1;
+        let doubtful = self.shadow_rows_cached(true)?.1;
+        let connection = self.connection()?;
+        // Pairs still waiting in one shadow list whose character exists and is enabled.
+        let pending =
+            |rows: Option<&ShadowRows>, doubtful: bool| -> Result<BTreeSet<(String, String)>> {
+                let prepared = prepare(&connection, rows, doubtful, series_id)?;
+                let rows = prepared
+                    .pending
+                    .into_iter()
+                    .map(|pending| pending.row)
+                    .collect::<Vec<_>>();
+                let enabled = enabled_target_names(&connection, &rows)?;
+                Ok(rows
+                    .into_iter()
+                    .filter(|row| enabled.contains_key(&row.target_id))
+                    .map(|row| (row.target_id, row.asset_id))
+                    .collect())
+            };
+        let recognition = pending(candidates.as_ref(), false)?;
+        let recheck_by_recognition = pending(doubtful.as_ref(), true)?;
+        // 0 tag, 1 recognition, 2 recheck: a pair takes the highest kind any list gives it.
+        let mut kinds = BTreeMap::<(String, String), u8>::new();
+        let mut tags = connection.prepare(
+            "SELECT target_id,asset_id,reason FROM character_tagger_pending
+             WHERE ?1 IS NULL OR series_id=?1",
+        )?;
+        for row in tags.query_map([series_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })? {
+            let (target_id, asset_id, reason) = row?;
+            kinds.insert((target_id, asset_id), if reason == "veto" { 2 } else { 0 });
+        }
+        for key in recognition {
+            let kind = kinds.entry(key).or_insert(1);
+            *kind = (*kind).max(1);
+        }
+        for key in recheck_by_recognition {
+            kinds.insert(key, 2);
+        }
+        let mut counts = ConfirmCounts::default();
+        for kind in kinds.into_values() {
+            match kind {
+                2 => counts.recheck += 1,
+                1 => counts.recognition += 1,
+                _ => counts.tag += 1,
+            }
+        }
+        Ok(counts)
     }
 
     pub fn character_shadow_review_page(
@@ -1987,6 +2057,108 @@ mod tests {
         drop(c);
         let earlier = page(&f, 0, 50);
         assert_eq!(earlier.summary.automatic, VerdictCounts::default());
+    }
+    #[test]
+    fn confirm_counts_count_each_pair_once_under_its_highest_kind() {
+        let f = Fixture::new();
+        let target = f.ready("Count");
+        for number in 8..14 {
+            series_asset(&f, &format!("asset-{number}"));
+        }
+        let version = "v1";
+        let scored = "2020-01-01T00:00:00Z";
+        insert(
+            f.temp.path(),
+            &[
+                (
+                    "asset-8",
+                    &target.id,
+                    "automatic",
+                    0.1,
+                    version,
+                    "none",
+                    scored,
+                ),
+                (
+                    "asset-9",
+                    &target.id,
+                    "recommended",
+                    0.2,
+                    version,
+                    "none",
+                    scored,
+                ),
+                (
+                    "asset-12",
+                    &target.id,
+                    "automatic",
+                    0.1,
+                    version,
+                    "none",
+                    scored,
+                ),
+                (
+                    "asset-13",
+                    &target.id,
+                    "none",
+                    0.9,
+                    version,
+                    "accepted_automatic",
+                    scored,
+                ),
+            ],
+        );
+        let c = f.library.connection().unwrap();
+        // asset-13 was placed automatically, which the doubtful list reviews.
+        c.execute(
+            "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+             VALUES(?1,'asset-13','asset-13',?2,'accepted',?3,'{}','automatic','now')",
+            params![target.id, content_hash("asset-13"), target.fingerprint],
+        )
+        .unwrap();
+        for (asset, reason) in [
+            ("asset-8", "recommendation"),
+            ("asset-10", "recommendation"),
+            ("asset-11", "veto"),
+            ("asset-12", "veto"),
+        ] {
+            c.execute(
+                "INSERT INTO character_tagger_candidates(target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+                 VALUES(?1,?2,?3,?4,0.9,0.9,'now')",
+                params![target.id, asset, content_hash(asset), reason],
+            )
+            .unwrap();
+        }
+        drop(c);
+        // asset-8: recognition and tags both read it; 9: recognition; 10: tags; 11 and 12: the tags
+        // doubt a placement (12 is also a recognition candidate); 13: 학습 인식 doubts it.
+        let expected = ConfirmCounts {
+            recognition: 2,
+            tag: 1,
+            recheck: 3,
+        };
+        assert_eq!(f.library.character_confirm_counts(None).unwrap(), expected);
+        assert_eq!(
+            f.library.character_confirm_counts(Some(&f.series)).unwrap(),
+            expected
+        );
+        assert_eq!(
+            f.library
+                .character_confirm_counts(Some("elsewhere"))
+                .unwrap(),
+            ConfirmCounts::default()
+        );
+        // The count follows the judgments: a manual decision removes the pair from every list.
+        decide(&f, &target, "asset-8", DecisionKind::Accepted);
+        decide(&f, &target, "asset-13", DecisionKind::Rejected);
+        assert_eq!(
+            f.library.character_confirm_counts(None).unwrap(),
+            ConfirmCounts {
+                recognition: 1,
+                tag: 1,
+                recheck: 2,
+            }
+        );
     }
     #[test]
     fn character_shadow_review_stable_shuffle_pages_and_origin_counts() {

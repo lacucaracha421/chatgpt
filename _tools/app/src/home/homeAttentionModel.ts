@@ -10,7 +10,7 @@ import { daysAfter } from './homeModel';
 export type AttentionRow = { key: string; label: string; secondary?: string; value?: string; days?: number; noteId?: string; problem?: boolean; disabled?: boolean };
 export type ReviewCount = { key: string; label: string; count: number | null; unit?: string };
 export type ConnectionProblem = { key: string; label: string; value: string; tone: string };
-const reviewOrder = ['unsorted', 'similar', 'pending', 'tagger', 'character', 'duplicates', 'av-link'];
+const reviewOrder = ['unsorted', 'similar', 'pending', 'confirm', 'duplicates', 'av-link'];
 
 /** Shared PC/tablet display rules. Concealed and unavailable note bodies never become previews. */
 export function attentionRows(notes: Note[], reviews: ReviewCount[], connections: ConnectionProblem[], today: string): AttentionRow[] {

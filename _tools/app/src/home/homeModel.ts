@@ -126,56 +126,6 @@ export function cloudLine(progress: CloudBackfillProgress | null, problemCount: 
   return { tone: "ok", text: "동기화됨" };
 }
 
-/** Pending S36 candidates of one character, split by verdict (`other`: neither tier). */
-export type CharacterReviewTally = { targetId: string; targetName: string; automatic: number; recommended: number; other: number };
-export type CharacterReviewCharacter = { targetId: string; name: string; count: number; automatic: number; recommended: number; thumbnailAssetId: string | null };
-export type CharacterReviewGroup = { seriesId: string | null; seriesName: string; total: number; automatic: number; recommended: number; characters: CharacterReviewCharacter[] };
-type ReviewTarget = { id: string; seriesClassificationId: string | null; displayName: string; thumbnailAssetId?: string | null; references?: readonly { assetId: string | null; status: string }[] };
-
-/** Count candidate items per character (first-seen order). */
-export function tallyCandidates(items: readonly { targetId: string; targetName: string; verdict?: string }[]): CharacterReviewTally[] {
-  const tallies = new Map<string, CharacterReviewTally>();
-  for (const item of items) {
-    let tally = tallies.get(item.targetId);
-    if (!tally) tallies.set(item.targetId, tally = { targetId: item.targetId, targetName: item.targetName, automatic: 0, recommended: 0, other: 0 });
-    if (item.verdict === "automatic") tally.automatic += 1;
-    else if (item.verdict === "recommended") tally.recommended += 1;
-    else tally.other += 1;
-  }
-  return [...tallies.values()];
-}
-
-/**
- * 캐릭터 검토 split by series and character: per-character counts grouped under the character's
- * series (busiest first). A character without a known series lands in "기타".
- */
-export function characterReviewGroups(
-  tallies: readonly CharacterReviewTally[],
-  targets: readonly ReviewTarget[],
-  seriesName: (id: string) => string | undefined,
-): CharacterReviewGroup[] {
-  const byId = new Map(targets.map((target) => [target.id, target]));
-  const groups = new Map<string, CharacterReviewGroup>();
-  for (const tally of tallies) {
-    const count = tally.automatic + tally.recommended + tally.other;
-    if (count === 0) continue;
-    const target = byId.get(tally.targetId);
-    const seriesId = target?.seriesClassificationId ?? null;
-    const key = seriesId ?? "";
-    let group = groups.get(key);
-    if (!group) groups.set(key, group = { seriesId, seriesName: (seriesId && seriesName(seriesId)) || "기타", total: 0, automatic: 0, recommended: 0, characters: [] });
-    group.total += count;
-    group.automatic += tally.automatic;
-    group.recommended += tally.recommended;
-    group.characters.push({ targetId: tally.targetId, name: tally.targetName, count, automatic: tally.automatic, recommended: tally.recommended,
-      thumbnailAssetId: target?.thumbnailAssetId ?? target?.references?.find((ref) => ref.status === "ready" && ref.assetId)?.assetId ?? null });
-  }
-  const result = [...groups.values()];
-  for (const group of result) group.characters.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko"));
-  // "기타" last; otherwise busiest first.
-  return result.sort((a, b) => Number(a.seriesId === null) - Number(b.seriesId === null) || b.total - a.total || a.seriesName.localeCompare(b.seriesName, "ko"));
-}
-
 /** Existing NEW notices plus dated local works and wishlist releases. General calendar entries are not followed titles. */
 export function newlyReleasedRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>, wishlist: ReleaseWishlistItem[], today: string): ReleaseRow[] {
   const rows = new Map(releaseRows(collections, board, inbox, wishlist, today).map(row => [row.key, row]));

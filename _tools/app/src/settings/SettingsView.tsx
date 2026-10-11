@@ -35,6 +35,7 @@ import { useAutoTagInbox } from "../autotags/AutoTagInboxSettings";
 import { TaggerReviewSettings } from "../autotags/TaggerReviewSettings";
 import { autoTagInboxResult } from "../autotags/autoTagInbox";
 import { CharacterAutomationSettings } from "./CharacterAutomationSettings";
+import { CharacterRecognitionStatus } from "./CharacterRecognitionStatus";
 import { CloudBackfillMaintenance, CloudBackfillSettings } from "./CloudBackfillSettings";
 import { ExtensionPairingQr } from "./ExtensionPairingQr";
 import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
@@ -174,6 +175,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [catalogRestoreBusy, setCatalogRestoreBusy] = useState(false);
   const [catalogRestoreMessage, setCatalogRestoreMessage] = useState<string | null>(null);
   const [catalogCheckpointConfirming, setCatalogCheckpointConfirming] = useState(false);
+  const [recognitionStatusOpen, setRecognitionStatusOpen] = useState(false);
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const cloud = useCloudSyncStatus(gateway, library?.root ?? "");
   const { health: authorityHealth } = useAuthoritySyncHealth(gateway, library?.root ?? "");
@@ -601,6 +603,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         </div>}
         {section === "advanced" && <div className="settings-view__section">
           <header className="settings-view__header"><h2>고급</h2></header>
+          <SettingsGroup title="캐릭터 인식 상태" help="캐릭터마다 어떤 인식이 이미지를 넣는지, 확인 판단이 얼마나 쌓였는지 읽기만 합니다. 학습 인식이 쓸 점수를 미리 계산하는 작업도 여기서 다룹니다.">
+            <SimpleRow name="캐릭터별 상태" status="인식 · 확인 판단 · 맞음 예시 · 틀림 / 허용" control={<Button size="sm" variant="secondary" aria-expanded={recognitionStatusOpen} onClick={() => setRecognitionStatusOpen(open => !open)}>{recognitionStatusOpen ? "닫기" : "보기"}</Button>} />
+            {recognitionStatusOpen && <CharacterRecognitionStatus disabled={pending} />}
+          </SettingsGroup>
           <SettingsGroup title="동기화 점검·복구">
             <CloudBackfillMaintenance />
           </SettingsGroup>

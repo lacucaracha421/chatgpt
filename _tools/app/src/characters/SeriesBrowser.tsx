@@ -8,7 +8,7 @@ import { CharacterSuggestionTile, prefetchCharacterSuggestions, useCharacterSugg
 import { NO_SERIES_REVISIONS, readSeriesSidebarCounts, seriesDataScope, sidebarCountCache, type SeriesRevisions } from "./seriesMountCache";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
-import { cloneElement, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactElement, type ReactNode } from "react";
+import { cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
 import { READY_CAP_MS } from "../shared/motion/AreaSwitch";
@@ -53,8 +53,9 @@ import { FolderFilterControl } from "../assets/FolderShelf";
 import { SelectionBar } from "../assets/SelectionBar";
 import { CharacterAssignPicker } from "./CharacterAssignPicker";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
-import { ShadowReview } from "./ShadowReview";
-import { shadowReviewApi, type ShadowReviewApi } from "./shadowReviewApi";
+import { ConfirmList } from "./ConfirmList";
+import { confirmSources, confirmTotal, type ConfirmSources } from "./confirmClient";
+import { taggerDecisionApi, type TaggerDecisionApi } from "./taggerReviewClient";
 import { S36ScoringWarning, S36SeriesControl, readinessLabel, useS36CharacterExclusion, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
 import { characterApi, draftReferenceRegions, moveAssetsToCharacters, type CharacterApi, type CharacterTarget } from "./api";
 import { prefetchRead, prefetchedRead, useFolderPrefetchIntent } from "../assets/folderPrefetch";
@@ -78,7 +79,9 @@ type Props = {
   /** Automatic analysis results per series: this series' entry refreshes its gallery and counts only. */
   seriesRevisions?: SeriesRevisions;
   onNavigate: (view: AssetView) => void; onChanged: () => void;
-  api?: CharacterApi; hubApi?: CharacterHubApi; shadowApi?: ShadowReviewApi;
+  api?: CharacterApi; hubApi?: CharacterHubApi;
+  /** The counts and lists behind "확인 N". */
+  confirmSource?: ConfirmSources; confirmDecisions?: Pick<TaggerDecisionApi, "move" | "classifications">;
   extrasApi?: typeof characterExtrasApi; promotionApi?: ExtrasPromotionApi;
   /** 선택한 영상 비교, as in plain folders. */
   onReviewVideos?: (assetIds: string[]) => void;
@@ -122,23 +125,22 @@ export function seriesFolderBrowseView(sort: AssetSort) {
   };
   return characterBrowseView(sort, filters);
 }
-/** Last pending S36 candidate count per series, shown on re-entry until the fresh count lands. */
-const lastCandidateCounts = new Map<string, number>();
+/** Last pending 확인 count per series, shown on re-entry until the fresh count lands. */
+const lastConfirmCounts = new Map<string, number>();
 /**
  * Hover prefetch of a series overview: the reads its switch makes (the first page in `load` and the
- * excluded-count, folder and candidate reads below), with the same arguments, so the switch takes them.
- * The switch gates on all but the candidate count.
+ * excluded-count, folder and 확인-count reads below), with the same arguments, so the switch takes them.
+ * The switch gates on all but the 확인 count.
  */
-export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, shadowApi: Pick<ShadowReviewApi, "page"> = shadowReviewApi, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number; seriesRevisions?: SeriesRevisions }): Promise<unknown>[] {
+export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, confirm: Pick<ConfirmSources, "counts"> = confirmSources, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number; seriesRevisions?: SeriesRevisions }): Promise<unknown>[] {
   const query = { seriesId, targetId: null, groupId: null, seriesFilter: "unclassified" as const, all: false, after: null, limit: 100, ...(options?.view ? { view: options.view } : {}) };
-  const candidates = { offset: 0, limit: 1, seriesId };
   return [
     ...(options ? [prefetchCharacterSuggestions(options.version, options.scope), readSeriesSidebarCounts(options.gateway, options.scope, options.version, options.seriesRevisions && { id: seriesId, revisions: options.seriesRevisions })] : []),
     // Tagged with the series: analysing it drops only these reads (invalidateFolderPrefetch(seriesId)).
     prefetchRead(hubApi, "browse", query, () => hubApi.browse(query), seriesId),
     prefetchRead(hubApi, "excludedAssets", [seriesId, null, 1], () => hubApi.excludedAssets(seriesId, null, 1), seriesId),
     prefetchRead(hubApi, "seriesFolders", seriesId, () => hubApi.seriesFolders(seriesId), seriesId),
-    prefetchRead(shadowApi, "page", candidates, () => shadowApi.page(candidates), seriesId),
+    prefetchRead(confirm, "counts", seriesId, () => confirm.counts(seriesId), seriesId),
   ];
 }
 /** Status that used to sit under each character card; tiles now show only a warning mark when something is wrong. */
@@ -150,7 +152,7 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
   return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
 }
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged, groupEditRequest: requestedGroupEdit = null, onGroupEditRequestHandled }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, confirmSource = confirmSources, confirmDecisions, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged, groupEditRequest: requestedGroupEdit = null, onGroupEditRequestHandled }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
@@ -168,10 +170,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const folders = cachedFolders ?? retainedFolderRead?.folders ?? [];
   const folderSeriesId = cachedFolders ? series.classificationId : retainedFolderRead?.seriesId ?? series.classificationId;
   const staleFolders = folderSeriesId !== series.classificationId;
-  // `series`: opened from this series' candidate count, so scoped to it; `all`: the overflow entry.
-  const [shadowReview, setShadowReview] = useState<false | "series" | "all">(false);
+  // The 확인 list opened from this series' count line, so scoped to it.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [s36Setup, setS36Setup] = useState(false);
-  const [candidateCount, setCandidateCount] = useState(() => lastCandidateCounts.get(series.classificationId) ?? 0);
+  const [confirmCount, setConfirmCount] = useState(() => lastConfirmCounts.get(series.classificationId) ?? 0);
   const [groupCreateRequest, setGroupCreateRequest] = useState(0);
   const [groupEditRequest, setGroupEditRequest] = useState(0);
   const [readinessVersion, setReadinessVersion] = useState(0);
@@ -232,7 +234,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const returnGallery = useRef<{ scope: string; page: CharacterBrowsePage } | null>(null);
   useLayoutEffect(() => {
     setEditor(null); setPicking(null); setConverting(false); setViewer(null); setExternalAsset(null);
-    setSelection(emptySelection()); setCharacterOpen(false); setShadowReview(false); setS36Setup(false);
+    setSelection(emptySelection()); setCharacterOpen(false); setConfirmOpen(false); setS36Setup(false);
     setPreselect(null); setPromotionTag(null); setPromoting(false); setPromotionDone(null); setUnregistering(false);
     setReferenceSuggestionTarget(null); setAll(false); setTrashUndo(null); setMessage(null); setEditorError(null); setCharacterNotice(null); setAssignArtistOpen(false);
     pickerPages.current.clear(); returnGallery.current = null;
@@ -399,26 +401,25 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       .finally(() => { if (active) setFolderLoading(false); });
     return () => { active = false; };
   }, [hubApi, previewCache, series.classificationId, targetId, currentGroup?.id, Boolean(picking), refreshVersion, reload]);
+  const confirmDecisionApi = useMemo<TaggerDecisionApi>(() => ({ ...taggerDecisionApi, ...confirmDecisions, decide: request => api.decide(request), decideBatch: requests => api.decideBatch(requests) }), [api, confirmDecisions]);
   useEffect(() => {
-    // Pending S36 candidates (automatic + recommended) drive the quiet 후보 N 확인 action
-    // on the series count line. Without the runtime the action stays hidden.
-    // The gallery does not wait for it: the shown count stays (this series' last known one, else
-    // the previous) until the read lands, then changes in place.
+    // Everything waiting for a judgment in this series (태그 추천, 인식 추천, 다시 확인) drives the quiet
+    // "확인 N" action on the series count line. The gallery does not wait for it: the shown count stays
+    // (this series' last known one, else the previous) until the read lands, then changes in place.
     if (targetId || currentGroup || picking) return;
     let active = true;
     const seriesId = series.classificationId;
-    const remembered = lastCandidateCounts.get(seriesId);
-    if (remembered !== undefined) setCandidateCount(remembered);
-    const candidates = { offset: 0, limit: 1, seriesId };
-    void prefetchedRead(shadowApi, "page", candidates, () => shadowApi.page(candidates))
+    const remembered = lastConfirmCounts.get(seriesId);
+    if (remembered !== undefined) setConfirmCount(remembered);
+    void prefetchedRead(confirmSource, "counts", seriesId, () => confirmSource.counts(seriesId))
       .then(result => {
-        const count = result.summary.automatic.pending + result.summary.recommended.pending;
-        lastCandidateCounts.set(seriesId, count);
-        if (active) setCandidateCount(count);
+        const count = confirmTotal(result);
+        lastConfirmCounts.set(seriesId, count);
+        if (active) setConfirmCount(count);
       })
-      .catch(() => { if (active) setCandidateCount(0); });
+      .catch(() => { if (active) setConfirmCount(0); });
     return () => { active = false; };
-  }, [shadowApi, series.classificationId, targetId, currentGroup?.id, Boolean(picking), readinessVersion]);
+  }, [confirmSource, series.classificationId, targetId, currentGroup?.id, Boolean(picking), readinessVersion]);
   useEffect(() => setSelection(emptySelection()), [clearSelectionRequest]);
   useEffect(() => { setPromotionTag(null); setPromoting(false); }, [targetId]);
   // A card's suggestion opens its 기타 with those images already selected (the person adds or removes by selecting).
@@ -692,7 +693,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     { id: "pick-cover", label: "시리즈 표지 선택", onSelect: () => beginPick("hero") },
     ...(series.heroAssetId ? [{ id: "clear-cover", label: "시리즈 표지 해제", onSelect: () => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null })) }] : []),
     ...(s36Settings || s36Error ? [{ id: "s36-setup", label: "학습 인식 설정", onSelect: () => setS36Setup(true) }] : []),
-    { id: "s36-review", label: "확인", onSelect: () => setShadowReview("all") },
     ...faultItem,
     { id: "unregister-series", label: "시리즈 등록 해제", disabled: busy, onSelect: () => setUnregistering(true) },
   ];
@@ -704,8 +704,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // A character inside a group shows the group in its path: series › group › character.
   const currentCharacterGroup = current && !extrasOnlyGroup ? groups.find(group => group.seriesId === series.classificationId && (currentExtras ? group.extrasTargetId === current.id : group.targetIds.includes(current.id))) : undefined;
   const currentStatus = characterTarget ? characterStatus(characterTarget, readiness.get(characterTarget.id), s36Driven(characterTarget.id)) : null;
-  const candidateReview = !picking && !current && !currentGroup && candidateCount > 0 && s36Settings?.series.includes(series.classificationId)
-    ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="학습 인식이 판단을 기다리는 후보를 하나씩 확인" onClick={() => setShadowReview("series")}>확인 {candidateCount.toLocaleString()}</Button>
+  const candidateReview = !picking && !current && !currentGroup && confirmCount > 0
+    ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="맞음 · 아님을 기다리는 이미지를 하나씩 확인" onClick={() => setConfirmOpen(true)}>확인 {confirmCount.toLocaleString()}</Button>
     : null;
   const selectionView: AssetView = { kind: "classification", classificationId: series.classificationId, ...(targetId ? { characterId: targetId } : {}), ...(currentGroup ? { characterGroupId: currentGroup.id } : {}) };
   const setSelectionFavorite = (favorite: boolean) => setAssetsFavorite(selectedIds, favorite);
@@ -933,7 +933,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         if (preview?.destinationId) onNavigate({ kind: "classification", classificationId: preview.destinationId });
       }} />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
-    {shadowReview && <ShadowReview onClose={() => { setShadowReview(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} api={shadowApi} decisions={api} series={shadowReview === "series" ? { id: series.classificationId, name } : undefined} />}
+    {confirmOpen && <ConfirmList onClose={() => { setConfirmOpen(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} sources={confirmSource} decisions={confirmDecisionApi}
+      scope={{ series: { id: series.classificationId, name } }} targets={[...targets, ...extras]} classifications={classifications} />}
     {s36Setup && <Dialog open title="학습 인식 설정" onClose={() => setS36Setup(false)}>
       <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
     </Dialog>}

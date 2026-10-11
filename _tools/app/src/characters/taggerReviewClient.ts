@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { characterApi, moveTaggerReviewAssetsToCharacter, type CharacterApi, type CharacterTarget, type ReviewRow, type TaggerReviewEvidence } from "./api";
+import { characterApi, moveTaggerReviewAssetsToCharacter, type CharacterApi, type ReviewRow, type TaggerReviewEvidence } from "./api";
 import { libraryGateway } from "../library/client";
 import type { ClassificationEntry } from "../library/types";
 
@@ -41,13 +41,6 @@ export type TaggerReviewItem = {
   crop?: { box: [number, number, number, number]; distance: number } | null;
 };
 
-export type TaggerReviewCounts = { recommendation: number; veto: number };
-export type TaggerReviewProgress = { read: number; seriesDone: number; seriesTotal: number };
-export type TaggerReviewSource = (
-  onProgress: (progress: TaggerReviewProgress) => void,
-  isLive: () => boolean,
-) => Promise<TaggerReviewItem[] | null>;
-
 export type TaggerDecisionApi = Pick<CharacterApi, "decide" | "decideBatch"> & {
   /** `learning: false` moves with a membership-only decision (맞음 · 영역 틀림). */
   move(targetId: string, expectedFingerprint: string, assetIds: string[], learning?: boolean): Promise<number>;
@@ -60,33 +53,6 @@ export const taggerDecisionApi: TaggerDecisionApi = {
   move: moveTaggerReviewAssetsToCharacter,
   classifications: (assetId) => libraryGateway.getAssetClassifications(assetId),
 };
-
-export const isTaggerEvidence = (evidence: unknown): evidence is TaggerReviewEvidence => {
-  if (!evidence || typeof evidence !== "object") return false;
-  const value = evidence as Partial<TaggerReviewEvidence>;
-  return value.source === "tagger"
-    && (value.reason === "recommendation" || value.reason === "veto")
-    && typeof value.pixaiScore === "number"
-    && typeof value.canaryScore === "number";
-};
-
-export const taggerItemKey = (item: Pick<TaggerReviewItem, "targetId" | "asset">) => `${item.targetId}\u0000${item.asset.id}`;
-
-export function taggerCounts(items: readonly TaggerReviewItem[]): TaggerReviewCounts {
-  return items.reduce((counts, item) => ({ ...counts, [item.evidence.reason]: counts[item.evidence.reason] + 1 }), { recommendation: 0, veto: 0 });
-}
-
-/** Reads the complete pending tagger projection with one native call. */
-export function taggerReviewSource(_api: Pick<CharacterApi, "review">, targets: readonly CharacterTarget[]): TaggerReviewSource {
-  const seriesIds = [...new Set(targets.flatMap((target) => target.seriesClassificationId ? [target.seriesClassificationId] : []))];
-  return async (onProgress, isLive) => {
-    if (!isLive()) return null;
-    const items = await invoke<TaggerReviewItem[]>("tagger_review_items");
-    if (!isLive()) return null;
-    onProgress({ read: items.length, seriesDone: seriesIds.length, seriesTotal: seriesIds.length });
-    return items;
-  };
-}
 
 export function classificationIsInSeries(classificationIds: readonly string[], seriesId: string, entries: readonly ClassificationEntry[]): boolean {
   const parents = new Map(entries.map((entry) => [entry.id, entry.parentId]));

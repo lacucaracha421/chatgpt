@@ -25,7 +25,7 @@ const item = (id: string, at = '2026-09-25T11:00:00Z'): Asset => ({id, kind: 'im
 const releaseReply = {version: 1, revision: 1, counts: {unread: 2, collections: [{collectionId: 'night', unread: 2}]}, items: [], nextCursor: null, hasMore: false};
 const revisitReply = {bundles: [{kind: 'date', title: '과거의 이날', items: [item('d1', '2025-09-25T03:00:00Z'), item('d2', '2025-09-25T05:00:00Z')]}, {kind: 'creator', title: '다시 만난 작가', groups: [{creator_key: 'ranzu', creator_name: 'Ranzu', creator_handle: 'ranzu', asset_count: 38, items: [item('r1'), item('r2')]}]}]};
 const upcomingEntry = {id: 'game-1', kind: 'game' as const, title: 'Hades II', originalTitle: 'Hades II', date: '2026-10-01', precision: 'exact', platforms: ['PC'], cover: {url: 'https://img.example/hades.jpg'}};
-type Server = {upcoming: unknown; avPick: unknown; artists: unknown; summary: unknown; offline: boolean};
+type Server = {upcoming: unknown; avPick: unknown; artists: unknown; summary: unknown; offline: boolean; review?: unknown};
 let server: Server;
 let notes: Note[];
 
@@ -45,6 +45,7 @@ beforeEach(() => {
   mocks.api.mockImplementation(async (path: string, _signal?: AbortSignal, body?: unknown, method?: string) => {
     if (server.offline) throw new ApiError('서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.', null, null);
     if (path.startsWith('/v1/library/similarity/review')) return {ready: true, counts: {open: 6}};
+    if (path.startsWith('/v1/library/characters/review?')) return server.review;
     if (path.startsWith('/v1/mobile-catalog/duplicates')) return {counts: {undecided: 2}};
     if (path.startsWith('/v1/collections/releases')) return releaseReply;
     if (path === '/v1/collections/status') return {revision: 'r1'};
@@ -213,6 +214,19 @@ describe('shared Home attention on tablet', () => {
     fireEvent.click(await screen.findByRole('button',{name:/유사 이미지 검토6쌍/})); expect(p.onSimilarity).toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button',{name:/처리 대기1/})); expect(p.onPending).toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button',{name:/Todo남은 항목/})); expect(p.onNotes).toHaveBeenCalledWith('shop');
+  });
+  it('shows one 확인 row with the PC list total and opens it, only when the PC has published a list', async () => {
+    server.review = {version: 1, ready: true, counts: {total: 5, s36: 3, b36: 1, doubtful: 1, pendingPc: 0, skipped: 0}, items: [], targets: {}};
+    const p = props({review: {enabled: true, refreshKey: 1}}); render(<Home {...p}/>);
+    const row = await screen.findByRole('button',{name:/확인5/});
+    expect(row.textContent).not.toMatch(/검토|캐릭터/);
+    fireEvent.click(row); expect(p.onReview).toHaveBeenCalled();
+  });
+  it('shows no 확인 row where the PC list is off or empty, and never waits for it', async () => {
+    server.review = {version: 1, ready: false, counts: {total: 0}, items: [], targets: {}};
+    const p = props({captures: [item('pending')], review: {enabled: true, refreshKey: 1}}); render(<Home {...p}/>);
+    expect(await screen.findByRole('button',{name:/처리 대기1/})).toBeTruthy();
+    expect(screen.queryByRole('button',{name:/^□?확인/})).toBeNull();
   });
   it('shares subscription and trial-window rows from the on-device ledger', async () => {
     notes = [note('ledger',{type:'ledger',pinned:false,recurring:[{id:'r',name:'무료',amount:10000,every:1,unit:'month',start:'2026-09-28',trial:true,until:null,remindDays:3,memo:'',order:'a'}]})];

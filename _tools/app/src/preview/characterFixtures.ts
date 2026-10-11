@@ -93,3 +93,94 @@ export function previewUnregisterPreview(seriesId: string) {
     ? { ...base, refusal: "상위 시리즈 ‘게임’에 같은 이름의 캐릭터가 있어 등록을 해제할 수 없습니다." }
     : base;
 }
+
+/**
+ * The three 확인 lists of the preview series: 태그 추천 and 다시 확인 by the automatic tags (the tag list),
+ * 인식 추천 (a candidate of the recognition list; asset-162 is also read by the tags, so it carries both badges)
+ * and 다시 확인 by 학습 인식 (the doubtful list).
+ */
+type PendingPair = { targetId: string; asset: number };
+const tagPairs: (PendingPair & { reason: "recommendation" | "veto"; pixai: number; canary: number; crop?: [number, number, number, number] })[] = [
+  { targetId: "t-anby", asset: 162, reason: "recommendation", pixai: 0.93, canary: 0.91, crop: [0.22, 0.12, 0.68, 0.78] },
+  { targetId: "t-anby", asset: 163, reason: "recommendation", pixai: 0.88, canary: 0.62 },
+  { targetId: "t-billy", asset: 164, reason: "recommendation", pixai: 0.9, canary: 0.9, crop: [0.3, 0.2, 0.7, 0.9] },
+  { targetId: "t-belle", asset: 165, reason: "recommendation", pixai: 0.87, canary: 0.89 },
+  { targetId: "t-ellen", asset: 10, reason: "veto", pixai: 0.12, canary: 0.1 },
+  { targetId: "t-corin", asset: 30, reason: "veto", pixai: 0.2, canary: 0.08 },
+];
+const candidatePairs: (PendingPair & { verdict: "automatic" | "recommended"; knn3: number })[] = [
+  { targetId: "t-ellen", asset: 166, verdict: "automatic", knn3: 0.31 },
+  { targetId: "t-corin", asset: 168, verdict: "automatic", knn3: 0.29 },
+  { targetId: "t-anby", asset: 162, verdict: "automatic", knn3: 0.27 },
+  { targetId: "t-ellen", asset: 167, verdict: "recommended", knn3: 0.44 },
+  { targetId: "t-lycaon", asset: 169, verdict: "recommended", knn3: 0.47 },
+];
+const doubtfulPairs: PendingPair[] = [{ targetId: "t-billy", asset: 85 }, { targetId: "t-ellen", asset: 12 }];
+const assetId = (number: number) => `asset-${String(number).padStart(3, "0")}`;
+const targetOf = (id: string) => previewCharacterTargets.find(item => item.id === id)!;
+
+export function previewTaggerReviewItems(assets: readonly AssetSummary[]) {
+  const byId = new Map(assets.map(asset => [asset.id, asset]));
+  return tagPairs.map(pair => ({
+    asset: byId.get(assetId(pair.asset))!, seriesId: PREVIEW_CHARACTER_SERIES_ID, targetId: pair.targetId, targetName: targetOf(pair.targetId).displayName, targetFingerprint: targetOf(pair.targetId).fingerprint,
+    evidence: { source: "tagger", reason: pair.reason, pixaiScore: pair.pixai, canaryScore: pair.canary },
+    crop: pair.crop ? { box: pair.crop, distance: 0.31 } : null,
+  }));
+}
+export const previewTaggerCounts = () => ({ total: tagPairs.length, recommendation: tagPairs.filter(pair => pair.reason === "recommendation").length, veto: tagPairs.filter(pair => pair.reason === "veto").length });
+
+function shadowItem(pair: PendingPair, verdict: "automatic" | "recommended" | "none", knn3: number | null, native: string, assets: readonly AssetSummary[]) {
+  const asset = assets.find(item => item.id === assetId(pair.asset))!;
+  const target = targetOf(pair.targetId);
+  return {
+    assetId: asset.id, contentHash: `hash-${asset.id}`, originalName: asset.originalName, width: asset.width, height: asset.height,
+    targetId: target.id, targetName: target.displayName, targetFingerprint: target.fingerprint,
+    referenceAssetIds: target.references.slice(0, 4).map(reference => reference.assetId), verdict, origin: "live", knn3, nativeOutcome: native, scoredAt: "2026-10-11T03:00:00.000Z",
+  };
+}
+const judgedCounts = { automatic: { accepted: 290, rejected: 12 }, recommended: { accepted: 59, rejected: 23 }, doubtful: { accepted: 69, rejected: 2 } };
+/** `character_shadow_review_page`: the candidate list, or the doubtful list for `mode: "doubtful"`; `seriesId` keeps this series only. */
+export function previewShadowReviewPage(query: { offset?: number; limit?: number; mode?: string; seriesId?: string }, assets: readonly AssetSummary[]) {
+  const doubtful = query.mode === "doubtful";
+  const inSeries = !query.seriesId || query.seriesId === PREVIEW_CHARACTER_SERIES_ID;
+  const all = !inSeries ? [] : doubtful
+    ? doubtfulPairs.map(pair => shadowItem(pair, "none", null, "accepted_automatic", assets))
+    : candidatePairs.map(pair => shadowItem(pair, pair.verdict, pair.knn3, "none", assets));
+  const offset = query.offset ?? 0, limit = query.limit ?? 40;
+  const zero = { pending: 0, accepted: 0, rejected: 0 };
+  const pending = (verdict: "automatic" | "recommended") => candidatePairs.filter(pair => inSeries && pair.verdict === verdict).length;
+  const tiers = { automatic: { pending: doubtful ? 0 : pending("automatic"), ...judgedCounts.automatic }, recommended: { pending: doubtful ? 0 : pending("recommended"), ...judgedCounts.recommended } };
+  return {
+    items: all.slice(offset, offset + limit), nextOffset: offset + limit < all.length ? offset + limit : null, policyVersion: "s36-knn3-v2",
+    summary: { ...tiers, byOrigin: { live: tiers, backfill: { automatic: zero, recommended: zero } }, doubtful: { pending: doubtful && inSeries ? doubtfulPairs.length : 0, ...judgedCounts.doubtful } },
+  };
+}
+export function previewShadowReviewSummary() {
+  const targets = new Map<string, { targetId: string; targetName: string; automatic: number; recommended: number }>();
+  for (const pair of candidatePairs) {
+    const row = targets.get(pair.targetId) ?? { targetId: pair.targetId, targetName: targetOf(pair.targetId).displayName, automatic: 0, recommended: 0 };
+    row[pair.verdict] += 1;
+    targets.set(pair.targetId, row);
+  }
+  return { automatic: candidatePairs.filter(pair => pair.verdict === "automatic").length, recommended: candidatePairs.filter(pair => pair.verdict === "recommended").length, targets: [...targets.values()] };
+}
+/** 확인 판단 / 맞음 예시 / 틀림 of the characters (the learning line is 30 and 50). */
+export function previewS36Readiness() {
+  const rows: [string, number, number, number, string][] = [
+    ["t-ellen", 74, 0, 126, "ready"], ["t-corin", 44, 2, 97, "ready"], ["t-lycaon", 36, 3, 42, "hold"],
+    ["t-anby", 46, 5, 111, "keep"], ["t-billy", 12, 0, 40, "collecting"], ["t-belle", 0, 0, 8, "collecting"],
+  ];
+  return rows.map(([targetId, reviewed, wrong, examples, status]) => ({ targetId, reviewed, wrong, examples, status }));
+}
+/** `character_confirm_counts`: each pair once under its highest kind (the tags and 학습 인식 doubting a placement beat a recognition suggestion). */
+export function previewConfirmCounts(seriesId?: string | null) {
+  const counts = { recognition: 0, tag: 0, recheck: 0 };
+  if (seriesId && seriesId !== PREVIEW_CHARACTER_SERIES_ID) return counts;
+  const kinds = new Map<string, "recognition" | "tag" | "recheck">();
+  const key = (pair: PendingPair) => `${pair.targetId}:${pair.asset}`;
+  for (const pair of tagPairs) kinds.set(key(pair), pair.reason === "veto" ? "recheck" : "tag");
+  for (const pair of candidatePairs) if (kinds.get(key(pair)) !== "recheck") kinds.set(key(pair), "recognition");
+  for (const pair of doubtfulPairs) kinds.set(key(pair), "recheck");
+  for (const kind of kinds.values()) counts[kind] += 1;
+  return counts;
+}

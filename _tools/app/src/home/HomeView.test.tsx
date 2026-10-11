@@ -1,3 +1,4 @@
+import { confirmSourceFor, shadowItem } from "../characters/confirmTestKit";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,8 +40,8 @@ vi.mock("../artists/artistStore", async (importOriginal) => {
 const workload = vi.hoisted(() => ({ restricted: false }));
 vi.mock("../app/workloadProfile", async (importOriginal) => ({ ...await importOriginal<typeof import("../app/workloadProfile")>(), useWorkloadProfile: () => ({ ...workload }) }));
 type Scope = { id: string; name: string } | undefined;
-vi.mock("../characters/ShadowReview", () => ({ ShadowReview: ({ onClose, series, target }: { onClose: () => void; series?: Scope; target?: Scope }) =>
-  <div role="dialog" aria-label="S36 확인"><span>{`범위 ${series?.id ?? "-"}/${target?.id ?? "-"}`}</span><button type="button" onClick={onClose}>닫기</button></div> }));
+vi.mock("../characters/ConfirmList", () => ({ ConfirmList: ({ onClose, scope }: { onClose: () => void; scope?: { series?: Scope; target?: Scope } }) =>
+  <div role="dialog" aria-label="확인 목록"><span>{`범위 ${scope?.series?.id ?? "-"}/${scope?.target?.id ?? "-"}`}</span><button type="button" onClick={onClose}>닫기</button></div> }));
 vi.mock("../manga/CatalogReviewDialog", () => ({ CatalogReviewDialog: ({ onClose, onChange }: { onClose: () => void; onChange: () => void }) => <div role="dialog" aria-label="중복 후보 검토"><button type="button" onClick={onChange}>Save duplicate decision</button><button type="button" onClick={onClose}>닫기</button></div> }));
 
 // Saturday 2026-09-26 14:31 local.
@@ -73,12 +74,12 @@ type Candidate = { targetId: string; targetName: string };
 type Setup = { props?: Partial<HomeViewProps>; notes?: Note[]; characters?: number; candidates?: Candidate[]; privacy?: boolean };
 function renderHome({ props = {}, notes = [], characters = 0, candidates = [], privacy = false }: Setup = {}) {
   const onNavigate = vi.fn();
-  const shadowApi = { page: vi.fn().mockResolvedValue({ items: candidates, nextOffset: null, policyVersion: null, summary: { automatic: { pending: Math.max(characters, candidates.length), accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 }, byOrigin: {} } }) };
+  const confirmSource = confirmSourceFor({ counts: { recognition: Math.max(characters, candidates.length) }, candidates: candidates.map((item, index) => shadowItem(`asset-${index}`, item.targetId, item.targetName)) });
   const view = render(<PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()}><WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
     <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={onNavigate} notes={notesWith(notes)}
-      shadowApi={shadowApi} now={() => NOW} {...props} />
+      confirmSource={confirmSource} now={() => NOW} {...props} />
   </WorkspaceChromeProvider></PrivacyProvider>);
-  return { onNavigate, shadowApi, view };
+  return { onNavigate, confirmSource, view };
 }
 
 beforeEach(() => {
@@ -181,7 +182,7 @@ describe('Home attention', () => {
   });
   it('orders nonzero reviews, routes them, and removes the old Home sections', async () => {
     gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 10, week: 41 }, { capturesPending: 3 }, { tagger: { total: 7, recommendation: 7, veto: 0 } }));
-    const { onNavigate } = renderHome({ props: { unsortedCount: 27, reviewCount: 2 } });
+    const { onNavigate } = renderHome({ characters: 7, props: { unsortedCount: 27, reviewCount: 2 } });
     const today = await screen.findByRole('region', { name: '오늘 할 것' });
     await waitFor(() => expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋27', '□유사 이미지 검토2쌍', '□처리 대기3', '□확인7']));
     fireEvent.click(within(today).getByRole('button', { name: /미분류 에셋/ }));
@@ -257,14 +258,29 @@ describe('Home attention', () => {
     await act(async () => resolve(overview({total: 0,today: 0,week: 0}, {capturesPending: 0})));
     await waitFor(() => expect(screen.queryByRole('button', {name: /처리 대기/})).toBeNull());
   });
-  it('still opens and returns from the character review overview', async () => {
+  it('opens one 확인 overview from a single row and returns to Home', async () => {
     const user = userEvent.setup();
-    const { shadowApi } = renderHome({ characters: 2, candidates: [{targetId:'lara',targetName:'라라'}, {targetId:'lara',targetName:'라라'}] });
-    await user.click(await screen.findByRole('button', {name:/캐릭터2/}));
+    const { confirmSource } = renderHome({ characters: 2, candidates: [{targetId:'lara',targetName:'라라'}, {targetId:'lara',targetName:'라라'}] });
+    await user.click(await screen.findByRole('button', {name:/확인2/}));
     expect(await screen.findByRole('button', {name:'홈으로 돌아가기'})).toBeTruthy();
+    expect(await screen.findByRole('button', {name: /라라 확인 2건/})).toBeTruthy();
     await user.click(screen.getByRole('button', {name:'홈으로 돌아가기'}));
-    expect(await screen.findByRole('button', {name:/캐릭터2/})).toBeTruthy();
-    expect(shadowApi.page).toHaveBeenCalled();
+    expect(await screen.findByRole('button', {name:/확인2/})).toBeTruthy();
+    expect(confirmSource.counts).toHaveBeenCalled();
+    expect(confirmSource.tagger).toHaveBeenCalled();
+    expect(screen.queryByRole('button', {name:/캐릭터\d/})).toBeNull();
+  });
+  it('counts each pair once: the Home row follows the exact 확인 count, not the sum of the tag and recognition counts', async () => {
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 10, today: 1, week: 2 }, {}, { tagger: { total: 6, recommendation: 6, veto: 0 } }));
+    renderHome({ characters: 7 });
+    expect(await screen.findByRole('button', {name:/확인7/})).toBeTruthy();
+  });
+  it('counts only the tag pairs in lightweight mode, where the recognition lists are not read', async () => {
+    workload.restricted = true;
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 10, today: 1, week: 2 }, {}, { tagger: { total: 4, recommendation: 4, veto: 0 } }));
+    const { confirmSource } = renderHome({ characters: 7 });
+    expect(await screen.findByRole('button', {name:/확인4/})).toBeTruthy();
+    expect(confirmSource.counts).not.toHaveBeenCalled();
   });
 });
 

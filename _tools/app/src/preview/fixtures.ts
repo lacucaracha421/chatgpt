@@ -1,6 +1,6 @@
 import type { AssetQuery, AssetSummary, CollectionSummary, ReleaseTitle, MangaIndexIdentity } from "../library/types.ts";
 import type { ArtistSummary } from "../artists/types.ts";
-import { PREVIEW_CHARACTER_SERIES_ID, previewCharacterBrowse, previewCharacterGroups, previewCharacterSidebarCounts, previewCharacterTargets, previewExtrasSuggestions, previewUnregisterPreview } from "./characterFixtures.ts";
+import { PREVIEW_CHARACTER_SERIES_ID, previewCharacterBrowse, previewCharacterGroups, previewCharacterSidebarCounts, previewCharacterTargets, previewConfirmCounts, previewExtrasSuggestions, previewS36Readiness, previewShadowReviewPage, previewShadowReviewSummary, previewTaggerCounts, previewTaggerReviewItems, previewUnregisterPreview } from "./characterFixtures.ts";
 
 export const PREVIEW_FIXTURE_MARKER = "lakomics-preview-fixture-20260929";
 
@@ -249,7 +249,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     }
     case "list_auto_tag_vocabulary": return [{ tag: "1girl", category: "general", count: 184 }, { tag: "original", category: "copyright", count: 91 }, { tag: "warm_light", category: "general", count: 73 }];
     case "get_auto_tag_import_summary": return { model: "preview-tagger", importedAt: "2026-09-28T04:00:00.000Z", sourceName: "preview.sqlite", taggedAssets: 218, tagRows: 1280, skippedAssets: 4 };
-    case "get_home_overview": return { failed: [], assets: { total: 300, today: 30, week: 180, images: 283, videos: 17 }, collections: { game: 12, manga: 12, movie: 12, av: 12 }, tagger: { total: 6, recommendation: 4, veto: 2 }, avPerformer: null, server: { configured: true, live: true, confirmedAt: "2026-09-29T06:00:00.000Z", capturesPending: 3 } };
+    case "get_home_overview": return { failed: [], assets: { total: 300, today: 30, week: 180, images: 283, videos: 17 }, collections: { game: 12, manga: 12, movie: 12, av: 12 }, tagger: previewTaggerCounts(), avPerformer: null, server: { configured: true, live: true, confirmedAt: "2026-09-29T06:00:00.000Z", capturesPending: 3 } };
     case "get_revisit_slate": return { localDate: "2026-09-29", createdAt: "2026-09-29T00:00:00.000Z", revision: 1, bundles: [{ id: "revisit-date", kind: "date", title: "1년 전 오늘", reason: "지난해 오늘 저장한 그림", assetIds: previewAssets.slice(80, 88).map(asset => asset.id), revision: 1 }] };
     case "list_av_favorites": return [];
     case "get_artist_overview": return { settings: { mainMinCount: 10, recentMinCount: 3, recentDays: 30 }, total: previewArtists.length, main: 7, other: 2, twoToFour: 1, single: 0, hidden: 0, reposter: 1, styleSuggestionCount: 4, unknownNone: 12, unknownSource: 7, mergeSuggestions: 1, sourceFillable: 7, pinned: previewArtists.filter(artist => artist.pinned) };
@@ -383,9 +383,13 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     }
     case "character_series_folders":
     case "character_suggestions":
-    case "ignored_character_suggestions":
-    case "character_s36_readiness": return [];
-    case "character_s36_publication": return { series: [], excludedTargets: [], scoringEnabled: false };
+    case "ignored_character_suggestions": return [];
+    case "character_s36_readiness": return args.seriesId === PREVIEW_CHARACTER_SERIES_ID ? previewS36Readiness() : [];
+    case "character_s36_publication": return { series: [PREVIEW_CHARACTER_SERIES_ID], excludedTargets: ["t-lycaon", "t-anby"], scoringEnabled: true };
+    case "tagger_review_items": return previewTaggerReviewItems(previewAssets);
+    case "character_confirm_counts": return previewConfirmCounts(args.seriesId as string | null | undefined);
+    case "character_shadow_backfill_status": return { running: false, preparing: false, total: 0, scored: 0, skipped: 0, cancelled: false, error: null };
+    case "character_review_inbound_status": return { applied: 0 };
     case "character_extras": return previewCharacterTargets.filter(item => item.role === "extras").map(item => ({ targetId: item.id, seriesId: PREVIEW_CHARACTER_SERIES_ID, groupId: item.extrasGroupId, name: item.displayName }));
     case "character_extras_suggestions": return previewExtrasSuggestions(String(args.targetId ?? ""));
     case "character_series_unregister_preview": return previewUnregisterPreview(String(args.seriesId ?? PREVIEW_CHARACTER_SERIES_ID));
@@ -393,8 +397,8 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "character_series_excluded_assets": return { items: [], nextCursor: null, totalCount: 0 };
     case "promote_character_extras": return { target: { ...previewCharacterTargets[0]!, id: "t-new", displayName: String((args.request as { displayName?: string } | undefined)?.displayName ?? "와이즈"), role: "character", revision: 1 }, movedCount: ((args.request as { assetIds?: string[] } | undefined)?.assetIds ?? []).length, referenceCount: ((args.request as { referenceAssetIds?: string[] } | undefined)?.referenceAssetIds ?? []).length, recognition: true };
     case "request_character_reference_refresh": return { targetId: String(args.targetId ?? ""), requestRevision: 1, state: "pending", eligibleCount: 214 };
-    case "character_shadow_review_summary": return { automatic: 0, recommended: 0, targets: [] };
-    case "character_shadow_review_page": return { items: [], nextOffset: null, summary: { automatic: { pending: 0 }, recommended: { pending: 0 } } };
+    case "character_shadow_review_summary": return previewShadowReviewSummary();
+    case "character_shadow_review_page": return previewShadowReviewPage((args.query ?? {}) as { offset?: number; limit?: number; mode?: string; seriesId?: string }, previewAssets);
     case "character_sidebar_counts": return previewCharacterSidebarCounts();
     case "index_missing_similarity_hashes": return { remaining: 0, failed: 0 };
     case "get_image_similarity_scan": return null;

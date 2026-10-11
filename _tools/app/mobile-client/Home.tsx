@@ -42,9 +42,9 @@ export interface HomeProps {
   onUnsortedCount?(count: number | null): void;
   items: Asset[]; hasMore: boolean; captures: Asset[] | null; busy: boolean; paused: boolean; secondaryError: string;
   scope: string; exchange: ExchangeSnapshot | null;
-  /** Retained for compatibility with callers that still hold the character index. Home does not expose review. */
+  /** Retained for callers that still hold the character index. */
   characters?: CharacterIndex | null;
-  /** Retained input shape; the tablet deliberately omits this review category. */
+  /** The 확인 list (only when the PC has published one) and the key that re-reads its count. */
   review: {enabled: boolean; refreshKey: unknown}; similarityKey: unknown;
   onPending(): void; onReview(): void; onSimilarity(): void; onDuplicates(): void; onExchange(): void;
   onReleases(): void; onWork(id: string): void; onSettings(): void; onRecent(): void; onLibrary(): void; onUnclassified(): void;
@@ -144,7 +144,7 @@ export function Home(props: HomeProps) {
   const at = useLocalDayClock();
   const today = localToday(at);
   const [shelfScope, setShelfScope] = useState<string | null>(null);
-  const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending: captures?.length ?? null, similarityKey: props.similarityKey, exchange: props.exchange, shelfEnabled: shelfScope === props.scope});
+  const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending: captures?.length ?? null, similarityKey: props.similarityKey, review: props.review, exchange: props.exchange, shelfEnabled: shelfScope === props.scope});
   useEffect(() => {props.onUnsortedCount?.(d.summary?.unclassified ?? null);}, [props.onUnsortedCount, d.summary?.unclassified]);
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
   useEffect(() => {if (memos && !memos.locked) setTabletTrashCount(props.scope, 'notes', deletedTrashNotes(memos.notes).length);}, [props.scope, memos]);
@@ -212,6 +212,7 @@ export function Home(props: HomeProps) {
     { key: 'unsorted', label: '미분류 에셋', count: d.summary?.unclassified ?? null },
     { key: 'similar', label: '유사 이미지 검토', count: d.todos.similar, unit: '쌍' },
     { key: 'pending', label: '처리 대기', count: d.todos.pending },
+    ...(props.review.enabled ? [{ key: 'confirm', label: '확인', count: d.characterSettled ? d.todos.character ?? 0 : null }] : []),
     { key: 'duplicates', label: '중복 판본', count: d.todos.duplicates },
   ];
   const connections = [
@@ -269,6 +270,7 @@ export function Home(props: HomeProps) {
       else if (row.key === 'unsorted') props.onUnclassified();
       else if (row.key === 'similar') props.onSimilarity();
       else if (row.key === 'pending') props.onPending();
+      else if (row.key === 'confirm') props.onReview();
       else if (row.key === 'duplicates') props.onDuplicates();
       else if (row.key === 'connection:exchange') props.onExchange();
       else if (row.key.startsWith('connection:')) props.onSettings();

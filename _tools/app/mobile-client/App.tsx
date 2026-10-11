@@ -21,7 +21,9 @@ import {fetchAssetFilterVersion, fetchListGeneration, pageGenerationOf, ASSET_LI
 import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
-import {validCharacterIndex,type CharacterIndex} from './characterModel';
+import {characterReviewLibrary,validCharacterIndex,type CharacterIndex} from './characterModel';
+import {CharacterReview,type ReviewScope} from './CharacterReview';
+import {CharacterReviewOverview} from './CharacterReviewOverview';
 import {useCharacterReviewBackgroundFlush} from './useCharacterReview';
 import {SimilarityReview} from './SimilarityReview';
 import {TrashLayer} from './TrashLayer';
@@ -185,6 +187,12 @@ export function App() {
   const [similarity,setSimilarity]=useState(false);
   const [similarityClosed,setSimilarityClosed]=useState(0);
   const similarityBack=useRef<(()=>boolean)|null>(null);
+  // The 확인 list, optionally scoped to one series or character. Home's 확인 opens its overview first; a list opened from the overview returns to it.
+  const [review,setReview]=useState<ReviewScope|null>(null);
+  const [reviewClosed,setReviewClosed]=useState(0);
+  const reviewBack=useRef<(()=>boolean)|null>(null);
+  const [reviewOverview,setReviewOverview]=useState(false);
+  const overviewBack=useRef<(()=>boolean)|null>(null);
   const [checking, setChecking] = useState(true), [settings, setSettings] = useState(false);
   // Without a connection, the connection screen is the first screen: end the launch splash.
   useLaunchReady(!status.configured && !checking);
@@ -267,7 +275,7 @@ export function App() {
   const loadInFlight = useRef(false), loadInterrupted = useRef(false);
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
-  const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
+  const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
   const clearSelection=useCallback(()=>{setClassificationBatchIds(null);setAssetInfo(null);setSelectedIds(new Set());},[]);
   const selectAsset=useCallback((id:string)=>setSelectedIds(current=>current.has(id)?current:new Set(current).add(id)),[]);
   const toggleSelectedAsset=useCallback((id:string)=>setSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;}),[]);
@@ -712,6 +720,9 @@ export function App() {
       else if (state.fault) setFault(null);
       else if (state.exchangeOpen) {if (!exchangeBack.current?.()) setExchangeOpen(false);}
       else if (state.similarity) {if (!similarityBack.current?.()) setSimilarity(false);}
+      // The 확인 list covers the app too; it closes its zoom first, then itself, and the overview beneath it follows.
+      else if (state.review) {if (!reviewBack.current?.()) closeReview();}
+      else if (state.reviewOverview) {if (!overviewBack.current?.()) setReviewOverview(false);}
       else if (trash.backRef.current?.()) { /* The trash browser consumed back. */ }
       // The filter dialog is the innermost surface, so it closes first and consumes the press.
       else if (state.viewSettings) setViewSettings(false);
@@ -877,7 +888,7 @@ export function App() {
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
-    setViewer(null); setClassificationBatchIds(null); setClassificationNotice(''); clearSelection(); closeAlbumBatch(); setSimilarity(false); setExchangeOpen(false); closeArtists(); setViewSettings(false);   setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setListVersion(0); setFolderAuthority(null); setFolderManagement(null); setIndexReady(false); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
+    setViewer(null); setClassificationBatchIds(null); setClassificationNotice(''); clearSelection(); closeAlbumBatch(); setSimilarity(false); setReview(null); setReviewOverview(false); setExchangeOpen(false); closeArtists(); setViewSettings(false);   setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setListVersion(0); setFolderAuthority(null); setFolderManagement(null); setIndexReady(false); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
     lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
@@ -942,7 +953,9 @@ export function App() {
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
   const totalTrashCount=useTabletTrashCount(status.endpoint,findStore);
   const reviewCount=useSimilarityReviewCount(status.configured&&!similarity,similarityClosed,status.endpoint)??0;
-  const paused=moreOpen||area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
+  const reviewLibrary=characterReviewLibrary(characterIndex);
+  const closeReview=()=>{setReview(null);setReviewClosed(n=>n+1);};
+  const paused=moreOpen||area!=='assets'||settings||!!viewer||!!fault||similarity||!!review||reviewOverview||trash.open||exchangeOpen||artistsOpen||calendarOpen;
   const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
@@ -1040,7 +1053,7 @@ export function App() {
   // Full-screen layers are pushed in from the right over the page and pop back the same way; the
   // page beneath stays put. Artists replaces the page only once it has covered it.
   const searchLayer=useMotionSurface('layer'),calendarLayer=useMotionSurface('layer'),artistsLayer=useMotionSurface('layer'),settingsLayer=useMotionSurface('layer');
-  const faultLayer=useMotionSurface('layer'),similarityLayer=useMotionSurface('layer'),trashLayer=useMotionSurface('layer'),exchangeLayer=useMotionSurface('layer');
+  const faultLayer=useMotionSurface('layer'),similarityLayer=useMotionSurface('layer'),reviewOverviewLayer=useMotionSurface('layer'),reviewLayer=useMotionSurface('layer'),trashLayer=useMotionSurface('layer'),exchangeLayer=useMotionSurface('layer');
   const classificationToast=useMotionSurface('toast'),exchangeToast=useMotionSurface('toast');
   const artistsCovered=useLayerCovered(artistsOpen);
   const selectionBar=<SelectionBar selectedCount={selectedIds.size} batchPending={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} onFavorite={albumTree?.adopted?value=>void selectionActions.run(value?'like':'unlike'):undefined} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} characterLabel="분류" characterShortcut={null} characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={<>{selectedAsset&&<Button variant="ghost" disabled={selectionActions.busy} onClick={()=>setAssetInfo(selectedAsset)}>정보</Button>}{page.view.album&&<Button size="icon" variant="ghost" aria-label="이 앨범에서 빼기" disabled={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onClick={()=>void selectionActions.run('remove')}><MinusCircleIcon aria-hidden="true"/></Button>}<span className="selection-action-notice" role={selectionActions.notice?'alert':'status'}><BusyLabel delay={400} busy={selectionActions.busy} idle={selectionActions.notice}>선택 작업 처리 중 {selectionActions.progress.done}/{selectionActions.progress.total}</BusyLabel></span></>} onClearSelection={()=>{if(!selectionActions.busy)clearSelection();}}/>;
@@ -1056,7 +1069,8 @@ export function App() {
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
         {charactersVisited && <CharacterBrowser classifications={entries} onOpenFolder={classification=>select({tab:'library',classification,title:entries.find(entry=>entry.id===classification)?.name??''})} hiddenIds={trash.hidden} search={page.view.search} onSearch={query=>{openAssetSearch();setAssetSearchDraft(query??'');}} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>{markViewerOpen();setViewer({items,index,character,source:'character'});}} backRef={characterBack} onExit={exitCharacters}
-          selection={characterSelection?{ids:selectedIds,onSelect:selectAsset,onToggle:toggleSelectedAsset,onClear:clearSelection}:undefined} onItems={characterItemsChanged} moreRef={characterMore}/>}
+          selection={characterSelection?{ids:selectedIds,onSelect:selectAsset,onToggle:toggleSelectedAsset,onClear:clearSelection}:undefined} onItems={characterItemsChanged} moreRef={characterMore}
+          review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:setReview}:undefined}/>}
         {characterSelection&&selectionBar}
         <div className="floating-notices">
           {searchNotice&&<p className="hint" role="status">{searchNotice}</p>}
@@ -1080,11 +1094,11 @@ export function App() {
   const homeAreaNode=<>{!artistsCovered&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
     <Home onUnsortedCount={setUnsortedCount} items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
-          review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => {closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
+          review={{enabled:!!reviewLibrary,refreshKey:`${characterIndex?.revision}:${reviewClosed}`}} similarityKey={similarityClosed} onArtists={() => {closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onRevisit={(key,title) => {const view:View={tab:'library',revisit:key,title};fromHome(view);select(view);}} onUnclassified={() => {const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
           onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
           onPending={openPending}
-          onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
+          onReview={() => setReviewOverview(true)} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCalendar()} onWork={id => {beginScreenTiming('collection.work','open');setHomeOrigin({area:'collections'});setArea('collections');setHomeWork(current=>({id,key:(current?.key??0)+1}));}}/>
   </main></>;
@@ -1154,6 +1168,8 @@ export function App() {
     {settings && <div className="settings-layer" ref={settingsLayer}><Settings onOpenVault={vaultSelected?undefined:()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/></div>}
     {fault && !privacyMode && !nsfwFilter && <div className="tablet-layer is-fault" ref={faultLayer}><FaultGame items={fault} onClose={() => setFault(null)}/></div>}
     {similarity && <div className="tablet-layer" ref={similarityLayer}><SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/></div>}
+    {reviewOverview && reviewLibrary && <div className="tablet-layer" ref={reviewOverviewLayer}><CharacterReviewOverview libraryId={reviewLibrary} characters={characterIndex} refreshKey={`${characterIndex?.revision}:${reviewClosed}`} paused={!!review} backRef={overviewBack} onOpen={setReview} onClose={() => setReviewOverview(false)}/></div>}
+    {review && reviewLibrary && <div className="tablet-layer" ref={reviewLayer}><CharacterReview key={review.target?.id??(review.series?`series:${review.series.id}`:'all')} libraryId={reviewLibrary} target={review.target} series={review.series} serverSeries={review.serverSeries} backRef={reviewBack} onClose={closeReview}/></div>}
     {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)}/>}
     {viewer && <Viewer totalCount={viewer.source==='library'?libraryTotal:undefined} onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <div className="tablet-layer" ref={trashLayer}><TrashLayer endpoint={status.endpoint} store={findStore} key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}

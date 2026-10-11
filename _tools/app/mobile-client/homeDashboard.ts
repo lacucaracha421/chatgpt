@@ -4,6 +4,7 @@ import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCap
 import type {CollectionSummary} from './collectionModel';
 import {currentShelf, forgetHomeShelf, invalidateReleases, loadShelf, observePublication, readHomeShelf, releaseEpoch, rememberHomeShelf, subscribeReleases} from './releaseStore';
 import {useSimilarityReviewCount} from './useSimilarityReview';
+import {useCharacterReviewCountState} from './useCharacterReview';
 import {useDuplicateCount} from './CatalogDuplicates';
 import {useCachedHomeSource, useCachedHomeSourceRead} from './homeCache';
 import {ApiError, api, native} from './transport';
@@ -20,9 +21,10 @@ export {clockLabel,daysAfter,UPCOMING_DAYS} from '../src/home/homeModel';
 
 /** Shared source cache for the attention-only Home; refreshes retain previous values. */
 export type TodoKey = 'pending' | 'character' | 'similar' | 'duplicates';
+/** `character` is the 확인 list (태그 추천 · 인식 추천 · 다시 확인) under its old key. */
 export const TODO_LABELS: Record<TodoKey, {label: string; unit: string; note: string}> = {
   pending: {label: '처리 대기', unit: '건', note: '수집 요청 · 분류 전'},
-  character: {label: '확인', unit: '건', note: '인식 추천 · 다시 확인'},
+  character: {label: '확인', unit: '건', note: '맞음 · 아님을 기다리는 이미지'},
   similar: {label: '유사 이미지', unit: '쌍', note: '같은 그림일 수 있음'},
   duplicates: {label: '중복 판본', unit: '건', note: '카탈로그 · 같은 작품'},
 };
@@ -332,9 +334,11 @@ export type HomeDashboardInput = {
   shelfEnabled?: boolean;
   pending: number | null;
   similarityKey: unknown;
+  /** The 확인 list; absent or disabled when the PC has not published one. */
+  review?: {enabled: boolean; refreshKey: unknown};
   exchange: ExchangeSnapshot | null;
 };
-export function useHomeDashboard({enabled, scope, pending, similarityKey, exchange, shelfEnabled = true}: HomeDashboardInput) {
+export function useHomeDashboard({enabled, scope, pending, similarityKey, review, exchange, shelfEnabled = true}: HomeDashboardInput) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [problems, setProblems] = useState<Record<string, 'offline' | 'server'>>({});
   useEffect(() => setProblems({}), [scope]);
@@ -349,6 +353,7 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
   };
   const similar = useSimilarityReviewCount(enabled, similarityKey, scope, refreshKey);
   const duplicates = useDuplicateCount(enabled, scope, refreshKey);
+  const confirm = useCharacterReviewCountState(enabled && !!review?.enabled, null, `${scope}|${String(review?.refreshKey ?? 0)}|${refreshKey}`);
   const {value: counts, ready: countsReady} = useCachedHomeSourceRead<ReleaseCounts | null>({
     enabled, scope, source: 'releaseCounts', signalKey: 'releases', initial: null, forceKey: refreshKey,
     read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); if (!signal.aborted) result('releases'); return reply ? releaseCounts(reply) : NO_RELEASES; }, onError: reason => result('releases', reason),
@@ -400,7 +405,7 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
 
   const offline = !online || Object.values(problems).includes('offline');
   const serverProblem = Object.values(problems).includes('server');
-  const live: Record<TodoKey, number | null> = {pending, character: null, similar, duplicates};
+  const live: Record<TodoKey, number | null> = {pending, character: review?.enabled ? confirm.count : null, similar, duplicates};
   const releases = counts && shelf ? releaseRows(shelf, counts) : null;
   const upcoming = shelf ? upcomingReleases(shelf) : null;
 
@@ -420,7 +425,9 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     shelfPrerequisitesReady: countsReady && collectionsReady && (summary !== undefined || Boolean(problems.summary)),
     /** Offline: when the kept to-do counts were last fresh. */
     todosAt: offline ? Math.max(0, ...TODO_ORDER.map(key => snapshot.counts[key]?.at ?? 0)) || null : null,
-    applicable: TODO_ORDER.filter(key => key !== 'character'),
+    /** The 확인 count is known, or known to be unavailable (no PC list, or the read answered without one). */
+    characterSettled: !review?.enabled || confirm.settled,
+    applicable: TODO_ORDER.filter(key => key !== 'character' || !!review?.enabled),
     unreadWorks: counts ? Object.keys(counts.byCollection).length : snapshot.counts.releases?.value ?? null,
     // A kept publication is display input only; loadShelf still refreshes the
     // shared store in the background, including when the status revision moved.

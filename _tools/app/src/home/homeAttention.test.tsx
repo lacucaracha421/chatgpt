@@ -12,8 +12,8 @@ beforeEach(() => localStorage.clear());
 afterEach(() => {cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();});
 describe('shared attention rows', () => {
   it('orders subscriptions, today reminders, nonzero reviews, pinned tasks, then connection problems', () => {
-    const rows = attentionRows([note('ledger',{type:'ledger',pinned:false,recurring:[recurring()]}), note('task',{body:'- [ ] 남음\n- [x] 완료'}),note('plain',{body:'일반 글'})], [ {key:'pending',label:'처리 대기',count:2},{key:'tagger',label:'태거',count:5},{key:'similar',label:'유사 이미지 검토',count:1},{key:'unsorted',label:'미분류 에셋',count:3},{key:'duplicates',label:'중복 판본',count:0} ], [{key:'server',label:'서버',value:'연결됨',tone:'ok'},{key:'cloud',label:'클라우드',value:'문제 1개',tone:'off'}],today);
-    expect(rows.map(r=>r.key)).toEqual(['subscriptions','reminder:ledger:sub:2026-11-01','unsorted','similar','pending','tagger','note:task','connection:cloud']);
+    const rows = attentionRows([note('ledger',{type:'ledger',pinned:false,recurring:[recurring()]}), note('task',{body:'- [ ] 남음\n- [x] 완료'}),note('plain',{body:'일반 글'})], [ {key:'pending',label:'처리 대기',count:2},{key:'confirm',label:'확인',count:5},{key:'similar',label:'유사 이미지 검토',count:1},{key:'unsorted',label:'미분류 에셋',count:3},{key:'duplicates',label:'중복 판본',count:0} ], [{key:'server',label:'서버',value:'연결됨',tone:'ok'},{key:'cloud',label:'클라우드',value:'문제 1개',tone:'off'}],today);
+    expect(rows.map(r=>r.key)).toEqual(['subscriptions','reminder:ledger:sub:2026-11-01','unsorted','similar','pending','confirm','note:task','connection:cloud']);
     expect(rows[1]?.days).toBe(2); expect(rows[6]?.secondary).toBe('남은 항목 1개');
   });
   it('uses actual monthly charges including price history and yearly renewals', () => {

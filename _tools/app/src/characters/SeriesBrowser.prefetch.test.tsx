@@ -12,7 +12,8 @@ import * as viewportImages from "../shared/motion/viewportImages";
 import { createCharacterFixture } from "./characterFixtures";
 import { characterHubApi, type CharacterHubApi, type SeriesFolder } from "./hubApi";
 import { prefetchSeriesOverview, seriesFolderBrowseView, SeriesBrowser } from "./SeriesBrowser";
-import { emptyShadowSummary, shadowReviewApi, type ShadowReviewApi } from "./shadowReviewApi";
+import { confirmSources } from "./confirmClient";
+import { confirmSourceFor } from "./confirmTestKit";
 import { suggestionApi } from "./suggestions/client";
 
 vi.mock("./suggestions/client", async importOriginal => {
@@ -54,7 +55,7 @@ function entryHarness(sort: AssetSort = "newest") {
   const browse = vi.spyOn(characterHubApi, "browse").mockImplementation(async query => ({ items: [asset(query.seriesId, 0)], nextCursor: null, totalCount: 1 }));
   const excluded = vi.spyOn(characterHubApi, "excludedAssets").mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 });
   const shelf = vi.spyOn(characterHubApi, "seriesFolders").mockResolvedValue([]);
-  const candidates = vi.spyOn(shadowReviewApi, "page").mockResolvedValue({ summary: emptyShadowSummary(), items: [], nextOffset: null, policyVersion: null });
+  const candidates = vi.spyOn(confirmSources, "counts").mockResolvedValue({ recognition: 0, tag: 0, recheck: 0 });
   const series = [{ classificationId: "series-a", heroAssetId: null, autoClassify: true }];
   let version = 0;
   const tree = (open: boolean, nextVersion = version) => {
@@ -153,28 +154,28 @@ function mount(plan?: FolderPrefetchPlan) {
     browse, seriesFolders: vi.fn(async (seriesId: string) => folders[seriesId]),
     excludedAssets: vi.fn(async () => ({ items: [], nextCursor: null, totalCount: 0 })),
   } as unknown as CharacterHubApi;
-  const shadowApi = { page: vi.fn(async () => ({ summary: emptyShadowSummary() })) } as unknown as ShadowReviewApi;
+  const confirmSource = confirmSourceFor();
   const navigate = vi.fn();
   const tree = (series: string) => <LibraryProvider gateway={{} as LibraryGateway}><FolderPrefetchContext.Provider value={plan ? { current: plan } : null}><SeriesBrowser
     series={{ classificationId: series, heroAssetId: null, autoClassify: true }} targets={[]} groups={[]}
     classifications={classifications} galleryLayout="justified" privacyMode={false} metadataVisible thumbnailRowHeight={180} refreshVersion={0}
     onGalleryLayoutChange={() => undefined} onPrivacyModeChange={() => undefined} onMetadataVisibleChange={() => undefined}
-    onThumbnailRowHeightChange={() => undefined} onNavigate={navigate} onChanged={() => undefined} api={api} hubApi={hubApi} shadowApi={shadowApi}
+    onThumbnailRowHeightChange={() => undefined} onNavigate={navigate} onChanged={() => undefined} api={api} hubApi={hubApi} confirmSource={confirmSource}
   /></FolderPrefetchContext.Provider></LibraryProvider>;
   const view = render(tree("series-a"));
   const reads = (seriesId: string) => ({
     browse: browse.mock.calls.filter(([query]) => query.seriesId === seriesId).length,
     excluded: vi.mocked(hubApi.excludedAssets).mock.calls.filter(([id]) => id === seriesId).length,
     folders: vi.mocked(hubApi.seriesFolders).mock.calls.filter(([id]) => id === seriesId).length,
-    candidates: vi.mocked(shadowApi.page).mock.calls.filter(([request]) => request.seriesId === seriesId).length,
+    candidates: vi.mocked(confirmSource.counts).mock.calls.filter(([id]) => id === seriesId).length,
   });
-  return { view, tree, hubApi, shadowApi, navigate, reads };
+  return { view, tree, hubApi, confirmSource, navigate, reads };
 }
 
 it("switches to a prefetched series without reading its first page again", async () => {
-  const { view, tree, hubApi, shadowApi, reads } = mount();
+  const { view, tree, hubApi, confirmSource, reads } = mount();
   await screen.findByRole("option", { name: "series-a 0.webp" });
-  await Promise.all(prefetchSeriesOverview("series-b", hubApi, shadowApi));
+  await Promise.all(prefetchSeriesOverview("series-b", hubApi, confirmSource));
   expect(reads("series-b")).toEqual({ browse: 1, excluded: 1, folders: 1, candidates: 1 });
   view.rerender(tree("series-b"));
   expect(await screen.findByRole("option", { name: "series-b 0.webp" })).toBeInTheDocument();
@@ -182,15 +183,15 @@ it("switches to a prefetched series without reading its first page again", async
   expect(reads("series-b")).toEqual({ browse: 1, excluded: 1, folders: 1, candidates: 1 });
 });
 
-it("enters a series with one candidate read and shows the gallery before the count lands", async () => {
-  const { view, tree, shadowApi, reads } = mount();
+it("enters a series with one 확인 count read and shows the gallery before the count lands", async () => {
+  const { view, tree, confirmSource, reads } = mount();
   await screen.findByRole("option", { name: "series-a 0.webp" });
   let land: (count: number) => void = () => undefined;
-  vi.mocked(shadowApi.page).mockImplementation(() => new Promise(resolve => {
-    land = count => resolve({ items: [], nextOffset: null, policyVersion: null, summary: { ...emptyShadowSummary(), automatic: { pending: count, accepted: 0, rejected: 0 } } });
+  vi.mocked(confirmSource.counts).mockImplementation(() => new Promise(resolve => {
+    land = count => resolve({ recognition: count, tag: 0, recheck: 0 });
   }));
   view.rerender(tree("series-b"));
-  // The candidate count is still on its way; the new gallery does not wait for it.
+  // The 확인 count is still on its way; the new gallery does not wait for it.
   expect(await screen.findByRole("option", { name: "series-b 0.webp" })).toBeInTheDocument();
   expect(reads("series-b").candidates).toBe(1);
   await act(async () => { land(3); });

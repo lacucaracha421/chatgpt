@@ -40,6 +40,26 @@ if (params.get("panel") === "info") {
   window.setTimeout(() => observer.disconnect(), 10_000);
 }
 
+if (params.get("click")) {
+  // Click these elements in turn as they appear (`?click=<selector>[~text]|<selector>`), so a headless capture can reach a screen.
+  const steps = params.get("click")!.split("|").filter(Boolean);
+  let step = 0, lastClick = 0;
+  const walk = () => {
+    if (step >= steps.length || performance.now() - lastClick < 700) return;
+    // A step is a selector, optionally followed by "~text" to take the first match whose text contains it.
+    const [selector, text] = steps[step]!.split("~");
+    const target = text ? [...document.querySelectorAll<HTMLElement>(selector!)].find(item => item.textContent?.includes(text)) : document.querySelector<HTMLElement>(selector!);
+    if (!target || target.closest("[inert]")) return;
+    target.click();
+    step += 1; lastClick = performance.now();
+    document.documentElement.dataset.previewClick = String(step);
+  };
+  const observer = new MutationObserver(walk);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  const ticker = window.setInterval(walk, 250);
+  window.setTimeout(() => { observer.disconnect(); window.clearInterval(ticker); }, 12_000);
+}
+
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return Promise.resolve(dispatchPreviewCommand(command, args ?? {}) as T);
 }

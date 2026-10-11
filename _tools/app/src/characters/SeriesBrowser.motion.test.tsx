@@ -6,7 +6,7 @@ import { createCharacterFixture, fixtureAssets, fixtureClassifications } from ".
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway } from "../library/types";
 import type { CharacterHubApi } from "./hubApi";
-import { emptyShadowSummary, type ShadowReviewApi } from "./shadowReviewApi";
+import { confirmSourceFor } from "./confirmTestKit";
 import { INFO_PANEL_KEY } from "../assets/useInfoPanelPreference";
 
 vi.mock("./suggestions/client", async importOriginal => {
@@ -21,11 +21,11 @@ async function mount() {
   const api = createCharacterFixture(), targets = await api.targets();
   const hubApi = { seriesFolders: vi.fn().mockResolvedValue([]), browse: vi.fn().mockResolvedValue({ items: fixtureAssets.slice(5), nextCursor: null, totalCount: 13 }),
     excludedAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }) } as unknown as CharacterHubApi;
-  const shadowApi = { page: vi.fn(async () => ({ items: [], nextOffset: null, policyVersion: null, summary: emptyShadowSummary() })) } as unknown as ShadowReviewApi;
+  const confirmSource = confirmSourceFor();
   const gateway = { listAssets: vi.fn().mockResolvedValue({ items: fixtureAssets, nextCursor: null }) } as unknown as LibraryGateway;
   render(<LibraryProvider gateway={gateway}><SeriesBrowser series={{ classificationId: "series", heroAssetId: null, autoClassify: true }} targets={targets} classifications={fixtureClassifications}
     galleryLayout="masonry" onGalleryLayoutChange={vi.fn()} privacyMode={false} onPrivacyModeChange={vi.fn()} metadataVisible onMetadataVisibleChange={vi.fn()} thumbnailRowHeight={180} onThumbnailRowHeightChange={vi.fn()}
-    refreshVersion={0} onNavigate={vi.fn()} onChanged={vi.fn()} api={api} hubApi={hubApi} shadowApi={shadowApi} /></LibraryProvider>);
+    refreshVersion={0} onNavigate={vi.fn()} onChanged={vi.fn()} api={api} hubApi={hubApi} confirmSource={confirmSource} /></LibraryProvider>);
   await screen.findByRole("option", { name: "이미지 5.webp" });
 }
 

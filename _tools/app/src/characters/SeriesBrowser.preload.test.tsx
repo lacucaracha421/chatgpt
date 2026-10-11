@@ -8,7 +8,7 @@ import type { CharacterTarget } from "./api";
 import { createCharacterFixture, fixtureTarget } from "./characterFixtures";
 import type { CharacterGroup, CharacterHubApi, SeriesFolder } from "./hubApi";
 import { SeriesBrowser } from "./SeriesBrowser";
-import { emptyShadowSummary, type ShadowReviewApi } from "./shadowReviewApi";
+import { confirmSourceFor } from "./confirmTestKit";
 import type { Suggestion } from "./suggestions/client";
 
 const shelf = vi.hoisted(() => ({ suggestions: [] as Suggestion[] }));
@@ -67,14 +67,14 @@ async function mount() {
     browse, seriesFolders: async (seriesId: string) => folders[seriesId],
     excludedAssets: async () => ({ items: [], nextCursor: null, totalCount: 0 }),
   } as unknown as CharacterHubApi;
-  const shadowApi = { page: async () => ({ summary: emptyShadowSummary() }) } as unknown as ShadowReviewApi;
+  const confirmSource = confirmSourceFor();
   const preloads: string[][] = [];
   vi.spyOn(viewportImages, "preloadImages").mockImplementation(async urls => { preloads.push([...urls]); });
   const tree = (series: string) => <LibraryProvider gateway={{} as LibraryGateway}><SeriesBrowser
     series={{ classificationId: series, heroAssetId: null, autoClassify: true }} targets={targets} groups={groups}
     classifications={classifications} galleryLayout="justified" privacyMode={false} metadataVisible thumbnailRowHeight={180} refreshVersion={0}
     onGalleryLayoutChange={() => undefined} onPrivacyModeChange={() => undefined} onMetadataVisibleChange={() => undefined}
-    onThumbnailRowHeightChange={() => undefined} onNavigate={() => undefined} onChanged={() => undefined} api={api} hubApi={hubApi} shadowApi={shadowApi}
+    onThumbnailRowHeightChange={() => undefined} onNavigate={() => undefined} onChanged={() => undefined} api={api} hubApi={hubApi} confirmSource={confirmSource}
   /></LibraryProvider>;
   const view = render(tree("series-a"));
   await screen.findByRole("option", { name: "a 0.webp" });

@@ -534,6 +534,7 @@ pub fn run() {
             commands::characters::character_review_pending_map,
             commands::characters::character_shadow_review_page,
             commands::characters::character_shadow_review_summary,
+            commands::characters::character_confirm_counts,
             commands::characters::character_shadow_backfill_start,
             commands::characters::character_shadow_backfill_status,
             commands::characters::character_shadow_backfill_cancel,

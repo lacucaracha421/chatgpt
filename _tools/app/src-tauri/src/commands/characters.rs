@@ -397,6 +397,21 @@ pub async fn character_shadow_review_page(
         .map_err(Into::into)
 }
 
+/// Exact pending counts of the 확인 list (태그 추천, 인식 추천, 다시 확인): the whole library, or one series.
+#[tauri::command]
+pub async fn character_confirm_counts(
+    series_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_shadow_review::ConfirmCounts, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.character_confirm_counts(series_id.as_deref())
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
 #[tauri::command]
 pub async fn character_shadow_review_summary(
     state: State<'_, AppState>,

@@ -11,12 +11,12 @@ import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
-import { characterApi, type CharacterTarget } from "../characters/api";
-import { TaggerReview } from "../characters/TaggerReview";
-import { taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type TaggerReviewItem, type TaggerReviewSource } from "../characters/taggerReviewClient";
+import type { CharacterTarget } from "../characters/api";
+import { confirmSources, confirmTotal, type ConfirmScope, type ConfirmSources } from "../characters/confirmClient";
+import { ConfirmOverview } from "../characters/ConfirmOverview";
+import { taggerDecisionApi, type TaggerDecisionApi } from "../characters/taggerReviewClient";
 import { notesStore, type NotesStore } from "../notes/store";
 import { usePrivacy } from "../privacy/PrivacyContext";
-import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewPendingTarget } from "../characters/shadowReviewApi";
 import { useLocalDayClock } from "../shared/useLocalDayClock";
 import { Dialog as UiDialog } from "../shared/ui/Dialog";
 import { displayDate } from "../shared/displayDate";
@@ -35,21 +35,18 @@ import { useHomeRevisitDay } from "./useHomeRevisitDay";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useLaunchReady } from "../shared/launch/LaunchSplash";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
-import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
 import { readDuplicateCount } from "./duplicateCount";
-import { shadowPageSource, type CharacterReviewSource } from "./characterReviewSource";
 import { pcStartupInput, pcStartupRead } from "../shared/pcPerfLog";
 import { readCalendarSourcesCache, readWishlistCache, writeCalendarSourcesCache, writeWishlistCache } from "./homeReleaseCache";
 import "./home.css";
 
-const ShadowReview = lazy(() => import("../characters/ShadowReview").then((module) => ({ default: module.ShadowReview })));
+const ConfirmList = lazy(() => import("../characters/ConfirmList").then((module) => ({ default: module.ConfirmList })));
 const CatalogReviewDialog = lazy(() => import("../manga/CatalogReviewDialog").then((module) => ({ default: module.CatalogReviewDialog })));
 
 const native = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-type Dialog = ({ kind: "character" } & CharacterReviewScope) | { kind: "duplicates" };
-/** Compatibility fallback for injected clients that do not expose the narrow summary yet. */
-const CHARACTER_PAGE = 200;
-type CharacterQueue = { total: number; targets: ShadowReviewPendingTarget[] };
+type Dialog = ({ kind: "confirm" } & ConfirmScope) | { kind: "duplicates" };
+/** Every pending item of the 확인 list, each pair once. */
+type ConfirmQueue = { total: number };
 
 export type HomeViewProps = {
   collections: CollectionSummary[];
@@ -68,13 +65,10 @@ export type HomeViewProps = {
   onNavigate: (view: AssetView) => void;
   onQueuesRequested?: () => void;
   notes?: NotesStore;
-  shadowApi?: Pick<ShadowReviewApi, "page"> & Partial<Pick<ShadowReviewApi, "summary">>;
-  /** Exact per-character counts for the 캐릭터 검토 overview; defaults to reading the whole S36 list. */
-  characterSource?: CharacterReviewSource;
-  /** Exact tagger queue read; injectable for browser tests. */
-  taggerSource?: TaggerReviewSource;
-  taggerApi?: TaggerDecisionApi;
-  /** Registered characters (series of each S36 target) and classifications (series names). */
+  /** The three 확인 lists and their counts; injectable for browser tests. Defaults to the native reads. */
+  confirmSource?: ConfirmSources;
+  confirmApi?: TaggerDecisionApi;
+  /** Registered characters (series of each target) and classifications (series names). */
   characters?: CharacterTarget[];
   classifications?: ClassificationEntry[];
   now?: () => Date;
@@ -83,7 +77,7 @@ export type HomeViewProps = {
 
 /** PC Home: media on the left, today's attention and memories on the right. */
 
-export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
+export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const requested = useContext(AreaRequested);
@@ -212,44 +206,28 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
 
   // 확인할 것 counts other screens own; read when Home opens and after their dialogs close.
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  // 캐릭터 검토 overview replaces Home until its back; `reviewRead` moves when a review closes.
+  // The 확인 overview replaces Home until its back; `reviewRead` moves when a list closes.
   const [reviewOverview, setReviewOverview] = useState(false);
-  const [taggerOverview, setTaggerOverview] = useState(false);
   const [reviewRead, setReviewRead] = useState(0);
-  const [characterQueue, setCharacterQueue] = useState<CharacterQueue | null>(null);
-  const [taggerItems, setTaggerItems] = useState<TaggerReviewItem[] | null>(null);
-  const [taggerLoading, setTaggerLoading] = useState(false);
+  const [confirmQueue, setConfirmQueue] = useState<ConfirmQueue | null>(null);
   const [duplicateCount, setDuplicateCount] = useState<number | null>(null);
   const [duplicateError, setDuplicateError] = useState(false);
-  const [characterError, setCharacterError] = useState(false);
-  const shadowQueueApi = shadowApi ?? (native() ? shadowReviewApi : null);
-  // Lightweight mode skips the S36 pending summary; the row stays hidden until the mode ends,
-  // then the summary is read once.
+  const [confirmError, setConfirmError] = useState(false);
+  const sources = useMemo<ConfirmSources | null>(() => confirmSource ?? (native() ? confirmSources : null), [confirmSource]);
+  // Lightweight mode skips the exact count (it reads the recognition lists); the tag count of the Home
+  // overview stands in for the total until the mode ends, then the exact count is read once.
   const { restricted } = useWorkloadProfile();
   useEffect(() => {
     if (!active) return;
-    if (!shadowQueueApi || restricted) { setCharacterQueue(null); return; }
+    if (!sources || restricted) { setConfirmQueue(null); return; }
     let live = true;
-    const read = shadowQueueApi.summary
-      ? shadowQueueApi.summary().then((summary) => ({ total: summary.automatic + summary.recommended, targets: summary.targets ?? [] }))
-      : shadowQueueApi.page({ offset: 0, limit: CHARACTER_PAGE }).then((page) => {
-        const total = page.summary ? page.summary.automatic.pending + page.summary.recommended.pending : 0;
-        return { total: page.nextOffset === null ? Math.max(total, page.items?.length ?? 0) : total, targets: [] };
-      });
-    void read.then((queue) => {
-      if (!live || !queue) return;
-      setCharacterQueue(queue);
-      setCharacterError(false);
-    }, () => { if (live) setCharacterError(true); });
+    void sources.counts().then(confirmTotal).then((total) => {
+      if (!live) return;
+      setConfirmQueue({ total });
+      setConfirmError(false);
+    }).catch(() => { if (live) setConfirmError(true); });
     return () => { live = false; };
-  }, [shadowQueueApi, restricted, queueRead, active]);
-  // Refresh only when the series set changes or a review closes; keep the last result meanwhile.
-  const taggerSeriesKey = characters.map((target) => `${target.id}:${target.seriesClassificationId ?? ""}`).join("|");
-  const charactersRef = useRef(characters);
-  charactersRef.current = characters;
-  const activeTaggerSource = useMemo(() => taggerSource ?? (native() ? taggerReviewSource(characterApi, charactersRef.current) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [taggerSource, taggerSeriesKey]);
+  }, [sources, restricted, queueRead, active]);
   useEffect(() => {
     if (!active) return;
     let live = true;
@@ -270,34 +248,25 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const go = (view: AssetView) => () => onNavigate(view);
   const calendarView = (type: "game" | "movie" = "game"): AssetView => ({ kind: "collections", typeFilter: type, showcase: false, releaseCalendar: true });
 
-  /* 확인할 것; 캐릭터 검토 names its busiest series (from the first page) and opens the overview */
+  /* 확인할 것; one total for the three kinds, opening the overview */
   const seriesNames = useMemo(() => new Map(classifications.map((entry) => [entry.id, entry.name])), [classifications]);
   const seriesName = useMemo(() => (id: string) => seriesNames.get(id), [seriesNames]);
-  const source = useMemo(() => characterSource ?? (shadowQueueApi ? shadowPageSource(shadowQueueApi) : null), [characterSource, shadowQueueApi]);
-  // The tagger count is one cheap COUNT in the overview, so it shows even in lightweight mode.
+  // The tag count is one cheap COUNT in the overview, so it shows even in lightweight mode.
   const taggerQueueCounts = overview?.tagger ?? null;
+  // The exact 확인 total, each pair once; in lightweight mode (or while the exact count is out) only the tag pairs are counted, by the overview read.
+  const confirmExact = Boolean(sources) && !restricted;
+  const confirmTotalNow = confirmExact && confirmQueue ? confirmQueue.total : taggerQueueCounts?.total ?? 0;
   const retryOverview = () => setQueueRead(value => value + 1);
   const fieldFailed = (field: HomeOverview["failed"][number]) => overviewError || Boolean(overview?.failed.includes(field));
   const reviewUnknown = [
-    {key: "character", label: "캐릭터", unknown: Boolean(shadowQueueApi) && !restricted && (characterQueue === null || characterError), failed: characterError},
-    {key: "tagger", label: "확인", unknown: Boolean(gateway.getHomeOverview) && (!overview || fieldFailed("tagger")), failed: fieldFailed("tagger")},
+    {key: "confirm", label: "확인", unknown: confirmExact ? confirmQueue === null || confirmError : Boolean(gateway.getHomeOverview) && (!overview || fieldFailed("tagger")), failed: confirmExact ? confirmError : fieldFailed("tagger")},
     {key: "duplicates", label: "중복 판본", unknown: duplicateCount === null || duplicateError, failed: duplicateError},
     {key: "unsorted", label: "미분류 에셋", unknown: unsortedCount === null, failed: false},
     {key: "av-link", label: "AV 품번", unknown: !privacyMode && avLinkCount === null, failed: false},
     {key: "pending", label: "처리 대기", unknown: Boolean(gateway.getHomeOverview) && (!overview || fieldFailed("server") || (overview.server?.configured && overview.server.capturesPending === null)), failed: fieldFailed("server"), settled: Boolean(overview?.server) && !fieldFailed("server")},
   ].filter(row => row.unknown);
-  const openTaggerReview = () => {
-    if (!activeTaggerSource || taggerLoading) return;
-    setTaggerLoading(true);
-    void activeTaggerSource(() => undefined, () => true).then((items) => {
-      if (!items) return;
-      setTaggerItems(items);
-      setTaggerOverview(true);
-    }, (reason) => console.warn("tagger review read failed", reason)).finally(() => setTaggerLoading(false));
-  };
   const todos = [
-    { key: "character", label: "캐릭터", count: characterQueue?.total ?? 0, open: () => setReviewOverview(true) },
-    { key: "tagger", label: "확인", count: taggerQueueCounts?.total ?? 0, open: openTaggerReview },
+    { key: "confirm", label: "확인", count: confirmTotalNow, open: () => setReviewOverview(true) },
     { key: "similar", label: "유사 이미지 검토", count: reviewCount, unit: "쌍", open: go({ kind: "similarity_review" }) },
     { key: "duplicates", label: "중복 판본", count: duplicateCount ?? 0, open: () => setDialog({ kind: "duplicates" }) },
     { key: "unsorted", label: "미분류 에셋", count: unsortedCount ?? 0, open: go({ kind: "unsorted" }) },
@@ -338,7 +307,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
     : todos;
   const todayRows = attentionRows(notesState.notes, reservedTodos, problems, today).map(row => ({ ...row,
     value: row.key === 'duplicates' ? duplicateCount === null ? ' ' : duplicateCount.toLocaleString() : row.value,
-    disabled: row.key === 'duplicates' ? duplicateCount === null : row.key === 'tagger' ? taggerLoading || overviewLoading || fieldFailed('tagger') : row.key === 'pending' ? overviewLoading || fieldFailed('server') : false }));
+    disabled: row.key === 'duplicates' ? duplicateCount === null : row.key === 'pending' ? overviewLoading || fieldFailed('server') : false }));
 
   const cover = (row: ReleaseRow | UpcomingRow) => {
     if (privacyMode) return null;
@@ -351,8 +320,8 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
 
   const closeDialog = () => { setDialog(null); if (reviewOverview) setReviewRead((value) => value + 1); else setQueueRead((value) => value + 1); };
   const dialogs = dialog && <Suspense fallback={null}>
-    {dialog.kind === "character"
-      ? <ShadowReview onClose={closeDialog} onChanged={() => undefined} privacyMode={privacyMode} series={dialog.series} target={dialog.target} />
+    {dialog.kind === "confirm"
+      ? <ConfirmList onClose={closeDialog} privacyMode={privacyMode} scope={dialog} targets={characters} classifications={classifications} sources={sources ?? confirmSources} decisions={confirmApi} />
       : <CatalogReviewDialog onClose={closeDialog} onChange={() => setQueueRead((value) => value + 1)} />}
   </Suspense>;
 
@@ -360,13 +329,13 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const shelfFailed = Boolean(release.error) || wishlistError;
   const retryShelf = () => { release.reload(); setShelfRetry(value => value + 1); };
   const attentionPending = (Boolean(gateway.getHomeOverview) && !overview && !overviewError)
-    || Boolean(shadowQueueApi) && !restricted && characterQueue === null && !characterError || Boolean(store && !notesState.ready);
+    || confirmExact && confirmQueue === null && !confirmError || Boolean(store && !notesState.ready);
   // Opt-in timing log: which first-load input arrives last (no effect when the log is off).
   if (collectionsReady) pcStartupInput("home.collections");
   if (media.data || media.failed) pcStartupInput("home.media");
   if (!shelfLoading) pcStartupInput("home.shelf");
   if (!(Boolean(gateway.getHomeOverview) && !overview && !overviewError)) pcStartupInput("home.overview");
-  if (!(Boolean(shadowQueueApi) && !restricted && characterQueue === null && !characterError)) pcStartupInput("home.characterQueue");
+  if (!(confirmExact && confirmQueue === null && !confirmError)) pcStartupInput("home.characterQueue");
   if (!(store && !notesState.ready)) pcStartupInput("home.notes");
   if (!tracking || release.data || release.error) pcStartupInput("home.releases");
   if (wishlistReady || wishlistError) pcStartupInput("home.wishlist");
@@ -382,14 +351,11 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const launchHost = useRef<HTMLDivElement>(null);
   useLaunchReady(!firstLoad, launchHost);
 
-  if (reviewOverview && source) return <>
-    <CharacterReviewOverview source={source} targets={characters} seriesName={seriesName} version={reviewRead} restricted={restricted} privacyMode={privacyMode}
-      onBack={() => { setReviewOverview(false); setQueueRead((value) => value + 1); }} onOpen={(scope) => setDialog({ kind: "character", ...scope })} />
+  if (reviewOverview) return <>
+    <ConfirmOverview sources={sources ?? confirmSources} targets={characters} seriesName={seriesName} version={reviewRead} restricted={restricted} privacyMode={privacyMode}
+      onBack={() => { setReviewOverview(false); setQueueRead((value) => value + 1); }} onOpen={(scope) => setDialog({ kind: "confirm", ...scope })} />
     {dialogs}
   </>;
-
-  if (taggerOverview && taggerItems) return <TaggerReview items={taggerItems} targets={characters} classifications={classifications} privacyMode={privacyMode}
-    api={taggerApi} onItemsChange={setTaggerItems} onBack={() => { setTaggerOverview(false); setQueueRead((value) => value + 1); }} />;
 
   const releaseKind = (kind: ReleaseRow['kind'], volume?: number | null) => volume ? `${volume}권` : ({ game: '게임', movie: '영화', anime: '애니', manga: '만화' })[kind];
   const releaseCover = (row: ReleaseRow | UpcomingRow) => { const src = cover(row); return src ? <StableImage src={src} alt="" loading="lazy" decoding="async" /> : undefined; };

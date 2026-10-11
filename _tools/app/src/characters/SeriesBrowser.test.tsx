@@ -12,7 +12,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetSort, LibraryGateway } from "../library/types";
 import { type CharacterGroup, type CharacterHubApi, type SeriesFolder } from "./hubApi";
 import { ChromeSettingsDock, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
-import { emptyShadowSummary, type ShadowReviewApi } from "./shadowReviewApi";
+import { confirmSourceFor, shadowItem } from "./confirmTestKit";
 import { s36PublicationApi } from "./S36Publication";
 import { FaultGameProvider } from "../games/FaultGame";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
@@ -142,16 +142,15 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
     confirmReferenceBatch:vi.fn(async()=>targets[0]),
     requestReferenceRefresh:vi.fn(async(targetId:string)=>({targetId,requestRevision:1,state:"pending" as const,eligibleCount:12})),
   } as CharacterHubApi;
-  const shadowApi={page:vi.fn(async()=>({items:(legacy?.shadowItems ?? []).map(assetId=>({assetId,contentHash:assetId,originalName:`${assetId}.png`,width:10,height:10,targetId:"hina",targetName:"히나",targetFingerprint:"fp",referenceAssetIds:[],verdict:"automatic",origin:"live",knn3:null,nativeOutcome:"none",scoredAt:"2026-09-24T00:00:00Z"})),nextOffset:null,policyVersion:null,summary:{...emptyShadowSummary(),automatic:{pending:legacy?.candidates ?? 0,accepted:0,rejected:0}}})),
-    start:vi.fn(),cancel:vi.fn(),status:vi.fn().mockResolvedValue({running:false,preparing:false,total:0,scored:0,skipped:0,cancelled:false,error:null})} as unknown as ShadowReviewApi;
+  const confirmSource=confirmSourceFor({counts:{recognition:legacy?.candidates ?? 0},candidates:(legacy?.shadowItems ?? []).map(assetId=>shadowItem(assetId,"hina","히나"))});
   const navigate=vi.fn(),changed=vi.fn();
   const onGalleryLayoutChange=vi.fn(),onMetadataVisibleChange=vi.fn(),onPrivacyModeChange=vi.fn(),onThumbnailRowHeightChange=vi.fn();
   const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn(),...legacy?.gateway} as unknown as LibraryGateway;
-  const browser=<SeriesBrowser targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} sort={legacy?.sort} onSortChange={legacy?.onSortChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} />;
+  const browser=<SeriesBrowser targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} sort={legacy?.sort} onSortChange={legacy?.onSortChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} confirmSource={confirmSource} />;
   const content = withChrome ? <WorkspaceChromeProvider scope="series"><div className="workspace-navigation"><aside className="workspace-index"><ChromeSettingsDock /></aside>{browser}</div></WorkspaceChromeProvider> : browser;
   const rendered = render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
   const navigateToCharacter = (id?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId: id })}</LibraryProvider>);
-  return {api,browse,shadowApi,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter};
+  return {api,browse,confirmSource,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter};
 }
 
 it("shows an inner series after characters and before ordinary folders without an exclusion menu", async () => {
@@ -946,30 +945,30 @@ it("skips region inspection entirely when the host does not expose it", async ()
   expect(mounted.api.inspectReferenceRegions).toBeUndefined();
 });
 
-it("opens the S36 review from the series overflow, not the gallery heading", async () => {
-  const { shadowApi } = await mount(undefined);
+it("opens the 확인 list from the series count line, not the series overflow", async () => {
+  const { confirmSource } = await mount(undefined, false, [], undefined, false, { candidates: 1, shadowItems: ["a1"] });
   const user = userEvent.setup();
   await screen.findByRole("radiogroup", { name: "시리즈 이미지 필터" });
-  expect(screen.queryByRole("button", { name: "확인" })).not.toBeInTheDocument();
   expect(screen.queryByRole("radiogroup", { name: "자동 분류 방식" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "시리즈 더보기" }));
-  await user.click(await screen.findByRole("menuitem", { name: "확인" }));
+  // The duplicate entries are gone: no S36 시험 채점 확인, no separate 확인 item in the overflow.
+  expect(screen.queryByRole("menuitem", { name: "확인" })).not.toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  await user.click(await screen.findByRole("button", { name: "확인 1" }));
   const dialog = await screen.findByRole("dialog", { name: "확인" });
-  expect(await within(dialog).findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
-  // The overflow entry stays the all-series list.
-  expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 40 });
-  expect(dialog.querySelector(".shadow-review__scope")).toBeNull();
+  expect(await within(dialog).findByRole("heading", { name: "히나?" })).toBeInTheDocument();
+  expect(confirmSource.shadow.page).toHaveBeenCalledWith(expect.objectContaining({ seriesId: "series" }));
   await user.click(within(dialog).getByRole("button", { name: "확인 닫기" }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "확인" })).not.toBeInTheDocument());
 });
 
-it("shows waiting candidates as a quiet action on the series count line, not a banner", async () => {
+it("shows waiting items as a quiet action on the series count line, not a banner", async () => {
   vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: ["series"], excludedTargets: [], scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
-  const { shadowApi } = await mount(undefined, false, [], undefined, false, { candidates: 37, shadowItems: ["a1"] });
+  const { confirmSource } = await mount(undefined, false, [], undefined, false, { candidates: 37, shadowItems: ["a1"] });
   const user = userEvent.setup();
   const review = await screen.findByRole("button", { name: "확인 37" });
-  expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 1, seriesId: "series" });
+  expect(confirmSource.counts).toHaveBeenCalledWith("series");
   expect(review).not.toHaveClass("ui-button--primary");
   expect(screen.queryByRole("region", { name: "확인할 후보" })).not.toBeInTheDocument();
   const heading = review.closest(".character-group-heading")!;
@@ -977,14 +976,14 @@ it("shows waiting candidates as a quiet action on the series count line, not a b
   const toolbar = screen.getByRole("toolbar", { name: "시리즈 도구" });
   expect(within(toolbar).queryByRole("button", { name: /후보/ })).not.toBeInTheDocument();
   await user.click(review);
-  // The count and the review it opens cover only this series' characters.
+  // The count and the list it opens cover only this series' characters.
   const dialog = await screen.findByRole("dialog", { name: "확인" });
-  expect(within(dialog).getByText("블루 아카이브")).toHaveClass("shadow-review__scope");
-  await waitFor(() => expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 40, seriesId: "series" }));
-  expect(shadowApi.page).not.toHaveBeenCalledWith({ offset: 0, limit: 40 });
+  expect(within(dialog).getByText("블루 아카이브")).toHaveClass("confirm-list__scope");
+  await waitFor(() => expect(confirmSource.shadow.page).toHaveBeenCalledWith(expect.objectContaining({ seriesId: "series" })));
+  expect(vi.mocked(confirmSource.shadow.page).mock.calls.every(([query]) => (query as { seriesId?: string }).seriesId === "series")).toBe(true);
 });
 
-it("hides the candidate action inside a character", async () => {
+it("hides the 확인 action inside a character", async () => {
   vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: ["series"], excludedTargets: [], scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
   await mount("hina", false, [], undefined, false, { candidates: 37 });
@@ -992,17 +991,17 @@ it("hides the candidate action inside a character", async () => {
   expect(screen.queryByRole("button", { name: /확인 [0-9]/ })).not.toBeInTheDocument();
 });
 
-it("hides 후보 확인 on a series that does not use S36", async () => {
+it("shows 확인 on a series that does not use 학습 인식 too, so judgments can pile up everywhere", async () => {
   vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: [], excludedTargets: [], scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
-  const { shadowApi } = await mount(undefined, false, [], undefined, false, { candidates: 37 });
-  await waitFor(() => expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 1, seriesId: "series" }));
-  expect(screen.queryByRole("button", { name: /확인 [0-9]/ })).not.toBeInTheDocument();
+  const { confirmSource } = await mount(undefined, false, [], undefined, false, { candidates: 37 });
+  expect(await screen.findByRole("button", { name: "확인 37" })).toBeInTheDocument();
+  expect(confirmSource.counts).toHaveBeenCalledWith("series");
 });
 
-it("hides 후보 확인 when nothing waits", async () => {
-  const { shadowApi } = await mount(undefined);
-  await waitFor(() => expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 1, seriesId: "series" }));
+it("hides 확인 when nothing waits", async () => {
+  const { confirmSource } = await mount(undefined);
+  await waitFor(() => expect(confirmSource.counts).toHaveBeenCalledWith("series"));
   expect(screen.queryByRole("button", { name: /확인 [0-9]/ })).not.toBeInTheDocument();
 });
 
@@ -1017,7 +1016,7 @@ it("moves FAULT and the S36 series control into the series overflow", async () =
   expect(screen.queryByRole("status", { name: /S36/ })).not.toBeInTheDocument();
   await user.click(within(toolbar).getByRole("button", { name: "시리즈 더보기" }));
   expect(await screen.findByRole("menuitem", { name: "FAULT로 플레이" })).toBeInTheDocument();
-  expect(screen.getByRole("menuitem", { name: "확인" })).toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: "확인" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("menuitem", { name: "학습 인식 설정" }));
   const dialog = await screen.findByRole("dialog", { name: "학습 인식 설정" });
   expect(within(dialog).getByRole("radiogroup", { name: "자동 분류 방식" })).toBeInTheDocument();
