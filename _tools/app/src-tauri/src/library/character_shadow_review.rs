@@ -1,9 +1,10 @@
-//! Read-only review feed over the disposable S36 shadow cache.
+//! Review feed and agreement publication over the disposable S36 shadow cache.
 //!
 //! The screen behind this module asks the user to judge assets the shadow
 //! scorer called `automatic` or `recommended`. Judgments go through the normal
-//! manual decision path (`record_character_decisions`); nothing here writes to
-//! the shadow cache or the library, and shadow rows never become evidence.
+//! manual decision path (`record_character_decisions`). The write-side reconciliation
+//! publishes agreed pairs through ordinary automatic acceptance; review reads stay read-only
+//! and shadow rows never become learning examples.
 use super::auto_tags::CHARACTER_MIN_SCORE;
 use super::{
     characters::{Error, Result},
@@ -1570,6 +1571,69 @@ fn automatic_targets(c: &Connection, target_ids: &[String]) -> Result<Vec<String
 }
 
 impl Library {
+    /// Write-side reconciliation using the exact judgments that remove agreed pairs from
+    /// 확인 and its PC/tablet projections. Call only inside a library write transaction.
+    /// Scan all targets so the next publication/apply also places pre-existing agreements.
+    pub(super) fn publish_agreed_pairs_in(&self, c: &Connection) -> Result<usize> {
+        let Some(cache) = open_shadow_cache(&self.root)? else {
+            return Ok(0);
+        };
+        let cache = cache.unchecked_transaction()?;
+        let targets = c.prepare(
+            "SELECT id FROM character_targets WHERE role='character' AND enabled=1 AND manual_only=0 ORDER BY id",
+        )?.query_map([], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let judged = judgments_of(c, Some(&cache), &targets, Auto::Full)?;
+        let Some(version) = newest_policy(&cache)? else {
+            return Ok(0);
+        };
+        let mut published = 0;
+        for (target_id, assets) in judged.agreed {
+            for asset_id in assets {
+                // An earlier decision, including 빼기 or an automatic veto, always wins.
+                let blocked: bool = c.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2)
+                     OR EXISTS(SELECT 1 FROM character_tagger_pending WHERE target_id=?1 AND asset_id=?2 AND reason='veto')",
+                    params![target_id, asset_id], |r| r.get(0),
+                )?;
+                if blocked {
+                    continue;
+                }
+                // Reuse ordinary automatic scope/reference checks; cached scores cannot
+                // classify a changed, excluded, unavailable or out-of-scope image.
+                let Some(target) = self
+                    .character_autotag_targets(c, &asset_id)?
+                    .into_iter()
+                    .find(|t| t.id == target_id)
+                else {
+                    continue;
+                };
+                let (hash, score, feature, rejections): (String, Option<f64>, String, i64) = cache.query_row(
+                    "SELECT content_hash,knn3,feature_id,prior_manual_rejections FROM scores
+                     WHERE asset_id=?1 AND target_id=?2 AND policy_version=?3 AND verdict='automatic'",
+                    params![asset_id, target_id, version], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )?;
+                let current: Option<String> = c.query_row(
+                    "SELECT content_hash FROM assets WHERE id=?1 AND status='normal' AND media_kind='image'",
+                    [&asset_id], |r| r.get(0),
+                ).optional()?;
+                if current.as_deref() != Some(hash.as_str()) {
+                    continue;
+                }
+                let snapshot = serde_json::json!({
+                    "scanId": null,
+                    "prediction": {"engine": "s36", "policyVersion": version,
+                        "featureId": feature, "knn3": score, "priorManualRejections": rejections,
+                        "automaticScope": true, "taggerAgreement": true},
+                    "references": target.usable_references().collect::<Vec<_>>(),
+                });
+                self.accept_s36_in(c, &target, &asset_id, &hash, &snapshot)?;
+                published += 1;
+            }
+        }
+        Ok(published)
+    }
+
     /// Read-only: the shadow cache and the library decisions of one series.
     pub fn character_s36_readiness(&self, series_id: &str) -> Result<Vec<S36Readiness>> {
         let cache = open_shadow_cache(&self.root)?;
@@ -3189,6 +3253,201 @@ mod tests {
             .collect::<Vec<_>>();
         ids.sort();
         ids
+    }
+
+    fn agreed_placement_fixture() -> (Fixture, Target) {
+        let f = Fixture::new();
+        let target = f.ready("Toki");
+        link_tag(&f, &target, "toki_tag");
+        for asset in [
+            "agreed-1",
+            "agreed-2",
+            "person-rejected",
+            "one-tagger",
+            "stale-hash",
+        ] {
+            candidate(&f, &target, asset);
+            tagger_reads(
+                &f,
+                asset,
+                "toki_tag",
+                Some(0.85),
+                Some(if asset == "one-tagger" { 0.849 } else { 0.999 }),
+            );
+            let c = f.library.connection().unwrap();
+            c.execute(
+                "INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at,synced_at)
+                 VALUES(?1,'asset',?2,'upsert','synced',1,'now','now')",
+                params![format!("queue-{asset}"), asset],
+            ).unwrap();
+        }
+        decide(&f, &target, "person-rejected", DecisionKind::Rejected);
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET content_hash=?1 WHERE id='stale-hash'",
+                ["f".repeat(64)],
+            )
+            .unwrap();
+        (f, target)
+    }
+
+    #[test]
+    fn agreed_pairs_are_placed_before_learning_owns_the_character_on_tagger_apply() {
+        {
+            let (f, target) = agreed_placement_fixture();
+            {
+                let c = f.library.connection().unwrap();
+                assert!(!f
+                    .library
+                    .learning_targets(&c, &[target.id.clone()])
+                    .owns(&target.id));
+                // Existing pending rows are not returned by the next preview. The write
+                // hook must reconcile them even when there is nothing new to apply.
+                for asset in ["agreed-1", "agreed-2", "one-tagger", "stale-hash"] {
+                    c.execute(
+                        "INSERT INTO character_tagger_candidates SELECT ?1,id,content_hash,'recommendation',0.85,?3,'now' FROM assets WHERE id=?2",
+                        params![target.id, asset, if asset == "one-tagger" { 0.849 } else { 0.999 }],
+                    ).unwrap();
+                }
+            }
+            // Warm the read projection before either write hook.
+            assert!(items_of(&f, &target)
+                .iter()
+                .all(|asset| !asset.starts_with("agreed-")));
+            let preview = f.library.preview_tagger_review().unwrap();
+            assert_eq!(preview.recommend.count, 0);
+            f.library
+                .apply_tagger_review(&preview.preview_token)
+                .unwrap();
+            for asset in ["agreed-1", "agreed-2"] {
+                assert_eq!(
+                    f.library.character_relations_for_asset(asset).unwrap(),
+                    [target.id.clone()]
+                );
+                let c = f.library.connection().unwrap();
+                let (decision, origin, engine): (String, String, String) = c.query_row(
+                    "SELECT decision,origin,json_extract(reference_snapshot,'$.prediction.engine')
+                     FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2",
+                    params![target.id, asset], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                ).unwrap();
+                assert_eq!(
+                    (decision.as_str(), origin.as_str(), engine.as_str()),
+                    ("accepted", "automatic", "s36")
+                );
+                let folders = c
+                    .prepare(
+                        "SELECT classification_id FROM asset_classifications WHERE asset_id=?1",
+                    )
+                    .unwrap()
+                    .query_map([asset], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .unwrap();
+                assert_eq!(folders, [f.series.clone()]);
+            }
+            for asset in ["person-rejected", "one-tagger", "stale-hash"] {
+                assert!(
+                    f.library
+                        .character_relations_for_asset(asset)
+                        .unwrap()
+                        .is_empty(),
+                    "{asset}"
+                );
+            }
+            assert!(items_of(&f, &target)
+                .iter()
+                .all(|asset| !asset.starts_with("agreed-")));
+            assert_eq!(
+                f.library
+                    .tagger_review_items()
+                    .unwrap()
+                    .iter()
+                    .map(|item| item.asset.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["one-tagger"]
+            );
+            assert_eq!(f.library.character_confirm_counts(None).unwrap().tag, 1);
+            assert!(f
+                .library
+                .character_review_feed_content()
+                .unwrap()
+                .items
+                .iter()
+                .all(|item| !item.asset_id.starts_with("agreed-")));
+            // Repeating the hook is idempotent; automatic placements are not examples.
+            let preview = f.library.preview_tagger_review().unwrap();
+            f.library
+                .apply_tagger_review(&preview.preview_token)
+                .unwrap();
+            let c = f.library.connection().unwrap();
+            assert_eq!(
+                c.query_row(
+                    "SELECT COUNT(*) FROM character_decisions WHERE origin='automatic'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                2
+            );
+            drop(c);
+            assert_eq!(
+                f.library.character_s36_readiness(&f.series).unwrap()[0].examples,
+                0
+            );
+            // 빼기 remains a person's decision and agreement must not re-add it.
+            decide(&f, &target, "agreed-1", DecisionKind::Cleared);
+            let preview = f.library.preview_tagger_review().unwrap();
+            f.library
+                .apply_tagger_review(&preview.preview_token)
+                .unwrap();
+            assert!(f
+                .library
+                .character_relations_for_asset("agreed-1")
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn agreed_pairs_applied_as_new_recommendations_remain_subject_to_tagger_veto() {
+        let f = Fixture::new();
+        let target = f.ready("Toki");
+        link_tag(&f, &target, "toki_tag");
+        candidate(&f, &target, "agreed");
+        tagger_reads(&f, "agreed", "toki_tag", Some(1.0), Some(0.999));
+        let preview = f.library.preview_tagger_review().unwrap();
+        assert_eq!(preview.recommend.count, 1);
+        f.library
+            .apply_tagger_review(&preview.preview_token)
+            .unwrap();
+        assert_eq!(
+            f.library.character_relations_for_asset("agreed").unwrap(),
+            [target.id.clone()]
+        );
+        tagger_reads(&f, "agreed", "toki_tag", Some(0.29), Some(0.29));
+        let preview = f.library.preview_tagger_review().unwrap();
+        assert_eq!(preview.veto.count, 1);
+        f.library
+            .apply_tagger_review(&preview.preview_token)
+            .unwrap();
+        assert!(f
+            .library
+            .character_relations_for_asset("agreed")
+            .unwrap()
+            .is_empty());
+        // A later agreement cannot undo that veto automatically.
+        tagger_reads(&f, "agreed", "toki_tag", Some(0.99), Some(0.99));
+        let preview = f.library.preview_tagger_review().unwrap();
+        f.library
+            .apply_tagger_review(&preview.preview_token)
+            .unwrap();
+        assert!(f
+            .library
+            .character_relations_for_asset("agreed")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

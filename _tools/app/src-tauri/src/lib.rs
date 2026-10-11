@@ -493,6 +493,8 @@ pub fn run() {
             commands::characters::character_extras,
             commands::characters::ensure_character_extras,
             commands::characters::create_character_extras_group,
+            commands::characters::character_folder_group_preview,
+            commands::characters::tidy_character_folder_into_group,
             commands::characters::character_extras_suggestions,
             commands::characters::promote_character_extras,
             commands::characters::character_series_unregister_preview,

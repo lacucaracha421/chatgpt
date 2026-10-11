@@ -225,6 +225,33 @@ fn original_available(library: &Library, connection: &Connection, asset_id: &str
         .is_some_and(|metadata| metadata.is_file())
 }
 
+/// Creates a 기타-only group inside the caller's transaction.
+pub(super) fn create_extras_group_in(
+    connection: &Connection,
+    series_id: &str,
+    name: &str,
+) -> Result<(String, String)> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(Error::Invalid("그룹 이름을 확인해 주세요."));
+    }
+    let registered: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1)",
+        [series_id],
+        |row| row.get(0),
+    )?;
+    if !registered {
+        return Err(Error::Invalid("등록된 시리즈를 선택해 주세요."));
+    }
+    let group_id = uuid::Uuid::new_v4().to_string();
+    connection.execute(
+        "INSERT INTO character_groups(id,series_id,name) VALUES(?1,?2,?3)",
+        params![group_id, series_id, name],
+    )?;
+    let extras_id = ensure_extras_in(connection, series_id, Some(&group_id))?;
+    Ok((group_id, extras_id))
+}
+
 impl Library {
     /// Every 기타 that exists: the series' own and the groups'. Missing ones are created by
     /// [`Self::ensure_character_extras`] when a screen first needs them.
@@ -269,26 +296,9 @@ impl Library {
         series_id: &str,
         name: &str,
     ) -> Result<ExtrasGroupResult> {
-        let name = name.trim();
-        if name.is_empty() || name.chars().count() > 100 {
-            return Err(Error::Invalid("그룹 이름을 확인해 주세요."));
-        }
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let registered: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1)",
-            [series_id],
-            |row| row.get(0),
-        )?;
-        if !registered {
-            return Err(Error::Invalid("등록된 시리즈를 선택해 주세요."));
-        }
-        let group_id = uuid::Uuid::new_v4().to_string();
-        tx.execute(
-            "INSERT INTO character_groups(id,series_id,name) VALUES(?1,?2,?3)",
-            params![group_id, series_id, name],
-        )?;
-        let extras_id = ensure_extras_in(&tx, series_id, Some(&group_id))?;
+        let (group_id, extras_id) = create_extras_group_in(&tx, series_id, name)?;
         let extras = self.read_character_target(&tx, &extras_id)?;
         let group = super::character_groups::groups_in(&tx, Some(series_id))?
             .into_iter()

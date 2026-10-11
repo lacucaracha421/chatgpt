@@ -10,6 +10,7 @@ pairs AS MATERIALIZED (
  FROM asset_tagger_character_scores s
  JOIN assets a ON a.id=s.asset_id AND a.status='normal' AND a.media_kind='image'
  WHERE s.score>=0.85
+ AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders x ON x.id=ac.classification_id WHERE ac.asset_id=s.asset_id)
  AND EXISTS(SELECT 1 FROM tagger_character_vocabulary v WHERE v.source=s.source AND v.tag=s.tag)
  AND NOT EXISTS(SELECT 1 FROM character_target_tagger_tags t WHERE t.tag=s.tag)
  AND NOT EXISTS(SELECT 1 FROM character_suggestion_ignored_tags i WHERE i.tag=s.tag)

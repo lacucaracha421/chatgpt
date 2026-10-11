@@ -448,7 +448,7 @@ impl Library {
         if current.as_deref() != Some(pending.content_hash.as_str()) {
             return Ok(0);
         }
-        let now = chrono::Utc::now().to_rfc3339();
+        let mut published = 0;
         // One person is one character: among confident S36 targets, each person crop
         // keeps only its closest character. Characters 학습 인식 does not place (yet) and
         // already-judged ones still take part, so they can block a look-alike, but only
@@ -475,7 +475,6 @@ impl Library {
                 winners.insert(crop, (score, target));
             }
         }
-        let mut published = 0;
         for (score, target) in winners.into_values() {
             // A closer character that 학습 인식 does not place yet still wins its person.
             if !learning.owns(&target.id) {
@@ -515,18 +514,43 @@ impl Library {
             {
                 snapshot["prediction"]["queryCrop"] = json!(crop);
             }
-            tx.execute(
-                "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
-                 VALUES(?1,?2,?2,?3,'accepted',?4,?5,'automatic',?6)",
-                params![target.id, pending.asset_id, pending.content_hash, target.fingerprint, serde_json::to_string(&snapshot)?, now],
+            self.accept_s36_in(
+                &tx,
+                &target,
+                &pending.asset_id,
+                &pending.content_hash,
+                &snapshot,
             )?;
             published += 1;
         }
-        if published > 0 {
-            super::character_autotag::refresh_character_review_state(&tx, &pending.asset_id)?;
-        }
         tx.commit()?;
         Ok(published)
+    }
+
+    /// Shared automatic acceptance path. Membership is the character_relations view of this
+    /// decision; inference never changes the user's saved folder or adds learning examples.
+    pub(super) fn accept_s36_in(
+        &self,
+        tx: &Connection,
+        target: &super::characters::Target,
+        asset_id: &str,
+        asset_hash: &str,
+        snapshot: &Value,
+    ) -> Result<()> {
+        tx.execute(
+            "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+             VALUES(?1,?2,?2,?3,'accepted',?4,?5,'automatic',?6)",
+            params![target.id, asset_id, asset_hash, target.fingerprint, serde_json::to_string(snapshot)?, chrono::Utc::now().to_rfc3339()],
+        )?;
+        // A consumed recommendation must not mask a later tagger veto in PAIRS_SQL.
+        tx.execute(
+            "DELETE FROM character_tagger_candidates WHERE target_id=?1 AND asset_id=?2 AND reason='recommendation'",
+            params![target.id, asset_id],
+        )?;
+        super::character_autotag::refresh_character_review_state(tx, asset_id)?;
+        self.character_changes
+            .series_analysed(target.series_classification_id.as_deref());
+        Ok(())
     }
 }
 

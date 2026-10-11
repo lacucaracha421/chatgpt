@@ -1,7 +1,9 @@
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { CharacterFolderOrganizer } from "./CharacterFolderOrganizer";
 import { FolderRegistrationContext } from "./FolderRegistrationContext";
-import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { CharacterFolderGroupDialog } from "./CharacterFolderGroupDialog";
+import { folderGroupApi } from "./folderGroupApi";
 import { AreaEntering, READY_CAP_MS, viewReady } from "../shared/motion/AreaSwitch";
 import { revealTogether, waitForViewportImages } from "../shared/motion/viewportImages";
 import { ChromeContext, useWorkspaceChrome, type Targets } from "../layout/WorkspaceChromeContext";
@@ -45,11 +47,32 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
 }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [organizeCharacter, setOrganizeCharacter] = useState(false);
+  const [organizeGroup, setOrganizeGroup] = useState(false);
+  const [exclusions, setExclusions] = useState<{ key: string; ids: string[] } | null>(null);
   const id = view.kind === "classification" ? view.classificationId : null;
   const folder = classifications.find(item => item.id === id);
   const series = hub.series.find(s => s.classificationId === id);
   const originalScope = Boolean(id && inOriginals(id, classifications));
-  if (series && !originalScope) return <FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={onGroupEditRequestHandled} /></FolderKindSwitch>;
+  const ancestors: string[] = [];
+  let ancestor = folder;
+  while (ancestor && !ancestors.includes(ancestor.id)) {
+    ancestors.push(ancestor.id);
+    ancestor = classifications.find(item => item.id === ancestor?.parentId);
+  }
+  const insideSeries = ancestors.slice(1).some(ancestorId => hub.series.some(entry => entry.classificationId === ancestorId));
+  const groupEligible = Boolean(folder?.parentId && insideSeries && !series && !originalScope
+    && !hub.targets.some(target => target.linkedClassificationId === id));
+  const exclusionKey = JSON.stringify([id, refreshVersion, hub.revision]);
+  useEffect(() => {
+    if (!groupEligible) return;
+    let active = true;
+    void folderGroupApi.folderExclusions().then(ids => { if (active) setExclusions({ key: exclusionKey, ids }); },
+      reason => { if (active) setError(commandErrorMessage(reason, "폴더의 분류 제외 상태를 확인하지 못했습니다.")); });
+    return () => { active = false; };
+  }, [groupEligible, exclusionKey]);
+  const canOrganizeGroup = groupEligible && exclusions?.key === exclusionKey
+    && !ancestors.some(ancestorId => exclusions.ids.includes(ancestorId));
+  if (series && !originalScope) return <><FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={onGroupEditRequestHandled} /></FolderKindSwitch></>;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);
@@ -57,12 +80,22 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
     catch (e) { setError(commandErrorMessage(e, "시리즈를 등록하지 못했습니다.")); }
     finally { setBusy(false); }
   }
-  return <FolderKindSwitch kind="plain"><FolderRegistrationContext.Provider value={folder?.parentId && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+  return <><FolderKindSwitch kind="plain"><FolderRegistrationContext.Provider value={folder?.parentId && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
     { id: "register-series", label: "시리즈로 등록", onSelect: () => void register() },
     { id: "make-character", label: "캐릭터로 만들기", onSelect: () => setOrganizeCharacter(true) },
+    ...(canOrganizeGroup ? [{ id: "organize-group", label: "그룹으로 정리", onSelect: () => setOrganizeGroup(true) }] : []),
   ]} /> : null}>
-    <div className="character-folder-content">{(error || hub.error) && <p className="character-message" role="alert">{error || hub.error}</p>}{children}{organizeCharacter && id && <CharacterFolderOrganizer key={id} folderId={id} classifications={classifications} targets={hub.targets} privacyMode={privacyMode} onClose={() => setOrganizeCharacter(false)} onSingleSaved={target => { setOrganizeCharacter(false); onAssetsChanged(); onNavigate({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}</div>
-  </FolderRegistrationContext.Provider></FolderKindSwitch>;
+    <div className="character-folder-content">{(error || hub.error) && <p className="character-message" role="alert">{error || hub.error}</p>}{children}{organizeCharacter && id && <CharacterFolderOrganizer key={id} folderId={id} classifications={classifications} targets={hub.targets} privacyMode={privacyMode} onClose={() => setOrganizeCharacter(false)} onSingleSaved={target => { setOrganizeCharacter(false); onAssetsChanged(); onNavigate({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}
+    </div>
+  </FolderRegistrationContext.Provider></FolderKindSwitch>
+      {/* Keep the dialog outside the retained browser so it closes as soon as apply succeeds. */}
+      {organizeGroup && id && <CharacterFolderGroupDialog key={id} folderId={id} onClose={() => setOrganizeGroup(false)} onSaved={result => {
+        setOrganizeGroup(false);
+        // The series is already in the hub; FolderKindSwitch keeps this folder painted until it is ready.
+        onNavigate({ kind: "classification", classificationId: result.seriesId });
+        hub.refresh(); onAssetsChanged();
+      }} />}
+  </>;
 }
 
 type FolderKind = "series" | "plain";

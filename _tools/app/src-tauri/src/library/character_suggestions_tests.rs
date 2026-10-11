@@ -694,3 +694,29 @@ fn concurrent_suggestion_reads_share_one_computation() {
         "{reads:?}"
     );
 }
+
+#[test]
+fn suggestions_skip_images_in_character_excluded_folders() {
+    // asset-6 is the fixture's image filed only in the plain `outside` folder.
+    let f = fixture();
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_folder_exclusions VALUES(?1)",
+            [&f.outside],
+        )
+        .unwrap();
+    let list = f.library.character_suggestions(Some(1)).unwrap();
+    let suggestion = list.iter().find(|s| s.tag == "new_character").unwrap();
+    assert_eq!(suggestion.image_count, 6);
+    let detail = f
+        .library
+        .character_suggestion_detail("new_character", Some(&f.series))
+        .unwrap();
+    assert_eq!(detail.images.len(), 6);
+    assert!(detail
+        .images
+        .iter()
+        .all(|image| image.asset_id != "asset-6"));
+}

@@ -2,7 +2,7 @@
 //! No inference jobs run here.
 //! Vetoes append an automatic `cleared` decision; the existing B36 and S36
 //! decision guards treat that as a durable stop, even after a later import.
-//! Recommendations block automatic publication while awaiting a manual judgment.
+//! Recommendations await a person unless S36 and both taggers agree; agreed pairs are placed.
 use super::auto_tags::CONTENT_RATING_SQL;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -569,6 +569,7 @@ impl Library {
                 super::character_autotag::refresh_character_review_state(&tx, &pair.asset_id)?;
             }
         }
+        self.publish_agreed_pairs_in(&tx)?;
         tx.commit()?;
         Ok(preview)
     }

@@ -170,7 +170,9 @@ fn detail_in(c: &Connection, tag: &str, series: Option<&str>) -> Result<Suggesti
           EXISTS(SELECT 1 FROM assets asset WHERE asset.id=a.id {solo_filter}) AS solo
         FROM asset_tagger_character_scores s
         JOIN assets a ON a.id=s.asset_id AND a.status='normal' AND a.media_kind='image'
-        WHERE s.tag=?1 GROUP BY a.id
+        WHERE s.tag=?1
+          AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders x ON x.id=ac.classification_id WHERE ac.asset_id=a.id)
+        GROUP BY a.id
         HAVING MAX(s.score)>=0.85 ORDER BY solo DESC,MAX(s.score) DESC,a.id"
     ))?;
     let images = statement

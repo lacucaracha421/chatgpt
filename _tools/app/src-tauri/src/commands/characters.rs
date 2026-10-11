@@ -1,6 +1,33 @@
 use tauri::State;
 
 #[tauri::command]
+pub async fn character_folder_group_preview(
+    folder_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_folder_group::FolderGroupPreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_folder_group_preview(&folder_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn tidy_character_folder_into_group(
+    folder_id: String,
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_folder_group::FolderGroupResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.tidy_character_folder_into_group(&folder_id, &token)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn character_tagger_tags(
     target_id: String,
     state: State<'_, AppState>,

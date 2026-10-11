@@ -39,6 +39,7 @@ const SUGGESTION_INPUT_TABLES: &[&str] = &[
     "classification_entries",
     "character_series",
     "character_targets",
+    "character_folder_exclusions",
 ];
 
 /// Rowid tables read by the S36 review lists (`character_shadow_review`): series membership,

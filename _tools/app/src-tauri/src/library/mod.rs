@@ -58,6 +58,7 @@ pub mod character_autotag;
 pub(crate) mod character_changes;
 pub mod character_conversion;
 pub mod character_extras;
+pub mod character_folder_group;
 pub(crate) mod character_exclusions;
 #[cfg(test)]
 #[path = "character_exclusions_tests.rs"]
