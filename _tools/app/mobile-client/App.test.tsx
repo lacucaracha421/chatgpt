@@ -1,3 +1,4 @@
+import {openScreenSearch} from './screenSearchTest';
 import type {ReactNode} from 'react';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -455,7 +456,7 @@ it('keeps visited Catalog and Notes panels separate when returning Home',async()
   mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?{unlocked:true,notes:[]}:{configured:true,endpoint:'https://example.invalid'});
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
   fireEvent.click(screen.getByRole('button',{name:'카탈로그',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});
-  fireEvent.click(screen.getByRole('button',{name:'메모',exact:true}));await screen.findByRole('button',{name:'동기화',exact:true});
+  fireEvent.click(screen.getByRole('button',{name:'메모',exact:true}));await screen.findByRole('heading',{name:'메모',exact:true});
   fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));await screen.findByText('tile-a1');
   expect(screen.queryByRole('button',{name:'동기화',exact:true})).toBeNull();expect(screen.queryByRole('region',{name:'메모',exact:true})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'카탈로그',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});expect(screen.queryByRole('button',{name:'동기화',exact:true})).toBeNull();
@@ -651,18 +652,18 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
   expect(document.querySelector('.desktop-index')).toBeNull();
   expect(screen.queryByRole('heading',{name:'최근 연 폴더'})).toBeNull();
   expect(document.querySelector('.classification-tree')).toBeNull();
-  expect(screen.queryByRole('button',{name:'더보기'})).toBeNull();
+  expect(await screen.findByRole('button',{name:'더보기'})).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
   await screen.findByRole('button',{name:'더보기'});
   fireEvent.click(screen.getByRole('button',{name:'컬렉션',exact:true}));
-  expect(screen.queryByRole('button',{name:'더보기'})).toBeNull();
+  expect(await screen.findByRole('button',{name:'더보기'})).toBeTruthy();
   // Collections draws its own title bar; Home's bar leaves with the Home view once the switch commits.
   await waitFor(()=>expect([...document.querySelectorAll('.app-header')].filter(header=>!header.closest('[style*="display: none"], [aria-hidden="true"]'))).toHaveLength(0),{timeout:2500});
   expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   // Catalog and Notes also draw their own title bars; no area offers the old sidebar.
   for(const area of ['카탈로그','메모']){
     fireEvent.click(screen.getByRole('button',{name:area,exact:true}));
-    expect(screen.queryByRole('button',{name:'더보기'})).toBeNull();
+    expect(await screen.findByRole('button',{name:'더보기'})).toBeTruthy();
     await waitFor(()=>expect([...document.querySelectorAll('.app-header')].filter(header=>!header.closest('[style*="display: none"], [aria-hidden="true"]'))).toHaveLength(0),{timeout:2500});
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }
@@ -896,7 +897,7 @@ describe('server list generation',()=>{
 it('closes an open search on Back before leaving the Library root',async()=>{
   render(<App/>);
   await screen.findByRole('button',{name:/^분류 B, /});
-  fireEvent.click(screen.getByRole('button',{name:'검색'}));
+  openScreenSearch();
   fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'분류'}});
   mocks.native.mockClear();
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
@@ -906,7 +907,7 @@ it('closes an open search on Back before leaving the Library root',async()=>{
 it('keeps the Library root mounted behind an open folder, so Back returns to the same search without rebuilding it',async()=>{
   render(<App/>);
   await screen.findByRole('button',{name:/^분류 B, /});
-  fireEvent.click(screen.getByRole('button',{name:'검색'}));
+  openScreenSearch();
   fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'분류'}});
   fireEvent.click(await screen.findByRole('button',{name:/^분류 B/}));
   await screen.findByRole('heading',{name:'분류 B'});
@@ -1015,7 +1016,7 @@ describe('asset search scope navigation',()=>{
       return original(path);
     });
     render(<App/>);
-    fireEvent.click(await screen.findByRole('button',{name:'검색',exact:true}));
+    await screen.findByRole('button',{name:'찾기'});openScreenSearch();
     fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'검색'}});
     fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^${names[kind]}`)}));
     const chip=await screen.findByRole('button',{name:`${names[kind]} 범위 빼기`});
@@ -1023,7 +1024,7 @@ describe('asset search scope navigation',()=>{
     expect(screen.getAllByRole('group',{name:'에셋 검색 범위'})).toHaveLength(1);
     fireEvent.click(chip);
     await waitFor(()=>expect(screen.queryByRole('button',{name:`${names[kind]} 범위 빼기`})).toBeNull());
-    expect(screen.getByRole('button',{name:'검색',exact:true})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'찾기',exact:true})).toBeTruthy();
   });
 });
 
@@ -1048,7 +1049,7 @@ describe('combined asset search chips',()=>{
   });
  });
  async function choose(query:string,name:RegExp){
-  if(!screen.queryByRole('searchbox'))fireEvent.click(await screen.findByRole('button',{name:'검색',exact:true}));
+  if(!screen.queryByRole('searchbox')){await screen.findByRole('button',{name:'찾기'});openScreenSearch();}
   fireEvent.change(screen.getByRole('searchbox'),{target:{value:query}});
   fireEvent.click(await screen.findByRole('button',{name}));
  }
@@ -1203,4 +1204,13 @@ it('shows the TOC total in All Assets and passes it to the viewer with the first
  const tile=await screen.findByText('tile-a1');
  await waitFor(()=>expect(screen.getByRole('heading',{name:'모든 자산'}).parentElement?.textContent).toContain('9,223'));
  fireEvent.click(tile);expect(screen.getByTestId('viewer').getAttribute('data-total')).toBe('9223');
+});
+
+it.each(['홈','에셋','컬렉션','카탈로그','메모'])('the actual %s main screen ends its top bar with Find and More',async name=>{
+ render(<App/>);await screen.findByRole('heading',{name:'에셋'});
+ fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name}));
+ await waitFor(()=>{
+  const find=screen.getByRole('button',{name:'찾기'}),header=find.closest('header')!;
+  expect(within(header).getAllByRole('button').slice(-2).map(button=>button.getAttribute('aria-label'))).toEqual(['찾기','더보기']);
+ });
 });

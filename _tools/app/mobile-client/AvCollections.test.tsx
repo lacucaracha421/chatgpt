@@ -118,7 +118,7 @@ describe('tablet AV collections',()=>{
     });
     render(<Collections {...props}/>);
     await openAv();
-    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'ssis123'}});
     expect(screen.getByText('SSIS-123',{selector:'strong'})).toBeTruthy();
@@ -142,7 +142,7 @@ describe('tablet AV collections',()=>{
     });
     render(<Collections {...props}/>);
     await openAv();
-    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'SSIS-001'}});
     fireEvent.click(screen.getByRole('button',{name:'보내기'}));
@@ -166,7 +166,7 @@ describe('tablet AV collections',()=>{
     });
     render(<Collections {...props}/>);
     await openAv();
-    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'SSIS-001'}});
     fireEvent.click(screen.getByRole('button',{name:'보내기'}));
@@ -178,7 +178,7 @@ describe('tablet AV collections',()=>{
     mocks.api.mockImplementation(async(path:string)=>path==='/v1/av-lookups'?{}:base(path));
     render(<Collections {...props}/>);
     await openAv();
-    fireEvent.click(await screen.findByRole('button',{name:'품번 보내기'}));
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'품번 보내기'}));
     const input=await screen.findByRole('textbox',{name:'품번'});
     for(let number=1;number<=6;number++){
       const code=`SSIS-${String(number).padStart(3,'0')}`;

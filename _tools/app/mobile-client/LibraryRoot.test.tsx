@@ -1,7 +1,8 @@
+import {render,openScreenSearch} from './screenSearchTest';
 import {useState} from 'react';
 import {readFileSync} from 'node:fs';
 const css=readFileSync('mobile-client/library.css','utf8');
-import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {LibraryRoot} from './LibraryRoot';
 import {closeVisibleSearch} from './TopBar';
@@ -42,7 +43,7 @@ it('shows root cards and All without recent folders, then searches every charact
  // Search is a magnifier in the shared bar until opened.
  expect(screen.queryByRole('searchbox')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:/모든 자산/}));expect(props.onSelect).toHaveBeenLastCalledWith({tab:'library',title:'모든 자산'});
- fireEvent.click(screen.getByRole('button',{name:'검색'}));
+ openScreenSearch();
  const search=screen.getByRole('searchbox',{name:'에셋 찾기'});
  fireEvent.change(search,{target:{value:'학생'}});
  expect(screen.getByRole('region',{name:'캐릭터'})).toBeTruthy();
@@ -56,7 +57,7 @@ it('searches nested albums from the unified field and opens a Library scope',asy
  function Root(){const [segment,onSegment]=useState<'folders'|'albums'>('folders');return <LibraryRoot {...props} albumTree={tree} segment={segment} onSegment={onSegment}/>;}
  render(<Root/>);fireEvent.click(screen.getByRole('radio',{name:'앨범'}));
  await screen.findByText('앨범 A');expect(screen.queryByText('여행')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'검색'}));
+ openScreenSearch();
  fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'여행'}});
  const result=screen.getByRole('button',{name:'여행'});
  expect(result.className).toBe('asset-search-result');
@@ -92,7 +93,7 @@ it('shows the three asset segments and lazily browses pinned artists with search
  fireEvent.click(cards[0]);
  // The list stays until the artist's first page is prepared, then the detail opens with it.
  await waitFor(()=>expect(props.onOpenArtist).toHaveBeenCalledWith(expect.objectContaining({id:'pin',label:'지우'})));
- fireEvent.click(screen.getByRole('button',{name:'검색'}));
+ openScreenSearch();
  fireEvent.change(screen.getByPlaceholderText('에셋 찾기'),{target:{value:'다람'}});
  expect(screen.getAllByRole('button',{name:/다람/})).toHaveLength(1);
  fireEvent.click(screen.getByRole('button',{name:'검색 닫기'}));
@@ -182,7 +183,7 @@ it('sizes the top-level covers from the real scroller so the first screen ends o
 });
 it('closes the search bar and clears its query on an empty-space tap or Back, but not on a result tap',()=>{
  render(<LibraryRoot {...props}/>);
- const open=(text:string)=>{fireEvent.click(screen.getByRole('button',{name:'검색'}));fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:text}});};
+ const open=(text:string)=>{openScreenSearch();fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:text}});};
  open('학생');
  // Tapping a result is left to the result.
  fireEvent.pointerDown(screen.getByRole('button',{name:/학생회/}));

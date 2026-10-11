@@ -1,5 +1,6 @@
+import {render,openScreenSearch} from './screenSearchTest';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {act,cleanup,fireEvent,screen,waitFor,within} from '@testing-library/react';
 import {Catalog} from './Catalog';
 import {adoptPins,flushPins,pendingPins,queuePin,visiblePins,INDEX_PATH,type PinSnapshot,type PinState} from './mangaIndexPins';
 import {setOutboxConnection} from './outboxConnection';
@@ -68,7 +69,7 @@ describe('tablet filter-sheet Manga index',()=>{
   });
   it('adds one AND condition without changing a typed OR expression',async()=>{
     await openSheet();fireEvent.click(screen.getByRole('button',{name:'필터 닫기'}));
-    fireEvent.click(screen.getByRole('button',{name:'검색'}));
+    openScreenSearch();
     fireEvent.change(screen.getByRole('textbox',{name:'카탈로그 검색'}),{target:{value:'alpha OR beta'}});
     fireEvent.submit(screen.getByRole('search'));
     fireEvent.click(screen.getByRole('button',{name:'필터'}));fireEvent.click(await screen.findByRole('button',{name:'태그 9'}));

@@ -319,27 +319,24 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .top-bar:has(> .ui-button:first-child), .top-bar.is-search { padding-left:4px; }
 .top-bar__brand { display:flex; align-items:center; color:var(--color-accent); margin-right:12px; flex-shrink:0; }
 .top-bar__brand .brand-mark { width:22px; height:26px; }
-.top-bar__titles { display:flex; flex-direction:column; justify-content:center; min-width:0; flex:0 1 auto; }
+.top-bar__titles { display:flex; align-items:center; gap:var(--space-2); min-width:0; flex:0 1 auto; }
 .top-bar__title { display:flex; align-items:baseline; gap:8px; min-width:0; }
 .top-bar h1 { display:flex; align-items:baseline; gap:8px; margin:0; font-size:var(--type-title); font-weight:600; line-height:1.2; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .top-bar h1 .numeric, .top-bar__count { font-size:var(--type-meta); font-weight:500; color:var(--color-muted); white-space:nowrap; }
-.top-bar__titles--stacked { gap:var(--space-1); }
-.top-bar__titles--stacked h1 { font-size:var(--type-body); }
-.top-bar__crumbs.is-alone { font-size:var(--type-body); color:var(--color-text); }
 .top-bar__crumbs { line-height:1.2; font-size:var(--type-meta); color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.top-bar__titles--stacked:has(> .library-breadcrumb) { flex-direction:row; justify-content:flex-start; align-items:center; gap:var(--space-2); }
-.top-bar .library-breadcrumb { flex:0 1 auto; min-width:0; max-width:50%; }
-.top-bar .library-breadcrumb button { min-width:var(--touch-target); min-height:var(--touch-target); padding:0 4px 0 0; font-size:11px; text-align:left; }
-.top-bar__titles--stacked:has(> .library-breadcrumb) > .top-bar__title { min-width:0; }
-.top-bar .library-breadcrumb>span>span { padding-right:4px; font-size:11px; }
+.top-bar__parent { display:flex; align-items:center; min-width:0; max-width:50%; }
+.top-bar__parent:only-child { max-width:100%; }
+.top-bar__parent button { min-width:var(--touch-target); min-height:var(--touch-target); padding:0 4px; border:0; background:transparent; font:inherit; font-size:var(--type-meta); color:var(--color-muted); text-align:left; }
+.top-bar__parent .library-breadcrumb { min-width:0; font-size:var(--type-meta); }
+.top-bar__parent .library-breadcrumb > span:last-child::after { content:'›'; padding-left:4px; }
+.top-bar__parent .library-breadcrumb > span > span { font-size:var(--type-meta); padding-right:4px; }
+.top-bar__slots { display:flex; align-items:center; gap:2px; flex:none; }
+.top-bar__slots button { width:var(--touch-target); height:var(--touch-target); min-height:var(--touch-target); padding:0; display:inline-flex; align-items:center; justify-content:center; }
+.top-bar__slots button svg { width:24px; height:24px; }
+.asset-section-tools, .library-header-tools { display:flex; align-items:center; gap:var(--space-1); }
 .top-bar__space { flex:1; min-width:4px; }
 .top-bar .ui-button--icon { color:var(--color-muted); }
 .top-bar .ui-button--icon:active:not(:disabled) { color:var(--color-text); background:var(--color-control-pressed); }
-.top-bar .notes-save-state, .top-bar .catalog-refresh-age { font-size:12px; color:var(--color-muted); margin-right:4px; white-space:nowrap; }
-.top-bar__queue { display:inline-flex; align-items:center; gap:6px; height:32px; margin-right:6px; padding:0 10px; border:1px solid var(--color-border); border-radius:var(--radius-sm); background:var(--color-control); box-shadow:var(--inset-light); font-size:13px; white-space:nowrap; position:relative; }
-.top-bar__queue::before { content:''; position:absolute; inset:-6px 0; }
-.top-bar__queue .numeric { font-size:14px; color:var(--color-accent); }
-.top-bar__queue:active { background:var(--color-control-pressed); }
 /* Search open: the bar becomes the field. */
 .top-bar.is-search { gap:4px; padding-right:8px; }
 .top-bar__search { position:relative; flex:1; min-width:0; display:flex; align-items:center; gap:8px; height:40px; padding:0 4px 0 12px; background:var(--color-bg); border:1px solid var(--color-border-strong); border-radius:var(--radius-sm); }

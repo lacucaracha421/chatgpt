@@ -439,8 +439,9 @@ describe('asset filters',()=>{
     // Here the guarantee that matters is that the committed filters are reset with the
     // rest of the library state, so a later page cannot carry them to another server.
     fireEvent.click(screen.getByRole('button',{name:'홈'}));
+    await waitFor(()=>expect(screen.getByRole('button',{name:'더보기'}).closest('header')?.classList.contains('app-header')).toBe(true));
     fireEvent.click(await screen.findByRole('button',{name:'더보기'}));
-    fireEvent.click(screen.getByRole('button',{name:'설정',exact:true}));
+    fireEvent.click(await screen.findByRole('button',{name:'설정',exact:true}));
     await screen.findByRole('main',{name:'설정 항목'});
     expect(screen.queryByRole('button',{name:'종류'})).toBeNull();
   });

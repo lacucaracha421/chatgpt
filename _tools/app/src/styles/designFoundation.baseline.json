@@ -777,8 +777,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/mobile.css": {
-      "offScaleSpacing": 83,
-      "offRoleFontSize": 48,
+      "offScaleSpacing": 80,
+      "offRoleFontSize": 44,
       "pillRadius": 1,
       "legacyToken": 0
     },

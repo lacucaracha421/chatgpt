@@ -1,6 +1,7 @@
+import {render,openScreenSearch} from './screenSearchTest';
 import {displayDate} from '../src/shared/displayDate';
 import {workImageLoads} from './workImageLoads.test-helper';
-import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
+import {act, cleanup, fireEvent,  screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {collectionCardCredit, collectionCardDate, collectionPath, coverFocuses, editionVolumes, editions} from './collectionModel';
 import type {CollectionDetail, CollectionPage} from './collectionModel';
@@ -27,7 +28,7 @@ const pressShowcase=(button:HTMLElement)=>{
 };
 const pressTab=(name:string)=>fireEvent.click(screen.getByRole('radio',{name}));
 /** Search lives behind the top bar's magnifier; open it once, then use the field. */
-const searchBox=()=>{if(!screen.queryByRole('searchbox',{name:'컬렉션 검색'}))fireEvent.click(screen.getByRole('button',{name:'검색'}));return screen.getByRole('searchbox',{name:'컬렉션 검색'}) as HTMLInputElement;};
+const searchBox=()=>{if(!screen.queryByRole('searchbox',{name:'컬렉션 검색'}))openScreenSearch();return screen.getByRole('searchbox',{name:'컬렉션 검색'}) as HTMLInputElement;};
 /** A downward pull from the top of a scroller is the refresh gesture. */
 function pull(element:HTMLElement){fireEvent.touchStart(element,{touches:[{clientX:0,clientY:0}]});fireEvent.touchMove(element,{touches:[{clientX:0,clientY:200}]});fireEvent.touchEnd(element);}
 /** jsdom has no layout, so the scroller's geometry is declared before the scroll event. */
@@ -720,7 +721,7 @@ describe('read-only collections',()=>{
     await screen.findByRole('heading',{level:1,name:'밤의 도서관'});
     expect(screen.queryByRole('radio',{name:'게임'})).toBeNull();
     expect(screen.getByRole('button',{name:'뒤로'})).toBeTruthy();
-    expect(within(screen.getByRole('button',{name:'뒤로'}).closest('header')!).getByText('컬렉션 › 게임')).toBeTruthy();
+    expect(within(screen.getByRole('button',{name:'뒤로'}).closest('header')!).getByText('컬렉션 › 게임 ›')).toBeTruthy();
     // The shared work screen: the case on its stage, the strip of views, the information below.
     expect(screen.getByRole('article',{name:'게임 작품 화면'})).toBeTruthy();
     expect(screen.getByRole('group',{name:'케이스'})).toBeTruthy();
@@ -1255,22 +1256,22 @@ describe('collection shortcut overlays',()=>{
     return {revision:'r1',item};
   });
   const shortcuts=()=>screen.getByRole('group',{name:'컬렉션 바로가기'});
-  const topTools=()=>screen.getByRole('button',{name:'쇼케이스'}).closest('.collection-top-tools') as HTMLElement;
+  const topTools=()=>(document.querySelector('.section-shade.is-open .collection-top-tools')??document.querySelector('.ui-section-bar--inline .collection-top-tools')) as HTMLElement;
   it.each([['게임','발매 캘린더 2'],['영화','발매 캘린더 1'],['만화','신간 3'],['AV',null]] as const)('shows the %s shortcuts and counts in the section bar, and the shared tools in the top bar',async(type,other)=>{
     serve();render(<Collections active paused={false} backRef={{current:null}}/>);
     pressTab(type);
     await screen.findByRole('button',{name:'쇼케이스'});
     // 쇼케이스 · 정렬 · 내 별점 · 보기 are the same on every type, so they live in the fixed top bar.
-    expect(topTools().closest('header.top-bar')).not.toBeNull();
+    expect(topTools().closest('.ui-section-bar__trailing')).not.toBeNull();
     expect(within(topTools()).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['쇼케이스','정렬','내 별점','보기']);
     expect(within(topTools()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
     expect(within(topTools()).getByRole('button',{name:'정렬'}).getAttribute('aria-pressed')).toBeNull();
     const bar=list().querySelector('.ui-section-bar--inline') as HTMLElement;
-    expect(within(bar).queryByRole('button',{name:/^(쇼케이스|정렬|내 별점|보기)$/})).toBeNull();
+    expect(within(bar).getByRole('button',{name:'보기'})).toBeTruthy();
     expect(document.querySelector('.section-shade-extra,.section-shade-rows--inline,.collection-shortcuts__divider')).toBeNull();
     if(!other){
       expect(screen.queryByRole('group',{name:'컬렉션 바로가기'})).toBeNull();
-      expect(bar.querySelector('.ui-section-bar__trailing')).toBeNull();
+      expect(bar.querySelector('.ui-section-bar__trailing')).toBeTruthy();
       return;
     }
     expect(within(shortcuts()).queryByRole('button',{name:'새 작품'})).toBeNull();
@@ -1293,8 +1294,8 @@ describe('collection shortcut overlays',()=>{
     const shade=document.querySelector('.section-shade.is-open') as HTMLElement;
     const right=shade.querySelector('.ui-section-bar__trailing') as HTMLElement;
     expect(within(right).getByRole('button',{name:'발매 캘린더 2'})).toBeTruthy();
-    expect(within(right).queryByRole('button',{name:'쇼케이스'})).toBeNull();
-    fireEvent.click(within(topTools()).getByRole('button',{name:'보기'}));
+    expect(within(right).getByRole('button',{name:'쇼케이스'})).toBeTruthy();
+    fireEvent.click(within(document.querySelector('.section-shade.is-open')??topTools()).getByRole('button',{name:'보기'}));
     expect(screen.getByRole('dialog',{name:'보기'})).toBeTruthy();
     expect(scroller.querySelector('.collection-grid')).toBe(cards);
     expect(scroller.scrollTop).toBe(440);
@@ -1333,7 +1334,7 @@ describe('collection shortcut overlays',()=>{
     list().scrollTop=380;fireEvent.scroll(list());fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
     const shade=document.querySelector('.section-shade') as HTMLElement;
     expect(within(shade).getByRole('radiogroup',{name:'컬렉션 유형'})).toBeTruthy();
-    expect(within(shade).queryByRole('button',{name:'쇼케이스'})).toBeNull();
+    expect(within(shade).getByRole('button',{name:'쇼케이스'})).toBeTruthy();
     pressShowcase(within(topTools()).getByRole('button',{name:'쇼케이스'}));
     expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'쇼케이스 닫기'}));expect(list().scrollTop).toBe(380);

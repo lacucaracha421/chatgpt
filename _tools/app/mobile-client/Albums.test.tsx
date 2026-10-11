@@ -65,7 +65,7 @@ describe('album Library scopes',()=>{
   await choose();await chipShown('영상');fireEvent.click(screen.getByRole('button',{name:'비율'}));const ratioSheet=await screen.findByRole('dialog',{name:'비율'});fireEvent.click(within(ratioSheet).getByRole('radio',{name:'전체'}));
   back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());await chipShown('종류');
   back();await screen.findByRole('heading',{name:'업로드용'});back();await screen.findByRole('heading',{name:'에셋'});
-  expect(screen.getByRole('radio',{name:'앨범'}).getAttribute('aria-checked')).toBe('true');expect(screen.getByRole('button',{name:'검색'})).toBeTruthy();
+  expect(screen.getByRole('radio',{name:'앨범'}).getAttribute('aria-checked')).toBe('true');expect(screen.getByRole('button',{name:'찾기'})).toBeTruthy();
  });
  it('jumps through breadcrumbs and restores the parent gallery scroll',async()=>{
   await openRootAlbum();fireEvent.scroll(document.querySelector('.gallery-scroll')!);

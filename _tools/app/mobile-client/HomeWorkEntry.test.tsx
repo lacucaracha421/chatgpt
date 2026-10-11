@@ -58,7 +58,7 @@ it.each(['system','arrow'])('opens directly after its own faces, then %s Back re
   await act(async()=>incoming.querySelectorAll('.tablet-work img').forEach(image=>fireEvent.load(image)));
   await waitFor(()=>expect(stage.getAttribute('data-motion-shown')).toBe('home-work'));
   expect(screen.getByRole('heading',{name:item.name})).toBeTruthy();
-  expect(incoming.querySelector('.top-bar__crumbs')?.textContent).toBe('홈');
+  expect(incoming.querySelector('.top-bar__crumbs')?.textContent).toBe('홈 ›');
   expect(nav('컬렉션').getAttribute('aria-current')).toBe('page');
   if(mode==='system')act(()=>window.dispatchEvent(new Event('lakomics-back')));
   else fireEvent.click(screen.getByRole('button',{name:'뒤로'}));

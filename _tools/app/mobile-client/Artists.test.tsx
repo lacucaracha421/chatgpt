@@ -1,4 +1,5 @@
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {render,openScreenSearch} from './screenSearchTest';
+import {act, cleanup, fireEvent,  screen, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {MutableRefObject} from 'react';
 import {Artists} from './Artists';
@@ -93,7 +94,7 @@ describe('Artists', () => {
     const view = renderArtists();
     await screen.findByRole('button', {name: /하늘빛, 74장/});
     fireEvent.click(screen.getByRole('button', {name: /하늘빛, 74장/}));
-    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
+    await screen.findByLabelText('자산 목록');fireEvent.click(screen.getByRole('button',{name:'더보기'}));
     fireEvent.click(screen.getByRole('button', {name: '이름 바꾸기'}));
     fireEvent.change(screen.getByRole('textbox', {name: '작가 이름'}), {target: {value: '새 이름'}});
     fireEvent.click(screen.getByRole('button', {name: '저장'}));
@@ -111,7 +112,7 @@ describe('Artists', () => {
       ? Promise.reject(new Error('offline')) : original(path, ...args));
     renderArtists();
     fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
-    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
+    await screen.findByLabelText('자산 목록');fireEvent.click(screen.getByRole('button',{name:'더보기'}));
     fireEvent.click(screen.getByRole('button', {name: '숨기기'}));
     act(() => backRef.current?.());
     expect(screen.queryByRole('button', {name: /하늘빛, 74장/})).toBeNull();
@@ -129,9 +130,9 @@ describe('Artists', () => {
       ? Promise.reject(new Error('offline')) : original(path, ...args));
     renderArtists();
     fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
-    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
+    await screen.findByLabelText('자산 목록');fireEvent.click(screen.getByRole('button',{name:'더보기'}));
     fireEvent.click(screen.getByRole('button', {name: '고정'}));
-    fireEvent.click(await screen.findByRole('button', {name: '작가 더보기'}));
+    await screen.findByLabelText('자산 목록');fireEvent.click(screen.getByRole('button',{name:'더보기'}));
     expect(screen.getByRole('button', {name: '고정 해제'})).toBeTruthy();
     expect(screen.queryByRole('button', {name: /합치기/})).toBeNull();
     fireEvent.click(screen.getByRole('button', {name: '고정 해제'}));
@@ -347,7 +348,7 @@ describe('Artists', () => {
   it('searches by choseong and underlines matching name syllables', async () => {
     renderArtists();
     await screen.findByRole('region', {name: '오늘'});
-    fireEvent.click(screen.getByRole('button', {name: '작가 검색'}));
+    openScreenSearch();
     fireEvent.change(screen.getByRole('searchbox', {name: '작가 검색'}), {target: {value: 'ㅎㄴ'}});
     await waitFor(() => expect(screen.getByRole('button', {name: /하늘빛, 74장/})).toBeTruthy());
     expect(document.querySelectorAll('mark').length).toBeGreaterThanOrEqual(2);

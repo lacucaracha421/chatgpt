@@ -287,7 +287,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
   useLayoutEffect(()=>{if(state!=='loading')screenReady('releaseCalendar',scroller.current,state==='error'?'error':'ok');});
   const unreadTotal = reply?.wishlist.reduce((sum, entry) => sum + entry.unread.length, 0) ?? 0;
 
-  const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length : undefined} />;
+  const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<button className="top-bar__crumbs" onClick={onClose}>홈 ›</button>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length : undefined} />;
   return <div className="release-calendar-screen">
     {!embedded&&header}
     <div ref={stripWheel} className="release-calendar-controls">

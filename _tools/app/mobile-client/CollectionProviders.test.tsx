@@ -51,7 +51,7 @@ function Harness({mode = 'actions', startSheet = 'menu', work = item, entityRevi
       <WorkManage item={work} authority={authority} status={status} active entityRevision={entityRevision} sheet={sheet} onSheet={setSheet} onForm={onForm} onDeleted={() => {}}/></>
     : <ProviderArtworkSheet item={work} provider="tmdb" externalId="tv:42" authority={authority} onClose={onClose}/>;
 }
-const menu = () => screen.findByRole('dialog', {name: '작품 관리'});
+const menu = () => screen.findByRole('dialog');
 const rowText = (row: HTMLElement) => row.textContent;
 
 it('disables the provider rows with the server reason when the provider is not configured', async () => {
@@ -64,16 +64,16 @@ it('disables the provider rows with the server reason when the provider is not c
 });
 
 it.each([
-  ['movie', ['편집', '외부 정보', '삭제'], ['컬렉션 편집', 'TMDB 새로고침', '포스터·배경 변경', '컬렉션 삭제']],
-  ['game', ['편집', '외부 정보', '삭제'], ['컬렉션 편집', 'IGDB 새로고침', '표지·hero 변경', '컬렉션 삭제']],
-  ['manga', ['편집', '삭제'], ['컬렉션 편집', '컬렉션 삭제']],
-  ['av', ['편집', '삭제'], ['컬렉션 편집', 'AV 정보 편집', '컬렉션 삭제']],
-] as const)('groups the %s menu like the PC 작품 관리 menu', async (type, groups, rows) => {
+  ['movie', ['컬렉션 편집', 'TMDB 새로고침', '포스터·배경 변경', '컬렉션 삭제']],
+  ['game', ['컬렉션 편집', 'IGDB 새로고침', '표지·hero 변경', '컬렉션 삭제']],
+  ['manga', ['컬렉션 편집', '컬렉션 삭제']],
+  ['av', ['컬렉션 편집', 'AV 정보 편집', '컬렉션 삭제']],
+] as const)('keeps the %s work management rows in screen-menu order', async (type, rows) => {
   render(<Harness work={{...item, id: type === 'game' ? 'game-1' : item.id, type}}/>);
   const sheet = await menu();
   if (type === 'movie' || type === 'game') await waitFor(() => expect(within(sheet).getAllByRole('button')[1]).toBeEnabled());
-  expect(within(sheet).getAllByRole('group').map(group => group.getAttribute('aria-label'))).toEqual(groups);
-  expect(within(sheet).getAllByRole('group').flatMap(group => within(group).getAllByRole('button').map(button => button.querySelector('span > span')!.textContent))).toEqual(rows);
+  expect(within(sheet).getByRole('navigation',{name:item.name})).toBeTruthy();
+  expect(within(sheet).getByRole('navigation').querySelectorAll('.more-panel__label')).toHaveLength(rows.length);expect([...within(sheet).getByRole('navigation').querySelectorAll('.more-panel__label')].map(label=>label.firstChild?.textContent)).toEqual(rows);
   expect(within(sheet).getByRole('button', {name: /^컬렉션 삭제/})).toHaveClass('is-danger');
 });
 
@@ -88,7 +88,7 @@ it('reads the binding only when 작품 관리 opens and answers a reopen from th
   await waitFor(() => expect(refresh).toBeEnabled());
   expect(baselinePages()).toBe(1);
   fireEvent.keyDown(document.activeElement ?? document.body, {key: 'Escape'});
-  await waitFor(() => expect(screen.queryByRole('dialog', {name: '작품 관리'})).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   fireEvent.click(screen.getByRole('button', {name: '관리 열기'}));
   const again = await within(await menu()).findByRole('button', {name: /^TMDB 새로고침/});
   await waitFor(() => expect(again).toBeEnabled());
@@ -98,7 +98,9 @@ it('reads the binding only when 작품 관리 opens and answers a reopen from th
 it('does not offer connect before the binding read has started', async () => {
   render(<Harness/>);
   const sheet = await menu();
-  expect(within(sheet).queryByRole('button', {name: /^TMDB에 연결/})).toBeNull();
+  const connect=within(sheet).queryByRole('button', {name: /^TMDB에 연결/});
+  if(connect)expect(connect).toBeDisabled();
+  expect(await within(sheet).findByRole('button',{name:/^TMDB 새로고침/})).toBeEnabled();
 });
 
 it('offers connect while unbound and keeps artwork waiting for a binding', async () => {
@@ -110,7 +112,7 @@ it('offers connect while unbound and keeps artwork waiting for a binding', async
   expect(artwork).toBeDisabled(); expect(rowText(artwork)).toContain('TMDB에 연결하면 이미지를 고를 수 있습니다.');
   fireEvent.click(connect);
   expect(await screen.findByRole('dialog', {name: 'TMDB에 연결'})).toBeTruthy();
-  expect(screen.queryByRole('dialog', {name: '작품 관리'})).toBeNull();
+  expect(screen.queryByRole('dialog',{name:item.name})).toBeNull();
 });
 
 it('opens the merged edit form from 컬렉션 편집 and blocks delete without the shown revision', async () => {
@@ -120,7 +122,7 @@ it('opens the merged edit form from 컬렉션 편집 and blocks delete without t
   expect(remove).toBeDisabled(); expect(rowText(remove)).toContain('서버를 업데이트하면 삭제할 수 있습니다');
   fireEvent.click(within(sheet).getByRole('button', {name: /^컬렉션 편집/}));
   expect(onForm).toHaveBeenCalledWith({mode: 'edit', type: 'movie', item});
-  await waitFor(() => expect(screen.queryByRole('dialog', {name: '작품 관리'})).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 });
 
 it('prefills connect from the work name and queues a connect without a create type', async () => {
@@ -140,7 +142,7 @@ it('queues refresh for the stored binding from the menu and closes it', async ()
   await waitFor(() => expect(readCommands()).toHaveLength(1));
   expect(readCommands()[0].command).toMatchObject({operation: 'refresh', provider: 'tmdb', externalId: 'tv:42', workId: item.id});
   expect(readCommands()[0].command).not.toHaveProperty('type');
-  await waitFor(() => expect(screen.queryByRole('dialog', {name: '작품 관리'})).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 });
 
 it('keeps both artwork slots by default and shows season posters without cover selection', async () => {

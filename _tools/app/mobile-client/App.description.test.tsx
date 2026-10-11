@@ -47,7 +47,7 @@ it('Enter opens the 내용 검색 result state in 에셋 and 검색 해제 retur
   expect(screen.getByText('이미지 내용')).toBeTruthy();expect(screen.getByText('관련도순 · 상위 2장')).toBeTruthy();
   const full=descriptionCalls().find(url=>url.searchParams.get('limit')==='200')!;
   expect(full.searchParams.get('q')).toBe('눈 내리는 겨울');expect(full.searchParams.has('force')).toBe(false);
-  fireEvent.click(screen.getByRole('button',{name:'검색 해제'}));
+  fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'검색 해제'}));
   expect(await screen.findByLabelText('home-content')).toBeTruthy();
   expect(screen.queryByText('이미지 내용')).toBeNull();
 });

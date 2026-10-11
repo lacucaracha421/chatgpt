@@ -199,7 +199,7 @@ describe('folder management entry points',()=>{
     render(<App/>);
     expect(await screen.findByRole('button',{name:'새 폴더'})).toBeTruthy();
     fireEvent.click(await screen.findByRole('button',{name:/^혼자/}));await screen.findByText('tile-a1');
-    expect(screen.getByRole('button',{name:'폴더 관리'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));expect(screen.getByRole('button',{name:'폴더 관리'})).toBeTruthy();
     cleanup();mocks.api.mockImplementation(server(2,{authority:null}));
     render(<App/>);
     await screen.findByRole('button',{name:/^혼자/});
@@ -242,7 +242,7 @@ describe('folder management entry points',()=>{
     });
     render(<App/>);
     fireEvent.click(await screen.findByRole('button',{name:/^혼자/}));await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'폴더 관리'}));
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'폴더 관리'}));
     await waitFor(()=>expect((screen.getByRole('button',{name:'이름 바꾸기'}) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button',{name:'이름 바꾸기'}));
     fireEvent.change(screen.getByLabelText('폴더 이름'),{target:{value:'바뀐 이름'}});

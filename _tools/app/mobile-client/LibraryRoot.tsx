@@ -2,8 +2,7 @@ import {displayCount} from '../src/shared/displayDate';
 import {useCallback,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type React from 'react';
 import {ChevronDownIcon,ChevronRightIcon} from '@heroicons/react/24/outline';
-import {BottomSheet} from './BottomSheet';
-import {SearchButton,TopBar} from './TopBar';
+import {TopBar} from './TopBar';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {Button,SectionLabel} from './ui';
 import {useSectionShade} from './SectionShade';
@@ -14,7 +13,6 @@ import {Albums,type AlbumTree} from './Albums';
 import {usePullToRefresh} from './usePullToRefresh';
 import type {Asset,View} from './types';
 import type {CharacterIndex} from './characterModel';
-import {SimilarityReviewEntry} from './SimilarityReview';
 import {Scrubber} from './Scrubber';
 import {AssetSearch} from './AssetSearch';
 import {assetSuggestions,type AssetSuggestion} from './assetSearchModel';
@@ -66,8 +64,7 @@ function useFolderFit(active:boolean,scroller:React.RefObject<HTMLDivElement|nul
   return fit;
 }
 export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onOpenArtist,onSearchSelect,onSearchFocus,endpoint='',onRefresh,albumTree,albumError,albumLoading=false,segment,onSegment,restoreScroll,onScroll,similarity,subtree=false,onCreateFolder}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSearchSelect?(item:AssetSuggestion):void;onSearchFocus?():void;endpoint?:string;onSelect(view:View):void;onOpenArtist(artist:LibraryArtist):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;albumLoading?:boolean;segment:LibrarySegment;onSegment(segment:LibrarySegment):void;restoreScroll:number;onScroll(top:number):void;/** The server serves subtree listings, so folder covers show the newest image anywhere below each folder. */subtree?:boolean;/** Present when the tablet may create folders; opens the new-folder sheet. */onCreateFolder?():void}) {
-  const [searchOpen,setSearchOpen]=useState(false);
-  const [queueOpen,setQueueOpen]=useState(false);
+  const [searchOpen,setSearchOpen]=useState(false),[searchDraft,setSearchDraft]=useState('');
   const [artistNames,setArtistNames]=useState<string[]>([]);
   // The end line describes the first screen only; it leaves once the user scrolls.
   const [scrolled,setScrolled]=useState(false);
@@ -77,7 +74,6 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   // Waiting review work is one quiet "확인 N" in the bar, shown only while something waits.
   const similarityCount=useSimilarityReviewCount(!!similarity?.enabled&&active&&!paused,similarity?.refreshKey,similarity?.scope)??0;
   const waiting=similarityCount;
-  const openQueue=()=>setQueueOpen(true);
   const topFolders=entries.filter(entry=>!entry.parent_id);
   const showFolders=segment==='folders'&&!searchOpen;
   const fit=useFolderFit(active&&showFolders,host,folders,`${topFolders.length}:${!!waiting}`);
@@ -99,9 +95,9 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   const sections=useSectionShade<LibrarySegment>({label:'에셋 보기',options:SEGMENTS,value:segment,onChange:chooseSegment},{active:active&&!paused});
   const onVisibleArtistNames=useCallback((names:string[])=>setArtistNames(previous=>previous.length===names.length&&previous.every((name,index)=>name===names[index])?previous:names),[]);
   return <div className={`library-root${fit?' is-fit':''}`} style={{display:active?undefined:'none',...(fit?{'--root-cover-height':`${fit.cover}px`} as React.CSSProperties:{})}}>
-    {searchOpen&&<AssetSearch items={suggestions} endpoint={endpoint} paused={paused} loading={busy||albumLoading||artistList.state==='idle'||artistList.state==='loading'} onClose={closeSearch} onChoose={chooseSuggestion} error={albumError||artistList.error} onRetry={()=>{onRefresh();artistList.retry();}}/>}
+    {searchOpen&&<AssetSearch initialQuery={searchDraft} items={suggestions} endpoint={endpoint} paused={paused} loading={busy||albumLoading||artistList.state==='idle'||artistList.state==='loading'} onClose={closeSearch} onChoose={chooseSuggestion} error={albumError||artistList.error} onRetry={()=>{onRefresh();artistList.retry();}}/>}
     <div style={{display:searchOpen?'none':undefined}} className="library-root-content">
-    <TopBar barRef={sections.barRef} title={sections.title('에셋')} loading={busy&&'목록 불러오는 중'} actions={<>{waiting>0&&<button className="top-bar__queue" onClick={openQueue} aria-label={`확인할 것 ${waiting}개`}>확인<span className="numeric">{waiting}</span></button>}<SearchButton onClick={openSearch}/></>}/>
+    <TopBar barRef={sections.barRef} title={sections.title('에셋')} loading={busy&&'목록 불러오는 중'} search={{scope:'에셋',run:query=>{setSearchDraft(query);openSearch();}}} menuCount={waiting}/>
     {sections.shade}
     <div className="library-root-scroll" ref={host} onScroll={event=>{const top=event.currentTarget.scrollTop;onScroll(top);if(top>8!==scrolled)setScrolled(top>8);}} aria-label="에셋 탐색">{pull}
     {sections.inline}
@@ -115,11 +111,8 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
       {albumTree&&<Albums key={`${albumTree.libraryId}:${albumTree.epoch}`} tree={albumTree} revision={revision} paused={paused||!active||segment!=='albums'||searchOpen} onSelect={onSelect}/>}
     </div>
     <div style={{display:segment==='artists'?undefined:'none'}}><HiddenArtists endpoint={endpoint} artists={artistList.allArtists} onOpen={onOpenArtist} pending={artistList.pending} syncError={artistList.error} onRetry={artistList.retry}/><ArtistGrid artists={artistList.artists} state={artistList.state} paused={paused||!active||segment!=='artists'||searchOpen} onOpenArtist={onOpenArtist} onVisibleNames={onVisibleArtistNames}/></div>
-    <Scrubber scrollRef={host} total={scrubberValues.length} sort={scrubberSort} hidden={!active||paused||queueOpen||searchOpen}/>
+    <Scrubber scrollRef={host} total={scrubberValues.length} sort={scrubberSort} hidden={!active||paused||searchOpen}/>
   </div>
   </div>
-  {queueOpen&&<BottomSheet title="확인할 것" onClose={()=>setQueueOpen(false)}>
-    {similarity&&<SimilarityReviewEntry enabled={similarity.enabled&&active&&!paused} refreshKey={similarity.refreshKey} onOpen={()=>{setQueueOpen(false);similarity.onOpen();}}/>}
-  </BottomSheet>}
   </div>;
 }

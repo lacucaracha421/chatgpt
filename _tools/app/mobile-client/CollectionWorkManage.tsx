@@ -1,6 +1,6 @@
-import {useState, type ComponentType, type SVGProps} from 'react';
+import {useState} from 'react';
 import {ArrowPathIcon, EllipsisHorizontalIcon, LinkIcon, PencilSquareIcon, PhotoIcon, TrashIcon} from '@heroicons/react/24/outline';
-import {BottomSheet} from './BottomSheet';
+import {MoreSheet,type ScreenMenuEntry} from './MoreSheet';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
 import {ProviderArtworkSheet, ProviderSearchSheet, useProviderBinding, type ProviderStatusState} from './CollectionProviders';
 import {artworkLabel, providerName} from './collectionProviderModel';
@@ -20,12 +20,6 @@ export type ManageSheet = 'menu' | 'delete' | 'search' | 'artwork' | 'av' | null
 /** The work detail's top-bar ⋯: one place for everything the PC's 작품 관리 menu offers. */
 export function WorkManageButton({onOpen}: {onOpen(): void}) {
   return <IconButton label="작품 관리" icon={EllipsisHorizontalIcon} onClick={onOpen}/>;
-}
-
-function ManageRow({icon: Icon, label, detail, danger = false, disabled = false, onClick}: {icon: ComponentType<SVGProps<SVGSVGElement>>; label: string; detail?: string | null; danger?: boolean; disabled?: boolean; onClick(): void}) {
-  return <button type="button" className={`sheet-option collection-manage-row${danger ? ' is-danger' : ''}`} disabled={disabled} onClick={onClick}>
-    <Icon aria-hidden="true"/><span className="collection-manage-row__text"><span>{label}</span>{detail && <small>{detail}</small>}</span>
-  </button>;
 }
 
 /**
@@ -54,23 +48,16 @@ export function WorkManage({item, confirmed = item, items = [], avRetry, authori
     close(); onDeleted(item.id);
   });
   return <>
-    {sheet === 'menu' && <BottomSheet title="작품 관리" onClose={close}>
-      <div className="collection-manage-group" role="group" aria-label="편집">
-        <ManageRow icon={PencilSquareIcon} label="컬렉션 편집" onClick={() => { close(); onForm({mode: 'edit', type: item.type, item}); }}/>
-        {item.type === 'av' && <ManageRow icon={PencilSquareIcon} label={AV_EDIT_TITLE} onClick={() => onSheet('av')}/>}
-      </div>
-      {provider && <div className="collection-manage-group" role="group" aria-label="외부 정보">
-        <ManageRow icon={binding.externalId ? ArrowPathIcon : LinkIcon} label={binding.externalId ? `${name} 새로고침` : `${name}에 연결`}
-          detail={binding.failure && !connectBlocked ? `${binding.failure} · 눌러서 다시 확인` : connectText} disabled={!!connectBlocked}
-          onClick={() => binding.failure ? binding.retry() : binding.externalId ? act(() => { binding.refresh(); close(); }) : onSheet('search')}/>
-        <ManageRow icon={PhotoIcon} label={artworkLabel(provider)} disabled={!!binding.blocked || !binding.externalId}
-          detail={binding.blockedText ?? (binding.blocked || binding.externalId ? null : `${name}에 연결하면 이미지를 고를 수 있습니다.`)} onClick={() => onSheet('artwork')}/>
-      </div>}
-      <div className="collection-manage-group" role="group" aria-label="삭제">
-        <ManageRow icon={TrashIcon} label="컬렉션 삭제" danger disabled={!!deleteBlocked} detail={deleteBlocked} onClick={() => onSheet('delete')}/>
-      </div>
-      {failure && <p role="alert" className="collection-manage-failure">{failure}</p>}
-    </BottomSheet>}
+    {sheet === 'menu' && <MoreSheet screenError={failure} screenTitle={item.name} onClose={close} screenEntries={[
+      {id:'edit',group:'action',label:'컬렉션 편집',icon:<PencilSquareIcon/>,run:()=>{close();onForm({mode:'edit',type:item.type,item});}},
+      ...(item.type==='av'?[{id:'av-edit',group:'action',label:AV_EDIT_TITLE,icon:<PencilSquareIcon/>,run:()=>onSheet('av')} as ScreenMenuEntry]:[]),
+      ...(provider?[
+        {id:'provider',group:'action',label:binding.externalId?`${name} 새로고침`:`${name}에 연결`,icon:binding.externalId?<ArrowPathIcon/>:<LinkIcon/>,hint:binding.failure&&!connectBlocked?`${binding.failure} · 눌러서 다시 확인`:connectText,disabled:!!connectBlocked,keepOpen:true,
+          run:()=>binding.failure?binding.retry():binding.externalId?act(()=>{binding.refresh();close();}):onSheet('search')},
+        {id:'artwork',group:'action',label:artworkLabel(provider),icon:<PhotoIcon/>,disabled:!!binding.blocked||!binding.externalId,hint:binding.blockedText??(binding.blocked||binding.externalId?null:`${name}에 연결하면 이미지를 고를 수 있습니다.`),run:()=>onSheet('artwork')},
+      ] as ScreenMenuEntry[]:[]),
+      {id:'delete',group:'action',label:'컬렉션 삭제',icon:<TrashIcon/>,danger:true,disabled:!!deleteBlocked,hint:deleteBlocked,run:()=>onSheet('delete')},
+    ]}/>}
     {sheet === 'delete' && <Dialog open title="컬렉션 삭제" onClose={close}>
       <div className="library-sheet collection-delete">
         <DialogDescription>{item.name} 컬렉션을 삭제하시겠습니까? 원본 에셋은 삭제하지 않습니다. 30일 동안 휴지통에서 되살릴 수 있어요.</DialogDescription>

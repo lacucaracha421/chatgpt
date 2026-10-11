@@ -1,6 +1,7 @@
-import {FindButton} from './FindContext';
+import {FindButton,type ScreenFind} from './FindContext';
+import {MoreButton,MoreContext,MoreSheet,type ScreenMenu} from './MoreSheet';
 import {ArrowLeftIcon,MagnifyingGlassIcon,PlusIcon} from '@heroicons/react/24/outline';
-import {useEffect,useRef,type ReactNode,type Ref} from 'react';
+import {useContext,useEffect,useRef,useState,type ReactNode,type Ref} from 'react';
 import {IconButton,Mark} from './ui';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {displayCount} from '../src/shared/displayDate';
@@ -23,11 +24,15 @@ export function LoadingLine({label,className=''}:{label:string|false|undefined;c
 export function BarProgress({label}:{label:string|false|undefined}) {
   return <LoadingLine label={label} className="top-bar__progress"/>;
 }
-export function TopBar({title,count,crumbs,back,actions,className='',loading,barRef,find=false}:{find?:boolean;title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false;/** The bar element, for a section shade's pull (SectionShade.tsx). */barRef?:Ref<HTMLElement>}) {
+export function TopBarActions({itemAction,search,menu,onMenu,menuCount=0}:{itemAction?:ReactNode;search?:ScreenFind;menu?:ScreenMenu;onMenu?():void;menuCount?:number}) {
+  const more=useContext(MoreContext),[open,setOpen]=useState(false);
+  return <><div className="top-bar__slots">{itemAction}<FindButton search={search}/><MoreButton count={menuCount||more?.options.reviewCount||0} onOpen={()=>{if(onMenu)onMenu();else if(more)more.open(menu);else setOpen(true);}}/></div>{open&&<MoreSheet screenTitle={menu?.title} screenEntries={menu?.entries} onClose={()=>setOpen(false)}/>}</>;
+}
+export function TopBar({title,count,crumbs,back,itemAction,search,menu,onMenu,menuCount,className='',loading,barRef}:{title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};itemAction?:ReactNode;search?:ScreenFind;menu?:ScreenMenu;onMenu?():void;menuCount?:number;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false;/** The bar element, for a section shade's pull (SectionShade.tsx). */barRef?:Ref<HTMLElement>}) {
   return <header ref={barRef} className={`top-bar${className?` ${className}`:''}`}>
     {back?<IconButton label={back.label} icon={ArrowLeftIcon} onClick={back.onClick}/>:<span className="top-bar__brand"><Mark/></span>}
-    <div className={`top-bar__titles${crumbs!=null&&title!=null?' top-bar__titles--stacked':''}`}>{crumbs}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{typeof count==='number'?displayCount(count):count}</span>}</div>}</div>
-    <span className="top-bar__space"/>{find&&<FindButton/>}{actions}<BarProgress label={loading}/>
+    <div className="top-bar__titles">{crumbs&&<div className="top-bar__parent">{crumbs}</div>}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{typeof count==='number'?displayCount(count):count}</span>}</div>}</div>
+    <span className="top-bar__space"/><TopBarActions itemAction={itemAction} search={search} menu={menu} onMenu={onMenu} menuCount={menuCount}/><BarProgress label={loading}/>
   </header>;
 }
 /** Open search bars, so the system Back can close the visible one before navigating. */
@@ -46,7 +51,7 @@ const INTERACTIVE='button,a,input,textarea,select,label,[role="option"],[role="l
  * `onClose` (the ← button, Back, or a tap on empty space outside the bar) closes the bar and
  * clears the query, so no hidden query keeps narrowing the list.
  */
-export function TopBarSearch({title,onClose,children,loading}:{title:string;onClose():void;children:ReactNode;loading?:string|false}) {
+export function TopBarSearch({title,onClose,children,loading,search,menu}:{title:string;onClose():void;children:ReactNode;loading?:string|false;search?:ScreenFind;menu?:ScreenMenu}) {
   const bar=useRef<HTMLElement>(null);
   const close=useRef(onClose);close.current=onClose;
   useEffect(()=>{
@@ -60,7 +65,7 @@ export function TopBarSearch({title,onClose,children,loading}:{title:string;onCl
     document.addEventListener('pointerdown',outside,true);
     return()=>{openSearches.delete(entry);document.removeEventListener('pointerdown',outside,true);};
   },[]);
-  return <header ref={bar} className="top-bar is-search"><h1 className="sr-only">{title}</h1><IconButton label="검색 닫기" icon={ArrowLeftIcon} onClick={onClose}/>{children}<BarProgress label={loading}/></header>;
+  return <header ref={bar} className="top-bar is-search"><h1 className="sr-only">{title}</h1><IconButton label="검색 닫기" icon={ArrowLeftIcon} onClick={onClose}/>{children}<TopBarActions search={search} menu={menu}/><BarProgress label={loading}/></header>;
 }
 export function SearchButton({onClick}:{onClick():void}) {
   return <IconButton label="검색" icon={MagnifyingGlassIcon} onClick={onClick}/>;

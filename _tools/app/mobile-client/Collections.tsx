@@ -25,7 +25,7 @@ import {AvPerformerScreen, avPerformerView} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
 import {AuthorityQueue, CollectionWorkForm, type WorkForm} from './CollectionAuthorityForms';
 import {useProviderStatus} from './CollectionProviders';
-import {WorkManage, WorkManageButton, type ManageSheet} from './CollectionWorkManage';
+import {WorkManage, type ManageSheet} from './CollectionWorkManage';
 import { lifecycleIntents, useCollectionTrash} from './CollectionTrash';
 import {lifecycleInFlight} from './collectionCommandOutbox';
 import {CollectionReleases} from './CollectionReleases';
@@ -49,8 +49,8 @@ import {KakaoReviewOverlay, useKakaoReviewQueue} from './KakaoReviewOverlay';
 import {LinkIcon} from '@heroicons/react/24/outline';
 import {SegmentedControl} from '../src/shared/ui/SegmentedControl';
 import {ReleaseCalendar} from './ReleaseCalendar';
-import {CreateWorkButton,SearchButton,TopBar,TopBarSearch} from './TopBar';
-import {FindButton} from './FindContext';
+import {CreateWorkButton,TopBar,TopBarSearch} from './TopBar';
+
 import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSectionShade} from './SectionShade';
@@ -651,20 +651,20 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <IconButton label="내 별점" icon={StarIcon} activeIcon={StarSolid} active={filters.rating!=='all'} onClick={()=>setSheet('rating')}/>
     <IconButton label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/>
   </div>;
-  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:shortcuts},{active:live&&!selected&&!overlayOpen&&!performer});
+  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>{viewTools}{shortcuts}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
   const header=selected
-    ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<span className="top-bar__crumbs is-alone">{directWork?'홈':<>컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</>}</span>} actions={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits}/>{edits.authority.identity&&<WorkManageButton onOpen={()=>setManage('menu')}/>}</div>:undefined}/>
+    ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<button onClick={closeWork} className="top-bar__crumbs is-alone">{directWork?'홈':<>컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</>} ›</button>} itemAction={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits} tracking={false}/></div>:undefined} onMenu={item&&edits.authority.identity?()=>setManage('menu'):undefined}/>
     :performer
-      ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › AV › 배우</span>} actions={edits.authority.identity ? <IconButton label="배우 관리" icon={EllipsisHorizontalIcon} onClick={() => setPerformerManagementRequest(value => value + 1)}/> : undefined}/>
+      ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<button onClick={closePerformer} className="top-bar__crumbs is-alone">컬렉션 › AV › 배우 ›</button>} menu={edits.authority.identity?{title:'배우',entries:[{id:'performer-manage',group:'action',label:'배우 관리',icon:<EllipsisHorizontalIcon/>,run:()=>setPerformerManagementRequest(value=>value+1)}]}:undefined}/>
     :searching&&tab!=='av'&&!overlayOpen
-        ?<TopBarSearch title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
+        ?<TopBarSearch title="컬렉션" search={{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());}}} loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
-        </form>{viewTools}</TopBarSearch>
-        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{viewTools}{tab==='av'?<><FindButton/><Button variant="ghost" onClick={()=>setAvInboxOpen(true)}>품번 보내기</Button></>:<SearchButton onClick={()=>setSearchOpen(true)}/>}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>}/>;
+        </form></TopBarSearch>
+        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} search={tab!=='av'?{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());setSearchOpen(true);}}:undefined} menu={tab==='av'?{title:'컬렉션',entries:[{id:'av-inbox',group:'action',label:'품번 보내기',icon:<RectangleStackIcon/>,run:()=>setAvInboxOpen(true)}]}:undefined}/>;
   const showAvLoading=useDelayedBusy(main.busy&&!main.committed);
   const showDetailLoading=useDelayedBusy(!!selected&&!item&&!detailError);
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;

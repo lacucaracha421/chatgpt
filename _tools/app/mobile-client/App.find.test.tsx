@@ -57,9 +57,21 @@ it('Android Back closes find first, preserves Home, then the usual back chain wo
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());
   expect(nav('홈').getAttribute('aria-current')).toBe('page');expect(mocks.native.mock.calls.some(([op])=>op==='finish')).toBe(false);
 });
-it('keeps the existing Assets search in its top-bar slot',async()=>{
+it('runs the existing asset search from the preselected local Find row',async()=>{
   render(<App/>);fireEvent.click(nav('에셋'));await screen.findByRole('heading',{name:'에셋'});
-  expect(screen.getByRole('button',{name:'검색',exact:true})).toBeTruthy();expect(screen.queryByRole('button',{name:'찾기',exact:true})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'찾기'}));
+  const field=screen.getByRole('combobox');fireEvent.change(field,{target:{value:'별과'}});
+  await waitFor(()=>expect(screen.getAllByRole('option')[0].textContent).toContain('이 화면에서 ‘별과’'));
+  expect(screen.getAllByRole('option')[0].getAttribute('aria-selected')).toBe('true');
+  fireEvent.keyDown(field,{key:'Enter'});
+  expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull();
+  expect((screen.getByRole('searchbox',{name:'에셋 찾기'}) as HTMLInputElement).value).toBe('별과');
+  expect(await screen.findByRole('button',{name:/^별과 폴더/})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'찾기'}));
+  const nextField=screen.getByRole('combobox');fireEvent.change(nextField,{target:{value:'다른 검색'}});
+  await screen.findByRole('option',{name:/이 화면에서 ‘다른 검색’/});
+  fireEvent.keyDown(nextField,{key:'Enter'});
+  expect((screen.getByRole('searchbox',{name:'에셋 찾기'}) as HTMLInputElement).value).toBe('다른 검색');
 });
 
 it.each(['홈','에셋'])('find opens the %s tab',async(name)=>{
@@ -67,4 +79,16 @@ it.each(['홈','에셋'])('find opens the %s tab',async(name)=>{
   fireEvent.click((await screen.findAllByRole('option')).find(option=>option.textContent===name)!);
   await waitFor(()=>expect(nav(name).getAttribute('aria-current')).toBe('page'));
   expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull();
+});
+
+it('keeps the review corner count and queue group available on Assets',async()=>{
+  window.LakomicsNative!.localStatus=()=>JSON.stringify({configured:true,endpoint:'https://review-count-test'});
+  const native=mocks.native.getMockImplementation()!;
+  mocks.native.mockImplementation(async(...args:unknown[])=>{const value=await native(...args);return value?.configured?{...value,endpoint:'https://review-count-test'}:value;});
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string,...args:unknown[])=>path.startsWith('/v1/library/similarity/review')?{ready:true,counts:{open:3},items:[]}:original(path,...args));
+  render(<App/>);fireEvent.click(nav('에셋'));await screen.findByRole('heading',{name:'에셋'});
+  await waitFor(()=>expect(screen.getByRole('button',{name:'더보기'}).parentElement?.querySelector('.header-badge')?.textContent).toBe('3'));
+  fireEvent.click(screen.getByRole('button',{name:'더보기'}));
+  expect(await within(screen.getByRole('navigation',{name:'확인할 것'})).findByRole('button',{name:'유사 검토 3개'})).toBeTruthy();
 });

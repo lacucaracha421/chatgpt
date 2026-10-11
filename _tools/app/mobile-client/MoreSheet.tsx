@@ -1,11 +1,10 @@
-import {useCallback} from 'react';
+import {createContext,useCallback,useContext} from 'react';
 import {EllipsisHorizontalIcon, InboxIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
-import {MoreEntryList} from '../src/layout/MorePanel';
 import {MORE_LABELS, NAVIGATION_GROUP_LABELS, type NavigationEntry} from '../src/shared/findEntries';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {BottomSheet} from './BottomSheet';
 import {screenReady} from './perf';
-import {CountBadge, IconButton} from './ui';
+import {CountBadge, IconButton,SectionLabel} from './ui';
 import './moreSheet.css';
 
 export function MoreButton({count, onOpen}: {count: number; onOpen(): void}) {
@@ -18,6 +17,15 @@ export type MoreOptions = {
   exchangeActivity?: string;
   onReview(): void; onUnsorted(): void; onExchange(): void; onVault(): void; onArtists(): void; onTrash(): void; onSettings(): void;
 };
+export type ScreenMenuEntry=NavigationEntry&{disabled?:boolean;hint?:string|null;danger?:boolean;keepOpen?:boolean};
+export type ScreenMenu={title:string;entries:ScreenMenuEntry[]};
+export const MoreContext=createContext<{options:MoreOptions;open(menu?:ScreenMenu):void}|null>(null);
+function MoreEntryList({entries,heading,onRun}:{entries:ScreenMenuEntry[];heading:string;onRun():void}) {
+  if(!entries.length)return null;
+  return <nav className="more-panel__navigation" aria-label={heading}><SectionLabel className="workspace-section-label" title={heading}/>{entries.map(entry=><button key={entry.id} type="button" className={`workspace-index-link${entry.danger?' is-danger':''}`} disabled={entry.disabled} aria-label={entry.count===undefined?undefined:`${entry.label} ${entry.count.toLocaleString()}개`} aria-description={entry.hint??entry.activity} onClick={()=>{if(!entry.keepOpen)onRun();entry.run();}}>
+    <span className="more-panel__icon" aria-hidden="true">{entry.icon}</span><span className="more-panel__label">{entry.label}{entry.hint&&<small>{entry.hint}</small>}</span>{entry.count!==undefined&&<span className="more-panel__count">{entry.count.toLocaleString()}</span>}{entry.activity&&<span className="more-panel__activity" aria-hidden="true"/>}
+  </button>)}</nav>;
+}
 
 export function tabletMoreEntries(options: MoreOptions): NavigationEntry[] {
   const queue = (count: number | null) => (count ?? 0) > 0 ? 'queue' as const : 'go' as const;
@@ -33,12 +41,14 @@ export function tabletMoreEntries(options: MoreOptions): NavigationEntry[] {
   ];
 }
 
-export function MoreSheet({onClose, ...options}: MoreOptions & {onClose(): void}) {
-  const entries = tabletMoreEntries(options);
+export function MoreSheet({onClose, screenEntries=[],screenTitle,screenHint,screenError, ...options}: Partial<MoreOptions> & {onClose(): void;screenEntries?:ScreenMenuEntry[];screenTitle?:string;screenHint?:string;screenError?:string}) {
+  const more=useContext(MoreContext);
+  const entries = options.onReview ? tabletMoreEntries(options as MoreOptions) : more ? tabletMoreEntries(more.options) : [];
   // The sheet renders in the dialog's portal, outside the app root, and after this component's own
   // commit; its content reports itself shown as it attaches, so More's screen timing can complete.
   const shown = useCallback((element: HTMLDivElement | null) => { if (element) screenReady('more', element); }, []);
-  return <BottomSheet title="더보기" onClose={onClose}><div className="tablet-more" ref={shown}>
+  return <BottomSheet title={screenEntries.length?screenTitle??'더보기':'더보기'} onClose={onClose}><div className="tablet-more" ref={shown}>
+    <MoreEntryList entries={screenEntries} heading={screenTitle??'이 화면'} onRun={onClose}/>{screenHint&&<p className="hint">{screenHint}</p>}{screenError&&<p role="alert" className="collection-manage-failure">{screenError}</p>}
     <MoreEntryList entries={entries.filter(entry => entry.group === 'queue')} heading={NAVIGATION_GROUP_LABELS.queue} onRun={onClose}/>
     <MoreEntryList entries={entries.filter(entry => entry.group === 'go')} heading={NAVIGATION_GROUP_LABELS.go} onRun={onClose}/>
   </div></BottomSheet>;

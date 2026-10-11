@@ -1,5 +1,5 @@
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import {BellSlashIcon, MinusIcon, PlusIcon} from '@heroicons/react/24/outline';
 import {BellIcon as BellSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
@@ -27,16 +27,20 @@ export function trackingState(item: CollectionDetail, edits: PersonalEdits) {
  * The owned-volume count per edition, for a manga Collection: the rows the PC's ownership panel
  * edits. They are editable only while the server advertises `collectionTrackingEdit` (an
  * upgraded PC published them); otherwise they are shown read-only with a short note. Edits
- * travel on the personal-edit outbox like my rating. 신간 알림 lives in the top bar
- * (`ReleaseWatchAction`).
+ * travel on the personal-edit outbox like my rating. The tablet keeps 신간 알림 here so the
+ * top bar has only one item action.
  */
 export function TrackingRows({item, edits, onOwned}: {item: CollectionDetail; edits: PersonalEdits; onOwned(edition: number): void}) {
+  const [reason,setReason]=useState('');
+  useEffect(()=>{if(!reason)return;const timer=window.setTimeout(()=>setReason(''),3000);return()=>window.clearTimeout(timer);},[reason]);
   if (item.type !== 'manga') return null;
   const {published, editable} = trackingState(item, edits);
   // An upgraded PC publishes both keys; one that has not yet leaves nothing to show.
   if (!published && edits.trackingSupported) return null;
   const single = trackedEditions(item).length === 1;
   return <>
+    <div className="collection-tracking-watch"><ReleaseWatchAction item={item} edits={edits} onReason={setReason}/>{item.releaseWatch&&<span>신간 알림</span>}</div>
+    {reason&&<p className="collection-toast" role="status">{reason}</p>}
     {trackedEditions(item).map(edition => {
       const owned = edits.visible<OwnedVolumesValue>(item.id, 'ownedVolumes', {editionIndex: edition, count: publishedCount(item, edition)});
       const total = editionVolumes(item.volumes, edition).length;

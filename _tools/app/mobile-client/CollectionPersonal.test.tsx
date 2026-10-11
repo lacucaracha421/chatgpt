@@ -367,7 +367,7 @@ describe('manga detail layout',()=>{
     await waitFor(()=>expect(screen.queryByRole('dialog',{name:'내 별점'})).toBeNull());
     // The top bar carries Showcase (off) and 신간 알림 (on) as toggles.
     expect(within(actions()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
-    expect(within(actions()).getByRole('button',{name:'신간 알림'}).getAttribute('aria-pressed')).toBe('true');
+    expect(within(info.getByRole('region',{name:'소장'})).getByRole('button',{name:'신간 알림'}).getAttribute('aria-pressed')).toBe('true');
     // The bookcase marks the volumes not owned; the provider overview stays hidden.
     expect(screen.getByRole('button',{name:'3권 보기'}).classList.contains('manga-spine--missing')).toBe(true);
     expect(screen.getByRole('button',{name:'2권 보기'}).classList.contains('manga-spine--missing')).toBe(false);

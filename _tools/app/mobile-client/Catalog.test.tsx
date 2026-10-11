@@ -1,13 +1,14 @@
+import {render,openScreenSearch} from './screenSearchTest';
 import {displayDateTime} from '../src/shared/displayDate';
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
-import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {act,cleanup,fireEvent,screen,waitFor,within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Catalog} from './Catalog';
 import {forgetCatalogCovers} from './CatalogCover';
 import {suggestionQuery,type CatalogItem,type CatalogPage} from './catalogModel';
 import * as catalogMedia from './catalogMedia';
 /** Search lives behind the top bar's magnifier; open it once, then use the field. */
-function catalogSearch(role:'textbox'|'combobox'){if(!screen.queryByRole(role,{name:'카탈로그 검색'}))fireEvent.click(screen.getByRole('button',{name:'검색'}));return screen.getByRole(role,{name:'카탈로그 검색'});}
+function catalogSearch(role:'textbox'|'combobox'){if(!screen.queryByRole(role,{name:'카탈로그 검색'}))openScreenSearch();return screen.getByRole(role,{name:'카탈로그 검색'});}
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn(),decode:vi.fn()}));
 vi.mock('./media',()=>({decodeImage:mocks.decode}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(e:Error)=>e.message}));
@@ -364,7 +365,7 @@ describe('mobile catalog reads',()=>{
     let published=false;
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{publicationRevision:'p1'}:published?{...page,items:[],countToken:null,totalCount:0,countStatus:'ready'}:{...page,ready:false,items:[],countToken:null});
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('카탈로그가 아직 공유되지 않았습니다');published=true;
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 새로고침'}));await screen.findByText('검색 결과 없음');expect(screen.queryByText('카탈로그가 아직 공유되지 않았습니다')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:/^새로고침/}));await screen.findByText('검색 결과 없음');expect(screen.queryByText('카탈로그가 아직 공유되지 않았습니다')).toBeNull();
   });
   it('resumes an aborted count without fetching the retained page again',async()=>{
     let countCalls=0;mocks.api.mockImplementation(async(path:string)=>{
@@ -696,7 +697,7 @@ describe('mobile catalog layout',()=>{
       return {...page,publishedAt};
     });
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    await screen.findByText(`갱신 ${displayDateTime(publishedAt)}`);expect(await screen.findByRole('button',{name:'새 작품 가져오기'})).toBeTruthy();
+    expect(document.querySelector('.top-bar')?.textContent).not.toContain('갱신');fireEvent.click(screen.getByRole('button',{name:'더보기'}));expect(await screen.findByRole('button',{name:`새로고침 · 갱신 ${displayDateTime(publishedAt)}`})).toBeTruthy();
   });
   it('offers only Read and starts at the cover even when old progress exists',async()=>{
     localStorage.setItem('lakomics.catalog.reading.kHentai:42','11');

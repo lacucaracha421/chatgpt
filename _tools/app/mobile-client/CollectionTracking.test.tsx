@@ -55,7 +55,7 @@ const section=()=>screen.getByRole('region',{name:'소장'});
 const personalSection=()=>screen.getByRole('region',{name:'내 기록'});
 /** 신간 알림 is a bell in the detail's top bar. */
 const actions=()=>screen.getByRole('group',{name:'작품 동작'});
-const watchSwitch=async()=>{await screen.findByRole('group',{name:'작품 동작'});return within(actions()).findByRole('button',{name:/^신간 알림/});};
+const watchSwitch=async()=>{await screen.findByRole('region',{name:'소장'});return within(section()).findByRole('button',{name:/^신간 알림/});};
 
 it('turns 신간 알림 on through the personal-edit outbox with the expected value',async()=>{
   await openDetail();

@@ -17,6 +17,7 @@ import {artworkTicket,decoded} from './collectionArtwork';
 import {decodeImage,mediaTicket} from './media';
 import {useNoteEditor} from './noteCaret';
 import './find.css';
+import type {ScreenFind} from './FindContext';
 
 type CachedMedia={url:string;promise:Promise<string>};
 type MediaCache=Map<string,CachedMedia>;
@@ -39,7 +40,7 @@ function FindMedia({entry,cache,signal}:{entry:TabletFindEntry;cache:MediaCache;
   return masked?<span className="privacy-mask" aria-label="이미지 숨김"/>:url?<img src={url} alt="" className={entry.avatar?'find-entry__avatar':undefined}/>:entry.icon;
 }
 
-export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,error,onRetry,onDescription}:{open:boolean;onClose():void;entries:TabletFindEntry[];endpoint:string;privacy:boolean;loading?:boolean;error?:string;onRetry?():void;/** Opens the 내용 검색 result state; absent when the screen cannot show one. */onDescription?(query:string):void}) {
+export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,error,onRetry,onDescription,search}:{open:boolean;onClose():void;entries:TabletFindEntry[];endpoint:string;privacy:boolean;loading?:boolean;error?:string;onRetry?():void;search?:ScreenFind;/** Opens the 내용 검색 result state; absent when the screen cannot show one. */onDescription?(query:string):void}) {
   const [nsfwFilter]=useNsfwFilter();
   const [query,setQuery]=useState(''),[scope,setScope]=useState<FindScope>('전체');
   const [expanded,setExpanded]=useState<NavigationEntryGroup[]>([]),[recent,setRecent]=useState<string[]>([]),[activeId,setActiveId]=useState<string|null>(null);
@@ -62,15 +63,17 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
     detail:<DescriptionStrip answer={strip.shown} failed={strip.failed} cache={session.cache} signal={session.controller.signal} privacy={privacy}/>,
     destination:{kind:'screen',screen:'assets'},run:()=>onDescription(typed)} as TabletFindEntry,...entries]:entries,[onDescription,draft.scope,typed,stripBusy,notReady,strip.shown,strip.failed,session,privacy,entries]);
   const groups=useMemo(()=>{
-    const found=findGroups(withContent,draft.query,draft.scope,privacy?[]:recent);
+    const local:TabletFindEntry[] = search?[{id:'screen-search',group:'search',label:typed?`이 화면에서 ‘${typed}’`:`${search.scope}에서 찾기`,icon:<MagnifyingGlassIcon/>,destination:{kind:'screen',screen:'assets'},run:()=>search.run(typed)}]:[];
+    const found=findGroups([...local,...withContent],draft.query,draft.scope,privacy?[]:recent);
     // Until the captions exist the row is informational, so Enter keeps going to the first real match.
-    return notReady?[...found.filter(({group})=>group!=='content'),...found.filter(({group})=>group==='content')]:found;
-  },[withContent,draft,privacy,recent,notReady]);
+    const appGroups=found.filter(({group})=>group!=='search');
+    return [...found.filter(({group})=>group==='search'),...(notReady?[...appGroups.filter(({group})=>group!=='content'),...appGroups.filter(({group})=>group==='content')]:appGroups)];
+  },[withContent,draft,privacy,recent,notReady,search,typed]);
   const displayed=groups.map(({group,items})=>({group,items:expanded.includes(group)?items:items.slice(0,GROUP_LIMIT),total:items.length}));
   const ordered=displayed.flatMap(group=>group.items) as TabletFindEntry[];
   const selected=ordered.findIndex(entry=>entry.id===activeId);const current=Math.max(0,selected);
   const pick=(entry:TabletFindEntry)=>{
-    if(!privacy&&entry.group!=='content')setRecent(rememberRecent(recentKey,entry.id));
+    if(!privacy&&entry.group!=='content'&&entry.group!=='search')setRecent(rememberRecent(recentKey,entry.id));
     picked.current=true;onClose();entry.run();
   };
   useEffect(()=>{if(open)document.getElementById(`${id}-option-${current}`)?.scrollIntoView?.({block:'nearest'});},[open,current,id]);
@@ -81,7 +84,7 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
       <RadixDialog.Content className="tablet-find" aria-describedby={undefined} onOpenAutoFocus={event=>{event.preventDefault();field.current?.focus();}} onCloseAutoFocus={event=>{event.preventDefault();if(!picked.current&&opener.current?.isConnected)opener.current.focus();}}
         onEscapeKeyDown={event=>{event.preventDefault();if(!event.isComposing&&event.keyCode!==229&&!(field.current&&editor.isComposing(field.current)))onClose();}}>
         <header className="tablet-find__bar"><RadixDialog.Title>찾기</RadixDialog.Title><IconButton label="찾기 닫기" icon={XMarkIcon} onClick={onClose}/></header>
-        <div className="tablet-find__field"><TextInput icon={MagnifyingGlassIcon} {...editor.bind(query,value=>{setQuery(value);setExpanded([]);setActiveId(null);},field)} autoFocus role="combobox" aria-label="작품, 작가, 메모 제목, 폴더, 화면 이름" aria-expanded="true" aria-controls={`${id}-results`} aria-activedescendant={ordered.length?`${id}-option-${current}`:undefined} aria-autocomplete="list" placeholder="작품, 작가, 메모, 폴더 찾기" autoComplete="off" spellCheck={false} enterKeyHint="go"
+        <div className="tablet-find__field"><TextInput icon={MagnifyingGlassIcon} {...editor.bind(query,value=>{setQuery(value);setExpanded([]);setActiveId(null);},field)} autoFocus role="combobox" aria-label="작품, 작가, 메모 제목, 폴더, 화면 이름" aria-expanded="true" aria-controls={`${id}-results`} aria-activedescendant={ordered.length?`${id}-option-${current}`:undefined} aria-autocomplete="list" placeholder="작품, 작가, 메모, 폴더 찾기" autoComplete="off" spellCheck={false} enterKeyHint="search"
           onKeyDown={event=>{
             if(editor.isComposing(event.currentTarget)||event.nativeEvent.isComposing||event.nativeEvent.keyCode===229)return;
             if(event.key==='ArrowDown'||event.key==='ArrowUp'){

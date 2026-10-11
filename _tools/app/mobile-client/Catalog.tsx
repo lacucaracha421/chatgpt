@@ -9,9 +9,11 @@ import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from '
 import {swapSegment,type ViewSwap} from '../src/shared/motion/viewSwap';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
-import {ArrowLeftIcon,BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
-import {SearchButton,TopBar,TopBarSearch} from './TopBar';
+import {TopBar,TopBarSearch} from './TopBar';
+import {ArrowPathIcon} from '@heroicons/react/24/outline';
+import {syncedLabel} from './CatalogRefresh';
 import {Badge,SectionLabel,Button,EmptyState,IconButton} from './ui';
 import {api,errorText,native} from './transport';
 import {batteryAllowsWarm,warmEnabled,type BatteryState} from './thumbnailWarm';
@@ -21,7 +23,7 @@ import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
 import {catalogScreenTiming} from './catalogPerf';
 import {CatalogReader} from './CatalogReader';
 import {useTabletCatalogMasked} from './catalogMask';
-import {CatalogRefreshBanner,CatalogRefreshControl,useCatalogRefresh,useNow} from './CatalogRefresh';
+import {CatalogRefreshBanner,useCatalogRefresh,useNow} from './CatalogRefresh';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSectionShade} from './SectionShade';
@@ -514,6 +516,12 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   useLayoutEffect(()=>{if(readerError)screenReady('catalog.reader',section.current,'error');});
   useLevelMotion(section,active?(selected?'detail':'list'):null,selected?1:0);
   // Search lives in the shared bar: the magnifier opens it, and it stays open while a query is set.
+  const refreshMenu={title:'카탈로그',entries:[{id:'catalog-refresh',group:'action' as const,label:`새로고침${syncedLabel(page?.publishedAt,now)?` · ${syncedLabel(page?.publishedAt,now)}`:''}`,icon:<ArrowPathIcon/>,disabled:refreshState.sending||refreshState.running||busy,run:()=>{
+    if(refreshState.sending||refreshState.running||busy)return;
+    if(!refreshState.supported)reload();else if(refreshState.language==='all')setRefreshLanguage(true);else void refreshState.request(refreshState.language);
+  }}]};
+  const [refreshLanguage,setRefreshLanguage]=useState(false);
+  const localFind={scope:'카탈로그',run:(value:string)=>{setDraft(value);setSearchOpen(true);setSuggestOpen(false);search(value);}};
   const searching=searchOpen||!!draft||!!query.text;
   const closeSearch=()=>{setSuggestOpen(false);setSearchOpen(false);setDraft('');if(query.text)search('');};
   const showCapability=useDelayedBusy(capability==='checking');
@@ -528,10 +536,11 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
         </form>
   </>;
   return <section ref={section} className="mobile-catalog" style={{display:active?'flex':'none'}} aria-label="만화 카탈로그">
+    {refreshLanguage&&<BottomSheet title="가져올 언어" onClose={()=>setRefreshLanguage(false)}><div role="radiogroup" aria-label="가져올 언어">{(['korean','japanese'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={false} onClick={()=>{setRefreshLanguage(false);void refreshState.request(value);}}>{value==='korean'?'한국어':'일본어'}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     <div className="catalog-content" style={{display:selected?'none':undefined}}>
-      {searching?<TopBarSearch title="카탈로그" loading={busy&&'카탈로그 불러오는 중'} onClose={closeSearch}>{searchForm}</TopBarSearch>
-      :<TopBar barRef={sources.barRef} loading={busy&&'카탈로그 불러오는 중'} title={<>{sources.title('카탈로그')}{page?.countStatus==='ready'&&page.totalCount!=null&&<span className="numeric muted catalog-total">{displayCount(page.totalCount)}</span>}</>}
-        actions={<>{!selected&&<CatalogRefreshControl state={refreshState} publishedAt={page?.publishedAt} now={now} onReload={reload} reloadBusy={busy}/>}<SearchButton onClick={()=>setSearchOpen(true)}/></>}/>}
+      {searching?<TopBarSearch title="카탈로그" search={localFind} menu={refreshMenu} loading={(busy||refreshState.sending||refreshState.running)&&'카탈로그 불러오는 중'} onClose={closeSearch}>{searchForm}</TopBarSearch>
+      :<TopBar barRef={sources.barRef} loading={(busy||refreshState.sending||refreshState.running)&&'카탈로그 불러오는 중'} title={<>{sources.title('카탈로그')}{page?.countStatus==='ready'&&page.totalCount!=null&&<span className="numeric muted catalog-total">{displayCount(page.totalCount)}</span>}</>}
+        search={localFind} menu={refreshMenu}/>}
       {!searching&&sources.shade}
       <div ref={list} className="catalog-scroll" onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))loadMore();}}>
         {listPull}
@@ -548,7 +557,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
       </div>
     </div>
     {selected&&<div className="catalog-detail">
-      <header className="catalog-top is-over"><IconButton label="카탈로그 목록으로" icon={ArrowLeftIcon} onClick={()=>setSelected(null)}/></header>
+      <TopBar back={{label:'카탈로그 목록으로',onClick:()=>setSelected(null)}} crumbs={<button className="top-bar__crumbs" onClick={()=>setSelected(null)}>카탈로그 ›</button>}/>
       {detailError?<div role="alert" className="inline-error">{detailError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:!detail||showDetail?showDetail&&<p role="status" className="hint catalog-detail-status">작품을 불러오는 중…</p>:<>
         <div className="catalog-detail-intro"><div className="catalog-detail-cover"><CatalogCover item={{...selected,thumbnailUrl:detail.thumbnailUrl}} revision={revision} active={active&&!paused&&!reader}/></div>
           <div className="catalog-detail-identity"><h2>{catalogDisplayTitle(detail.title)}</h2>{catalogDisplayTitle(detail.title)!==detail.title&&<p className="catalog-detail-alt"><span className="sr-only">원제 </span>{detail.title}</p>}{detail.titleJpn&&detail.titleJpn!==detail.title&&<p className="catalog-detail-alt">{detail.titleJpn}</p>}{selected.artists.length>0&&<p className="catalog-detail-credit">{selected.artists.join(' · ')}</p>}<p className="catalog-detail-facts">{detail.fileCount}페이지 · 조회 {detail.views.toLocaleString()}</p></div></div>

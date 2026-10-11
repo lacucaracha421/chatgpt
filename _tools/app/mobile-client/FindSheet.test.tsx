@@ -13,6 +13,16 @@ function show(props:Partial<Parameters<typeof FindSheet>[0]>={}){return render(<
 function type(query:string){fireEvent.change(screen.getByRole('combobox'),{target:{value:query}});}
 beforeEach(()=>{localStorage.clear();media.ticket.mockReset();media.ticket.mockResolvedValue({url:'https://test/cover'});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
+it('preselects the asset screen search ahead of all app results and Enter runs it',async()=>{
+ const run=vi.fn(),close=vi.fn();show({search:{scope:'에셋',run},onClose:close});
+ expect(screen.getAllByRole('option')[0].textContent).toContain('에셋에서 찾기');
+ type('별과');
+ await waitFor(()=>expect(screen.getAllByRole('option')[0].textContent).toContain('이 화면에서 ‘별과’'));
+ expect(screen.getAllByRole('option')[0].getAttribute('aria-selected')).toBe('true');
+ fireEvent.keyDown(screen.getByRole('combobox'),{key:'Enter'});
+ expect(run).toHaveBeenCalledWith('별과');expect(close).toHaveBeenCalledOnce();
+ expect(readRecent(recentKey)).not.toContain('screen-search');
+});
 it('focuses the field, shares group limits and expands; all six scope chips stay touch controls',async()=>{
   show();expect(document.activeElement).toBe(screen.getByRole('combobox'));type('별과');
   await waitFor(()=>expect(screen.getAllByRole('option')).toHaveLength(6));

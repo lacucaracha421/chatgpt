@@ -302,11 +302,11 @@ it('distinguishes an older server from an unpublished character view',async()=>{
   fireEvent.click(await screen.findByRole('button',{name:'Series · 2장'}));
   const hero=await screen.findByRole('img',{name:'Series 대표 이미지'});
   expect(screen.getByLabelText('character gallery').contains(hero)).toBe(true);
-  expect(screen.getByRole('navigation',{name:'현재 위치'})).toBeTruthy();
+  expect(screen.getByRole('heading',{name:'Series'})).toBeTruthy();
   await screen.findByText('asset-1');
   act(()=>{media.matches=false;rotate();});
   expect(screen.queryByRole('img',{name:'Series 대표 이미지'})).toBeNull();
-  expect(screen.getByRole('navigation',{name:'현재 위치'})).toBeTruthy();
+  expect(screen.getByRole('heading',{name:'Series'})).toBeTruthy();
   expect(screen.getByText('asset-1')).toBeTruthy();
 });
 
@@ -450,7 +450,7 @@ it('shows the character breadcrumb parents and keeps the title free of a count',
   const heading=await screen.findByRole('heading',{name:'Character'});
   const navigation=screen.getByRole('navigation',{name:'현재 위치'});
   expect([...navigation.querySelectorAll('button')].map(button=>button.textContent)).toEqual(['Series','Group']);
-  expect(heading.getAttribute('aria-label')).toBe('Character');
+  expect(heading.textContent).toBe('Character');
   expect(heading.parentElement?.textContent).not.toContain('2장');
 });
 it('shows a scope or filter load only as the line in the top bar, never inside the content',async()=>{

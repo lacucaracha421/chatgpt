@@ -5,6 +5,13 @@ import {beginScreenTiming, cancelScreenTiming} from './perf';
 import {resetPerfEnabledForTests} from './perfEnabled';
 
 afterEach(cleanup);
+it('puts the screen rows before the existing More groups and runs their actions',()=>{
+ const run=vi.fn(),close=vi.fn();
+ render(<MoreSheet {...options()} screenTitle="폴더" screenEntries={[{id:'folder',group:'action',label:'폴더 관리',icon:<span/>,run}]} onClose={close}/>);
+ expect(screen.getByRole('dialog',{name:'폴더'})).toBeTruthy();
+ expect(screen.getAllByRole('navigation').map(nav=>nav.getAttribute('aria-label'))).toEqual(['폴더','확인할 것','이동']);
+ fireEvent.click(screen.getByRole('button',{name:'폴더 관리'}));expect(run).toHaveBeenCalledOnce();expect(close).toHaveBeenCalledOnce();
+});
 function options(overrides: Partial<MoreOptions> = {}): MoreOptions {
   return {reviewCount:3, unsortedCount:1200, unseen:2, trashCount:8, vaultPresent:true,
     onReview:vi.fn(), onUnsorted:vi.fn(), onExchange:vi.fn(), onVault:vi.fn(), onArtists:vi.fn(), onTrash:vi.fn(), onSettings:vi.fn(), ...overrides};

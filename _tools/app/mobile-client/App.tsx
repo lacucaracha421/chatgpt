@@ -7,7 +7,7 @@ import {AreaSwitch, MotionScope, viewReady} from '../src/shared/motion/AreaSwitc
 import {useLaunchReady} from '../src/shared/launch/LaunchSplash';
 import {useAreaPrewarm} from './useAreaPrewarm';
 import {AssetInfoSheet} from './AssetInfoSheet';
-import {FindContext,FindButton} from './FindContext';
+import {FindContext,type ScreenFind} from './FindContext';
 import {FindSheet} from './FindSheet';
 import {DescriptionIntro} from './DescriptionIntro';
 import {descriptionMeta} from './descriptionSearch';
@@ -25,7 +25,7 @@ import {validCharacterIndex,type CharacterIndex} from './characterModel';
 import {useCharacterReviewBackgroundFlush} from './useCharacterReview';
 import {SimilarityReview} from './SimilarityReview';
 import {TrashLayer} from './TrashLayer';
-import {MoreButton, MoreSheet} from './MoreSheet';
+import {MoreContext,MoreSheet,type ScreenMenu} from './MoreSheet';
 import {useTabletTrashCount} from './trashCounts';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useLibraryTrash} from './useLibraryTrash';
@@ -50,7 +50,7 @@ import {StepSlider} from './StepSlider';
 import type {Asset, AssetFiltersValue, Classification, ClassificationList, Page, SavedPosition, Status, View} from './types';
 import {EMPTY_FILTERS, ASSET_FILTER_VERSION, ASSET_SORTS, LIST_VERSION_RANKED, MEDIA_SECTIONS, RANKED_ASSET_SORTS, SORT_LABELS, assertAppliedQuery, hasActiveFilters, isRankedSort, queryExtras, sameFilters, sortOf, subtreeOf, withSort, withSubtree, type AssetSort} from './assetFilters';
 import {FilterChips,type FilterGroup} from './FilterChips';
-import {BarProgress,LoadingLine,TopBar,SearchButton,closeVisibleSearch} from './TopBar';
+import {BarProgress,LoadingLine,TopBar,TopBarActions,closeVisibleSearch} from './TopBar';
 import {BottomSheet} from './BottomSheet';
 import {LibraryRoot,type LibrarySegment} from './LibraryRoot';
 import {AssetScopeChips} from './AssetScopeChips';
@@ -904,7 +904,12 @@ export function App() {
   },[status.endpoint,status.configured,connectionRevision,indexRevision]);
   const filterable = area==='assets' && page.view.tab==='library' && !page.view.root && !page.view.characters && !page.view.revisit && !page.view.description;
   // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
-  const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia},{active:filterable&&!settings&&!viewer});
+  const assetTools=<div className="asset-section-tools">
+    <FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={filters} applied={filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>
+    {!page.view.album&&<Button type="button" size="sm" variant="ghost" className="asset-topbar__sort" aria-label={`정렬 ${SORT_LABELS[sortOf(filters)]}`} onClick={()=>setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/><span>{SORT_LABELS[sortOf(filters)]}</span></Button>}
+    <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setSortOpen(false);setViewSettings(true);}}><Squares2X2Icon aria-hidden="true"/></Button>
+  </div>;
+  const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia,trailing:assetTools},{active:filterable&&!settings&&!viewer});
   const selectionGallery = filterable || (area==='assets' && !!page.view.description);
   // Character galleries select like the plain gallery (user, 2026-10-05).
   const characterSelection = area==='assets' && !!page.view.characters;
@@ -944,7 +949,7 @@ export function App() {
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
   const totalTrashCount=useTabletTrashCount(status.endpoint,findStore);
-  const reviewCount=useSimilarityReviewCount(status.configured&&area==='assets'&&page.view.tab==='home'&&!similarity,similarityClosed,status.endpoint)??0;
+  const reviewCount=useSimilarityReviewCount(status.configured&&!similarity,similarityClosed,status.endpoint)??0;
   const paused=moreOpen||area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
   const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings&&!filtersOpen&&!sortOpen,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
@@ -1010,16 +1015,13 @@ export function App() {
   };
   const scopeChips=<AssetScopeChips chips={page.view.search??[]} onRemove={removeSearchScope} onClear={()=>commitSearch([])}/>;
   const assetToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&!page.view.revisit&&!page.view.description&&<TopBar barRef={kindShade.barRef} className="library-header asset-topbar" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={libraryCrumbNode} title={kindShade.title(currentAlbum?.name??(currentEntry&&!currentEntry.characterNode?currentEntry.name:page.view.title))} count={libraryCount}
-    actions={<>
-      <SearchButton onClick={openAssetSearch}/>
-      <FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={filters} applied={filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>
-      {!page.view.album&&<Button type="button" size="sm" variant="ghost" className="asset-topbar__sort" aria-label={`정렬 ${SORT_LABELS[sortOf(filters)]}`} onClick={()=>setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/><span>{SORT_LABELS[sortOf(filters)]}</span></Button>}
-      {currentAlbum&&<Button variant="ghost" aria-label="앨범 관리" onClick={()=>setAlbumManagementOpen(true)}>앨범 관리</Button>}
-      {folderAuthority&&plainFolder&&currentEntry&&<Button variant="ghost" aria-label="폴더 관리" onClick={()=>setFolderManagement({folder:currentEntry})}>폴더 관리</Button>}
-      <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setSortOpen(false);setViewSettings(true);}}><Squares2X2Icon aria-hidden="true"/></Button>
-    </>}/>;
+    search={{scope:'에셋',run:query=>{openAssetSearch();setAssetSearchDraft(query);}}}
+    menu={{title:currentAlbum?.name??currentEntry?.name??'에셋',entries:[
+      ...(currentAlbum?[{id:'album-manage',group:'action' as const,label:'앨범 관리',icon:<RectangleStackIcon/>,run:()=>setAlbumManagementOpen(true)}]:[]),
+      ...(folderAuthority&&plainFolder&&currentEntry?[{id:'folder-manage',group:'action' as const,label:'폴더 관리',icon:<Squares2X2Icon/>,run:()=>setFolderManagement({folder:currentEntry})}]:[]),
+    ]}}/>;
   const revisitToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&page.view.revisit&&<TopBar className="library-header" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={libraryCrumbNode} title={page.view.title} count={libraryCount}/>;
-  const descriptionToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&page.view.description&&<TopBar className="library-header" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<nav className="library-breadcrumb" aria-label="현재 위치"><Badge>이미지 내용</Badge></nav>} title={page.view.description.query} count={page.items.length||undefined} actions={<Button type="button" variant="ghost" onClick={exitDescription}>검색 해제</Button>}/>;
+  const descriptionToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&page.view.description&&<TopBar className="library-header" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<nav className="library-breadcrumb" aria-label="현재 위치"><Badge>이미지 내용</Badge></nav>} title={page.view.description.query} count={page.items.length||undefined} menu={{title:'이미지 내용',entries:[{id:'clear-description',group:'action',label:'검색 해제',icon:<Squares2X2Icon/>,run:exitDescription}]}}/>;
   const descriptionIntro=page.view.description?<DescriptionIntro meta={page.description} force={page.view.description.force} count={page.items.length} busy={busy} onForce={()=>openDescription(page.view.description!.query,true)}/>:undefined;
   const findNavigate=(destination:FindDestination)=>{
     closeArtists();setHomeOrigin(null);
@@ -1061,7 +1063,7 @@ export function App() {
         {selectionGallery&&selectionBar}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
-        {charactersVisited && <CharacterBrowser hiddenIds={trash.hidden} search={page.view.search} onSearch={openAssetSearch} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>{markViewerOpen();setViewer({items,index,character,source:'character'});}} backRef={characterBack} onExit={exitCharacters}
+        {charactersVisited && <CharacterBrowser hiddenIds={trash.hidden} search={page.view.search} onSearch={query=>{openAssetSearch();setAssetSearchDraft(query??'');}} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>{markViewerOpen();setViewer({items,index,character,source:'character'});}} backRef={characterBack} onExit={exitCharacters}
           selection={characterSelection?{ids:selectedIds,onSelect:selectAsset,onToggle:toggleSelectedAsset,onClear:clearSelection}:undefined} onItems={characterItemsChanged} moreRef={characterMore}/>}
         {characterSelection&&selectionBar}
         <div className="floating-notices">
@@ -1075,7 +1077,14 @@ export function App() {
   );
   // Home's header belongs to the Home view, so it leaves with Home during a tab switch instead of
   // vanishing first and shifting the retained Home content up.
-  const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{area==='assets'&&page.view.tab==='home'&&<MoreButton count={reviewCount} onOpen={()=>{beginScreenTiming('more','open');setMoreOpen(true);}}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
+  const [screenMenu,setScreenMenu]=useState<ScreenMenu>();
+  const [findSearch,setFindSearch]=useState<ScreenFind>();
+  const [assetSearchDraft,setAssetSearchDraft]=useState('');
+  const moreOptions={reviewCount,unsortedCount,unseen:exchangeUnseen,trashCount:totalTrashCount,vaultPresent,exchangeActivity:exchangeSending?'보내는 중':undefined,
+    onReview:()=>setSimilarity(true),onUnsorted:()=>{const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);},
+    onExchange:()=>setExchangeOpen(true),onVault:()=>setVaultOpen(true),onArtists:()=>{closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();},
+    onTrash:()=>trash.setOpen(true),onSettings:()=>setSettings(true)};
+  const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<TopBarActions/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
   const homeAreaNode=<>{!artistsCovered&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
     <Home onUnsortedCount={setUnsortedCount} items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
@@ -1126,21 +1135,18 @@ export function App() {
     else if(motionTab==='home'||motionTab==='collections'||motionTab==='catalog'||motionTab==='notes')screenReady(motionTab,host,error&&motionTab==='home'?'error':'ok');
   });
 
-  return <FindContext.Provider value={()=>setFindOpen(true)}><MotionScope key={status.endpoint}><div className="mobile-app" ref={appRef}>
+  return <FindContext.Provider value={search=>{setFindSearch(search);setFindOpen(true);}}><MoreContext.Provider value={{options:moreOptions,open:menu=>{setScreenMenu(menu);beginScreenTiming('more','open');setMoreOpen(true);}}}><MotionScope key={status.endpoint}><div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
     {!status.configured&&appHeader}
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area} data-layer-covered={artistsCovered||undefined}>
       <AreaSwitch activeKey={motionTab} views={motionViews} retained={['library',...(page.view.tab==='home'?['home']:[]),'collections','notes','catalog']} ready={tabReady} waitForReady={homeWorkOpen} crossFade={false}/>
-      {assetSearchOpen&&<div className="asset-search-layer" ref={searchLayer}><AssetSearch items={searchItems} chips={searchChips.map(chipName)} endpoint={status.endpoint} paused={settings||!!viewer} onClose={()=>setAssetSearchOpen(false)} onChoose={chooseSearchScope}/></div>}
+      {assetSearchOpen&&<div className="asset-search-layer" ref={searchLayer}><AssetSearch initialQuery={assetSearchDraft} items={searchItems} chips={searchChips.map(chipName)} endpoint={status.endpoint} paused={settings||!!viewer} onClose={()=>setAssetSearchOpen(false)} onChoose={chooseSearchScope}/></div>}
       {calendarOpen && <div className="release-calendar-layer" ref={calendarLayer}><ReleaseCalendar onClose={closeCalendar} initialKind={calendarKind} backRef={calendarBack}/></div>}
       {artistsOpen && <div className="artists-layer" ref={artistsLayer}><Artists endpoint={status.endpoint} backRef={artistsBack} initialArtist={artistSelection ?? undefined} onClose={closeArtists} paused={settings||!!viewer} onOpenViewer={(items,index) => {markViewerOpen();setViewer({items,index});}}/></div>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}><BusyLabel busy={!!(checking)} idle={'라이브러리 연결'}>연결 확인 중</BusyLabel><ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{beginScreenTiming('home','tab');closeArtists();openHome();}}><AREA_ICONS.home aria-hidden="true"/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{beginScreenTiming('assets','tab');closeArtists();setHomeOrigin(null);openLibrary();}}><AREA_ICONS.assets aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{beginScreenTiming('collections','tab');closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><AREA_ICONS.collections aria-hidden="true"/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{beginScreenTiming('catalog','tab');closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><AREA_ICONS.manga aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{beginScreenTiming('notes','tab');closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><AREA_ICONS.notes aria-hidden="true"/><span>메모</span></button></nav>}
-    {status.configured&&<FindSheet open={findOpen} onClose={()=>setFindOpen(false)} entries={findEntries} onDescription={query=>openDescription(query)} endpoint={status.endpoint} privacy={privacyMode} loading={findWorks.loading||findNotes.loading||albumLoading||searchArtists.state==='loading'} error={findWorks.error||findNotes.error||albumError||searchArtists.error} onRetry={()=>{setFindRetry(value=>value+1);findWorks.retry();searchArtists.retry();void findStore.load();}}/>}
-    {moreOpen&&<MoreSheet onClose={()=>setMoreOpen(false)} reviewCount={reviewCount} unsortedCount={unsortedCount} unseen={exchangeUnseen} trashCount={totalTrashCount} vaultPresent={vaultPresent} exchangeActivity={exchangeSending?'보내는 중':undefined}
-      onReview={()=>setSimilarity(true)} onUnsorted={()=>{const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);}}
-      onExchange={()=>setExchangeOpen(true)} onVault={()=>setVaultOpen(true)} onArtists={()=>{closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
-      onTrash={()=>trash.setOpen(true)} onSettings={()=>setSettings(true)}/>}
+    {status.configured&&<FindSheet search={findSearch} open={findOpen} onClose={()=>setFindOpen(false)} entries={findEntries} onDescription={query=>openDescription(query)} endpoint={status.endpoint} privacy={privacyMode} loading={findWorks.loading||findNotes.loading||albumLoading||searchArtists.state==='loading'} error={findWorks.error||findNotes.error||albumError||searchArtists.error} onRetry={()=>{setFindRetry(value=>value+1);findWorks.retry();searchArtists.retry();void findStore.load();}}/>}
+    {moreOpen&&<MoreSheet {...moreOptions} screenTitle={screenMenu?.title} screenEntries={screenMenu?.entries} onClose={()=>setMoreOpen(false)}/>}
     {sortOpen&&<BottomSheet title="정렬" onClose={()=>setSortOpen(false)}><div role="radiogroup" aria-label="정렬">{(rankedServer?RANKED_ASSET_SORTS:ASSET_SORTS).map(sort=><button key={sort} className="sheet-option" role="radio" aria-checked={sortOf(filters)===sort} onClick={()=>applySort(sort)}>{SORT_LABELS[sort]}<span className="radio-dot"/></button>)}</div>{sortOf(filters)==='random'&&<Button variant="ghost" onClick={reshuffle}>다시 섞기</Button>}</BottomSheet>}
     {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}><div className="view-options-host" ref={setOptionsHost}/><StepSlider className="view-options-density" label="썸네일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/>{!privacyMode&&!nsfwFilter&&faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
     {classificationNotice&&<div className="exchange-toast" role="status" ref={classificationToast} data-state="open"><span>{classificationNotice}</span><Button variant="ghost" onClick={()=>setClassificationNotice('')}>닫기</Button></div>}
@@ -1159,5 +1165,5 @@ export function App() {
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <div className="tablet-layer" ref={exchangeLayer}><Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/></div>}
     {exchange.toast && status.configured && !viewer && !fault && !vaultOpen && <div className="exchange-toast" role="status" key={exchange.toast.key} ref={exchangeToast} data-state="open"><span>{exchange.toast.text}</span><Button variant="ghost" onClick={()=>{exchange.dismissToast();setExchangeOpen(true);}}>보기</Button></div>}
-  </div></MotionScope></FindContext.Provider>;
+  </div></MotionScope></MoreContext.Provider></FindContext.Provider>;
 }

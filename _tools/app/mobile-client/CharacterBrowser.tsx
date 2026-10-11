@@ -8,9 +8,9 @@ import type {LibraryCrumb} from './LibraryHeader';
 import {FilterChips,type FilterGroup} from './FilterChips';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
-import {ArrowLeftIcon,ChevronUpIcon,FolderIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon,UserGroupIcon,UserIcon} from '@heroicons/react/24/outline';
+import {ChevronUpIcon,FolderIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon,UserGroupIcon,UserIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
-import {BarProgress,SearchButton} from './TopBar';
+import {TopBar} from './TopBar';
 import {useSectionShade} from './SectionShade';
 import {Button,EmptyState,IconButton,SegmentedControl} from './ui';
 import {api,errorText} from './transport';
@@ -112,7 +112,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false,ratings}:{node:
   </button>;
 }
 
-export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,selection,onItems,moreRef,hiddenIds}:{search?:readonly AssetSearchName[];onSearch?():void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void;
+export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,selection,onItems,moreRef,hiddenIds}:{search?:readonly AssetSearchName[];onSearch?(query?:string):void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void;
   /** Selection mode, as in the tablet's plain gallery (long press, then taps toggle). */hiddenIds?:ReadonlySet<string>;selection?:{ids:ReadonlySet<string>;onSelect(id:string):void;onToggle(id:string):void;onClear():void};
   /** The loaded items, for the host's selection bar and a viewer opened from here. */onItems?(items:Asset[]):void;
   /** Loads the next page; the host's viewer calls it near its end. */moreRef?:MutableRefObject<(()=>void)|null>}) {
@@ -425,26 +425,14 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<EmptyState title={where.node?(filterPending?'조건에 맞는 자산이 없습니다':node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}/>}
   </>;
   // 종류 is the gallery's first row; scrolled away, the current crumb names it and the bar pulls down.
-  const kindShade=useSectionShade<AssetMediaFilter>({label:'종류',options:MEDIA_SECTIONS,value:where.filters.media,onChange:applyMedia},{active:active&&!paused&&!!where.node});
+  const characterTools=<div className="asset-section-tools">{where.node&&<FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>}<Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>onOptions(page?.items??[])}><Squares2X2Icon aria-hidden="true"/></Button></div>;
+  const kindShade=useSectionShade<AssetMediaFilter>({label:'종류',options:MEDIA_SECTIONS,value:where.filters.media,onChange:applyMedia,trailing:characterTools},{active:active&&!paused&&!!where.node});
   const breadcrumbNodes=node?[...ancestors,node]:[];
-  const characterHeader=<header ref={where.node?kindShade.barRef:undefined} className="top-bar library-header asset-topbar character-header">
-    <IconButton label="뒤로" icon={ArrowLeftIcon} onClick={goUp}/>
-    <div className="top-bar__titles">
-      <nav className="character-breadcrumb" aria-label="현재 위치">
-        {breadcrumbNodes.length?breadcrumbNodes.map((item,itemIndex)=><span key={item.id}>{itemIndex>0&&<span className="character-breadcrumb__separator" aria-hidden="true">›</span>}{itemIndex<breadcrumbNodes.length-1?<button type="button" onClick={()=>enterInside({node:item.id,filter:defaultCharacterFilter(item.id,index)})}>{item.name}</button>:<span className="character-breadcrumb__current" aria-current="page">{where.node?kindShade.title(item.name):item.name}</span>}</span>):<span className="character-breadcrumb__current" aria-current="page">시리즈</span>}
-      </nav>
-      <h1 className="sr-only" aria-label={node?.name??'시리즈'}/>
-    </div>
-    <span className="top-bar__space"/>
-    {onSearch&&<SearchButton onClick={onSearch}/>}
-    {where.node&&<FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>}
-    <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>onOptions(page?.items??[])}><Squares2X2Icon aria-hidden="true"/></Button>
-    <BarProgress label={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'}/>
-  </header>;
+  const characterHeader=<TopBar barRef={where.node?kindShade.barRef:undefined} className="library-header asset-topbar character-header" back={{label:'뒤로',onClick:goUp}} crumbs={breadcrumbNodes.length>1?<nav className="library-breadcrumb" aria-label="현재 위치">{breadcrumbNodes.slice(0,-1).map(item=><span key={item.id}><button onClick={()=>enterInside({node:item.id,filter:defaultCharacterFilter(item.id,index)})}>{item.name}</button></span>)}</nav>:undefined} title={node?kindShade.title(node.name):'시리즈'} search={onSearch?{scope:'에셋',run:query=>onSearch(query)}:undefined} loading={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'}/>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
-    <Gallery hasMore={!!(page??(stale?lastPage.current:undefined))?.next_cursor} privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node&&kindShade.inline}{overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(galleryItems,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null} selectedIds={selection?.ids} onSelectAsset={selection?.onSelect} onToggleSelection={selection?.onToggle} onClearSelection={selection?.onClear}/>
+    <Gallery hasMore={!!(page??(stale?lastPage.current:undefined))?.next_cursor} privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?kindShade.inline:<div className="library-header-tools">{characterTools}</div>}{overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(galleryItems,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null} selectedIds={selection?.ids} onSelectAsset={selection?.onSelect} onToggleSelection={selection?.onToggle} onClearSelection={selection?.onClear}/>
     {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     <LoadingLine label={(more)&&'다음 캐릭터 자산 불러오는 중'} className="is-bottom"/>
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>{if(sparse){cache.current.clear();setRetry(n=>n+1);}else void append();}}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}

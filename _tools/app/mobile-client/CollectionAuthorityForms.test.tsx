@@ -35,8 +35,8 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sent = () => mocks.api.mock.calls.filter(([path]) => path === COMMAND_PATH).map(([, , body]) => body);
 /** Opens 컬렉션 편집 from the work detail's 작품 관리 menu. */
 const openEdit = async () => {
-  fireEvent.click(await screen.findByRole('button', {name: '작품 관리'}));
-  fireEvent.click(within(screen.getByRole('dialog', {name: '작품 관리'})).getByRole('button', {name: '컬렉션 편집'}));
+  fireEvent.click(await screen.findByRole('button', {name: '더보기'}));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: '컬렉션 편집'}));
   return screen.findByRole('dialog', {name: '컬렉션 편집'});
 };
 describe('activation-gated tablet forms', () => {
@@ -58,8 +58,8 @@ describe('activation-gated tablet forms', () => {
     fireEvent.click(await screen.findByText(av.name));
     fireEvent.click(await screen.findByText(av.name));
     const article=await screen.findByRole('article',{name:'AV 작품 화면'});
-    fireEvent.click(await screen.findByRole('button',{name:'작품 관리'}));
-    fireEvent.click(within(screen.getByRole('dialog',{name:'작품 관리'})).getByRole('button',{name:'AV 정보 편집'}));
+    fireEvent.click(await screen.findByRole('button',{name:'더보기'}));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'AV 정보 편집'}));
     const dialog=screen.getByRole('dialog',{name:'AV 정보 편집'});
     fireEvent.change(within(dialog).getByLabelText('일본어 제목'),{target:{value:'新しい題名'}});
     fireEvent.change(within(dialog).getByLabelText('레이블'),{target:{value:'새 레이블'}});
@@ -83,17 +83,18 @@ describe('activation-gated tablet forms', () => {
     await screen.findByText(item.name); await act(async () => {});
     expect(screen.queryByRole('button', {name: '새 작품'})).toBeNull();
     fireEvent.click(screen.getByText(item.name)); await screen.findByRole('group', {name: '작품 동작'});
-    expect(screen.queryByRole('button', {name: '작품 관리'})).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));
+    expect(screen.queryByRole('button',{name:'컬렉션 편집'})).toBeNull();
     expect(screen.queryByRole('button', {name: '휴지통'})).toBeNull();
   });
-  it.each([['게임', 'game'], ['만화', 'manga'], ['영화', 'movie'], ['AV', 'av']] as const)('shows the top-bar plus on %s and defaults to its type', async (label, kind) => {
+  it.each([['게임', 'game'], ['만화', 'manga'], ['영화', 'movie'], ['AV', 'av']] as const)('shows the section-bar plus on %s and defaults to its type', async (label, kind) => {
     render(<Collections active paused={false} backRef={{current: null}}/>);
     await screen.findByRole('button', {name: '새 작품'});
     fireEvent.click(screen.getAllByRole('radio', {name: label})[0]);
     const plus = screen.getByRole('button', {name: '새 작품'});
-    expect(plus.closest('.top-bar')).not.toBeNull();
+    expect(plus.closest('.ui-section-bar__trailing')).not.toBeNull();
     expect(plus.textContent).toBe('');
-    expect(screen.queryByRole('button', {name: '검색'}) !== null).toBe(kind !== 'av');
+    expect(screen.getByRole('button',{name:'찾기'})).toBeTruthy();
     // AV has no type shortcuts; the others keep only their own shortcuts in the section bar.
     const shortcuts = screen.queryByRole('group', {name: '컬렉션 바로가기'});
     expect(shortcuts === null).toBe(kind === 'av');
@@ -138,9 +139,9 @@ describe('activation-gated tablet forms', () => {
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0]).toMatchObject({...identity, commandType: 'createWork', type: 'movie', name: '새 영화', fields: {description: '영화 설명'}, legacyKind: null, binding: null});
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await screen.findByRole('button', {name: '작품 관리'});
+    await screen.findByRole('button', {name: '더보기'});
     expect(screen.getByRole('heading', {name: '새 영화'})).toBeTruthy();
-    expect(screen.getAllByText('컬렉션 › 영화').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('컬렉션 › 영화 ›').length).toBeGreaterThan(0);
     expect(readCommands()[0].state).toBe('pending');
     expect(mocks.api.mock.calls.some(([path]) => path === `/v1/collections/${readCommands()[0].command.workId}`)).toBe(false);
     act(() => { expect(backRef.current?.()).toBe(true); });
@@ -237,7 +238,7 @@ describe('activation-gated tablet forms', () => {
     render(<Collections active paused={false} backRef={{current: null}}/>);
     fireEvent.click(await screen.findByText(item.name));
     const form = await openEdit();
-    expect(screen.queryByRole('dialog', {name: '작품 관리'})).toBeNull();
+    expect(screen.queryByRole('dialog',{name:item.name})).toBeNull();
     expect(within(form).queryByRole('group', {name: '유형'})).toBeNull();
     expect(within(form).queryByLabelText('설명')).toBeNull();
     // The PC dialog's game fields, in its order.
@@ -280,11 +281,11 @@ describe('activation-gated tablet forms', () => {
     fireEvent.change(screen.getByLabelText('이름'), {target: {value: '오프라인 작품'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
     await waitFor(() => expect(readCommands()[0]?.attempts).toBe(1));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await screen.findByRole('button', {name: '작품 관리'});
+    await screen.findByRole('button', {name: '더보기'});
     expect(screen.getByRole('heading', {name: '오프라인 작품'})).toBeTruthy();
     act(() => { backRef.current?.(); });
     const tile = screen.getByRole('button', {name: /오프라인 작품/}); fireEvent.click(tile);
-    await screen.findByRole('button', {name: '작품 관리'});
+    await screen.findByRole('button', {name: '더보기'});
     expect(mocks.api.mock.calls.some(([path]) => path === `/v1/collections/${readCommands()[0].command.workId}`)).toBe(false);
   });
   it('retains the original name expectation when correcting a rename nameConflict', async () => {
@@ -392,8 +393,8 @@ describe('delete and 휴지통', () => {
   const shortcuts = () => screen.getByRole('group', {name: '컬렉션 바로가기'});
   const openDelete = async () => {
     fireEvent.click(await screen.findByText(item.name));
-    fireEvent.click(await screen.findByRole('button', {name: '작품 관리'}));
-    const remove = within(screen.getByRole('dialog', {name: '작품 관리'})).getByRole('button', {name: /^컬렉션 삭제/});
+    fireEvent.click(await screen.findByRole('button', {name: '더보기'}));
+    const remove = within(screen.getByRole('dialog')).getByRole('button', {name: /^컬렉션 삭제/});
     await waitFor(() => expect(remove).toBeEnabled()); fireEvent.click(remove);
     return screen.findByRole('dialog', {name: '컬렉션 삭제'});
   };
@@ -406,7 +407,7 @@ describe('delete and 휴지통', () => {
     fireEvent.click(within(dialog).getByRole('button', {name: '삭제'}));
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'deleteWork', workId: item.id, expectedRevision: 4});
-    await waitFor(() => expect(screen.queryByRole('button', {name: '작품 관리'})).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('group',{name:'작품 동작'})).toBeNull());
     expect(screen.queryByRole('dialog')).toBeNull();
     // Off the shelf at once; the shelf's queue names the delete on its way.
     expect(screen.queryByRole('button', {name: new RegExp(item.name)})).toBeNull();
@@ -463,7 +464,7 @@ describe('delete and 휴지통', () => {
     fireEvent.click(within(await openDelete()).getByRole('button', {name: '취소'}));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(readCommands()).toHaveLength(0); expect(sent()).toHaveLength(0);
-    expect(screen.getByRole('button', {name: '작품 관리'})).toBeTruthy();
+    expect(screen.getByRole('button', {name: '더보기'})).toBeTruthy();
   });
   it('brings a rejected delete back to the shelf with its conflict in the queue', async () => {
     command = body => body.commandType === 'deleteWork' ? new ApiError('충돌', 409, {detail: {code: 'revisionConflict'}}) : {};

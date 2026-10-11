@@ -169,7 +169,7 @@ describe('tablet AV editor', () => {
   });
   it.each(['game','manga','movie'] as const)('hides the AV entry for %s', async type => {
     render(<Harness work={{...item,type,av:null}}/>);
-    await screen.findByRole('dialog',{name:'작품 관리'});
+    await screen.findByRole('dialog');
     expect(screen.queryByRole('button',{name:'AV 정보 편집'})).toBeNull();
   });
   it('blocks an invalid date before persistence', async () => {

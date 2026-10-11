@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
-import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline';
+import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import {TopBar} from './TopBar';
 import { PinIcon, PinSolidIcon } from '../src/shared/ui/PinIcon';
 import {Button, EmptyState, IconButton} from './ui';
 import { keyBetween } from '../src/notes/model';
@@ -16,7 +17,7 @@ import './ledger.css';
 type LedgerSheet = { kind: 'entry'; draft: EntryDraft } | { kind: 'income' } | { kind: 'recurring'; item: Recurring | null } | { kind: 'plan'; item: Planned | null } | { kind: 'charge'; charge: Charge } | null;
 const nextOrder = (list: { order: string }[]) => keyBetween(list.reduce<string | null>((max, item) => max === null || item.order > max ? item.order : max, null), null);
 
-export function NoteLedger({ store, ledger, notes, saveState, onLeave, onMore, backRef }: { store: NotesStore; ledger: Note; notes: Note[]; saveState: string; onLeave(): void; onMore(): void; backRef: MutableRefObject<(() => boolean) | null> }) {
+export function NoteLedger({ store, ledger, notes, loading, onLeave, onMore, backRef }: { store: NotesStore; ledger: Note; notes: Note[]; loading?: string | false; onLeave(): void; onMore(): void; backRef: MutableRefObject<(() => boolean) | null> }) {
   const today = localToday(), current = today.slice(0, 7);
   const [month, setMonth] = useState(current), [sheet, setSheet] = useState<LedgerSheet>(null), [problem, setProblem] = useState<string | null>(null);
   useEffect(() => { backRef.current = () => { if (sheet) { setSheet(null); return true; } return false; }; return () => { backRef.current = null; }; });
@@ -78,7 +79,8 @@ export function NoteLedger({ store, ledger, notes, saveState, onLeave, onMore, b
     <Button size="sm" variant="quiet" onClick={() => openSheet({ kind: 'entry', draft: {} })}>기록</Button>
   </>;
   return <div className="ledger-view">
-    <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={onLeave} /><h1>{ledger.title.trim() || '가계부'}</h1><span className="notes-top__space" /><span role="status" className="notes-save-state">{saveState}</span><IconButton label={ledger.pinned ? "고정 해제" : "고정"} icon={PinIcon} activeIcon={PinSolidIcon} active={ledger.pinned} onClick={() => editLedger(l => ({ pinned: !l.pinned }))} /><IconButton label="메모 더보기" icon={EllipsisHorizontalIcon} onClick={onMore} /></header>
+    <TopBar back={{label:'메모 목록',onClick:onLeave}} crumbs={<button className="top-bar__crumbs" onClick={onLeave}>메모 ›</button>} title={ledger.title.trim()||'가계부'} itemAction={<IconButton label={ledger.pinned?'고정 해제':'고정'} icon={PinIcon} activeIcon={PinSolidIcon} active={ledger.pinned} onClick={()=>editLedger(l=>({pinned:!l.pinned}))}/>} onMenu={onMore} loading={loading}/>
+
     <div className="ledger-page">
       <div className="ledger-monthrow"><IconButton label="이전 달" icon={ChevronLeftIcon} onClick={() => setMonth(addMonths(month, -1))} /><h2>{monthLabel(month)}</h2><IconButton label="다음 달" icon={ChevronRightIcon} onClick={() => setMonth(addMonths(month, 1))} />{month !== current && <Button size="sm" variant="quiet" onClick={() => setMonth(current)}>이번 달로</Button>}<span className="ledger-spacer" /><Button size="sm" variant="quiet" onClick={() => openSheet({ kind: 'income' })}>예산 정하기</Button></div>
       {problem && !sheet && <p className="ledger-problem" role="alert">{problem}</p>}

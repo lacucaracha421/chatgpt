@@ -95,7 +95,7 @@ export function PersonalRecord({item, edits, onSheet, includeTracking = true}: {
  * The detail's top-bar actions: Showcase membership (sparkles) and, for manga, 신간 알림 (bell).
  * A tap that cannot change anything explains why in a brief toast.
  */
-export function PersonalActions({item, edits}: {item: CollectionDetail; edits: PersonalEdits}) {
+export function PersonalActions({item, edits,tracking=true}: {item: CollectionDetail; edits: PersonalEdits;tracking?:boolean}) {
   const showcase = edits.visible(item.id, 'showcase', item.showcase);
   const [toast, setToast] = useState<{text: string; key: number} | null>(null);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3000); return () => clearTimeout(timer); }, [toast]);
@@ -108,7 +108,7 @@ export function PersonalActions({item, edits}: {item: CollectionDetail; edits: P
             <span className="collection-bar-pending" aria-hidden="true"/>
           </IconButton>
         : (showcase.value || showcase.pending) && <span className={`collection-bar-action is-static${showcase.pending ? ' is-pending' : ''}`} role="img" aria-label={`쇼케이스에 추가됨${showcase.pending ? ', 전송 대기' : ''}`}>{showcase.value ? <SparklesSolid aria-hidden="true"/> : <SparklesIcon aria-hidden="true"/>}<span className="collection-bar-pending" aria-hidden="true"/></span>}
-      <ReleaseWatchAction item={item} edits={edits} onReason={text => setToast(current => ({text, key: (current?.key ?? 0) + 1}))}/>
+      {tracking&&<ReleaseWatchAction item={item} edits={edits} onReason={text => setToast(current => ({text, key: (current?.key ?? 0) + 1}))}/>}
     </div>
     {toast && <p key={toast.key} ref={toastRef} data-state="open" className="collection-toast" role="status">{toast.text}</p>}
   </>;

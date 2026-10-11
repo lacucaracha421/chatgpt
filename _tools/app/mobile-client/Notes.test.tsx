@@ -99,7 +99,7 @@ it('groups pinned notes and leaves trash navigation to the unified screen',async
  expect(screen.queryByText('지운 메모')).toBeNull();
  // The list menu keeps recovery; deleted notes are reached only through More's unified trash.
  expect(screen.queryByRole('button',{name:/휴지통|복구키/})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'메모 목록 더보기'}));
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));
  const sheet=within(await screen.findByRole('dialog'));expect(sheet.queryByRole('button',{name:/휴지통/})).toBeNull();expect(sheet.getByRole('button',{name:'복구키 보기'})).toBeTruthy();
  act(()=>{expect(backRef.current?.()).toBe(true);});
  await screen.findByText('고정한 메모');expect(backRef.current?.()).toBe(false);
@@ -113,16 +113,16 @@ it('creates notes from the floating button and moves an open note to the trash',
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
  await openNote('제목');fireEvent.click(await screen.findByRole('button',{name:'고정'}));
  expect(screen.getByRole('button',{name:'고정 해제'})).toBeTruthy();
- fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
  await waitFor(()=>expect(saves().some(s=>s.id===note.id&&s.deleted===true&&s.pinned===true)).toBe(true));
  await screen.findByRole('button',{name:'새 메모'});
 });
 it('colours with a circle and archives from the more sheet',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- fireEvent.click(screen.getByRole('button',{name:'메모 색상'}));
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'메모 색상'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('radio',{name:'청록'}));
  await waitFor(()=>expect(saves().some(s=>s.color==='teal')).toBe(true));
- fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'보관함으로 보내기'}));
  await waitFor(()=>expect(saves().some(s=>s.archived===true)).toBe(true));
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
@@ -156,7 +156,7 @@ it('hides text note cards, saves the concealment choice and searches hidden note
  render(<Notes active backRef={{current:null}}/>);
  const card=await screen.findByText('숨은 제목');
  fireEvent.click(card);
- fireEvent.click(await screen.findByRole('button',{name:'메모 더보기'}));
+ fireEvent.click(await screen.findByRole('button',{name:'더보기'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'목록에서 내용 숨기기'}));
  await waitFor(()=>expect(saves().some(s=>s.id===visible.id&&s.concealed===true)).toBe(true));
 
@@ -261,7 +261,7 @@ it('syncs at once from the 동기화 button and backs pending sync off while wri
  await act(()=>vi.advanceTimersByTimeAsync(1));expect(syncs()).toBe(1);
  await act(()=>vi.advanceTimersByTimeAsync(3999));expect(syncs()).toBe(1);
  await act(()=>vi.advanceTimersByTimeAsync(1));expect(syncs()).toBe(2);
- fireEvent.click(screen.getByRole('button',{name:'동기화'}));await act(async()=>{});
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:/^지금 동기화/}));await act(async()=>{});
  expect(syncs()).toBe(3);
 });
 it('shows sticky-note cards: pin, checklist progress with done items struck, masked secret fields, labels and the pending dot',async()=>{
@@ -302,7 +302,7 @@ it('forgets the Home origin after the note opened from Home is trashed, so anoth
  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
  render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
  expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
- fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
  await openNote('다른 메모');
  expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('다른 내용');
  act(()=>{expect(backRef.current!()).toBe(true);});
@@ -315,7 +315,7 @@ it('leaves the list to App after the note opened from Home is trashed from its s
  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
  render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
  expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
- fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'휴지통으로'}));
  await waitFor(()=>expect(saves().some(s=>s.deleted===true)).toBe(true));
  // On the list, Back is no longer a Notes step: App's tab fallback handles it, without the Home return.
@@ -336,7 +336,7 @@ it('returns a note opened from Home to Home, closing a deeper sheet first',async
  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
  const view=render(<Notes active backRef={backRef} request={{id:note.id,key:1}} onReturnHome={home}/>);
  expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
- fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
+ fireEvent.click(screen.getByRole('button',{name:'더보기'}));
  act(()=>{expect(backRef.current!()).toBe(true);});
  expect(home).not.toHaveBeenCalled();
  act(()=>{expect(backRef.current!()).toBe(true);});
@@ -368,7 +368,7 @@ it('keeps save feedback quiet through repeated typing and delayed save acknowled
  mock.native.mockImplementation(async(op,p)=>op==='notesSave'?new Promise(resolve=>{finish=resolve;}):{unlocked:true,notes:[note]});
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
  const area=screen.queryByRole('textbox',{name:'메모 본문'})??await editBody();
- const indicator=document.querySelector('.note-open .notes-top .notes-save-state')!;
+ const indicator=document.querySelector('.note-open .top-bar')!;
  const initial=indicator.textContent;
  fireEvent.change(area,{target:{value:'한'}});
  expect(indicator.textContent).toBe(initial);
@@ -526,7 +526,7 @@ it('protects the recovery sheet before its key arrives and releases protection o
  const backRef={current:null as (()=>boolean)|null},props={active:true,backRef};
  const view=render(<Notes {...props}/>);
  try {
-  fireEvent.click(await screen.findByRole('button',{name:'메모 목록 더보기'}));
+  await screen.findByText('제목');fireEvent.click(screen.getByRole('button',{name:'더보기'}));
   expect(sensitive).toHaveBeenLastCalledWith(false);
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'복구키 보기'}));
   expect(sensitive).toHaveBeenLastCalledWith(true);
@@ -534,7 +534,7 @@ it('protects the recovery sheet before its key arrives and releases protection o
   expect((await screen.findByRole('textbox',{name:'복구키'}) as HTMLTextAreaElement).value).toBe('a'.repeat(64));
   expect(sensitive).toHaveBeenLastCalledWith(true);
   act(()=>{backRef.current?.();});expect(sensitive).toHaveBeenLastCalledWith(false);
-  fireEvent.click(screen.getByRole('button',{name:'메모 목록 더보기'}));
+  fireEvent.click(screen.getByRole('button',{name:'더보기'}));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'복구키 보기'}));
   expect(sensitive).toHaveBeenLastCalledWith(true);
   view.rerender(<Notes {...props} active={false}/>);expect(sensitive).toHaveBeenLastCalledWith(false);
