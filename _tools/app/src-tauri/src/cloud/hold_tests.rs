@@ -145,7 +145,6 @@ fn hold_manual_workers_leave_dirty_generations_and_queues_untouched() {
         client.base(),
         "api",
         Some("publisher"),
-        None,
         &|_| {},
     ));
     held(library.push_cloud_collections(&|_| {}));

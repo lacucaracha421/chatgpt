@@ -228,6 +228,7 @@ const REVIEW_BATCH_DURABLE_SQL: &str = "SELECT e.id,e.asset_id,p.target_id,p.res
 
 /// The durable "recommended" rows of one target without paging: the saved-prediction part
 /// of [`REVIEW_RECOMMENDED_DURABLE_SQL`], used to export B36 recommendations of every target.
+#[cfg(test)]
 const B36_RECOMMENDED_TARGET_SQL: &str = r#"
 WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
@@ -272,6 +273,9 @@ impl Library {
     /// current target fingerprint. In-memory scan results and the media re-hash of the page
     /// are deliberately left out: this feeds the mobile candidate feed, which only lists what
     /// is saved and lets the PC re-validate every decision when it applies it.
+    ///
+    /// Test-only: the mobile feed no longer lists these (see `character_review_feed`).
+    #[cfg(test)]
     pub(crate) fn b36_recommended_pairs(&self) -> Result<Vec<(String, String)>> {
         let ids = self
             .connection()?

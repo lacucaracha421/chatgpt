@@ -573,14 +573,7 @@ fn review_decisions_are_received_before_the_snapshot_which_carries_their_cursor(
     bind(&f, &base);
     let client = CloudClient::new(&base).unwrap();
     f.library
-        .push_cloud_characters_with(
-            &client,
-            &base,
-            "shared",
-            Some("publisher"),
-            Some(&Default::default()),
-            &|_| {},
-        )
+        .push_cloud_characters_with(&client, &base, "shared", Some("publisher"), &|_| {})
         .unwrap();
     let seen = handle.join().unwrap();
     assert!(seen[1].0.contains("after=0&limit=1"), "probe");
@@ -662,7 +655,7 @@ fn an_older_server_keeps_the_snapshot_without_the_review_cursor() {
     let client = CloudClient::new(&base).unwrap();
     for _ in 0..2 {
         f.library
-            .push_cloud_characters_with(&client, &base, "shared", Some("publisher"), None, &|_| {})
+            .push_cloud_characters_with(&client, &base, "shared", Some("publisher"), &|_| {})
             .unwrap();
     }
     let seen = handle.join().unwrap();
@@ -707,7 +700,7 @@ fn before_adoption_the_snapshot_carries_a_zero_cursor_and_a_refused_feed_is_retr
     bind(&f, &base);
     let client = CloudClient::new(&base).unwrap();
     f.library
-        .push_cloud_characters_with(&client, &base, "shared", Some("publisher"), None, &|_| {})
+        .push_cloud_characters_with(&client, &base, "shared", Some("publisher"), &|_| {})
         .expect("a refused feed never fails the character publication");
     let seen = handle.join().unwrap();
     let snapshot: serde_json::Value = serde_json::from_str(&seen[4].2).unwrap();

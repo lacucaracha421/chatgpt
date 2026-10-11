@@ -344,8 +344,8 @@ impl Library {
         let Some(generation) = generation else {
             if kind == "characters" {
                 // No snapshot is due, but the candidate feed has its own schedule (the S36
-                // cache and saved B36 predictions change without dirtying this lane). A
-                // publication that is due republishes the feed itself, right after it.
+                // cache changes without dirtying this lane). A publication that is due
+                // republishes the feed itself, right after it.
                 if let Err(error) = self.publish_due_character_review_feed(endpoint) {
                     eprintln!("character review feed: {error}");
                 }

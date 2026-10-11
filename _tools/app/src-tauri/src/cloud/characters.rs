@@ -933,13 +933,11 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => None,
             Err(error) => return Err(error),
         };
-        let s36_series = self.character_s36_series();
         self.push_cloud_characters_with(
             &client,
             &endpoint,
             token.expose(),
             publisher_token.as_ref().map(|token| token.expose()),
-            s36_series.as_ref(),
             progress,
         )
     }
@@ -952,7 +950,6 @@ impl Library {
         endpoint: &str,
         token: &str,
         publisher_token: Option<&str>,
-        s36_series: Option<&std::collections::BTreeSet<String>>,
         progress: Reporter<'_>,
     ) -> Result<CharacterPublishResult, LibraryError> {
         self.ensure_send_to(client.base())?;
@@ -1050,9 +1047,9 @@ impl Library {
             self.acknowledge_character_review_publication(&endpoint, &library_id, cursor)?;
             // The feed follows the snapshot and carries the position it just acknowledged. It
             // is optional: a failure is retried later and never fails the navigation result.
-            if let Err(error) = self.publish_due_character_review_feed_with(
-                client, publisher, token, &endpoint, s36_series,
-            ) {
+            if let Err(error) =
+                self.publish_due_character_review_feed_with(client, publisher, token, &endpoint)
+            {
                 eprintln!("character review feed: {error}");
             }
         }

@@ -1,13 +1,17 @@
 //! Mobile character-candidate review: export and publish the PC's candidate feed.
 //!
-//! The feed lists `(targetId, assetId)` pairs the user can judge on mobile, merged from
-//! three PC-local sources:
+//! The feed lists `(targetId, assetId)` pairs the user can judge on mobile. It carries the
+//! same pairs as the desktop 확인 list (minus the tag-recommendation kind, which mobile cannot
+//! show yet), merged from two PC-local sources:
 //!
-//! * `s36`: pending S36 shadow candidates (`automatic` / `recommended`), the same list as the
-//!   desktop S36 review screen. For a series switched to S36, `automatic` verdicts are not
-//!   offered (user decision 2): S36 already accepts those itself.
-//! * `b36`: saved B36 recommendations for each character's current fingerprint.
-//! * `doubtful`: existing automatic acceptances S36 does not support.
+//! * `s36`: pending S36 shadow candidates (`automatic` / `recommended`) of every series, the
+//!   desktop 인식 추천 list.
+//! * `doubtful`: existing automatic acceptances S36 does not support (desktop 다시 확인).
+//!
+//! Saved B36 scan recommendations (`b36_recommended_pairs`) are deliberately not listed: the
+//! desktop 확인 list does not contain them (only the much smaller tagger projection), and on a
+//! real library they number in the thousands, which crowded out the cap and inflated the
+//! mobile total. The server still accepts a `b36` source for older feeds.
 //!
 //! Only committed cloud assets are listed (a synced upload or a server-confirmed asset
 //! lifecycle); the server drops anything it cannot show anyway. Each item's `basis` is the
@@ -17,7 +21,7 @@
 //! Publication runs on the `characters` lane after the navigation snapshot and carries that
 //! snapshot's review cursor as `decisionCursor`, plus the skipped decisions acknowledged since
 //! the previous feed. It is rebuilt at most every five minutes, sooner (debounced) when the
-//! decisions, the S36 cache, saved B36 predictions, characters or the S36 series choice change;
+//! decisions, the S36 cache, characters or the broad-folder scope change;
 //! an unchanged body is not sent again. All of it is durable (`mobile_character_review_feed_state`).
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -138,27 +142,19 @@ fn character_error(error: CharacterError) -> LibraryError {
 }
 
 impl Library {
-    /// Build the candidate feed from the S36 shadow lists and saved B36 recommendations.
-    ///
-    /// `s36_series` is the per-series S36 switch; `None` (automation not configured in this
-    /// session) conservatively leaves out every S36 `automatic` verdict, since any of them
-    /// might belong to a series S36 already classifies.
-    pub(crate) fn character_review_feed_content(
-        &self,
-        s36_series: Option<&BTreeSet<String>>,
-    ) -> Result<FeedContent, LibraryError> {
+    /// Build the candidate feed from the S36 shadow lists: every pending pair the desktop 확인
+    /// list shows as 인식 추천 or 다시 확인, each pair once.
+    pub(crate) fn character_review_feed_content(&self) -> Result<FeedContent, LibraryError> {
         let candidates = self.shadow_review_items(None).map_err(character_error)?;
         let doubtful = self
             .shadow_review_items(Some("doubtful"))
             .map_err(character_error)?;
-        let b36 = self.b36_recommended_pairs().map_err(character_error)?;
         // Every target the feed may name, read before taking the lock below so their
         // reference file checks run without it.
         let wanted = candidates
             .items
             .iter()
             .map(|item| item.target_id.clone())
-            .chain(b36.iter().map(|(target_id, _)| target_id.clone()))
             .chain(doubtful.items.iter().map(|item| item.target_id.clone()))
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -230,12 +226,7 @@ impl Library {
             }
         };
         for item in &candidates.items {
-            let Some(series) = target(&item.target_id)? else {
-                continue;
-            };
-            if item.verdict == "automatic"
-                && s36_series.is_none_or(|switched| switched.contains(&series))
-            {
+            if target(&item.target_id)?.is_none() {
                 continue;
             }
             add(
@@ -245,12 +236,6 @@ impl Library {
                 &item.verdict,
                 item.knn3,
             );
-        }
-        for (target_id, asset_id) in &b36 {
-            if target(target_id)?.is_none() {
-                continue;
-            }
-            add(target_id, asset_id, "b36", "recommended", None);
         }
         for item in &doubtful.items {
             if target(&item.target_id)?.is_none() {
@@ -334,45 +319,28 @@ impl Library {
     }
 
     /// Cheap fingerprint of everything the feed depends on (see the migration 0092 notes).
-    fn character_review_feed_input(
-        &self,
-        acknowledged: i64,
-        s36_series: Option<&BTreeSet<String>>,
-    ) -> Result<String, LibraryError> {
+    fn character_review_feed_input(&self, acknowledged: i64) -> Result<String, LibraryError> {
         self.publication_inputs.character_sources(self);
-        let key = serde_json::json!([acknowledged, s36_series]).to_string();
+        let key = serde_json::json!([acknowledged]).to_string();
         self.publication_inputs.cached_input(1, key, || {
-            self.build_character_review_feed_input(acknowledged, s36_series)
+            self.build_character_review_feed_input(acknowledged)
         })
     }
 
-    fn build_character_review_feed_input(
-        &self,
-        acknowledged: i64,
-        s36_series: Option<&BTreeSet<String>>,
-    ) -> Result<String, LibraryError> {
+    fn build_character_review_feed_input(&self, acknowledged: i64) -> Result<String, LibraryError> {
         let scored = super::character_shadow_review::shadow_cache_scored_marker(self.root())
             .map_err(character_error)?;
         let connection = self.connection()?;
-        let (decisions, predictions, targets, broad): (Option<i64>, Option<i64>, Option<String>, Option<bool>) = connection
+        let (decisions, targets, broad): (Option<i64>, Option<String>, Option<bool>) = connection
             .query_row(
                 "SELECT (SELECT MAX(sequence) FROM character_decisions),
-                        (SELECT MAX(rowid) FROM character_autotag_predictions),
                         (SELECT MAX(updated_at) || ':' || COUNT(*) || ':' || SUM(revision) FROM character_targets),
                         (SELECT broad_folder_scope FROM character_autotag_control WHERE singleton=1)",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )?;
         // The broad-folder setting hides or shows candidates, so it is part of the input.
-        let input = serde_json::json!([
-            decisions,
-            scored,
-            predictions,
-            targets,
-            acknowledged,
-            s36_series,
-            broad
-        ]);
+        let input = serde_json::json!([decisions, scored, targets, acknowledged, broad]);
         Ok(hex(input.to_string()))
     }
 
@@ -396,13 +364,11 @@ impl Library {
         };
         let token = credential::read_cloud_api_token_os()?;
         let client = self.cloud_client(endpoint)?;
-        let s36 = self.character_s36_series();
         self.publish_due_character_review_feed_with(
             &client,
             publisher.expose(),
             token.expose(),
             endpoint,
-            s36.as_ref(),
         )
     }
 
@@ -419,7 +385,6 @@ impl Library {
         publisher_token: &str,
         api_token: &str,
         endpoint: &str,
-        s36_series: Option<&BTreeSet<String>>,
     ) -> Result<FeedOutcome, LibraryError> {
         self.ensure_send_to(client.base())?;
         client.ensure_send()?;
@@ -439,7 +404,7 @@ impl Library {
         let Some(acknowledged) = acknowledged else {
             return Ok(FeedOutcome::NotReady);
         };
-        let input = self.character_review_feed_input(acknowledged, s36_series)?;
+        let input = self.character_review_feed_input(acknowledged)?;
         let due = {
             let db = self.connection()?;
             db.execute(
@@ -487,7 +452,7 @@ impl Library {
             params![endpoint, library_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )?;
-        let content = self.character_review_feed_content(s36_series)?;
+        let content = self.character_review_feed_content()?;
         // The skipped decisions acknowledged since the previous feed, bounded like the server.
         let mut cursor = acknowledged.max(published_cursor);
         let mut skipped = self

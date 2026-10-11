@@ -152,11 +152,8 @@ fn s36_candidates_match_the_desktop_review_list_and_its_pages() {
         }
     }
     assert_eq!(paged, all.items);
-    // Outside an S36 series the feed offers exactly that list, in the same order.
-    let feed = f
-        .library
-        .character_review_feed_content(Some(&BTreeSet::new()))
-        .unwrap();
+    // The feed offers exactly that list, in the same order.
+    let feed = f.library.character_review_feed_content().unwrap();
     let expected: Vec<_> = all
         .items
         .iter()
@@ -175,43 +172,50 @@ fn s36_candidates_match_the_desktop_review_list_and_its_pages() {
 }
 
 #[test]
-fn an_s36_series_offers_no_automatic_acceptances() {
+fn the_feed_matches_the_desktop_confirm_counts_and_leaves_out_saved_b36_scans() {
     let f = Fixture::new();
     let target = f.ready("Shadow");
-    for id in ["asset-8", "asset-9"] {
+    for id in ["asset-8", "asset-9", "asset-10", "asset-11", "asset-12"] {
         series_asset(&f, id, true);
     }
+    // asset-8 automatic, asset-9 recommended, asset-12 an automatic acceptance S36 doubts.
+    automatic_acceptance(&f, &target, "asset-12");
     scores(
         &f,
         &[
             ("asset-8", &target.id, "automatic", 0.1),
             ("asset-9", &target.id, "recommended", 0.2),
+            ("asset-12", &target.id, "recommended", 0.3),
         ],
     );
-    let switched = BTreeSet::from([f.series.clone()]);
-    let feed = f
-        .library
-        .character_review_feed_content(Some(&switched))
-        .unwrap();
+    // Saved B36 scan recommendations are not part of the desktop 확인 list.
+    b36(&f, &target, "asset-10");
+    b36(&f, &target, "asset-11");
+    let feed = f.library.character_review_feed_content().unwrap();
+    let mut got = pairs(&feed);
+    got.sort();
     assert_eq!(
-        pairs(&feed),
-        [(
-            "asset-9".to_string(),
-            vec!["s36"],
-            "recommended".to_string()
-        )]
+        got,
+        [
+            (
+                "asset-12".to_string(),
+                vec!["s36", "doubtful"],
+                "recommended".to_string()
+            ),
+            ("asset-8".to_string(), vec!["s36"], "automatic".to_string()),
+            (
+                "asset-9".to_string(),
+                vec!["s36"],
+                "recommended".to_string()
+            ),
+        ]
     );
-    // Unknown switch (automation not configured yet): automatic verdicts stay out.
-    let unknown = f.library.character_review_feed_content(None).unwrap();
-    assert_eq!(pairs(&unknown), pairs(&feed));
-    let other = BTreeSet::from(["another-series".to_string()]);
+    // Same pairs, each once, as the desktop counts (no tag candidates in this fixture).
+    let counts = f.library.character_confirm_counts(None).unwrap();
+    assert_eq!(counts.tag, 0);
     assert_eq!(
-        f.library
-            .character_review_feed_content(Some(&other))
-            .unwrap()
-            .items
-            .len(),
-        2
+        feed.items.len() as i64,
+        (counts.recognition + counts.recheck) as i64
     );
 }
 
@@ -233,26 +237,18 @@ fn sources_merge_per_pair_with_basis_and_only_committed_assets() {
             ("asset-11", &target.id, "recommended", 0.1),
         ],
     );
-    // asset-9 also has a saved B36 recommendation; asset-10 only that.
+    // Saved B36 recommendations (asset-9 also scored by S36, asset-10 only B36) add no sources.
     b36(&f, &target, "asset-9");
     b36(&f, &target, "asset-10");
     for id in ["asset-0", "asset-1"] {
         commit(&f, id);
     }
-    let feed = f
-        .library
-        .character_review_feed_content(Some(&BTreeSet::new()))
-        .unwrap();
+    let feed = f.library.character_review_feed_content().unwrap();
     let mut got = pairs(&feed);
     got.sort();
     assert_eq!(
         got,
         [
-            (
-                "asset-10".to_string(),
-                vec!["b36"],
-                "recommended".to_string()
-            ),
             (
                 "asset-8".to_string(),
                 vec!["s36", "doubtful"],
@@ -260,7 +256,7 @@ fn sources_merge_per_pair_with_basis_and_only_committed_assets() {
             ),
             (
                 "asset-9".to_string(),
-                vec!["s36", "b36"],
+                vec!["s36"],
                 "recommended".to_string()
             ),
         ]
@@ -279,36 +275,20 @@ fn sources_merge_per_pair_with_basis_and_only_committed_assets() {
         feed.targets[&target.id].reference_asset_ids,
         ["asset-0", "asset-1"]
     );
-    // Same B36 rows as the per-target desktop "recommended" page.
-    let page = f
-        .library
-        .character_review_page(crate::library::character_scan::ReviewQuery {
-            series_id: f.series.clone(),
-            target_id: Some(target.id.clone()),
-            filter: "recommended".into(),
-            after: None,
-            limit: 80,
-        })
-        .unwrap();
-    let mut desktop: Vec<String> = page.rows.iter().map(|r| r.asset.id.clone()).collect();
-    desktop.sort();
-    assert_eq!(desktop, ["asset-10", "asset-9"]);
     // A decided pair leaves the feed.
     f.library
         .record_character_decisions(DecisionRequest {
             target_id: target.id.clone(),
             expected_fingerprint: target.fingerprint.clone(),
-            asset_ids: vec!["asset-10".into()],
+            asset_ids: vec!["asset-9".into()],
             decision: DecisionKind::Rejected,
             baseline_fingerprint: None,
             scan_id: None,
         })
         .unwrap();
-    let feed = f
-        .library
-        .character_review_feed_content(Some(&BTreeSet::new()))
-        .unwrap();
-    assert!(feed.items.iter().all(|i| i.asset_id != "asset-10"));
+    let feed = f.library.character_review_feed_content().unwrap();
+    assert!(feed.items.iter().all(|i| i.asset_id != "asset-9"));
+    assert!(feed.items.iter().any(|i| i.asset_id == "asset-8"));
 }
 
 #[test]
@@ -407,16 +387,9 @@ fn feed_publication_is_debounced_throttled_and_skips_an_unchanged_body() {
     ]);
     let id = bind(&f, &base);
     let client = CloudClient::new(&base).unwrap();
-    let series = BTreeSet::new();
     let publish = || {
         f.library
-            .publish_due_character_review_feed_with(
-                &client,
-                "publisher",
-                "shared",
-                &base,
-                Some(&series),
-            )
+            .publish_due_character_review_feed_with(&client, "publisher", "shared", &base)
             .unwrap()
     };
     // First: adoption PUT.
@@ -514,13 +487,7 @@ fn skipped_decisions_are_reported_once_with_the_acknowledged_cursor() {
     let client = CloudClient::new(&base).unwrap();
     let publish = || {
         f.library
-            .publish_due_character_review_feed_with(
-                &client,
-                "publisher",
-                "shared",
-                &base,
-                Some(&BTreeSet::new()),
-            )
+            .publish_due_character_review_feed_with(&client, "publisher", "shared", &base)
             .unwrap()
     };
     // Received but not yet acknowledged by a snapshot: the feed does not claim it.
@@ -570,13 +537,7 @@ fn an_older_server_or_a_stale_base_never_breaks_the_feed() {
     let client = CloudClient::new(&base).unwrap();
     let publish = || {
         f.library
-            .publish_due_character_review_feed_with(
-                &client,
-                "publisher",
-                "shared",
-                &base,
-                Some(&BTreeSet::new()),
-            )
+            .publish_due_character_review_feed_with(&client, "publisher", "shared", &base)
             .unwrap()
     };
     assert_eq!(publish(), FeedOutcome::Unsupported);
@@ -604,7 +565,7 @@ fn an_older_server_or_a_stale_base_never_breaks_the_feed() {
     configure(&g.library, &base);
     assert_eq!(
         g.library
-            .publish_due_character_review_feed_with(&client, "publisher", "shared", &base, None)
+            .publish_due_character_review_feed_with(&client, "publisher", "shared", &base)
             .unwrap(),
         FeedOutcome::NotReady
     );
@@ -615,15 +576,8 @@ fn unchanged_feed_skips_five_minute_build_and_verifies_after_thirty_without_io()
     let f = Fixture::new();
     let endpoint = "https://character-feed-idle.invalid";
     let id = bind(&f, endpoint);
-    let series = BTreeSet::new();
-    let input = f
-        .library
-        .character_review_feed_input(0, Some(&series))
-        .unwrap();
-    let content = f
-        .library
-        .character_review_feed_content(Some(&series))
-        .unwrap();
+    let input = f.library.character_review_feed_input(0).unwrap();
+    let content = f.library.character_review_feed_content().unwrap();
     let digest = hex(serde_json::to_vec(&FeedBody {
         version: 1,
         library_id: &id,
@@ -643,13 +597,7 @@ fn unchanged_feed_skips_five_minute_build_and_verifies_after_thirty_without_io()
     let client = CloudClient::new(endpoint).unwrap();
     let publish = || {
         f.library
-            .publish_due_character_review_feed_with(
-                &client,
-                "publisher",
-                "shared",
-                endpoint,
-                Some(&series),
-            )
+            .publish_due_character_review_feed_with(&client, "publisher", "shared", endpoint)
             .unwrap()
     };
     assert_eq!(publish(), FeedOutcome::NotDue);
