@@ -5,7 +5,10 @@ import type { CharacterTarget } from "./api";
 import { ConfirmOverview } from "./ConfirmOverview";
 import { confirmSourceFor, shadowItem } from "./confirmTestKit";
 
-vi.mock("./suggestions/CharacterSuggestions", () => ({ CharacterSuggestionsOverview: () => null }));
+// A stand-in for the suggestion cards: its button is the moment a registration or merge has been stored.
+vi.mock("./suggestions/CharacterSuggestions", () => ({
+  CharacterSuggestionsOverview: ({ onSaved }: { onSaved?: (result: unknown) => void }) => <button type="button" onClick={() => onSaved?.({})}>제안 저장됨</button>,
+}));
 afterEach(cleanup);
 
 const targets = [
@@ -54,4 +57,22 @@ it("goes back from the toolbar", async () => {
   const { onBack } = mount();
   await userEvent.setup().click(await screen.findByRole("button", { name: "홈으로 돌아가기" }));
   expect(onBack).toHaveBeenCalled();
+});
+
+it("reads the list again when a suggestion is registered, so its tag-read images show without leaving", async () => {
+  const added: unknown[] = [];
+  const sources = confirmSourceFor({
+    tagger: async () => [...added] as never,
+    candidates: [shadowItem("c1", "hina", "히나")],
+    doubtful: [],
+  });
+  render(<ConfirmOverview sources={sources} targets={targets} seriesName={id => id === "series" ? "백합" : undefined} version={0} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={vi.fn()} />);
+  const series = await screen.findByRole("region", { name: "백합" });
+  expect(series).toHaveTextContent("1건");
+  expect(within(series).queryByRole("button", { name: /키사키/ })).toBeNull();
+  // Registering 키사키 stores her tag-read images as 태그 추천; the overview has to ask for them.
+  added.push({ asset: { id: "t1", originalName: "t1.png", width: 1, height: 1 }, seriesId: "series", targetId: "kisaki", targetName: "키사키", targetFingerprint: "fp",
+    evidence: { source: "tagger", reason: "recommendation", pixaiScore: 0.99, canaryScore: 0.99 } });
+  await userEvent.setup().click(screen.getByRole("button", { name: "제안 저장됨" }));
+  expect(await within(await screen.findByRole("region", { name: "백합" })).findByRole("button", { name: "백합 › 키사키 확인 1건" })).toHaveTextContent("태그 추천 1");
 });

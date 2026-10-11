@@ -85,8 +85,10 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
 }
 export type SuggestionState = ReturnType<typeof useCharacterSuggestions>;
 
-export function CharacterSuggestionsOverview({ version, privacyMode, api = suggestionApi, onCount }: {
+export function CharacterSuggestionsOverview({ version, privacyMode, api = suggestionApi, onCount, onSaved }: {
   version: number; privacyMode: boolean; api?: SuggestionApi; onCount?: (count: number) => void;
+  /** Called after a registration or merge is stored: its images just entered 확인, so the host list must read again. */
+  onSaved?: (result: SuggestionResult) => void;
 }) {
   const state = useCharacterSuggestions(version, api);
   const [collapsed, setCollapsed] = useState(false);
@@ -136,7 +138,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
       {state.error && <p role="alert">{state.error}</p>}
       <Button variant="ghost" onClick={() => setIgnoredOpen(false)}>닫기</Button>
     </Dialog>}
-    {editor && <SuggestionDialog {...editor} privacyMode={privacyMode} api={api} onClose={() => setEditor(null)} onSaved={result => { setEditor(null); state.saved(result); }} />}
+    {editor && <SuggestionDialog {...editor} privacyMode={privacyMode} api={api} onClose={() => setEditor(null)} onSaved={result => { setEditor(null); state.saved(result); onSaved?.(result); }} />}
   </section>;
 }
 

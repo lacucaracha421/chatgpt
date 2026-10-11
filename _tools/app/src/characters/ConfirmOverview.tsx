@@ -122,7 +122,7 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
       chrome={{ navigation: index }} />
     <div className="crv-scroll">
       <div className="crv-page">
-        {!restricted && <CharacterSuggestionsOverview version={version} privacyMode={privacyMode} onCount={setSuggestionCount} />}
+        {!restricted && <CharacterSuggestionsOverview version={version} privacyMode={privacyMode} onCount={setSuggestionCount} onSaved={() => setRetry(value => value + 1)} />}
         {tallies && !restricted && !error && groups.length > 0 && <div className="crv-summary">
           <span className="crv-count crv-count--lg numeric">{totals.total.toLocaleString()}<small>건</small></span>
           <span className="crv-summary__t">{groups.length.toLocaleString()}개 시리즈 · {groups.reduce((sum, group) => sum + group.characters.length, 0).toLocaleString()}명

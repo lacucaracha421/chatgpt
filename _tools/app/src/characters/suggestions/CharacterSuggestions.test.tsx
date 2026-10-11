@@ -113,6 +113,18 @@ it("keeps a registered suggestion retired after refreshing and remounting", asyn
   expect(client.list).toHaveBeenCalledTimes(2);
 });
 
+it("tells its host when a registration is stored, so the host list can read the new 확인 items", async () => {
+  const client = api(), onSaved = vi.fn();
+  render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={client} onSaved={onSaved} />);
+  await screen.findByText("이졸데");
+  fireEvent.click(screen.getByRole("button", { name: "캐릭터로 등록" }));
+  const create = await screen.findByRole("button", { name: "캐릭터 만들기" });
+  await waitFor(() => expect(create).toBeEnabled());
+  expect(onSaved).not.toHaveBeenCalled();
+  fireEvent.click(create);
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ target, queuedCount: 3 }));
+});
+
 describe("character suggestions", () => {
   it("ships reviewed Korean names and humanises unknown qualifiers", () => {
     expect(suggestionName(suggestion.tag)).toBe("이졸데");
