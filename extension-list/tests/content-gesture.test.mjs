@@ -457,3 +457,84 @@ test('background saves count concurrently, retry resubmits once, and permanent f
   assert.equal(status().querySelector('button'), null);
   f.close();
 });
+
+// Drives a press on an arbitrary element, with a candidate finder that, like the
+// real one, resolves any <video> or <img> ancestor of the target.
+function playerFixture(html) {
+  const f = fixture();
+  const holder = f.w.document.createElement('div'); holder.innerHTML = html; f.w.document.body.append(holder);
+  // Like the X and video.js sources, a press anywhere inside a player (control bar
+  // included) resolves to that player's media, so only the control check can stop it.
+  f.w.LakomicsForumSource.findGenericCandidate = () => null;
+  f.w.LakomicsForumSource.findCandidate = target => {
+    for (let node = target; node && node !== f.w.document.body; node = node.parentElement) {
+      const media = node.matches('img, video, audio') ? node : node.querySelector('img, video, audio');
+      if (media) return { element: media, type: media.tagName === 'IMG' ? 'image' : 'video', mediaUrl: 'https://example.test/media.bin' };
+    }
+    return null;
+  };
+  const press = async (selector, { input = 'mouse', y = 40, hold = 600 } = {}) => {
+    const target = f.w.document.querySelector(selector);
+    const fire = (type, x) => {
+      const event = new f.w.MouseEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0 });
+      Object.defineProperties(event, { pointerId: { value: 7 }, pointerType: { value: input } });
+      target.dispatchEvent(event);
+    };
+    fire('pointerdown', 40);
+    if (input === 'mouse') fire('pointermove', 70);
+    await f.advance(hold);
+    fire('pointerup', 70);
+    await f.advance(1);
+    return f.mounts.length;
+  };
+  return { f, press };
+}
+
+test('a drag that starts on a player control never opens the picker', async () => {
+  const cases = {
+    'range input over a video': '<div><video id="v"></video><input id="c" type="range"></div>',
+    'YouTube progress bar container': '<div class="html5-video-player"><video id="v"></video><div class="ytp-chrome-bottom"><div class="ytp-progress-bar-container"><div id="c"></div></div></div></div>',
+    'X scrubber': '<div data-testid="videoPlayer"><video id="v"></video><div data-testid="videoPlayerControls"><div data-testid="scrubber"><div id="c"></div></div></div></div>',
+    'role slider': '<div><video id="v"></video><div id="c" role="slider"></div></div>',
+    'player button': '<div class="video-js"><video id="v"></video><div class="vjs-control-bar"><button id="c"><span></span></button></div></div>',
+    'generic progress class in a player': '<div class="my-player"><video id="v"></video><div class="seek-progress-bar"><i id="c"></i></div></div>',
+  };
+  for (const [name, html] of Object.entries(cases)) {
+    const { f, press } = playerFixture(html);
+    assert.equal(await press('#c'), 0, name);
+    assert.equal(f.requests.length, 0, name);
+    f.close();
+  }
+});
+
+test('the same drag on the media itself or on an image still opens the picker', async () => {
+  for (const html of ['<img id="c">', '<div class="html5-video-player"><video id="c"></video><div class="ytp-chrome-bottom"></div></div>', '<div data-testid="videoPlayer"><video></video><div id="c"></div></div>']) {
+    const { f, press } = playerFixture(html);
+    assert.equal(await press('#c'), 1, html);
+    f.close();
+  }
+});
+
+test('native video controls: the bottom 50 px is ignored, the rest opens', async () => {
+  for (const [y, expected] of [[395, 0], [350, 0], [349, 1], [100, 1]]) {
+    const { f, press } = playerFixture('<video id="c" controls></video>');
+    f.w.document.querySelector('#c').getBoundingClientRect = () => ({ top: 0, bottom: 400, left: 0, right: 600, width: 600, height: 400 });
+    assert.equal(await press('#c', { y }), expected, `y=${y}`);
+    f.close();
+  }
+  // Without the controls attribute the whole element stays collectable.
+  const { f, press } = playerFixture('<video id="c"></video>');
+  f.w.document.querySelector('#c').getBoundingClientRect = () => ({ top: 0, bottom: 400 });
+  assert.equal(await press('#c', { y: 395 }), 1);
+  f.close();
+});
+
+test('a touch long-press on a slider never opens the picker, but on the media it does', async () => {
+  const slider = playerFixture('<div><video id="v"></video><input id="c" type="range"></div>');
+  assert.equal(await slider.press('#c', { input: 'touch' }), 0);
+  assert.equal(slider.f.requests.length, 0);
+  slider.f.close();
+  const media = playerFixture('<video id="c"></video>');
+  assert.equal(await media.press('#c', { input: 'touch' }), 1);
+  media.f.close();
+});

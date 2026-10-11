@@ -14,6 +14,48 @@
       event.composedPath?.().some(node => node?.matches?.(selector)));
   }
 
+  // Interactive player controls (seek bar, volume slider, buttons, control bars).
+  // A press that starts on one of these is the user operating the player, never an
+  // invocation of the collector picker. Generic class patterns only count inside a
+  // player container so ordinary page content named "progress" is not excluded.
+  const PLAYER_CONTROL_SELECTOR = [
+    "input[type=range]", "[role=slider]", "[role=progressbar]", "[role=scrollbar]",
+    "progress", "meter", "button", "[role=button]", "select",
+    // YouTube
+    ".ytp-chrome-bottom", ".ytp-progress-bar-container", ".ytp-chrome-controls",
+    // X / Twitter
+    '[data-testid="videoPlayerControls"]', '[data-testid="scrubber"]',
+    // video.js, Plyr, JW Player
+    ".vjs-control-bar", ".plyr__controls", ".jw-controlbar",
+  ].join(",");
+  const PLAYER_CONTROL_GENERIC_SELECTOR = '[class*="control-bar"], [class*="controlbar"], [class*="progress"]';
+  const PLAYER_CONTAINER_SELECTOR = 'video, audio, .video-js, .plyr, [class*="player" i], [data-testid="videoPlayer"]';
+  // Height of the native <video controls> strip at the bottom of the element.
+  const NATIVE_CONTROLS_STRIP_PX = 50;
+
+  // Walks from the event target up to (not including) the candidate element, so a
+  // control bar that is a sibling of the media element is still found.
+  function startsOnPlayerControl(event, candidate) {
+    const path = event.composedPath?.() ?? [];
+    const nodes = path.length ? path : [event.target];
+    for (const node of nodes) {
+      if (node === candidate?.element) break;
+      if (typeof node?.matches !== "function") continue;
+      if (node.matches(PLAYER_CONTROL_SELECTOR)) return true;
+      if (node.matches(PLAYER_CONTROL_GENERIC_SELECTOR) && node.closest?.(PLAYER_CONTAINER_SELECTOR)) return true;
+    }
+    return false;
+  }
+
+  // A native <video controls> draws its controls inside the element, so the only
+  // signal is where inside the element the press landed.
+  function startsOnNativeMediaControls(event) {
+    const media = event.target;
+    if (!/^(video|audio)$/i.test(media?.tagName ?? "") || !media.hasAttribute?.("controls")) return false;
+    const rect = media.getBoundingClientRect?.();
+    return Boolean(rect) && event.clientY >= rect.bottom - NATIVE_CONTROLS_STRIP_PX;
+  }
+
   function runtimeTimeoutMs(message) {
     if (message?.type !== "collector:save") return 15_000;
     return message?.payload?.candidate?.type === "video" ? 310_000 : 70_000;
@@ -516,6 +558,8 @@
       if (insidePicker(event) || gate.phase !== "idle") return;
       const input = inputKind(event); if (!input) return;
       const candidate = findCandidate(event.target); if (!candidate) return;
+      if (startsOnPlayerControl(event, candidate)) return;
+      if (input === "mouse" && startsOnNativeMediaControls(event)) return;
       if (!gate.arm(event.pointerId)) return;
       const origin = point(event);
       active = { id: event.pointerId, input, candidate, origin, latest: origin, href: location.href };
