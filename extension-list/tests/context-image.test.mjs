@@ -246,7 +246,7 @@ function trust(w) {
   w.addEventListener = w.EventTarget.prototype.addEventListener; w.removeEventListener = w.EventTarget.prototype.removeEventListener;
   return fn => { on = true; try { return fn(); } finally { on = false; } };
 }
-function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch = false} = {}) {
+function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch = false, collector = {}} = {}) {
   const dom = new JSDOM(`<body>${html}</body>`, {url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true});
   const w = dom.window; w.matchMedia = query => ({matches: touch && /hover: none/.test(query)});
   const user = trust(w), roots = new Map(), attach = w.Element.prototype.attachShadow;
@@ -259,7 +259,7 @@ function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch
   const surfaces = w.LakomicsContextSurfaces.createSurfaces({doc: w.document, win: w, css});
   const watchers = [];
   const watchSession = () => { const watcher = {callback: null, stopped: false, watch(callback) { this.callback = callback; }, stop() { this.stopped = true; }}; watchers.push(watcher); return watcher; };
-  const actions = w.LakomicsContextActions.createActions({doc: w.document, win: w, surfaces, send: transport, alive: context => context.departed !== true, watchSession});
+  const actions = w.LakomicsContextActions.createActions({doc: w.document, win: w, surfaces, send: transport, collector, alive: context => context.departed !== true, watchSession});
   const img = w.document.getElementById('pic');
   if (img) {
     Object.defineProperty(img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, right: 300, top: 50, bottom: 250, width: 200, height: 200})});
@@ -270,6 +270,39 @@ function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch
 }
 const gesture = {isTrusted: true, type: 'click'};
 const origin = {x: 10, y: 10};
+
+test('desktop image translation exposes 저장 only with an available collector candidate and keeps the popover open', async () => {
+  for (const available of [false, true]) {
+    const opened = [];
+    const collector = available ? { findCandidate: image => ({ element: image, type: 'image', mediaUrl: image.src }), open: (...args) => opened.push(args) } : {};
+    const f = page(undefined, { collector });
+    await f.actions.activate('image.translate', f.context(), origin, gesture);
+    const box = f.popover(), button = box.querySelector('[data-action="image.lakomics"]');
+    assert.equal(Boolean(button), available);
+    if (available) {
+      button.click(); assert.equal(opened.length, 0, 'untrusted clicks do nothing');
+      f.user(() => button.click());
+      assert.equal(opened.length, 1); assert.equal(opened[0][0].element, f.img);
+      assert.deepEqual(plain(opened[0][1]), { x: 200, y: 150 }); assert.equal(opened[0][2], 'mouse');
+      assert.equal(f.popover(), box);
+      assert.equal(f.sent.some(message => message.type.startsWith('collector:')), false);
+    }
+    f.actions.destroy(); f.close();
+  }
+});
+
+test('save stays available for empty results and failures, and rechecks a disappeared candidate', async () => {
+  for (const result of [{ ok: true, lines: [] }, { ok: false, code: 'image_unavailable' }]) {
+    let available = true, saved = 0;
+    const collector = { findCandidate: image => available ? { element: image, type: 'image', mediaUrl: image.src } : null, open: () => saved++ };
+    const f = page(undefined, { collector, send: async () => result });
+    await f.actions.activate('image.translate', f.context(), origin, gesture);
+    const button = f.popover().querySelector('[data-action="image.lakomics"]');
+    assert.ok(button); available = false;
+    f.user(() => button.click()); assert.equal(saved, 0);
+    f.actions.destroy(); f.close();
+  }
+});
 
 test('the menu item asks for setup only when the image model has no key, and the model list is the label source', () => {
   const f = page();
@@ -474,6 +507,303 @@ test('only a trusted activation translates; navigation and a vanished image clos
   f.actions.destroy(); f.close();
 });
 
+test('touch popover places beside, below, then inside the image with viewport-aware width', () => {
+  const f = page(undefined, {touch: true}), view = {width: 800, height: 700}, size = {width: 360, height: 120};
+  const place = rect => plain(f.model.imagePlacement(rect, size, view, 12, true));
+  assert.deepEqual(place({left: 20, right: 300, top: 50, bottom: 250, width: 280}), {side: 'right', x: 312, y: 50, width: 360});
+  assert.deepEqual(place({left: 50, right: 750, top: 50, bottom: 250, width: 700}), {side: 'below', x: 50, y: 262, width: 360});
+  assert.deepEqual(place({left: 50, right: 750, top: 50, bottom: 690, width: 700}), {side: 'inside', x: 62, y: 558, width: 360});
+  f.close();
+});
+
+test('touch popover stays fixed on outside tap and scroll, and closes with the close button', async () => {
+  const f = page(undefined, {touch: true});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  f.popover().dispatchEvent(new f.w.Event('pointerdown', {bubbles: true, composed: true}));
+  assert.ok(f.popover());
+  f.doc.body.dispatchEvent(new f.w.Event('pointerdown', {bubbles: true}));
+  await f.timer.advance(100); assert.ok(f.popover());
+  const host = f.doc.querySelector('lakomics-image-popover'), position = [host.style.left, host.style.top];
+  Object.defineProperty(f.img, 'getBoundingClientRect', {value: () => ({left: 0, right: 100, top: -400, bottom: -300, width: 100, height: 100})});
+  f.doc.dispatchEvent(new f.w.Event('scroll'));
+  await f.timer.advance(100); assert.ok(f.popover());
+  assert.deepEqual([host.style.left, host.style.top], position);
+  f.popover().querySelector('.x').click();
+  await f.timer.advance(100); assert.equal(f.popover(), null);
+  f.actions.destroy(); f.close();
+});
+
+function pointer(f, target, type, x, y, pointerType = 'mouse', id = 1) {
+  const event = new f.w.Event(type, {bubbles: true, composed: true, cancelable: true});
+  Object.assign(event, {clientX: x, clientY: y, pointerId: id, pointerType, button: 0, isPrimary: true});
+  target.dispatchEvent(event);
+  return event;
+}
+function dragGeometry(f) {
+  const box = f.popover(), host = f.doc.querySelector('lakomics-image-popover'), captures = new Set();
+  box.setPointerCapture = id => captures.add(id); box.hasPointerCapture = id => captures.has(id); box.releasePointerCapture = id => captures.delete(id);
+  box.getBoundingClientRect = () => ({width: parseFloat(box.style.width), height: 200});
+  return {box, host, captures};
+}
+
+for (const target of ['.h', '.pb']) test(`touch drag from ${target} tracks all 12 moves after capture loss`, async () => {
+  const f = page(undefined, {touch: true});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host} = dragGeometry(f);
+  host.style.top = '500px';
+  const x = parseFloat(host.style.left), y = parseFloat(host.style.top);
+  pointer(f, box.querySelector(target), 'pointerdown', 100, 300, 'touch');
+  for (let step = 1; step <= 12; step++) {
+    pointer(f, f.w, 'pointermove', 100, 300 - step * 15, 'touch');
+    assert.deepEqual([parseFloat(host.style.left), parseFloat(host.style.top)], [x, y - step * 15], `move ${step}`);
+    if (step === 1) pointer(f, box, 'lostpointercapture', 100, 285, 'touch');
+  }
+  const position = [host.style.left, host.style.top];
+  pointer(f, f.w, 'pointerup', 100, 120, 'touch');
+  assert.deepEqual([host.style.left, host.style.top], position);
+  pointer(f, f.w, 'pointermove', 150, 150, 'touch');
+  assert.deepEqual([host.style.left, host.style.top], position, 'release ends the gesture');
+  f.actions.destroy(); f.close();
+});
+
+test('drag and release keep the entrance animation unchanged and never resize the box', async () => {
+  const f = page(undefined, {touch: true});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host} = dragGeometry(f);
+  // JSDOM does not apply shadow styles. Probe the real CSS cascade in light DOM.
+  const style = f.doc.createElement('style'), probe = f.doc.createElement('div');
+  style.textContent = css; f.doc.head.append(style); f.doc.body.append(probe);
+  const animation = () => { probe.className = box.className; probe.style.cssText = box.style.cssText; return f.w.getComputedStyle(probe).animation; };
+  const entrance = animation();
+  assert.match(entrance, /^toastIn /);
+  const observer = new f.w.MutationObserver(() => {});
+  observer.observe(box, {attributes: true, attributeFilter: ['style']});
+  pointer(f, box.querySelector('.h'), 'pointerdown', 100, 100, 'touch');
+  for (let step = 1; step <= 12; step++) {
+    pointer(f, f.w, 'pointermove', 100 + step * 15, 100 + step * 15, 'touch');
+    assert.equal(animation(), entrance, `animation on move ${step}`);
+    assert.equal(observer.takeRecords().length, 0, `no size or touch-action writes on move ${step}`);
+  }
+  const position = [host.style.left, host.style.top];
+  pointer(f, f.w, 'pointerup', 280, 280, 'touch');
+  assert.equal(animation(), entrance, 'release cannot remove and re-add toastIn');
+  assert.equal(box.classList.contains('dragging'), false);
+  assert.deepEqual([host.style.left, host.style.top], position);
+  observer.disconnect(); f.actions.destroy(); f.close();
+});
+
+for (const unavailable of ['throws', 'missing']) test(`drag needs no pointer capture when capture ${unavailable}`, async () => {
+  const f = page(undefined, {touch: true});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host} = dragGeometry(f), x = parseFloat(host.style.left), y = parseFloat(host.style.top), errors = [];
+  let calls = 0;
+  box.setPointerCapture = unavailable === 'missing' ? undefined : () => { calls++; throw new f.w.DOMException('capture failed', 'NotFoundError'); };
+  f.w.addEventListener('error', event => { errors.push(event.error); event.preventDefault(); });
+  pointer(f, box.querySelector('.h'), 'pointerdown', 100, 100, 'touch');
+  for (let step = 1; step <= 12; step++) {
+    pointer(f, f.w, 'pointermove', 100 + step * 10, 100 + step * 10, 'touch');
+    assert.deepEqual([parseFloat(host.style.left), parseFloat(host.style.top)], [x + step * 10, y + step * 10]);
+  }
+  pointer(f, f.w, 'pointerup', 220, 220, 'touch');
+  assert.equal(calls, 0); assert.deepEqual(errors, []);
+  f.actions.destroy(); f.close();
+});
+
+test('ResizeObserver keeps touch-action stable during a gesture and updates it before the next press', async () => {
+  const f = page(undefined, {touch: true});
+  let resize;
+  f.w.ResizeObserver = class { constructor(callback) { resize = callback; } observe() {} disconnect() {} };
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host} = dragGeometry(f), body = box.querySelector('.pb');
+  let scrollHeight = 100;
+  Object.defineProperties(body, {scrollHeight: {get: () => scrollHeight}, clientHeight: {value: 200}});
+  resize();
+  assert.equal(body.style.touchAction, 'none', 'non-scrolling body is ready before pointerdown');
+  pointer(f, body, 'pointerdown', 100, 100, 'touch');
+  pointer(f, f.w, 'pointermove', 120, 130, 'touch');
+  const x = parseFloat(host.style.left), y = parseFloat(host.style.top), width = box.style.width;
+  scrollHeight = 600; resize();
+  f.w.dispatchEvent(new f.w.Event('resize'));
+  assert.equal(box.style.width, width); assert.equal(body.style.touchAction, 'none');
+  pointer(f, f.w, 'pointermove', 140, 160, 'touch');
+  assert.deepEqual([parseFloat(host.style.left), parseFloat(host.style.top)], [x + 20, y + 30]);
+  pointer(f, f.w, 'pointerup', 140, 160, 'touch');
+  assert.equal(body.style.touchAction, 'pan-y', 'scroll is ready before the next gesture');
+  assert.equal(box.style.touchAction, 'pan-y');
+  assert.match(css, /\.popA \.h\{touch-action:none;/, 'header remains a drag target even with a scrolling body');
+  const position = [host.style.left, host.style.top];
+  pointer(f, body, 'pointerdown', 100, 100, 'touch');
+  const move = pointer(f, f.w, 'pointermove', 100, 140, 'touch');
+  assert.equal(move.defaultPrevented, false);
+  assert.deepEqual([host.style.left, host.style.top], position);
+  pointer(f, f.w, 'pointercancel', 100, 140, 'touch');
+  f.actions.destroy(); f.close();
+});
+
+test('a translation finishing during drag waits for release without changing content or size', async () => {
+  let finish;
+  const f = page(undefined, {touch: true, send: () => new Promise(resolve => { finish = resolve; })});
+  const work = f.actions.activate('image.translate', f.context(), origin, gesture);
+  await f.timer.advance(400);
+  const {box, host} = dragGeometry(f), width = box.style.width;
+  pointer(f, box.querySelector('.h'), 'pointerdown', 100, 100, 'touch');
+  pointer(f, f.w, 'pointermove', 120, 130, 'touch');
+  finish({ok: true, lines: [{original: 'a', korean: '가'}]});
+  await f.timer.advance(600); await work;
+  assert.equal(box.querySelectorAll('.sk').length, 3, 'keep the existing content for the gesture');
+  assert.equal(box.style.width, width); assert.equal(box.style.height, '');
+  pointer(f, f.w, 'pointermove', 140, 160, 'touch');
+  const position = [host.style.left, host.style.top];
+  pointer(f, f.w, 'pointerup', 140, 160, 'touch');
+  assert.equal(box.querySelector('b').textContent, '가');
+  assert.deepEqual([host.style.left, host.style.top], position);
+  f.actions.destroy(); f.close();
+});
+
+test('an active height transition stays frozen until the drag ends', async () => {
+  let finish;
+  const f = page(undefined, {touch: true, send: () => new Promise(resolve => { finish = resolve; })});
+  const work = f.actions.activate('image.translate', f.context(), origin, gesture);
+  await f.timer.advance(400);
+  const {box, host} = dragGeometry(f);
+  box.getBoundingClientRect = () => ({width: parseFloat(box.style.width), height: parseFloat(box.style.height) || (box.querySelector('.sk') ? 120 : 200)});
+  finish({ok: true, lines: [{original: 'a', korean: '가'}]});
+  await f.timer.advance(600); await work;
+  assert.equal(box.style.height, '200px'); assert.match(box.style.transition, /^height 140ms/);
+  // Model grabbing the box partway through the browser's height transition.
+  box.getBoundingClientRect = () => ({width: parseFloat(box.style.width), height: box.style.height ? 150 : 200});
+  pointer(f, box.querySelector('.h'), 'pointerdown', 100, 100, 'touch');
+  pointer(f, f.w, 'pointermove', 120, 130, 'touch');
+  assert.equal(box.style.height, '150px'); assert.equal(box.style.transition, 'none');
+  await f.timer.advance(200);
+  assert.equal(box.style.height, '150px', 'the old cleanup timer cannot resize during drag');
+  pointer(f, f.w, 'pointermove', 140, 160, 'touch');
+  const position = [host.style.left, host.style.top];
+  pointer(f, f.w, 'pointerup', 140, 160, 'touch');
+  assert.equal(box.style.height, ''); assert.equal(box.style.transition, ''); assert.equal(box.style.overflow, '');
+  assert.deepEqual([host.style.left, host.style.top], position);
+  f.actions.destroy(); f.close();
+});
+
+for (const pointerType of ['mouse', 'touch', 'pen']) test(`${pointerType} drag uses window pointer delta, detaches and clamps the window to the visual viewport`, async () => {
+  const f = page(undefined, {touch: pointerType !== 'mouse'});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host, captures} = dragGeometry(f), x = parseFloat(host.style.left), y = parseFloat(host.style.top);
+  pointer(f, box.querySelector('b'), 'pointerdown', 100, 100, pointerType);
+  pointer(f, f.w, 'pointermove', 104, 103, pointerType);
+  assert.deepEqual([parseFloat(host.style.left), parseFloat(host.style.top)], [x, y]);
+  assert.equal(captures.size, 0); assert.equal(box.classList.contains('dragging'), false);
+  pointer(f, f.w, 'pointerup', 104, 103, pointerType);
+  pointer(f, box.querySelector('b'), 'pointerdown', 100, 100, pointerType);
+  pointer(f, f.w, 'pointermove', 120, 130, pointerType);
+  assert.deepEqual([parseFloat(host.style.left), parseFloat(host.style.top)], [x + 20, y + 30]);
+  assert.equal(captures.size, 0); assert.equal(box.classList.contains('dragging'), true);
+  pointer(f, f.w, 'pointerup', 120, 130, pointerType);
+  assert.equal(captures.size, 0);
+  Object.defineProperty(f.img, 'getBoundingClientRect', {value: () => ({left: 0, right: 100, top: -400, bottom: -300, width: 100})});
+  f.doc.dispatchEvent(new f.w.Event('scroll')); await f.timer.advance(100);
+  assert.ok(f.popover()); assert.deepEqual([parseFloat(host.style.left), parseFloat(host.style.top)], [x + 20, y + 30]);
+  const view = new f.w.EventTarget(); Object.assign(view, {offsetLeft: 40, offsetTop: 30, width: 500, height: 300});
+  Object.defineProperty(f.w, 'visualViewport', {value: view, configurable: true});
+  pointer(f, box.querySelector('.h'), 'pointerdown', 0, 0, pointerType);
+  pointer(f, f.w, 'pointermove', 2000, 2000, pointerType);
+  assert.equal(parseFloat(host.style.left), 540 - parseFloat(box.style.width));
+  assert.equal(parseFloat(host.style.top), 330 - 200 - 12);
+  pointer(f, f.w, 'pointermove', -2000, -2000, pointerType);
+  assert.deepEqual([host.style.left, host.style.top], ['40px', '42px']);
+  pointer(f, f.w, 'pointerup', -2000, -2000, pointerType);
+  view.offsetLeft = 60; view.offsetTop = 50;
+  f.w.dispatchEvent(new f.w.Event('orientationchange'));
+  assert.deepEqual([host.style.left, host.style.top], ['60px', '62px']);
+  f.actions.destroy(); f.close();
+});
+
+test('a short desktop press preserves text selection and image following', async () => {
+  const f = page(); await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host, captures} = dragGeometry(f), range = f.doc.createRange();
+  range.selectNode(f.img); f.w.getSelection().addRange(range);
+  pointer(f, box.querySelector('b'), 'pointerdown', 100, 100);
+  pointer(f, f.w, 'pointermove', 106, 100); pointer(f, f.w, 'pointerup', 106, 100);
+  assert.equal(captures.size, 0); assert.equal(f.w.getSelection().rangeCount, 1);
+  Object.defineProperty(f.img, 'getBoundingClientRect', {value: () => ({left: 150, right: 350, top: 80, bottom: 280, width: 200})});
+  f.doc.dispatchEvent(new f.w.Event('scroll'));
+  assert.deepEqual([host.style.left, host.style.top], ['358px', '80px']);
+  f.actions.destroy(); f.close();
+});
+
+test('detached popover reclamps on window and visual viewport resize', async () => {
+  const f = page(), view = new f.w.EventTarget();
+  Object.assign(view, {offsetLeft: 0, offsetTop: 0, width: 1000, height: 700});
+  Object.defineProperty(f.w, 'visualViewport', {value: view});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host} = dragGeometry(f);
+  pointer(f, box.querySelector('.h'), 'pointerdown', 0, 0); pointer(f, f.w, 'pointermove', 500, 500); pointer(f, f.w, 'pointerup', 500, 500);
+  Object.assign(view, {offsetLeft: 20, offsetTop: 30, width: 250, height: 200});
+  view.dispatchEvent(new f.w.Event('resize'));
+  assert.deepEqual([host.style.left, host.style.top, box.style.width], ['20px', '42px', '250px']);
+  view.height = 150; f.w.dispatchEvent(new f.w.Event('resize'));
+  assert.equal(host.style.top, '42px');
+  f.actions.destroy(); f.close();
+});
+
+test('overflowing body preserves vertical scroll; horizontal drags and the header move the window', async () => {
+  const f = page(undefined, {touch: true});
+  let resize;
+  f.w.ResizeObserver = class { constructor(callback) { resize = callback; } observe() {} disconnect() {} };
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host, captures} = dragGeometry(f), body = box.querySelector('.pb'), position = [host.style.left, host.style.top];
+  Object.defineProperties(body, {scrollHeight: {value: 600}, clientHeight: {value: 200}});
+  resize();
+  pointer(f, body, 'pointerdown', 100, 100, 'touch');
+  assert.equal(box.style.touchAction, 'pan-y');
+  assert.equal(body.style.touchAction, 'pan-y');
+  const move = pointer(f, f.w, 'pointermove', 101, 150, 'touch');
+  assert.equal(move.defaultPrevented, false); assert.equal(captures.size, 0);
+  assert.deepEqual([host.style.left, host.style.top], position);
+  pointer(f, f.w, 'pointercancel', 101, 150, 'touch');
+  pointer(f, body, 'pointerdown', 100, 100, 'touch'); pointer(f, f.w, 'pointermove', 130, 101, 'touch');
+  assert.equal(parseFloat(host.style.left), parseFloat(position[0]) + 30);
+  pointer(f, f.w, 'pointerup', 130, 101, 'touch');
+  const top = parseFloat(host.style.top);
+  pointer(f, box.querySelector('.h'), 'pointerdown', 100, 100, 'touch'); pointer(f, f.w, 'pointermove', 100, 150, 'touch');
+  assert.equal(parseFloat(host.style.top), top + 50);
+  pointer(f, f.w, 'pointerup', 100, 150, 'touch');
+  f.actions.destroy(); f.close();
+});
+
+test('buttons do not initiate drag; retry and content refill retain the dragged position', async () => {
+  const replies = [{ok: false}, {ok: true, lines: [{original: 'a', korean: '가'}]}];
+  const f = page(undefined, {send: async () => replies.shift()});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {box, host, captures} = dragGeometry(f);
+  const retry = box.querySelector('.retry');
+  pointer(f, retry, 'pointerdown', 0, 0); pointer(f, f.w, 'pointermove', 40, 40); pointer(f, f.w, 'pointerup', 40, 40);
+  assert.equal(captures.size, 0); assert.equal(host.style.left, '308px');
+  pointer(f, box, 'pointerdown', 0, 0); pointer(f, f.w, 'pointermove', 30, 40); pointer(f, f.w, 'pointerup', 30, 40);
+  const position = [host.style.left, host.style.top];
+  f.user(() => retry.click()); await f.timer.advance(1000);
+  assert.equal(box.querySelector('b').textContent, '가'); assert.deepEqual([host.style.left, host.style.top], position);
+  for (const selector of ['.f button', '.x']) {
+    const button = box.querySelector(selector);
+    pointer(f, button.querySelector('svg') || button, 'pointerdown', 0, 0); pointer(f, f.w, 'pointermove', 40, 40); pointer(f, f.w, 'pointerup', 40, 40);
+    assert.deepEqual([host.style.left, host.style.top], position);
+    f.user(() => button.click()); await f.timer.advance(100);
+  }
+  assert.deepEqual(f.clipboard, ['가']); assert.equal(f.popover(), null);
+  f.actions.destroy(); f.close();
+});
+
+test('equivalent original and Korean lines display and copy once after NFKC and whitespace normalization', async () => {
+  const lines = [{original: '８９，９００', korean: '89,900'}, {original: '  @viora_draw  ', korean: '@viora_draw'}, {original: 'a\n  b', korean: 'a b'}, {original: 'またね', korean: '또 봐'}];
+  const f = page(undefined, {send: async () => ({ok: true, lines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const items = [...f.popover().querySelectorAll('li')];
+  assert.deepEqual(items.map(item => item.querySelectorAll('small').length), [0, 0, 0, 1]);
+  f.user(() => f.popover().querySelector('.f button').click()); await f.timer.advance(0);
+  assert.deepEqual(f.clipboard, ['89,900\n@viora_draw\na b\n또 봐']);
+  f.actions.destroy(); f.close();
+});
+
 test('keyboard activation moves focus into the popover; touch gets the larger layout flag', async () => {
   const f = page(undefined, {touch: true});
   await f.actions.activate('image.translate', f.context(), origin, {isTrusted: true, type: 'keydown'});
@@ -515,5 +845,86 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.6', 'the controller bumps the version');
+  assert.equal(manifest.version, '3.5.11');
+});
+
+
+for (const dragged of [false, true]) test(`filled tablet popover ${dragged ? 'stays detached' : 'moves above the viewport bottom'}`, async () => {
+  let finish;
+  const f = page(undefined, {touch: true, send: () => new Promise(resolve => { finish = resolve; })});
+  Object.defineProperty(f.w, 'visualViewport', {value: {width: 673, height: 952, offsetLeft: 0, offsetTop: 0, addEventListener() {}, removeEventListener() {}}});
+  Object.defineProperty(f.img, 'getBoundingClientRect', {value: () => ({left: 24, right: 649, top: 100, bottom: 731, width: 625, height: 631})});
+  const geometry = f.w.HTMLElement.prototype.getBoundingClientRect;
+  f.w.HTMLElement.prototype.getBoundingClientRect = function() {
+    if (this.classList.contains('h')) return {height: 48};
+    if (this.classList.contains('f')) return {height: 48};
+    if (this.classList.contains('popA')) {
+      const body = this.querySelector('.pb');
+      const natural = this.querySelector('.sk') ? 22 : 277;
+      return {width: parseFloat(this.style.width) || 360, height: parseFloat(this.style.height) || 98 + Math.min(natural, parseFloat(body?.style.maxHeight) || natural)};
+    }
+    return geometry.call(this);
+  };
+  const work = f.actions.activate('image.translate', f.context(), origin, gesture);
+  await f.timer.advance(400);
+  const box = f.popover(), host = f.doc.querySelector('lakomics-image-popover');
+  assert.equal(host.style.top, '743px', 'the skeleton fits below the image');
+  if (dragged) {
+    pointer(f, box.querySelector('.h'), 'pointerdown', 100, 800, 'touch');
+    pointer(f, f.w, 'pointermove', 120, 250, 'touch');
+    pointer(f, f.w, 'pointerup', 120, 250, 'touch');
+  }
+  const position = [host.style.left, host.style.top];
+  finish({ok: true, lines: [{original: 'a', korean: '가'}]});
+  await f.timer.advance(600); await work;
+  assert.match(box.style.transition, /^height 140ms/);
+  if (dragged) assert.deepEqual([host.style.left, host.style.top], position);
+  else assert.notEqual(host.style.top, position[1]);
+  assert.ok(parseFloat(host.style.top) + box.getBoundingClientRect().height <= 940);
+  await f.timer.advance(150);
+  if (dragged) assert.deepEqual([host.style.left, host.style.top], position);
+  // A shorter visual viewport caps only the list, leaving both controls visible.
+  f.w.visualViewport.height = 300;
+  f.w.dispatchEvent(new f.w.Event('resize'));
+  assert.equal(box.querySelector('.pb').style.maxHeight, '178px');
+  assert.ok(parseFloat(host.style.top) + box.getBoundingClientRect().height <= 288);
+  assert.ok(box.querySelector('.h')); assert.ok(box.querySelector('.f'));
+  f.actions.destroy(); f.close();
+});
+
+for (const outcome of ['cancelled', 'saved', 'temporary', 'unavailable', 'throws']) test(`touch save restores normal focus and picker visibility: ${outcome}`, async () => {
+  let lifecycle;
+  const collector = {findCandidate: image => ({element: image, type: 'image'}), open(candidate, origin, input, callbacks) {
+    lifecycle = callbacks;
+    assert.equal(input, 'touch');
+    if (outcome === 'throws') throw new Error('cannot open');
+    if (outcome !== 'unavailable') callbacks.onOpen();
+  }};
+  const f = page(undefined, {touch: true, collector});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const box = f.popover(), host = f.doc.querySelector('lakomics-image-popover'), root = f.roots.get(host);
+  const position = [host.style.left, host.style.top], save = box.querySelector('[data-action="image.lakomics"]');
+  save.focus(); assert.equal(root.activeElement, save);
+  f.user(() => save.dispatchEvent(new f.w.MouseEvent('click', {bubbles: true, detail: 1}))); await f.timer.advance(0);
+  assert.notEqual(root.activeElement, save);
+  if (['unavailable', 'throws'].includes(outcome)) {
+    assert.equal(box.classList.contains('picker-hidden'), false);
+  } else {
+    assert.equal(host.inert, true); assert.equal(box.style.pointerEvents, 'none');
+    assert.equal(box.classList.contains('picker-hidden'), true);
+    f.user(() => f.w.dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Escape'})));
+    assert.equal(f.popover(), box, 'Escape belongs to the open picker');
+    lifecycle.onClose(outcome === 'cancelled' ? undefined : {ok: true});
+    assert.equal(host.inert, false); assert.equal(box.style.pointerEvents, 'auto');
+    assert.equal(box.classList.contains('picker-hidden'), false);
+    assert.equal(box.classList.contains('picker-restored'), true);
+    assert.deepEqual([host.style.left, host.style.top], position);
+  }
+  assert.match(css, /button:focus-visible/);
+  if (outcome === 'unavailable') {
+    save.focus();
+    f.user(() => save.click()); await f.timer.advance(0);
+    assert.equal(root.activeElement, save, 'keyboard activation retains focus-visible on a touch device');
+  }
+  f.actions.destroy(); f.close();
 });

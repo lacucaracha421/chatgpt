@@ -140,10 +140,19 @@
       y: Math.max(top + 8, Math.min(flipY ? y - height - offset : y + offset, bottom - height - 8)), flipX, flipY };
   }
   // The image text popover sits right of the image, else left, else inside its lower edge.
-  function imagePlacement(rect, size, viewport, gap = 8) {
+  function imagePlacement(rect, size, viewport, gap = 8, touch = false) {
     const left = viewport.offsetLeft || 0, top = viewport.offsetTop || 0, right = left + viewport.width, bottom = top + viewport.height;
-    const width = Math.min(size.width, viewport.width - 16), height = Math.min(size.height, viewport.height - 16);
-    const clampY = y => Math.max(top + 8, Math.min(y, bottom - height - 8));
+    const insetY = touch ? 12 : 8;
+    const width = Math.min(size.width, viewport.width - 16), height = Math.min(size.height, viewport.height - insetY * 2);
+    const clampY = y => Math.max(top + insetY, Math.min(y, bottom - height - insetY));
+    if (touch) {
+      const inset = 12, edge = 24;
+      const clampX = x => Math.max(left + edge, Math.min(x, right - width - edge));
+      if (rect.right + gap + width <= right - inset) return { side: "right", x: rect.right + gap, y: clampY(rect.top), width };
+      if (rect.left - gap - width >= left + inset) return { side: "left", x: rect.left - gap - width, y: clampY(rect.top), width };
+      if (rect.bottom + gap + height <= bottom - inset) return { side: "below", x: clampX(rect.left), y: rect.bottom + gap, width };
+      return { side: "inside", x: clampX(rect.left + inset), y: clampY(rect.bottom - inset - height), width };
+    }
     if (rect.right + gap + width <= right - 8) return { side: "right", x: rect.right + gap, y: clampY(rect.top), width };
     if (rect.left - gap - width >= left + 8) return { side: "left", x: rect.left - gap - width, y: clampY(rect.top), width };
     const inside = Math.max(160, Math.min(width, rect.width - 16));

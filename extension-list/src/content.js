@@ -434,6 +434,7 @@
     let active = null;
     let longPressTimer = null;
     let picker = null;
+    let contextController = null;
     let statePromise = null;
     let suppressNextClick = false;
     let suppressClickTimer = null;
@@ -442,6 +443,8 @@
     let saveToast = null, saveToastTimer = null, pendingSaves = 0;
     let gestureTarget = null;
     let touchGuardRestore = [];
+    const touchPointers = new Map();
+    let twoFingerTimer = null, twoFingerCancelled = false, translationGuard = null;
 
     // Preload the local shadow stylesheet before taking ownership of a right click.
     // Failure leaves Chrome's native menu available.
@@ -454,21 +457,30 @@
           css, initialSettings: stored[globalThis.LakomicsContextModel.SETTINGS], watchSession: createSessionWatcher,
           collector: {
             state: () => ({ phase: gate.phase, picker: Boolean(picker) }), findCandidate,
-            open: async (candidate, origin) => {
+            open: async (candidate, origin, input = "mouse", lifecycle = {}) => {
               if (!candidate || gate.phase !== "idle" || picker) return;
               const id = Symbol("context-menu-save");
               if (!gate.arm(id)) return;
-              active = { id, input: "mouse", candidate, origin, latest: origin, href: location.href, released: true };
-              await open(active);
+              active = { id, input, candidate, origin, latest: origin, href: location.href, released: true, pickerLifecycle: lifecycle };
+              const session = active;
+              await open(session);
+              if (active === session && picker) lifecycle.onOpen?.();
             },
           },
         });
+        contextController = controller;
         chrome.storage.onChanged.addListener((changes, area) => {
           if (area === "local" && changes[globalThis.LakomicsContextModel.SETTINGS]) controller.update(changes[globalThis.LakomicsContextModel.SETTINGS].newValue);
         });
       }).catch(() => {});
     }
 
+    window.addEventListener("pointerdown", onTouchDown, { capture: true, passive: true });
+    window.addEventListener("pointermove", onTouchMove, { capture: true, passive: true });
+    window.addEventListener("pointerup", onTouchEnd, { capture: true, passive: true });
+    window.addEventListener("pointercancel", onTouchEnd, { capture: true, passive: true });
+    window.addEventListener("click", swallowTranslation, true);
+    window.addEventListener("contextmenu", swallowTranslation, true);
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("pointermove", onMove, true);
     document.addEventListener("pointerup", onUp, true);
@@ -477,7 +489,7 @@
     document.addEventListener("selectstart", onSelectStart, true);
     document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("click", onClick, true);
-    const cancelPending = () => { if (gate.phase === "armed") reset(); };
+    const cancelPending = () => { cancelTwoFinger(); if (gate.phase === "armed") reset(); };
     // A committed navigation invalidates the whole session: the pending opening,
     // the mounted list, its ownership, its timers and any transient UI. This runs
     // unconditionally so it works while the list is busy or input-locked, where
@@ -486,9 +498,58 @@
     document.addEventListener("scroll", cancelPending, true);
     document.addEventListener("wheel", cancelPending, { passive: true });
     window.addEventListener("blur", cancelPending);
+    const clearTranslationGesture = () => { cancelTwoFinger(); touchPointers.clear(); translationGuard = null; };
+    window.addEventListener("blur", clearTranslationGesture);
+    for (const name of ["pagehide", "popstate", "hashchange"]) window.addEventListener(name, clearTranslationGesture);
     document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !picker) reset(); }, true);
 
     function insidePicker(event) { return Boolean(picker && event.composedPath?.().includes(picker.host)); }
+    function cancelTwoFinger() {
+      if (twoFingerTimer !== null) clearTimeout(twoFingerTimer);
+      twoFingerTimer = null; twoFingerCancelled = true;
+    }
+    function onTouchDown(event) {
+      if (!touchPointers.size) translationGuard = null;
+      if (event.pointerType !== "touch") return;
+      if (!touchPointers.size) twoFingerCancelled = false;
+      touchPointers.set(event.pointerId, { start: point(event), latest: point(event), at: event.timeStamp });
+      if (touchPointers.size === 1) {
+        if (youtubeSubtitleUi(event) || !contextController?.canTranslateTouch(event)) cancelTwoFinger();
+        return;
+      }
+      // A second finger always abandons the pending single-finger save, even
+      // when the pair is too late or belongs to browser scrolling/zooming.
+      if (active?.input === "touch" && gate.phase === "armed") reset();
+      if (touchPointers.size !== 2 || twoFingerCancelled || youtubeSubtitleUi(event) || !contextController?.canTranslateTouch(event)) { cancelTwoFinger(); return; }
+      const [first, second] = [...touchPointers.values()];
+      if (second.at - first.at > 150) { cancelTwoFinger(); return; }
+      const href = location.href;
+      twoFingerTimer = setTimeout(() => {
+        twoFingerTimer = null;
+        if (twoFingerCancelled || touchPointers.size !== 2 || location.href !== href) return;
+        const origin = { x: (first.latest.x + second.latest.x) / 2, y: (first.latest.y + second.latest.y) / 2 };
+        const target = document.elementFromPoint(origin.x, origin.y);
+        if (!target || youtubeSubtitleUi({ target, composedPath: () => [target] })) return;
+        if (contextController?.translateTouch(target, origin, event)) {
+          translationGuard = { ids: new Set(touchPointers.keys()), until: Infinity };
+        }
+      }, 350);
+    }
+    function onTouchMove(event) {
+      const pointer = event.pointerType === "touch" && touchPointers.get(event.pointerId);
+      if (!pointer) return;
+      pointer.latest = point(event);
+      if (distance(pointer.start, pointer.latest) > 10) cancelTwoFinger();
+    }
+    function onTouchEnd(event) {
+      if (event.pointerType !== "touch" || !touchPointers.delete(event.pointerId)) return;
+      cancelTwoFinger();
+      if (translationGuard?.ids.delete(event.pointerId) && !translationGuard.ids.size) translationGuard.until = Date.now() + 500;
+    }
+    function swallowTranslation(event) {
+      if (!translationGuard || Date.now() > translationGuard.until) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+    }
     function clearTimer() { if (longPressTimer !== null) clearTimeout(longPressTimer); longPressTimer = null; }
     function clearStatus() { statusSequence += 1; if (toastTimer !== null) clearTimeout(toastTimer); toastTimer = null; toast?.remove(); toast = null; }
     function clearClickGuard() { suppressNextClick = false; if (suppressClickTimer !== null) clearTimeout(suppressClickTimer); suppressClickTimer = null; }
@@ -544,6 +605,8 @@
     }
 
     function endSession(disposePicker = true) {
+      const lifecycle = active?.pickerLifecycle;
+      cancelTwoFinger(); touchPointers.clear(); translationGuard = null;
       watcher.stop();
       sessions.end();
       reset();
@@ -554,6 +617,7 @@
       try { if (disposePicker) current?.dispose?.(); } catch {}
       clearClickGuard();
       clearStatus();
+      lifecycle?.onClose?.();
     }
 
     // A pointer id alone cannot identify an invocation: the same finger or button id
@@ -568,6 +632,7 @@
       if (youtubeSubtitleUi(event)) return;
       if (insidePicker(event) || gate.phase !== "idle") return;
       const input = inputKind(event); if (!input) return;
+      if (input === "touch" && touchPointers.size > 1) return;
       const candidate = findCandidate(event.target); if (!candidate) return;
       if (startsOnPlayerControl(event, candidate)) return;
       if (input === "mouse" && startsOnNativeMediaControls(event)) return;

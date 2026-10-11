@@ -8,6 +8,7 @@
     image_unreadable: "이미지를 읽지 못했어요", api_key_missing: "API 키가 필요해요", worker_timeout: "시간이 너무 오래 걸렸어요", timeout: "시간이 너무 오래 걸렸어요",
   };
   function failureText(code) { return messages[code] || "번역하지 못했어요"; }
+  function normalized(text) { return String(text || "").normalize("NFKC").trim().replace(/\s+/g, " "); }
   // The already-loaded picture drawn small; null when it is not an <img> or the canvas is tainted.
   function captureImage(image, doc = document) {
     try {
@@ -20,7 +21,7 @@
       return url.startsWith("data:image/") ? url : null;
     } catch { return null; }
   }
-  function create({ doc = document, win = window, send, surfaces, alive = () => true, watchSession = () => ({ watch() {}, stop() {} }) } = {}) {
+  function create({ doc = document, win = window, send, surfaces, collector = {}, alive = () => true, watchSession = () => ({ watch() {}, stop() {} }) } = {}) {
     const model = globalThis.LakomicsContextModel, cache = new Map();
     let current = null, sequence = 0;
     const reduced = () => Boolean(win.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
@@ -41,25 +42,122 @@
       const surface = surfaces.host("lakomics-image-popover", session.context.image || session.context.target);
       const box = doc.createElement("div"); box.className = "popA"; box.setAttribute("role", "dialog"); box.setAttribute("aria-label", "이미지 글자 번역"); box.tabIndex = -1; box.style.pointerEvents = "auto";
       surface.root.append(box);
-      const popover = { surface, box, copyTimer: 0 };
+      const popover = { surface, box, copyTimer: 0, heightTimer: 0 };
       session.popover = popover;
       const touch = () => surface.node.dataset.touch === "true";
-      surface.node.dataset.touch = String(Boolean(win.matchMedia?.("(hover: none) and (pointer: coarse)").matches));
+      surface.node.dataset.touch = String(Boolean(session.context.touch || win.matchMedia?.("(hover: none) and (pointer: coarse)").matches));
+      // Keep the ancestor permissive: the header always uses none, and only the
+      // overflowing body uses pan-y. These values must be ready before pointerdown.
+      box.style.touchAction = "pan-y";
+      popover.scrollability = () => {
+        if (popover.pressed) return;
+        const body = box.querySelector(".pb");
+        popover.scrollable = Boolean(body && body.scrollHeight > body.clientHeight);
+        if (body) body.style.touchAction = popover.scrollable ? "pan-y" : "none";
+      };
+      popover.capBody = () => {
+        if (popover.pressed) return;
+        const body = box.querySelector(".pb"), view = surfaces.viewport();
+        if (!body) return;
+        const chrome = (box.querySelector(".h")?.getBoundingClientRect().height || (touch() ? 48 : 36))
+          + (box.querySelector(".f")?.getBoundingClientRect().height || (box.querySelector(".f") ? (touch() ? 48 : 32) : 0)) + 2;
+        body.style.maxHeight = Math.max(0, Math.min(view.height * .6, 420, view.height - 24 - chrome)) + "px";
+      };
+      popover.pickerVisibility = hidden => {
+        if (current !== session || surface.closed) return;
+        popover.pickerOpen = hidden;
+        surface.node.inert = hidden;
+        surface.node.setAttribute("aria-hidden", String(hidden));
+        box.style.pointerEvents = hidden ? "none" : "auto";
+        box.classList.toggle("picker-hidden", hidden);
+        box.classList.toggle("picker-restored", !hidden);
+      };
+      popover.clamp = (x = parseFloat(surface.node.style.left) || 0, y = parseFloat(surface.node.style.top) || 0) => {
+        if (surface.closed) return;
+        const view = surfaces.viewport(), left = view.offsetLeft || 0, top = view.offsetTop || 0;
+        if (!popover.pressed) {
+          box.style.width = Math.max(1, Math.min(parseFloat(box.style.width) || (touch() ? 360 : 300), view.width)) + "px";
+          box.style.maxWidth = view.width + "px";
+        }
+        const width = box.getBoundingClientRect().width || parseFloat(box.style.width);
+        popover.capBody();
+        const height = box.getBoundingClientRect().height || 120;
+        surface.node.style.left = Math.max(left, Math.min(x, left + view.width - width)) + "px";
+        surface.node.style.top = Math.max(top + 12, Math.min(y, top + view.height - height - 12)) + "px";
+        if (!popover.pressed) popover.scrollability();
+      };
       popover.place = () => {
+        if (popover.detached) { popover.clamp(); return; }
         const image = session.context.image;
         if (!image?.isConnected || surface.closed) return;
         const rect = image.getBoundingClientRect(), view = surfaces.viewport();
         const outside = rect.bottom <= (view.offsetTop || 0) || rect.top >= (view.offsetTop || 0) + view.height || rect.right <= (view.offsetLeft || 0) || rect.left >= (view.offsetLeft || 0) + view.width;
-        if (rect.width > 0 && outside) { close(); return; }
+        if (!touch() && rect.width > 0 && outside) { close(); return; }
+        popover.capBody();
         const preferred = touch() ? Math.min(360, view.width - 48) : 300;
-        const size = { width: Math.max(160, preferred), height: box.getBoundingClientRect().height || 120 };
-        const position = model.imagePlacement(rect, size, view);
+        box.style.width = Math.max(touch() ? 1 : 160, preferred) + "px";
+        const size = { width: Math.max(touch() ? 1 : 160, preferred), height: box.getBoundingClientRect().height || 120 };
+        const position = model.imagePlacement(rect, size, view, touch() ? 12 : 8, touch());
         box.style.width = position.width + "px"; popover.side = position.side;
         surface.node.style.left = position.x + "px"; surface.node.style.top = position.y + "px";
+        popover.positioned = true;
+        popover.scrollability();
       };
-      popover.follow = () => popover.place();
-      doc.addEventListener("scroll", popover.follow, true); win.addEventListener("resize", popover.follow);
-      popover.onKey = event => { if (event.isTrusted === true && event.key === "Escape") close(); };
+      popover.follow = () => { if (!touch() && !popover.detached) popover.place(); };
+      popover.resize = () => popover.detached ? popover.clamp() : popover.place();
+      doc.addEventListener("scroll", popover.follow, true); win.addEventListener("resize", popover.resize);
+      win.addEventListener("orientationchange", popover.resize);
+      win.visualViewport?.addEventListener("resize", popover.resize);
+      let press = null;
+      popover.finishHeight = () => {
+        win.clearTimeout(popover.heightTimer); popover.heightTimer = 0;
+        box.style.height = ""; box.style.transition = ""; box.style.overflow = "";
+      };
+      popover.down = event => {
+        if (press || event.isPrimary === false || event.button !== 0 || event.target.closest("button")) return;
+        const body = event.target.closest(".pb");
+        if (popover.heightTimer) {
+          const height = box.getBoundingClientRect().height;
+          win.clearTimeout(popover.heightTimer); popover.heightTimer = 0;
+          box.style.transition = "none"; box.style.height = height + "px";
+          popover.heightPaused = true;
+        }
+        popover.pressed = true;
+        press = {id: event.pointerId, x: event.clientX, y: event.clientY, left: parseFloat(surface.node.style.left), top: parseFloat(surface.node.style.top), body: body && body.scrollHeight > body.clientHeight ? body : null, scrollTop: body?.scrollTop || 0, mode: null};
+      };
+      popover.move = event => {
+        if (!press || event.pointerId !== press.id) return;
+        const dx = event.clientX - press.x, dy = event.clientY - press.y;
+        if (!press.mode) {
+          if (Math.hypot(dx, dy) <= 6) return;
+          press.mode = press.body && Math.abs(dy) > Math.abs(dx) ? "scroll" : "drag";
+          if (press.mode === "drag") {
+            popover.detached = true; box.classList.add("dragging");
+            // Window listeners already track the gesture. Capture loss is not
+            // pointerup, and transferring capture can interrupt tablet drags.
+            win.getSelection()?.removeAllRanges();
+          }
+        }
+        if (press.mode === "scroll") {
+          // Touch/pen use native pan-y; mouse drags scroll the list directly.
+          if (event.pointerType === "mouse") { press.body.scrollTop = press.scrollTop - dy; event.preventDefault(); }
+          return;
+        }
+        event.preventDefault(); popover.clamp(press.left + dx, press.top + dy);
+      };
+      popover.up = event => {
+        if (!press || event.pointerId !== press.id) return;
+        press = null; popover.pressed = false;
+        box.classList.remove("dragging");
+        if (popover.heightPaused) { popover.heightPaused = false; popover.finishHeight(); }
+        const pending = popover.pendingFill; popover.pendingFill = null;
+        if (pending) fill(session, pending); else popover.scrollability();
+      };
+      box.addEventListener("pointerdown", popover.down);
+      win.addEventListener("pointermove", popover.move, {passive: false});
+      win.addEventListener("pointerup", popover.up); win.addEventListener("pointercancel", popover.up);
+      if (win.ResizeObserver) { popover.observer = new win.ResizeObserver(popover.scrollability); popover.observer.observe(box); }
+      popover.onKey = event => { if (event.isTrusted === true && event.key === "Escape" && !popover.pickerOpen) close(); };
       win.addEventListener("keydown", popover.onKey, true);
       surfaces.reveal(surface);
       return popover;
@@ -67,13 +165,21 @@
 
     // Replaces the content in one step; the popover height eases over 140 ms.
     function fill(session, build) {
-      const popover = open(session), box = popover.box, before = box.getBoundingClientRect().height;
-      win.clearTimeout(popover.copyTimer); box.replaceChildren(); build(box); popover.place();
+      const popover = open(session), box = popover.box;
+      if (popover.pressed) { popover.pendingFill = build; return; }
+      if (popover.heightTimer) popover.finishHeight();
+      const before = box.getBoundingClientRect().height;
+      win.clearTimeout(popover.copyTimer); box.replaceChildren(); build(box);
+      let footer = box.querySelector(".f");
+      if (!footer) { footer = doc.createElement("div"); footer.className = "f"; }
+      appendSave(session, footer);
+      if (footer.childNodes.length && !footer.isConnected) box.append(footer);
+      if (popover.detached) popover.clamp(); else popover.place();
       const after = box.getBoundingClientRect().height;
       if (!before || !after || Math.abs(after - before) < 1 || reduced()) return;
       box.style.height = before + "px"; box.style.overflow = "hidden"; box.getBoundingClientRect();
       box.style.transition = "height 140ms cubic-bezier(.2,0,0,1)"; box.style.height = after + "px";
-      win.setTimeout(() => { box.style.height = ""; box.style.transition = ""; box.style.overflow = ""; popover.place(); }, 150);
+      popover.heightTimer = win.setTimeout(() => { popover.finishHeight(); if (popover.detached) popover.clamp(); else popover.place(); }, 150);
     }
     function header(title) {
       const bar = doc.createElement("div"); bar.className = "h"; bar.setAttribute("aria-live", "polite");
@@ -99,7 +205,7 @@
         const list = doc.createElement("ol");
         for (const line of lines) {
           const item = doc.createElement("li"), korean = doc.createElement("b"); korean.lang = "ko"; korean.textContent = line.korean; item.append(korean);
-          if (line.original) { const original = doc.createElement("small"); original.lang = model.sourceLanguage(line.original); original.textContent = line.original; item.append(original); }
+          if (line.original && normalized(line.original) !== normalized(line.korean)) { const original = doc.createElement("small"); original.lang = model.sourceLanguage(line.original); original.textContent = line.original; item.append(original); }
           list.append(item);
         }
         body.append(list); box.append(body);
@@ -109,6 +215,27 @@
         footer.append(button); box.append(footer);
       });
       focusIfKeyboard(session);
+    }
+    function appendSave(session, footer) {
+      const image = session.context.image;
+      const candidate = image?.tagName === "IMG" && collector.findCandidate?.(image);
+      if (!candidate || candidate.type === "video" || !collector.open) return;
+      const button = doc.createElement("button"); button.type = "button"; button.dataset.action = "image.lakomics";
+      button.append(surfaces.icon("download"), "저장");
+      button.addEventListener("click", event => {
+        if (event.isTrusted !== true || current !== session || !alive(session.context) || !image.isConnected) return;
+        const touch = session.popover.surface.node.dataset.touch === "true";
+        if (event.pointerType === "touch" || (touch && event.detail > 0)) button.blur();
+        const resolved = collector.findCandidate?.(image);
+        if (!resolved || resolved.type === "video") return;
+        const rect = image.getBoundingClientRect();
+        try { void Promise.resolve(collector.open(resolved,
+          { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, touch ? "touch" : "mouse", {
+            onOpen: () => session.popover?.pickerVisibility(true),
+            onClose: () => session.popover?.pickerVisibility(false),
+          })).catch(() => {}); } catch {}
+      });
+      footer.append(button);
     }
     function copyAll(session, lines, label) {
       const text = lines.map(line => line.korean).join("\n"), popover = session.popover;
@@ -142,7 +269,9 @@
     function close(ms = 90) {
       const session = current; if (!session) return; current = null; session.watcher?.stop();
       const popover = session.popover; if (!popover) return;
-      doc.removeEventListener("scroll", popover.follow, true); win.removeEventListener("resize", popover.follow); win.removeEventListener("keydown", popover.onKey, true); win.clearTimeout(popover.copyTimer);
+      doc.removeEventListener("scroll", popover.follow, true); win.removeEventListener("resize", popover.resize); win.removeEventListener("orientationchange", popover.resize); win.visualViewport?.removeEventListener("resize", popover.resize);
+      win.removeEventListener("pointermove", popover.move); win.removeEventListener("pointerup", popover.up); win.removeEventListener("pointercancel", popover.up);
+      popover.observer?.disconnect(); win.removeEventListener("keydown", popover.onKey, true); win.clearTimeout(popover.copyTimer); win.clearTimeout(popover.heightTimer);
       surfaces.remove(popover.surface, popover.box, ms);
     }
     function translate(context, event) {

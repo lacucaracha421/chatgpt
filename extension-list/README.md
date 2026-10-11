@@ -75,6 +75,26 @@ document, and 일본어/영어/한국어로 바꾸기 replaces the selection in 
 one undo step. Image, link and page "다른 이름으로 저장" use
 `chrome.downloads` with `saveAs`; page saving uses `chrome.pageCapture`.
 
+In 3.5.10, the arc collector returns to saving only; a single-finger 500 ms media
+hold still opens it. For translation, land two touch pointers within 150 ms and
+hold both still for 350 ms after the second lands (at most 10 px movement each).
+The midpoint resolves through the normal save candidate finder: an image opens
+image-text translation; elsewhere, including video, toggles page-body translation
+with the right-click menu's state and setup rules. A second finger cancels a pending
+single-finger hold. Movement, early release, a late second finger or a third finger
+cancels translation without taking over browser pinch/scroll gestures. Disabled,
+excluded and extension-owned UI are bypassed. Missing API keys open settings.
+The image popover has a 저장 button beside 모두 복사 when the collector can save
+that image. It opens the same folder/temporary-save picker at the image centre,
+temporarily fades and disables the popover while the picker is open, then restores
+it at the same position after save, cancellation or temporary save. If the picker
+cannot open, the popover stays visible. No translation text is sent with a save.
+The touch image popover is up
+to 360 px wide with 24 px viewport margins, prefers space beside or below the image, and otherwise
+overlays its lower edge. It stays fixed on screen when the page scrolls; outside
+taps do not dismiss it. Use ✕ to close it (Escape, navigation and opening another
+image translation also close it).
+
 이미지 글자 번역 (`translation:image`): the worker fetches the image (https only,
 redirects followed, 8 MB, `image/*`; an auth/CORS failure falls back to the
 already loaded `<img>` drawn on a canvas by the page), shrinks the long edge to
@@ -82,6 +102,15 @@ already loaded `<img>` drawn on a canvas by the page), shrinks the long edge to
 or Gemini only, default Haiku 5.5) for `{lines:[{original, korean}]}`. The result
 opens in a popover beside the image with a skeleton after 400 ms, the original
 under each Korean line, 모두 복사, Escape/close, and a 다시 시도 on failure.
+Equivalent original and Korean text (NFKC and whitespace normalized) appears
+only once and is copied once. Drag with a mouse, pen or touch after moving more
+than 6 px; buttons remain tappable. The header always drags, while vertical
+gestures in an overflowing body scroll its list. After dragging, the popover
+stays at its viewport position through scrolling and content updates; resize
+and orientation changes keep the window inside the visual viewport. Before a drag,
+each content update repositions using its actual height with a 12 px bottom inset;
+long lists scroll while the header and footer remain visible. On desktop,
+before dragging it follows the image and closes when the image leaves view.
 Results are cached in memory per image URL and model for the tab session.
 
 페이지 본문 번역 (`translation:page`): the main text (article/main/role=main, else the

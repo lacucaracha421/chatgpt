@@ -37,7 +37,7 @@
   function createActions({ doc = document, win = window, send = runtime, surfaces, collector = {}, alive = () => true, watchSession } = {}) {
     const model = globalThis.LakomicsContextModel;
     // Both own long-lived surfaces (the image popover, the page translation) and their own navigation watchers.
-    const image = globalThis.LakomicsContextImage?.create({ doc, win, send, surfaces, alive, watchSession });
+    const image = globalThis.LakomicsContextImage?.create({ doc, win, send, surfaces, collector, alive, watchSession });
     const page = globalThis.LakomicsContextPage?.create({ doc, win, send, surfaces, watchSession });
     function notice(label, context, origin, options) { const toast = surfaces.toast(origin, context.target); toast.show(label, options); return toast; }
     function copy(text, context, origin) {

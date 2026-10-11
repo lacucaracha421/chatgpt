@@ -74,6 +74,30 @@
       void send({ type: "translation:settings" }).then(available => { if (available?.ok) render(available); });
       return true;
     }
+    function canTranslateTouch(event) {
+      return !model.bypass(event, { ...config, hostname: win.location.hostname, ...collector.state?.() });
+    }
+    function translateTouch(target, origin, event) {
+      if (!canTranslateTouch({ isTrusted: event.isTrusted, target, composedPath: () => [target] })) return false;
+      const candidate = collector.findCandidate?.(target);
+      const image = candidate?.type !== "video" && candidate?.element?.tagName === "IMG" ? candidate.element : null;
+      const context = { target, image, candidate, imageUrl: image?.currentSrc || image?.src || "", href: win.location.href, touch: true };
+      const id = image ? "image.translate" : "page.translate";
+      const watcher = watchSession(); actionWatchers.add(watcher);
+      watcher.watch(() => { context.departed = true; watcher.stop(); actionWatchers.delete(watcher); });
+      void (async () => {
+        try {
+          const available = await send({ type: "translation:settings" });
+          if (departing || context.departed || context.href !== win.location.href || !canTranslateTouch({ isTrusted: event.isTrusted, target, composedPath: () => [target] })) return;
+          context.imageModel = available?.imageModel || "";
+          const pageState = actions.pageState();
+          const item = model.items(image ? { imageUrl: context.imageUrl } : {}, { ...available, pageState: pageState === "off" ? null : pageState }).find(item => item.id === id);
+          if (item?.setup) await send({ type: "context:settings" });
+          else if (item && !item.disabled) await actions.activate(id, context, origin, event);
+        } finally { watcher.stop(); actionWatchers.delete(watcher); }
+      })().catch(() => {});
+      return true;
+    }
     function contextmenu(event) { open(event); }
     function keydown(event) {
       if (!current) { if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) open(event, true); return; }
@@ -87,7 +111,7 @@
     win.addEventListener("contextmenu", contextmenu); win.addEventListener("keydown", keydown);
     doc.addEventListener("pointerdown", outside, true); doc.addEventListener("scroll", dismiss, true); win.addEventListener("resize", dismiss); win.addEventListener("blur", dismiss); doc.addEventListener("visibilitychange", dismiss);
     win.visualViewport?.addEventListener("resize", dismiss); win.visualViewport?.addEventListener("scroll", dismiss);
-    return { open, close, keydown, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
+    return { open, close, keydown, canTranslateTouch, translateTouch, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
       close({ immediate: true }); departing = true; for (const watcher of actionWatchers) watcher.stop(); actionWatchers.clear(); actions.destroy?.(); surfaces.destroy();
       win.removeEventListener("contextmenu", contextmenu); win.removeEventListener("keydown", keydown); doc.removeEventListener("pointerdown", outside, true); doc.removeEventListener("scroll", dismiss, true); win.removeEventListener("resize", dismiss); win.removeEventListener("blur", dismiss); doc.removeEventListener("visibilitychange", dismiss);
       win.visualViewport?.removeEventListener("resize", dismiss); win.visualViewport?.removeEventListener("scroll", dismiss);
