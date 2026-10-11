@@ -72,9 +72,26 @@ Translation uses the existing OpenRouter/Anthropic settings (`translation:contex
 requests; page scripts never see keys). 한국어로 번역 shows a result block below the
 selected paragraph, 일본어/영어로 번역해서 복사 copies through an offscreen
 document, and 일본어/영어/한국어로 바꾸기 replaces the selection in a field with
-one undo step. 이미지 글자 번역 and 페이지 본문 번역 are shown but answer "다음
-업데이트에서 지원" for now. Image, link and page "다른 이름으로 저장" use
+one undo step. Image, link and page "다른 이름으로 저장" use
 `chrome.downloads` with `saveAs`; page saving uses `chrome.pageCapture`.
+
+이미지 글자 번역 (`translation:image`): the worker fetches the image (https only,
+redirects followed, 8 MB, `image/*`; an auth/CORS failure falls back to the
+already loaded `<img>` drawn on a canvas by the page), shrinks the long edge to
+1568 px as JPEG, and asks the vision-capable "이미지 글자 번역 모델" (options; Claude
+or Gemini only, default Haiku 5.5) for `{lines:[{original, korean}]}`. The result
+opens in a popover beside the image with a skeleton after 400 ms, the original
+under each Korean line, 모두 복사, Escape/close, and a 다시 시도 on failure.
+Results are cached in memory per image URL and model for the tab session.
+
+페이지 본문 번역 (`translation:page`): the main text (article/main/role=main, else the
+densest container; navigation, side notes, footers, forms, code, editable fields and
+ad-like containers are skipped) is translated block by block through the
+right-click model chain, what is on screen first and what scrolls into view next,
+three requests at a time, each result under its block. A status chip at the top
+right shows the progress and toggles 원문만 보기 / 번역 보기 without new requests;
+the menu item switches to 번역 숨기기 / 번역 보기 while a translation exists. A
+navigation stops the job.
 
 New permissions: `clipboardRead`, `clipboardWrite`, `pageCapture`, `offscreen`.
 The Chrome context-menu entry "표지 찾기" (Shift+right click) now sends the code

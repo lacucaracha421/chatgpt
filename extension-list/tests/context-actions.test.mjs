@@ -39,9 +39,8 @@ test('translated copy goes through async background clipboard and replace change
   assert.deepEqual(f.calls.map(message=>message.type),['translation:context','context:clipboard']);assert.equal(f.calls[0].kind,'translate.ja.copy');assert.equal(f.toasts.at(-1).label,'일본어로 복사됨');assert.equal(f.toasts.at(-1).preview,'Translated');
   f.toasts.length=0;await f.actions.activate('replace.en',c,origin,gesture);assert.equal(c.field.value,'Translated world');assert.equal(f.toasts.length,0);f.close();
 });
-test('round-two placeholders show a clear toast, image/link/page calls and navigation dispatch correctly',async()=>{
+test('image/link/page browser calls and clipboard actions dispatch correctly',async()=>{
   const f=fixture(),c=f.context();c.imageUrl='https://site.test/i.png';c.linkUrl='https://site.test/l';
-  for(const id of ['image.translate','page.translate']){await f.actions.activate(id,c,origin,gesture);assert.equal(f.toasts.at(-1).label,'다음 업데이트에서 지원');}
   for(const id of ['image.save','image.saveAs','image.openTab','link.saveAs','link.openTab','page.saveAs'])await f.actions.activate(id,c,origin,gesture);
   assert.deepEqual(f.calls.map(call=>call.action),['image.save','image.saveAs','image.openTab','link.saveAs','link.openTab','page.saveAs']);
   await f.actions.activate('image.copyUrl',c,origin,gesture);await f.actions.activate('link.copy',c,origin,gesture);assert.deepEqual(f.clipboard,[c.imageUrl,c.linkUrl]);f.close();

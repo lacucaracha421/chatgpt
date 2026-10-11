@@ -34,8 +34,11 @@
     if (context.input) { context.field.select(); return; }
     const range = doc.createRange(); range.selectNodeContents(context.field); const selection = win.getSelection(); selection.removeAllRanges(); selection.addRange(range);
   }
-  function createActions({ doc = document, win = window, send = runtime, surfaces, collector = {}, alive = () => true } = {}) {
+  function createActions({ doc = document, win = window, send = runtime, surfaces, collector = {}, alive = () => true, watchSession } = {}) {
     const model = globalThis.LakomicsContextModel;
+    // Both own long-lived surfaces (the image popover, the page translation) and their own navigation watchers.
+    const image = globalThis.LakomicsContextImage?.create({ doc, win, send, surfaces, alive, watchSession });
+    const page = globalThis.LakomicsContextPage?.create({ doc, win, send, surfaces, watchSession });
     function notice(label, context, origin, options) { const toast = surfaces.toast(origin, context.target); toast.show(label, options); return toast; }
     function copy(text, context, origin) {
       // Invoke synchronously in the trusted click/key handler, before any await.
@@ -96,7 +99,8 @@
           case "edit.selectAll": selectAll(context, doc, win); break;
           case "image.copyUrl": await copy(context.imageUrl, context, origin); break;
           case "link.copy": await copy(context.linkUrl, context, origin); break;
-          case "image.translate": case "page.translate": notice("다음 업데이트에서 지원", context, origin); break;
+          case "image.translate": await image?.translate(context, event); break;
+          case "page.translate": page?.activate(context, origin); break;
           case "image.lakomics": await collector.open?.(context.candidate, origin); break;
           case "nav.back": win.history.back(); break;
           case "nav.forward": win.history.forward(); break;
@@ -117,7 +121,7 @@
         return { ok: true };
       } catch { if (alive(context)) notice("작업 실패 · 브라우저 권한을 확인해 주세요", context, origin, { error: true }); return { ok: false }; }
     }
-    return { activate };
+    return { activate, pageState: () => page?.state() ?? "off", destroy() { image?.destroy(); page?.destroy(); } };
   }
   globalThis.LakomicsContextActions = { runtime, unchanged, replace, selectAll, createActions };
 })();

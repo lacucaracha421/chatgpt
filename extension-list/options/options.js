@@ -153,6 +153,9 @@
     // Right-click translation model: "" follows the X translation model.
     $("context-menu-model").replaceChildren(new Option("X 번역과 같게", ""), ...(result.models || []).map(model => new Option(model.label, model.id)));
     $("context-menu-model").value = result.contextModel || "";
+    // Image text translation: only models that can read pictures (Claude, Gemini).
+    $("context-menu-image-model").replaceChildren(...(result.imageModels || []).map(model => new Option(model.label, model.id)));
+    $("context-menu-image-model").value = result.imageModel || "";
     $("translation-key").placeholder = result.hasOpenRouterKey ? "OpenRouter 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
     $("translation-anthropic-key").placeholder = result.hasAnthropicKey ? "Anthropic 키 저장됨 · 변경할 키 입력" : "Anthropic API 키 (Claude 모델용)";
     $("translation-dictionary").value = (result.userTerms || []).map(term => `${term.source} = ${term.korean}`).join("\n");
@@ -171,6 +174,11 @@
   $("context-menu-model").onchange = async () => {
     const result = await send({ type: "translation:update", contextModel: $("context-menu-model").value });
     $("context-menu-status").textContent = result?.ok ? "저장됨" : "번역 모델 저장 실패";
+    await translationSettings();
+  };
+  $("context-menu-image-model").onchange = async () => {
+    const result = await send({ type: "translation:update", imageModel: $("context-menu-image-model").value });
+    $("context-menu-status").textContent = result?.ok ? "저장됨" : "이미지 번역 모델 저장 실패";
     await translationSettings();
   };
   $("translation-enabled").onchange = async () => {

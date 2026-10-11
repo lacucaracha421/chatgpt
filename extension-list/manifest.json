@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Companion",
-  "version": "3.5.2",
+  "version": "3.5.3",
   "description": "Collect images and videos into Lakomics, translate X posts, YouTube subtitles and web pages, and use the Lakomics right-click menu.",
   "permissions": [
     "storage",
@@ -76,6 +76,8 @@
         "src/arc-collector.js",
         "src/context-menu/model.js",
         "src/context-menu/surfaces.js",
+        "src/context-menu/image.js",
+        "src/context-menu/page.js",
         "src/context-menu/actions.js",
         "src/context-menu/menu.js",
         "src/content.js"
@@ -104,6 +106,8 @@
         "src/arc-collector.js",
         "src/context-menu/model.js",
         "src/context-menu/surfaces.js",
+        "src/context-menu/image.js",
+        "src/context-menu/page.js",
         "src/context-menu/actions.js",
         "src/context-menu/menu.js",
         "src/content.js"

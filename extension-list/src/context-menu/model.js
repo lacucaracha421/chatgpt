@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const SETTINGS = "lakomics:context-menu:v1";
-  const ownSelector = "lakomics-menu, lakomics-toast, lakomics-translation-block, #lakomics-arc-collector, #lakomics-yt-button, #lakomics-yt-overlay, #lakomics-yt-toast, #ytsf-button";
+  const ownSelector = "lakomics-menu, lakomics-toast, lakomics-translation-block, lakomics-image-popover, lakomics-page-status, #lakomics-arc-collector, #lakomics-yt-button, #lakomics-yt-overlay, #lakomics-yt-toast, #ytsf-button";
   function hosts(value) {
     return [...new Set((Array.isArray(value) ? value : String(value || "").split(/\r?\n/))
       .map(host => String(host).trim().toLowerCase().replace(/\.$/, ""))
@@ -106,7 +106,7 @@
       add(edit, "edit.selectAll", "모두 선택", "select", { hint: "Ctrl+A" });
     }
     if (context.imageUrl) {
-      add(imageActions, "image.translate", "이미지 글자 번역", "translate");
+      add(imageActions, "image.translate", "이미지 글자 번역", "translate", { setup: !(availability.hasImageApiKey ?? availability.hasApiKey) });
       if (context.candidate) add(imageActions, "image.lakomics", "Lakomics에 저장…", "archive");
       add(imageBrowser, "image.save", "이미지 저장", "download");
       add(imageBrowser, "image.saveAs", "다른 이름으로 저장", "download");
@@ -119,7 +119,9 @@
       add(links, "link.saveAs", "링크를 다른 이름으로 저장", "download");
     }
     if (!context.text && !context.field && !context.imageUrl && !context.linkUrl) {
-      add(page, "page.translate", "페이지 본문 번역", "translate");
+      // While a page translation exists the item toggles it: hide, then show again.
+      const pageLabel = { on: "번역 숨기기", hidden: "번역 보기" }[availability.pageState] || "페이지 본문 번역";
+      add(page, "page.translate", pageLabel, "translate", { setup: !availability.pageState && !(availability.hasContextApiKey ?? availability.hasApiKey) });
       groups.push(page);
       const browser = [];
       add(browser, "page.saveAs", "다른 이름으로 페이지 저장", "download");
@@ -137,6 +139,16 @@
     return { x: Math.max(left + 8, Math.min(flipX ? x - width - offset : x + offset, right - width - 8)),
       y: Math.max(top + 8, Math.min(flipY ? y - height - offset : y + offset, bottom - height - 8)), flipX, flipY };
   }
+  // The image text popover sits right of the image, else left, else inside its lower edge.
+  function imagePlacement(rect, size, viewport, gap = 8) {
+    const left = viewport.offsetLeft || 0, top = viewport.offsetTop || 0, right = left + viewport.width, bottom = top + viewport.height;
+    const width = Math.min(size.width, viewport.width - 16), height = Math.min(size.height, viewport.height - 16);
+    const clampY = y => Math.max(top + 8, Math.min(y, bottom - height - 8));
+    if (rect.right + gap + width <= right - 8) return { side: "right", x: rect.right + gap, y: clampY(rect.top), width };
+    if (rect.left - gap - width >= left + 8) return { side: "left", x: rect.left - gap - width, y: clampY(rect.top), width };
+    const inside = Math.max(160, Math.min(width, rect.width - 16));
+    return { side: "inside", x: Math.max(left + 8, Math.min(rect.left + 8, right - inside - 8)), y: clampY(rect.bottom - gap - height), width: inside };
+  }
   function nextIndex(key, current, count) {
     if (!count) return -1;
     if (key === "Home") return 0;
@@ -145,5 +157,5 @@
     if (key === "ArrowUp") return current < 0 ? count - 1 : (current + count - 1) % count;
     return current;
   }
-  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, bypass, sourceLanguage, quote, editable, snapshot, restore, items, placement, nextIndex };
+  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, bypass, sourceLanguage, quote, editable, snapshot, restore, items, placement, imagePlacement, nextIndex };
 })();

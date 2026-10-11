@@ -4,7 +4,7 @@
     const model = globalThis.LakomicsContextModel, surfaces = globalThis.LakomicsContextSurfaces.createSurfaces({ doc, win, css });
     const actionWatchers = new Set();
     let config = model.settings(initialSettings), current = null, departing = false;
-    const actions = globalThis.LakomicsContextActions.createActions({ doc, win, send, surfaces, collector, alive: context => !departing && context?.departed !== true && (!context?.href || win.location.href === context.href) });
+    const actions = globalThis.LakomicsContextActions.createActions({ doc, win, send, surfaces, collector, watchSession, alive: context => !departing && context?.departed !== true && (!context?.href || win.location.href === context.href) });
     function close({ restore = true } = {}) {
       const session = current; if (!session) return; current = null; session.watcher.stop();
       // Chrome-like: the menu fades in over 80 ms and disappears instantly.
@@ -50,7 +50,8 @@
         if (current !== session) return;
         const focusedId = session.items[session.index]?.id;
         rows.replaceChildren(); session.nodes = []; session.items = [];
-        for (const item of model.items(context, { ...available, href: win.location.href, canGoBack: win.navigation?.canGoBack ?? win.history.length > 1, canGoForward: win.navigation?.canGoForward === true })) {
+        context.imageModel = available.imageModel || "";
+        for (const item of model.items(context, { ...available, pageState: actions.pageState?.(), href: win.location.href, canGoBack: win.navigation?.canGoBack ?? win.history.length > 1, canGoForward: win.navigation?.canGoForward === true })) {
           if (item.separator) { const separator = doc.createElement("div"); separator.className = "sep"; separator.setAttribute("role", "separator"); rows.append(separator); continue; }
           const index = session.items.length; session.items.push(item);
           const node = doc.createElement("div"); node.className = "it"; node.id = "lkm-item-" + item.id; node.setAttribute("role", "menuitem");
@@ -87,7 +88,7 @@
     doc.addEventListener("pointerdown", outside, true); doc.addEventListener("scroll", dismiss, true); win.addEventListener("resize", dismiss); win.addEventListener("blur", dismiss); doc.addEventListener("visibilitychange", dismiss);
     win.visualViewport?.addEventListener("resize", dismiss); win.visualViewport?.addEventListener("scroll", dismiss);
     return { open, close, keydown, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
-      close({ immediate: true }); departing = true; for (const watcher of actionWatchers) watcher.stop(); actionWatchers.clear(); surfaces.destroy();
+      close({ immediate: true }); departing = true; for (const watcher of actionWatchers) watcher.stop(); actionWatchers.clear(); actions.destroy?.(); surfaces.destroy();
       win.removeEventListener("contextmenu", contextmenu); win.removeEventListener("keydown", keydown); doc.removeEventListener("pointerdown", outside, true); doc.removeEventListener("scroll", dismiss, true); win.removeEventListener("resize", dismiss); win.removeEventListener("blur", dismiss); doc.removeEventListener("visibilitychange", dismiss);
       win.visualViewport?.removeEventListener("resize", dismiss); win.visualViewport?.removeEventListener("scroll", dismiss);
     } };

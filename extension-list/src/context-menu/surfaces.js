@@ -89,10 +89,12 @@
       };
       currentToast = api; return api;
     }
-    function inline(block) {
+    // `inside` puts the card at the end of the block (table cells and list items), not after it.
+    function inline(block, { inside = false } = {}) {
       let api = blocks.get(block); if (api && !api.closed) return api;
       const surface = host("lakomics-translation-block", block, false), box = doc.createElement("div"); box.className = "trA"; box.setAttribute("role", "region"); box.setAttribute("aria-label", "한국어 번역"); surface.root.append(box);
-      let version = 0;
+      let version = 0, hidden = false;
+      const apply = () => { surface.node.style.display = hidden ? "none" : "block"; };
       api = { get closed() { return surface.closed === true; }, begin() { const request = ++version; return () => request === version && !surface.closed; },
         show(text, { pending = false, error = false, retry = null } = {}) {
           if (surface.closed || !block.isConnected) return;
@@ -103,13 +105,43 @@
           if (retry) { const button = doc.createElement("button"); button.className = "retry"; button.textContent = "다시 시도"; button.addEventListener("click", event => { if (event.isTrusted === true) retry(event); }); header.append(button); }
           const spacer = doc.createElement("span"); spacer.className = "sp"; const close = doc.createElement("button"); close.className = "x"; close.setAttribute("aria-label", "번역 닫기"); close.append(icon(doc, "close")); close.addEventListener("click", () => api.close()); header.append(spacer, close); box.append(header);
           if (!pending && !error) { const body = doc.createElement("div"); body.lang = "ko"; body.textContent = text; box.append(body); }
-          if (!surface.node.isConnected) block.after(surface.node);
+          if (!surface.node.isConnected) { if (inside) block.append(surface.node); else block.after(surface.node); apply(); }
         },
+        // Page translation hides and shows its cards without asking again.
+        setHidden(value) { hidden = Boolean(value); if (!surface.closed) apply(); },
+        get hidden() { return hidden; },
         close() { remove(surface, box, 90, true); blocks.delete(block); },
       };
       blocks.set(block, api); return api;
     }
-    return { host, reveal, place, remove, toast, inline, viewport, icon: name => icon(doc, name), destroy() { currentToast?.close(0); } };
+    // The page translation status: top right of the viewport, stays until closed.
+    function status(target) {
+      const surface = host("lakomics-page-status", target), box = doc.createElement("div"); box.className = "toastA status"; box.style.pointerEvents = "auto"; surface.root.append(box);
+      const reposition = () => {
+        const view = viewport(), width = box.getBoundingClientRect().width;
+        surface.node.style.left = Math.max((view.offsetLeft || 0) + 8, (view.offsetLeft || 0) + view.width - width - 16) + "px";
+        surface.node.style.top = (view.offsetTop || 0) + 16 + "px";
+      };
+      const api = {
+        get closed() { return surface.closed === true; },
+        show(label, { pending = false, count = "", actions = [] } = {}) {
+          if (surface.closed) return;
+          box.replaceChildren(); box.className = "toastA status" + (pending ? " pending" : ""); box.setAttribute("role", "status");
+          const text = doc.createElement("span"); text.textContent = label; box.append(text);
+          if (count) { const node = doc.createElement("span"); node.className = "pv"; node.textContent = count; box.append(node); }
+          for (const { label: name, onClick } of actions) {
+            const button = doc.createElement("button"); button.className = "act"; button.textContent = name;
+            button.addEventListener("click", event => { if (event.isTrusted === true) onClick(event); }); box.append(button);
+          }
+          const close = doc.createElement("button"); close.className = "act x"; close.setAttribute("aria-label", "닫기"); close.append(icon(doc, "close")); close.addEventListener("click", event => { if (event.isTrusted === true) api.close(); }); box.append(close);
+          reveal(surface); reposition();
+        },
+        close(ms = 130) { remove(surface, box, ms); win.removeEventListener("resize", reposition); },
+      };
+      win.addEventListener("resize", reposition);
+      return api;
+    }
+    return { host, reveal, place, remove, toast, inline, status, viewport, icon: name => icon(doc, name), destroy() { currentToast?.close(0); } };
   }
   // Pending text appears after 400 ms and, once visible, lasts at least 600 ms.
   async function delayed(work, pending, { win = window, now = () => Date.now() } = {}) {
