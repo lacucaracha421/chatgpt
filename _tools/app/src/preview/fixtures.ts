@@ -1,6 +1,6 @@
 import type { AssetQuery, AssetSummary, CollectionSummary, ReleaseTitle, MangaIndexIdentity } from "../library/types.ts";
 import type { ArtistSummary } from "../artists/types.ts";
-import { PREVIEW_CHARACTER_SERIES_ID, previewCharacterBrowse, previewCharacterGroups, previewCharacterSidebarCounts, previewCharacterTargets, previewConfirmCounts, previewExtrasSuggestions, previewS36Readiness, previewShadowReviewPage, previewShadowReviewSummary, previewTaggerCounts, previewTaggerReviewItems, previewUnregisterPreview } from "./characterFixtures.ts";
+import { PREVIEW_CHARACTER_SERIES_ID, previewCharacterBrowse, previewCharacterGroups, previewCharacterSuggestions, previewCharacterSidebarCounts, previewCharacterTargets, previewConfirmCounts, previewExtrasSuggestions, previewS36Readiness, previewShadowReviewPage, previewShadowReviewSummary, previewTaggerCounts, previewTaggerReviewItems, previewUnregisterPreview } from "./characterFixtures.ts";
 
 export const PREVIEW_FIXTURE_MARKER = "lakomics-preview-fixture-20260929";
 
@@ -382,8 +382,8 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
       return null;
     }
     case "character_series_folders":
-    case "character_suggestions":
     case "ignored_character_suggestions": return [];
+    case "character_suggestions": return previewCharacterSuggestions(Number(args.minimum ?? 5));
     case "character_s36_readiness": return args.seriesId === PREVIEW_CHARACTER_SERIES_ID ? previewS36Readiness() : [];
     case "character_s36_publication": return { series: [PREVIEW_CHARACTER_SERIES_ID], excludedTargets: ["t-lycaon", "t-anby"], scoringEnabled: true };
     case "tagger_review_items": return previewTaggerReviewItems(previewAssets);

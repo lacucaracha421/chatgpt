@@ -82,6 +82,28 @@ export function previewExtrasSuggestions(targetId: string) {
   return [];
 }
 
+/**
+ * `character_suggestions`: eight new-character suggestions in two series (the second has no registered
+ * folder match for one of them), so the thumbnail cards show every folder sentence and badge shape.
+ */
+export function previewCharacterSuggestions(minimum: number) {
+  const samples = (first: number) => rangeIds([first, first + 3]);
+  const row = (tag: string, imageCount: number, bothCount: number, insideCount: number, first: number, seriesId: string | null, seriesName: string | null) =>
+    ({ tag, imageCount, bothCount, pixaiCount: imageCount, canaryCount: bothCount, sampleAssetIds: samples(first), seriesId, seriesName, insideCount });
+  const rows = [
+    row("blonney", 9, 0, 9, 11, PREVIEW_CHARACTER_SERIES_ID, "젠레스 존 제로"),
+    row("hornet_(hollow_knight)", 8, 8, 2, 21, PREVIEW_CHARACTER_SERIES_ID, "젠레스 존 제로"),
+    row("sophia_(reverse:1999)", 8, 5, 8, 31, PREVIEW_CHARACTER_SERIES_ID, "젠레스 존 제로"),
+    row("dairin", 9, 7, 9, 41, PREVIEW_CHARACTER_SERIES_ID, "젠레스 존 제로"),
+    row("soldier_11_(zenless_zone_zero)", 9, 4, 9, 51, "class-reverse", "리버스"),
+    row("ukinami_yuzuha", 9, 9, 9, 61, "class-reverse", "리버스"),
+    row("koharu_rika", 5, 2, 5, 71, "class-reverse", "리버스"),
+    row("belle_(swimsuit)", 8, 1, 0, 81, "class-reverse", "리버스"),
+    row("canary_only_character", 6, 0, 0, 91, null, null),
+  ];
+  return rows.filter(item => item.imageCount >= minimum);
+}
+
 /** `?unregister=refusal` in the preview URL shows the refused variant of the 시리즈 등록 해제 dialog. */
 export function previewUnregisterPreview(seriesId: string) {
   const refused = new URLSearchParams(window.location.search).get("unregister") === "refusal";

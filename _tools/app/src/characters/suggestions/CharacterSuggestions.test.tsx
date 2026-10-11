@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLayoutEffect } from "react";
-import { CharacterSuggestionsOverview, CharacterSuggestionTile, useCharacterSuggestions, type SuggestionState } from "./CharacterSuggestions";
+import { CharacterSuggestionsOverview, CharacterSuggestionTile, suggestionFolderSentence, useCharacterSuggestions, type SuggestionState } from "./CharacterSuggestions";
+import { SUGGESTION_FILTERS_KEY } from "./suggestionFilters";
 import { readFileSync } from "node:fs";
 import { SuggestionDialog } from "./SuggestionDialog";
 import { suggestionName, type Suggestion, type SuggestionApi, type SuggestionDetail } from "./client";
@@ -30,7 +32,13 @@ const folders = [{ id: "series", parentId: null, name: "리버스", kind: "root"
 const api = (): SuggestionApi => ({ list: vi.fn().mockResolvedValue([suggestion]), detail: vi.fn().mockResolvedValue(detail), ignored: vi.fn().mockResolvedValue([]), ignore: vi.fn().mockResolvedValue(undefined), register: vi.fn().mockResolvedValue({ target, queuedCount: 3 }), merge: vi.fn().mockResolvedValue({ target, queuedCount: 8 }), context: vi.fn().mockResolvedValue({ targets: [target], folders }), groups: vi.fn().mockResolvedValue([]) });
 const dialog = (client: SuggestionApi, mode: "register" | "merge" = "register", row = suggestion, onSaved = vi.fn()) => render(<SuggestionDialog suggestion={row} mode={mode} privacyMode={false} api={client} onClose={vi.fn()} onSaved={onSaved} />);
 
+beforeEach(() => localStorage.removeItem(SUGGESTION_FILTERS_KEY));
 afterEach(cleanup);
+const chooseFromMenu = async (card: string, item: string) => {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: `${card} 더 보기` }));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+};
 
 it("marks changed suggestion requests loading on the first committed render", async () => {
   const client = api(), reads: boolean[] = [];
@@ -75,7 +83,7 @@ it("keeps a dismissed suggestion dismissed after a remount at the same data revi
   await screen.findByText("이졸데");
   vi.mocked(client.list).mockResolvedValue([]);
   vi.mocked(client.ignored).mockResolvedValue([{ tag: suggestion.tag, ignoredAt: "now" }]);
-  fireEvent.click(screen.getByRole("button", { name: "무시" }));
+  await chooseFromMenu("이졸데", "무시");
   await screen.findByRole("button", { name: "무시 목록 1" });
   first.unmount();
   render(tree());
@@ -93,7 +101,7 @@ it("keeps a registered suggestion retired after refreshing and remounting", asyn
   const tree = () => <CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />;
   const first = render(tree());
   await screen.findByText("이졸데");
-  fireEvent.click(screen.getByRole("button", { name: "등록" }));
+  fireEvent.click(screen.getByRole("button", { name: "캐릭터로 등록" }));
   const create = await screen.findByRole("button", { name: "캐릭터 만들기" });
   await waitFor(() => expect(create).toBeEnabled());
   fireEvent.click(create);
@@ -116,7 +124,9 @@ describe("character suggestions", () => {
     render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />);
     expect(await screen.findByText("이졸데")).toBeInTheDocument();
     expect(client.list).toHaveBeenCalledWith(5);
-    expect(screen.getByText("확실 0 · 불확실 8")).toBeInTheDocument();
+    const canary = screen.getByRole("article", { name: "canary character" });
+    expect(within(canary).getByText("불확실 8")).toBeInTheDocument();
+    expect(within(canary).queryByText(/^확실/)).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "시리즈 폴더 없음" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "시리즈 폴더 안에 있는 것만" }));
     expect(screen.queryByText("canary character")).not.toBeInTheDocument();
@@ -131,7 +141,7 @@ describe("character suggestions", () => {
     await screen.findByText("이졸데");
     vi.mocked(client.list).mockResolvedValue([]);
     vi.mocked(client.ignored).mockResolvedValue([{ tag: suggestion.tag, ignoredAt: "now" }]);
-    fireEvent.click(screen.getByRole("button", { name: "무시" }));
+    await chooseFromMenu("이졸데", "무시");
     await waitFor(() => expect(client.ignore).toHaveBeenCalledWith(suggestion.tag, true));
     fireEvent.click(await screen.findByRole("button", { name: "무시 목록 1" }));
     vi.mocked(client.list).mockResolvedValue([suggestion]); vi.mocked(client.ignored).mockResolvedValue([]);
@@ -141,7 +151,7 @@ describe("character suggestions", () => {
   });
   it("opens the shared registration dialog from the overview", async () => {
     render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={api()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "등록" }));
+    fireEvent.click(await screen.findByRole("button", { name: "캐릭터로 등록" }));
     expect(await screen.findByRole("dialog", { name: "새 캐릭터 등록" })).toBeInTheDocument();
     expect(await screen.findByDisplayValue("이졸데")).toBeInTheDocument();
   });
@@ -236,6 +246,66 @@ describe("character suggestions", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(client.detail).toHaveBeenCalledTimes(2));
+  });
+  it("renders a thumbnail-first card with name, tag, counts and one folder sentence", async () => {
+    const client = api();
+    vi.mocked(client.list).mockResolvedValue([suggestion, { ...suggestion, tag: "outside_character", imageCount: 8, bothCount: 8, insideCount: 2 }]);
+    render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />);
+    const card = await screen.findByRole("article", { name: "이졸데" });
+    expect(within(card).getByText("isolde_(reverse:1999)")).toBeInTheDocument();
+    expect(card.querySelectorAll(".character-suggestion-card__thumb img")).toHaveLength(3);
+    expect(within(card).getByText("+5")).toBeInTheDocument();
+    expect(within(card).getByText("확실 6")).toBeInTheDocument();
+    expect(within(card).getByText("불확실 2")).toBeInTheDocument();
+    expect(within(card).getByText("리버스 폴더에 7장, 다른 곳에 1장")).toBeInTheDocument();
+    const outside = screen.getByRole("article", { name: "outside character" });
+    expect(within(outside).queryByText(/^불확실/)).not.toBeInTheDocument();
+    expect(within(outside).getByText("리버스 폴더에 2장, 다른 곳에 6장")).toBeInTheDocument();
+    expect(suggestionFolderSentence({ ...suggestion, insideCount: 8 })).toBe("리버스 폴더에 8장");
+    expect(suggestionFolderSentence({ ...suggestion, seriesId: null, seriesName: null })).toBe("시리즈 폴더 없음");
+  });
+  it("keeps 다른 캐릭터와 같음, 나중에 and 무시 in the ⋯ menu with the same handlers", async () => {
+    const client = api();
+    render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />);
+    await screen.findByText("이졸데");
+    expect(screen.queryByRole("button", { name: "무시" })).not.toBeInTheDocument();
+    await chooseFromMenu("이졸데", "다른 캐릭터와 같음…");
+    expect(await screen.findByRole("dialog", { name: "같은 캐릭터 고르기" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await chooseFromMenu("이졸데", "나중에");
+    expect(screen.queryByText("이졸데")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "나중에 1 · 다시 보기" }));
+    expect(await screen.findByText("이졸데")).toBeInTheDocument();
+    await chooseFromMenu("이졸데", "무시");
+    await waitFor(() => expect(client.ignore).toHaveBeenCalledWith(suggestion.tag, true));
+  });
+  it("puts the explanation behind a help button", async () => {
+    render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={api()} />);
+    await screen.findByText("이졸데");
+    expect(screen.queryByText(/자동으로 만들지 않고/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "새 캐릭터 제안 도움말" }));
+    expect(await screen.findByText(/자동으로 만들지 않고/)).toBeInTheDocument();
+  });
+  it("remembers the minimum and the inside-only filter across a remount and a restart", async () => {
+    const client = api();
+    const view = render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />);
+    await screen.findByText("이졸데");
+    fireEvent.change(screen.getByRole("combobox", { name: "최소 이미지 수" }), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "시리즈 폴더 안에 있는 것만" }));
+    expect(JSON.parse(localStorage.getItem(SUGGESTION_FILTERS_KEY)!)).toEqual({ minimum: 10, insideOnly: true });
+    view.unmount();
+    render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />);
+    expect(screen.getByRole("combobox", { name: "최소 이미지 수" })).toHaveValue("10");
+    expect(screen.getByRole("checkbox", { name: "시리즈 폴더 안에 있는 것만" })).toBeChecked();
+    cleanup();
+    // A restart loads the module again and reads the stored choice.
+    vi.resetModules();
+    const fresh = await import("./CharacterSuggestions");
+    render(<fresh.CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />);
+    expect(screen.getByRole("combobox", { name: "최소 이미지 수" })).toHaveValue("10");
+    expect(screen.getByRole("checkbox", { name: "시리즈 폴더 안에 있는 것만" })).toBeChecked();
+    await waitFor(() => expect(client.list).toHaveBeenLastCalledWith(10));
   });
   it("does not render private thumbnails", async () => {
     render(<CharacterSuggestionsOverview version={0} privacyMode api={api()} />);
