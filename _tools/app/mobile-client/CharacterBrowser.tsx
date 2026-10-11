@@ -24,7 +24,7 @@ import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc} from 
 import {pagePath,RequestGate} from './model';
 import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters} from './assetFilters';
-import {characterParent,characterChildren,characterExclusion,characterExclusionTarget,characterNodeName,characterPath,isExtrasNode,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
+import {characterParent,characterChildren,characterExclusion,characterExclusionTarget,characterNodeName,characterPath,characterScopeNode,isExtrasNode,soloExtrasNode,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import {FolderShelf} from './FolderCards';
 import {useLevelMotion} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
@@ -259,7 +259,7 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
   const recoverSearch=async(location:Location,reason:unknown,signal:AbortSignal)=>{
     if((reason as {status?:number})?.status!==422||!location.search?.length||!latest.current.onInvalidSearch)return false;
     const invalid=await invalidSearchChoices(location.search,chip=>chip.kind==='character'&&location.node&&latest.current.index?.revision
-      ?api(characterPath(location.node,'all',latest.current.index.revision,null),signal)
+      ?api(characterPath(characterScopeNode(latest.current.index,location.node),'all',latest.current.index.revision,null),signal)
       :api(pagePath({tab:'library',title:'에셋',search:[chip]},null,EMPTY_FILTERS,1),signal),signal);
     if(!invalid.length)return false;
     latest.current.onInvalidSearch?.(invalid);return true;
@@ -268,13 +268,15 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
     if(!active||!index?.ready||!index.revision||!where.node)return;
     const request=pageGate.current.begin();setBusy(true);setError('');setMoreError('');
     moreGate.current.cancel();morePending.current=false;setMore(false);
+    // A group with only a 기타 reads that 기타's images; the place (title, path, Back) stays the group's.
+    const scopeNode=characterScopeNode(index,where.node);
     const cached=cache.current.get(key(index.revision,where));
     // A cached page is re-validated against the contract it was stored under, so a scope
     // cannot present a page the server would now refuse simply because it was cached.
     const usable=cached&&(!hasActiveFilters(where.filters)||cached.page.filter_version===ASSET_FILTER_VERSION)?cached:undefined;
     const promise=(usable?Promise.resolve(usable.page):withScopedToc(
-      api<CharacterPage&{listGeneration?:string}>(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search),request.signal).then(value=>({...value,list_generation:value.listGeneration,filter_version:filterVersionOf(value)??undefined})),
-      readScopedToc(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search,true),request.signal),'newest'))
+      api<CharacterPage&{listGeneration?:string}>(characterPath(scopeNode,where.filter,index.revision,null,where.filters,where.search),request.signal).then(value=>({...value,list_generation:value.listGeneration,filter_version:filterVersionOf(value)??undefined})),
+      readScopedToc(characterPath(scopeNode,where.filter,index.revision,null,where.filters,where.search,true),request.signal),'newest'))
       // A switch keeps the old page, and an entry its empty gallery, until the new first screen
       // is decoded (capped like the PC's first viewport); later images load in place.
       // Cached preview URLs bypass readyFirstScreen's missing-thumbnail work; decode them
@@ -328,7 +330,7 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
     morePending.current=true;setMore(true);setMoreError('');
     const request=moreGate.current.begin();
     try{
-      const raw=await api<CharacterPage>(characterPath(s.where.node,s.where.filter,s.index.revision,s.page.next_cursor,base.filters,base.search),request.signal);
+      const raw=await api<CharacterPage>(characterPath(characterScopeNode(s.index,s.where.node),s.where.filter,s.index.revision,s.page.next_cursor,base.filters,base.search),request.signal);
       if(!moreGate.current.current(request.id))return;
       // Resolved through the same reader as the other scopes, since this envelope declares the
       // contract under the wire name rather than the normalized page field.
@@ -348,7 +350,7 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
     async(cursor,signal)=>{
       const base=committed;
       if(!base?.node||!index?.revision)throw new Error('목록이 변경되었습니다. 새로고침해 주세요.');
-      const raw=await api<CharacterPage&{listGeneration?:string}>(characterPath(base.node,base.filter,index.revision,cursor,base.filters,base.search),signal);
+      const raw=await api<CharacterPage&{listGeneration?:string}>(characterPath(characterScopeNode(index,base.node),base.filter,index.revision,cursor,base.filters,base.search),signal);
       if(raw.revision!==index.revision||hasActiveFilters(base.filters)&&filterVersionOf(raw)!==ASSET_FILTER_VERSION)throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
       return {...raw,list_generation:raw.listGeneration,filter_version:filterVersionOf(raw)??undefined};
     },()=>{cache.current.clear();setRetry(n=>n+1);},setMoreError,
@@ -393,14 +395,15 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
   const place=navigating&&lastPlace.current?lastPlace.current:where;
   const node=index?.nodes.find(n=>n.id===place.node);
   const children=index?characterChildren(index,place.node,classifications):[];
-  const scope=index?.scopes.find(s=>s.nodeId===place.node&&s.filter===place.filter);
+  const soloExtras=index&&node?soloExtrasNode(index,node):null;
+  const scope=index?.scopes.find(s=>s.nodeId===(soloExtras?.id??place.node)&&s.filter===place.filter);
   const ancestors:CharacterNode[]=[];
   let parent=node&&index?characterParent(index,node,classifications):null;
   while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=characterParent(index,found,classifications);}
-  const folderStrip=!!node&&node.kind!=='character';
+  const folderStrip=!!node&&node.kind!=='character'&&!soloExtras;
   // Keep the containing shelf mounted while a character is open. Returning reuses its
   // decoded image elements and horizontal offset, rather than replaying blank cards.
-  const shelfHidden=node?.kind==='character'&&!children.length;
+  const shelfHidden=node?.kind==='character'&&!children.length||!!soloExtras;
   const shelfPlace=shelfHidden?[...ancestors].reverse().find(item=>item.kind!=='character')?.id??null:place.node;
   const shelfChildren=index?characterChildren(index,shelfPlace,classifications):[];
   const foldable=folderStrip&&shelfChildren.length>0;
@@ -432,7 +435,7 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
-    <Gallery hasMore={!!(page??(stale?lastPage.current:undefined))?.next_cursor} privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?kindShade.inline:<div className="library-header-tools">{characterTools}</div>}{overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(galleryItems,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={!!optionsHost} selectedIds={selection?.ids} onSelectAsset={selection?.onSelect} onToggleSelection={selection?.onToggle} onClearSelection={selection?.onClear}/>
+    <Gallery hasMore={!!(page??(stale?lastPage.current:undefined))?.next_cursor} privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?kindShade.inline:<div className="library-header-tools">{characterTools}</div>}{overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(galleryItems,i,viewerCharacterContext(soloExtras??node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={!!optionsHost} selectedIds={selection?.ids} onSelectAsset={selection?.onSelect} onToggleSelection={selection?.onToggle} onClearSelection={selection?.onClear}/>
     {active&&where.node&&optionsHost&&createPortal(<AssetViewSections value={where.filters} onChange={applyFilters}/>,optionsHost)}
     <LoadingLine label={(more)&&'다음 캐릭터 자산 불러오는 중'} className="is-bottom"/>
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>{if(sparse){cache.current.clear();setRetry(n=>n+1);}else void append();}}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}

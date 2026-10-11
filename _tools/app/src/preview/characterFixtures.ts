@@ -22,6 +22,7 @@ const seeds: Seed[] = [
   { id: "x-group-victoria", name: "빅토리아 가정부 서비스 기타", thumbnail: 101, images: [101, 112], extrasGroupId: "g-victoria", extras: true },
   { id: "x-group-hares", name: "카룬 토끼굴 기타", thumbnail: 113, images: [113, 112], // an empty range: this 기타 holds no images yet
     extrasGroupId: "g-hares", extras: true },
+  { id: "x-group-trainees", name: "신입 조사원 기타", thumbnail: 231, images: [231, 246], extrasGroupId: "g-trainees", extras: true }, // a group that has only a 기타
   { id: "x-series", name: "젠레스 존 제로 기타", thumbnail: 121, images: [121, 160], extras: true },
 ];
 
@@ -44,12 +45,13 @@ const groupIds = { victoria: ["t-ellen", "t-corin", "t-lycaon"], hares: ["t-anby
 export const previewCharacterGroups = [
   { id: "g-victoria", seriesId: PREVIEW_CHARACTER_SERIES_ID, name: "빅토리아 가정부 서비스", revision: 2, targetIds: groupIds.victoria, extrasTargetId: "x-group-victoria" },
   { id: "g-hares", seriesId: PREVIEW_CHARACTER_SERIES_ID, name: "카룬 토끼굴", revision: 1, targetIds: groupIds.hares, extrasTargetId: "x-group-hares" },
+  { id: "g-trainees", seriesId: PREVIEW_CHARACTER_SERIES_ID, name: "신입 조사원", revision: 1, targetIds: [] as string[], extrasTargetId: "x-group-trainees" },
 ];
 
 export function previewCharacterSidebarCounts() {
   return {
     targets: Object.fromEntries(seeds.map(seed => [seed.id, imagesByTarget.get(seed.id)!.length])),
-    groups: { "g-victoria": 24 + 16 + 18 + 12, "g-hares": 22 + 12 },
+    groups: { "g-victoria": 24 + 16 + 18 + 12, "g-hares": 22 + 12, "g-trainees": 16 },
   };
 }
 
@@ -66,13 +68,16 @@ export function previewCharacterBrowse(args: Record<string, unknown>, assets: re
   return { items, nextCursor: null, totalCount: items.length, unavailableReferenceIds: [] };
 }
 
-/** The 기타 suggestions: the series' own reads one known name on 7 images; the Victoria group's reads an unlisted name. */
+/** The 기타 suggestions: the series' own reads one known name on 7 images; the Victoria group's reads an unlisted name; the 기타-only group reads one known name on 6. */
 export function previewExtrasSuggestions(targetId: string) {
   if (targetId === "x-series") {
     return [{ tag: "wise_(zenless_zone_zero)", imageCount: 7, bothCount: 5, pixaiCount: 6, canaryCount: 6, assetIds: rangeIds([121, 127]) }];
   }
   if (targetId === "x-group-victoria") {
     return [{ tag: "hoshimi_miyabi_(zenless_zone_zero)", imageCount: 12, bothCount: 9, pixaiCount: 11, canaryCount: 10, assetIds: rangeIds([101, 112]) }];
+  }
+  if (targetId === "x-group-trainees") {
+    return [{ tag: "nicole_demara_(zenless_zone_zero)", imageCount: 6, bothCount: 5, pixaiCount: 6, canaryCount: 5, assetIds: rangeIds([231, 236]) }];
   }
   return [];
 }

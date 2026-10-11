@@ -285,3 +285,43 @@ it("shows a refusal or name collision as the reason and keeps the unregister but
   expect(within(dialog).getByRole("button", { name: "등록 해제" })).toBeDisabled();
   expect(extrasApi.unregisterSeries).not.toHaveBeenCalled();
 });
+
+const soloExtras = extrasOf("extras-solo", "solo");
+const solo: CharacterGroup = { id: "solo", seriesId: "series", name: "신입 조사원", revision: 1, targetIds: [], extrasTargetId: "extras-solo" };
+
+it("opens a group that has only a 기타 straight to the 기타 gallery under the group's own title", async () => {
+  const user = userEvent.setup();
+  const ids = loaded.slice(0, 6).map(a => a.id);
+  const { api, hubApi } = await mount({ groupId: "solo", groups: [band, solo], extras: [seriesExtras, groupExtras, soloExtras], suggestions: { "extras-solo": [suggestion(ids)] } });
+  expect(await screen.findByRole("option", { name: "이미지 5.webp" })).toBeVisible();
+  const title = screen.getByLabelText("시리즈 도구");
+  expect(within(title).getByText("신입 조사원")).toBeVisible();
+  expect(within(title).queryByText("기타")).not.toBeInTheDocument();
+  // No shelf and no 기타 card: the gallery is the 기타's own, read once.
+  expect(screen.queryByRole("button", { name: "기타 열기" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("신입 조사원 그룹 캐릭터")).not.toBeVisible(); // kept mounted for the group editor, but hidden
+  expect(hubApi.browse).toHaveBeenCalledWith(expect.objectContaining({ targetId: "extras-solo", groupId: null }));
+  expect(hubApi.browse).not.toHaveBeenCalledWith(expect.objectContaining({ groupId: "solo" }));
+  // The 기타 gallery's own actions: 캐릭터로, the name chips and 기타에서 빼기.
+  expect(screen.getByRole("button", { name: "캐릭터로" })).toBeDisabled();
+  // The group menu stays: 그룹 편집 opens the group's editor even though the shelf is not shown.
+  await user.click(screen.getByRole("button", { name: "그룹 더보기" }));
+  await user.click(await screen.findByRole("menuitem", { name: "그룹 편집" }));
+  const editor = await screen.findByRole("dialog", { name: "캐릭터 그룹 편집" });
+  expect(within(editor).getByRole("textbox", { name: "그룹 이름" })).toHaveValue("신입 조사원");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "캐릭터 그룹 편집" })).not.toBeInTheDocument());
+  await user.click(await screen.findByRole("button", { name: "아바라이 렌지 6장" }));
+  await waitFor(() => expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "true"));
+  expect(screen.getByRole("button", { name: "캐릭터로" })).toBeEnabled();
+  const decide = vi.spyOn(api, "decide");
+  await user.click(await screen.findByRole("button", { name: "기타에서 빼기" }));
+  await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ targetId: "extras-solo", decision: "cleared" })));
+});
+
+it("keeps the group screen with its shelf once the group has a member", async () => {
+  await mount({ groupId: "solo", groups: [band, { ...solo, targetIds: ["hina"] }], extras: [seriesExtras, groupExtras, soloExtras] });
+  const shelf = await screen.findByLabelText("신입 조사원 그룹 캐릭터");
+  expect(within(shelf).getByRole("button", { name: "기타 열기" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "캐릭터로" })).not.toBeInTheDocument();
+});

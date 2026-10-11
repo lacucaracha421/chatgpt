@@ -58,6 +58,19 @@ export function characterChildren(index:CharacterIndex,node:string|null,classifi
   const rank=(n:CharacterNode)=>n.kind==='group'?0:n.kind==='character'?(isExtrasNode(n)?2:1):n.kind==='series'?3:4;
   return index.nodes.filter(n=>characterParent(index,n,classifications)===node).sort((a,b)=>rank(a)-rank(b));
 }
+/**
+ * The 기타 that stands for a group with no member character (it is the group's only child), or
+ * `null`. Such a group opens straight to its 기타 images under the group's own name.
+ */
+export function soloExtrasNode(index:CharacterIndex,node:CharacterNode|undefined|null) {
+  if(node?.kind!=='group')return null;
+  const children=index.nodes.filter(n=>n.parentId===node.id);
+  return children.length===1&&isExtrasNode(children[0])?children[0]!:null;
+}
+/** The node whose scope a place reads: a group's only 기타 for that group, else the node itself. */
+export function characterScopeNode(index:CharacterIndex|undefined,node:string):string {
+  return index?soloExtrasNode(index,index.nodes.find(n=>n.id===node))?.id??node:node;
+}
 export function characterParent(index:CharacterIndex,node:CharacterNode,classifications:readonly Classification[]=[]) {
   if(node.kind!=='series')return node.parentId;
   const parent=classifications.find(c=>c.id===node.sourceId)?.parent_id;

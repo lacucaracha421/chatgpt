@@ -150,7 +150,7 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
   return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
 }
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
@@ -238,6 +238,17 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     pickerPages.current.clear(); returnGallery.current = null;
   }, [series.classificationId]);
   const seriesExtras = extras.filter(t => t.seriesClassificationId === series.classificationId);
+  const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
+  const requestedGroup = groups.find(group => group.id === groupId && group.seriesId === series.classificationId);
+  // The 기타 card of this screen: the group's own on a group screen, else the series' own.
+  const shelfExtras = requestedGroup
+    ? seriesExtras.find(t => t.id === requestedGroup.extrasTargetId || t.extrasGroupId === requestedGroup.id)
+    : seriesExtras.find(t => !t.extrasGroupId);
+  // A group with a 기타 and no member character opens as that 기타 (its title stays the group's);
+  // it returns to the group screen by itself once a member joins.
+  const extrasOnlyGroup = !requestedTargetId && requestedGroup && shelfExtras && !members.some(member => requestedGroup.targetIds.includes(member.id)) ? requestedGroup : undefined;
+  const targetId = requestedTargetId ?? (extrasOnlyGroup ? shelfExtras?.id : undefined);
+  const currentGroup = extrasOnlyGroup ? undefined : requestedGroup;
   const current = targets.find(t => t.id === targetId) ?? seriesExtras.find(t => t.id === targetId);
   // A 기타 opens as an ordinary gallery, but has no reference, edit or recognition controls.
   const currentExtras = current?.role === "extras";
@@ -257,11 +268,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       : referenceInspection.inspections && needsReferenceConfirmation(referenceInspection.inspections) ? "필요한 인물 확인이 있습니다."
       : null
     : null;
-  const currentGroup = groups.find(group => group.id === groupId && group.seriesId === series.classificationId);
-  // The 기타 card of this screen: the group's own on a group screen, else the series' own.
-  const shelfExtras = currentGroup
-    ? seriesExtras.find(t => t.id === currentGroup.extrasTargetId || t.extrasGroupId === currentGroup.id)
-    : seriesExtras.find(t => !t.extrasGroupId);
   const extrasForSuggestions = currentExtras ? current : !targetId ? shelfExtras : undefined;
   const extrasSuggestions = useExtrasSuggestions(extrasForSuggestions?.id ?? null, refreshVersion + reload + analysisRevision, extrasApi);
   const extrasPreviews = useExtrasPreviews(series.classificationId, shelfExtras?.id ?? null, refreshVersion + reload + analysisRevision, hubApi);
@@ -276,7 +282,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const sorted = viewApplies && Boolean(onSortChange) ? sort : "newest";
   const browseView = viewApplies ? characterBrowseView(sorted, { mediaFilter, aspectFilter, randomPivot }) : undefined;
   const filtered = Boolean(browseView?.mediaKind || browseView?.aspectRatio);
-  const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
   // Per-character image counts come from the character index (character folders are hidden from the
   // folder tree, so their tree counts are missing); the folder tree is only a fallback.
   const cachedCounts = sidebarCountCache.peek(gateway, dataScope, refreshVersion);
@@ -695,9 +700,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // Recovery surfaces only while automation is actually off or stalled.
   const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 인식 켜기</Button>
     : s36Stalled && !current && !currentGroup ? <S36ScoringWarning disabled={busy || Boolean(picking)} onChanged={() => { setReadinessVersion(v => v + 1); refresh(); }} /> : null;
-  const focusedName = currentExtras ? "기타" : current?.displayName ?? currentGroup?.name;
+  const focusedName = currentExtras ? extrasOnlyGroup?.name ?? "기타" : current?.displayName ?? currentGroup?.name;
   // A character inside a group shows the group in its path: series › group › character.
-  const currentCharacterGroup = current ? groups.find(group => group.seriesId === series.classificationId && (currentExtras ? group.extrasTargetId === current.id : group.targetIds.includes(current.id))) : undefined;
+  const currentCharacterGroup = current && !extrasOnlyGroup ? groups.find(group => group.seriesId === series.classificationId && (currentExtras ? group.extrasTargetId === current.id : group.targetIds.includes(current.id))) : undefined;
   const currentStatus = characterTarget ? characterStatus(characterTarget, readiness.get(characterTarget.id), s36Driven(characterTarget.id)) : null;
   const candidateReview = !picking && !current && !currentGroup && candidateCount > 0 && s36Settings?.series.includes(series.classificationId)
     ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="학습 인식이 판단을 기다리는 후보를 하나씩 확인" onClick={() => setShadowReview("series")}>확인 {candidateCount.toLocaleString()}</Button>
@@ -782,7 +787,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {!picking && currentExtras && <Button size="sm" variant="primary" disabled={busy || selectedIds.length === 0 || selectedIds.length > MAX_PROMOTION_IMAGES} aria-description={selectedIds.length > MAX_PROMOTION_IMAGES ? `한 번에 ${MAX_PROMOTION_IMAGES}장까지` : selectedIds.length === 0 ? "기타에서 같은 사람의 이미지를 골라 주세요" : undefined} onClick={() => setPromoting(true)}>캐릭터로</Button>}
         {!picking && characterTarget && <Menu label="캐릭터 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={characterMenuItems} />}
         {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={seriesMenuItems} />}
-        {currentGroup && !picking && <Menu label="그룹 더보기" disabled={busy} trigger={<UserGroupIcon aria-hidden="true" />} items={[
+        {(currentGroup ?? extrasOnlyGroup) && !picking && <Menu label="그룹 더보기" disabled={busy} trigger={<UserGroupIcon aria-hidden="true" />} items={[
           { id: "edit-group", label: "그룹 편집", icon: <PencilIcon aria-hidden="true" />, onSelect: () => setGroupEditRequest(v => v + 1) },
           ...faultItem,
         ]} />}
@@ -801,7 +806,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && current && <div className="series-character-folder-head"><div className="folder-shelf__label character-group-heading"><span>이미지</span><span className="character-group-heading__count">{page.totalCount.toLocaleString("ko-KR")}</span></div></div>}
         {!picking && !excludedOnly && <SeriesShelf hidden={Boolean(current)} scope={`${library?.root ?? ""}:${series.classificationId}:${currentGroup?.id ?? ""}`} privacyKey={String(privacyMode)} ready={!shelfLoading && (Boolean(currentGroup) || (!staleFolders && (!folderLoading || Boolean(cachedFolders))) || Boolean(folderError))}>
-          <CharacterGroups key={`${library?.root ?? ""}:${series.classificationId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
+          <CharacterGroups key={`${library?.root ?? ""}:${series.classificationId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={(currentGroup ?? extrasOnlyGroup)?.id} privacyMode={privacyMode} memberCounts={memberCounts}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
             onGroupsChanged={onChanged} suggestionCount={currentGroup ? 0 : seriesSuggestions.length}
             extrasCard={shelfExtras ? <ExtrasCard count={characterCounts[shelfExtras.id]} previews={extrasPreviews} privacyMode={privacyMode} suggestions={extrasSuggestions}

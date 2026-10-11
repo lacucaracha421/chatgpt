@@ -621,3 +621,22 @@ it('names a 기타 in the manual-exclusion context so the viewer says 기타, no
   const extras={...node('character','x','Group 기타','group:g'),role:'extras' as const,protectedAssetIds:[]};
   expect(viewerCharacterContext(extras,capable)).toMatchObject({targetId:'x',name:'기타'});
 });
+
+it('opens a group whose only child is its 기타 straight to the 기타 images under the group name',async()=>{
+  const soloGroup=structuredClone(index);
+  soloGroup.nodes=[node('series','s','Series',null),node('group','solo','Solo group','series:s'),{...node('character','x-solo','Solo group 기타','group:solo'),role:'extras' as const}];
+  soloGroup.scopes.push({nodeId:'group:solo',filter:'all',totalCount:5,sourceCount:5},{nodeId:'character:x-solo',filter:'all',totalCount:5,sourceCount:5});
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(soloGroup):page(['solo-1','solo-2']));
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Solo group · 5장'}));
+  await screen.findByText('solo-1');
+  expect(screen.getByRole('heading',{name:'Solo group'})).toBeTruthy();
+  // The images are the 기타's own; no 기타 title, no 기타 card.
+  expect(screen.queryByRole('heading',{name:'기타'})).toBeNull();
+  expect(screen.queryByRole('button',{name:/^기타/})).toBeNull();
+  expect(mocks.api.mock.calls.some(([p])=>p.includes('node=character%3Ax-solo'))).toBe(true);
+  expect(mocks.api.mock.calls.some(([p])=>p.includes('node=group%3Asolo'))).toBe(false);
+  // Back leaves the group for its series as for any group.
+  act(()=>{expect(backRef.current?.()).toBe(true);});
+  expect(await screen.findByRole('heading',{name:'Series'})).toBeTruthy();
+});
