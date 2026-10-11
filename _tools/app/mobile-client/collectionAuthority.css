@@ -11,6 +11,7 @@
 .collection-create-form .ui-dialog__actions .ui-button { min-height: var(--touch-target); }
 /* 작품 관리: the shared 52px sheet rows, icon first, grouped by one hairline. */
 .collection-manage-group { display: flex; flex-direction: column; }
+.library-sheet:has(> .collection-manage-group) > .ui-button { justify-content: flex-start; padding-left: calc(4px + 20px + var(--space-3)); border: 0; }
 .collection-manage-group + .collection-manage-group { border-top: 1px solid var(--color-border); }
 .sheet-option.collection-manage-row { justify-content: flex-start; gap: var(--space-3); border-bottom: 0; color: var(--color-text); cursor: pointer; }
 .sheet-option.collection-manage-row > svg { flex: none; width: 20px; height: 20px; margin: 0; }

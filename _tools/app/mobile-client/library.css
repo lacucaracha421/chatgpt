@@ -3,9 +3,9 @@
 .library-root-scroll { flex:1; min-height:0; overflow:auto; overscroll-behavior-y:contain; padding:0 var(--mobile-gutter) 24px; }
 .library-root-scroll h2,.folder-intro h2 { font-size:15px; font-weight:500; margin:24px 0 12px; }
 .library-segments { width:100%; margin:var(--space-3) 0 var(--space-2); }
-.library-segments .ui-segmented__cell { min-height:42px; }
-/* Asset galleries (folders, albums, characters) have a 16px side gutter; their shade matches it. */
-.library-main { --section-shade-gutter:16px; }
+.library-segments .ui-segmented__cell { min-height:var(--touch-target); }
+/* Asset galleries and their shade share the screen gutter. */
+.library-main { --section-shade-gutter:var(--mobile-gutter); }
 .library-root { --section-shade-gutter:var(--mobile-gutter); }
 .library-search { display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--color-border); margin-bottom:16px; }
 .library-search svg { width:20px; color:var(--color-muted); }

@@ -281,10 +281,16 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     moveViewport(top);
     if(segment)onScroll(scroll.scrollTop);
   }, [identity, restoreScroll]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = parent.current; if (!element) return;
     // A retained tab reports zero width under display:none, not a new gallery layout.
-    const observer = new ResizeObserver(() => {if (element.clientWidth > 32) setWidth(element.clientWidth - 32);});
+    const measure = () => {
+      const style = getComputedStyle(element);
+      const gutter = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      if (element.clientWidth > gutter) setWidth(element.clientWidth - gutter);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(element); return () => observer.disconnect();
   }, []);
   // Warm roughly two screens below what is rendered; a new position replaces the old batch.

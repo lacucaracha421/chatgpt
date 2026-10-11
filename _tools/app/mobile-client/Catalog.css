@@ -28,8 +28,9 @@
 @keyframes catalog-spin{to{transform:rotate(360deg)}}
 /* View settings share Collections' second-row segmented track, without a selection thumb. */
 .mobile-catalog .catalog-view-controls{flex:none}
+.mobile-catalog .ui-button{height:var(--touch-target);min-height:var(--touch-target)}
 .mobile-catalog .catalog-view-controls .ui-segmented__cell{gap:var(--space-2);color:var(--color-text)}
-.mobile-catalog .catalog-view-controls .ui-segmented__cell::before{content:'';position:absolute;inset:-4px 0}
+.mobile-catalog .catalog-view-controls .ui-segmented__cell::before{content:'';position:absolute;inset:0}
 .mobile-catalog .catalog-view-controls .ui-segmented__cell + .ui-segmented__cell{border-left:1px solid var(--color-border)}
 .mobile-catalog .catalog-view-controls .ui-segmented__cell:active:not(:disabled){background:var(--color-control-pressed)}
 .mobile-catalog .catalog-view-controls .ui-segmented__cell.is-active{background:var(--color-filter-selected);color:var(--color-filter-text);font-weight:600}

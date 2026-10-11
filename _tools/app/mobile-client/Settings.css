@@ -27,7 +27,12 @@
 
 .settings-screen__content {
   width: min(760px, 100%);
-  margin: 0 auto;
+  margin: 0;
+}
+
+.settings-screen .ui-button {
+  height: var(--touch-target);
+  min-height: var(--touch-target);
 }
 
 .settings-screen .settings-view__value {
