@@ -1,6 +1,6 @@
 import {assetSearchParams,type AssetSearchName} from '../src/assets/assetSearch';
 import type {AssetFiltersValue} from './types';
-import {EMPTY_FILTERS, withFilters} from './assetFilters';
+import {EMPTY_FILTERS, filterParams, sortOf} from './assetFilters';
 import type {ScopedAssetPage} from './scopedAssetToc';
 export type CharacterFilter = 'all' | 'unclassified' | 'needs_review';
 /** Assets that define this character (its base and learned references). Only an upgraded
@@ -39,10 +39,13 @@ export type CharacterPage = ScopedAssetPage & {revision:string;totalCount:number
  * newest date order, whose TOC cursors differ from the server's default published order.
  */
 export function characterPath(node:string,filter:CharacterFilter,revision:string,cursor:string|null,filters:AssetFiltersValue=EMPTY_FILTERS,search:readonly AssetSearchName[]=[],toc=false) {
-  const params=assetSearchParams(new URLSearchParams({node,filter,revision,limit:'40',sort:'newest'}),search,false);
+  const params=assetSearchParams(new URLSearchParams({node,filter,revision,limit:'40',sort:sortOf(filters)}),search,false);
   if(toc){params.delete('limit');params.set('toc','1');params.set('utcOffsetMinutes',String(-new Date().getTimezoneOffset()));}
   if(cursor)params.set('cursor',cursor);
-  return withFilters(`/v1/library/characters/assets?${params}`,filters);
+  for(const [key,value] of filterParams(filters))params.set(key,value);
+  // The character route sorts by date only (published · newest · oldest); 좋아요순 and 랜덤 fall back to newest.
+  params.set('sort',sortOf(filters)==='oldest'?'oldest':'newest');params.delete('seed');
+  return `/v1/library/characters/assets?${params}`;
 }
 export function characterChildren(index:CharacterIndex,node:string|null) {
   const rank={series:0,group:0,character:1,folder:2};

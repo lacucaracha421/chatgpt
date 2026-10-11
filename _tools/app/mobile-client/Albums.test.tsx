@@ -27,7 +27,7 @@ async function choose(group='종류',choice='영상'){
  fireEvent.click(screen.getByRole('button',{name:group}));fireEvent.click(screen.getByRole('radio',{name:choice}));
 }
 /** Reads the compact filter labels from the top bar. */
-function chipLabels(){return [...screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')].map(b=>b.textContent);}
+function chipLabels(){return [...document.querySelectorAll('.ui-section-bar__trailing button')].map(b=>b.getAttribute('aria-label'));}
 const chipShown=(label:string)=>waitFor(async()=>{
  if(label==='종류')expect(screen.getByRole('radiogroup',{name:'종류'})).toBeTruthy();
  else if(label==='영상'||label==='이미지')expect(within(screen.getByRole('radiogroup',{name:'종류'})).getByRole('radio',{name:label}).getAttribute('aria-checked')).toBe('true');
@@ -53,17 +53,18 @@ describe('album Library scopes',()=>{
   await openRootAlbum();expect(screen.queryByRole('dialog')).toBeNull();
   expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('에셋›앨범');
   expect(document.querySelector('.gallery-scroll .library-children .library-folder')?.textContent).toContain('임시');
-  expect(chipLabels()).toEqual(['비율','길이']);
-  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
-  const viewSheet=screen.getByRole('dialog',{name:'보기 옵션'});
+  expect(chipLabels()).toEqual(['보기']);
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));
+  const viewSheet=screen.getByRole('dialog',{name:'보기'});
   expect(within(viewSheet).queryByRole('group',{name:'자산 필터'})).toBeNull();back();
   await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('heading',{name:'업로드용'})).toBeTruthy();
  });
  it('walks inner sheet, filters, parent album, then root with Albums selected',async()=>{
   await openRootAlbum();fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
   expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('에셋›앨범›업로드용');
-  await choose();await chipShown('영상');fireEvent.click(screen.getByRole('button',{name:'비율'}));const ratioSheet=await screen.findByRole('dialog',{name:'비율'});fireEvent.click(within(ratioSheet).getByRole('radio',{name:'전체'}));
-  back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());await chipShown('종류');
+  await choose();await chipShown('영상');fireEvent.click(screen.getByRole('button',{name:'보기'}));const ratioSheet=await screen.findByRole('dialog',{name:'보기'});fireEvent.click(within(within(ratioSheet).getByRole('radiogroup',{name:'비율'})).getByRole('radio',{name:'전체'}));
+  back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());await chipShown('영상');
+  back();await waitFor(()=>expect(within(screen.getByRole('radiogroup',{name:'종류'})).getByRole('radio',{name:'전체'}).getAttribute('aria-checked')).toBe('true'));
   back();await screen.findByRole('heading',{name:'업로드용'});back();await screen.findByRole('heading',{name:'에셋'});
   expect(screen.getByRole('radio',{name:'앨범'}).getAttribute('aria-checked')).toBe('true');expect(screen.getByRole('button',{name:'찾기'})).toBeTruthy();
  });

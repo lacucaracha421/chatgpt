@@ -33,7 +33,7 @@ import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
 import {useDuplicateDecisionFlush} from './CatalogDuplicates';
 import type {ViewerCharacterContext} from './Viewer';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {RectangleStackIcon, ArrowsUpDownIcon, ChevronRightIcon, PlayIcon, Squares2X2Icon} from '@heroicons/react/24/outline';
+import {RectangleStackIcon, ChevronRightIcon, PlayIcon, Squares2X2Icon} from '@heroicons/react/24/outline';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
@@ -48,8 +48,10 @@ import {startCollectionWarm} from './collectionWarm';
 import {DEFAULT_DENSITY, DENSITIES, densityIndex, densityOf, normalizePage, pagePath, RequestGate, validDensity, viewKey} from './model';
 import {StepSlider} from './StepSlider';
 import type {Asset, AssetFiltersValue, Classification, ClassificationList, Page, SavedPosition, Status, View} from './types';
-import {EMPTY_FILTERS, ASSET_FILTER_VERSION, ASSET_SORTS, LIST_VERSION_RANKED, MEDIA_SECTIONS, RANKED_ASSET_SORTS, SORT_LABELS, assertAppliedQuery, hasActiveFilters, isRankedSort, queryExtras, sameFilters, sortOf, subtreeOf, withSort, withSubtree, type AssetSort} from './assetFilters';
-import {FilterChips,type FilterGroup} from './FilterChips';
+import {EMPTY_FILTERS, ASSET_FILTER_VERSION, ASSET_SORTS, LIST_VERSION_RANKED, MEDIA_SECTIONS, RANKED_ASSET_SORTS, assertAppliedQuery, filterKey, hasActiveFilters, isRankedSort, queryExtras, sameFilters, sortOf, subtreeOf, withSort, withSubtree, type AssetSort} from './assetFilters';
+import {AssetViewSections} from './AssetViewSections';
+import {SectionTool} from './SectionTool';
+import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 import {BarProgress,LoadingLine,TopBar,TopBarActions,closeVisibleSearch} from './TopBar';
 import {BottomSheet} from './BottomSheet';
 import {LibraryRoot,type LibrarySegment} from './LibraryRoot';
@@ -187,7 +189,6 @@ export function App() {
   // Without a connection, the connection screen is the first screen: end the launch splash.
   useLaunchReady(!status.configured && !checking);
   const [viewSettings, setViewSettings] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
   // A character scope may supply local view options through this host; filters stay in its top bar.
   const [optionsHost, setOptionsHost] = useState<HTMLDivElement|null>(null);
   // The album or character scope the options sheet was opened from, and the FAULT game launched from it.
@@ -197,7 +198,6 @@ export function App() {
   // filter change is an ordinary navigation: it commits a new page and Back returns to
   // the previous view instead of silently mutating the one on screen.
   const [filters, setFilters] = useState<AssetFiltersValue>({...EMPTY_FILTERS});
-  const [filtersOpen, setFiltersOpen] = useState<FilterGroup|null>(null);
   const [filterVersion, setFilterVersion] = useState<number | null>(null);
   const [filterNotice, setFilterNotice] = useState('');
   const [page, setPage] = useState<Committed>({items:[], has_more:false, next_cursor:null, view:HOME, cursor:null, previous:[], version:0, restoreScroll:0, generation:null, filters:{...EMPTY_FILTERS}});
@@ -267,7 +267,7 @@ export function App() {
   const loadInFlight = useRef(false), loadInterrupted = useRef(false);
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
-  const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
+  const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
   const clearSelection=useCallback(()=>{setClassificationBatchIds(null);setAssetInfo(null);setSelectedIds(new Set());},[]);
   const selectAsset=useCallback((id:string)=>setSelectedIds(current=>current.has(id)?current:new Set(current).add(id)),[]);
   const toggleSelectedAsset=useCallback((id:string)=>setSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;}),[]);
@@ -412,7 +412,7 @@ export function App() {
       const apply = () => {
         if (!gate.current.current(request.id)) return;
         scroll.current = restored;
-        setFilters(nextFilters);setFiltersOpen(null);
+        setFilters(nextFilters);
         setPage({ ...response, items, view, cursor, previous, restoreScroll:restored, generation, version:request.id, filters:nextFilters, tocRequest, ...(cached?.assetRanges?{assetRanges:cached.assetRanges}:{}) });
       };
       if (kindSwitch) {
@@ -714,8 +714,6 @@ export function App() {
       else if (state.similarity) {if (!similarityBack.current?.()) setSimilarity(false);}
       else if (trash.backRef.current?.()) { /* The trash browser consumed back. */ }
       // The filter dialog is the innermost surface, so it closes first and consumes the press.
-      else if (state.filtersOpen) setFiltersOpen(null);
-      else if (state.sortOpen) setSortOpen(false);
       else if (state.viewSettings) setViewSettings(false);
       else if (state.settings) setSettings(false);
       else if (state.assetInfo) setAssetInfo(null);
@@ -780,8 +778,8 @@ export function App() {
    */
   const applyFilters = (next: AssetFiltersValue) => {
     const state = latest.current;
-    if (sameFilters(next, state.page.filters)) {gate.current.cancel();cancelMore();setBusy(false);loadInFlight.current=false;setError('');setFilterNotice('');setFilters(next);setFiltersOpen(null);lastIntent.current={view:state.page.view,cursor:state.page.cursor,previous:state.page.previous,filters:next};return;}
-    setFiltersOpen(null); setFilters(next);
+    if (filterKey(next) === filterKey(state.page.filters)) {gate.current.cancel();cancelMore();setBusy(false);loadInFlight.current=false;setError('');setFilterNotice('');setFilters(next);lastIntent.current={view:state.page.view,cursor:state.page.cursor,previous:state.page.previous,filters:next};return;}
+    setFilters(next);
     // Home and Revisit are not filterable, so a filter change can only originate from a
     // filterable Library scope and is committed against that same scope.
     void load(state.page.view, null, [], scroll.current, true, next);
@@ -792,18 +790,16 @@ export function App() {
   };
   const applySort = (sort: AssetSort) => {
     const state = latest.current;
-    setSortOpen(false);
     // Choosing the sort already shown keeps it (and a shuffle keeps its seed); only 다시 섞기 reshuffles.
-    if (sortOf(state.page.filters) === sort) {setFilters(state.page.filters);return;}
-    const next = withSort(state.page.filters, sort);
+    if (sortOf(filters) === sort) return;
+    const next = withSort(filters, sort);
     setFilters(next);
     void load(state.page.view, null, [], scroll.current, true, next);
   };
   const reshuffle = () => {
     const state = latest.current;
-    setSortOpen(false);
-    if (sortOf(state.page.filters) !== 'random') return;
-    const next = withSort(state.page.filters, 'random');
+    if (sortOf(filters) !== 'random') return;
+    const next = withSort(filters, 'random');
     setFilters(next);
     void load(state.page.view, null, [], 0, true, next);
   };
@@ -881,7 +877,7 @@ export function App() {
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
-    setViewer(null); setClassificationBatchIds(null); setClassificationNotice(''); clearSelection(); closeAlbumBatch(); setSimilarity(false); setExchangeOpen(false); closeArtists(); setViewSettings(false); setSortOpen(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setListVersion(0); setFolderAuthority(null); setFolderManagement(null); setIndexReady(false); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
+    setViewer(null); setClassificationBatchIds(null); setClassificationNotice(''); clearSelection(); closeAlbumBatch(); setSimilarity(false); setExchangeOpen(false); closeArtists(); setViewSettings(false);   setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setListVersion(0); setFolderAuthority(null); setFolderManagement(null); setIndexReady(false); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
     lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
@@ -904,11 +900,7 @@ export function App() {
   },[status.endpoint,status.configured,connectionRevision,indexRevision]);
   const filterable = area==='assets' && page.view.tab==='library' && !page.view.root && !page.view.characters && !page.view.revisit && !page.view.description;
   // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
-  const assetTools=<div className="asset-section-tools">
-    <FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={filters} applied={filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>
-    {!page.view.album&&<Button type="button" size="sm" variant="ghost" className="asset-topbar__sort" aria-label={`정렬 ${SORT_LABELS[sortOf(filters)]}`} onClick={()=>setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/><span>{SORT_LABELS[sortOf(filters)]}</span></Button>}
-    <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setSortOpen(false);setViewSettings(true);}}><Squares2X2Icon aria-hidden="true"/></Button>
-  </div>;
+  const assetTools=<SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}}/>;
   const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia,trailing:assetTools},{active:filterable&&!settings&&!viewer});
   const selectionGallery = filterable || (area==='assets' && !!page.view.description);
   // Character galleries select like the plain gallery (user, 2026-10-05).
@@ -951,7 +943,7 @@ export function App() {
   const totalTrashCount=useTabletTrashCount(status.endpoint,findStore);
   const reviewCount=useSimilarityReviewCount(status.configured&&!similarity,similarityClosed,status.endpoint)??0;
   const paused=moreOpen||area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
-  const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings&&!filtersOpen&&!sortOpen,appRef);
+  const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
   const intro=<>{rankedServer&&plainFolder&&!!childEntries.length&&<FolderScope direct={currentEntry?.asset_count} total={currentEntry?.total_asset_count} subtree={subtreeOf(filters)} onChange={applySubtree}/>}{!!childEntries.length&&!subtreeShown&&<section className="folder-intro"><FolderCards strip subtree={rankedServer} place={currentEntry?.id} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&!busy&&<EmptyState icon={RectangleStackIcon} title={hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':childEntries.length&&!subtreeShown?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'}/>}</>;
@@ -1059,7 +1051,7 @@ export function App() {
             covers and position at once instead of rebuilding them. */}
         <LibraryRoot endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} subtree={rankedServer} onCreateFolder={folderAuthority?()=>setFolderManagement({parentId:null}):undefined} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? null : <>
-        <Gallery hasMore={page.has_more} stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={selectionVisibleItems} scrubberSort={isRankedSort(sortOf(page.filters))?RANKED_SCRUBBER:undefined} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:descriptionIntro??intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={index=>openCurrent(index,selectionVisibleItems)} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
+        <Gallery hasMore={page.has_more} stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={selectionVisibleItems} scrubberSort={isRankedSort(sortOf(page.filters))?RANKED_SCRUBBER:undefined} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:descriptionIntro??intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={index=>openCurrent(index,selectionVisibleItems)} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&selectionBar}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
@@ -1147,14 +1139,17 @@ export function App() {
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{beginScreenTiming('home','tab');closeArtists();openHome();}}><AREA_ICONS.home aria-hidden="true"/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{beginScreenTiming('assets','tab');closeArtists();setHomeOrigin(null);openLibrary();}}><AREA_ICONS.assets aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{beginScreenTiming('collections','tab');closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><AREA_ICONS.collections aria-hidden="true"/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{beginScreenTiming('catalog','tab');closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><AREA_ICONS.manga aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{beginScreenTiming('notes','tab');closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><AREA_ICONS.notes aria-hidden="true"/><span>메모</span></button></nav>}
     {status.configured&&<FindSheet search={findSearch} open={findOpen} onClose={()=>setFindOpen(false)} entries={findEntries} onDescription={query=>openDescription(query)} endpoint={status.endpoint} privacy={privacyMode} loading={findWorks.loading||findNotes.loading||albumLoading||searchArtists.state==='loading'} error={findWorks.error||findNotes.error||albumError||searchArtists.error} onRetry={()=>{setFindRetry(value=>value+1);findWorks.retry();searchArtists.retry();void findStore.load();}}/>}
     {moreOpen&&<MoreSheet {...moreOptions} screenTitle={screenMenu?.title} screenEntries={screenMenu?.entries} onClose={()=>setMoreOpen(false)}/>}
-    {sortOpen&&<BottomSheet title="정렬" onClose={()=>setSortOpen(false)}><div role="radiogroup" aria-label="정렬">{(rankedServer?RANKED_ASSET_SORTS:ASSET_SORTS).map(sort=><button key={sort} className="sheet-option" role="radio" aria-checked={sortOf(filters)===sort} onClick={()=>applySort(sort)}>{SORT_LABELS[sort]}<span className="radio-dot"/></button>)}</div>{sortOf(filters)==='random'&&<Button variant="ghost" onClick={reshuffle}>다시 섞기</Button>}</BottomSheet>}
-    {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}><div className="view-options-host" ref={setOptionsHost}/><StepSlider className="view-options-density" label="썸네일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/>{!privacyMode&&!nsfwFilter&&faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
+    {viewSettings&&<BottomSheet title="보기" onClose={()=>setViewSettings(false)}><div className="ui-view-options__content">
+      {filterable&&<AssetViewSections value={filters} onChange={applyFilters} sorts={rankedServer&&!page.view.album?RANKED_ASSET_SORTS:ASSET_SORTS} onSort={applySort} onShuffle={reshuffle}/>}
+      <div className="view-options-host" ref={setOptionsHost}/>
+      <ViewOptionsSection title="타일 크기"><StepSlider className="view-options-density" label="타일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/></ViewOptionsSection>
+      {!privacyMode&&!nsfwFilter&&faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}
+    </div></BottomSheet>}
     {classificationNotice&&<div className="exchange-toast" role="status" ref={classificationToast} data-state="open"><span>{classificationNotice}</span><Button variant="ghost" onClick={()=>setClassificationNotice('')}>닫기</Button></div>}
     {albumBatchOpen&&<AlbumBatchSheet assetIds={albumBatchAssetIds} open onClose={closeAlbumBatch} onComplete={clearSelection}/>}
     {folderManagement&&folderAuthority&&<FolderManagement authority={folderAuthority} folders={classifications} folder={folderManagement.folder} parentId={folderManagement.parentId??null} onClose={()=>setFolderManagement(null)} onChanged={folderChange}/>}
     {albumManagementOpen&&albumTree&&currentAlbum&&<AlbumManagement tree={albumTree} album={currentAlbum} onClose={()=>setAlbumManagementOpen(false)} onDeleted={albumRoot}/>}
     {selectionActions.notice&&!selectedIds.size&&<div className="trash-snackbar" role="alert">{selectionActions.notice}</div>}
-    {filterable&&<FilterChips media={false} row={false} value={filters} applied={page.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}
     {settings && <div className="settings-layer" ref={settingsLayer}><Settings onOpenVault={vaultSelected?undefined:()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/></div>}
     {fault && !privacyMode && !nsfwFilter && <div className="tablet-layer is-fault" ref={faultLayer}><FaultGame items={fault} onClose={() => setFault(null)}/></div>}

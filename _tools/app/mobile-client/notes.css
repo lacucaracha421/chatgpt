@@ -1,5 +1,5 @@
 /* Notes: own title bar, search, pinned/recent cards, a small trash link that opens its own
-   screen, a floating "new note" button and a full-screen editor. */
+   screen, section actions and a full-screen editor. */
 .mobile-notes{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;position:relative;background:var(--color-bg)}
 .notes-list-view{display:flex;flex-direction:column;flex:1;min-height:0;position:relative}
 .notes-top{display:flex;align-items:center;gap:6px;min-height:var(--mobile-header);padding:0 calc(var(--mobile-gutter) - 10px) 0 var(--mobile-gutter);flex-shrink:0;background:var(--color-bg)}
@@ -11,10 +11,7 @@
 .notes-top h1 .numeric{font-size:var(--type-meta);font-weight:500}
 .notes-top__space{flex:1}
 .notes-save-state{color:var(--color-muted);font-size:var(--type-meta);white-space:nowrap}
-.notes-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 var(--mobile-gutter) calc(var(--control-height) + var(--space-3) + var(--space-4) + var(--space-8))}
-.notes-search{display:flex;align-items:center;gap:var(--space-2);margin:var(--space-1) 0 var(--space-3)}
-.notes-search>.ui-text-input{flex:1;min-width:0}
-.notes-search>.ui-button--icon{width:var(--touch-target);min-height:var(--touch-target);padding:var(--space-2)}
+.notes-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 var(--mobile-gutter) var(--space-4)}
 .notes-trash-hint{margin:var(--space-1) 0 var(--space-3);font-size:var(--type-meta)}
 .notes-filter-bar{display:flex;align-items:center;gap:var(--space-3);min-width:0;margin:0 0 var(--space-4);overflow-x:auto;scrollbar-width:none}
 .notes-filter-bar::-webkit-scrollbar{display:none}
@@ -30,8 +27,6 @@
 .notes-card__ledger-amount{font-size:var(--type-number)}
 .notes-trash-link{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 4px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:13px;cursor:pointer}
 .notes-trash-link svg{width:16px;height:16px}
-.notes-fab.ui-button{position:absolute;right:var(--mobile-gutter);bottom:var(--space-4);min-height:calc(var(--control-height) + var(--space-3));padding:0 var(--space-4);border-radius:var(--radius-control);gap:var(--space-2);font-weight:600;box-shadow:none;z-index:3}
-.notes-fab svg{width:22px;stroke-width:2}
 .notes-editor{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;padding:0 var(--mobile-gutter) 16px}
 .notes-editor__inner{display:flex;flex-direction:column;flex:1 0 auto;width:100%;max-width:760px;margin:0 auto}
 .notes-editor :where(input:not(.memo-rename),textarea:not(.memo-item-text):not(.memo-body-text)){background:none;border:0;outline:none;color:inherit;font:inherit;resize:none;padding:0;min-width:0}
@@ -107,3 +102,5 @@
 .mobile-notes .memo-editor{max-width:none;flex:none}
 .notes-memo-footer{margin:auto 0 0;color:var(--color-faint);font-size:var(--type-meta)}
 @media(max-width:420px){.mobile-notes .notes-title-row{flex-wrap:wrap}.mobile-notes .notes-title-row .notes-title{flex-basis:100%}}
+
+.notes-search-result{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:var(--touch-target);margin-bottom:var(--space-2);font-size:var(--type-meta);color:var(--color-muted)}

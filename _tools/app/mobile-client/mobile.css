@@ -34,6 +34,24 @@ h1,h2,h3,p { margin:0; }
 .ui-button--sm:not(.ui-button--icon) { min-height:var(--control-height-compact); padding:0 var(--space-3); }
 .ui-segmented, .ui-section-bar > .ui-segmented { height:calc(var(--touch-target) + 2 * var(--space-1)); }
 .ui-segmented__cell { min-height:var(--touch-target); }
+/* Tools keep their targets; sections share all remaining width and scroll only below 96px. */
+.section-bar-row.ui-section-bar > .ui-segmented,
+.release-calendar-controls > .ui-segmented { flex:1 1 auto; width:0; min-width:0; overflow-x:auto; }
+.section-bar-row.ui-section-bar > .ui-segmented .ui-segmented__cell,
+.release-calendar-controls > .ui-segmented .ui-segmented__cell { flex:1 0 96px; min-width:96px; padding-inline:var(--space-2); box-sizing:border-box; }
+.section-bar-row .ui-section-bar__trailing { gap:0; }
+.section-tool.ui-button { flex:none; width:var(--touch-target); min-width:var(--touch-target); min-height:var(--touch-target); height:var(--touch-target); padding-inline:0; gap:var(--space-1); }
+.section-bar-row .section-tool > svg,
+.release-calendar-controls .section-tool > svg { flex:none; width:20px; height:20px; }
+.section-tool__label { display:none; }
+.section-tool__count { min-width:2ch; font-size:var(--type-meta); color:var(--color-faint); }
+.section-tool__count.is-new { color:var(--color-accent); }
+.section-tool.is-selected { color:var(--color-text); }
+.section-tools-divider { flex:none; width:1px; height:24px; background:var(--color-border); margin-inline:var(--space-1); }
+@media (orientation:landscape) {
+  .section-tool__label { display:inline; }
+  .section-tool.ui-button { width:auto; padding-inline:var(--space-2); }
+}
 :where(.ui-button--sm:not(.ui-button--icon))::before { inset:-4px 0; }
 @media(hover:hover) { button:not(:disabled):hover { filter:brightness(1.15); } .ui-button--ghost:not(:disabled):hover { background:var(--color-surface); } }
 .mobile-app { height:100dvh; display:flex; flex-direction:column; padding-top:env(safe-area-inset-top); }
@@ -328,6 +346,7 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .top-bar__parent:only-child { max-width:100%; }
 .top-bar__parent button { min-width:var(--touch-target); min-height:var(--touch-target); padding:0 4px; border:0; background:transparent; font:inherit; font-size:var(--type-meta); color:var(--color-muted); text-align:left; }
 .top-bar__parent .library-breadcrumb { min-width:0; font-size:var(--type-meta); }
+.top-bar__parent .library-breadcrumb button { min-width:0; }
 .top-bar__parent .library-breadcrumb > span:last-child::after { content:'›'; padding-left:4px; }
 .top-bar__parent .library-breadcrumb > span > span { font-size:var(--type-meta); padding-right:4px; }
 .top-bar__slots { display:flex; align-items:center; gap:2px; flex:none; }

@@ -1,14 +1,15 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
-import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
 import {MoreSheet,type ScreenMenuEntry} from './MoreSheet';
 import {useSectionShade} from './SectionShade';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MutableRefObject} from 'react';
-import {TagIcon,ArchiveBoxIcon,ArrowPathIcon,DocumentTextIcon,EyeIcon,EyeSlashIcon,KeyIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {TagIcon,ArchiveBoxIcon,ArrowPathIcon,DocumentTextIcon,EyeIcon,EyeSlashIcon,KeyIcon,LockClosedIcon,Squares2X2Icon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon,PinSolidIcon} from '../src/shared/ui/PinIcon';
-import {Button,EmptyState,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
+import {Button,EmptyState,IconButton,SectionLabel,SegmentedControl} from './ui';
+import {SectionTool} from './SectionTool';
+import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useLevelMotion} from './motion';
@@ -37,8 +38,8 @@ const SECRET_TOUCH_MS=60_000;
 import {mobileNotesRequest} from './notesTransport';
 export {mobileNotesRequest} from './notesTransport';
 
-type Scope='all'|'archive'|'trash';
-type Sheet='new'|'color'|'more'|'list'|'recovery'|null;
+type Scope='all'|'pinned'|'archive'|'trash';
+type Sheet='new'|'color'|'more'|'list'|'view'|'recovery'|null;
 const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);return value?({'--note-tint':value} as CSSProperties):undefined;};
 /** The bottom quick-add field was removed (user, 2026-10-03); clear its device preferences once. */
 function clearQuickSectionPreferences(){
@@ -88,7 +89,6 @@ function RecoveryKey({store}:{store:NotesStore}) {
  *  `onHomeEntryGone`: called when that note is trashed or the list is used instead, so App forgets
  *  the Home origin and Notes behaves like a normal tab visit from then on. */
 export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findStore}:{active:boolean;findStore?:NotesStore;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void;onHomeEntryGone?:()=>void}) {
-  const stripWheel=useHorizontalWheel();
   useEffect(clearQuickSectionPreferences,[]);
   const [store]=useState(()=>findStore??new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
@@ -226,11 +226,11 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   useLevelMotion(section,active&&state.ready&&state.unlocked?(editing?'edit':scope!=='all'?scope:'list'):null,(editing?1:0)+(scope!=='all'?1:0));
   // ---- List
   const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of listed)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,'ko'));},[listed]);
-  const filterable=listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query));
+  const filterable=listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(scope!=='pinned'||n.pinned)&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query));
   const kindOptions=[{value:'all' as const,label:'전체'},...NOTE_KIND_DEFINITIONS.filter(([value])=>value!=='checklist').map(([value,label])=>({value,label}))];
   const visible=sortNotes(filterable.filter(n=>kindFilter==='all'||(noteKind(n)==='checklist'?'text':noteKind(n))===kindFilter));
   // The kinds are the list's first row; scrolled away, the top bar pulls them down.
-  const kinds=useSectionShade<NoteKindFilter>({label:'메모 종류',options:kindOptions,value:kindFilter,onChange:setKindFilter},{active:active&&state.ready&&state.unlocked&&!editing});
+  const kinds=useSectionShade<NoteKindFilter>({label:'메모 종류',options:kindOptions,value:kindFilter,onChange:setKindFilter,trailing:<><SectionTool label="새 메모" icon={PlusIcon} onClick={()=>setSheet('new')}/><SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/></>},{active:active&&state.ready&&state.unlocked&&!editing});
   const pinned=scope!=='all'?[]:visible.filter(n=>n.pinned),recent=scope!=='all'?visible:visible.filter(n=>!n.pinned);
   const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   // Local saves remain immediate; an open editor only announces errors.
@@ -287,31 +287,31 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
     {/* Always mounted once unlocked so its pull-to-refresh gesture stays attached. */}
     <div className="notes-list-view" style={{display:state.ready&&state.unlocked&&!editing?undefined:'none'}}>
       {scope!=='all'
-        ?<TopBar barRef={kinds.barRef} back={{label:'메모 목록으로',onClick:()=>setScope('all')}} crumbs={<button className="top-bar__crumbs" onClick={()=>setScope('all')}>메모 ›</button>} title={kinds.title(trash?'휴지통':'보관함')} count={trash?trashed:archived} search={!trash?{scope:'메모',run:setQuery}:undefined} onMenu={()=>setSheet('list')} loading={!state.error&&(state.saving||state.syncing)&&(state.saving?'저장 중':'동기화 중')}/>
+        ?<TopBar barRef={kinds.barRef} back={{label:'메모 목록으로',onClick:()=>setScope('all')}} crumbs={<button className="top-bar__crumbs" onClick={()=>setScope('all')}>메모 ›</button>} title={kinds.title(trash?'휴지통':scope==='pinned'?'고정':'보관함')} count={trash?trashed:scope==='pinned'?visible.length:archived} search={!trash?{scope:'메모',run:setQuery}:undefined} onMenu={()=>setSheet('list')} loading={!state.error&&(state.saving||state.syncing)&&(state.saving?'저장 중':'동기화 중')}/>
         :<TopBar barRef={kinds.barRef} title={kinds.title('메모')} search={{scope:'메모',run:setQuery}} onMenu={()=>setSheet('list')} loading={!state.error&&(state.saving||state.syncing)&&(state.saving?'저장 중':'동기화 중')}/>}
       {kinds.shade}
       <div ref={list} className="notes-scroll">
         {pull}
         {kinds.inline}
-        {trash?<p className="hint notes-trash-hint">열어서 복원할 수 있습니다.</p>:<form className="notes-search" role="search" onSubmit={event=>{event.preventDefault();(document.activeElement as HTMLElement|null)?.blur();}}><TextInput className="notes-search__input" icon={MagnifyingGlassIcon} aria-label="메모 검색" placeholder="제목, 본문, 라벨 검색" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</form>}
-        {/* Labels are the user's own tags, not kinds: they sit on their own row after a tag mark. */}
-        {!trash&&allLabels.length>0&&<div ref={stripWheel} className="notes-filter-bar"><TagIcon className="notes-filter-tag" aria-hidden="true"/><div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div></div>}
+        {trash&&<p className="hint notes-trash-hint">열어서 복원할 수 있습니다.</p>}
+        {!trash&&query&&<div className="notes-search-result" role="status"><span>‘{query}’ 검색 결과</span><Button size="sm" variant="quiet" onClick={()=>setQuery('')}>해제</Button></div>}
+        {label&&<div className="notes-search-result"><span>라벨 · {label}</span><Button size="sm" variant="quiet" onClick={()=>setLabel(null)}>라벨 해제</Button></div>}
         {pinned.length>0&&<><SectionLabel as="h2" className="notes-board__label" title="고정됨"/><div className="notes-grid">{pinned.map(card)}</div></>}
         {recent.length>0&&<>{pinned.length>0&&<SectionLabel as="h2" className="notes-board__label" title="최근"/>}<div className="notes-grid">{recent.map(card)}</div></>}
-        {!visible.length&&<EmptyState title={trash?'휴지통이 비어 있습니다':scope==='archive'?'보관한 메모가 없습니다':query?'검색 결과 없음':label?'찾는 메모가 없습니다':'아직 메모가 없습니다'} hint={scope==='all'&&!query&&!label&&'아래 버튼으로 첫 메모를 써 보세요.'}/>}
+        {!visible.length&&<EmptyState title={trash?'휴지통이 비어 있습니다':scope==='archive'?'보관한 메모가 없습니다':query?'검색 결과 없음':label?'찾는 메모가 없습니다':'아직 메모가 없습니다'} hint={scope==='all'&&!query&&!label&&'+ 버튼으로 첫 메모를 써 보세요.'}/>}
         {!!state.unreadable&&<p className="hint" role="status">읽을 수 없는 메모 {state.unreadable}개는 목록에서 뺐습니다.</p>}
-        {scope==='all'&&archived>0&&<div className="notes-links">
-          {archived>0&&<button className="notes-trash-link" onClick={()=>setScope('archive')}><ArchiveBoxIcon aria-hidden="true"/>보관함 <span className="numeric">{archived}</span></button>}
-        </div>}
         <Scrubber scrollRef={list} total={visible.length} sort={scrubberSort} hidden={!active||!!note||sheet!==null}/>
       </div>
-      {scope==='all'&&<Button variant="primary" className="notes-fab" onClick={()=>setSheet('new')}><PlusIcon aria-hidden="true"/>새 메모</Button>}
     </div>
     {sheet==='new'&&<BottomSheet title="새 메모" onClose={()=>setSheet(null)}>
       <button className="sheet-option" onClick={()=>newNote('text')}><DocumentTextIcon aria-hidden="true"/>메모</button>
       <button className="sheet-option" onClick={()=>newNote('secret')}><LockClosedIcon aria-hidden="true"/>암호 메모</button>
       <button className="sheet-option" onClick={openLedger}><WalletIcon aria-hidden="true"/>가계부</button>
     </BottomSheet>}
+    {sheet==='view'&&<BottomSheet title="보기" onClose={()=>setSheet(null)}><div className="ui-view-options__content">
+      <ViewOptionsSection title="보기"><div role="radiogroup" aria-label="메모 범위">{([['all','모든 메모'],['pinned','고정'],['archive','보관함'],['trash','휴지통']] as const).map(([value,title])=><button key={value} className="sheet-option" role="radio" aria-checked={scope===value&&!label} onClick={()=>{setScope(value);setLabel(null);setSheet(null);}}>{title}<span className="radio-dot"/></button>)}</div></ViewOptionsSection>
+      <ViewOptionsSection title="라벨">{allLabels.map(entry=><button key={labelKey(entry.label)} className="sheet-option" aria-pressed={!!label&&labelKey(label)===labelKey(entry.label)} onClick={()=>{setLabel(entry.label);setScope('all');setSheet(null);}}><TagIcon aria-hidden="true"/>{entry.label}<span className="numeric">{entry.count}</span></button>)}{!allLabels.length&&<p className="hint">라벨이 없습니다.</p>}</ViewOptionsSection>
+    </div></BottomSheet>}
     {sheet==='color'&&note&&<BottomSheet title="메모 색상" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="메모 색상">
       <button className="sheet-option" role="radio" aria-checked={!colorValue} onClick={()=>{edit({color:null});setSheet(null);}}><span className="notes-color-dot is-empty" aria-hidden="true"/>기본<span className="radio-dot"/></button>
       {NOTE_COLORS.map(c=><button key={c.key} className="sheet-option" role="radio" aria-checked={note.color===c.key} onClick={()=>{edit({color:c.key});setSheet(null);}}><span className="notes-color-dot" style={{background:c.value}} aria-hidden="true"/>{c.label}<span className="radio-dot"/></button>)}

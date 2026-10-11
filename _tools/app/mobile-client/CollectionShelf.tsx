@@ -13,7 +13,7 @@ import {collectionCover, type CollectionKind, type CollectionSummary} from './co
 import './collectionShelf.css';
 
 export type ShelfLayout = 'grid' | 'shelf' | 'bookcase';
-export type ShelfView = {layout: ShelfLayout; perRow: number};
+export type ShelfView = {layout: ShelfLayout; perRow: number; grouping?: 'device' | 'year' | 'sort'};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
 export const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
@@ -42,6 +42,7 @@ function readView(type: CollectionKind): ShelfView {
     return {
       layout: value.layout === 'grid' || value.layout === 'shelf' || (type === 'manga' && value.layout === 'bookcase') ? value.layout : fallback.layout,
       perRow: Number.isInteger(value.perRow) ? Math.max(SHELF_PER_ROW.min, Math.min(SHELF_PER_ROW.max, value.perRow!)) : fallback.perRow,
+      grouping: value.grouping === 'device' || value.grouping === 'year' || value.grouping === 'sort' ? value.grouping : undefined,
     };
   } catch { return fallback; }
 }
@@ -94,12 +95,13 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
 
 /** 보기: the same choices as the PC menu (배치, 한 줄에 N개), as a bottom sheet. */
 export function ShelfViewSheet({type, view, onChange, onClose}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void; onClose(): void}) {
+  return <BottomSheet title="보기" onClose={onClose}><div className="ui-view-options__content shelf-view-sheet"><ShelfViewSection type={type} view={view} onChange={onChange}/></div></BottomSheet>;
+}
+export function ShelfViewSection({type, view, onChange}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void}) {
   const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}, ...(type === 'manga' ? [{value: 'bookcase' as const, label: '책장'}] : [])];
-  return <BottomSheet title="보기" onClose={onClose}><div className="ui-view-options__content shelf-view-sheet">
-    <ViewOptionsSection title="배치">
+  return <ViewOptionsSection title="보기">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
       <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
       <p className="hint">세로 화면 기준입니다. 가로 화면에서는 같은 크기로 더 많이 표시합니다.</p>
-    </ViewOptionsSection>
-  </div></BottomSheet>;
+    </ViewOptionsSection>;
 }

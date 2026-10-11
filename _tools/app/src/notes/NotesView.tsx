@@ -1,6 +1,6 @@
 import { EmptyState } from "../shared/ui/EmptyState";
 import { SectionLabel } from "../shared/ui/SectionLabel";
-import { BusyLabel } from "../shared/ui/BusyLabel";
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { displayDateTime } from "../shared/displayDate";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ArrowLeftIcon, ArrowPathIcon, ArrowUturnLeftIcon, ChevronDownIcon, DocumentTextIcon, EllipsisHorizontalIcon, LockClosedIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
@@ -200,13 +200,15 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   }
   applyUndo.current=(field,value)=>edit(field==="checklist"?{items:value as ChecklistItem[]}:field==="title"?{title:value as string}:{type:"text",items:undefined,body:value as string});
   async function backup(operation:"export"|"import"){setBackupBusy(true);try{await store.backup(operation);}finally{setBackupBusy(false);}}
-  const status=state.error?"저장·동기화 확인 필요":state.notes.some(n=>n.conflict)?"충돌 확인 필요":editing?"편집 중":state.notes.some(n=>n.pending)?"PC에 저장됨 · 동기화 대기":state.lastSyncedAt?"동기화됨":"PC에 저장됨";
+  const syncTime=state.lastSyncedAt?new Date(state.lastSyncedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false}):"";
+  const syncItem:MenuItem={id:"sync",label:`지금 동기화${syncTime?` · ${syncTime}`:""}`,disabled:state.syncing||state.saving,onSelect:()=>void store.sync()};
+  const showProgress=useDelayedBusy(state.unlocked&&!editing&&!state.error&&(state.saving||state.syncing));
   const newItems:MenuItem[]=[{id:"text",label:"메모",onSelect:()=>newNote("text")},{id:"secret",label:"암호 메모",onSelect:()=>newNote("secret")},{id:"ledger",label:"가계부",onSelect:openLedger}];
   const colorItems:MenuItem[]=note?[{id:"none",label:"기본",group:"color",selected:!noteColorValue(note.color),onSelect:()=>edit({color:null})},...NOTE_COLORS.map(c=>({id:c.key,label:c.label,group:"color",selected:note.color===c.key,icon:<span className="notes-swatch" style={{background:c.value}} aria-hidden="true"/>,onSelect:()=>edit({color:c.key})}))]:[];
   // Archive sits in the ⋯ menu next to 휴지통, away from the everyday actions.
   const moreItems:MenuItem[]=note&&!trash?[
     ...((kind==="text"||kind==="checklist")&&!note.readOnly?[{id:"conceal",label:note.concealed?"목록에서 내용 보이기":"목록에서 내용 숨기기",onSelect:()=>edit({concealed:!note.concealed})}]:[]),
-    {id:"archive",label:note.archived?"보관 해제":"보관함으로 보내기",onSelect:()=>edit({archived:!note.archived})}]:[];
+    {id:"archive",label:note.archived?"보관 해제":"보관함으로 보내기",onSelect:()=>edit({archived:!note.archived})},syncItem]:note?[syncItem]:[];
   const colorValue=note?noteColorValue(note.color):null;
   const notesSectionTitle=query.trim()?"검색 결과":label??({all:"모든 메모",pinned:"고정",archive:"보관함",trash:"휴지통"} as const)[scope];
   const kindOptions:SegmentedOption<NoteKindFilter>[]=[{value:"all",label:"전체"},...NOTE_KIND_DEFINITIONS.filter(([value])=>value!=="checklist").map(([value,label])=>({value,label}))];
@@ -218,6 +220,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   };
   const menuCount=(value:number)=><span className="notes-view-menu-count" aria-hidden="true">{value.toLocaleString()}</span>;
   const viewItems:MenuItem[]=[
+    syncItem,
     {id:"scope-all",label:"모든 메모",selected:scope==="all"&&!label,icon:menuCount(scopeCounts.all),onSelect:()=>{setScope("all");setLabel(null);}},
     {id:"scope-pinned",label:"고정",selected:scope==="pinned"&&!label,icon:menuCount(scopeCounts.pinned),onSelect:()=>{setScope("pinned");setLabel(null);}},
     {id:"scope-archive",label:"보관함",selected:scope==="archive"&&!label,icon:menuCount(scopeCounts.archive),onSelect:()=>{setScope("archive");setLabel(null);}},
@@ -309,7 +312,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       if(mod&&!e.shiftKey&&key==="n"&&state.unlocked){e.preventDefault();newNote();}
       if(mod&&key==="s"){e.preventDefault();void store.sync();}
 }}>
-    <ViewToolbar sectionDrop={sectionDrop} title="메모" titleContent={notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:state.unlocked?<span className="notes-save-status" role="status" aria-description={state.lastSyncedAt?`마지막 동기화 ${displayDateTime(state.lastSyncedAt, new Date(), { withTime: true })}`:undefined}><BusyLabel busy={!editing && !state.error && !state.notes.some(n=>n.conflict) && (state.saving || state.syncing)} idle={status}>{state.saving ? "PC에 저장 중…" : "동기화 중…"}</BusyLabel></span>:undefined}}/>
+    <ViewToolbar sectionDrop={sectionDrop} title="메모" titleContent={notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:showProgress?<span className="notes-sync-progress" role="status" aria-label={state.saving?"PC에 저장 중…":"동기화 중…"}/>:undefined}}/>
     {state.error&&<div className="notes-error" role="alert"><span>{state.error}</span><Button size="sm" variant="ghost" disabled={state.syncing} onClick={()=>void (state.unlocked?store.sync():store.load())}>다시 시도</Button></div>}
     {main}
     {recoverySurface}

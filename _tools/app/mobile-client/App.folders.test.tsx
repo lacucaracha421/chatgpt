@@ -47,6 +47,7 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 const openAll=async()=>{fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');};
 const openFolder=async(name:RegExp)=>{fireEvent.click(await screen.findByRole('button',{name}));await screen.findByText('tile-p1');};
+const openSort=()=>{if(!screen.queryByRole('dialog',{name:'보기'}))fireEvent.click(screen.getByRole('button',{name:'보기'}));};
 const sortOptions=()=>within(screen.getByRole('radiogroup',{name:'정렬'})).getAllByRole('radio').map(option=>option.textContent);
 
 describe('folder list request',()=>{
@@ -79,22 +80,22 @@ describe('sorting a list',()=>{
   it('offers the two shipped sorts only, to a server without list version 2',async()=>{
     mocks.api.mockImplementation(server(undefined));
     render(<App/>);await openAll();
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));
+    openSort();
     expect(sortOptions()).toEqual(['최신순','오래된순']);
     expect(screen.queryByRole('button',{name:'다시 섞기'})).toBeNull();
   });
   it('offers 좋아요순 and 랜덤 from list version 2, and asks the server for them',async()=>{
     render(<App/>);await openAll();
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));
+    openSort();
     expect(sortOptions()).toEqual(['최신순','오래된순','좋아요순','랜덤']);
     fireEvent.click(screen.getByRole('radio',{name:'좋아요순'}));
     await waitFor(()=>expect(params(lastPagePath()).get('sort')).toBe('favorites'));
     expect(params(lastPagePath()).has('seed')).toBe(false);
-    expect(screen.getByRole('button',{name:'정렬 좋아요순'})).toBeTruthy();
+    expect(screen.getByRole('radio',{name:'좋아요순'}).getAttribute('aria-checked')).toBe('true');
   });
   it('shuffles with a seed, keeps the seed while paging, and reshuffles with a new one',async()=>{
     render(<App/>);await openAll();
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));
+    openSort();
     fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));
     await screen.findByText('tile-r1');
     const first=params(lastPagePath());
@@ -103,12 +104,12 @@ describe('sorting a list',()=>{
     expect(gallery.getAttribute('data-scrubber')).toBe('fallback');
     const identity=gallery.getAttribute('data-identity');
     // Choosing 랜덤 again keeps the same shuffle.
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));
+    openSort();
     fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));
     expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).toBe(identity);
-    expect(screen.queryByRole('dialog',{name:'정렬'})).toBeNull();
+    expect(screen.getByRole('dialog',{name:'보기'})).toBeTruthy();
     // 다시 섞기 is a new seed, hence a new list identity and no cursor.
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));
+    openSort();
     fireEvent.click(screen.getByRole('button',{name:'다시 섞기'}));
     await waitFor(()=>expect(params(lastPagePath()).get('seed')).not.toBe(first.get('seed')));
     const second=params(lastPagePath());
@@ -118,8 +119,8 @@ describe('sorting a list',()=>{
   });
   it('drops the seed and the shuffle when another sort is chosen',async()=>{
     render(<App/>);await openAll();
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));await screen.findByText('tile-r1');
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));fireEvent.click(screen.getByRole('radio',{name:'오래된순'}));
+    openSort();fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));await screen.findByText('tile-r1');
+    openSort();fireEvent.click(screen.getByRole('radio',{name:'오래된순'}));
     await waitFor(()=>expect(params(lastPagePath()).get('sort')).toBe('oldest'));
     expect(params(lastPagePath()).has('seed')).toBe(false);
     expect(screen.getByLabelText('자산 목록').getAttribute('data-scrubber')).toBeNull();
@@ -127,13 +128,13 @@ describe('sorting a list',()=>{
   it('requests no month index for a shuffled or favorites list',async()=>{
     render(<App/>);await openAll();
     mocks.api.mockClear();
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));await screen.findByText('tile-r1');
+    openSort();fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));await screen.findByText('tile-r1');
     expect(assetPaths().some(path=>path.includes('toc=1'))).toBe(false);
   });
   it('refuses a list a server returned without applying the requested sort',async()=>{
     mocks.api.mockImplementation(server(2,{echo:false}));
     render(<App/>);await openAll();
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));
+    openSort();fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));
     expect((await screen.findAllByText('이 서버는 이 정렬을 지원하지 않습니다. 서버를 업데이트해 주세요.')).length).toBeGreaterThan(0);
     // The previous list stays on screen.
     expect(screen.getByText('tile-a1')).toBeTruthy();
@@ -171,8 +172,8 @@ describe('folder subtree',()=>{
   });
   it('keeps the sort, the shuffle and the kind when the range changes',async()=>{
     render(<App/>);await openFolder(/^부모/);
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));await screen.findByText('tile-r1');
-    const seed=params(lastPagePath()).get('seed');
+    openSort();fireEvent.click(screen.getByRole('radio',{name:'랜덤'}));await screen.findByText('tile-r1');
+    const seed=params(lastPagePath()).get('seed');fireEvent.click(screen.getByRole('button',{name:'닫기'}));
     fireEvent.click(within(screen.getByRole('radiogroup',{name:'이미지 범위'})).getByRole('radio',{name:'전체 9'}));
     await waitFor(()=>expect(params(lastPagePath()).get('subtree')).toBe('1'));
     expect(params(lastPagePath()).get('sort')).toBe('random');expect(params(lastPagePath()).get('seed')).toBe(seed);

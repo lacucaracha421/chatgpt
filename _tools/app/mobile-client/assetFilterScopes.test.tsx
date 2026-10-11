@@ -34,18 +34,19 @@ describe('character scope filters',()=>{
     expect(screen.queryByText('old')).toBeNull();
   });
 
-  it('rejects a snake-case wire contract and closes only the filter dialog on Back',async()=>{
+  it('rejects a snake-case wire contract and retains the gallery when requesting view options',async()=>{
     mocks.api.mockImplementation(async(path:string)=>{
       if(path==='/v1/library/characters')return index;
       if(path.startsWith('/v1/library/characters/assets'))return{revision,filter_version:1,items:[asset('a1')],totalCount:1,sourceCount:2,has_more:false,next_cursor:null};
       return{};
     });
     const back={current:null as (()=>boolean)|null};
-    render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={back} onExit={()=>{}}/>);
+    const onOptions=vi.fn();
+    render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOptions={onOptions} onOpen={()=>{}} backRef={back} onExit={()=>{}}/>);
     await screen.findByText('a1');
-    fireEvent.click(screen.getByRole('button',{name:'비율'}));
-    expect(back.current?.()).toBe(true);
-    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'종류'})).toBeNull());
+    fireEvent.click(screen.getByRole('button',{name:'보기'}));
+    expect(onOptions).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByText('a1')).toBeTruthy();
     fireEvent.click(screen.getByRole('radio',{name:'영상'}));
     await screen.findByText(/서버를 업데이트해 주세요/);
@@ -58,10 +59,10 @@ describe('character scope filters',()=>{
       if(path.startsWith('/v1/library/characters/assets'))return{revision,filterVersion:1,items:[asset('a1')],totalCount:2,sourceCount:2,has_more:false,next_cursor:null};
       return{};
     });
-    render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={{current:null}} onExit={()=>{}}/>);
+    const host=document.createElement('div');document.body.append(host);
+    const view=render(<CharacterBrowser optionsHost={host} initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={{current:null}} onExit={()=>{}}/>);
     await screen.findByText('Series');
     await screen.findByText('a1');
-    fireEvent.click(screen.getByRole('button',{name:'길이'}));
     const within=screen.getByRole('radiogroup',{name:'길이'});
     fireEvent.click([...within.querySelectorAll('button')].find(b=>b.textContent==='5분 이상')!);
     await waitFor(()=>expect(String(mocks.api.mock.calls.at(-1)?.[0])).toContain('duration_ms_min=300000'));
@@ -69,6 +70,7 @@ describe('character scope filters',()=>{
     const path=String(mocks.api.mock.calls.at(-1)?.[0]);
     expect(path).toContain(`revision=${revision}`);
     expect(path).toContain('node=series%3As');
+    view.unmount();host.remove();
   });
 
   it('refuses a character page that ignored the filter parameters',async()=>{

@@ -1,7 +1,23 @@
-import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {act,cleanup,fireEvent,render as renderBase,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,it,expect,vi} from 'vitest';
-import {useState} from 'react';
+import {useState,type ReactNode} from 'react';
+import {FindContext,type ScreenFind} from './FindContext';
+import {FindSheet} from './FindSheet';
 import {Notes,type MobileNote} from './Notes';
+function FindHost({children}:{children:ReactNode}){
+ const [open,setOpen]=useState(false),[search,setSearch]=useState<ScreenFind>();
+ return <FindContext.Provider value={value=>{setSearch(value);setOpen(true);}}>{children}<FindSheet open={open} search={search} onClose={()=>setOpen(false)} entries={[]} endpoint="notes-test" privacy={false}/></FindContext.Provider>;
+}
+const render:typeof renderBase=(ui,options)=>renderBase(ui,{wrapper:FindHost,...options});
+async function searchNotes(value:string){
+ fireEvent.click(screen.getByRole('button',{name:'찾기'}));
+ const input=screen.getByRole('combobox');fireEvent.change(input,{target:{value}});
+ await screen.findByRole('option',{name:`메모에서 ‘${value}’`});fireEvent.keyDown(input,{key:'Enter'});
+ expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull();
+}
+async function pickLabel(value:string){
+ fireEvent.click(screen.getByRole('button',{name:'보기'}));fireEvent.click(within(screen.getByRole('dialog',{name:'보기'})).getByRole('button',{name:new RegExp(`^${value}`)}));
+}
 const mock=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mock.native,errorText:(e:Error)=>e.message}));
 const note:MobileNote={id:'a'.repeat(32),title:'제목',body:'내용',pinned:false,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false};
@@ -85,11 +101,12 @@ it('retains a failed draft and retries it explicitly',async()=>{
 
 const pinned:MobileNote={...note,id:'b'.repeat(32),title:'고정한 메모',pinned:true};
 const trashed:MobileNote={...note,id:'c'.repeat(32),title:'지운 메모',deleted:true};
-it('puts the note kinds first in the list, above the search',async()=>{
+it('puts the note kinds and creation/view actions first without a body search',async()=>{
  render(<Notes active backRef={{current:null}}/>);await screen.findByText('제목');
  const kinds=screen.getByRole('radiogroup',{name:'메모 종류'}).closest('.notes-scroll > .ui-section-bar--inline') as HTMLElement;
  expect(kinds).toBeTruthy();
- expect(kinds.compareDocumentPosition(screen.getByLabelText('메모 검색'))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(screen.queryByLabelText('메모 검색')).toBeNull();
+ expect([...kinds.querySelectorAll('.ui-section-bar__trailing button')].map(button=>button.getAttribute('aria-label'))).toEqual(['새 메모','보기']);
 });
 it('groups pinned notes and leaves trash navigation to the unified screen',async()=>{
  mock.native.mockImplementation(state([note,pinned,trashed]));
@@ -104,7 +121,7 @@ it('groups pinned notes and leaves trash navigation to the unified screen',async
  act(()=>{expect(backRef.current?.()).toBe(true);});
  await screen.findByText('고정한 메모');expect(backRef.current?.()).toBe(false);
 });
-it('creates notes from the floating button and moves an open note to the trash',async()=>{
+it('creates notes from the section bar plus button and moves an open note to the trash',async()=>{
  render(<Notes active backRef={{current:null}}/>);await screen.findByText('제목');
  fireEvent.click(screen.getByRole('button',{name:'새 메모'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'메모'}));
@@ -126,7 +143,7 @@ it('colours with a circle and archives from the more sheet',async()=>{
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'보관함으로 보내기'}));
  await waitFor(()=>expect(saves().some(s=>s.archived===true)).toBe(true));
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
- fireEvent.click(await screen.findByRole('button',{name:'보관함 1'}));
+ fireEvent.click(screen.getByRole('button',{name:'보기'}));fireEvent.click(screen.getByRole('radio',{name:'보관함'}));
  expect(await screen.findByText('제목')).toBeTruthy();
 });
 
@@ -139,15 +156,15 @@ it('filters by label chips and searches secret notes by title only',async()=>{
  const secretCard=screen.getByText('서버 계정').closest('button')!;
  expect(within(secretCard).getByLabelText('암호 메모')).toBeTruthy();
  expect(secretCard.textContent).toContain('잠김••••••');
- fireEvent.click(screen.getByRole('button',{name:/^개인/}));
+ await pickLabel('개인');
  expect(screen.queryByText('제목')).toBeNull();expect(screen.getByText('여행')).toBeTruthy();
- fireEvent.click(screen.getByRole('button',{name:/^개인/}));
- fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'계정'}});
+ fireEvent.click(screen.getByRole('button',{name:'라벨 해제'}));
+ await searchNotes('계정');
  expect(screen.getByText('서버 계정')).toBeTruthy();expect(screen.queryByText('여행')).toBeNull();
  // Korean-aware search: 초성 and a syllable still being composed.
- fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'ㅇㅎ'}});
+ await searchNotes('ㅇㅎ');
  expect(screen.getByText('여행')).toBeTruthy();expect(screen.queryByText('서버 계정')).toBeNull();
- fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'섭'}});
+ await searchNotes('섭');
  expect(screen.getByText('서버 계정')).toBeTruthy();expect(screen.queryByText('여행')).toBeNull();
 });
 it('hides text note cards, saves the concealment choice and searches hidden notes by title only',async()=>{
@@ -164,10 +181,9 @@ it('hides text note cards, saves the concealment choice and searches hidden note
  const noteCard=screen.getByText('숨은 제목').closest('button')!;
  expect(within(noteCard).getByText('숨긴 메모 · 열어서 보기')).toBeTruthy();
  expect(noteCard.textContent).not.toContain('숨겨진 본문 단어');
- const search=screen.getByRole('textbox',{name:'메모 검색'});
- fireEvent.change(search,{target:{value:'숨겨진 본문 단어'}});
+ await searchNotes('숨겨진 본문 단어');
  expect(screen.queryByText('숨은 제목')).toBeNull();
- fireEvent.change(search,{target:{value:'숨은 제목'}});
+ await searchNotes('숨은 제목');
  expect(screen.getByText('숨은 제목')).toBeTruthy();
 });
 it('opens a secret note with the PIN, copies natively and drops its content when the app goes to the background',async()=>{
@@ -540,4 +556,14 @@ it('protects the recovery sheet before its key arrives and releases protection o
   view.rerender(<Notes {...props} active={false}/>);expect(sensitive).toHaveBeenLastCalledWith(false);
   view.unmount();expect(sensitive).toHaveBeenLastCalledWith(false);
  } finally {delete window.LakomicsNative;}
+});
+
+it('runs the memo Find screen row, displays the query and clears back to the full list',async()=>{
+ mock.native.mockImplementation(state([note,{...note,id:'b'.repeat(32),title:'여행',body:'서울 일정'}]));
+ render(<Notes active backRef={{current:null}}/>);await screen.findByText('여행');
+ fireEvent.click(screen.getByRole('button',{name:'찾기'}));
+ fireEvent.change(screen.getByRole('combobox'),{target:{value:'서울'}});
+ const row=await screen.findByRole('option',{name:'메모에서 ‘서울’'});expect(row.getAttribute('aria-selected')).toBe('true');fireEvent.click(row);
+ expect(screen.getByText('‘서울’ 검색 결과')).toBeTruthy();expect(screen.queryByText('제목')).toBeNull();expect(screen.getByText('여행')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'해제'}));expect(screen.getByText('제목')).toBeTruthy();expect(screen.getByText('여행')).toBeTruthy();expect(screen.queryByText('‘서울’ 검색 결과')).toBeNull();
 });

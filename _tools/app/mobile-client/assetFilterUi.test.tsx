@@ -31,33 +31,27 @@ const legacy=async(path:string)=>{
   if(path.includes('revisit'))return{bundles:[]}; if(path.includes('captures'))return{captures:[]};
   return page(['a1']);
 };
-/** Open the top-bar kind segmented control or one of the compact filter buttons. */
+/** Kind stays in the section bar; all other choices share one view sheet. */
 const openFilters=(group='종류')=>{
-  if(group==='종류'||group==='미디어')return screen.getByRole('radiogroup',{name:'종류'});
-  const toolbar=screen.getByRole('group',{name:'자산 필터'});
-  const index=['비율','길이'].indexOf(group);
-  fireEvent.click(toolbar.querySelectorAll('button')[index]);
+  if(group==='종류'||group==='미디어')return;
+  if(!screen.queryByRole('dialog',{name:'보기'}))fireEvent.click(screen.getByRole('button',{name:'보기'}));
 };
 const chooseIn=(group:string,label:string)=>{
   const name=group==='미디어'?'종류':group;
   if(group==='미디어'||group==='종류'){
-    fireEvent.click(screen.getByRole('radiogroup',{name:'종류'}).querySelector(`button[aria-label="${label}"]`)!);
-    return;
-  }
-  if(!screen.queryByRole('radiogroup',{name})){
     if(screen.queryByRole('dialog'))fireEvent.click(screen.getByRole('button',{name:'닫기'}));
-    openFilters(name);
+    fireEvent.click(within(screen.getByRole('radiogroup',{name:'종류'})).getByRole('radio',{name:label}));return;
   }
-  fireEvent.click(screen.getByRole('radio',{name:label}));
+  openFilters(name);
+  fireEvent.click(within(screen.getByRole('radiogroup',{name})).getByRole('radio',{name:label}));
 };
-/** Reads the compact filter labels from the gallery top bar. */
-const toolbarFilterLabels=()=>[...screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')].map(b=>b.textContent);
+const toolbarFilterLabels=()=>[...document.querySelectorAll('.ui-section-bar__trailing button')].map(b=>b.getAttribute('aria-label'));
 /** Opens and closes the view sheet. */
 const openViewSheet=async()=>{
-  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
-  const dialog=await screen.findByRole('dialog',{name:'보기 옵션'});
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));
+  const dialog=await screen.findByRole('dialog',{name:'보기'});
   fireEvent.click(within(dialog).getByRole('button',{name:'닫기'}));
-  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'보기 옵션'})).toBeNull());
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'보기'})).toBeNull());
 };
 const openFolder=async(name:string)=>{
   fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋',exact:true}));
@@ -80,13 +74,12 @@ describe('asset filters',()=>{
     const kind=screen.getByRole('radiogroup',{name:'종류'});
     fireEvent.click(within(kind).getByRole('radio',{name:'영상'}));
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
-    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));
-    expect(screen.getByRole('dialog',{name:'정렬'})).toBeTruthy();
+    openFilters('정렬');
+    expect(screen.getByRole('dialog',{name:'보기'})).toBeTruthy();
     fireEvent.click(screen.getByRole('radio',{name:'오래된순'}));
     await waitFor(()=>expect(lastPagePath()).toContain('sort=oldest'));
-    fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
-    const viewSheet=screen.getByRole('dialog',{name:'보기 옵션'});
-    expect(within(viewSheet).getByRole('slider',{name:'썸네일 크기'})).toBeTruthy();
+    const viewSheet=screen.getByRole('dialog',{name:'보기'});
+    expect(within(viewSheet).getByRole('slider',{name:'타일 크기'})).toBeTruthy();
     expect(within(viewSheet).queryByRole('group',{name:'자산 필터'})).toBeNull();
   });
 
@@ -137,14 +130,14 @@ describe('asset filters',()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     expect(lastPagePath()).not.toContain('media_kind');
     expect(lastPagePath()).not.toContain('aspect_ratio');
-    expect(toolbarFilterLabels()).toEqual(['비율','길이']);
+    expect(toolbarFilterLabels()).toEqual(['보기']);
     openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
     // The selected filter stays visible in the bar; 보기 has no count or changed face.
-    await waitFor(()=>expect(toolbarFilterLabels()).toEqual(['비율']));
-    expect(screen.getByRole('button',{name:'보기 옵션'}).classList.contains('is-changed')).toBe(false);
-    expect(screen.getByRole('button',{name:'보기 옵션'}).textContent).not.toContain('1');
-    expect(screen.getByRole('radio',{name:'이미지'}).getAttribute('aria-checked')).toBe('true');
+    await waitFor(()=>expect(toolbarFilterLabels()).toEqual(['보기']));
+    expect(screen.getByRole('button',{name:'보기'}).classList.contains('is-changed')).toBe(false);
+    expect(screen.getByRole('button',{name:'보기'}).textContent).not.toContain('1');
+    expect(within(screen.getByRole('radiogroup',{name:'종류'})).getByRole('radio',{name:'이미지'}).getAttribute('aria-checked')).toBe('true');
     expect(screen.queryByText('필터 적용 대기')).toBeNull();
   });
 
@@ -243,9 +236,8 @@ describe('asset filters',()=>{
     // would be comparing against a stale set and could legitimately no-op.
     await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).toContain('duration_ms_min=300000'));
     // Each visible toolbar filter can return to 전체; the 보기 sheet no longer owns a reset row.
-    fireEvent.click(screen.getByRole('button',{name:'5분 이상'}));
-    fireEvent.click(await screen.findByRole('radio',{name:'전체'}));
-    fireEvent.click(screen.getByRole('radio',{name:'전체'}));
+    chooseIn('길이','전체');
+    chooseIn('미디어','전체');
     await waitFor(()=>expect(lastPagePath()).not.toContain('media_kind'));
     expect(lastPagePath()).not.toContain('duration_ms_min');
   });
@@ -371,9 +363,9 @@ describe('asset filters',()=>{
   it('closes the filter dialog on Back before the gallery surface itself',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters('비율');
-    expect(screen.getByRole('dialog',{name:'비율'})).toBeTruthy();
+    expect(screen.getByRole('dialog',{name:'보기'})).toBeTruthy();
     act(()=>window.dispatchEvent(new Event('lakomics-back')));
-    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'비율'})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'보기'})).toBeNull());
     // The gallery is untouched by the press that closed the dialog.
     expect(screen.getByText('tile-a1')).toBeTruthy();
   });
@@ -395,10 +387,10 @@ describe('asset filters',()=>{
 
   it('does not offer filters on Home, where a control would imply a narrowing that is not applied',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    expect(toolbarFilterLabels()).toEqual(['비율','길이']);
+    expect(toolbarFilterLabels()).toEqual(['보기']);
     fireEvent.click(screen.getByRole('button',{name:'홈'}));
     await screen.findByText('tile-a1');
-    expect(screen.queryByRole('button',{name:'보기 옵션'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'보기'})).toBeNull();
     expect(screen.queryByRole('button',{name:'종류'})).toBeNull();
   });
 
@@ -448,6 +440,29 @@ describe('asset filters',()=>{
 });
 
 describe('asset filter dialog shape',()=>{
+  it('keeps an in-flight ratio choice when sorting from the same view sheet',async()=>{
+    const server=supporting();
+    mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/library/assets')&&!path.includes('toc=1')&&path.includes('aspect_ratio=square')?new Promise(()=>{}):server(path));
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    chooseIn('비율','정사각형');await waitFor(()=>expect(lastPagePath()).toContain('aspect_ratio=square'));
+    fireEvent.click(screen.getByRole('radio',{name:'오래된순'}));
+    await waitFor(()=>{expect(lastPagePath()).toContain('aspect_ratio=square');expect(lastPagePath()).toContain('sort=oldest');});
+    expect(screen.getByText('tile-a1')).toBeTruthy();
+  });
+  it('changes the ratio from the view sheet and retains the old tiles until the filtered page is ready',async()=>{
+    const pending=Promise.withResolvers<ReturnType<typeof page>>();
+    const server=supporting();
+    mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/library/assets')&&!path.includes('toc=1')&&path.includes('aspect_ratio=square')?pending.promise:server(path));
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'보기'}));const sheet=screen.getByRole('dialog',{name:'보기'});
+    expect([...sheet.querySelectorAll('.ui-section-label__title')].map(node=>node.textContent)).toEqual(['정렬','비율','길이','타일 크기']);
+    fireEvent.click(within(within(sheet).getByRole('radiogroup',{name:'비율'})).getByRole('radio',{name:'정사각형'}));
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('aspect_ratio=square'))).toBe(true));
+    expect(screen.getByText('tile-a1')).toBeTruthy();expect(screen.queryByText('tile-square')).toBeNull();
+    await act(async()=>pending.resolve(page(['square'])));
+    await screen.findByText('tile-square');expect(screen.queryByText('tile-a1')).toBeNull();
+    expect(within(sheet).getByRole('radio',{name:'정사각형'}).getAttribute('aria-checked')).toBe('true');
+  });
   it('groups each control with its own accessible name and the PC labels',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     const kindLabels=['전체','이미지','영상'];
@@ -461,6 +476,6 @@ describe('asset filter dialog shape',()=>{
     }
     chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
-    openFilters();expect(screen.getByRole('radio',{name:'이미지'}).getAttribute('aria-checked')).toBe('true');
+    openFilters();expect(within(screen.getByRole('radiogroup',{name:'종류'})).getByRole('radio',{name:'이미지'}).getAttribute('aria-checked')).toBe('true');
   });
 });

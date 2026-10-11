@@ -19,6 +19,7 @@ import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
 import {decodeImage} from './media';
 import './releaseCalendar.css';
+import {SectionTool} from './SectionTool';
 
 type ScreenState = 'loading' | 'ready' | 'empty' | 'error';
 
@@ -292,7 +293,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
     {!embedded&&header}
     <div ref={stripWheel} className="release-calendar-controls">
       <SegmentedControl className="release-calendar-segments" label="종류" options={kindOptions} value={kind} onChange={setKind} />
-      <Button type="button" size="sm" variant="quiet" className={`release-calendar-interest${wishlistOnly ? ' is-selected' : ''}`} aria-label={`관심 목록 ${count.toLocaleString('ko-KR')}`} aria-pressed={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}><BookmarkOutlineIcon aria-hidden="true" />관심 <span className="numeric">{count.toLocaleString('ko-KR')}</span></Button>
+      <SectionTool label="관심" ariaLabel={`관심 목록 ${count.toLocaleString('ko-KR')}`} icon={BookmarkOutlineIcon} count={count} selected={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}/>
       {unreadTotal > 0 && <Badge variant="accent">NEW {unreadTotal.toLocaleString('ko-KR')}</Badge>}
     </div>
     {error && <div className="release-calendar-error" role="alert"><span>{error}</span><button type="button" onClick={() => setRetry(value => value + 1)}>다시 시도</button></div>}

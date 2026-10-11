@@ -126,13 +126,13 @@ describe('FAULT entry',()=>{
   }
   async function openAlbumOptions(){
     render(<App/>);fireEvent.click(await screen.findByRole('radio',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 2개'}));
-    await screen.findByRole('heading',{name:'업로드용'});fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
+    await screen.findByRole('heading',{name:'업로드용'});fireEvent.click(screen.getByRole('button',{name:'보기'}));
   }
   it('offers FAULT in an album with images, opens the game over the app and closes it with Back',async()=>{
     vi.stubGlobal('fetch',vi.fn(()=>new Promise(()=>{})));
     serve([image('a1'),image('v1',{kind:'video'})]);await openAlbumOptions();
     fireEvent.click(screen.getByRole('button',{name:'FAULT로 플레이'}));
-    expect(await screen.findByRole('dialog',{name:'FAULT'})).toBeTruthy();expect(screen.queryByRole('dialog',{name:'보기 옵션'})).toBeNull();
+    expect(await screen.findByRole('dialog',{name:'FAULT'})).toBeTruthy();expect(screen.queryByRole('dialog',{name:'보기'})).toBeNull();
     expect(mocks.mediaTicket).toHaveBeenCalledWith(expect.objectContaining({id:'a1'}),'original',expect.anything());
     expect(mocks.mediaTicket).toHaveBeenCalledTimes(1);
     act(()=>window.dispatchEvent(new Event('lakomics-back')));
@@ -141,7 +141,7 @@ describe('FAULT entry',()=>{
   });
   it('hides FAULT when the album holds no images',async()=>{
     serve([image('v1',{kind:'video'})]);await openAlbumOptions();
-    expect(screen.getByRole('dialog',{name:'보기 옵션'})).toBeTruthy();expect(screen.queryByRole('button',{name:'FAULT로 플레이'})).toBeNull();
+    expect(screen.getByRole('dialog',{name:'보기'})).toBeTruthy();expect(screen.queryByRole('button',{name:'FAULT로 플레이'})).toBeNull();
   });
 });
 

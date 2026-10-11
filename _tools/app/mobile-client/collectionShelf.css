@@ -144,13 +144,11 @@
   .tablet-performer__controls { flex-wrap: wrap; }
 }
 
-/* The type switch keeps one width on every type (60% of the row), whatever shortcuts the type
-   has; they sit at the row's right end and travel with it into the section shade. The controls
-   every type shares live in the top bar (.collection-top-tools). */
+/* The segment fills the space left by this type's section actions. */
 .mobile-collections .ui-section-bar { flex-wrap: nowrap; gap: var(--space-2); }
-.mobile-collections .ui-section-bar > .ui-segmented { flex: 0 1 60%; width: auto; overflow-x: auto; }
+.mobile-collections .section-bar-row > .ui-segmented { flex: 1 1 auto; width: 0; overflow-x: auto; }
 .mobile-collections .ui-section-bar__trailing { gap: 0; }
-.mobile-collections .ui-section-bar__trailing .ui-button { min-width: 44px; min-height: 44px; height: 44px; padding-inline: var(--space-2); }
+.mobile-collections .ui-section-bar__trailing .ui-button { min-width: 44px; min-height: 44px; height: 44px; }
 .mobile-collections .ui-section-bar__trailing > .ui-button svg { width: 20px; height: 20px; }
 .mobile-collections .collection-shortcuts__label { display: none; }
 /* A type's shortcut fades in when switching to it, so it never pops in beside the still segment. */

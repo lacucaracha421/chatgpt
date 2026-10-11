@@ -172,10 +172,10 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
   const lifted=away||open;
   return {
     away,open,barRef,
-    inline:bar.extra?<div ref={inlineRef} className="section-shade-rows section-shade-rows--inline"><SectionBar placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} trailing={bar.trailing}/>{bar.extra}</div>:<SectionBar ref={inlineRef} placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} trailing={bar.trailing}/>,
+    inline:bar.extra?<div ref={inlineRef} className="section-shade-rows section-shade-rows--inline"><SectionBar className="section-bar-row" placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} trailing={bar.trailing}/>{bar.extra}</div>:<SectionBar className="section-bar-row" ref={inlineRef} placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} trailing={bar.trailing}/>,
     shade:lifted?<div className="section-shade-anchor">
       <div ref={shade} id={id} className={`section-shade${open?' is-open':''}${dragging?' is-dragging':''}`} aria-hidden={!open||undefined} inert={!open||undefined}>
-        <SectionBar placement="shade" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={pick} trailing={bar.trailing}/>{bar.extra&&<div className="section-shade-extra" onClick={close}>{bar.extra}</div>}
+        <SectionBar className="section-bar-row" placement="shade" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={pick} trailing={bar.trailing}/>{bar.extra&&<div className="section-shade-extra" onClick={close}>{bar.extra}</div>}
       </div>
     </div>:null,
     title:base=>lifted

@@ -63,7 +63,7 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
     detail:<DescriptionStrip answer={strip.shown} failed={strip.failed} cache={session.cache} signal={session.controller.signal} privacy={privacy}/>,
     destination:{kind:'screen',screen:'assets'},run:()=>onDescription(typed)} as TabletFindEntry,...entries]:entries,[onDescription,draft.scope,typed,stripBusy,notReady,strip.shown,strip.failed,session,privacy,entries]);
   const groups=useMemo(()=>{
-    const local:TabletFindEntry[] = search?[{id:'screen-search',group:'search',label:typed?`이 화면에서 ‘${typed}’`:`${search.scope}에서 찾기`,icon:<MagnifyingGlassIcon/>,destination:{kind:'screen',screen:'assets'},run:()=>search.run(typed)}]:[];
+    const local:TabletFindEntry[] = search?[{id:'screen-search',group:'search',label:typed?`${search.scope==='메모'?'메모에서':'이 화면에서'} ‘${typed}’`:`${search.scope}에서 찾기`,icon:<MagnifyingGlassIcon/>,destination:{kind:'screen',screen:'assets'},run:()=>search.run(typed)}]:[];
     const found=findGroups([...local,...withContent],draft.query,draft.scope,privacy?[]:recent);
     // Until the captions exist the row is informational, so Enter keeps going to the first real match.
     const appGroups=found.filter(({group})=>group!=='search');

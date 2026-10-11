@@ -731,10 +731,10 @@ it('sets the thumbnail size with a slider, stores it and keeps 보기 quiet',asy
   localStorage.setItem('lakomics.mobile.density','0');
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
   // A pre-slider stored value (0 = 크게) is still honoured, but 보기 has no changed badge.
-  const opener=screen.getByRole('button',{name:'보기 옵션'});
+  const opener=screen.getByRole('button',{name:'보기'});
   expect(opener.classList.contains('is-changed')).toBe(false);
   opener.focus();fireEvent.click(opener);
-  const slider=screen.getByRole('slider',{name:'썸네일 크기'}) as HTMLInputElement;
+  const slider=screen.getByRole('slider',{name:'타일 크기'}) as HTMLInputElement;
   expect(slider.value).toBe('0');expect(slider.getAttribute('aria-valuetext')).toBe('크게');
   fireEvent.change(slider,{target:{value:'3'}});
   expect(localStorage.getItem('lakomics.mobile.density')).toBe('1.5');

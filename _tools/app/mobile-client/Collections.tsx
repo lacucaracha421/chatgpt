@@ -16,7 +16,7 @@ import {moreWorkFacts, workFacts} from '../src/collections/work/workFacts';
 import {withProductCodeCopy} from '../src/collections/work/ProductCodeCopy';
 import {writeClipboard} from './ViewerInfo';
 import {latestKoreanRelease} from '../src/collections/releaseCaption';
-import {ShelfTile, ShelfViewSheet, useShelfColumns, useShelfViews} from './CollectionShelf';
+import {ShelfTile, ShelfViewSheet, ShelfViewSection, useShelfColumns, useShelfViews} from './CollectionShelf';
 import {useShelfPutDown} from '../src/collections/useShelfPutDown';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import {TabletMangaShelf} from './CollectionMangaShelf';
@@ -40,7 +40,7 @@ import {displayDate} from '../src/shared/displayDate';
 import {beginScreenTiming,screenReady} from './perf';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
-import {BellIcon, CalendarDaysIcon, SparklesIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon,  XMarkIcon} from '@heroicons/react/24/outline';
+import {BellIcon, CalendarDaysIcon, SparklesIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon,  XMarkIcon} from '@heroicons/react/24/outline';
 import {SparklesIcon as SparklesSolidIcon, StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -49,8 +49,11 @@ import {KakaoReviewOverlay, useKakaoReviewQueue} from './KakaoReviewOverlay';
 import {LinkIcon} from '@heroicons/react/24/outline';
 import {SegmentedControl} from '../src/shared/ui/SegmentedControl';
 import {ReleaseCalendar} from './ReleaseCalendar';
-import {CreateWorkButton,TopBar,TopBarSearch} from './TopBar';
+import {TopBar,TopBarSearch} from './TopBar';
 
+import {SectionTool} from './SectionTool';
+import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
+import {PlusIcon} from '@heroicons/react/24/outline';
 import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSectionShade} from './SectionShade';
@@ -412,7 +415,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // What the server serves may have changed: the lists re-read, and so does the shared 신간 read on its next show.
   const bump=useCallback(()=>{detailCache.current.clear();invalidateReleases();setRefresh(n=>n+1);},[]);
   const [showcaseAll,setShowcaseAll]=useState(false),[calendarOpen,setCalendarOpen]=useState(false);
-  const [sheet,setSheet]=useState<'sort'|'rating'|'view'|'performerSort'|null>(null);
+  const [sheet,setSheet]=useState<'view'|'performerSort'|null>(null);
   // 보기 per type (격자 · 선반, 한 줄에 N개), the case a tap turned to the front, and the order a work was opened from.
   const [viewOf,patchView]=useShelfViews();
   const columns=useShelfColumns();
@@ -638,20 +641,15 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
 
   // The type switch is the list's first row; scrolled away, the top bar pulls it down as a shade.
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
-  // The type's own shortcuts sit in the section bar's right group on both surfaces; the controls
-  // every type shares (쇼케이스, 정렬, 내 별점, 보기) live in the top bar, so the bar's segment
-  // keeps one width on every type.
-  const calendarShortcut=(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>{beginScreenTiming('releaseCalendar','open');setCalendarOpen(true);}}><CalendarDaysIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>;
-  const newsShortcut=tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>;
-  const reviewShortcut=tab==='manga'&&kakaoUnlinked>0&&<Button variant="quiet" size="sm" aria-label={`연결 점검 ${kakaoUnlinked}`} onClick={()=>setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true"/><span className="collection-shortcuts__label">연결 점검</span><span className="numeric collection-shortcuts__count">{kakaoUnlinked}</span></Button>;
-  const shortcuts=(calendarShortcut||newsShortcut||reviewShortcut)?<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}{reviewShortcut}</div>:undefined;
-  const viewTools=<div className="collection-top-tools">
-    <IconButton label="쇼케이스" icon={SparklesIcon} activeIcon={SparklesSolidIcon} active={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}/>
-    <IconButton label="정렬" icon={ArrowsUpDownIcon} onClick={()=>setSheet('sort')}/>
-    <IconButton label="내 별점" icon={StarIcon} activeIcon={StarSolid} active={filters.rating!=='all'} onClick={()=>setSheet('rating')}/>
-    <IconButton label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/>
-  </div>;
-  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>{viewTools}{shortcuts}{edits.authority.identity&&<CreateWorkButton onClick={()=>setWorkForm({mode:'create',type})}/>}</>},{active:live&&!selected&&!overlayOpen&&!performer});
+  // Both orientations keep shortcuts, view and creation in the same order.
+  const calendarShortcut=(tab==='game'||tab==='movie')&&<SectionTool label="발매 캘린더" icon={CalendarDaysIcon} count={calendarInterestCount||undefined} onClick={()=>{beginScreenTiming('releaseCalendar','open');setCalendarOpen(true);}}/>;
+  const newsShortcut=tab==='manga'&&<SectionTool label="신간" icon={BellIcon} count={releases.unread||undefined} onClick={openInbox}/>;
+  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>
+    <SectionTool label="쇼케이스" ariaLabel="쇼케이스" icon={showcaseAll?SparklesSolidIcon:SparklesIcon} selected={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}/>
+    {(calendarShortcut||newsShortcut)&&<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}</div>}<span className="section-tools-divider" aria-hidden="true"/>
+    <SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/>
+    {edits.authority.identity&&<SectionTool label="새 작품" icon={PlusIcon} onClick={()=>setWorkForm({mode:'create',type})}/>}
+  </>},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
@@ -660,11 +658,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     :performer
       ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<button onClick={closePerformer} className="top-bar__crumbs is-alone">컬렉션 › AV › 배우 ›</button>} menu={edits.authority.identity?{title:'배우',entries:[{id:'performer-manage',group:'action',label:'배우 관리',icon:<EllipsisHorizontalIcon/>,run:()=>setPerformerManagementRequest(value=>value+1)}]}:undefined}/>
     :searching&&tab!=='av'&&!overlayOpen
-        ?<TopBarSearch title="컬렉션" search={{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());}}} loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
+        ?<TopBarSearch title="컬렉션" menu={tab==='manga'&&kakaoUnlinked>0?{title:'컬렉션',entries:[{id:'review-links',group:'action',label:`연결 점검 ${kakaoUnlinked}`,icon:<LinkIcon/>,run:()=>setKakaoReviewOpen(true)}]}:undefined} search={{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());}}} loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
-        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} search={tab!=='av'?{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());setSearchOpen(true);}}:undefined} menu={tab==='av'?{title:'컬렉션',entries:[{id:'av-inbox',group:'action',label:'품번 보내기',icon:<RectangleStackIcon/>,run:()=>setAvInboxOpen(true)}]}:undefined}/>;
+        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} search={tab!=='av'?{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());setSearchOpen(true);}}:undefined} menu={tab==='manga'&&kakaoUnlinked>0?{title:'컬렉션',entries:[{id:'review-links',group:'action',label:`연결 점검 ${kakaoUnlinked}`,icon:<LinkIcon/>,run:()=>setKakaoReviewOpen(true)}]}:tab==='av'?{title:'컬렉션',entries:[{id:'av-inbox',group:'action',label:'품번 보내기',icon:<RectangleStackIcon/>,run:()=>setAvInboxOpen(true)}]}:undefined}/>;
   const showAvLoading=useDelayedBusy(main.busy&&!main.committed);
   const showDetailLoading=useDelayedBusy(!!selected&&!item&&!detailError);
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
@@ -696,7 +694,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const workList=(listed:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals)=>{
     const items=deletedWorks.size?listed.filter(work=>!deletedWorks.has(work.id)):listed;
     const settings=viewOf(kind),order=items.map(work=>work.id);
-    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
+    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:showcaseAll?'sort':settings.grouping??'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
       render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>}/>;
     if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={visible} privacy={privacyMode}
       owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)}/>;
@@ -800,15 +798,18 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={columns(avPerformerView(viewOf('av')).perRow)} order={performerOrder} authority={edits.authority} managementRequest={performerManagementRequest}
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
     </>, work: workView}}/>}
-    {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
-      <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>changeFilters({...filters,sort:value})}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
-      <p className="collection-sheet-label">순서</p><div role="radiogroup" aria-label="정렬 순서">{(['desc','asc'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.direction===value} onClick={()=>changeFilters({...filters,direction:value})}>{sortDirectionLabels(filters.sort)[value]}<span className="radio-dot"/></button>)}</div>
-    </BottomSheet>}
     {sheet==='performerSort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
       <div role="radiogroup" aria-label="정렬 순서">{([['newest','발매일 최신순'],['oldest','발매일 오래된순']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={performerOrder===value} onClick={()=>setPerformerOrder(value)}>{label}<span className="radio-dot"/></button>)}</div>
     </BottomSheet>}
-    {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/>{filters.rating!=='all'&&<Button variant="quiet" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</Button>}</BottomSheet>}
-    {sheet==='view'&&<ShelfViewSheet type={performer&&!selected?'av':type} view={performer&&!selected?avPerformerView(viewOf('av')):viewOf(type)} onChange={patch=>patchView(performer&&!selected?'av':type,patch)} onClose={()=>setSheet(null)}/>}
+    {sheet==='view'&&(performer&&!selected?<ShelfViewSheet type="av" view={avPerformerView(viewOf('av'))} onChange={patch=>patchView('av',patch)} onClose={()=>setSheet(null)}/>:<BottomSheet title="보기" onClose={()=>setSheet(null)}><div className="ui-view-options__content shelf-view-sheet">
+      <ViewOptionsSection title="정렬">
+        {type==='game'&&<><p className="collection-sheet-label">묶기</p><div role="radiogroup" aria-label="묶기">{([['device','기기'],['year','발매 연도']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={viewOf(type).grouping===value} onClick={()=>{patchView(type,{grouping:value});if(value==='year')changeFilters({...filters,sort:'media_date',direction:'desc'});}}>{label}<span className="radio-dot"/></button>)}</div></>}
+      <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>{patchView(type,{grouping:'sort'});changeFilters({...filters,sort:value});}}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
+      <p className="collection-sheet-label">순서</p><div role="radiogroup" aria-label="정렬 순서">{(['desc','asc'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.direction===value} onClick={()=>{patchView(type,{grouping:'sort'});changeFilters({...filters,direction:value});}}>{sortDirectionLabels(filters.sort)[value]}<span className="radio-dot"/></button>)}</div>
+      </ViewOptionsSection>
+      <ViewOptionsSection title="내 별점"><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/>{filters.rating!=='all'&&<Button variant="quiet" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</Button>}</ViewOptionsSection>
+      <ShelfViewSection type={type} view={viewOf(type)} onChange={patch=>patchView(type,patch)}/>
+    </div></BottomSheet>)}
     {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>
       <div className="collection-cover-stage"><CoverStage key={`${edition}:${coverIndex}:${coverMode}`} item={item} id={covers[coverIndex].id} revision={detail!.revision} label={covers[coverIndex].label} mode={physical?coverMode:'flat'} onFlat={()=>setCoverMode('flat')}/></div>

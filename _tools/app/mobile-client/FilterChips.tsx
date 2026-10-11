@@ -3,8 +3,13 @@ import {ChevronDownIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {ASPECT_LABELS,DURATION_LABELS,MEDIA_LABELS,EMPTY_FILTERS,hasActiveFilters,queryExtras} from './assetFilters';
 import type {AssetFiltersValue} from './types';
+import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 export type FilterGroup=keyof AssetFiltersValue;
 const groups={media:{label:'종류',labels:MEDIA_LABELS},aspect:{label:'비율',labels:ASPECT_LABELS},duration:{label:'길이',labels:DURATION_LABELS}};
+export function FilterOptionsSection({group,value,onChange}:{group:FilterGroup;value:AssetFiltersValue;onChange(value:AssetFiltersValue):void}) {
+  const disabled=group==='duration'&&value.media==='images';
+  return <ViewOptionsSection title={groups[group].label}><div role="radiogroup" aria-label={groups[group].label}>{Object.entries(groups[group].labels).map(([key,label])=><button className="sheet-option" role="radio" aria-checked={value[group]===key} disabled={disabled} key={key} onClick={()=>onChange(group==='media'&&key==='images'?{...value,media:'images',duration:'all'}:{...value,[group]:key})}>{label}<span className="radio-dot"/></button>)}</div>{group==='duration'&&<p className="hint">길이는 영상에만 적용됩니다.</p>}</ViewOptionsSection>;
+}
 /**
  * The filter chip row and each group's choice sheet. `row` and `sheet` split the two, so the row
  * can live inside the 보기 옵션 sheet while the choice sheet opens on its own (never nested).

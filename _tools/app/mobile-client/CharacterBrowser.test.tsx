@@ -325,9 +325,9 @@ it('keeps an internal level on tab return but resets an explicit re-entry to its
 it('hands the visible scope items to the options menu so the host can offer FAULT',async()=>{
   const onOptions=vi.fn();
   render(<CharacterBrowser {...props} onOptions={onOptions}/>);
-  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(onOptions).toHaveBeenLastCalledWith([]);
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));expect(onOptions).toHaveBeenLastCalledWith([]);
   fireEvent.click(await screen.findByRole('button',{name:'Series · 2장'}));await screen.findByText('asset-2');
-  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(onOptions).toHaveBeenLastCalledWith(page().items);
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));expect(onOptions).toHaveBeenLastCalledWith(page().items);
 });
 
 it('offers 미분류 and 전체 이미지 only, opens a series on 미분류, and keeps 보기 quiet',async()=>{
@@ -337,8 +337,8 @@ it('offers 미분류 and 전체 이미지 only, opens a series on 미분류, and
   expect(mocks.api.mock.calls.some(([path])=>String(path).includes('filter=needs_review'))).toBe(false);
   expect(screen.queryByRole('button',{name:'추가 확인'})).toBeNull();
   expect([...screen.getByRole('radiogroup',{name:'이미지 범위'}).querySelectorAll('.ui-segmented__label > span:first-child')].map(b=>b.textContent)).toEqual(['미분류','전체']);
-  expect([...screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')].map(button=>button.textContent)).toEqual(['비율','길이']);
-  const options=()=>screen.getByRole('button',{name:'보기 옵션'});
+  expect(screen.queryByRole('group',{name:'자산 필터'})).toBeNull();
+  const options=()=>screen.getByRole('button',{name:'보기'});
   expect(options().classList.contains('is-changed')).toBe(false);
   fireEvent.click(within(screen.getByRole('radiogroup',{name:'이미지 범위'})).getByRole('radio',{name:/전체/}));
   await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('filter=all'))).toBe(true));
@@ -349,16 +349,19 @@ it('offers 미분류 and 전체 이미지 only, opens a series on 미분류, and
   await waitFor(()=>expect(screen.getByRole('radio',{name:/미분류/}).getAttribute('aria-checked')).toBe('true'));
   expect(options().classList.contains('is-changed')).toBe(false);
 });
-it('opens the matching character filter sheet and hides length for images',async()=>{
-  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+it('hosts character view filters and sorting in the shared view sheet without toolbar filters',async()=>{
+ const host=document.createElement('div');document.body.append(host);
+ try{
+  render(<CharacterBrowser {...props} initialNode="series:s" optionsHost={host}/>);
   await screen.findByRole('heading',{name:'Series'});
-  const toolbar=screen.getByRole('group',{name:'자산 필터'});
-  fireEvent.click(within(toolbar).getByRole('button',{name:'비율'}));
-  expect(await screen.findByRole('dialog',{name:'비율'})).toBeTruthy();
-  fireEvent.click(screen.getByRole('button',{name:'닫기'}));
+  expect(screen.queryByRole('group',{name:'자산 필터'})).toBeNull();
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'비율'})).getByRole('radio',{name:'가로형'}));
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('aspect_ratio=landscape'))).toBe(true));
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'정렬'})).getByRole('radio',{name:'오래된순'}));
+  await waitFor(()=>{const path=String(mocks.api.mock.calls.at(-1)?.[0]);expect(new URL(path,'https://test').searchParams.getAll('sort')).toEqual(['oldest']);});
   fireEvent.click(screen.getByRole('radio',{name:'이미지'}));
-  expect([...screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')].map(button=>button.textContent)).toEqual(['비율']);
-  expect(screen.queryByText('필터 해제')).toBeNull();
+  expect(within(screen.getByRole('radiogroup',{name:'길이'})).getAllByRole('radio').every(button=>(button as HTMLButtonElement).disabled)).toBe(true);
+ }finally{host.remove();}
 });
 it('opens the image range explanation from the info button',async()=>{
   render(<CharacterBrowser {...props} initialNode="series:s"/>);

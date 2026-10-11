@@ -48,7 +48,7 @@ it("requires backing up a newly generated key before unlocking",async()=>{
   await userEvent.click(open);expect(operations).toContain("unlock");
 });
 
-it("keeps typing status stable without delaying local writes",async()=>{
+it("saves typing immediately without persistent status words in the top bar",async()=>{
   const note:Note={id:"n",title:"Draft",body:"",pinned:false,deleted:false,createdAt:"2026-09-07T00:00:00Z",updatedAt:"2026-09-07T00:00:00Z",localRevision:0,pending:false,conflict:false};
   const request=vi.fn(async(op:string,input:any)=>op==="save"?{...note,...input,localRevision:1,pending:true}:{unlocked:true,notes:[note],lastSyncedAt:null});
   const store=new NotesStore(request as NotesRequest);surface(store);
@@ -58,9 +58,9 @@ it("keeps typing status stable without delaying local writes",async()=>{
     fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"typing"}});
     await act(async()=>{await Promise.resolve();});
     expect(request).toHaveBeenCalledWith("save",expect.objectContaining({body:"typing"}));
-    expect(screen.getByText("편집 중")).toBeInTheDocument();
+    expect(screen.queryByText("편집 중")).not.toBeInTheDocument();
     await act(async()=>{vi.advanceTimersByTime(1200);});
-    expect(screen.getByText("PC에 저장됨 · 동기화 대기")).toBeInTheDocument();
+    expect(screen.queryByText("PC에 저장됨 · 동기화 대기")).not.toBeInTheDocument();
   } finally { vi.useRealTimers(); }
 });
 

@@ -93,7 +93,7 @@ describe('activation-gated tablet forms', () => {
     fireEvent.click(screen.getAllByRole('radio', {name: label})[0]);
     const plus = screen.getByRole('button', {name: '새 작품'});
     expect(plus.closest('.ui-section-bar__trailing')).not.toBeNull();
-    expect(plus.textContent).toBe('');
+    expect(plus.querySelector('.section-tool__label')?.textContent).toBe('새 작품');
     expect(screen.getByRole('button',{name:'찾기'})).toBeTruthy();
     // AV has no type shortcuts; the others keep only their own shortcuts in the section bar.
     const shortcuts = screen.queryByRole('group', {name: '컬렉션 바로가기'});
