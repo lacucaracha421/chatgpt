@@ -377,12 +377,12 @@ Status: `HOLD` — design exists in the 2026-10-12 context-menu mockup (touch va
 <a id="collector-options-001--options-page-reorganisation-and-theme-unification"></a>
 ## COLLECTOR-OPTIONS-001 — Options page reorganisation and theme unification (2026-10-12)
 
-Status: `IN_PROGRESS` — design in progress (user 2026-10-12): reorganise the extension options page (it has grown with X translation, right-click and image-text translation, YouTube subtitles, dictionary and key settings) and unify its theme with the new right-click menu and the app design language. Not implemented; follow the shared design rules (`DESIGN.md`) and keep keys, models and the dictionary editable only from extension pages (`1de6eb98`).
+Status: `DONE` — shipped in 3.5.6 (`4957e893`): seven sections with a sticky nav, auto-save, clears in 저장공간 with inline confirms, key↔model links, bundled Pretendard and the paper/ink theme.
 
 <a id="collector-drag-001--drag-to-save-ignores-video-player-controls"></a>
 ## COLLECTOR-DRAG-001 — Drag-to-save ignores video player controls (2026-10-12)
 
-Status: `IN_PROGRESS` — the drag-to-save gesture must ignore video player controls (seek bar, volume, buttons) so dragging a control no longer saves the video. Uncommitted work in `extension-list/src/content.js` (player-control detection now also recognises custom controls such as X's vertical volume slider by `aria-valuenow`/`aria-valuemax` and volume/seek labels or test ids) and `extension-list/tests/content-gesture.test.mjs` (2026-10-12 working tree). Verify in real Chrome on YouTube and an X video before closing.
+Status: `DONE` — shipped in 3.5.4/3.5.5 (`fc59c40c`, `db78c486`): drags starting on player controls (incl. unlabeled ones such as X's volume slider) and the native control strip no longer open the save picker.
 
 <a id="collector-picker-001--arca-live-post-editor-library-image-picker"></a>
 ## COLLECTOR-PICKER-001 — Arca Live post-editor image picker from Lakomics (2026-10-08)
