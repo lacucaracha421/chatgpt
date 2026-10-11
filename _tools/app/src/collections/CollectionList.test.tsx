@@ -76,10 +76,10 @@ it("groups games by device or release year, preserving other media's current ord
   expect(shelfGroups(films, "device")[0].items).toBe(films);
 });
 
-// A 1440px list with 500px available below the collection chrome. jsdom has no layout:
+// A reference-width list with 500px available below the collection chrome. jsdom has no layout:
 // supply rectangles from the grid's card tracks and group headings.
 function shelfGeometry() {
-  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1216);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function(this: HTMLElement) {
     return this.classList.contains("collection-browser__list-scroll") ? 500 : 0;
   });
@@ -278,4 +278,37 @@ it("does not assign image sources outside the near window and retains visible im
   root.scrollTop = 2000; fireEvent.scroll(root);
   expect(container.querySelector('img[src="/covers/work-25"]')).not.toBeNull();
   expect(container.querySelector('img[src="/covers/work-0"]')).toBeNull();
+});
+
+it("grows wide shelf rows while preserving the minimum and matching cell/plank geometry", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1856);
+  const { container, rerender } = render(<CollectionList items={works} view={{ layout: "shelf", perRow: 6, grouping: "sort" }} label="작품" onPick={() => undefined} render={drawCase} />);
+  const list = container.querySelector<HTMLElement>(".collection-list")!;
+  expect(list.dataset.perRow).toBe("9");
+  expect(list.style.getPropertyValue("--columns")).toBe("9");
+  const cells = [...list.querySelectorAll<HTMLElement>(".collection-list__cell")];
+  expect(cells[8].style.gridRow).toBe("1");
+  expect(cells[9].style.gridRow).toBe("2");
+  expect(list.querySelectorAll(".collection-list__plank")).toHaveLength(3);
+  rerender(<CollectionList items={works} view={{ layout: "grid", perRow: 6, grouping: "sort" }} label="작품" onPick={() => undefined} render={drawCase} />);
+  expect(list.dataset.perRow).toBe("6");
+});
+
+it("uses expanded columns for virtual rows and keyboard navigation on a wide shelf", () => {
+  shelfGeometry();
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1856);
+  const onPick = vi.fn();
+  const { container } = render(windowedShelf(8, { onPick }));
+  const list = container.querySelector<HTMLElement>(".collection-list")!;
+  expect(list.dataset.perRow).toBe("12");
+  expect(list.querySelectorAll(".collection-list__plank")).toHaveLength(16);
+  const card = container.querySelector<HTMLElement>('[data-collection-id="work-23"]')!;
+  act(() => card.focus());
+  fireEvent.keyDown(card, { key: "ArrowDown" });
+  expect(onPick).toHaveBeenLastCalledWith("work-35");
+  expect(document.activeElement).toBe(container.querySelector('[data-collection-id="work-35"]'));
+  const root = container.firstElementChild as HTMLElement;
+  root.scrollTop = 2000; fireEvent.scroll(root);
+  expect(container.querySelectorAll("[data-collection-id]").length).toBeLessThan(largeShelf.length);
+  expect(container.querySelectorAll(".collection-list__cell")).toHaveLength(largeShelf.length);
 });

@@ -53,7 +53,7 @@ button.exchange-strip-tile { cursor: pointer; }
 .exchange-limits li::before { content: ""; display: inline-block; width: 4px; height: 4px; margin-right: 6px; vertical-align: 3px; background: var(--color-border-strong); }
 
 .exchange-composer { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 24px; border-top: 1px solid var(--color-border); background: var(--color-sidebar); }
-.exchange-composer-to { flex: 1; min-width: 0; margin: 0; font-size: var(--text-sm); line-height: 1.4; color: var(--color-muted); }
+.exchange-composer-to { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; margin: 0; font-size: var(--text-sm); line-height: 1.4; color: var(--color-muted); }
 .exchange-composer-to b { display: block; color: var(--color-text); font-size: var(--text-md); font-weight: 500; }
 .exchange-composer svg { width: 18px; height: 18px; }
 .exchange-drop-veil { position: absolute; left: 14px; right: 14px; bottom: 80px; height: 260px; z-index: 6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 1px solid var(--color-accent); background: var(--color-bg); pointer-events: none; }
@@ -85,8 +85,8 @@ button.exchange-strip-tile { cursor: pointer; }
 .exchange-index-foot { flex: none; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); border-top: 1px solid var(--color-border); }
 .exchange-index-label { margin: 0; font-size: var(--text-xs); color: var(--color-muted); }
 .exchange-index-value { margin: 0; font-size: var(--text-sm); }
-.exchange-folder { overflow-wrap: anywhere; font-size: var(--text-xs); }
-.exchange-index-links { display: flex; gap: var(--space-2); }
+.exchange-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+.exchange-index-links { display: flex; gap: var(--space-2); margin-left: calc(-1 * var(--space-3) - var(--border-width)); }
 .exchange-token-details { margin-top: var(--space-1); font-size: var(--text-xs); color: var(--color-muted); }
 .exchange-token-details summary { cursor: pointer; }
 .exchange-token-details[open] summary { margin-bottom: var(--space-2); }

@@ -3,8 +3,9 @@ import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import {useAssetMask} from "../privacy/PrivacyContext";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowsUpDownIcon, CheckIcon, ComputerDesktopIcon, DevicePhoneMobileIcon, DeviceTabletIcon, ExclamationTriangleIcon, FolderIcon, PaperClipIcon } from "@heroicons/react/24/outline";
+import { ArrowsUpDownIcon, CheckIcon, ComputerDesktopIcon, DevicePhoneMobileIcon, DeviceTabletIcon, ExclamationTriangleIcon, FolderIcon, InformationCircleIcon, PaperClipIcon } from "@heroicons/react/24/outline";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { Button } from "../shared/ui/Button";
 import { formatBytes } from "../assets/assetMetadata";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -265,6 +266,8 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
   const [receivedOnly, setReceivedOnly] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [emptyHelpOpen, setEmptyHelpOpen] = useState(false);
   const { availability, devices } = snapshot;
   const chosen = devices.find((device) => device.deviceId === target) ?? devices[0] ?? null;
 
@@ -366,12 +369,12 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
               <Block block={block} peerName={peerOf(block.entries[0].row).name || peer} store={store} onError={setError} />
             </Fragment>)}
           </ol>
-        : <EmptyState className="exchange-empty" icon={ArrowsUpDownIcon} title={emptyText.title} hint={emptyText.text}>
+        : <EmptyState className="exchange-empty" icon={ArrowsUpDownIcon} title={emptyText.title} titleAction={<AnchoredPanel open={emptyHelpOpen} onOpenChange={setEmptyHelpOpen} title="전송" trigger={<Button size="icon" variant="ghost" aria-label="전송 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}><p>{emptyText.text}</p></AnchoredPanel>}>
             {chosen && !receivedOnly && <ul className="exchange-limits"><li>파일당 최대 2GB</li><li>한 번에 100개까지</li><li>안 받으면 24시간 뒤 삭제</li></ul>}
           </EmptyState>}
     </div>
     {chosen && <footer className="exchange-composer">
-      <p className="exchange-composer-to"><b>{peer}(으)로 보내기</b>파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로</p>
+      <div className="exchange-composer-to"><b>{peer}(으)로 보내기</b><AnchoredPanel open={helpOpen} onOpenChange={setHelpOpen} title="전송" trigger={<Button size="icon" variant="ghost" aria-label="보내기 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}><p>파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로</p></AnchoredPanel></div>
       <Button onClick={() => void choose(pickFolder)}><FolderIcon aria-hidden="true" />폴더 보내기</Button>
       <Button variant="primary" onClick={() => void choose(pickFiles)}><PaperClipIcon aria-hidden="true" />파일 보내기</Button>
     </footer>}

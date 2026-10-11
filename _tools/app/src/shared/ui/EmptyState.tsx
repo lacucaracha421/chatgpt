@@ -2,6 +2,7 @@ import type { ComponentType, PropsWithChildren, ReactNode, SVGProps } from "reac
 
 type EmptyStateProps = PropsWithChildren<{
   title: string;
+  titleAction?: ReactNode;
   icon?: ComponentType<SVGProps<SVGSVGElement>>;
   /** One quiet line under the title; it may differ per screen ("검색어나 필터를 바꿔 보세요"). */
   hint?: ReactNode;
@@ -17,14 +18,14 @@ type EmptyStateProps = PropsWithChildren<{
  * Empty list, no result or failed load (DESIGN.md §12 States): a faint icon, one line,
  * an optional hint and one action. No search results always read "검색 결과 없음".
  */
-export function EmptyState({ children, title, icon: Icon, hint, action, inline = false, role, className }: EmptyStateProps) {
+export function EmptyState({ children, title, titleAction, icon: Icon, hint, action, inline = false, role, className }: EmptyStateProps) {
   if (inline) {
     return <p className={["ui-empty-state--inline", className].filter(Boolean).join(" ")} role={role}>{title}</p>;
   }
   return (
     <section className={["ui-empty-state", className].filter(Boolean).join(" ")} role={role}>
       {Icon && <Icon className="ui-empty-state__icon" aria-hidden="true" />}
-      <h2>{title}</h2>
+      {titleAction ? <div className="ui-empty-state__heading"><h2>{title}</h2>{titleAction}</div> : <h2>{title}</h2>}
       {hint !== undefined && hint !== null && hint !== false && <p className="ui-empty-state__hint">{hint}</p>}
       {children}
       {action}

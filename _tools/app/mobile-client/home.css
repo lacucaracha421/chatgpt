@@ -40,3 +40,6 @@
 .home-detail-original, .home-detail-meta, .home-detail-description { margin:0; color:var(--color-muted); font-size:var(--type-meta); }
 .home-detail-description { color:var(--color-text); line-height:1.5; }
 .home-interest-action { min-height:var(--control-height); margin-top:var(--space-1); padding:0 var(--space-3); border:1px solid var(--color-accent); border-radius:var(--radius-control); background:var(--color-accent); color:var(--color-on-accent); font-size:var(--type-body); font-weight:600; }
+/* Touch swipes the Home shelf; the PC arrow gutters and arrows are not needed. */
+.home-attention-mobile .home-shelf--whole-cards { padding-inline:0; }
+.home-attention-mobile .home-shelf--whole-cards .home-shelf__arrow { display:none; }

@@ -144,3 +144,14 @@ it("shows the empty timeline and where a drop goes", async () => {
   view.drop({ type: "leave" });
   expect(screen.queryByText("놓으면 Galaxy Tab S11(으)로 보냅니다")).toBeNull();
 });
+
+it("keeps explanations behind separate help buttons and preserves the full save path", async () => {
+  setup({ devices: [tablet], folder: "C:\\Downloads\\Lakomics" });
+  await screen.findByRole("button", { name: "파일 보내기" });
+  const explanation = "파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로";
+  expect(screen.queryByText(explanation)).toBeNull();
+  expect(screen.getByText("C:\\Downloads\\Lakomics")).toHaveAttribute("title", "C:\\Downloads\\Lakomics");
+  await userEvent.click(screen.getByRole("button", { name: "보내기 도움말" }));
+  expect(screen.getByText(explanation)).toBeInTheDocument();
+  expect(screen.queryByText(/보낸 파일과 받은 파일이 여기에 시간순으로/)).toBeNull();
+});

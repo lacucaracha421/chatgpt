@@ -1,30 +1,51 @@
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useHorizontalWheel } from "./useHorizontalWheel";
 
 type ShelfScrollerProps = {
   children: ReactNode;
   previousLabel?: string;
   nextLabel?: string;
+  wholeCards?: boolean;
 };
 
 /** Horizontal shelf with wheel panning, pointer drag, glide, and paging arrows. */
-export function ShelfScroller({ children, previousLabel = "이전 발매 예정", nextLabel = "다음 발매 예정" }: ShelfScrollerProps) {
+export function ShelfScroller({ children, previousLabel = "이전 발매 예정", nextLabel = "다음 발매 예정", wholeCards = false }: ShelfScrollerProps) {
   const track = useRef<HTMLDivElement>(null);
+  const shelf = useRef<HTMLDivElement>(null);
+  const cardStep = useRef(0);
   const [edges, setEdges] = useState({ start: true, end: true });
   const measure = () => {
     const node = track.current;
     if (!node) return;
+    if (wholeCards && shelf.current) {
+      const content = node.firstElementChild as HTMLElement | null;
+      const card = content?.querySelector<HTMLElement>("button");
+      if (content && card && card.offsetWidth > 0) {
+        const outerStyle = getComputedStyle(shelf.current);
+        const style = getComputedStyle(content);
+        const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+        const gap = parseFloat(style.columnGap) || 0;
+        const available = shelf.current.clientWidth - (parseFloat(outerStyle.paddingLeft) || 0) - (parseFloat(outerStyle.paddingRight) || 0);
+        const step = card.offsetWidth + gap;
+        const count = Math.max(1, Math.floor((available - padding + gap) / step));
+        const width = Math.min(available, count * step - gap + padding);
+        if (width > 0) node.style.width = `${width}px`;
+        cardStep.current = step;
+      }
+    }
     setEdges({ start: node.scrollLeft <= 2, end: node.scrollLeft + node.clientWidth >= node.scrollWidth - 2 });
   };
-  useEffect(() => {
+  useLayoutEffect(() => {
     measure();
     const node = track.current;
     if (!node || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
+    if (wholeCards && shelf.current) observer.observe(shelf.current);
+    if (wholeCards && node.firstElementChild) observer.observe(node.firstElementChild);
     return () => observer.disconnect();
-  }, [children]);
+  }, [children, wholeCards]);
 
   const target = useRef<number | null>(null);
   const frame = useRef<number | null>(null);
@@ -32,7 +53,9 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
   const easeTo = (left: number) => {
     const node = track.current;
     if (!node) return;
-    target.current = Math.max(0, Math.min(node.scrollWidth - node.clientWidth, left));
+    const destination = wholeCards && cardStep.current ? Math.round(left / cardStep.current) * cardStep.current : left;
+    target.current = Math.max(0, Math.min(node.scrollWidth - node.clientWidth, destination));
+    if (Math.abs(target.current - node.scrollLeft) < 0.5) { stop(); measure(); return; }
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       node.scrollLeft = target.current;
       stop();
@@ -54,7 +77,7 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
 
   const bindWheel = useHorizontalWheel({
     getLeft: () => target.current ?? track.current?.scrollLeft ?? 0,
-    pan: delta => easeTo((target.current ?? track.current?.scrollLeft ?? 0) + delta * 1.6),
+    pan: delta => easeTo((target.current ?? track.current?.scrollLeft ?? 0) + (wholeCards && cardStep.current ? Math.sign(delta) * Math.max(cardStep.current, Math.abs(delta) * 1.6) : delta * 1.6)),
   });
   const bindTrack = useCallback((node: HTMLDivElement | null) => {
     track.current = node;
@@ -86,7 +109,7 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
     const state = drag.current;
     if (node?.hasPointerCapture?.(event.pointerId)) node.releasePointerCapture(event.pointerId);
     if (!state?.moved) { drag.current = null; return; }
-    if (node && Math.abs(state.velocity) > 0.2) easeTo(node.scrollLeft - state.velocity * 260);
+    if (node && (wholeCards || Math.abs(state.velocity) > 0.2)) easeTo(node.scrollLeft - state.velocity * 260);
     window.setTimeout(() => { setDragging(false); drag.current = null; }, 0);
   };
   const clickCapture = (event: ReactMouseEvent) => {
@@ -95,10 +118,10 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
   };
   const page = (direction: 1 | -1) => {
     const node = track.current;
-    if (node) easeTo((target.current ?? node.scrollLeft) + direction * node.clientWidth * 0.9);
+    if (node) easeTo((target.current ?? node.scrollLeft) + direction * (wholeCards && cardStep.current ? Math.max(1, Math.floor(node.clientWidth / cardStep.current)) * cardStep.current : node.clientWidth * 0.9));
   };
-  return <div className="home-shelf">
-    <div ref={bindTrack} className={`home-shelf__track${dragging ? " is-dragging" : ""}`} onScroll={measure}
+  return <div ref={shelf} className={`home-shelf${wholeCards ? " home-shelf--whole-cards" : ""}`}>
+    <div ref={bindTrack} className={`home-shelf__track${dragging ? " is-dragging" : ""}`} onScroll={measure} onScrollEnd={() => { if (wholeCards && target.current === null && !drag.current) easeTo(track.current?.scrollLeft ?? 0); }}
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}
       onClickCapture={clickCapture} onDragStart={(event) => event.preventDefault()}>{children}</div>
     {!edges.start && <button type="button" className="home-shelf__arrow home-shelf__arrow--prev" aria-label={previousLabel} onClick={() => page(-1)}><ChevronRightIcon aria-hidden="true" /></button>}

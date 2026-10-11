@@ -6,6 +6,7 @@ import {useDeferredValue,useEffect,useId,useLayoutEffect,useMemo,useRef,useState
 import {XMarkIcon,MagnifyingGlassIcon,PhotoIcon} from '@heroicons/react/24/outline';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {Button,EmptyState,IconButton,TextInput,SectionLabel,Skeleton} from './ui';
+import {FilterChip} from '../src/shared/ui/FilterChip';
 import {FindEntryContent} from '../src/shared/FindEntryContent';
 import {findGroups,GROUP_LIMIT,readRecent,rememberRecent,type FindScope} from '../src/shared/findModel';
 import {NAVIGATION_GROUP_LABELS,type NavigationEntryGroup} from '../src/shared/findEntries';
@@ -87,7 +88,7 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
               event.preventDefault();if(ordered.length)setActiveId(ordered[(current+(event.key==='ArrowDown'?1:ordered.length-1))%ordered.length].id);
             }else if(event.key==='Enter'){event.preventDefault();if(!stale&&ordered[current])pick(ordered[current]);}
           }}/></div>
-        <div className="tablet-find__scopes" role="group" aria-label="찾기 범위">{TABLET_FIND_SCOPES.map(name=><Button type="button" key={name} variant="ghost" aria-pressed={scope===name} onPointerDown={event=>event.preventDefault()} onClick={()=>{setScope(name);setExpanded([]);setActiveId(null);}}>{name}</Button>)}</div>
+        <div className="tablet-find__scopes" role="group" aria-label="찾기 범위">{TABLET_FIND_SCOPES.map(name=><FilterChip key={name} aria-pressed={scope===name} onPointerDown={event=>event.preventDefault()} onClick={()=>{setScope(name);setExpanded([]);setActiveId(null);}}>{name}</FilterChip>)}</div>
         <div className="tablet-find__results" id={`${id}-results`} role="listbox" aria-label="찾기 결과" aria-busy={loading||stale} inert={stale||undefined}>
           {!ordered.length&&(loading?<div className="tablet-find__skeleton"><Skeleton/><Skeleton/><Skeleton/></div>:<EmptyState inline className="tablet-find__empty" title={query.trim()?'검색 결과 없음':privacy?'이름으로 찾기':'최근 연 항목이 없습니다.'} />)}
           {displayed.map(({group,items,total})=><div key={group} role="group" aria-labelledby={`${id}-${group}`}>

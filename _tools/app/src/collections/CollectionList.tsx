@@ -68,10 +68,13 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     observer?.observe(element); return () => observer?.disconnect();
   }, []);
   const shelf = view.layout === "shelf";
-  const cellWidth = Math.max(1, (metrics.width - metrics.padding - metrics.gap * (view.perRow - 1)) / view.perRow);
+  // Preserve the chosen density at a 1280px window (including the 64px area rail).
+  const referenceWidth = 1280 - 64 - metrics.padding;
+  const perRow = shelf ? Math.max(view.perRow, Math.floor((metrics.width - metrics.padding + metrics.gap) / ((referenceWidth + metrics.gap) / view.perRow))) : view.perRow;
+  const cellWidth = Math.max(1, (metrics.width - metrics.padding - metrics.gap * (perRow - 1)) / perRow);
   // Approved shelf geometry reserves the turned cover and the 22px spine.
   const height = Math.min(300, Math.max(1, (cellWidth - 13) / (.8 * (2 / 3))));
-  const perRow = view.perRow, grouping = view.grouping;
+  const grouping = view.grouping;
   const windowed = windowRows && shelf;
   const { groups, positions, ordered, rowStarts } = useMemo(() => {
     const groups = shelf && !showcase ? shelfGroups(items, grouping) : [{ label: "", items }];
@@ -158,7 +161,7 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     return children;
   }, [groups, positions, perRow, showcase, render, windowed, nearRows, pinnedRows]);
   return <div ref={ref} className={`collection-list collection-list--${shelf ? "shelf" : "grid"}${showcase ? " collection-list--showcase" : ""}`} role="group" aria-label={label}
-    data-per-row={view.perRow} style={{ "--columns": view.perRow, "--cell-width": `${cellWidth}px`, "--case-height": `${height}px` } as CSSProperties}
+    data-per-row={perRow} style={{ "--columns": perRow, "--cell-width": `${cellWidth}px`, "--case-height": `${height}px` } as CSSProperties}
     onFocusCapture={event => {
       const card = (event.target as HTMLElement).closest<HTMLElement>("[data-collection-id]");
       if (windowed && card) setFocusedId(card.dataset.collectionId ?? null);

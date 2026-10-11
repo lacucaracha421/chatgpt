@@ -922,3 +922,16 @@ select.ui-text-input {
   filter: drop-shadow(0 1px 2px rgb(0 0 0 / 70%));
 }
 .ui-bookmark-corner.ui-button:focus-visible { outline: var(--focus-width, 2px) solid var(--color-focus); outline-offset: -2px; }
+
+.ui-filter-chip { min-height: var(--control-height); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-body); cursor: pointer; }
+.ui-filter-chip[aria-pressed="true"] { background: var(--color-filter-selected); color: var(--color-filter-text); font-weight: 600; }
+.ui-filter-chip:hover:not(:disabled) { background: var(--color-surface-hover); }
+.ui-filter-chip:active:not(:disabled) { background: var(--color-surface-pressed); }
+.ui-filter-chip:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
+.ui-filter-chip:disabled { opacity: .5; cursor: default; }
+
+/* Reserve both arrow gutters before measuring so paging never shifts the shelf. */
+.home-shelf--whole-cards { padding-inline: calc(var(--control-height-compact) + var(--space-2)); }
+.home-shelf--whole-cards .home-shelf__track { width: 100%; max-width: 100%; }
+
+.ui-empty-state__heading { display: flex; align-items: center; justify-content: center; gap: var(--space-2); }

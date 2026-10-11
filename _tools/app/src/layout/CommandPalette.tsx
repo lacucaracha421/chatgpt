@@ -14,7 +14,8 @@ import { DESCRIPTION_PREVIEW_COUNT, descriptionQueryReady, useDescriptionPreview
 import { modalDialogOpen } from "./modalDialog";
 import type { ChromeSearchInfo } from "./WorkspaceChromeContext";
 import { usePrivacy } from "../privacy/PrivacyContext";
-import { Button } from "../shared/ui/Button";
+import { TextInput } from "../shared/ui/TextInput";
+import { FilterChip } from "../shared/ui/FilterChip";
 import { FIND_SCOPES, findGroups, GROUP_LIMIT, readRecent, rememberRecent, type FindScope } from "./findModel";
 import { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "./navigationEntries";
 
@@ -164,16 +165,15 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
         onEscapeKeyDown={(event) => { event.preventDefault(); if (event.isComposing || event.keyCode === 229) return; onClose(); }}>
         <RadixDialog.Title className="command-palette__title">찾기</RadixDialog.Title>
         <div className="command-palette__field">
-          <MagnifyingGlassIcon aria-hidden="true" />
-          <input autoFocus type="text" role="combobox" aria-label="작품, 작가, 메모 제목, 폴더, 화면 또는 명령 이름" aria-expanded="true"
+          <TextInput icon={MagnifyingGlassIcon} autoFocus type="text" role="combobox" aria-label="작품, 작가, 메모 제목, 폴더, 화면 또는 명령 이름" aria-expanded="true"
             aria-controls={`${id}-list`} aria-autocomplete="list" aria-activedescendant={ordered.length ? optionId(current) : undefined}
             placeholder="작품, 작가, 메모, 폴더 찾기" value={query} spellCheck={false} autoComplete="off"
             onChange={(event) => { setQuery(event.target.value); setExpanded([]); setActiveId(null); }} onKeyDown={onKeyDown}
             onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} />
         </div>
         <div className="command-palette__scopes" role="group" aria-label="찾기 범위">
-          {FIND_SCOPES.map(name => <Button key={name} size="sm" variant="ghost" aria-pressed={scope === name}
-            onMouseDown={event => event.preventDefault()} onClick={() => { setScope(name); setExpanded([]); setActiveId(null); }}>{name}</Button>)}
+          {FIND_SCOPES.map(name => <FilterChip key={name} aria-pressed={scope === name}
+            onMouseDown={event => event.preventDefault()} onClick={() => { setScope(name); setExpanded([]); setActiveId(null); }}>{name}</FilterChip>)}
         </div>
         <div ref={listRef} id={`${id}-list`} className="command-palette__list" role="listbox" aria-label="찾기 결과" aria-busy={loading || query !== filteredQuery}>
           <BusyLabel busy={loading && ordered.length === 0} idle={!loading && ordered.length === 0 && <EmptyState inline className="command-palette__empty" title={query.trim() ? "검색 결과 없음" : "확인할 것과 최근 연 항목이 없습니다."} />}><p className="command-palette__empty">이름을 불러오는 중…</p></BusyLabel>
