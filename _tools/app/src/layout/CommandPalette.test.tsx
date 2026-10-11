@@ -129,7 +129,7 @@ describe("device name search", () => {
     const user = userEvent.setup();
     const tree = (privacy: boolean) => <PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()}><CommandPalette open onClose={vi.fn()} entries={data()} recentKey="privacy-test" /></PrivacyProvider>;
     const { rerender } = render(tree(false));
-    expect(screen.getByText("확인할 것과 최근 연 항목이 없습니다.")).toBeVisible();
+    expect(screen.getByText("최근 항목 없음")).toBeVisible();
     await user.type(screen.getByRole("combobox"), "별과");
     expect(document.querySelector(".command-palette img")).not.toBeNull();
     rerender(tree(true));

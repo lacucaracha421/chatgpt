@@ -120,14 +120,14 @@ it("keeps the previous ledger, covers and counts inert while refreshing, then sw
   expect(screen.getByRole("row", { name: "새 권" })).toBe(row);
   expect(screen.getByLabelText("권별 집계")).toHaveTextContent("1새로 나옴3나왔지만 아직 없음3발매 예정");
   expect(row.closest(".collection-releases__body")).toHaveAttribute("inert");
-  expect(screen.queryByText("소장하지 않은 정발 권이 없습니다.")).not.toBeInTheDocument();
+  expect(screen.queryByText("소장하지 않은 정발 권 없음")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("신간 읽는 중")).not.toBeInTheDocument();
   expect(row.querySelector("img")).toHaveAttribute("src", "/cover-a");
   fireEvent.click(row);
   expect(onOpen).not.toHaveBeenCalled();
   view.rerender(wrap(<CollectionReleases {...props} collections={[]} data={{ board: new Map(), inbox: [] }} />));
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
-  expect(screen.getByText("신간 알림을 켠 만화가 없습니다.")).toBeInTheDocument();
+  expect(screen.getByText("신간 알림 켠 만화 없음")).toBeInTheDocument();
 });
 
 it("keeps the real cached ledger until an invalidated read completes", async () => {

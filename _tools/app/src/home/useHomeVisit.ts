@@ -19,17 +19,20 @@ export function useHomeVisit<T extends HomeArrival>(scope: string, items: T[], t
   }, [scope, active, visitedAt]);
   const visit = state.scope === scope ? state.visit : readHomeVisit(scope);
   const arrivals = useMemo(() => newHomeArrivals(items, visit, today), [items, visit, today]);
-  const pendingKey = arrivals.map(i => i.token).join('\n');
+  const pendingKey = arrivals.map(i => i.token).join('\n') + '\n\n' + items.filter(i => i.fresh).map(i => i.token).join('\n');
   useEffect(() => {
     // A resumed visit or a changed connection must adopt its own stored state before writing.
     if (!active || state.scope !== scope || state.session !== session.current) return;
     const saved = readHomeVisit(scope);
-    const pending = [...new Set([...saved.pending, ...visit.pending, ...arrivals.map(i => i.token)])].filter(token => !visit.opened.includes(token));
+    // A release with an unread server notice is NEW because of that notice and ends when it is read, on any
+    // device; only the others wait here until opened. A notice that appears later takes over from the wait.
+    const noticed = new Set(items.filter(i => i.fresh).map(i => i.token));
+    const pending = [...new Set([...saved.pending, ...visit.pending, ...arrivals.filter(i => !i.fresh).map(i => i.token)])].filter(token => !visit.opened.includes(token) && !noticed.has(token));
     // Preserve discoveries from partial reads, but acknowledge the visit only after all sources succeeded.
     writeHomeVisit(scope, { ...visit, pending, lastVisit: readReady ? enteredAt.current : saved.lastVisit });
     // Retain discoveries in memory too, including when localStorage is unavailable.
-    if (pending.some(token => !visit.pending.includes(token))) setState(previous => ({ ...previous, visit: { ...previous.visit, pending } }));
-    // Arrival content can change independently; only its tokens affect persistence.
+    if (pending.length !== visit.pending.length || pending.some(token => !visit.pending.includes(token))) setState(previous => ({ ...previous, visit: { ...previous.visit, pending } }));
+    // Arrival content can change independently; only its tokens and notice state affect persistence.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, active, readReady, pendingKey, state]);
   const opened = (token: string) => {

@@ -365,7 +365,8 @@ select.ui-text-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-2);
+  align-content: center;
+  gap: 0 var(--space-2);
   min-height: var(--row-height-2);
   margin: 0;
   padding: var(--space-2) 0;
@@ -397,6 +398,8 @@ select.ui-text-input {
 .settings-view__status[data-tone="ok"] { color: var(--color-success); }
 .settings-view__status[data-tone="off"],
 .settings-view__status[data-tone="danger"] { color: var(--color-danger); }
+.settings-view__property > .settings-view__status,
+.settings-view__property > .settings-view__path { margin-top: var(--space-1); }
 .settings-view__stacked-status { display: grid; gap: var(--space-1); }
 
 .settings-view__inline-controls,
@@ -418,6 +421,9 @@ select.ui-text-input {
 .settings-view__property > .ui-toggle { grid-column: 2; justify-self: end; }
 .settings-view__property > .settings-view__actions { grid-column: 2; grid-row: 1 / span 2; padding: 0; }
 .settings-view__property > .settings-view__inline-controls { justify-content: flex-end; }
+/* Switches and buttons share one right edge: a quiet button's text sits flush where a switch ends. */
+.settings-view__property > .ui-button--quiet:last-child,
+.settings-view__inline-controls > .ui-button--quiet:last-child { margin-inline-end: calc(var(--space-2) * -1); }
 .settings-view__row-message { margin: var(--space-2) 0; }
 .settings-view__confirmation { margin: 0 0 var(--space-3); color: var(--color-success); font-size: var(--type-meta); }
 .settings-view__danger-action { color: var(--color-danger); }

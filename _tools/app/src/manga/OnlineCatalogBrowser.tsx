@@ -658,6 +658,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   </> : undefined;
   // Rarely used catalog actions share one overflow menu in the top bar; the catalog also refreshes hourly on its own.
   const catalogMenu = status?.installed ? <Menu label="카탈로그 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+    { id: "refresh", label: "새로고침", disabled: loading, onSelect: () => { void refreshSearch.current().then(success => { if (success) setRefreshedAt(new Date().toISOString()); }); } },
     { id: "reveal", label: "숨긴 결과 표시", checked: revealBlocked, disabled: loading, onSelect: toggleRevealBlocked },
     { id: "update", label: showUpdating ? "갱신 중…" : "신규 작품 갱신", disabled: updating, onSelect: () => void updateCatalog() },
     { id: "review", label: "중복 후보 검토", onSelect: () => setReviewOpen(true) },
@@ -724,7 +725,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     {active && <MangaToolbar source={requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
       filterToken={<MangaIndexToken filter={indexFilter} onClear={() => onClearIndexFilter?.()} />}
       countLabel={showCounting ? "결과 수 계산 중…" : totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : countError ? "결과 수 확인 실패" : undefined}
-      controls={catalogControls} refreshedAt={refreshedAt ?? latestUpdate} refreshing={loading} onRefresh={status?.installed ? () => { void refreshSearch.current().then(success => { if (success) setRefreshedAt(new Date().toISOString()); }); } : undefined}
+      controls={catalogControls} refreshedAt={refreshedAt ?? latestUpdate}
       ariaLabel="온라인 망가 도구" actions={catalogMenu} chrome={{
         summary: `${catalogSortLabel(sort)} · ${language === "korean" ? "한국어" : "일본어"}${revealBlocked ? " · 숨김 포함" : ""}`,
         status: <ChromeQueryBadge search={{ scope: "온라인 카탈로그", label: "온라인 만화 검색", query: appliedQuery, onApply: (text) => { setQuery(text); void search(text); } }} />,
@@ -775,7 +776,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
           <div ref={moreSentinel} className="online-catalog__more-sentinel" aria-hidden="true" />
           {/* Counts and appended pages are background work, not initial area readiness. */}
           <footer className="online-catalog__list-end">
-            <span>{totalCount === null ? `${results.works.length.toLocaleString()}개` : `${results.works.length.toLocaleString()} / ${totalCount.toLocaleString()}`}</span>
+            {/* The header already states a complete count; the footer only shows paging progress. */}
+            {totalCount === null || results.works.length < totalCount ? <span>{totalCount === null ? `${results.works.length.toLocaleString()}개` : `${results.works.length.toLocaleString()} / ${totalCount.toLocaleString()}`}</span> : null}
             {moreAvailable && !loadingMore && (loadMoreFailed || !autoLoadSupported) && <Button size="sm" variant="quiet" disabled={searchPending} onClick={() => void loadMore()}>더 불러오기</Button>}
           </footer>
         </>}

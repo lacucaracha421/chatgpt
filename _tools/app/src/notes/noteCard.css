@@ -30,12 +30,12 @@
 .notes-card.is-pinned .notes-card__title { padding-right: var(--space-6); }
 .notes-card__title.is-untitled { color: var(--color-muted); font-weight: 500; }
 .notes-card__title svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; margin-top: var(--space-1); color: var(--color-muted); }
-.notes-card__title-text { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.notes-card__title-text { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; word-break: keep-all; overflow-wrap: anywhere; }
 .notes-card__pin { position: absolute; top: var(--space-3); right: var(--space-2); width: var(--icon-sm); height: var(--icon-sm); color: var(--color-accent); }
 .notes-copy-mark { margin-left: auto; flex: none; color: var(--color-muted); font-size: var(--type-meta); font-weight: 400; }
 .notes-conflict-mark { margin-left: auto; color: var(--color-danger); }
 
-.notes-card__text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 10; overflow: hidden; margin-top: var(--space-2); font-size: var(--type-meta); line-height: 1.6; color: color-mix(in srgb, var(--color-text) 78%, var(--color-muted)); white-space: pre-line; overflow-wrap: anywhere; }
+.notes-card__text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 10; overflow: hidden; margin-top: var(--space-2); font-size: var(--type-meta); line-height: 1.6; color: color-mix(in srgb, var(--color-text) 78%, var(--color-muted)); white-space: pre-line; word-break: keep-all; overflow-wrap: anywhere; }
 .notes-card__text.is-empty { color: var(--color-muted); }
 .notes-card__progress { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); font: 500 var(--type-meta) / 1 var(--font-numeric); font-variant-numeric: tabular-nums; color: var(--color-muted); }
 .notes-card__progress-bar { flex: 1; height: 3px; background: color-mix(in srgb, var(--color-text) 12%, transparent); }

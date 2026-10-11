@@ -357,7 +357,7 @@ describe("CollectionBrowser", () => {
     const tracking = { ...trackingWith([]), runUpdates: vi.fn(), updateStatus: vi.fn().mockResolvedValue(undefined) } as unknown as CollectionTrackingGateway;
     renderBrowser({ collections: [manga], typeFilter: "manga", showcase: false, tracking, releaseProvider: "kakao" });
     expect(await screen.findByRole("button", { name: "새로고침" })).toBeInTheDocument();
-    expect(await screen.findByText("신간 알림을 켠 만화가 없습니다.")).toBeInTheDocument();
+    expect(await screen.findByText("신간 알림 켠 만화 없음")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "신간" })).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "컬렉션 바로가기" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "새 컬렉션" })).toBeInTheDocument();
@@ -650,7 +650,7 @@ describe("CollectionBrowser", () => {
 
   it("shows empty state when no collections", () => {
     renderBrowser({ collections: [], typeFilter: "game", showcase: false });
-    expect(screen.getByText("컬렉션이 없습니다.")).toBeInTheDocument();
+    expect(screen.getByText("컬렉션 없음")).toBeInTheDocument();
   });
 
   it("filters by type when type filter set", async () => {
@@ -668,7 +668,7 @@ describe("CollectionBrowser", () => {
 
   it("shows only showcase collections when showcase on", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: true });
-    expect(screen.getByText("쇼케이스에 컬렉션이 없습니다.")).toBeInTheDocument();
+    expect(screen.getByText("쇼케이스에 컬렉션 없음")).toBeInTheDocument();
   });
 
   it("leaves Showcase through Back and retains it when choosing a type", async () => {

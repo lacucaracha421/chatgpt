@@ -254,7 +254,7 @@ describe("OnlineCatalogBrowser", () => {
     await act(async () => next.resolve({ works: [{ ...work, title: "다음 작품" }], totalCount: 1, page: 0, pageSize: 48 }));
     expect(await screen.findByText("다음 작품")).toBeVisible();
     vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(next.promise);
-    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await userEvent.click(await catalogMenuItem("새로고침"));
     await waitFor(() => expect(document.querySelector(".manga-toolbar__refresh time")).toHaveTextContent("갱신"));
     expect(container.querySelector(".manga-card--skeleton")).toBeNull();
     expect(screen.queryByText(/갱신했습니다|새로고침했습니다|이미 최신입니다/)).not.toBeInTheDocument();
@@ -343,7 +343,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(within(index).queryByRole("button", { name: "중복 후보 검토" })).not.toBeInTheDocument();
     await userEvent.click(trigger);
     expect(screen.getByRole("menuitemcheckbox", { name: "숨긴 결과 표시" })).not.toBeChecked();
-    expect(screen.queryByRole("menuitem", { name: "새로고침" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "새로고침" })).toBeEnabled();
     expect(screen.getByRole("menuitem", { name: "신규 작품 갱신" })).toBeEnabled();
     await userEvent.click(screen.getByRole("menuitem", { name: "중복 후보 검토" }));
     expect(await screen.findByRole("dialog", { name: "중복 후보 검토" })).toBeVisible();
@@ -372,7 +372,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(footer.textContent).toBe(before);
     expect(before).toBe("1 / 60");
     expect(screen.getByRole("button", { name: "언어" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+    expect(await catalogMenuItem("새로고침")).toBeEnabled();
     await userEvent.keyboard("{Escape}");
     await act(async () => pending.resolve({ works: [{ ...work, bookmarked: false }], totalCount: 60, page: 0, pageSize: 48 }));
     expect(await screen.findByRole("button", { name: "오래된 제독 북마크" })).toBeEnabled();
@@ -718,7 +718,7 @@ describe("OnlineCatalogBrowser", () => {
     const refresh = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
     vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(refresh.promise);
 
-    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await userEvent.click(await catalogMenuItem("새로고침"));
     expect(screen.getByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
     await act(async () => refresh.reject(new Error("연결 시간이 초과되었습니다")));
     expect(await screen.findByText("연결 시간이 초과되었습니다")).toBeVisible();
@@ -1540,7 +1540,7 @@ describe("load more", () => {
 
     await io.reveal();
     expect(await screen.findByRole("button", { name: "작품 2-3 상세 보기" })).toBeInTheDocument();
-    expect(end).toHaveTextContent("100 / 100");
+    expect(end).toBeEmptyDOMElement();
     expect(io.observing()).toBe(false);
     expect(gateway.searchOnlineCatalog).toHaveBeenCalledTimes(3);
   });

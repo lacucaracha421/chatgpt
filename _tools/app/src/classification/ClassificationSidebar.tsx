@@ -764,7 +764,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
         >
           {hasChildren ? (
             <Button type="button" size="icon" variant="ghost" className="classification-sidebar__tree-toggle" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry); }} onKeyDown={(event) => event.stopPropagation()}>
-              <span className="classification-sidebar__tree-toggle-mark" data-state={expanded ? "expanded" : "collapsed"} aria-hidden="true" />
+              <ChevronRightIcon className="classification-sidebar__tree-toggle-mark" data-state={expanded ? "expanded" : "collapsed"} aria-hidden="true" />
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
           <span className="classification-sidebar__tree-surface">

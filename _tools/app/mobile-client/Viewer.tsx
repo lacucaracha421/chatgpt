@@ -61,7 +61,7 @@ function viewerDateLabel(value?: string): string {
  * `name` is used where the established name is longer than the short action label.
  */
 function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
-  return <Button type="button" size="icon" variant={danger ? 'danger' : 'ghost'} className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/></Button>;
+  return <Button type="button" size="icon" variant="ghost" className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/></Button>;
 }
 export function Viewer(props: Omit<Parameters<typeof ViewerContent>[0], 'openedOn'>) {
   const [privacy] = usePrivacyMode();

@@ -72,6 +72,65 @@ describe('device visit and NEW', () => {
     expect(readHomeVisit('pc').lastVisit).toBe(entered);
     expect(hook.result.current.arrivals).toEqual([]);
   });
+  it('does not resurrect an opened old release on consecutive daily reads with unread source data', () => {
+    const unread = {...item, date: '2026-06-10', token: 'manga:work:2026-06-10:12', fresh: true};
+    const first = renderHook(() => useHomeVisit('pc', [unread], '2026-10-09', true, '2026-10-09T12:00:00Z'));
+    expect(first.result.current.arrivals).toEqual([unread]);
+    act(() => first.result.current.opened(unread.token));
+    first.unmount();
+    for (const day of ['2026-10-10', '2026-10-11']) {
+      const next = renderHook(() => useHomeVisit('pc', [unread], day, true, `${day}T12:00:00Z`));
+      expect(next.result.current.arrivals).toEqual([]);
+      expect(readHomeVisit('pc').opened).toContain(unread.token);
+      next.unmount();
+    }
+  });
+  it('stops showing a notice-driven release once its server notice is read, on later days', () => {
+    // 룩백 / 학생회에도 구멍은 있다!: unread wishlist notice on the first day, read in the calendar afterwards.
+    const wish = {key: 'title:wish', token: 'title:wish:2026-10-08:', date: '2026-10-08', fresh: true};
+    writeHomeVisit('pc', {lastVisit: new Date(2026, 9, 7).toISOString(), pending: [], opened: []});
+    const first = renderHook(() => useHomeVisit('pc', [wish], '2026-10-09', true, '2026-10-09T03:00:00Z'));
+    expect(first.result.current.arrivals).toEqual([wish]);
+    first.unmount();
+    for (const day of ['2026-10-10', '2026-10-11', '2026-10-12']) {
+      const next = renderHook(() => useHomeVisit('pc', [{...wish, fresh: false}], day, true, `${day}T03:00:00Z`));
+      expect(next.result.current.arrivals).toEqual([]);
+      next.unmount();
+    }
+  });
+  it('drops the stored wait of a release when its notice appears, so reading the notice ends NEW', () => {
+    const quiet = {key: 'manga:work', token: 'manga:work:2026-10-08:3권', date: '2026-10-08', fresh: false};
+    writeHomeVisit('pc', {lastVisit: new Date(2026, 9, 7).toISOString(), pending: [], opened: []});
+    const first = renderHook(() => useHomeVisit('pc', [quiet], '2026-10-09', true, '2026-10-09T03:00:00Z'));
+    expect(readHomeVisit('pc').pending).toEqual([quiet.token]);
+    first.unmount();
+    const noticed = renderHook(() => useHomeVisit('pc', [{...quiet, fresh: true}], '2026-10-10', true, '2026-10-10T03:00:00Z'));
+    expect(noticed.result.current.arrivals).toHaveLength(1);
+    expect(readHomeVisit('pc').pending).toEqual([]);
+    noticed.unmount();
+    const read = renderHook(() => useHomeVisit('pc', [quiet], '2026-10-11', true, '2026-10-11T03:00:00Z'));
+    expect(read.result.current.arrivals).toEqual([]);
+  });
+  it('keeps a release without a server notice NEW until opened once, then never again', () => {
+    // 천국대마경 12권: a Kakao volume, no notice.
+    const volume = {key: 'manga:work', token: 'manga:work:2026-06-10:12권', date: '2026-06-10', fresh: false};
+    writeHomeVisit('pc', {lastVisit: new Date(2026, 5, 9).toISOString(), pending: [], opened: []});
+    const first = renderHook(() => useHomeVisit('pc', [volume], '2026-06-11', true, '2026-06-11T03:00:00Z'));
+    first.unmount();
+    const second = renderHook(() => useHomeVisit('pc', [volume], '2026-06-12', true, '2026-06-12T03:00:00Z'));
+    expect(second.result.current.arrivals).toEqual([volume]);
+    act(() => second.result.current.opened(volume.token));
+    second.unmount();
+    for (const day of ['2026-06-13', '2026-10-11']) {
+      const next = renderHook(() => useHomeVisit('pc', [volume], day, true, `${day}T03:00:00Z`));
+      expect(next.result.current.arrivals).toEqual([]);
+      next.unmount();
+    }
+  });
+  it('forgets the unopened waits stored before notices stopped being kept there', () => {
+    localStorage.setItem(HOME_VISIT_KEY + 'pc', JSON.stringify({lastVisit: '2026-10-10T00:00:00Z', pending: ['title:wish:2026-10-08:'], opened: ['gone']}));
+    expect(readHomeVisit('pc')).toEqual({lastVisit: '2026-10-10T00:00:00Z', pending: [], opened: ['gone']});
+  });
   it('acknowledges a successful empty first read without announcing old history', () => {
     const entered = new Date(2026, 10, 2).toISOString();
     const hook = renderHook(({ ready }) => useHomeVisit('pc', [], '2026-11-02', true, entered, ready), { initialProps: { ready: false } });

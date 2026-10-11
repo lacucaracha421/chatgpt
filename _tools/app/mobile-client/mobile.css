@@ -357,7 +357,6 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .viewer-actions .viewer-action { min-height:36px; padding:0 10px; gap:6px; color:var(--color-text); font-size:13px; font-weight:500; }
 .viewer-actions .viewer-action svg { width:19px; height:19px; color:var(--color-muted); }
 .viewer-actions .viewer-action[aria-pressed=true] { background:var(--color-selected); }
-.viewer-actions .viewer-action.is-danger svg { color:color-mix(in srgb,var(--color-danger) 80%,var(--color-muted)); }
 .viewer-actions__divider { width:1px; height:20px; margin:0 4px; background:#3a3b3d; flex:none; }
 @media (max-width:600px) { .viewer-action__label { display:none; } .viewer-actions .viewer-action { width:var(--touch); padding:0; } }
 /* Endless grids end in a short fade above the navigation instead of a hard cut. */

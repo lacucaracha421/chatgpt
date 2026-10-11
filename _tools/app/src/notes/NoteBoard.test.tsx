@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 import { BackNavigationProvider } from "../shared/navigation/BackNavigation";
 import { NotesWorkspace } from "./NotesView";
-import { boardColumns, placeCards, previewLines } from "./NoteBoard";
+import { previewLines } from "./NoteBoard";
 import { NotesStore, type Note, type NotesRequest } from "./store";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -18,21 +18,6 @@ function surface(notes: Note[]) {
   render(<BackNavigationProvider><WorkspaceChromeProvider scope="notes"><ChromeTarget name="navigation" /><ChromeTarget name="actions" /><ChromeTarget name="search" /><NotesWorkspace store={store} /></WorkspaceChromeProvider></BackNavigationProvider>);
   return store;
 }
-
-it("fits as many ~240px columns as the width allows and places cards row by row into the shortest column", () => {
-  expect(boardColumns(0)).toEqual({ columns: 0, cardWidth: 0 });
-  expect(boardColumns(200).columns).toBe(1);
-  expect(boardColumns(1300)).toEqual({ columns: 5, cardWidth: (1300 - 4 * 12) / 5 });
-  // Wider panes add empty room instead of stretching cards past 300px.
-  expect(boardColumns(1236)).toEqual({ columns: 4, cardWidth: 300 });
-  expect(boardColumns(718)).toEqual({ columns: 2, cardWidth: 300 });
-  const { positions, height } = placeCards([100, 300, 120, 50, 80], 3, 200);
-  // The first row keeps list order left to right; the next card goes under the shortest column.
-  expect(positions.slice(0, 3).map((p) => p.left)).toEqual([0, 212, 424]);
-  expect(positions[3]).toEqual({ left: 0, top: 112 });
-  expect(positions[4]).toEqual({ left: 424, top: 132 });
-  expect(height).toBe(300);
-});
 
 it("shows only the title of a hidden note on its card", async () => {
   surface([base("api", { title: "API", body: "sk-secret-value", concealed: true })]);

@@ -176,7 +176,7 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
             onMouseDown={event => event.preventDefault()} onClick={() => { setScope(name); setExpanded([]); setActiveId(null); }}>{name}</FilterChip>)}
         </div>
         <div ref={listRef} id={`${id}-list`} className="command-palette__list" role="listbox" aria-label="찾기 결과" aria-busy={loading || query !== filteredQuery}>
-          <BusyLabel busy={loading && ordered.length === 0} idle={!loading && ordered.length === 0 && <EmptyState inline className="command-palette__empty" title={query.trim() ? "검색 결과 없음" : "확인할 것과 최근 연 항목이 없습니다."} />}><p className="command-palette__empty">이름을 불러오는 중…</p></BusyLabel>
+          <BusyLabel busy={loading && ordered.length === 0} idle={!loading && ordered.length === 0 && <EmptyState inline className="command-palette__empty" title={query.trim() ? "검색 결과 없음" : "최근 항목 없음"} />}><p className="command-palette__empty">이름을 불러오는 중…</p></BusyLabel>
           {displayed.map(({ group, items }) => {
             return <div key={group} role="group" aria-labelledby={`${id}-${group}`} className="command-palette__group">
               <div id={`${id}-${group}`} className="command-palette__heading" role="presentation">{NAVIGATION_GROUP_LABELS[group]}</div>

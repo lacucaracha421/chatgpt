@@ -14,7 +14,7 @@ import { LaunchSplash, resetLaunchSplashForTests } from "../shared/launch/Launch
 
 const gateway = vi.hoisted(() => ({
   collectionTracking: { listInbox: vi.fn(), releaseBoard: vi.fn() },
-  releaseCalendar: { calendar: vi.fn(), wishlist: vi.fn() },
+  releaseCalendar: { calendar: vi.fn(), wishlist: vi.fn(), acknowledge: vi.fn() },
   getHomeOverview: vi.fn(),
   getHomeMedia: vi.fn(),
   getOnlineCatalogStatus: vi.fn(),
@@ -378,6 +378,23 @@ describe("Home server row", () => {
 });
 
 describe("Home wishlist arrivals", () => {
+  it("acknowledges the displayed release notices when Home opens a title", async () => {
+    const watched = title("wish", "관심 영화", "movie", "2026-09-23", { released: true, unread: [{ id: "event", itemId: "wish", kind: "released", previousValue: null, currentValue: "2026-09-23", detectedAt: iso(12), readAt: null }] });
+    gateway.releaseCalendar.wishlist.mockResolvedValue([watched]);
+    gateway.releaseCalendar.acknowledge.mockResolvedValue(undefined);
+    renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /관심 영화/ }));
+    await waitFor(() => expect(gateway.releaseCalendar.acknowledge).toHaveBeenCalledWith(["event"]));
+  });
+  it("reports a failed notice acknowledgement while keeping the title open", async () => {
+    const watched = title("wish", "관심 영화", "movie", "2026-09-23", { released: true, unread: [{ id: "event", itemId: "wish", kind: "released", previousValue: null, currentValue: "2026-09-23", detectedAt: iso(12), readAt: null }] });
+    gateway.releaseCalendar.wishlist.mockResolvedValue([watched]);
+    gateway.releaseCalendar.acknowledge.mockRejectedValueOnce(new Error("offline"));
+    renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: /관심 영화/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("발매 캘린더에서 다시 확인");
+    expect(screen.getByRole("dialog", {name: "관심 영화"})).toBeTruthy();
+  });
   it.each(["2026-09-25", "2026-09-26"])("never marks an unwished calendar movie NEW on %s, including a saved pending arrival", async date => {
     writeHomeVisit("fixture", { lastVisit: new Date(2026, 8, 24).toISOString(), pending: [`title:digger:${date}:`], opened: [] });
     gateway.releaseCalendar.calendar.mockResolvedValue({ entries: [title("digger", "디거", "movie", date, { region: "korea" })], sources: [] });

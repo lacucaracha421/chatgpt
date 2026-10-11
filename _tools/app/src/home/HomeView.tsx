@@ -124,6 +124,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const [wishlistError, setWishlistError] = useState(false);
   const [startupSettled, setStartupSettled] = useState(false);
   const [releaseDetail, setReleaseDetail] = useState<ReleaseTitle | null>(null);
+  const [releaseNoticeError, setReleaseNoticeError] = useState<string | null>(null);
   const [shelfRetry, setShelfRetry] = useState(0);
   // Wait for the already-pending first collection read. Later refreshes keep the old
   // snapshot active until the changed collection key arrives.
@@ -312,8 +313,17 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const upcoming = upcomingRows(collections, board, inbox, wishlist, today).filter(row => daysAfter(row.date, today) <= 14);
   const openRelease = (row: ReleaseRow & { token: string }) => {
     visit.opened(row.token);
+    setReleaseNoticeError(null);
     if (row.collection) onNavigate({ kind: 'collection', collectionId: row.collection.id });
-    else if (row.title) setReleaseDetail(row.title);
+    else if (row.title) {
+      const title = row.title;
+      setReleaseDetail(title);
+      const events = wishlist.find(item => item.id === title.id)?.unread ?? [];
+      // Opening Home's title also confirms the notices used by the calendar.
+      if (events.length && calendarApi) {
+        void calendarApi.acknowledge(events.map(event => event.id)).catch(() => setReleaseNoticeError(title.id));
+      }
+    }
   };
   const openUpcoming = (row: UpcomingRow) => row.collectionId ? onNavigate({ kind: 'collection', collectionId: row.collectionId }) : onNavigate(calendarView(row.kind === 'movie' ? 'movie' : 'game'));
   const problems = connectionRows.filter(row => row.tone === 'off' || row.tone === 'idle');
@@ -415,6 +425,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
     </div></div>
     {dialogs}
     {releaseDetail && <UiDialog open title={releaseDetail.title} onClose={() => setReleaseDetail(null)}><div className="home-release-detail">
+      {releaseNoticeError === releaseDetail.id && <p role="alert">알림을 확인 처리하지 못했습니다. 발매 캘린더에서 다시 확인해 주세요.</p>}
       <p>{releaseDetail.date ? displayDate(releaseDetail.date, at) : '발매됨'}</p>
       {releaseDetail.originalTitle && <p>{releaseDetail.originalTitle}</p>}
       {releaseDetail.platforms.length > 0 && <p>{releaseDetail.platforms.join(' · ')}</p>}

@@ -1,6 +1,7 @@
 import { EmptyState } from "../shared/ui/EmptyState";
 import { useAutoTagInboxStatus } from "../autotags/useAutoTagInboxStatus";
 import { Button } from "../shared/ui/Button";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { ChartBarIcon, ChevronRightIcon, InboxIcon, Square2StackIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState, type ReactNode } from "react";
@@ -155,7 +156,7 @@ export function StatusCenter({
           <StatusBlock title="작업">
             <div className="status-center__list">
               {workCount === 0
-                ? <EmptyState inline className="status-center__empty" title="진행 중인 작업이 없습니다." />
+                ? <EmptyState inline className="status-center__empty" title="진행 중인 작업 없음" />
                 : <>
                   <WorkTray works={works} retryFailed={retryWork} dismissWork={dismissWork}
                     openReview={() => go({ kind: "similarity_review" })} openExisting={(assetId) => { setOpen(false); openExisting(assetId); }} />
@@ -188,7 +189,7 @@ export function StatusCenter({
 
 function StatusBlock({ title, children }: { title: string; children: ReactNode }) {
   return <section className="status-center__block" aria-label={title}>
-    <h3 className="status-center__heading">{title}</h3>
+    <SectionLabel as="h3" className="status-center__heading" title={title} />
     {children}
   </section>;
 }

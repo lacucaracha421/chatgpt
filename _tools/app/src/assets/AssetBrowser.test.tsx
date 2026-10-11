@@ -443,7 +443,7 @@ describe("AssetBrowser", () => {
     const entries: ClassificationEntry[] = [{ id: "leaf", kind: "root", name: "단일 폴더", parentId: null, iconKey: null, colorKey: null, assetCount: 2, totalAssetCount: 2 }];
     const folderShelfApi: Pick<CharacterHubApi, "seriesFolders"> = { seriesFolders: vi.fn() };
     renderBrowser(gateway, { view: { kind: "classification", classificationId: "leaf" }, classifications: entries, folderShelfApi });
-    await screen.findByRole("heading", { name: "자산이 없습니다" });
+    await screen.findByRole("heading", { name: "자산 없음" });
     expect(screen.queryByRole("region", { name: "하위 폴더" })).not.toBeInTheDocument();
     expect(screen.queryByRole("radiogroup", { name: "폴더 이미지 필터" })).not.toBeInTheDocument();
     expect(folderShelfApi.seriesFolders).not.toHaveBeenCalled();
@@ -791,7 +791,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null }).mockResolvedValueOnce({ items: [], nextCursor: null });
     const { rerender } = renderBrowser(gateway); fireEvent.click(await screen.findByRole("option", { name: "Selected" }), { ctrlKey: true });
     rerender(browserElement(gateway, { refreshVersion: 1 }));
-    expect(await screen.findByRole("heading", { name: "자산이 없습니다" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "자산 없음" })).toBeInTheDocument();
   });
 
   it("clears selection when the view changes", async () => {

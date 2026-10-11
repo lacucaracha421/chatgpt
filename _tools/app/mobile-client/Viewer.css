@@ -126,8 +126,8 @@
 .viewer-actions .viewer-action--like[aria-pressed="true"] { background: transparent; }
 .viewer-actions .viewer-action--like[aria-pressed="true"] svg { color: var(--color-heart); }
 .viewer-actions .viewer-action--like { --toggle-pop-color: var(--color-heart); }
-.viewer-actions .viewer-action.is-danger { color: var(--color-danger); }
-.viewer-actions .viewer-action.is-danger svg { color: currentColor; }
+/* Same ghost weight as the other tools; red appears only while pressed (the S Pen reports hover, so no hover tint). */
+.viewer-actions .viewer-action.is-danger:active svg { color: var(--color-danger); }
 .viewer-actions__divider { display: none; }
 
 .viewer-surface {

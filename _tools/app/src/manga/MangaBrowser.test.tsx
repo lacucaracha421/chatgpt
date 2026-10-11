@@ -246,9 +246,10 @@ describe("MangaBrowser", () => {
     expect(screen.queryByText("폴더 스캔 중")).not.toBeInTheDocument();
     await act(async () => { vi.advanceTimersByTime(1); });
     expect(screen.getByRole("status")).toHaveTextContent("폴더 스캔 중");
-    expect(screen.getByRole("button", { name: "새로고침" })).toBeDisabled();
+    await act(async () => { fireEvent.pointerDown(screen.getByRole("button", { name: "망가 관리" }), { button: 0, ctrlKey: false, pointerType: "mouse" }); });
+    expect(screen.getByRole("menuitem", { name: "새로고침" })).toHaveAttribute("aria-disabled", "true");
     await act(async () => finishScan());
-    expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "새로고침" })).not.toHaveAttribute("aria-disabled", "true");
     await act(async () => { vi.advanceTimersByTime(399); });
     expect(screen.getByText("폴더 스캔 중")).toBeVisible();
     await act(async () => { vi.advanceTimersByTime(1); });

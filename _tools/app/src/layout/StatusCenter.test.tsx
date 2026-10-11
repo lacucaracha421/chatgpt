@@ -54,7 +54,7 @@ it("stays quiet when idle, closes on Escape and returns focus to the indicator",
   await user.click(trigger);
   const panel = screen.getByRole("dialog", { name: "상태" });
   expect(trigger).toHaveAttribute("aria-expanded", "true");
-  expect(panel).toHaveTextContent("진행 중인 작업이 없습니다.");
+  expect(panel).toHaveTextContent("진행 중인 작업 없음");
   expect(within(panel).queryByRole("region", { name: "확인할 것" })).not.toBeInTheDocument();
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

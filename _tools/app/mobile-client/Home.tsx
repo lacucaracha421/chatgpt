@@ -133,9 +133,9 @@ function HomePlayingCase({item, revision, active, privacy, selected}: {item: Col
 
 const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;
 
-function UpcomingDetailSheet({entry, interested, privacy, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; onToggle(): void; onClose(): void}) {
+function UpcomingDetailSheet({entry, interested, privacy, noticeError, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; noticeError: boolean; onToggle(): void; onClose(): void}) {
   const days = entry.date ? daysAfter(entry.date, localToday()) : null;
-  return <BottomSheet title={entry.title} onClose={onClose}><div className="home-detail-sheet"><div className="home-detail-cover"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></div><Badge>{upcomingKind[entry.kind]}</Badge>{entry.originalTitle && <p className="home-detail-original">{entry.originalTitle}</p>}<p className="home-detail-meta">{entry.date ? displayDate(entry.date) : '발매일 미정'}{days !== null && ` · ${ddayLabel(days) ?? '발매됨'}`}</p>{entry.platforms?.length ? <p className="home-detail-meta">{entry.platforms.join(' · ')}</p> : null}{entry.description && <p className="home-detail-description">{entry.description}</p>}<BookmarkToggle className="home-detail-bookmark" bookmarked={interested} label={interested ? '관심 목록에서 빼기' : '관심 목록에 추가'} onClick={onToggle} /></div></BottomSheet>;
+  return <BottomSheet title={entry.title} onClose={onClose}><div className="home-detail-sheet">{noticeError && <p role="alert">알림을 확인 처리하지 못했습니다. 발매 캘린더에서 다시 확인해 주세요.</p>}<div className="home-detail-cover"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></div><Badge>{upcomingKind[entry.kind]}</Badge>{entry.originalTitle && <p className="home-detail-original">{entry.originalTitle}</p>}<p className="home-detail-meta">{entry.date ? displayDate(entry.date) : '발매일 미정'}{days !== null && ` · ${ddayLabel(days) ?? '발매됨'}`}</p>{entry.platforms?.length ? <p className="home-detail-meta">{entry.platforms.join(' · ')}</p> : null}{entry.description && <p className="home-detail-description">{entry.description}</p>}<BookmarkToggle className="home-detail-bookmark" bookmarked={interested} label={interested ? '관심 목록에서 빼기' : '관심 목록에 추가'} onClick={onToggle} /></div></BottomSheet>;
 }
 
 export function Home(props: HomeProps) {
@@ -149,6 +149,18 @@ export function Home(props: HomeProps) {
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
   useEffect(() => {if (memos && !memos.locked) setTabletTrashCount(props.scope, 'notes', deletedTrashNotes(memos.notes).length);}, [props.scope, memos]);
   const upcoming = useHomeUpcoming(!paused, props.scope, d.refreshKey);
+  const [releaseNoticeError, setReleaseNoticeError] = useState<string | null>(null);
+  const openTitle = (entry: UpcomingHomeEntry) => {
+    setDetail(entry);
+    setReleaseNoticeError(null);
+    const events = (upcoming.wishlistItems.find(item => item.id === entry.id)?.events ?? []).filter(event => !event.readAt);
+    if (!events.length) return;
+    const controller = new AbortController();
+    void api('/v1/home/upcoming/wishlist', controller.signal, {
+      version: 1, operationId: crypto.randomUUID(), action: 'acknowledge', itemId: entry.id,
+      eventIds: events.map(event => event.id),
+    }, 'POST', false, props.scope).catch(() => setReleaseNoticeError(entry.id)).finally(() => controller.abort());
+  };
   const revisitRead = useHomeRevisitRead(!paused, props.scope, d.refreshKey);
   const revisit = revisitRead.value;
   const homeScroll = useRef<HTMLDivElement>(null);
@@ -212,7 +224,7 @@ export function Home(props: HomeProps) {
   const releaseCards: HomeReleaseCard[] = [
     ...visit.arrivals.map(e => ({key: e.key, name: e.name, date: e.date, detail: e.external ? upcomingKind[e.external.kind] : e.detail === '발매됨' ? KIND_LABEL[works.get(e.workId)?.type ?? 'game'] : e.detail, fresh: true,
       cover: e.external ? <HomeCoverImage cover={e.external.cover} alt="" privacy={privacy} /> : cover(e.workId, e.name),
-      onOpen: () => {visit.opened(e.token); if (e.external) setDetail(e.external); else props.onWork(e.workId);}})),
+      onOpen: () => {visit.opened(e.token); if (e.external) openTitle(e.external); else props.onWork(e.workId);}})),
     ...future.filter(row => !visit.arrivals.some(e => e.key === row.key && e.date === row.date)),
   ];
   const playing = (shelf?.works ?? []).filter(work => work.type === 'game' && work.status === 'playing' || work.type === 'movie' && work.status === 'watching');
@@ -273,6 +285,6 @@ export function Home(props: HomeProps) {
     </HomeSection></div>
     </div></div>}
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}
-    {detail && <UpcomingDetailSheet entry={detail} interested={upcoming.wishlist.has(detail.id)} privacy={privacy} onToggle={() => upcoming.toggle(detail.id)} onClose={() => setDetail(null)} />}
+    {detail && <UpcomingDetailSheet entry={detail} interested={upcoming.wishlist.has(detail.id)} privacy={privacy} noticeError={releaseNoticeError === detail.id} onToggle={() => upcoming.toggle(detail.id)} onClose={() => setDetail(null)} />}
   </div>;
 }

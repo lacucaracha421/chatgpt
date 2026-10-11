@@ -367,22 +367,21 @@
   transform: translate(-50%, -50%);
 }
 
-.classification-sidebar__tree-toggle-mark {
+.classification-sidebar__tree-toggle .classification-sidebar__tree-toggle-mark {
   display: block;
-  width: 0;
-  height: 0;
-  border-top: calc(var(--classification-triangle-height) / 2) solid transparent;
-  border-bottom: calc(var(--classification-triangle-height) / 2) solid transparent;
-  border-left: var(--classification-triangle-width) solid var(--color-muted);
-  transform-origin: calc(var(--classification-triangle-width) / 2) 50%;
+  flex: none;
+  width: var(--space-3);
+  height: var(--space-3);
+  color: var(--color-muted);
+  transform-origin: 50% 50%;
 }
 
-.classification-sidebar__tree-toggle-mark[data-state="expanded"] {
+.classification-sidebar__tree-toggle .classification-sidebar__tree-toggle-mark[data-state="expanded"] {
   transform: rotate(90deg);
 }
 
 .classification-sidebar__tree-row[aria-selected="true"] .classification-sidebar__tree-toggle-mark {
-  border-left-color: var(--color-text);
+  color: var(--color-text);
 }
 
 .classification-sidebar__tree-surface {

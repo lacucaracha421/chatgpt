@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowPathIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import { SidebarOpenIcon } from "../shared/ui/SidebarIcons";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
@@ -29,9 +29,9 @@ export function MangaChoiceMenu<T extends string>({ label, value, options, onCha
     items={options.map(option => ({ id: option.value, label: option.label, group: label, selected: value === option.value, onSelect: () => onChange(option.value) }))} />;
 }
 
-export function MangaToolbar({ source, onSourceChange, countLabel, filterToken, controls, refreshedAt, refreshing, onRefresh, actions, chrome, ariaLabel = "망가 도구" }: {
+export function MangaToolbar({ source, onSourceChange, countLabel, filterToken, controls, refreshedAt, actions, chrome, ariaLabel = "망가 도구" }: {
   source: MangaSource; onSourceChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number;
-  countLabel?: string; filterToken?: ReactNode; controls?: ReactNode; refreshedAt?: string | null; refreshing?: boolean; onRefresh?: () => void;
+  countLabel?: string; filterToken?: ReactNode; controls?: ReactNode; refreshedAt?: string | null;
   actions?: ReactNode; chrome?: ViewChromeSpec; ariaLabel?: string;
 }) {
   const workspace = useWorkspaceChrome();
@@ -44,7 +44,6 @@ export function MangaToolbar({ source, onSourceChange, countLabel, filterToken, 
       {countLabel && <span className="manga-toolbar__count">{countLabel}</span>}
       <div className="manga-toolbar__refresh">
         {refreshedAt && <time dateTime={refreshedAt}>갱신 {displayDateTime(refreshedAt, new Date(), { withTime: true })}</time>}
-        {onRefresh && <Button variant="quiet" size="icon" aria-label="새로고침" disabled={refreshing} onClick={onRefresh}><ArrowPathIcon aria-hidden="true" /></Button>}
         {actions}
       </div>
     </>} chrome={chrome} />

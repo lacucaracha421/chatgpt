@@ -155,7 +155,7 @@ function FolderItem({ node, hasNextSibling, scope, expanded, readOnly, editor, d
         {hasChildren
           ? <Button type="button" size="icon" variant="ghost" className="classification-sidebar__tree-toggle" aria-label={`${folder.name} ${isOpen ? "접기" : "펼치기"}`}
             onClick={(event) => { event.stopPropagation(); onToggle(folder.id); }} onKeyDown={(event) => event.stopPropagation()}>
-            <span className="classification-sidebar__tree-toggle-mark" data-state={isOpen ? "expanded" : "collapsed"} aria-hidden="true" />
+            <ChevronRightIcon className="classification-sidebar__tree-toggle-mark" data-state={isOpen ? "expanded" : "collapsed"} aria-hidden="true" />
           </Button>
           : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
         <span className="classification-sidebar__tree-surface">

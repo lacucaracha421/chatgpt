@@ -90,7 +90,7 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
           }}/></div>
         <div className="tablet-find__scopes" role="group" aria-label="찾기 범위">{TABLET_FIND_SCOPES.map(name=><FilterChip key={name} aria-pressed={scope===name} onPointerDown={event=>event.preventDefault()} onClick={()=>{setScope(name);setExpanded([]);setActiveId(null);}}>{name}</FilterChip>)}</div>
         <div className="tablet-find__results" id={`${id}-results`} role="listbox" aria-label="찾기 결과" aria-busy={loading||stale} inert={stale||undefined}>
-          {!ordered.length&&(loading?<div className="tablet-find__skeleton"><Skeleton/><Skeleton/><Skeleton/></div>:<EmptyState inline className="tablet-find__empty" title={query.trim()?'검색 결과 없음':privacy?'이름으로 찾기':'최근 연 항목이 없습니다.'} />)}
+          {!ordered.length&&(loading?<div className="tablet-find__skeleton"><Skeleton/><Skeleton/><Skeleton/></div>:<EmptyState inline className="tablet-find__empty" title={query.trim()?'검색 결과 없음':privacy?'이름으로 찾기':'최근 항목 없음'} />)}
           {displayed.map(({group,items,total})=><div key={group} role="group" aria-labelledby={`${id}-${group}`}>
             <SectionLabel as="h2" id={`${id}-${group}`} title={NAVIGATION_GROUP_LABELS[group]}/>
             {items.map(entry=>{const index=ordered.findIndex(item=>item.id===entry.id);return <div key={entry.id} id={`${id}-option-${index}`} role="option" tabIndex={0} aria-selected={index===current} className="tablet-find__option" onPointerDown={event=>event.preventDefault()} onClick={()=>pick(entry as TabletFindEntry)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();pick(entry as TabletFindEntry);}}}>

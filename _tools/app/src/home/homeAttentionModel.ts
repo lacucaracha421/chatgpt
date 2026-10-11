@@ -44,16 +44,22 @@ export function attentionRows(notes: Note[], reviews: ReviewCount[], connections
 export type HomeArrival = { key: string; token: string; date: string | null; fresh: boolean };
 export type HomeVisit = { lastVisit: string | null; pending: string[]; opened: string[] };
 export const HOME_VISIT_KEY = 'lakomics.home.visit.v1:';
+/**
+ * Stored shape version. From 2 on, `pending` keeps only releases without an unread server notice;
+ * a notice-driven release stays NEW while its notice is unread and ends when the notice is read
+ * anywhere. Older `pending` lists mixed both and could not be told apart, so they are dropped.
+ */
+const HOME_VISIT_SCHEMA = 2;
 export function readHomeVisit(scope: string): HomeVisit {
   try {
     const saved = JSON.parse(localStorage.getItem(HOME_VISIT_KEY + scope) ?? 'null');
     return { lastVisit: typeof saved?.lastVisit === 'string' && Number.isFinite(Date.parse(saved.lastVisit)) ? saved.lastVisit : null,
-      pending: Array.isArray(saved?.pending) ? saved.pending.filter((v: unknown) => typeof v === 'string') : [],
+      pending: saved?.schema === HOME_VISIT_SCHEMA && Array.isArray(saved?.pending) ? saved.pending.filter((v: unknown) => typeof v === 'string') : [],
       opened: Array.isArray(saved?.opened) ? saved.opened.filter((v: unknown) => typeof v === 'string') : [] };
   } catch { return { lastVisit: null, pending: [], opened: [] }; }
 }
 export function writeHomeVisit(scope: string, visit: HomeVisit) {
-  try { localStorage.setItem(HOME_VISIT_KEY + scope, JSON.stringify(visit)); } catch { /* Storage can be disabled on either client. */ }
+  try { localStorage.setItem(HOME_VISIT_KEY + scope, JSON.stringify({ ...visit, schema: HOME_VISIT_SCHEMA })); } catch { /* Storage can be disabled on either client. */ }
 }
 function releasedAfter(date: string, visitedAt: string): boolean {
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];

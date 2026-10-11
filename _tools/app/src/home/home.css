@@ -18,7 +18,7 @@
 @media (prefers-reduced-motion:reduce) { .home-revisit__cell { transition:none; } }
 
 /* A single split keeps the day's last image level with the media column. */
-.home-pc-layout { min-height:100%; box-sizing:border-box; display:grid; grid-template-columns:minmax(0,1.75fr) minmax(0,1fr); gap:calc(var(--space-8) + var(--space-2)); align-items:stretch; }
+.home-pc-layout { --home-pc-gap:calc(var(--space-8) + var(--space-2)); min-height:100%; box-sizing:border-box; display:grid; /* Right column keeps its 1 : 1.75 share but stops at 500px, so a maximized window gives the rest to the left column. */ grid-template-columns:minmax(0,1fr) minmax(0,min(500px, calc((100% - var(--home-pc-gap)) / 2.75))); gap:var(--home-pc-gap); align-items:stretch; }
 .home-media-column, .home-day-column { min-width:0; display:flex; flex-direction:column; gap:var(--space-8); }
 .home-media-column > .home-attention-section:only-child { margin-bottom:auto; }
 .home-day, .home-day > .home-attention-section, .home-day > .home-attention-section > div:last-child { min-height:0; flex:1; display:flex; flex-direction:column; }
@@ -64,5 +64,5 @@
 .home-daily__caption { position:relative; flex:none; min-height:88px; box-sizing:border-box; padding:var(--space-4) var(--space-6); display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); background:var(--color-overlay); }
 .home-daily__caption b { display:block; font-size:var(--type-title); font-weight:600; }
 .home-daily__favorite { display:block; margin-top:var(--space-1); color:var(--color-muted); font-size:var(--type-meta); }
-@container home (max-width:1000px) { .home-pc-layout { gap:var(--space-6); } .home-release-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } .home-playing { --case-height:192px; --cell-width:120px; } }
+@container home (max-width:1000px) { .home-pc-layout { --home-pc-gap:var(--space-6); } .home-release-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } .home-playing { --case-height:192px; --cell-width:120px; } }
 @container home (max-width:700px) { .home-pc-layout { grid-template-columns:minmax(0,1fr); } .home-day-column { min-height:420px; } }

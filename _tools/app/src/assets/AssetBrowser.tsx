@@ -675,11 +675,11 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       : visibleItems.length === 0 && descriptionQuery !== null
         ? <EmptyState title="검색 결과 없음">{noMatchQuery !== undefined && <Button onClick={() => onViewChange?.({ kind: "description_search", query: noMatchQuery, force: true })}>그래도 가장 비슷한 그림 보기</Button>}</EmptyState>
       : visibleItems.length === 0 && (hasActiveFilters || autoTagFiltered || styleSuggestionsOnly)
-        ? <>{folderHead}<EmptyState title={styleSuggestionsOnly ? "추천이 있는 자산이 없습니다." : "조건에 맞는 자산이 없습니다."}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState></>
+        ? <>{folderHead}<EmptyState title={styleSuggestionsOnly ? "추천 있는 자산 없음" : "조건에 맞는 자산 없음"}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState></>
       : visibleItems.length === 0
         ? directOnlyEmpty
           ? <>{folderHead}<EmptyState title="이 폴더에 바로 들어 있는 이미지가 없습니다">하위 폴더와 캐릭터의 이미지는 전체에서 볼 수 있어요.<Button onClick={() => setDirectOnlyState({ folderId: plainFolderId, value: false })}>전체 보기</Button></EmptyState></>
-          : <>{folderHead}<EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState></>
+          : <>{folderHead}<EmptyState title={view.kind === "album" ? "이 앨범에 자산 없음" : view.kind === "collection" ? "이 컬렉션에 자산 없음" : "자산 없음"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState></>
       : <ContextMenu items={contextItems}><div onContextMenu={(event) => {
           const id = (event.target as HTMLElement).closest<HTMLElement>("[data-asset-id]")?.dataset.assetId;
           const target = items.find((item) => item.id === id);

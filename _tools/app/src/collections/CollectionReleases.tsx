@@ -244,8 +244,8 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
         <thead><tr><th aria-label="표지" /><th scope="col">작품</th><th scope="col">소장</th><th scope="col">안 가진 권</th><th scope="col">날짜</th><th scope="col">상태</th></tr></thead>
         <tbody>{rows.map(renderRow)}</tbody>
       </table>}
-      {shownData && !loading && !watched.length && !others.length && <EmptyState icon={BookOpenIcon} title="신간 알림을 켠 만화가 없습니다." />}
-      {shownData && !loading && watched.length > 0 && !rows.length && <EmptyState icon={BookOpenIcon} title={provider === "mangadex" ? "일본 발매 정보가 없습니다." : "소장하지 않은 정발 권이 없습니다."} />}
+      {shownData && !loading && !watched.length && !others.length && <EmptyState icon={BookOpenIcon} title="신간 알림 켠 만화 없음" />}
+      {shownData && !loading && watched.length > 0 && !rows.length && <EmptyState icon={BookOpenIcon} title={provider === "mangadex" ? "일본 발매 정보 없음" : "소장하지 않은 정발 권 없음"} />}
       {shownData && others.length > 0 && <>
         <h3 className="collection-releases__others">{shown.size ? "그 밖의 새 알림" : "새 알림"}</h3>
         {others.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName}>

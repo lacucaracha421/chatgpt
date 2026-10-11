@@ -248,11 +248,12 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     {localVisited && <section ref={localScreen} className="manga-browser manga-browser__screen" aria-label="망가" style={{ display: localActive ? undefined : "none" }}>
     {localActive && <MangaToolbar source={source === "local" ? "local" : onlineScope} onSourceChange={selectSource}
       localCount={series?.length} bookmarkCount={bookmarkCount} countLabel={series ? countLabel : undefined}
-      refreshedAt={refreshedAt} refreshing={scanning} onRefresh={root ? () => void refreshSeries() : undefined}
+      refreshedAt={refreshedAt}
       controls={<MangaChoiceMenu label="정렬" value={sort} onChange={setSort} options={[
         { value: "recent", label: "최근 변경순" }, { value: "title_asc", label: "제목순" }, { value: "author_asc", label: "작가순" }, { value: "pages_desc", label: "페이지 많은 순" },
       ]} />}
       actions={root ? <Menu label="망가 관리" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+        { id: "refresh", label: "새로고침", disabled: scanning, onSelect: () => void refreshSeries() },
         ...(gateway.refreshLocalMangaThumbnails ? [{ id: "refresh-thumbnails", label: "썸네일 갱신", disabled: thumbnailBusy, onSelect: () => void refreshThumbnails() }] : []),
         ...(gateway.previewMangaCatalogRecovery ? [{ id: "recovery", label: "카탈로그로 복구", disabled: recoveryBusy, onSelect: () => void previewRecovery() }] : []),
       ]} /> : undefined}

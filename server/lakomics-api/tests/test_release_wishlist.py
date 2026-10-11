@@ -350,6 +350,30 @@ class Core(unittest.TestCase):
         self.assertEqual(self.stored()["next_check_at"], (NOW + timedelta(hours=6)).isoformat())
         self.assertEqual(self.db.execute("SELECT digest FROM release_calendar_owner").fetchone()[0], state["digest"])
 
+    def test_acknowledged_release_stays_read_across_daily_calendar_and_wishlist_refreshes(self):
+        self.seed(dates=[release(value="2026-10-09")])
+        self.check(None)
+        original = self.private()["events"]
+        self.assertEqual(len(original), 1)
+        self.append("acknowledge", event_ids=[original[0]["id"]])
+        rw.apply_intents(self.db, NOW)
+        self.db.commit()
+        self.db.execute("INSERT INTO release_calendar_owner VALUES(1,?)", (self.state()["digest"],))
+        self.db.commit()
+        for days in (1, 2):
+            moment = NOW + timedelta(days=days)
+            document = {"rangeStart": (moment.date() - timedelta(days=7)).isoformat(),
+                        "rangeEnd": (moment.date() + timedelta(days=183)).isoformat(),
+                        "entries": [], "sources": [{"provider": "igdb", "fetchedAt": moment.isoformat(), "errorCode": None}]}
+            self.db.execute("BEGIN IMMEDIATE")
+            rc.store_calendar(self.db, document, moment, lambda d: d, lambda *args: None)
+            self.db.commit()
+            self.assertFalse(self.check(None, now=moment))
+            self.assertEqual(json.loads(self.state()["document"])["wishlist"][0]["events"], [])
+            retained = self.private()["events"]
+            self.assertEqual([e["id"] for e in retained], [original[0]["id"]])
+            self.assertEqual(retained[0]["read_at"], NOW.isoformat())
+
     def test_calendar_and_wishlist_publications_preserve_each_other_and_cursor(self):
         self.seed()
         self.db.execute("INSERT INTO release_calendar_owner VALUES(1,?)", (self.state()["digest"],))

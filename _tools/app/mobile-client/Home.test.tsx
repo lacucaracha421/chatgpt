@@ -62,6 +62,22 @@ beforeEach(() => {
 afterEach(() => {cleanup(); vi.useRealTimers(); setOutboxConnection(null); delete window.LakomicsNative;});
 
 describe('shared Home attention on tablet', () => {
+  it('acknowledges unread wishlist notices when a Home title is opened', async () => {
+    const released = {...upcomingEntry, date: '2026-09-24', released: true, events: [{id: 'release-event', kind: 'released', previousValue: null, currentValue: '2026-09-24', detectedAt: '2026-09-25T00:00:00Z', readAt: null}]};
+    server.upcoming = {version: 1, revision: 3, entries: [released], wishlist: [released], pending: []};
+    render(<Home {...props()}/>);
+    fireEvent.click(await screen.findByRole('button', {name: /Hades II/}));
+    await waitFor(() => expect(mocks.api).toHaveBeenCalledWith('/v1/home/upcoming/wishlist', expect.anything(), expect.objectContaining({action: 'acknowledge', itemId: released.id, eventIds: ['release-event']}), 'POST', false, props().scope));
+  });
+  it('shows failed notice acknowledgement inside the open title sheet', async () => {
+    const released = {...upcomingEntry, date: '2026-09-24', released: true, events: [{id: 'release-event', kind: 'released', previousValue: null, currentValue: '2026-09-24', detectedAt: '2026-09-25T00:00:00Z', readAt: null}]};
+    server.upcoming = {version: 1, revision: 3, entries: [released], wishlist: [released], pending: []};
+    const read = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, ...args: unknown[]) => path === '/v1/home/upcoming/wishlist' ? Promise.reject(new Error('offline')) : read(path, ...args));
+    render(<Home {...props()}/>);
+    fireEvent.click(await screen.findByRole('button', {name: /Hades II/}));
+    expect((await screen.findByRole('alert')).textContent).toContain('발매 캘린더에서 다시 확인');
+  });
   it('waits for foreground Home reads before full paging and keeps an uncached Home covered until every page is ready', async () => {
     const read=mocks.api.getMockImplementation()!;
     let finishMemos!:(value:unknown)=>void;
