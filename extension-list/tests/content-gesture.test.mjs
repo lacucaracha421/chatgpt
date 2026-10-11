@@ -538,3 +538,20 @@ test('a touch long-press on a slider never opens the picker, but on the media it
   assert.equal(await media.press('#c', { input: 'touch' }), 1);
   media.f.close();
 });
+
+test('unlabeled custom video controls (e.g. X volume) are caught by value attributes or volume names', async () => {
+  const cases = {
+    'aria value slider without role': '<div data-testid="videoPlayer"><video id="v"></video><div aria-valuenow="40" aria-valuemax="100"><div id="c"></div></div></div>',
+    'volume test id': '<div data-testid="videoPlayer"><video id="v"></video><div data-testid="volumeControl"><div id="c"></div></div></div>',
+    'Korean volume label': '<div data-testid="videoPlayer"><video id="v"></video><div aria-label="볼륨"><div id="c"></div></div></div>',
+  };
+  for (const [name, html] of Object.entries(cases)) {
+    const { f, press } = playerFixture(html);
+    assert.equal(await press('#c'), 0, name);
+    f.close();
+  }
+  // Image carousels are often called "slider"; images inside them stay collectable.
+  const { f, press } = playerFixture('<div class="image-slider"><img id="c"></div>');
+  assert.equal(await press('#c'), 1);
+  f.close();
+});

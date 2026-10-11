@@ -43,8 +43,19 @@
       if (typeof node?.matches !== "function") continue;
       if (node.matches(PLAYER_CONTROL_SELECTOR)) return true;
       if (node.matches(PLAYER_CONTROL_GENERIC_SELECTOR) && node.closest?.(PLAYER_CONTAINER_SELECTOR)) return true;
+      if (candidate?.type === "video" && looksLikeMediaControl(node)) return true;
     }
     return false;
+  }
+
+  // Custom players (e.g. X's vertical volume slider) often have no role or known class;
+  // value attributes or a volume/seek label or test id still give them away. Video only:
+  // image carousels are often called "slider" and must stay draggable.
+  const MEDIA_CONTROL_NAME = /volume|mute|slider|scrub|seek|progress|볼륨|음량|소리|음소거|탐색|재생 위치/i;
+  function looksLikeMediaControl(node) {
+    if (node.hasAttribute?.("aria-valuenow") || node.hasAttribute?.("aria-valuemax")) return true;
+    const names = [node.getAttribute?.("data-testid"), node.getAttribute?.("aria-label"), typeof node.className === "string" ? node.className : ""];
+    return names.some(name => typeof name === "string" && MEDIA_CONTROL_NAME.test(name));
   }
 
   // A native <video controls> draws its controls inside the element, so the only

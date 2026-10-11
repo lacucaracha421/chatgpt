@@ -14,7 +14,7 @@ test('collection uses the arc menu and keeps the list editor out of content page
   }
   assert.equal(scripts.some(path=>/gesture|radial/i.test(path)), false);
   assert.equal(manifest.name, 'Lakomics Companion');
-  assert.equal(manifest.version, '3.5.4');
+  assert.equal(manifest.version, '3.5.5');
   assert.equal('version_name' in manifest, false);
   assert.match(manifest.description, /right-click menu/);
   assert.match(manifest.description, /YouTube/);
