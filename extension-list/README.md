@@ -1,4 +1,4 @@
-# Lakomics Collector
+# Lakomics Companion
 
 The active extension is `extension-list/`. Load this directory as the unpacked
 extension. After updating it, reload the extension and the collecting page so the
@@ -49,6 +49,37 @@ A revision conflict re-reads the server and retries the latest local document
 once. Older servers returning 404 retain local behavior and the legacy profile
 order synchronization. The new server module must be registered separately;
 installing this extension alone does not activate the endpoint.
+
+## Right-click menu (Lakomics Companion 3.5)
+
+The extension is named Lakomics Companion. A plain right click on an HTTPS page
+opens the Lakomics menu (a closed Shadow DOM host in the top layer; ContextMenu or
+Shift+F10 opens it from the keyboard). Shift+right click always opens Chrome's
+own menu, as do pages with their own menu, an armed or open collector gesture,
+excluded sites and the disabled switch. Options has a "우클릭 메뉴" section with
+an enable switch (default on), one excluded host per line and the Shift hint.
+
+Order: Lakomics actions first (translation, 표지 찾기), then the browser group
+(복사, 잘라내기/붙여넣기/모두 선택 in fields, link and image actions, 다른 이름으로
+저장, 뒤로/앞으로/새로고침). Copy is not forced to the top and there is no Google
+search item. 표지 찾기 appears only when the selection holds a product code and
+sends it straight to Lakomics (the same `av-send` path as the page button), then
+shows a toast. The menu fades in over 80 ms (opacity only) like Chrome's native
+menu and closes instantly; result blocks and toasts keep their own motion, and
+`prefers-reduced-motion` disables the animations.
+
+Translation uses the existing OpenRouter/Anthropic settings (`translation:context`
+requests; page scripts never see keys). 한국어로 번역 shows a result block below the
+selected paragraph, 일본어/영어로 번역해서 복사 copies through an offscreen
+document, and 일본어/영어/한국어로 바꾸기 replaces the selection in a field with
+one undo step. 이미지 글자 번역 and 페이지 본문 번역 are shown but answer "다음
+업데이트에서 지원" for now. Image, link and page "다른 이름으로 저장" use
+`chrome.downloads` with `saveAs`; page saving uses `chrome.pageCapture`.
+
+New permissions: `clipboardRead`, `clipboardWrite`, `pageCapture`, `offscreen`.
+The Chrome context-menu entry "표지 찾기" (Shift+right click) now sends the code
+instead of opening a lookup page. The X translation card uses the same block
+style as the menu result (no coloured stripe, faint tint, header with close).
 
 ## AV code sending (3.0.0.44 / 3.0.0-alpha.44)
 

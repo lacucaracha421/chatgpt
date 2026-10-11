@@ -1,5 +1,7 @@
 importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translation/korean-rules.js", "translation/korean.js", "translation/terms.js", "translation/deadline.js", "translate-service.js", "av-lookup.js", "youtube/settings.js", "youtube/terms.js", "youtube/korean.js", "youtube/deadline.js", "youtube/parse.js", "youtube/chunk.js", "youtube/order.js", "youtube/display.js", "youtube/cues.js", "youtube/timing.js", "youtube/resume.js", "youtube/mode.js", "youtube/prompts.js", "youtube/results.js", "youtube/anthropic.js", "youtube/provider.js", "youtube/server-cache.js", "youtube/service.js");
 
+importScripts("context-menu/background.js");
+
 (() => {
   "use strict";
   const AV_LOOKUP_MENU_ID = "lakomics-av-lookup";
@@ -50,6 +52,7 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
   }
 
   async function handleMessage(message, sender = {}) {
+    if (message?.type?.startsWith("context:")) return globalThis.LakomicsContextBackground.handle(message, sender);
     if (message?.type?.startsWith("youtube:")) return globalThis.LakomicsYouTubeService.handle(message, sender);
     if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message, sender);
     switch (message?.type) {
@@ -176,6 +179,7 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === "context:offscreen") return false;
     Promise.resolve(handleMessage(message, sender)).then(sendResponse).catch((error) => sendResponse({ ok: false, code: "worker_failed", message: String(error?.message || error || "") }));
     return true;
   });
@@ -192,14 +196,13 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
 
   chrome.runtime.onInstalled?.addListener(() => {
     void globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true }).catch(() => {});
-    if (chrome.contextMenus?.create) chrome.contextMenus.create({ id: AV_LOOKUP_MENU_ID, title: "AV 표지 찾기: “%s”", contexts: ["selection"] }, () => void chrome.runtime.lastError);
-    if (chrome.contextMenus?.create) chrome.contextMenus.create({ id: AV_SEND_MENU_ID, title: "AV 컬렉션에 보내기: “%s”", contexts: ["selection"], documentUrlPatterns: ["https://*/*"] }, () => void chrome.runtime.lastError);
+    chrome.contextMenus?.remove?.(AV_LOOKUP_MENU_ID, () => void chrome.runtime.lastError);
+    if (chrome.contextMenus?.create) chrome.contextMenus.create({ id: AV_SEND_MENU_ID, title: "표지 찾기: “%s”", contexts: ["selection"], documentUrlPatterns: ["https://*/*"] }, () => void chrome.runtime.lastError);
   });
 
   chrome.contextMenus?.onClicked?.addListener((info, tab) => {
-    if (info?.menuItemId === AV_SEND_MENU_ID) return sendAvSelection(info, tab);
-    if (info?.menuItemId !== AV_LOOKUP_MENU_ID) return undefined;
-    return openAvLookup(info.selectionText, tab);
+    if (info?.menuItemId === AV_SEND_MENU_ID || info?.menuItemId === AV_LOOKUP_MENU_ID) return sendAvSelection(info, tab);
+    return undefined;
   });
 
   if (globalThis.__LAKOMICS_TEST__) globalThis.LakomicsAvLookupBackground = { AV_LOOKUP_MENU_ID, AV_SEND_MENU_ID, handleMessage, openAvLookup };

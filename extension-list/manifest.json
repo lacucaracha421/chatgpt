@@ -1,14 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Lakomics Collector List",
-  "version": "3.0.0.51",
-  "version_name": "3.0.0-alpha.51",
-  "description": "A Lakomics media collector with a thumb-friendly edge menu.",
+  "name": "Lakomics Companion",
+  "version": "3.5.2",
+  "description": "Collect images and videos into Lakomics, translate X posts, YouTube subtitles and web pages, and use the Lakomics right-click menu.",
   "permissions": [
     "storage",
     "downloads",
     "contextMenus",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "clipboardRead",
+    "clipboardWrite",
+    "pageCapture",
+    "offscreen"
   ],
   "host_permissions": [
     "https://*/*",
@@ -71,6 +74,10 @@
         "src/x-gallery.js",
         "src/x-home-refresh.js",
         "src/arc-collector.js",
+        "src/context-menu/model.js",
+        "src/context-menu/surfaces.js",
+        "src/context-menu/actions.js",
+        "src/context-menu/menu.js",
         "src/content.js"
       ],
       "css": [
@@ -95,6 +102,10 @@
         "src/classification-tree.js",
         "src/forum-source.js",
         "src/arc-collector.js",
+        "src/context-menu/model.js",
+        "src/context-menu/surfaces.js",
+        "src/context-menu/actions.js",
+        "src/context-menu/menu.js",
         "src/content.js"
       ],
       "css": [
@@ -125,6 +136,7 @@
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [{ "resources": ["src/context-menu/menu.css"], "matches": ["https://*/*"] }],
   "options_page": "options/options.html",
   "icons": {
     "16": "icons/icon16.png",

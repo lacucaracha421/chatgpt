@@ -170,7 +170,7 @@ test('context menu sends via paired API and its toast retries the original reque
   const worker = background({ responses: [false, true] });
   worker.install();
   const menu = worker.menus.find(m => m.id === 'lakomics-av-send');
-  assert.equal(menu.title, 'AV 컬렉션에 보내기: “%s”');
+  assert.equal(menu.title, '표지 찾기: “%s”');
   await worker.click({ menuItemId: menu.id, selectionText: 'Code ssis001', pageUrl: 'https://example.test/work', frameId: 3 }, { id: 8 });
   const notification = worker.notifications[0];
   assert.equal(notification.id, 8);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
 const lookupSource = await readFile(new URL('../src/av-lookup.js', import.meta.url), 'utf8');
@@ -10,7 +11,7 @@ const backgroundSource = await readFile(new URL('../src/background.js', import.m
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function loadLookup() {
-  const context = {};
+  const context = { crypto: webcrypto, URL };
   vm.runInNewContext(lookupSource, context);
   return context.LakomicsAvLookup;
 }
@@ -52,12 +53,14 @@ function backgroundFixture() {
   let messageListener;
   const createdMenu = [];
   const tabs = [];
+  const sends = [];
   const lookup = loadLookup();
   const context = {
     Promise,
     URL,
     importScripts() {},
     LakomicsAvLookup: lookup,
+    LakomicsListApi: { request: async (path, options) => { sends.push({ path, ...options }); return { ok: true }; } },
     LakomicsProfileStore: { refresh: async () => ({ ok: true }) },
     chrome: {
       runtime: {
@@ -69,29 +72,28 @@ function backgroundFixture() {
         create(details) { createdMenu.push(details); },
         onClicked: { addListener(listener) { contextMenuClick = listener; } },
       },
-      tabs: { create: async details => { tabs.push(details); return { id: tabs.length }; } },
+      tabs: { create: async details => { tabs.push(details); return { id: tabs.length }; }, sendMessage(id, message, options, callback) { callback?.(); } },
     },
   };
   vm.runInNewContext(backgroundSource, context);
-  return { context, createdMenu, tabs, get contextMenuClick() { return contextMenuClick; }, get installed() { return installed; }, dispatch(message, sender) {
+  return { context, createdMenu, tabs, sends, get contextMenuClick() { return contextMenuClick; }, get installed() { return installed; }, dispatch(message, sender) {
     return new Promise(resolve => messageListener(message, sender, resolve));
   } };
 }
 
-test('context menu is created on install and opens lookup tabs in order beside the source tab', async () => {
+test('native context menu keeps one cover item and sends recognized codes straight to Lakomics', async () => {
   const fixture = backgroundFixture();
   await fixture.installed();
-  assert.deepEqual(plain(fixture.createdMenu), [{ id: 'lakomics-av-lookup', title: 'AV 표지 찾기: “%s”', contexts: ['selection'] },
-    { id: 'lakomics-av-send', title: 'AV 컬렉션에 보내기: “%s”', contexts: ['selection'], documentUrlPatterns: ['https://*/*'] }]);
+  assert.deepEqual(plain(fixture.createdMenu), [{ id: 'lakomics-av-send', title: '표지 찾기: “%s”', contexts: ['selection'], documentUrlPatterns: ['https://*/*'] }]);
 
   const result = await fixture.contextMenuClick(
-    { menuItemId: 'lakomics-av-lookup', selectionText: 'ssis123' },
+    { menuItemId: 'lakomics-av-send', selectionText: 'ssis123', pageUrl: 'https://example.test/work' },
     { id: 17, index: 4 },
   );
   assert.equal(result.ok, true);
-  assert.deepEqual(plain(fixture.tabs), [
-    { url: 'https://www.javlibrary.com/ja/vl_searchbyid.php?keyword=SSIS-123', active: false, index: 5, openerTabId: 17 },
-  ]);
+  assert.deepEqual(plain(fixture.tabs), []);
+  assert.equal(fixture.sends[0].path, '/v1/av-lookups');
+  assert.equal(fixture.sends[0].body.productCode, 'SSIS-123');
 });
 
 test('touch message uses the same background tab opener path and rejects empty selections', async () => {
@@ -174,10 +176,10 @@ test('chip hides on scroll, Escape, and a changed selection', () => {
   fixture.close();
 });
 
-test('manifest grants context menus, carries version 3.0.0.51, and excludes the pairing page from the chip', async () => {
+test('manifest grants context menus, carries version 3.5.2, and excludes the pairing page from the chip', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '3.0.0.51');
-  assert.equal(manifest.version_name, '3.0.0-alpha.51');
+  assert.equal(manifest.version, '3.5.2');
+  assert.equal(manifest.version_name, undefined);
   assert.ok(manifest.permissions.includes('contextMenus'));
   const general = manifest.content_scripts.find(entry => entry.matches?.includes('https://*/*'));
   assert.ok(general.js.includes('src/av-lookup.js'));

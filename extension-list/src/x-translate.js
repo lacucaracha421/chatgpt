@@ -240,6 +240,24 @@
       node.append(anchor);
     }
     if (!previous) element.after(node);
+    const heading = document.createElement("span");
+    heading.style.cssText = "display:block;white-space:normal";
+    const headingRoot = heading.attachShadow({ mode: "closed" });
+    const headingStyle = document.createElement("style");
+    headingStyle.textContent = `
+      .h{display:flex;align-items:center;gap:8px;height:20px;margin:0 0 4px;font:400 12px/20px "Pretendard Variable",Pretendard,"Malgun Gothic","Segoe UI",sans-serif;color:color-mix(in srgb,currentColor 55%,transparent)}
+      .sp{flex:1}.x{display:grid;place-items:center;width:20px;height:20px;border:0;border-radius:2px;background:transparent;color:inherit;padding:0;opacity:0;transition:opacity 90ms cubic-bezier(.2,0,0,1);cursor:pointer}
+      :host-context(.lakomics-translation:hover) .x,.h:focus-within .x{opacity:1}.x:focus-visible{outline:2px solid #2f6fdb;outline-offset:1px}.x svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5}
+      @media(hover:none){.x{opacity:1;width:44px;height:44px;margin:-12px -12px -12px 0}.h{height:24px;font-size:13px}.x svg{width:20px;height:20px}}
+      @media(prefers-reduced-motion:reduce){.x{transition:none}}`;
+    const header = document.createElement("span"); header.className = "h";
+    const title = document.createElement("span"); title.textContent = "번역";
+    const spacer = document.createElement("span"); spacer.className = "sp";
+    const close = document.createElement("button"); close.type = "button"; close.className = "x"; close.setAttribute("aria-label", "번역 닫기");
+    close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    close.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); removeResult(element); });
+    header.append(title, spacer, close); headingRoot.append(headingStyle, header); node.prepend(heading);
+    node.setAttribute("role", error ? "status" : "region"); node.setAttribute("aria-label", "한국어 번역");
     rendered.set(element, node);
     if (!error && !previous) collapseOriginal(element, node);
     else if (error) addRetry(element, node);
@@ -628,17 +646,19 @@
   function mount() {
     const style = document.createElement("style");
     style.textContent = `
-      .lakomics-translation{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:.96em;line-height:1.36;margin:8px 0 10px;padding:8px 10px;border-left:2px solid rgb(29,155,240);border-radius:0 8px 8px 0;box-sizing:border-box}
-      .lakomics-translation[data-theme="light"]{color:#0f1419;background:rgba(29,155,240,.07)}
-      .lakomics-translation[data-theme="dim"]{color:#f0f2f4;background:rgba(29,155,240,.09)}
-      .lakomics-translation[data-theme="lights-out"]{color:#e7e9ea;background:rgba(29,155,240,.08)}
+      .lakomics-translation{white-space:pre-wrap;overflow-wrap:anywhere;font:400 .96em/1.7 "Pretendard Variable",Pretendard,"Malgun Gothic","Segoe UI",sans-serif;margin:8px 0 12px;padding:8px 12px 12px;border:0;border-radius:4px;box-sizing:border-box;background:color-mix(in srgb,currentColor 6%,transparent);interpolate-size:allow-keywords;animation:lakomics-translation-in 140ms cubic-bezier(.2,0,0,1) both}
+      @keyframes lakomics-translation-in{from{opacity:0;height:0;overflow:hidden}to{opacity:1;height:auto}}
+      @media(prefers-reduced-motion:reduce){.lakomics-translation{animation:none}}
+      .lakomics-translation[data-theme="light"]{color:#0f1419}
+      .lakomics-translation[data-theme="dim"]{color:#f0f2f4}
+      .lakomics-translation[data-theme="lights-out"]{color:#e7e9ea}
       .lakomics-translation a{color:rgb(29,155,240);text-decoration:none}
       .lakomics-translation a:hover,.lakomics-translation a:focus-visible{text-decoration:underline}
       .lakomics-translation[data-error="true"]{font-size:12px;padding:4px 8px;background:transparent;opacity:.82}
-      .lakomics-translation[data-error="true"][data-theme="light"]{color:#536471;border-left-color:#aab8c2}
-      .lakomics-translation[data-error="true"]:not([data-theme="light"]){color:#8b98a5;border-left-color:#536471}
-      .lakomics-translation[data-state="pending"]{font-size:12px;padding:4px 8px;background:transparent;opacity:.7;color:#8b98a5;border-left-color:#536471}
-      .lakomics-translation[data-state="pending"][data-theme="light"]{color:#536471;border-left-color:#aab8c2}
+      .lakomics-translation[data-error="true"][data-theme="light"]{color:#536471}
+      .lakomics-translation[data-error="true"]:not([data-theme="light"]){color:#8b98a5}
+      .lakomics-translation[data-state="pending"]{font-size:12px;padding:6px 12px;opacity:.7;color:#8b98a5}
+      .lakomics-translation[data-state="pending"][data-theme="light"]{color:#536471}
       [data-testid="tweetText"][data-lakomics-collapsed="true"]{display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
       .lakomics-translation-toggle{display:block;margin:-4px 0 8px auto;padding:2px 0;border:0;background:none;font:inherit;font-size:12px;color:rgb(29,155,240);cursor:pointer;white-space:nowrap}
       .lakomics-translation-toggle:hover,.lakomics-translation-toggle:focus-visible{text-decoration:underline}

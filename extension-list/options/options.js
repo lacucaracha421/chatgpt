@@ -3,6 +3,27 @@
   const $ = (id) => document.getElementById(id);
   let state = null, preview = null, busy = false;
 
+  const contextKey = "lakomics:context-menu:v1";
+  function contextHosts(text) {
+    return [...new Set(text.split(/\r?\n/).map(host => host.trim().toLowerCase().replace(/\.$/, "")).filter(Boolean))];
+  }
+  async function saveContextMenu() {
+    const excludedHosts = contextHosts($("context-menu-excluded").value);
+    if (excludedHosts.some(host => !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(host))) {
+      $("context-menu-status").textContent = "주소 대신 호스트만 입력하세요"; return;
+    }
+    try {
+      await chrome.storage.local.set({ [contextKey]: { enabled: $("context-menu-enabled").checked, excludedHosts } });
+      $("context-menu-excluded").value = excludedHosts.join("\n"); $("context-menu-status").textContent = "저장됨";
+    } catch { $("context-menu-status").textContent = "설정 저장 실패"; }
+  }
+  $("context-menu-enabled").onchange = saveContextMenu;
+  $("context-menu-form").onsubmit = event => { event.preventDefault(); void saveContextMenu(); };
+  if (chrome.storage?.local) void chrome.storage.local.get([contextKey]).then(stored => {
+    const value = stored[contextKey]; $("context-menu-enabled").checked = value?.enabled !== false;
+    $("context-menu-excluded").value = Array.isArray(value?.excludedHosts) ? value.excludedHosts.join("\n") : "";
+  }).catch(() => { $("context-menu-status").textContent = "설정을 불러오지 못했습니다"; });
+
   function send(message) { return chrome.runtime.sendMessage(message); }
   function model() { return state ? LakomicsClassificationTree.createModel(state.classifications.entries, state.profile) : null; }
   function pathLabel(entry) { return model()?.path(entry.id).map((item) => item.name).join(" / ") || entry.name; }
@@ -129,6 +150,9 @@
     // The sub model answers when the main model fails or times out; it cannot equal the main model.
     $("translation-fallback").replaceChildren(new Option("사용 안 함", ""), ...(result.models || []).filter(model => model.id !== result.model).map(model => new Option(model.label, model.id)));
     $("translation-fallback").value = result.fallbackModel || "";
+    // Right-click translation model: "" follows the X translation model.
+    $("context-menu-model").replaceChildren(new Option("X 번역과 같게", ""), ...(result.models || []).map(model => new Option(model.label, model.id)));
+    $("context-menu-model").value = result.contextModel || "";
     $("translation-key").placeholder = result.hasOpenRouterKey ? "OpenRouter 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
     $("translation-anthropic-key").placeholder = result.hasAnthropicKey ? "Anthropic 키 저장됨 · 변경할 키 입력" : "Anthropic API 키 (Claude 모델용)";
     $("translation-dictionary").value = (result.userTerms || []).map(term => `${term.source} = ${term.korean}`).join("\n");
@@ -142,6 +166,11 @@
   $("translation-fallback").onchange = async () => {
     const result = await send({ type: "translation:update", fallbackModel: $("translation-fallback").value });
     $("translation-status").textContent = result?.ok ? "보조 모델 저장됨" : "보조 모델 저장 실패";
+    await translationSettings();
+  };
+  $("context-menu-model").onchange = async () => {
+    const result = await send({ type: "translation:update", contextModel: $("context-menu-model").value });
+    $("context-menu-status").textContent = result?.ok ? "저장됨" : "번역 모델 저장 실패";
     await translationSettings();
   };
   $("translation-enabled").onchange = async () => {

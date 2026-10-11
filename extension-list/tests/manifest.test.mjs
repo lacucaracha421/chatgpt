@@ -13,7 +13,11 @@ test('collection uses the arc menu and keeps the list editor out of content page
     assert.equal(entry.js.includes('src/list-collector.js'), false);
   }
   assert.equal(scripts.some(path=>/gesture|radial/i.test(path)), false);
-  assert.equal(manifest.name, 'Lakomics Collector List');
+  assert.equal(manifest.name, 'Lakomics Companion');
+  assert.equal(manifest.version, '3.5.2');
+  assert.equal('version_name' in manifest, false);
+  assert.match(manifest.description, /right-click menu/);
+  assert.match(manifest.description, /YouTube/);
 });
 
 
@@ -34,6 +38,7 @@ test('X page video observation starts early without exposing other extension scr
 test('permanent saves remain server-only while temporary PC saves allow downloads', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('downloads'));
+  for (const permission of ['clipboardRead', 'clipboardWrite', 'pageCapture', 'offscreen']) assert.ok(manifest.permissions.includes(permission));
 
   const saveSource = await readFile(new URL('../src/save-client.js', import.meta.url), 'utf8');
   assert.equal(saveSource.includes('chrome.downloads'), false);

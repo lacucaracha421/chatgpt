@@ -390,6 +390,32 @@
     let gestureTarget = null;
     let touchGuardRestore = [];
 
+    // Preload the local shadow stylesheet before taking ownership of a right click.
+    // Failure leaves Chrome's native menu available.
+    if (globalThis.LakomicsContextMenu) {
+      void Promise.all([
+        fetch(chrome.runtime.getURL("src/context-menu/menu.css")).then(response => { if (!response.ok) throw new Error("menu style unavailable"); return response.text(); }),
+        chrome.storage.local.get([globalThis.LakomicsContextModel.SETTINGS]),
+      ]).then(([css, stored]) => {
+        const controller = globalThis.LakomicsContextMenu.createController({
+          css, initialSettings: stored[globalThis.LakomicsContextModel.SETTINGS], watchSession: createSessionWatcher,
+          collector: {
+            state: () => ({ phase: gate.phase, picker: Boolean(picker) }), findCandidate,
+            open: async (candidate, origin) => {
+              if (!candidate || gate.phase !== "idle" || picker) return;
+              const id = Symbol("context-menu-save");
+              if (!gate.arm(id)) return;
+              active = { id, input: "mouse", candidate, origin, latest: origin, href: location.href, released: true };
+              await open(active);
+            },
+          },
+        });
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area === "local" && changes[globalThis.LakomicsContextModel.SETTINGS]) controller.update(changes[globalThis.LakomicsContextModel.SETTINGS].newValue);
+        });
+      }).catch(() => {});
+    }
+
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("pointermove", onMove, true);
     document.addEventListener("pointerup", onUp, true);

@@ -98,6 +98,37 @@ test('translation options expose both supported models and persist a model chang
   dom.window.close();
 });
 
+test('right-click translation model select lists the X models, loads and saves contextModel only', async () => {
+  const dom = new JSDOM(html, { url: 'https://extension.test/options.html', runScripts: 'outside-only' });
+  const w = dom.window, updates = [];
+  let contextModel = '';
+  const models = [
+    { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
+    { id: 'anthropic:claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (Anthropic)' },
+  ];
+  const settings = () => ({ ok: true, enabled: true, hasApiKey: true, model: models[0].id, contextModel, models });
+  w.chrome = { runtime: { async sendMessage(message) {
+    if (message.type === 'settings:get') return { paired: false, state: null };
+    if (message.type === 'translation:settings') return settings();
+    if (message.type === 'translation:update') { updates.push(message); contextModel = message.contextModel ?? contextModel; return settings(); }
+    throw new Error(`Unexpected message type: ${message.type}`);
+  } } };
+  for (const source of sources) w.eval(source);
+  w.eval(optionsSource); await tick(); await tick();
+  const select = w.document.querySelector('#context-menu-model');
+  assert.deepEqual([...select.options].map(option => option.value), ['', ...models.map(model => model.id)]);
+  assert.equal(select.options[0].textContent, 'X 번역과 같게'); assert.equal(select.value, '');
+  assert.match(w.document.querySelector('#context-menu-section').textContent, /Sonnet 5\.5를 추천해요/);
+  select.value = 'anthropic:claude-sonnet-5-5';
+  select.dispatchEvent(new w.Event('change', { bubbles: true })); await tick(); await tick();
+  assert.equal(JSON.stringify(updates), JSON.stringify([{ type: 'translation:update', contextModel: 'anthropic:claude-sonnet-5-5' }]));
+  assert.equal(select.value, 'anthropic:claude-sonnet-5-5');
+  select.value = '';
+  select.dispatchEvent(new w.Event('change', { bubbles: true })); await tick(); await tick();
+  assert.equal(JSON.stringify(updates[1]), JSON.stringify({ type: 'translation:update', contextModel: '' })); assert.equal(select.value, '');
+  dom.window.close();
+});
+
 test('disconnect needs a second press and the header states the connection in text', async () => {
   const dom = new JSDOM(html, { url: 'https://extension.test/options.html', runScripts: 'outside-only' });
   const w = dom.window, messages = [];

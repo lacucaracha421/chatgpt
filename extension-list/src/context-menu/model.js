@@ -1,0 +1,149 @@
+(() => {
+  "use strict";
+  const SETTINGS = "lakomics:context-menu:v1";
+  const ownSelector = "lakomics-menu, lakomics-toast, lakomics-translation-block, #lakomics-arc-collector, #lakomics-yt-button, #lakomics-yt-overlay, #lakomics-yt-toast, #ytsf-button";
+  function hosts(value) {
+    return [...new Set((Array.isArray(value) ? value : String(value || "").split(/\r?\n/))
+      .map(host => String(host).trim().toLowerCase().replace(/\.$/, ""))
+      .filter(host => /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(host)))];
+  }
+  function settings(value) { return { enabled: value?.enabled !== false, excludedHosts: hosts(value?.excludedHosts) }; }
+  function excluded(host, list) { host = host.toLowerCase().replace(/\.$/, ""); return list.some(item => host === item || host.endsWith("." + item)); }
+  function bypass(event, { enabled = true, excludedHosts = [], hostname = "", phase = "idle", picker = false } = {}) {
+    return event.isTrusted !== true || event.defaultPrevented || (event.shiftKey && event.key !== "F10") || !enabled || excluded(hostname, excludedHosts)
+      || phase !== "idle" || picker || event.composedPath?.().some(node => node?.matches?.(ownSelector)) || Boolean(event.target?.closest?.(ownSelector));
+  }
+  function sourceLanguage(text) {
+    const letters = [...text].filter(char => /\p{Letter}/u.test(char));
+    if (!letters.length) return "en";
+    if (letters.filter(char => /[\uac00-\ud7a3\u1100-\u11ff]/.test(char)).length / letters.length > .3) return "ko";
+    if (letters.filter(char => /[\u3040-\u30ff\u3400-\u9fff]/.test(char)).length / letters.length > .3) return "ja";
+    return "en";
+  }
+  function quote(text) {
+    const clean = text.replace(/\s+/g, " ").trim();
+    const segments = typeof Intl.Segmenter === "function" ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(clean)].map(item => item.segment) : [...clean];
+    return segments.slice(0, 40).join("") + (segments.length > 40 ? "…" : "");
+  }
+  function editable(target) {
+    let field = target?.closest?.('input, textarea, [contenteditable]');
+    if (!field) return null;
+    if (field.matches('input') && !/^(?:text|search|url|tel|email|password)$/i.test(field.type)) return null;
+    if (field.hasAttribute("contenteditable") && field.getAttribute("contenteditable") === "false") return null;
+    if (field.hasAttribute("contenteditable")) {
+      // The editing host can be an ancestor of nested markup carrying the same
+      // attribute. Keep selection and input events on the outer editing host.
+      while (field.parentElement?.isContentEditable) field = field.parentElement;
+    }
+    return field;
+  }
+  function blockAt(node) {
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    return element?.closest?.("p, li, blockquote, dd, td, h1, h2, h3, h4, h5, h6, div") || element;
+  }
+  function selectionEnd(range) {
+    let node = range?.endContainer;
+    if (node?.nodeType === 1 && range.endOffset > 0) {
+      node = node.childNodes[Math.min(range.endOffset, node.childNodes.length) - 1] || node;
+      while (node.lastChild) node = node.lastChild;
+    }
+    return node;
+  }
+  function snapshot(target, doc = document, win = window, candidateFor = () => null) {
+    const field = editable(target), selection = win.getSelection?.();
+    let range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    const input = field?.matches("input, textarea") && typeof field.selectionStart === "number";
+    const start = input ? field.selectionStart : null, end = input ? field.selectionEnd : null;
+    let text = input ? field.value.slice(start, end) : selection?.toString() || "";
+    if (field && !input && (!range || !field.contains(range.startContainer) || !field.contains(range.endContainer))) {
+      // A selection elsewhere on the page must never become an editable-field
+      // cut/paste target. With no field caret, paste at the end of that field.
+      range = doc.createRange(); range.selectNodeContents(field); range.collapse(false); text = "";
+    }
+    const media = target?.closest?.("img, picture, video");
+    const image = media?.matches("picture") ? media.querySelector("img") : media;
+    const imageUrl = image?.matches("video") ? image.poster : image?.currentSrc || image?.src || "";
+    const link = target?.closest?.("a[href]");
+    return { target, field, readonly: Boolean(field?.readOnly || field?.disabled), password: field?.type === "password", input,
+      start, end, direction: input ? field.selectionDirection : null, fieldValue: input ? field.value : null,
+      fieldContent: !input && field ? field.innerHTML : null,
+      text, range, activeElement: doc.activeElement,
+      block: blockAt(selectionEnd(range) || target), image: imageUrl ? image : null, imageUrl,
+      linkUrl: link?.href || "", candidate: imageUrl ? candidateFor(target) : null };
+  }
+  function restore(context, doc = document, win = window, focus = true) {
+    try {
+      if (focus && context.activeElement?.isConnected) context.activeElement.focus({ preventScroll: true });
+      if (context.input && context.field?.isConnected) context.field.setSelectionRange(context.start, context.end, context.direction);
+      else if (context.range && context.range.startContainer.isConnected && context.range.endContainer.isConnected) {
+        const selection = win.getSelection(); selection.removeAllRanges(); selection.addRange(context.range);
+      }
+    } catch {}
+  }
+  function items(context, availability = {}, lookup = globalThis.LakomicsAvLookup) {
+    const groups = [], selection = [], translation = [], av = [], edit = [], imageActions = [], links = [], imageBrowser = [], page = [];
+    const add = (group, id, label, icon, extra = {}) => group.push({ id, label, icon, ...extra });
+    const translate = (id, label, glyph) => add(translation, id, label, glyph, { setup: !(availability.hasContextApiKey ?? availability.hasApiKey) });
+    if (context.text) {
+      if (!context.field) add(selection, "edit.copy", "복사", "copy", { hint: "Ctrl+C" });
+      if (!context.password && context.text.trim()) {
+        const language = sourceLanguage(context.text);
+        if (context.field && !context.readonly) {
+          for (const [code, label, glyph] of [["ja", "일본어", "あ"], ["en", "영어", "A"], ["ko", "한국어", "가"]]) {
+            if (code !== language) translate("replace." + code, label + "로 바꾸기", glyph);
+          }
+        } else if (!context.field && language !== "ko") translate("translate.ko.inline", "한국어로 번역", "가");
+        translate("translate.ja.copy", "일본어로 번역해서 복사", "あ");
+        translate("translate.en.copy", "영어로 번역해서 복사", "A");
+        const request = lookup?.createSendRequest(context.text, availability.href);
+        if (request) add(av, "av.send", "표지 찾기:", "film", { quote: request.productCode });
+      }
+    }
+    if (context.field) {
+      if (context.text && !context.readonly) add(edit, "edit.cut", "잘라내기", "cut", { hint: "Ctrl+X" });
+      if (context.text) add(edit, "edit.copy", "복사", "copy", { hint: "Ctrl+C" });
+      if (!context.readonly) add(edit, "edit.paste", "붙여넣기", "clipboard", { hint: "Ctrl+V" });
+      add(edit, "edit.selectAll", "모두 선택", "select", { hint: "Ctrl+A" });
+    }
+    if (context.imageUrl) {
+      add(imageActions, "image.translate", "이미지 글자 번역", "translate");
+      if (context.candidate) add(imageActions, "image.lakomics", "Lakomics에 저장…", "archive");
+      add(imageBrowser, "image.save", "이미지 저장", "download");
+      add(imageBrowser, "image.saveAs", "다른 이름으로 저장", "download");
+      add(imageBrowser, "image.copyUrl", "이미지 주소 복사", "image");
+      add(imageBrowser, "image.openTab", "새 탭에서 이미지 열기", "open");
+    }
+    if (context.linkUrl) {
+      add(links, "link.openTab", "새 탭에서 열기", "open");
+      add(links, "link.copy", "링크 주소 복사", "link");
+      add(links, "link.saveAs", "링크를 다른 이름으로 저장", "download");
+    }
+    if (!context.text && !context.field && !context.imageUrl && !context.linkUrl) {
+      add(page, "page.translate", "페이지 본문 번역", "translate");
+      groups.push(page);
+      const browser = [];
+      add(browser, "page.saveAs", "다른 이름으로 페이지 저장", "download");
+      add(browser, "nav.back", "뒤로", "back", { hint: "Alt+←", disabled: !availability.canGoBack });
+      add(browser, "nav.forward", "앞으로", "forward", { hint: "Alt+→", disabled: !availability.canGoForward });
+      add(browser, "nav.reload", "새로고침", "reload", { hint: "Ctrl+R" });
+      groups.push(browser);
+    } else groups.push(translation, av, selection, edit, imageActions, links, imageBrowser);
+    return groups.filter(group => group.length).flatMap((group, index) => index ? [{ separator: true }, ...group] : group);
+  }
+  function placement(x, y, width, height, viewport, offset = 2) {
+    const left = viewport.offsetLeft || 0, top = viewport.offsetTop || 0;
+    const right = left + viewport.width, bottom = top + viewport.height;
+    const flipX = x + offset + width > right - 8, flipY = y + offset + height > bottom - 8;
+    return { x: Math.max(left + 8, Math.min(flipX ? x - width - offset : x + offset, right - width - 8)),
+      y: Math.max(top + 8, Math.min(flipY ? y - height - offset : y + offset, bottom - height - 8)), flipX, flipY };
+  }
+  function nextIndex(key, current, count) {
+    if (!count) return -1;
+    if (key === "Home") return 0;
+    if (key === "End") return count - 1;
+    if (key === "ArrowDown") return (current + 1) % count;
+    if (key === "ArrowUp") return current < 0 ? count - 1 : (current + count - 1) % count;
+    return current;
+  }
+  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, bypass, sourceLanguage, quote, editable, snapshot, restore, items, placement, nextIndex };
+})();
