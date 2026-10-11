@@ -218,6 +218,13 @@ Former rollout and source decisions are in the [archive](lakomics-completed.md#c
 # Catalog / optional providers
 
 <a id="catalog-archive-001--retain-removed-unbookmarked-catalog-metadata"></a>
+## COLLECTION-READ-001 — Readable manga files inside Collections (2026-10-11)
+
+Status: `IDEA` — user 2026-10-11: put readable manga volume files into Collections so each owned volume can be read on PC and tablet. Not designed yet; design first, then decide.
+- **Size estimate (2026-10-11, read-only):** 149 manga works with 2,562 registered volumes (only 116 marked owned). At ~80 MB per volume: owned only ≈ 9 GB, half of the registered volumes ≈ 100 GB, all ≈ 205 GB. Re-encoding pages to WebP at reading quality usually brings a volume to 20–30 MB (all volumes ≈ 60–80 GB).
+- **Storage direction to evaluate:** originals stay on the PC library disk; a lighter reading copy goes to object storage (Cloudflare R2, ~$0.015/GB-month, no egress fee; ~$3/month for 200 GB) because the new VPS disk (80 GB) cannot hold it; the tablet streams pages on demand and keeps only recently read volumes cached, like the catalog reader.
+- **Open questions:** import flow (attach files to a volume, folder/zip/cbz), which volumes count (owned only?), reading position sync between PC and tablet, privacy mode and NSFW masking in the reader, and whether the catalog reader component is reused.
+
 ## CATALOG-ARCHIVE-001 — Keep searchable records of works removed from source catalogs (2026-10-08)
 
 Status: `IDEA` — **user's actual pain point**: a Korean-language adult doujinshi gallery once visible in the catalog can vanish from search later, **even though the user never bookmarked it**. This is distinct from `CATALOG-KEEP-001`, which covers retaining full **pages of bookmarked** works after the upstream gallery disappears. Do not narrow this new item to favorites, bookmarks, reading-progress entries, or an automatic image-download requirement. No implementation approved.
