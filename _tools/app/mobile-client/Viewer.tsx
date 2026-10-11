@@ -3,7 +3,7 @@ import {assetMasked} from '../src/shared/privacy/contentMask';
 import {mediaMasked} from './assetMask';
 import {useNsfwFilter} from './privacyMode';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
-import {displayDateTime} from '../src/shared/displayDate';
+import {displayCount,displayDateTime} from '../src/shared/displayDate';
 import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, RectangleStackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import {HeartIcon as HeartSolidIcon} from '@heroicons/react/24/solid';
 import type {ComponentType, CSSProperties, SVGProps} from 'react';
@@ -349,7 +349,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       <div className="viewer-main">
       <header className="viewer-bar">
         <IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={motion.close}/>
-        <span className="numeric viewer-position">{index + 1} / {total.toLocaleString('ko-KR')}</span>
+        <span className="numeric viewer-position">{displayCount(index + 1)} / {displayCount(total)}</span>
         {!vault&&<div className="viewer-heading"><strong>{artistLabel}</strong>{metaLabel&&<small>{metaLabel}</small>}</div>}
         {!vault&&<span className="viewer-spacer"/>}
         <div className="viewer-actions">
@@ -484,7 +484,7 @@ function MaskedViewer({items,index,onIndex,onClose,onNearEnd,totalCount,backRef}
   }}>
     <div className="viewer chrome-visible" data-filmstrip-visible="true">
       <div className="viewer-backdrop"/><div className="viewer-main">
-        <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric viewer-position">{index+1} / {totalCount??items.length}</span></header>
+        <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric viewer-position">{displayCount(index+1)} / {displayCount(totalCount??items.length)}</span></header>
         <div className="viewer-surface" onPointerDown={event=>{gesture.current={x:event.clientX,y:event.clientY};event.currentTarget.setPointerCapture?.(event.pointerId);}} onPointerUp={event=>{const start=gesture.current;gesture.current=null;if(!start)return;const dx=event.clientX-start.x,dy=event.clientY-start.y;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.4){const next=index+(dx<0?1:-1);if(next>=0&&next<items.length)onIndex(next);}}}><span className="privacy-mask" aria-label="NSFW 필터로 이미지 숨김" style={{width:'100%',height:'100%'}}/></div>
         <ViewerFilmstrip items={items} index={index} onIndex={onIndex}/>
         <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index===0} onClick={()=>onIndex(index-1)}/><span className="viewer-title">NSFW 필터</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index===items.length-1} onClick={()=>onIndex(index+1)}/></footer>

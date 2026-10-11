@@ -65,6 +65,7 @@ import {albumAncestors,albumPage,albumView,type AlbumAssetPage} from './albumMod
 import {LIBRARY_ROOT,mergeLibraryEntries,ancestorsOf,entryView} from './libraryModel';
 import './library.css';
 import {Gallery} from './Gallery';
+import {displayCount} from '../src/shared/displayDate';
 import {readAssetToc, supportsAssetToc, useAssetToc, type AssetTocPage} from './assetToc';
 import {AlbumBatchSheet} from './AlbumBatchSheet';
 import {AlbumManagement} from './AlbumManagement';
@@ -984,7 +985,8 @@ export function App() {
   if(page.view.root)rootPage.current={items:visibleItems,total:page.version&&!page.has_more?visibleItems.length:undefined};
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
   const openPending = () => { if (captures?.length) {markViewerOpen();setViewer({items: captures, index: 0, pending: true});} else void refreshSecondary(true); };
-  const libraryCount=page.view.search?.length?(page.assetRanges?.toc.totalCount.toLocaleString('ko-KR')??`${page.items.length}${page.has_more?'+':''}`):hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:(subtreeShown?currentEntry?.total_asset_count:undefined)??currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`;
+  const libraryTotal=page.assetRanges?.toc.totalCount;
+  const libraryCount=libraryTotal??(hasActiveFilters(page.filters)||page.view.search?.length?`${displayCount(page.items.length)}${page.has_more?'+':''}`:(subtreeShown?currentEntry?.total_asset_count:undefined)??currentEntry?.asset_count??currentAlbum?.assetCount??`${displayCount(page.items.length)}${page.has_more?'+':''}`);
   const libraryCrumbNode=<nav className="library-breadcrumb" aria-label="현재 위치">{crumbs.map((crumb,i)=><span key={crumb.id}>{i>0&&<span aria-hidden="true">›</span>}<button type="button" onClick={crumb.onSelect}>{crumb.name}</button></span>)}</nav>;
   const commitSearch=(chips:AssetSearchChip[])=>{
     setSearchChips(chips);setAssetSearchOpen(false);setSearchNotice('');setArea('assets');
@@ -1152,7 +1154,7 @@ export function App() {
     {fault && !privacyMode && !nsfwFilter && <div className="tablet-layer is-fault" ref={faultLayer}><FaultGame items={fault} onClose={() => setFault(null)}/></div>}
     {similarity && <div className="tablet-layer" ref={similarityLayer}><SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/></div>}
     {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)}/>}
-    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
+    {viewer && <Viewer totalCount={viewer.source==='library'?libraryTotal:undefined} onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <div className="tablet-layer" ref={trashLayer}><TrashLayer endpoint={status.endpoint} store={findStore} key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <div className="tablet-layer" ref={exchangeLayer}><Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/></div>}

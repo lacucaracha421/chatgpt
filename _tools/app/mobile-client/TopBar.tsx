@@ -3,6 +3,7 @@ import {ArrowLeftIcon,MagnifyingGlassIcon,PlusIcon} from '@heroicons/react/24/ou
 import {useEffect,useRef,type ReactNode,type Ref} from 'react';
 import {IconButton,Mark} from './ui';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
+import {displayCount} from '../src/shared/displayDate';
 /**
  * The shared tab bar: the logo mark (or Back on a deeper level), the tab or place name, and the
  * actions that belong to that screen. Every tab uses the same 56px bar, so switching tabs never
@@ -25,7 +26,7 @@ export function BarProgress({label}:{label:string|false|undefined}) {
 export function TopBar({title,count,crumbs,back,actions,className='',loading,barRef,find=false}:{find?:boolean;title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false;/** The bar element, for a section shade's pull (SectionShade.tsx). */barRef?:Ref<HTMLElement>}) {
   return <header ref={barRef} className={`top-bar${className?` ${className}`:''}`}>
     {back?<IconButton label={back.label} icon={ArrowLeftIcon} onClick={back.onClick}/>:<span className="top-bar__brand"><Mark/></span>}
-    <div className={`top-bar__titles${crumbs!=null&&title!=null?' top-bar__titles--stacked':''}`}>{crumbs}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{count}</span>}</div>}</div>
+    <div className={`top-bar__titles${crumbs!=null&&title!=null?' top-bar__titles--stacked':''}`}>{crumbs}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{typeof count==='number'?displayCount(count):count}</span>}</div>}</div>
     <span className="top-bar__space"/>{find&&<FindButton/>}{actions}<BarProgress label={loading}/>
   </header>;
 }

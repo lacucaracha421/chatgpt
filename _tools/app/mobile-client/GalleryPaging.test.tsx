@@ -170,7 +170,8 @@ it.each([0, .5, 1, 1.5, 2].flatMap(density => [320, 800, 1280].map(width => ({de
   measurement.width = width;
   const scroll = mount({density});
   const canvas = scroll.querySelector<HTMLElement>('.gallery-canvas')!;
-  const available = width - 32, target = rowHeight(density, available);
+  // The gallery subtracts its computed side padding; jsdom loads no stylesheet, so that is 0 here.
+  const available = width, target = rowHeight(density, available);
   const columns = Math.max(1, Math.round((available + 10) / (target * .75 + 10)));
   expect(canvas.style.getPropertyValue('--gallery-placeholder-height')).toBe(`${target}px`);
   expect(canvas.style.getPropertyValue('--gallery-placeholder-pitch')).toBe(`${target + 10}px`);

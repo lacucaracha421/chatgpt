@@ -11,7 +11,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'co
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onRecent,onArtists}:HomeProps)=><div><button onClick={onRecent}>전체 보기</button><button onClick={onArtists}>작가 전체</button>{items.slice(0,12).map(a=><span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
 vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll,sparse,onSelectAsset}:{onSelectAsset?(id:string):void;sparse?:SparseGallerySource;intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} data-toc-total={sparse?.toc.totalCount} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onContextMenu={event=>{event.preventDefault();onSelectAsset?.(a.id);}} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}{sparse&&<button onClick={()=>void sparse.load(2,2,new AbortController().signal)}>seek bucket</button>}</div>}));
-vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
+vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose,totalCount}:{items:Asset[];index:number;totalCount?:number;onIndex(i:number):void;onClose():void})=><div data-testid="viewer" data-total={totalCount}><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 /** The folder list is requested with the subtree counts and list version the tablet asks for. */
 const CLASSIFICATIONS='/v1/library/classifications?subtree_counts=1';
@@ -1188,4 +1188,19 @@ it('keeps queued album removals hidden across refresh and opens the correct rema
  expect(screen.queryByText('tile-a1')).toBeNull();
  blocked=true;act(()=>window.dispatchEvent(new Event('lakomics-resume')));
  expect(await screen.findByText('tile-a1')).toBeTruthy();expect(await screen.findByText(/앨범에서 빼기 전송에 실패/)).toBeTruthy();
+});
+
+
+it('shows the TOC total in All Assets and passes it to the viewer with the first page',async()=>{
+ const original=mocks.api.getMockImplementation()!;
+ mocks.api.mockImplementation(async(path:string)=>{
+  const url=new URL(path,'https://test');
+  if(url.pathname==='/v1/library/assets'&&url.searchParams.has('toc'))return {tocVersion:1,listGeneration:'a'.repeat(64),totalCount:9223,sort:'newest',buckets:[{key:'2026-10',startIndex:0,count:9223,startCursor:null}]};
+  if(url.pathname==='/v1/library/assets'&&url.searchParams.get('limit')==='40')return {items:a,has_more:true,next_cursor:'next',listGeneration:'a'.repeat(64)};
+  return original(path);
+ });
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+ const tile=await screen.findByText('tile-a1');
+ await waitFor(()=>expect(screen.getByRole('heading',{name:'모든 자산'}).parentElement?.textContent).toContain('9,223'));
+ fireEvent.click(tile);expect(screen.getByTestId('viewer').getAttribute('data-total')).toBe('9223');
 });

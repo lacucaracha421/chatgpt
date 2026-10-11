@@ -30,7 +30,7 @@
 .release-calendar-cover-placeholder { background:var(--color-surface-elevated); }
 .release-calendar-cover-placeholder.is-private { background:var(--color-private-fill); }
 .release-calendar-new-badge { position:absolute; top:var(--space-2); left:var(--space-2); z-index:1; }
-.release-calendar-title { display:-webkit-box; overflow:hidden; min-width:0; color:var(--color-text); font:400 var(--type-body) / 1.35 var(--font-ui); -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.release-calendar-title { display:-webkit-box; overflow:hidden; min-width:0; color:var(--color-text); font:400 var(--type-body) / 1.35 var(--font-ui); word-break:keep-all; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .release-calendar-card > .platform-badges { margin-top:var(--space-1); }
 .release-calendar-pending { color:var(--color-accent); font-size:var(--type-meta); }
 .release-calendar-events { display:flex; flex-direction:column; gap:var(--space-1); margin-top:var(--space-1); }

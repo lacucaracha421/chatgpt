@@ -3,6 +3,7 @@ import {XMarkIcon} from '@heroicons/react/24/outline';
 import {IconButton} from './ui';
 import {layerEnterTime} from './motion';
 import {motionDefaults,motionSpring,motionTime,prefersReducedMotion} from '../src/shared/motion/curves';
+import {displayCount} from '../src/shared/displayDate';
 import './overlay.css';
 
 /** How long the sheet takes to slide back down (0.7× its rise), or the reduced-motion fade. */
@@ -91,7 +92,7 @@ export function Overlay({open,covered=false,title,count,onClose,children,deferCo
     <div ref={panel} className="mobile-overlay__panel" role="dialog" aria-modal="true" aria-labelledby={id}>
       <div className="mobile-overlay__header" onPointerDown={down} onPointerUp={end} onPointerCancel={end}>
         <div className="mobile-overlay__grab" aria-hidden="true"/>
-        <div className="mobile-overlay__title-row"><h2 id={id}>{title}</h2>{count!=null&&<span className="numeric muted">{count.toLocaleString()}</span>}<IconButton label={`${title} 닫기`} icon={XMarkIcon} onClick={onClose}/></div>
+        <div className="mobile-overlay__title-row"><h2 id={id}>{title}</h2>{count!=null&&<span className="numeric muted">{displayCount(count)}</span>}<IconButton label={`${title} 닫기`} icon={XMarkIcon} onClick={onClose}/></div>
       </div>
       <div className="mobile-overlay__body">{typeof children==='function'?children(!deferContent||entered):children}</div>
     </div>

@@ -25,6 +25,7 @@ import {NoteLedger} from './NoteLedger';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
 import {revealCaret,useNoteEditor} from './noteCaret';
 import '../src/notes/noteCard.css';
+import {displayCount} from '../src/shared/displayDate';
 import './notes.css';
 import {Scrubber} from './Scrubber';
 
@@ -290,7 +291,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
     {/* Always mounted once unlocked so its pull-to-refresh gesture stays attached. */}
     <div className="notes-list-view" style={{display:state.ready&&state.unlocked&&!editing?undefined:'none'}}>
       {scope!=='all'
-        ?<header ref={kinds.barRef} className="notes-top is-sub"><IconButton label="메모 목록으로" icon={ArrowLeftIcon} onClick={()=>setScope('all')}/><h1>{kinds.title(trash?'휴지통':'보관함')}<span className="numeric muted">{trash?trashed:archived}</span></h1></header>
+        ?<header ref={kinds.barRef} className="notes-top is-sub"><IconButton label="메모 목록으로" icon={ArrowLeftIcon} onClick={()=>setScope('all')}/><h1>{kinds.title(trash?'휴지통':'보관함')}<span className="numeric muted">{displayCount(trash?trashed:archived)}</span></h1></header>
         :<TopBar find barRef={kinds.barRef} title={kinds.title('메모')} actions={<><span className="notes-save-state" role="status"><BusyLabel busy={!state.error&&(state.saving||state.syncing)} idle={status}>{state.saving?'저장 중':'동기화 중'}</BusyLabel></span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
       {kinds.shade}
       <div ref={list} className="notes-scroll">

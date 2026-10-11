@@ -75,7 +75,7 @@
 .catalog-bookmark-error{color:var(--color-danger, #d98a8a)}
 .catalog-reader-error{font-size:12px;color:var(--color-muted);margin:8px 0 0}
 .catalog-editions,.catalog-tags{margin-top:28px}
-.catalog-editions h3,.catalog-tags h3{font-size:15px;font-weight:600;margin:0 0 12px}
+.catalog-editions .ui-section-label,.catalog-tags .ui-section-label{margin:0 0 var(--space-3)}
 .catalog-edition-row{display:flex;gap:12px;overflow-x:auto;margin:0 calc(-1*var(--mobile-gutter));padding:0 var(--mobile-gutter) 4px;scrollbar-width:none}
 .catalog-edition-row::-webkit-scrollbar{display:none}
 .catalog-edition{width:112px;flex-shrink:0;display:flex;flex-direction:column;gap:2px;padding:4px;border:0;border-radius:var(--radius-sm);background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer}
@@ -87,7 +87,7 @@
 .catalog-tags dl>div{display:contents}
 .catalog-tags dt{font-size:12px;color:var(--color-muted);padding-top:8px;white-space:nowrap}
 .catalog-tags dd{margin:0;display:flex;flex-wrap:wrap;gap:6px}
-.catalog-tag{min-height:32px;padding:0 12px;border:0;border-radius:16px;background:var(--color-surface);color:inherit;font:inherit;font-size:13px;cursor:pointer}
+.catalog-tag{min-height:32px;padding:0 12px;border:0;border-radius:var(--radius-mark);background:var(--color-surface);color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .catalog-tag:active{background:var(--color-selected)}
 .catalog-tags .hint{margin:10px 0 0;font-size:12px}
 @media(prefers-reduced-motion:reduce){.catalog-banner svg{animation:none}}
