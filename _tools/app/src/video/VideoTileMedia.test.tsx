@@ -2,15 +2,24 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { VideoTileMedia } from "./VideoTileMedia";
+import { mockVideoFrames } from "./videoFrameTestUtils";
+
+let presentFrame: ReturnType<typeof mockVideoFrames>;
+const loadStill = () => {
+  const pending = document.querySelector<HTMLImageElement>("[data-stable-image-pending]");
+  if (pending) fireEvent.load(pending);
+};
 
 const workload = vi.hoisted(() => ({ restricted: false, ready: true }));
 vi.mock("../app/workloadProfile", () => ({ useWorkloadProfile: () => workload }));
 
 beforeEach(() => {
+  presentFrame = mockVideoFrames();
   vi.useFakeTimers();
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
 });
 afterEach(() => { cleanup(); workload.restricted = false; workload.ready = true; vi.useRealTimers(); vi.restoreAllMocks(); });
 
@@ -31,11 +40,14 @@ it("plays the video live on hover, keeping prepared frames until its first frame
   expect(media.play).toHaveBeenCalledOnce();
   expect(media).not.toHaveAttribute("data-shown");
   // Until the video plays, the prepared frames keep the tile alive.
+  loadStill();
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/1"));
   act(() => vi.advanceTimersByTime(720));
+  loadStill();
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/3"));
 
   fireEvent.playing(media);
+  presentFrame(media);
   expect(media).toHaveAttribute("data-shown");
   const still = screen.getByRole("img", { name: "clip.webm" }).getAttribute("src");
   act(() => vi.advanceTimersByTime(1_440));
@@ -57,6 +69,7 @@ it("keeps visible hover playback through progress, equal props, stalls and child
   const removeAttribute = vi.spyOn(media, "removeAttribute");
   const setAttribute = vi.spyOn(media, "setAttribute");
   fireEvent.playing(media);
+  presentFrame(media);
 
   for (let second = 1; second <= 20; second++) {
     media.currentTime = second % 10;
@@ -69,6 +82,7 @@ it("keeps visible hover playback through progress, equal props, stalls and child
     fireEvent.seeked(media);
     expect(media).toHaveAttribute("data-shown");
     fireEvent.playing(media);
+    presentFrame(media);
     act(() => vi.advanceTimersByTime(720));
     expect(container.querySelector("video")).toBe(media);
     expect(media).toHaveAttribute("data-shown");
@@ -88,13 +102,14 @@ it("keeps visible hover playback through progress, equal props, stalls and child
   expect(setAttribute.mock.calls.some(([name]) => name === "src")).toBe(false);
 });
 
-it("updates the still image immediately when its thumbnail source revision changes", () => {
+it("updates the still image once its replacement thumbnail loads", () => {
   const props = { active: false, onRequestActive: vi.fn(), onReleaseActive: vi.fn(), onRetry: vi.fn() };
   const { rerender } = render(<VideoTileMedia asset={video()} {...props} thumbnailSrc="http://lakomics.localhost/thumbnail/video-1?v=1" />);
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-1?v=1");
 
   rerender(<VideoTileMedia asset={video()} {...props} thumbnailSrc="http://lakomics.localhost/thumbnail/video-1?v=2" />);
 
+  loadStill();
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-1?v=2");
 });
 
@@ -108,6 +123,7 @@ it("maps pointer position to a scrub frame and delays video seeking", () => {
   const slider = screen.getByRole("slider", { name: "영상 탐색" });
   vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, right: 100, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) });
   fireEvent.pointerDown(slider, { pointerId: 1, clientX: 50 });
+  loadStill();
   expect(screen.getByRole("img")).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/5"));
   const media = screen.getByLabelText("clip.webm 미리보기") as HTMLVideoElement;
   expect(media.currentTime).toBe(0);
@@ -129,6 +145,7 @@ it("scrub only follows the pointer while the handle is held", () => {
   fireEvent.pointerDown(slider, { pointerId: 1, clientX: 80 });
   expect(request).toHaveBeenCalled();
   fireEvent.pointerMove(slider, { pointerId: 1, clientX: 20 });
+  loadStill();
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/2"));
   expect(slider).toHaveAttribute("data-scrubbing");
 
@@ -136,6 +153,7 @@ it("scrub only follows the pointer while the handle is held", () => {
   fireEvent.pointerUp(slider, { pointerId: 1, clientX: 20 });
   expect(slider).not.toHaveAttribute("data-scrubbing");
   fireEvent.pointerMove(slider, { pointerId: 1, clientX: 60 });
+  loadStill();
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/2"));
 });
 
@@ -144,7 +162,9 @@ it("reflects playback position in the scrub control while playing", () => {
   const slider = container.querySelector(".video-tile__scrub") as HTMLDivElement;
   fireEvent.keyDown(slider, { key: "ArrowRight" });
   const media = container.querySelector("video") as HTMLVideoElement;
+  act(() => vi.advanceTimersByTime(120));
   fireEvent.playing(media);
+  presentFrame(media);
   Object.defineProperty(media, "currentTime", { value: 2.5, writable: true, configurable: true });
   fireEvent.seeked(media);
   fireEvent(media, new Event("timeupdate"));
@@ -155,6 +175,7 @@ it("reflects playback position in the scrub control while playing", () => {
 it("does not attach the original video merely because a tile is active", () => {
   const { container } = render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
   expect(container.querySelector("video")).toBeNull();
+  loadStill();
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/1"));
 });
 
@@ -224,6 +245,7 @@ it("keeps the hover preview playing while the pointer is on the gallery cell's o
   rerender(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={release} onRetry={vi.fn()} />);
   const media = container.querySelector("video") as HTMLVideoElement;
   fireEvent.playing(media);
+  presentFrame(media);
 
   // Onto the heart and back: the same playback continues, nothing restarts.
   // React derives enter/leave from pointerout/pointerover and their relatedTarget.
@@ -253,9 +275,81 @@ it("keeps the scrub frame, not the first frame, until a scrubbed video is on scr
   act(() => vi.advanceTimersByTime(120));
   // Seeked before the video's first frame shows: the still must stay on the scrubbed frame.
   fireEvent.seeked(media);
+  loadStill();
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/5"));
   fireEvent.playing(media);
+  expect(media).not.toHaveAttribute("data-shown");
+  presentFrame(media);
   expect(media).toHaveAttribute("data-shown");
+});
+
+it("keeps the still through drag release, the delayed seek and stale frames in both seek directions", () => {
+  const { container, unmount } = render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const slider = screen.getByRole("slider", { name: "영상 탐색" });
+  vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, right: 100, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) });
+  fireEvent.pointerEnter(container.querySelector(".video-tile")!);
+  act(() => vi.advanceTimersByTime(160));
+  const media = container.querySelector("video")!;
+  fireEvent.playing(media);
+  expect(media).not.toHaveAttribute("data-shown");
+  presentFrame(media);
+  expect(media).toHaveAttribute("data-shown");
+  const freeze = container.querySelector("canvas")!;
+  for (const percent of [80, 20]) {
+    const oldTime = media.currentTime;
+    fireEvent.pointerDown(slider, { pointerId: 1, clientX: percent });
+    expect(freeze.style.display).not.toBe("none");
+    fireEvent.pointerUp(slider, { pointerId: 1, clientX: percent });
+    fireEvent.playing(media);
+    presentFrame(media, oldTime);
+    expect(media).not.toHaveAttribute("data-shown");
+    expect(freeze.style.display).not.toBe("none");
+    act(() => vi.advanceTimersByTime(120));
+    fireEvent.seeked(media);
+    fireEvent.playing(media);
+    presentFrame(media, oldTime);
+    expect(media).not.toHaveAttribute("data-shown");
+    loadStill();
+    const still = screen.getByRole("img", { name: "clip.webm" });
+    act(() => vi.advanceTimersByTime(720));
+    expect(screen.getByRole("img", { name: "clip.webm" })).toBe(still);
+    presentFrame(media);
+    expect(media).toHaveAttribute("data-shown");
+    expect(freeze.style.display).toBe("none");
+    expect(container.querySelector("video")).toBe(media);
+  }
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("keeps the captured frame if an earlier scrub image finishes decoding during a newer seek", async () => {
+  const { container } = render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const slider = screen.getByRole("slider");
+  fireEvent.keyDown(slider, { key: "ArrowRight" });
+  act(() => vi.advanceTimersByTime(120));
+  const media = container.querySelector("video")!;
+  presentFrame(media);
+  fireEvent.keyDown(slider, { key: "ArrowLeft" });
+  const pending = container.querySelector<HTMLImageElement>("[data-stable-image-pending]")!;
+  let resolveDecode!: () => void;
+  const decode = new Promise<void>(resolve => { resolveDecode = resolve; });
+  Object.defineProperty(pending, "decode", { value: () => decode });
+  fireEvent.load(pending);
+  fireEvent.keyDown(slider, { key: "ArrowRight" });
+  await act(async () => { resolveDecode(); await decode; });
+  expect(container.querySelector("canvas")!.style.display).not.toBe("none");
+  expect(media).not.toHaveAttribute("data-shown");
+});
+
+it("keeps the decoded still until the replacement scrub image loads", () => {
+  render(<VideoTileMedia asset={video()} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const still = screen.getByRole("img", { name: "clip.webm" });
+  fireEvent.load(still);
+  fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" });
+  expect(screen.getByRole("img", { name: "clip.webm" })).toBe(still);
+  expect(still).toHaveAttribute("src", expect.stringContaining("/thumbnail/"));
+  loadStill();
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/5"));
 });
 
 it("shows an unknown length as a dash, not 0:00", () => {

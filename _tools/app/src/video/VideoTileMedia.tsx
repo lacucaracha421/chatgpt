@@ -8,6 +8,8 @@ import { useWorkloadProfile } from "../app/workloadProfile";
 import { Button } from "../shared/ui/Button";
 import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { StableImage } from "../shared/ui/StableImage";
+import { waitForVideoFrame } from "./waitForVideoFrame";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
 type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; /** `null`: the Asset has no thumbnail, so no still image is requested. */ thumbnailSrc?: string | null; playbackSrc?: string; compactBadge?: boolean; durationVisible?: boolean; /** The video itself reported its length while previewing. */ onDurationKnown?(durationMs: number): void };
@@ -15,12 +17,19 @@ type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onRe
 export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode:requestedPrivacy = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true, onDurationKnown }: Props) {
   const privacyMode=useAssetMask(asset,requestedPrivacy);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const freezeRef = useRef<HTMLCanvasElement>(null);
+  const [frozen, setFrozen] = useState(false);
+  const frozenRef = useRef(false);
+  const wantedStill = useRef<string | null>(null);
   /** Detaches the gallery-cell leave listener armed while the pointer is on the cell's own controls. */
   const cellWatch = useRef<(() => void) | null>(null);
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
   const frameTimer = useRef<number | null>(null);
   const scrubbingRef = useRef(false);
+  const cancelFrame = useRef<(() => void) | null>(null);
+  const pendingSeek = useRef<number | null>(null);
+  const presented = useRef(false);
   const [scrubbing, setScrubbing] = useState(false);
   const [previewRatio, setPreviewRatio] = useState<number | null>(null);
   const [playedRatio, setPlayedRatio] = useState(0);
@@ -41,13 +50,21 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     if (!active || !playbackRequested || privacyMode) return;
     const video = videoRef.current;
     if (!video) return;
-    video.src = playbackSrc ?? playbackUrl(asset.id);
+    const source = playbackSrc ?? playbackUrl(asset.id);
+    if (video.getAttribute("src") !== source) video.src = source;
+    if (pendingSeek.current === null) {
+      cancelFrame.current = waitForVideoFrame(video, 0, () => {
+        presented.current = true;
+        setVideoShown(true);
+        if (!scrubbingRef.current) setPreviewRatio(null);
+      });
+    }
     video.muted = true;
     void video.play()?.catch(() => undefined);
-    return () => { video.pause(); video.removeAttribute("src"); video.load(); setVideoShown(false); };
+    return () => { cancelFrame.current?.(); presented.current = false; frozenRef.current = false; setFrozen(false); video.pause(); video.removeAttribute("src"); video.load(); setVideoShown(false); };
   }, [active, asset.id, playbackRequested, playbackSrc, privacyMode]);
   useEffect(() => {
-    if (!active || privacyMode || videoShown || asset.media.scrubFrameCount <= 1) {
+    if (!active || privacyMode || videoShown || previewRatio !== null || asset.media.scrubFrameCount <= 1) {
       setHoverFrame(null);
       return;
     }
@@ -64,9 +81,9 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       frameTimer.current = null;
       setHoverFrame(null);
     };
-  }, [active, asset.media.scrubFrameCount, privacyMode, videoShown]);
-  useEffect(() => () => { clearTimers(); cellWatch.current?.(); }, []);
-  const leave = () => { cellWatch.current?.(); clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); setVideoShown(false); onReleaseActive(); };
+  }, [active, asset.media.scrubFrameCount, privacyMode, videoShown, previewRatio]);
+  useEffect(() => () => { cancelFrame.current?.(); clearTimers(); cellWatch.current?.(); }, []);
+  const leave = () => { cancelFrame.current?.(); pendingSeek.current = null; presented.current = false; frozenRef.current = false; setFrozen(false); cellWatch.current?.(); clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); setVideoShown(false); onReleaseActive(); };
   const leaveRef = useRef(leave);
   leaveRef.current = leave;
   // The gallery cell's heart and other hover controls sit outside this tile: moving onto them must
@@ -88,10 +105,43 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   };
   const seekToRatio = (ratio: number, live: boolean) => {
     const clamped = Math.max(0, Math.min(1, ratio));
+    // Revealing the image beneath a playing video would itself flash back to the old thumbnail.
+    // Keep the visible video frame until either the scrub image decodes or the seek frame presents.
+    const video = videoRef.current;
+    const canvas = freezeRef.current;
+    if (presented.current && !frozenRef.current && video && canvas && video.readyState >= 2 && video.videoWidth) {
+      const context = canvas.getContext("2d");
+      if (context) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        try {
+          context.drawImage(video, 0, 0);
+          frozenRef.current = true;
+          setFrozen(true);
+        } catch { /* The existing still remains available if capture is unsupported. */ }
+      }
+    }
+    cancelFrame.current?.();
+    presented.current = false;
+    setVideoShown(false);
     setPreviewRatio(clamped);
+    const target = clamped * asset.media.durationMs / 1_000;
+    pendingSeek.current = target;
     if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
     seekTimer.current = window.setTimeout(() => {
-      if (videoRef.current) videoRef.current.currentTime = clamped * asset.media.durationMs / 1_000;
+      const video = videoRef.current;
+      if (!video) return;
+      pendingSeek.current = null;
+      cancelFrame.current = waitForVideoFrame(video, target, () => {
+        presented.current = true;
+        setVideoShown(true);
+        if (!scrubbingRef.current) {
+          frozenRef.current = false;
+          setFrozen(false);
+          setPreviewRatio(null);
+        }
+      });
+      video.currentTime = target;
     }, 120);
     if (live) setScrubbing(true);
   };
@@ -119,6 +169,11 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     scrubbingRef.current = false;
     setScrubbing(false);
+    if (presented.current) {
+      frozenRef.current = false;
+      setFrozen(false);
+      setPreviewRatio(null);
+    }
   };
   const durationSeconds = videoDuration;
   // An unknown length (0) shows "—", not "0:00", until the video itself reports one.
@@ -155,9 +210,20 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const alt = asset.title || asset.originalName;
   const previewFrame = previewRatio === null ? hoverFrame : Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1));
   const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? (thumbnailSrc === null ? null : thumbnailSrc ?? assetThumbnailUrl(asset)) : scrubFrameUrl(asset.id, previewFrame, asset.thumbnailRevision);
+  wantedStill.current = stillUrl;
   return <div className="video-tile" onPointerEnter={enterTile} onPointerLeave={leaveTile}>
     {/* 재생 프리뷰가 위에 깔리므로, 영상 첫 프레임이 뜨기 전까지는 scrub 미리보기 프레임을 img로 보여준다. */}
-    {stillUrl && <img src={stillUrl} alt={alt} decoding="async" draggable={false} />}
+    {stillUrl && <StableImage src={stillUrl} alt={alt} decoding="async" decodeFirst={false} draggable={false} onLoad={event => {
+      const image = event.currentTarget;
+      const loaded = image.getAttribute("src");
+      const decoded = () => {
+        if (!image.isConnected || wantedStill.current !== loaded) return;
+        frozenRef.current = false;
+        setFrozen(false);
+      };
+      if (typeof image.decode === "function") void image.decode().then(decoded, () => undefined);
+      else decoded();
+    }} />}
     {active && playbackRequested && <video
       ref={videoRef}
       src={playbackSrc ?? playbackUrl(asset.id)}
@@ -165,15 +231,14 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       loop
       playsInline
       data-shown={videoShown || undefined}
-      // Once the video shows the new position it covers the still; until then the scrub frame stays.
-      onPlaying={() => { setVideoShown(true); if (!scrubbingRef.current) setPreviewRatio(null); }}
       draggable={false}
       preload="metadata"
       aria-label={`${alt} 미리보기`}
       onTimeUpdate={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); }}
-      onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); if (videoShown) setPreviewRatio(null); } }}
+      onSeeked={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); }}
       onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) { setVideoDuration(d); onDurationKnown?.(Math.round(d * 1_000)); } }}
     />}
+    <canvas ref={freezeRef} aria-hidden="true" style={{display: frozen ? undefined : "none", position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none"}} />
     {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(shownDurationMs)}` : formatDuration(shownDurationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
     <div
       className="video-tile__scrub"
@@ -194,6 +259,11 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
         event.stopPropagation();
         scrubbingRef.current = false;
         setScrubbing(false);
+        if (presented.current) {
+          frozenRef.current = false;
+          setFrozen(false);
+          setPreviewRatio(null);
+        }
       }}
     >
       <span className="video-tile__scrub-fill" style={{ width: `${scrubRatio * 100}%` }} aria-hidden="true" />

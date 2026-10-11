@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
 import type { AssetSummary } from "../library/types";
 import { VideoPlayer } from "./VideoPlayer";
+import { mockVideoFrames } from "./videoFrameTestUtils";
+
+let presentFrame: ReturnType<typeof mockVideoFrames>;
 
 const progressApi = vi.hoisted(() => ({
   get: vi.fn(),
@@ -11,6 +14,7 @@ const progressApi = vi.hoisted(() => ({
 }));
 
 beforeEach(() => {
+  presentFrame = mockVideoFrames();
   progressApi.get.mockResolvedValue(null);
   progressApi.save.mockResolvedValue(undefined);
   progressApi.clear.mockResolvedValue(undefined);
@@ -38,6 +42,51 @@ afterEach(() => {
 });
 
 describe("VideoPlayer", () => {
+  it("keeps an independent poster through media events until a frame is presented", () => {
+    const { container, rerender } = render(<VideoPlayer asset={videoAsset()} poster="poster.webp" />);
+    const video = screen.getByLabelText("sample.webm 영상") as HTMLVideoElement;
+    fireEvent.loadedData(video);
+    fireEvent.canPlay(video);
+    fireEvent.playing(video);
+    expect(video).not.toHaveAttribute("poster");
+    expect(container.querySelector("img.video-player__freeze")).toHaveAttribute("src", "poster.webp");
+    presentFrame(video);
+    expect(container.querySelector("img.video-player__freeze")).toBeNull();
+
+    const setAttribute = vi.spyOn(video, "setAttribute");
+    const removeAttribute = vi.spyOn(video, "removeAttribute");
+    rerender(<VideoPlayer asset={videoAsset(90_000)} poster="poster.webp" />);
+    expect(container.querySelector("video")).toBe(video);
+    expect(setAttribute.mock.calls.some(([name]) => name === "src")).toBe(false);
+    expect(removeAttribute.mock.calls.some(([name]) => name === "src")).toBe(false);
+  });
+
+  it("holds one good frame through seeks, seeked and timeouts until the final position is presented", () => {
+    vi.useFakeTimers();
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+    const { container, unmount } = render(<VideoPlayer asset={videoAsset()} poster="poster.webp" />);
+    const video = screen.getByLabelText("sample.webm 영상") as HTMLVideoElement;
+    const timeline = screen.getByRole("slider", { name: "재생 위치" });
+    presentFrame(video);
+    const freeze = container.querySelector("canvas")!;
+    fireEvent.change(timeline, { target: { value: "50" } });
+    fireEvent.seeked(video);
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(freeze.style.display).not.toBe("none");
+    fireEvent.change(timeline, { target: { value: "20" } });
+    presentFrame(video, 50);
+    expect(freeze.style.display).not.toBe("none");
+    expect(drawImage).toHaveBeenCalledOnce();
+    fireEvent.seeked(video);
+    presentFrame(video, 20);
+    expect(freeze.style.display).toBe("none");
+    fireEvent.change(timeline, { target: { value: "30" } });
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("accepts a host media URL and controlled chrome without changing playback on a media tap", () => {
     const onControlsActivity = vi.fn();
     const onError = vi.fn();
@@ -58,7 +107,8 @@ describe("VideoPlayer", () => {
 
     const video = screen.getByLabelText("sample.webm 영상");
     expect(video).toHaveAttribute("src", "https://tablet.invalid/ticket");
-    expect(video).toHaveAttribute("poster", "https://tablet.invalid/poster");
+    expect(video).not.toHaveAttribute("poster");
+    expect(document.querySelector("img.video-player__freeze")).toHaveAttribute("src", "https://tablet.invalid/poster");
     expect(video).toHaveAttribute("autoplay");
     expect(video).toHaveAttribute("loop");
     expect(element).toBe(video);

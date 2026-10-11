@@ -3,6 +3,7 @@ import {Skeleton} from "../shared/ui/Skeleton";
 import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref, type VideoHTMLAttributes } from "react";
 import { Button } from "../shared/ui/Button";
+import { waitForVideoFrame } from "./waitForVideoFrame";
 
 export type VideoPlayerAsset = {
   contentRating?: import("../shared/privacy/contentMask").ContentRating | null;
@@ -18,8 +19,6 @@ export const VIDEO_SEEK_STEP_SECONDS = 5;
 
 /** Lets a host (the asset viewer) route arrow keys to the player while focus sits elsewhere. */
 export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void; togglePlayback: () => void; currentTimeMs: () => number };
-/** Longest time the pre-seek frame may cover the video if `seeked` never fires. */
-const SEEK_FREEZE_MAX_MS = 1_500;
 
 export type PlaybackUrlResolver = (assetId: string) => Promise<string>;
 export type ScrubFrameUrlBuilder = (assetId: string, frameIndex: number, revision?: string | null) => string;
@@ -115,10 +114,10 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
   const [scrubbing, setScrubbing] = useState(false);
   const [volumeInteracting, setVolumeInteracting] = useState(false);
   const [controlsFocused, setControlsFocused] = useState(false);
-  const [source, setSource] = useState<string | undefined>(() => props.sourceUrl ?? undefined);
   const idleTimerRef = useRef<number | null>(null);
   const freezeRef = useRef<HTMLCanvasElement>(null);
-  const freezeTimerRef = useRef<number | null>(null);
+  const cancelFrameRef = useRef<(() => void) | null>(null);
+  const [frameShown, setFrameShown] = useState(false);
   const [frozen, setFrozen] = useState(false);
   const frozenRef = useRef(false);
   const controlsVisible = controlledControlsVisible ?? localControlsVisible;
@@ -176,16 +175,21 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     let active = true;
     const applySource = (next: string | undefined) => {
       if (!active) return;
-      setSource(next);
+      cancelFrameRef.current?.();
+      frozenRef.current = false;
+      setFrozen(false);
+      setFrameShown(false);
       if (video) {
-        if (next) video.src = next;
+        if (next) {
+          if (video.getAttribute("src") !== next) video.src = next;
+          cancelFrameRef.current = waitForVideoFrame(video, 0, () => setFrameShown(true));
+        }
         else video.removeAttribute("src");
       }
     };
     // Linux WebKitGTK uses the lakomics: scheme, which does not stream ranged video well;
     // there the player uses the app's authenticated local HTTP playback URL instead.
     if (fallback?.startsWith("lakomics:")) {
-      setSource(undefined);
       video?.removeAttribute("src");
       if (resolvePlaybackUrl) void resolvePlaybackUrl(asset.id).then(applySource).catch(() => undefined);
     } else {
@@ -193,29 +197,24 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     }
     return () => {
       active = false;
+      cancelFrameRef.current?.();
       if (!video) return;
       video.pause();
       video.removeAttribute("src");
       video.load();
     };
-  }, [asset.id, asset.media.durationMs, props.sourceUrl, resolvePlaybackUrl]);
+  }, [asset.id, props.sourceUrl, resolvePlaybackUrl]);
 
   const releaseFrame = useCallback(() => {
-    if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
-    freezeTimerRef.current = null;
     frozenRef.current = false;
     setFrozen(false);
   }, []);
   useEffect(() => releaseFrame, [releaseFrame]);
-  /** Some engines (WebKitGTK) show black while a seek flushes; hold the current frame over it until `seeked`. */
+  /** Keep a good frame through decoder flushes, until the replacement frame is presented. */
   const holdFrame = () => {
     // While a frame is already held (a drag seeks many times), keep that good frame: a capture taken
     // mid-seek can be the engine's black flush frame, which made releasing the scrubber flicker.
-    if (frozenRef.current) {
-      if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
-      freezeTimerRef.current = window.setTimeout(releaseFrame, SEEK_FREEZE_MAX_MS);
-      return;
-    }
+    if (frozenRef.current || !frameShown) return;
     const video = videoRef.current;
     const canvas = freezeRef.current;
     if (!video || !canvas || video.readyState < 2 || !video.videoWidth) return;
@@ -226,8 +225,13 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     try { context.drawImage(video, 0, 0); } catch { return; }
     frozenRef.current = true;
     setFrozen(true);
-    if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
-    freezeTimerRef.current = window.setTimeout(releaseFrame, SEEK_FREEZE_MAX_MS);
+  };
+  const seekTo = (video: HTMLVideoElement, next: number) => {
+    if (next === video.currentTime) return;
+    holdFrame();
+    cancelFrameRef.current?.();
+    cancelFrameRef.current = waitForVideoFrame(video, next, () => { setFrameShown(true); releaseFrame(); });
+    video.currentTime = next;
   };
   const togglePlayback = () => {
     const video = videoRef.current;
@@ -248,8 +252,7 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     const from = Number.isFinite(video.currentTime) ? video.currentTime : 0;
     const next = Math.max(0, limit > 0 ? Math.min(limit, from + deltaSeconds) : from + deltaSeconds);
     if (next === from) return;
-    holdFrame();
-    video.currentTime = next;
+    seekTo(video, next);
     setCurrentTime(next);
     scheduleIdle();
   };
@@ -284,8 +287,6 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     <video
       ref={setVideoRef}
       className="video-player__media"
-      src={source}
-      poster={poster}
       aria-label={`${title} 영상`}
       playsInline
       preload={preload}
@@ -312,8 +313,7 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
         setPlaying(false);
         mediaEvents?.onEnded?.(event);
       }}
-      // Release only after the last of several queued seeks has landed.
-      onSeeked={(event) => { if (!event.currentTarget.seeking) releaseFrame(); mediaEvents?.onSeeked?.(event); }}
+      onSeeked={mediaEvents?.onSeeked}
       onTimeUpdate={(event) => {
         setCurrentTime(event.currentTarget.currentTime);
         mediaEvents?.onTimeUpdate?.(event);
@@ -324,6 +324,7 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
       }}
       onVolumeChange={(event) => { setMuted(event.currentTarget.muted); setVolume(event.currentTarget.volume); mediaEvents?.onVolumeChange?.(event); }}
     />
+    {poster && !frameShown && <img className="video-player__freeze" src={poster} alt="" aria-hidden="true" style={{background: "var(--color-bg)"}} />}
     <canvas ref={freezeRef} className="video-player__freeze" aria-hidden="true" style={{display: frozen ? undefined : "none"}} />
     <div
       className="video-player__controls"
@@ -353,7 +354,7 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
           onChange={(event) => {
             if (!timelineAvailable) return;
             const next = Number(event.currentTarget.value);
-            if (videoRef.current) { holdFrame(); videoRef.current.currentTime = next; }
+            if (videoRef.current) seekTo(videoRef.current, next);
             setCurrentTime(next);
             scheduleIdle();
           }}
