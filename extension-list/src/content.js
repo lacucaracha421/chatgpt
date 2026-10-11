@@ -8,6 +8,12 @@
   // from an idle page, so it cannot become a permanent background timer.
   const SESSION_WATCH_INTERVAL_MS = 400;
 
+  function youtubeSubtitleUi(event) {
+    const selector = "#lakomics-yt-button, #lakomics-yt-overlay, #lakomics-yt-toast, #ytsf-button";
+    return Boolean(event.target?.closest?.(selector) ||
+      event.composedPath?.().some(node => node?.matches?.(selector)));
+  }
+
   function runtimeTimeoutMs(message) {
     if (message?.type !== "collector:save") return 15_000;
     return message?.payload?.candidate?.type === "video" ? 310_000 : 70_000;
@@ -480,6 +486,7 @@
     }
 
     function onDown(event) {
+      if (youtubeSubtitleUi(event)) return;
       if (insidePicker(event) || gate.phase !== "idle") return;
       const input = inputKind(event); if (!input) return;
       const candidate = findCandidate(event.target); if (!candidate) return;
@@ -544,6 +551,7 @@
       unlockPickerAfterRelease(session);
     }
     function onClick(event) {
+      if (youtubeSubtitleUi(event)) return;
       if (event.isTrusted === false && event.target.closest?.('[data-testid="like"], [data-testid="unlike"]')) return;
       // Consume the release-generated click before checking whether it landed
       // inside the newly mounted picker. This prevents row-1 auto entry.
@@ -557,12 +565,14 @@
       if (disposition === "picker") return;
     }
     function onContextMenu(event) {
+      if (youtubeSubtitleUi(event)) return;
       if (insidePicker(event)) return;
       if (shouldSuppressNativeContext(active, gate.phase)) {
         event.preventDefault(); event.stopImmediatePropagation();
       }
     }
     function onSelectStart(event) {
+      if (youtubeSubtitleUi(event)) return;
       if (insidePicker(event)) return;
       if (shouldSuppressNativeContext(active, gate.phase)) {
         event.preventDefault(); event.stopImmediatePropagation();

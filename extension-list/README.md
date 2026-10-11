@@ -5,6 +5,35 @@ extension. After updating it, reload the extension and the collecting page so th
 new content scripts are active. The existing connection and portable profile are
 retained.
 
+## YouTube subtitles (personal use)
+
+On `https://www.youtube.com/*`, the player AI button cleans Korean captions or
+translates the spoken-language track into Korean. Finished chunks appear while
+the rest processes; pressing again resumes failed chunks. Shift+A switches the
+processed and original captions. A half-filled AI badge means processed captions
+are available while the original view is selected. Each displayed line has its
+own dark band, with optional original text above the translation.
+
+The YouTube subtitles section in options controls enablement, Haiku 5.5 (default)
+or Sonnet 5.5, foreign-language translation, register, speaker marks, optional
+Sonnet glossary, size, position and original text. It shares the Anthropic key and
+user dictionary from AI translation settings. There is no Gemini subtitle provider.
+YouTube has its own request limit; it does not use the X translation queue.
+
+If standalone 자막다듬이 (`#ytsf-button`) is detected, Lakomics skips its subtitle
+UI and logs once to avoid two AI buttons. Disable the standalone extension and
+reload the YouTube page to use Lakomics subtitles.
+
+Complete subtitles are cached locally. When paired, a local miss checks
+`GET /v1/extension/subtitles?video=...&track=...&mode=...` before calling Anthropic;
+complete locally cached results are uploaded with `PUT /v1/extension/subtitles`,
+with one retry. Partial failures are never uploaded. Server misses, authentication
+failures and network outages retain local behavior. Credentials stay in the worker.
+The optional server endpoint must be implemented and deployed separately.
+Options can clear this browser's subtitles/resume data, or also delete all subtitle
+entries in the paired library scope through `DELETE /v1/extension/subtitles`.
+Clearing does not remove the shared API key, dictionary or X translation cache.
+
 Menu order and hidden folders also synchronize through
 `GET/PUT /v1/extension/settings` when that optional server module is wired.
 Changes remain local immediately and are sent together after 750 ms of inactivity.

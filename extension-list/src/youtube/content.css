@@ -1,0 +1,141 @@
+/* Player button */
+#lakomics-yt-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: top;
+  width: 48px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+#lakomics-yt-button .lakomics-yt-icon {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1.5px solid #fff;
+  border-radius: 4px;
+  color: #fff;
+  font: 700 13px/1.25 "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", Roboto, Arial, sans-serif;
+  letter-spacing: 0.02em;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+#lakomics-yt-button.lakomics-yt-ready .lakomics-yt-icon {
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.65) 50%, transparent 50%);
+}
+
+#lakomics-yt-button.lakomics-yt-on .lakomics-yt-icon {
+  background: #fff;
+  color: #111;
+}
+
+#lakomics-yt-button.lakomics-yt-busy .lakomics-yt-icon {
+  animation: lakomics-yt-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes lakomics-yt-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Clean caption overlay */
+#lakomics-yt-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: min(86%, 24em);
+  bottom: calc(max(24px, var(--lakomics-yt-h, 360) * 0.06px) + var(--lakomics-yt-h, 360) * var(--lakomics-yt-raise, 0) * 1px);
+  transform: none;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  color: #fff;
+  font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  font-weight: 600;
+  font-size: clamp(calc(16px * var(--lakomics-yt-scale, 1)), calc(var(--lakomics-yt-h, 360) * 0.052px * var(--lakomics-yt-scale, 1)), calc(46px * var(--lakomics-yt-scale, 1)));
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-align: center;
+  white-space: pre-line;
+  text-wrap: balance;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  z-index: 60;
+  transition: bottom 0.25s ease;
+}
+
+/* YouTube controls visible (player lacks .ytp-autohide) */
+#movie_player:not(.ytp-autohide) #lakomics-yt-overlay {
+  bottom: calc(max(64px, 52px + var(--lakomics-yt-h, 360) * 0.03px) + var(--lakomics-yt-h, 360) * var(--lakomics-yt-raise, 0) * 1px);
+}
+
+#lakomics-yt-overlay > span,
+#lakomics-yt-overlay > div > span {
+  background: rgba(0, 0, 0, 0.78);
+  padding: 0.04em 0.42em;
+  border-radius: 0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+#lakomics-yt-overlay .lakomics-yt-orig-line {
+  margin-bottom: 0.15em;
+  font-size: 0.68em;
+}
+
+#lakomics-yt-overlay.lakomics-yt-waiting > span {
+  font-size: 0.7em;
+  opacity: 0.75;
+}
+
+#lakomics-yt-overlay .lakomics-yt-orig {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(0, 0, 0, 0.72);
+}
+
+/* YouTube's own captions are hidden only while the clean ones are active */
+#movie_player.lakomics-yt-active .ytp-caption-window-container {
+  display: none !important;
+}
+
+/* Status toast (progress, completion, errors): top centre so it never covers subtitles */
+#lakomics-yt-toast {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  max-width: 80%;
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: rgba(8, 8, 8, 0.9);
+  color: #fff;
+  font: 400 14px/1.4 "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", Roboto, Arial, sans-serif;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 70;
+}
+
+#lakomics-yt-toast.lakomics-yt-show {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #lakomics-yt-button .lakomics-yt-icon,
+  #lakomics-yt-overlay,
+  #lakomics-yt-toast { transition: none; }
+  #lakomics-yt-button.lakomics-yt-busy .lakomics-yt-icon { animation: none; }
+}

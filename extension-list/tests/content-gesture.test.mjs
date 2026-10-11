@@ -4,6 +4,30 @@ import { readFile } from 'node:fs/promises';
 import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
 const source = await readFile(new URL('../src/content.js', import.meta.url), 'utf8');
+
+test('YouTube subtitle buttons and overlay bypass collector capture handlers, even under its click guard', async () => {
+  const f = fixture();
+  // Deliberately broad candidate finder catches accidental collector ownership.
+  f.w.LakomicsForumSource.findCandidate = target => ({ element: target, type: 'image', mediaUrl: 'https://example.test/image.jpg' });
+  for (const id of ['lakomics-yt-button', 'lakomics-yt-overlay', 'lakomics-yt-toast', 'ytsf-button']) {
+    const host = f.w.document.createElement('div'); host.id = id;
+    const child = f.w.document.createElement('span'); host.append(child); f.w.document.body.append(host);
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'click']) {
+      const event = new f.w.MouseEvent(type, { bubbles: true, cancelable: true, clientX: type === 'pointerdown' ? 40 : 70, clientY: 40, button: 0 });
+      Object.defineProperties(event, { pointerId: { value: 7 }, pointerType: { value: 'mouse' } });
+      child.dispatchEvent(event); assert.equal(event.defaultPrevented, false);
+    }
+  }
+  await f.advance(600);
+  assert.equal(f.mounts.length, 0); assert.equal(f.requests.length, 0);
+  f.pointer('pointerdown'); f.pointer('pointermove', 'mouse', 60); await f.advance(251);
+  assert.equal(f.mounts.length, 1, 'ordinary collection still works');
+  f.pointer('pointerup', 'mouse', 60);
+  const event = new f.w.MouseEvent('click', { bubbles: true, cancelable: true });
+  f.w.document.querySelector('#lakomics-yt-button span').dispatchEvent(event);
+  assert.equal(event.defaultPrevented, false, 'collector release click guard leaves AI button alone');
+  f.close();
+});
 function fixture() {
   const dom = new JSDOM('<img id="image">', { url: 'https://example.test/', runScripts: 'outside-only' });
   const w = dom.window, timers = new Map(), mounts = [], requests = [];

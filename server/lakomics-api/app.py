@@ -1056,6 +1056,12 @@ startup_extension_settings = register_extension_settings(
     app, get_db, require_admin_or_extension, resolve_scope=lambda _principal: "primary-library")
 
 
+from extension_subtitles import register as register_extension_subtitles
+
+startup_extension_subtitles = register_extension_subtitles(
+    app, get_db, require_admin_or_extension, resolve_scope=lambda _principal: "primary-library")
+
+
 # Install after the visibility/authority schemas. No historical Assets are enqueued.
 import image_thumbnails
 

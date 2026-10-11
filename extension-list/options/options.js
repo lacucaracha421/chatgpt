@@ -11,6 +11,7 @@
   async function load() {
     const settings = await send({ type: "settings:get" });
     const paired = Boolean(settings?.paired);
+    $("youtube-clear-server").hidden = !paired;
     $("state-dot").classList.toggle("online", paired);
     $("state-label").textContent = paired ? "연결됨" : "연결 안 됨";
     $("pair-help").hidden = paired;
@@ -177,4 +178,37 @@
     } catch { $("translation-dictionary-status").textContent = "사전 저장 실패"; }
   };
   void translationSettings().catch(() => { $("translation-status").textContent = "번역 설정을 불러오지 못했습니다"; });
+  const youtubeChecks = ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal"];
+  const youtubeSelects = ["model", "register", "fontScale", "position"];
+  function renderYoutube(settings) {
+    for (const key of youtubeChecks) $("youtube-" + key).checked = settings[key];
+    for (const key of youtubeSelects) $("youtube-" + key).value = String(settings[key]);
+  }
+  async function youtubeSettings() {
+    const result = await send({ type: "youtube:settings" });
+    if (result?.ok) renderYoutube(result.settings);
+    else $("youtube-status").textContent = "자막 설정을 불러오지 못했습니다";
+  }
+  for (const key of [...youtubeChecks, ...youtubeSelects]) {
+    $("youtube-" + key).onchange = async () => {
+      const node = $("youtube-" + key);
+      const value = youtubeChecks.includes(key) ? node.checked : key === "fontScale" ? Number(node.value) : node.value;
+      try {
+        const result = await send({ type: "youtube:update", patch: { [key]: value } });
+        $("youtube-status").textContent = result?.ok ? "저장됨" : "설정 저장 실패";
+        if (result?.ok) renderYoutube(result.settings);
+      } catch { $("youtube-status").textContent = "설정 저장 실패"; }
+    };
+  }
+  for (const [id, type] of [["youtube-clear", "youtube:clearCache"], ["youtube-clear-server", "youtube:clearServerCache"]]) {
+    $(id).onclick = async () => {
+      $(id).disabled = true;
+      try {
+        const result = await send({ type });
+        $("youtube-status").textContent = result?.ok ? "저장된 자막을 지웠습니다" : "삭제 실패 · 잠시 후 다시 시도해 주세요";
+      } catch { $("youtube-status").textContent = "삭제 실패"; }
+      finally { $(id).disabled = false; }
+    };
+  }
+  void youtubeSettings().catch(() => { $("youtube-status").textContent = "자막 설정을 불러오지 못했습니다"; });
 })();

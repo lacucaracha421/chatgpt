@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Collector List",
-  "version": "3.0.0.50",
-  "version_name": "3.0.0-alpha.50",
+  "version": "3.0.0.51",
+  "version_name": "3.0.0-alpha.51",
   "description": "A Lakomics media collector with a thumb-friendly edge menu.",
   "permissions": [
     "storage",
     "downloads",
-    "contextMenus"
+    "contextMenus",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://*/*",
@@ -98,6 +99,28 @@
       ],
       "css": [
         "src/content.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "src/youtube/page-hook.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "src/youtube/content.js"
+      ],
+      "css": [
+        "src/youtube/content.css"
       ],
       "run_at": "document_idle"
     }

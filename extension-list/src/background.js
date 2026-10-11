@@ -1,4 +1,4 @@
-importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translation/korean-rules.js", "translation/korean.js", "translation/terms.js", "translation/deadline.js", "translate-service.js", "av-lookup.js");
+importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translation/korean-rules.js", "translation/korean.js", "translation/terms.js", "translation/deadline.js", "translate-service.js", "av-lookup.js", "youtube/settings.js", "youtube/terms.js", "youtube/korean.js", "youtube/deadline.js", "youtube/parse.js", "youtube/chunk.js", "youtube/order.js", "youtube/display.js", "youtube/cues.js", "youtube/timing.js", "youtube/resume.js", "youtube/mode.js", "youtube/prompts.js", "youtube/results.js", "youtube/anthropic.js", "youtube/provider.js", "youtube/server-cache.js", "youtube/service.js");
 
 (() => {
   "use strict";
@@ -50,6 +50,7 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
   }
 
   async function handleMessage(message, sender = {}) {
+    if (message?.type?.startsWith("youtube:")) return globalThis.LakomicsYouTubeService.handle(message, sender);
     if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message, sender);
     switch (message?.type) {
       case "pair:review": {

@@ -43,6 +43,20 @@
     <form id="translation-anthropic-key-form"><input id="translation-anthropic-key" type="password" aria-label="Anthropic API 키" autocomplete="off" placeholder="Anthropic API 키 (Claude 모델용)"><button>키 저장</button></form>
     <button id="translation-clear" type="button">캐시 비우기</button>
   </section>
+  <section id="youtube-section">
+    <div class="section-head"><span>YouTube 자막</span><output id="youtube-status" aria-live="polite"></output></div>
+    <p class="hint">YouTube 플레이어의 AI 버튼 · Shift+A로 원래 자막과 전환합니다. 위에 저장한 Anthropic 키와 아래 내 용어 사전을 함께 사용합니다.</p>
+    <label><input id="youtube-enabled" type="checkbox"> YouTube 자막 사용</label>
+    <label for="youtube-model">모델 <select id="youtube-model"><option value="claude-haiku-5-5">Haiku 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option></select></label>
+    <label><input id="youtube-translate" type="checkbox"> 외국어 영상 한국어 번역</label>
+    <label for="youtube-register">말투 <select id="youtube-register"><option value="auto">자동</option><option value="haeyo">해요체</option><option value="hapnida">합니다체</option><option value="banmal">반말</option></select></label>
+    <label><input id="youtube-speakers" type="checkbox"> 화자 전환 표시</label>
+    <label><input id="youtube-glossarySonnet" type="checkbox"> 용어 목록은 Sonnet</label>
+    <label for="youtube-fontScale">글자 크기 <select id="youtube-fontScale"><option value="0.85">작게</option><option value="1">기본</option><option value="1.15">크게</option><option value="1.3">아주 크게</option></select></label>
+    <label for="youtube-position">위치 <select id="youtube-position"><option value="default">기본</option><option value="raised">조금 위로</option></select></label>
+    <label><input id="youtube-showOriginal" type="checkbox"> 번역 위에 원문 표시</label>
+    <div class="youtube-cache-actions"><button id="youtube-clear" type="button">저장된 자막 지우기 (이 브라우저)</button><button id="youtube-clear-server" type="button" hidden>서버에 저장된 자막도 지우기</button></div>
+  </section>
   <section id="translation-dictionary-section">
     <div class="section-head"><label for="translation-dictionary">내 용어 사전</label><output id="translation-dictionary-status" aria-live="polite"></output></div>
     <p class="hint" id="translation-dictionary-help">한 줄에 원문 = 한국어로 입력하세요. →와 -&gt;도 사용할 수 있습니다. 최대 200개, 원문과 한국어는 각각 80자까지 저장됩니다.</p>

@@ -64,6 +64,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "asset_authority.register_asset_authority.<locals>.<lambda>",
             "library_search.register.<locals>.startup",
             "extension_settings.register.<locals>.startup",
+            "extension_subtitles.register.<locals>.startup",
             "app.startup_image_thumbnails",
         ]
         expected_shutdown = [
@@ -99,6 +100,7 @@ class ReplicationStartupTests(unittest.TestCase):
                     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                     triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
                     self.assertTrue({"library_tag_counts", "library_tag_visibility"} <= tables)
+                    self.assertIn("extension_subtitles", tables)
                     self.assertTrue({"tag_canonical_insert", "tag_domain_insert"} <= triggers)
             self.assertEqual(calls, expected_startup + ["async_startup"]
                              + expected_shutdown + ["async_shutdown"])
