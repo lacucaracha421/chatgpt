@@ -24,12 +24,7 @@ pub(crate) struct Inputs {
     observed: [Mutex<Option<(String, u64)>>; 12],
     checked: [Mutex<Option<u64>>; 12],
     cached: [Mutex<Option<(u64, String, String)>>; 12],
-    character_sources: Mutex<
-        Option<(
-            Vec<Option<(std::time::SystemTime, u64)>>,
-            Option<std::collections::BTreeSet<String>>,
-        )>,
-    >,
+    character_sources: Mutex<Option<Vec<Option<(std::time::SystemTime, u64)>>>>,
 }
 impl Inputs {
     pub(crate) fn lanes_to_dispatch(
@@ -125,7 +120,7 @@ impl Inputs {
     }
     pub(crate) fn character_sources(&self, library: &Library) {
         // S36 writes a separate SQLite cache. Include its WAL; no cache connection or scan.
-        let stamps = ["s36_shadow.sqlite", "s36_shadow.sqlite-wal"]
+        let source = ["s36_shadow.sqlite", "s36_shadow.sqlite-wal"]
             .into_iter()
             .map(|name| {
                 std::fs::metadata(library.root().join(".cache/characters").join(name))
@@ -133,7 +128,6 @@ impl Inputs {
                     .and_then(|m| m.modified().ok().map(|at| (at, m.len())))
             })
             .collect();
-        let source = (stamps, library.character_s36_series());
         let mut previous = self
             .character_sources
             .lock()

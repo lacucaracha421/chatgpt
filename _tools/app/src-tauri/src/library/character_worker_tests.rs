@@ -17,7 +17,6 @@ fn augmentation_settings_keep_the_selected_model_when_disabled() {
         models: temp.path().to_owned(),
         augmentation_model: Some(model.clone()),
         s36_shadow_disabled: true,
-        s36: Default::default(),
         shadow_model: None,
     };
     // Legacy JSON with a model path remains enabled until explicitly disabled.
@@ -56,7 +55,6 @@ fn invalid_augmentation_model_does_not_overwrite_settings() {
         models: temp.path().to_owned(),
         augmentation_model: None,
         s36_shadow_disabled: true,
-        s36: Default::default(),
         shadow_model: None,
     };
     let before = serde_json::to_vec(&config).unwrap();
@@ -85,7 +83,6 @@ fn preconnected_model_is_resolved_without_enabling_legacy_runtime() {
         models: temp.path().to_owned(),
         augmentation_model: None,
         s36_shadow_disabled: true,
-        s36: Default::default(),
         shadow_model: None,
     };
     let before = serde_json::to_vec(&config).unwrap();
@@ -168,7 +165,6 @@ fn child_cancellation_deadline_exit_and_oversized_output_are_bounded() {
             models: temp.path().into(),
             augmentation_model: None,
             s36_shadow_disabled: true,
-            s36: Default::default(),
             shadow_model: None,
         };
         let mut worker = Worker::start(&config, temp.path(), cancel.clone()).unwrap();
@@ -248,6 +244,26 @@ fn character_shadow_setting_save_preserves_augmentation_and_unknown_fields() {
 }
 
 #[test]
+fn an_old_runtime_file_with_the_series_switch_still_loads_and_the_switch_is_ignored() {
+    let temp = tempfile::tempdir().unwrap();
+    let settings = temp.path().join("settings.json");
+    let script = temp.path().join("worker.py");
+    std::fs::write(&script, b"fixture").unwrap();
+    let old = serde_json::json!({
+        "python": script, "script": script, "models": temp.path(),
+        "s36_series": ["850f4406-ebfd-4024-957f-2b36a5cbff88"],
+        "s36_excluded_targets": ["target"],
+    });
+    std::fs::write(&settings, serde_json::to_vec(&old).unwrap()).unwrap();
+    let saved = RuntimeConfig::load(script.clone(), &settings).unwrap();
+    let written = serde_json::to_value(&saved.runtime).unwrap();
+    assert!(written.get("s36_series").is_none());
+    assert!(written.get("s36_excluded_targets").is_none());
+    let status = serde_json::to_value(RuntimeConfig::s36_publication(script, &settings).unwrap()).unwrap();
+    assert_eq!(status, serde_json::json!({"scoringEnabled": false}));
+}
+
+#[test]
 #[ignore = "requires LAKOMICS_CHARACTER_TEST_PYTHON"]
 fn character_shadow_worker_response_is_preemptible() {
     let temp = tempfile::tempdir().unwrap();
@@ -262,7 +278,6 @@ fn character_shadow_worker_response_is_preemptible() {
         models: temp.path().into(),
         augmentation_model: None,
         s36_shadow_disabled: true,
-        s36: Default::default(),
         shadow_model: None,
     };
     let mut worker = Worker::start(&config, temp.path(), Arc::new(AtomicBool::new(false))).unwrap();
@@ -284,7 +299,7 @@ fn performance_budgets_reach_worker_arguments_but_not_saved_runtime_settings() {
         let config = RuntimeConfig {
             performance: profile.budgets(), python: "python".into(), script: "worker.py".into(),
             models: "models".into(), augmentation_model: None, s36_shadow_disabled: false,
-            shadow_model: None, s36: Default::default(),
+            shadow_model: None,
         };
         assert_eq!(config.performance_args(), [
             "--s36-intra-threads".to_string(), profile.budgets().s36_intra_threads.to_string(),

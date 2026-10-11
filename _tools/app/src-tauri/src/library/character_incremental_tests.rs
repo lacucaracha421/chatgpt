@@ -98,7 +98,7 @@ fn augmentation_publication_is_additive_and_respects_manual_vetoes() {
                 &BTreeSet::new(),
                 &BTreeSet::new(),
                 (mode != "off").then_some(&response),
-                &crate::library::character_worker::S36Publication::default(),
+                &crate::library::character_shadow_review::LearningTargets::default(),
             )
             .unwrap();
         if mode == "rollback" {
@@ -565,7 +565,6 @@ for line in sys.stdin:
         models: f.temp.path().into(),
         augmentation_model: None,
         s36_shadow_disabled: true,
-        s36: Default::default(),
         shadow_model: None,
     }
 }
@@ -1191,7 +1190,6 @@ fn real_native_incremental_queue_reuses_kisaki_references() {
             .join("../character-runtime/scan_worker.py"),
         augmentation_model: None,
         s36_shadow_disabled: true,
-        s36: Default::default(),
         shadow_model: None,
         models: std::env::var_os("LAKOMICS_CHARACTER_TEST_MODELS")
             .unwrap()
@@ -2286,8 +2284,8 @@ fn character_shadow_queue_publication_is_unchanged_on_off_and_failure() {
 }
 
 #[test]
-fn s36_series_suppresses_native_automatic_membership_only_for_its_targets() {
-    for s36_series in [false, true] {
+fn learning_recognition_suppresses_native_automatic_membership_only_for_its_characters() {
+    for learning in [false, true] {
         let f = Fixture::new();
         let target = f.ready("A");
         add_learned_reference(&f, &target.id);
@@ -2317,10 +2315,11 @@ fn s36_series_suppresses_native_automatic_membership_only_for_its_targets() {
                 })),
             },
         };
-        let mut s36 = crate::library::character_worker::S36Publication::default();
-        if s36_series {
-            s36.s36_series.insert(f.series.clone());
-        }
+        let s36 = if learning {
+            crate::library::character_shadow_review::LearningTargets::of([target.id.clone()])
+        } else {
+            Default::default()
+        };
         f.library
             .finalize_incremental_augmented(
                 &tx,
@@ -2338,8 +2337,8 @@ fn s36_series_suppresses_native_automatic_membership_only_for_its_targets() {
         let relations = f.library.character_relations_for_asset("asset-5").unwrap();
         assert_eq!(
             relations.is_empty(),
-            s36_series,
-            "S36 series = {s36_series}"
+            learning,
+            "learning character = {learning}"
         );
     }
 }
@@ -2356,8 +2355,6 @@ fn idle_config(f: &Fixture) -> RuntimeConfig {
         r#"{"version":"idle-gate"}"#,
     )
     .unwrap();
-    let mut s36 = crate::library::character_worker::S36Publication::default();
-    s36.s36_series.insert(f.series.clone());
     RuntimeConfig {
         performance: crate::performance::Profile::Laptop.budgets(),
         python: f.temp.path().join("no-python"),
@@ -2365,7 +2362,6 @@ fn idle_config(f: &Fixture) -> RuntimeConfig {
         models: f.temp.path().into(),
         augmentation_model: Some(runtime.join("augmentation-model")),
         s36_shadow_disabled: false,
-        s36,
         shadow_model: Some(runtime.join("augmentation-model")),
     }
 }
@@ -2958,17 +2954,23 @@ fn s36_catch_up_skips_scored_references_and_reuses_pass_connections() {
             c.execute("UPDATE character_autotag_jobs SET state='completed',updated_at=?2 WHERE asset_id=?1", params![id, now]).unwrap();
         }
     }
+    // 학습 인식 places this character: enough judged candidates and examples.
+    crate::library::character_shadow_review::seed_readiness(
+        f.temp.path(),
+        &f.library.connection().unwrap(),
+        &target.id,
+        "idle-gate",
+        "catch-up",
+        (30, 0, 20),
+    );
     let cache_path = f.temp.path().join(".cache/characters/s36_shadow.sqlite");
-    std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
     let cache = rusqlite::Connection::open(&cache_path).unwrap();
-    cache
-        .execute_batch("CREATE TABLE scores(asset_id TEXT,policy_version TEXT);")
-        .unwrap();
     for i in 0..6 {
         cache
             .execute(
-                "INSERT INTO scores VALUES(?1,'idle-gate')",
-                [format!("asset-{i}")],
+                "INSERT INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections,origin)
+                 VALUES(?1,'hash',?2,0.5,'none','idle-gate','feature','none','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',100,'live')",
+                params![format!("asset-{i}"), target.id],
             )
             .unwrap();
     }
@@ -3027,8 +3029,15 @@ fn s36_catch_up_skips_scored_references_and_reuses_pass_connections() {
         2,
         "a missing score uses the same pass connection"
     );
-    let mut other_cfg = cfg.clone();
-    other_cfg.s36.s36_series = BTreeSet::from([f.outside.clone()]);
+    // The character is taken off automatic recognition: nobody is placed by 학습 인식.
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE character_targets SET manual_only=1 WHERE id=?1",
+            [&target.id],
+        )
+        .unwrap();
     f.library
         .character_incremental
         .lock()
@@ -3038,10 +3047,10 @@ fn s36_catch_up_skips_scored_references_and_reuses_pass_connections() {
     #[cfg(unix)]
     f.library.character_reference_files.lock().unwrap().clear();
     ORIGINAL_OPENS.with(|n| n.set(0));
-    assert!(f.library.s36_catch_up(&other_cfg).unwrap().is_none());
+    assert!(f.library.s36_catch_up(&cfg).unwrap().is_none());
     assert_eq!(
         ORIGINAL_OPENS.with(|n| n.get()),
         0,
-        "non-S36 series must not resolve references even without a cached score"
+        "a series without a learning character must not resolve references even without a cached score"
     );
 }

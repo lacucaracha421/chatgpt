@@ -67,8 +67,8 @@
       "legacyToken": 7
     },
     "_tools/app/src/characters/SeriesBrowser.css": {
-      "offScaleSpacing": 3,
-      "offRoleFontSize": 3,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 2,
       "pillRadius": 0,
       "legacyToken": 21
     },

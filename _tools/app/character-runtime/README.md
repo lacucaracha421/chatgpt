@@ -490,30 +490,40 @@ judgment of the same asset/hash/target; clears and changed/unavailable assets ar
 unknown. Rates use reviewed rows only, not all arrivals. Verification uses fixtures;
 real-library native runtime, actual model inference and Windows remain unverified.
 
-## S36 publication by series (stage 3)
+## S36 publication per character (stage 3)
 
-The series header offers `자동 분류: 기존 / S36`; a character in an S36 series can be
-marked `S36 제외`. Both choices are machine-local, stored as `s36_series` and
-`s36_excluded_targets` in `character-runtime.json` (no library schema change), so each
-PC switches its own series. In an S36 series the native queue still runs B36 but
-publishes no B36 or augmentation membership for that series' targets. After the image's
-S36 shadow score is recorded (idle time, live queue and explicit historical refresh
-only — never the cached backfill), a `automatic` verdict under `s36_policy.json`
-becomes an automatic acceptance with `prediction.engine = "s36"`, policy version,
-feature id, knn3 and the rejection count in its evidence. Any earlier decision for the
-pair (manual, automatic or cleared), an excluded character, changed content or a
-target outside the automatic scope publishes nothing. S36 series therefore classify
-nothing while `S36 시험 채점` is off or the model is unavailable; the queue is never
-blocked. `S36 자동 분류 해제` clears the series' S36-made acceptances that nobody has
-judged since, through the ordinary manual decision path. The review screen adds a
-`기존 자동 분류 점검` tab listing automatic acceptances whose S36 score does not support
-them (shadow verdict `recommended`/`none`).
+Each character is placed automatically by exactly one recognizer at a time: B36
+(기본 인식) or S36 (학습 인식). There is no setting and no selector: the library derives
+it from the character's judgments every time it matters (`character_shadow_review.rs`,
+`readiness_status`). S36 places a character when at least 30 automatic S36 candidates
+were judged after scoring, at least 50 manual acceptances exist and the wrong ones
+(rejections of those candidates) do not exceed `max(1, floor(5% of judged))`. Beyond the
+allowance the character is B36's again, and it returns once the numbers are within it.
+Manual-only and switched-off characters, 기타 buckets and extras are never placed. The
+same rule is checked in both languages against `src/characters/learningRule.fixture.json`.
+Ownership changes only affect new placements; nothing already placed is moved or removed.
 
-Characters S36 does not classify yet (a B36 series, or `S36 제외`) show an S36
-readiness line: automatic candidates of the newest policy judged after scoring, the
-wrong ones among them, and manual acceptances (examples). `ready` needs at least 30
-judged with at most one wrong and 50 examples; two or three wrong is `hold`, four or
-more `keep`. It is a read-only summary; switching stays an explicit choice.
+For a character S36 places, the native queue still runs B36 but publishes no B36 or
+augmentation membership for it. After the image's S36 shadow score is recorded (idle
+time, live queue and explicit historical refresh only — never the cached backfill), an
+`automatic` verdict under `s36_policy.json` becomes an automatic acceptance with
+`prediction.engine = "s36"`, policy version, feature id, knn3 and the rejection count
+in its evidence. Any earlier decision for the pair (manual, automatic or cleared),
+changed content or a target outside the automatic scope publishes nothing. A closer
+character that S36 does not place yet still wins its person crop, and when B36 already
+placed another character on the same person (or the crops cannot tell) the pair is left
+as an open candidate for a person: the recognizers are never ranked automatically. S36
+places nothing while `S36 시험 채점` is off or the model is unavailable, and then no
+character counts as S36's, so B36 keeps classifying; the queue is never blocked.
+`학습 인식이 넣은 것 되돌리기` (설정 › 고급 › 캐릭터 인식 상태) clears a series' S36-made
+acceptances that nobody has judged since, through the ordinary manual decision path. The
+review screen adds a `기존 자동 분류 점검` tab listing automatic acceptances whose S36
+score does not support them (shadow verdict `recommended`/`none`).
+
+An older `character-runtime.json` may still hold `s36_series` / `s36_excluded_targets`
+from the former per-series switch; they are ignored. The read-only readiness line per
+character (judged, wrong, allowed, examples, `learning` / `collecting` / `hold`) is
+shown on the character cards and in 설정 › 고급.
 
 ## S36 review screen (stage 4, early)
 

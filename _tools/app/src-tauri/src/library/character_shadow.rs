@@ -247,6 +247,10 @@ impl Cache {
         if !cache_has_origin(&tx)? {
             tx.execute_batch("ALTER TABLE scores ADD COLUMN origin TEXT NOT NULL DEFAULT 'live'; PRAGMA user_version=1;")?;
         }
+        // Finds the newest policy without reading every score (see `character_shadow_review`).
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS scores_by_time ON scores(scored_at, policy_version)",
+        )?;
         tx.commit()?;
         Ok(Self(c))
     }
@@ -353,7 +357,12 @@ impl Library {
         }
         source.verify(self)?;
         Cache::open(&self.root)?.record(&pending, &policy, &response, rejections, &at)?;
-        let published = self.publish_s36(&pending, &policy, &response, rejections, &config.s36)?;
+        let learning = {
+            let c = self.connection()?;
+            let ids = pending.outcomes.keys().cloned().collect::<Vec<_>>();
+            self.learning_targets(&c, &ids)
+        };
+        let published = self.publish_s36(&pending, &policy, &response, rejections, &learning)?;
         if published > 0 {
             eprintln!(
                 "S36 automatic classification: {published} for {}",
@@ -409,18 +418,21 @@ impl Library {
         Ok(cleared)
     }
 
-    /// Stage 3. In a series switched to S36, an automatic verdict becomes an automatic
-    /// acceptance. Any earlier decision for the pair (manual, automatic or cleared) wins,
-    /// and scope, content and exclusion are rechecked in this write transaction.
+    /// Stage 3. For a character 학습 인식 places (see `LearningTargets`), an automatic verdict
+    /// becomes an automatic acceptance. Any earlier decision for the pair (manual, automatic
+    /// or cleared) wins, and scope and content are rechecked in this write transaction.
+    ///
+    /// Nothing is settled between the two recognizers: when 기본 인식 already placed another
+    /// character on the same person, the pair stays an open 인식 추천 for a person to decide.
     pub(super) fn publish_s36(
         &self,
         pending: &Pending,
         policy: &Policy,
         response: &Value,
         rejections: u64,
-        s36: &super::character_worker::S36Publication,
+        learning: &super::character_shadow_review::LearningTargets,
     ) -> Result<usize> {
-        if s36.s36_series.is_empty() {
+        if learning.is_empty() {
             return Ok(0);
         }
         let scores = response["scores"].as_object().ok_or(Error::Stale)?;
@@ -438,14 +450,12 @@ impl Library {
         }
         let now = chrono::Utc::now().to_rfc3339();
         // One person is one character: among confident S36 targets, each person crop
-        // keeps only its closest character. Excluded or already-judged characters still
-        // take part, so they can block a look-alike, but only open pairs are written.
+        // keeps only its closest character. Characters 학습 인식 does not place (yet) and
+        // already-judged ones still take part, so they can block a look-alike, but only
+        // open pairs of characters it places are written.
         let crops = response["crops"].as_object();
         let mut candidates = Vec::new();
         for target in self.character_autotag_targets(&tx, &pending.asset_id)? {
-            if !s36.owns(target.series_classification_id.as_deref()) {
-                continue;
-            }
             let Some(score) = scores.get(&target.id).and_then(Value::as_f64) else {
                 continue;
             };
@@ -467,7 +477,8 @@ impl Library {
         }
         let mut published = 0;
         for (score, target) in winners.into_values() {
-            if s36.s36_excluded_targets.contains(&target.id) {
+            // A closer character that 학습 인식 does not place yet still wins its person.
+            if !learning.owns(&target.id) {
                 continue;
             }
             // As in B36, only agreement recommendations may reach automatic acceptance.
@@ -479,6 +490,9 @@ impl Library {
                 |r| r.get(0),
             )?;
             if earlier {
+                continue;
+            }
+            if placed_by_base_on_same_person(&tx, &pending.asset_id, &target.id, crops)? {
                 continue;
             }
             let snapshot = json!({
@@ -508,8 +522,37 @@ impl Library {
     }
 }
 
+/// Whether another character that is not placed by 학습 인식 holds an automatic acceptance of
+/// the asset on the person `target_id` was matched to (or on a person nobody can tell apart).
+/// Such a pair is left to a person: the two recognizers are never ranked here.
+fn placed_by_base_on_same_person(
+    tx: &Connection,
+    asset_id: &str,
+    target_id: &str,
+    crops: Option<&serde_json::Map<String, Value>>,
+) -> Result<bool> {
+    let person = |target: &str| crops.and_then(|c| c.get(target)).and_then(Value::as_u64);
+    let others = tx
+        .prepare(
+            "SELECT d.target_id FROM character_decisions d
+             WHERE d.source_asset_id=?1 AND d.target_id<>?2 AND d.origin='automatic' AND d.decision='accepted'
+               AND COALESCE(json_extract(d.reference_snapshot,'$.prediction.engine'),'')<>'s36'
+               AND d.sequence=(SELECT MAX(x.sequence) FROM character_decisions x
+                               WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id)
+               AND NOT EXISTS(SELECT 1 FROM character_targets t WHERE t.id=d.target_id AND t.role='extras')",
+        )?
+        .query_map(params![asset_id, target_id], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mine = person(target_id);
+    Ok(others
+        .iter()
+        .any(|other| mine.is_none() || person(other).is_none_or(|theirs| Some(theirs) == mine)))
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::character_shadow_review::LearningTargets;
+    use super::super::characters::{tests::Fixture, Target};
     use super::*;
     fn policy_file(root: &Path) -> std::path::PathBuf {
         let path = root.join("s36_policy.json");
@@ -742,8 +785,7 @@ mod tests {
     #[test]
     fn s36_publication_tagger_agreement_requires_automatic_verdict() {
         let (f, target, policy, pending) = s36_fixture();
-        let mut s36 = super::super::character_worker::S36Publication::default();
-        s36.s36_series.insert(f.series.clone());
+        let s36 = LearningTargets::of([target.id.clone()]);
         for (reason, pixai, canary, score, rejections, accepted) in [
             ("recommendation", 0.85, 0.85, 0.05, 100, true),
             ("recommendation", 0.9, 0.9, 0.11, 100, false),
@@ -838,8 +880,7 @@ mod tests {
     #[test]
     fn s36_publication_tagger_agreement_never_overrides_existing_decisions() {
         let (f, target, policy, pending) = s36_fixture();
-        let mut s36 = super::super::character_worker::S36Publication::default();
-        s36.s36_series.insert(f.series.clone());
+        let s36 = LearningTargets::of([target.id.clone()]);
         for origin in ["manual", "automatic"] {
             for decision in ["accepted", "rejected", "cleared"] {
                 let c = f.library.connection().unwrap();
@@ -910,18 +951,19 @@ mod tests {
         }
     }
     #[test]
-    fn s36_publication_accepts_only_confident_unjudged_pairs_in_s36_series_and_rolls_back() {
+    fn s36_publication_accepts_only_confident_unjudged_pairs_of_learning_characters_and_rolls_back()
+    {
         let (f, target, policy, pending) = s36_fixture();
-        let mut s36 = super::super::character_worker::S36Publication::default();
+        let mut s36 = LearningTargets::default();
         let confident = response(&pending, &target.id, 0.05);
-        // Not an S36 series: nothing is published.
+        // 학습 인식 places nobody here: nothing is published.
         assert_eq!(
             f.library
                 .publish_s36(&pending, &policy, &confident, 100, &s36)
                 .unwrap(),
             0
         );
-        s36.s36_series.insert(f.series.clone());
+        s36 = LearningTargets::of([target.id.clone()]);
         // Below the guard or above the threshold: nothing is published.
         assert_eq!(
             f.library
@@ -936,15 +978,6 @@ mod tests {
                 .unwrap(),
             0
         );
-        // Excluded character: nothing is published.
-        s36.s36_excluded_targets.insert(target.id.clone());
-        assert_eq!(
-            f.library
-                .publish_s36(&pending, &policy, &confident, 100, &s36)
-                .unwrap(),
-            0
-        );
-        s36.s36_excluded_targets.clear();
         assert_eq!(
             f.library
                 .publish_s36(&pending, &policy, &confident, 100, &s36)
@@ -984,8 +1017,7 @@ mod tests {
     #[test]
     fn s36_publication_skips_changed_content() {
         let (f, target, policy, mut pending) = s36_fixture();
-        let mut s36 = super::super::character_worker::S36Publication::default();
-        s36.s36_series.insert(f.series.clone());
+        let s36 = LearningTargets::of([target.id.clone()]);
         pending.content_hash = "b".repeat(64);
         let confident = response(&pending, &target.id, 0.05);
         assert_eq!(
@@ -1000,8 +1032,7 @@ mod tests {
         let (f, target, policy, mut pending) = s36_fixture();
         let other = f.ready("Look-alike");
         pending.outcomes.insert(other.id.clone(), "none".into());
-        let mut s36 = super::super::character_worker::S36Publication::default();
-        s36.s36_series.insert(f.series.clone());
+        let s36 = LearningTargets::of([target.id.clone()]);
         let same = json!({"type":"s36_shadow_result","assetId":pending.asset_id,"contentHash":pending.content_hash,
             "featureId":"a".repeat(64),"queryAvailable":true,
             "scores":{target.id.clone(): 0.05, other.id.clone(): 0.10},
@@ -1018,34 +1049,93 @@ mod tests {
         );
     }
     #[test]
-    fn s36_publication_accepts_two_characters_on_two_people_and_excluded_still_blocks() {
+    fn s36_publication_accepts_two_characters_on_two_people_and_a_closer_base_character_still_blocks(
+    ) {
         let (f, target, policy, mut pending) = s36_fixture();
         let other = f.ready("Second");
         pending.outcomes.insert(other.id.clone(), "none".into());
-        let mut s36 = super::super::character_worker::S36Publication::default();
-        s36.s36_series.insert(f.series.clone());
-        s36.s36_excluded_targets.insert(target.id.clone());
+        // The closer character is not placed by 학습 인식 (yet): it still wins its person.
+        let only_other = LearningTargets::of([other.id.clone()]);
         let same = json!({"type":"s36_shadow_result","assetId":pending.asset_id,"contentHash":pending.content_hash,
             "featureId":"a".repeat(64),"queryAvailable":true,
             "scores":{target.id.clone(): 0.05, other.id.clone(): 0.10},
             "crops":{target.id.clone(): 0, other.id.clone(): 0}});
-        // The excluded closer character blocks the look-alike on the same person.
         assert_eq!(
             f.library
-                .publish_s36(&pending, &policy, &same, 100, &s36)
+                .publish_s36(&pending, &policy, &same, 100, &only_other)
                 .unwrap(),
             0
         );
-        s36.s36_excluded_targets.clear();
+        let both = LearningTargets::of([target.id.clone(), other.id.clone()]);
         let two = json!({"type":"s36_shadow_result","assetId":pending.asset_id,"contentHash":pending.content_hash,
             "featureId":"a".repeat(64),"queryAvailable":true,
             "scores":{target.id.clone(): 0.05, other.id.clone(): 0.10},
             "crops":{target.id.clone(): 0, other.id.clone(): 1}});
         assert_eq!(
             f.library
-                .publish_s36(&pending, &policy, &two, 100, &s36)
+                .publish_s36(&pending, &policy, &two, 100, &both)
                 .unwrap(),
             2
         );
+    }
+    /// 기본 인식 placed `base` on the asset; nothing is ranked between the recognizers.
+    fn base_places(f: &Fixture, base: &Target, asset: &str, hash: &str) {
+        f.library.connection().unwrap().execute(
+            "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+             VALUES(?1,?2,?2,?3,'accepted',?4,'{\"prediction\":{\"distance\":0.1}}','automatic','2026-09-24T00:00:00Z')",
+            params![base.id, asset, hash, base.fingerprint],
+        ).unwrap();
+    }
+    #[test]
+    fn s36_publication_leaves_a_person_basic_recognition_already_placed_to_a_human() {
+        let (f, target, policy, mut pending) = s36_fixture();
+        let base = f.ready("Base");
+        pending
+            .outcomes
+            .insert(base.id.clone(), "accepted_automatic".into());
+        base_places(&f, &base, &pending.asset_id, &pending.content_hash);
+        let learning = LearningTargets::of([target.id.clone()]);
+        let result = |crops: Value| {
+            json!({"type":"s36_shadow_result","assetId":pending.asset_id,"contentHash":pending.content_hash,
+            "featureId":"a".repeat(64),"queryAvailable":true,
+            "scores":{target.id.clone(): 0.05, base.id.clone(): 0.5}, "crops": crops})
+        };
+        // Both would claim the same person: nothing is written, the pair stays open.
+        for crops in [
+            json!({target.id.clone(): 0, base.id.clone(): 0}),
+            json!({target.id.clone(): 0}),
+        ] {
+            assert_eq!(
+                f.library
+                    .publish_s36(&pending, &policy, &result(crops), 100, &learning)
+                    .unwrap(),
+                0
+            );
+        }
+        let mut older = result(json!({}));
+        older.as_object_mut().unwrap().remove("crops");
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &older, 100, &learning)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            f.library.character_relations_for_asset("asset-5").unwrap(),
+            vec![base.id.clone()]
+        );
+        // Another person in the image: both placements stand.
+        let apart = result(json!({target.id.clone(): 0, base.id.clone(): 1}));
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &apart, 100, &learning)
+                .unwrap(),
+            1
+        );
+        let mut related = f.library.character_relations_for_asset("asset-5").unwrap();
+        related.sort();
+        let mut expected = vec![base.id.clone(), target.id.clone()];
+        expected.sort();
+        assert_eq!(related, expected);
     }
 }

@@ -1,0 +1,23 @@
+{
+  "readyReviewed": 30,
+  "readyExamples": 50,
+  "cases": [
+    { "judged": 0, "examples": 0, "wrong": 0, "allowed": 1, "status": "collecting" },
+    { "judged": 29, "examples": 80, "wrong": 0, "allowed": 1, "status": "collecting" },
+    { "judged": 40, "examples": 49, "wrong": 0, "allowed": 2, "status": "collecting" },
+    { "judged": 30, "examples": 50, "wrong": 0, "allowed": 1, "status": "learning" },
+    { "judged": 30, "examples": 50, "wrong": 1, "allowed": 1, "status": "learning" },
+    { "judged": 30, "examples": 50, "wrong": 2, "allowed": 1, "status": "hold" },
+    { "judged": 39, "examples": 60, "wrong": 1, "allowed": 1, "status": "learning" },
+    { "judged": 40, "examples": 60, "wrong": 2, "allowed": 2, "status": "learning" },
+    { "judged": 40, "examples": 60, "wrong": 3, "allowed": 2, "status": "hold" },
+    { "judged": 44, "examples": 60, "wrong": 2, "allowed": 2, "status": "learning" },
+    { "judged": 60, "examples": 90, "wrong": 3, "allowed": 3, "status": "learning" },
+    { "judged": 60, "examples": 90, "wrong": 4, "allowed": 3, "status": "hold" },
+    { "judged": 74, "examples": 120, "wrong": 0, "allowed": 3, "status": "learning" },
+    { "judged": 36, "examples": 60, "wrong": 3, "allowed": 1, "status": "hold" },
+    { "judged": 46, "examples": 60, "wrong": 5, "allowed": 2, "status": "hold" },
+    { "judged": 100, "examples": 200, "wrong": 5, "allowed": 5, "status": "learning" },
+    { "judged": 100, "examples": 200, "wrong": 6, "allowed": 5, "status": "hold" }
+  ]
+}

@@ -450,30 +450,6 @@ pub async fn character_s36_publication(
 }
 
 #[tauri::command]
-pub async fn set_character_s36_publication(
-    series: Vec<String>,
-    excluded_targets: Vec<String>,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<crate::library::character_worker::S36PublicationSettings, CommandError> {
-    let library = current_required(state)?;
-    let (script, settings) = runtime_paths(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = crate::library::character_worker::RuntimeConfig::update_s36_publication(
-            script,
-            &settings,
-            series.into_iter().collect(),
-            excluded_targets.into_iter().collect(),
-        )?;
-        // The running queue picks up the new series choice with its configuration.
-        start_incremental_if_configured(&app, &library);
-        Ok(result)
-    })
-    .await
-    .map_err(|_| super::background_task_error())?
-}
-
-#[tauri::command]
 pub async fn clear_character_s36_automatic(
     series_id: String,
     state: State<'_, AppState>,

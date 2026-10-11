@@ -2,7 +2,7 @@ import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
 import { characterApi, type CharacterTarget } from "../characters/api";
-import { READY_EXAMPLES, READY_REVIEWED, enableS36Scoring, s36PublicationApi, type S36PublicationSettings, type S36Readiness } from "../characters/S36Publication";
+import { READY_EXAMPLES, READY_REVIEWED, S36ClearControl, enableS36Scoring, s36PublicationApi, type S36PublicationSettings, type S36Readiness } from "../characters/S36Publication";
 import { shadowReviewApi, type ShadowBackfillStatus, type ShadowReviewSummary } from "../characters/shadowReviewApi";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -134,7 +134,7 @@ export function CharacterRecognitionStatus({ disabled = false }: { disabled?: bo
     </table>
     <p className="recognition-status__note">오늘까지의 판단입니다. 앞으로의 정확도를 보장하지는 않습니다.</p>
 
-    <p className="recognition-status__note">기본 인식 (B36) · 학습 인식 (S36). 학습 인식으로 넘어가려면 확인 판단 {READY_REVIEWED}건 · 맞음 예시 {READY_EXAMPLES}장이 필요하고, 틀림이 허용치(판단의 5%, 최소 1건) 안이어야 합니다.</p>
+    <p className="recognition-status__note">기본 인식 (B36) · 학습 인식 (S36). 인식은 캐릭터마다 저절로 바뀌고 고르는 메뉴는 없습니다. 학습 인식으로 넘어가려면 확인 판단 {READY_REVIEWED}건 · 맞음 예시 {READY_EXAMPLES}장이 필요하고, 틀림이 허용치(판단의 5%, 최소 1건) 안이어야 합니다. 틀림이 허용치를 넘으면 기본 인식으로 돌아가고, 다시 허용치 안이 되면 학습 인식이 됩니다. 새로 넣는 이미지부터 바뀌며, 이미 들어간 이미지는 그대로입니다.</p>
     {!data ? <p className="recognition-status__note" role="status"><BusyLabel busy>불러오는 중…</BusyLabel></p>
       : series.length === 0 ? <p className="recognition-status__note">등록한 캐릭터가 없습니다.</p>
         : series.map(group => <details key={group.seriesId} className="recognition-status__series" open={group.learning > 0 || group.rows.some(row => row.judged > 0)}>
@@ -149,6 +149,7 @@ export function CharacterRecognitionStatus({ disabled = false }: { disabled?: bo
               <td className="numeric">{row.judged > 0 ? `${row.wrong.toLocaleString()} / ${row.allowed.toLocaleString()}` : "—"}</td>
             </tr>)}</tbody>
           </table>
+          {group.learning > 0 && <S36ClearControl seriesId={group.seriesId} seriesName={group.seriesName} disabled={disabled} onChanged={() => setReload(value => value + 1)} />}
         </details>)}
   </div>;
 }

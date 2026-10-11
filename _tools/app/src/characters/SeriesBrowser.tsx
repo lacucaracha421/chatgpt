@@ -31,7 +31,6 @@ import { characterCardImage, folderCardImage, seriesShelfCardImages, shelfCardsI
 import { applySelectionGesture, emptySelection, focusAsset, moveSelectionFocus, selectAllLoaded } from "../assets/selection";
 import { Button } from "../shared/ui/Button";
 import { Menu } from "../shared/ui/Menu";
-import { Dialog } from "../shared/ui/Dialog";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
@@ -56,7 +55,7 @@ import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
 import { ConfirmList } from "./ConfirmList";
 import { confirmSources, confirmTotal, type ConfirmSources } from "./confirmClient";
 import { taggerDecisionApi, type TaggerDecisionApi } from "./taggerReviewClient";
-import { S36ScoringWarning, S36SeriesControl, readinessLabel, useS36CharacterExclusion, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
+import { readinessLabel, useS36Readiness, type S36Readiness } from "./S36Publication";
 import { characterApi, draftReferenceRegions, moveAssetsToCharacters, type CharacterApi, type CharacterTarget } from "./api";
 import { prefetchRead, prefetchedRead, useFolderPrefetchIntent } from "../assets/folderPrefetch";
 import { characterHubApi, type CharacterBrowsePage, type CharacterBrowseView, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesGalleryFilter, type SeriesFolder } from "./hubApi";
@@ -144,12 +143,12 @@ export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterH
   ];
 }
 /** Status that used to sit under each character card; tiles now show only a warning mark when something is wrong. */
-function characterStatus(target: CharacterTarget, readiness: S36Readiness | undefined, s36Driven: boolean): { detail: string[]; warning: boolean } {
+function characterStatus(target: CharacterTarget, readiness: S36Readiness | undefined): { detail: string[]; warning: boolean } {
   const references = activeCharacterReferences(target).length;
   const detail = !target.enabled ? ["자동 인식 꺼짐"] : references < 6 ? [`레퍼런스 ${references}장 · 자동 확정 보류`] : [];
-  const s36 = target.enabled && !s36Driven ? readiness : undefined;
-  if (s36) detail.push(readinessLabel(s36));
-  return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
+  const numbers = target.enabled ? readiness : undefined;
+  if (numbers) detail.push(readinessLabel(numbers));
+  return { detail, warning: Boolean(numbers && numbers.wrong > numbers.allowed) };
 }
 
 export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, confirmSource = confirmSources, confirmDecisions, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged, groupEditRequest: requestedGroupEdit = null, onGroupEditRequestHandled }: Props) {
@@ -172,7 +171,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const staleFolders = folderSeriesId !== series.classificationId;
   // The 확인 list opened from this series' count line, so scoped to it.
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [s36Setup, setS36Setup] = useState(false);
   const [confirmCount, setConfirmCount] = useState(() => lastConfirmCounts.get(series.classificationId) ?? 0);
   const [groupCreateRequest, setGroupCreateRequest] = useState(0);
   const [groupEditRequest, setGroupEditRequest] = useState(0);
@@ -234,7 +232,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const returnGallery = useRef<{ scope: string; page: CharacterBrowsePage } | null>(null);
   useLayoutEffect(() => {
     setEditor(null); setPicking(null); setConverting(false); setViewer(null); setExternalAsset(null);
-    setSelection(emptySelection()); setCharacterOpen(false); setConfirmOpen(false); setS36Setup(false);
+    setSelection(emptySelection()); setCharacterOpen(false); setConfirmOpen(false);
     setPreselect(null); setPromotionTag(null); setPromoting(false); setPromotionDone(null); setUnregistering(false);
     setReferenceSuggestionTarget(null); setAll(false); setTrashUndo(null); setMessage(null); setEditorError(null); setCharacterNotice(null); setAssignArtistOpen(false);
     pickerPages.current.clear(); returnGallery.current = null;
@@ -309,8 +307,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const orderedMembers = members.filter(target => currentGroup
     ? currentGroup.targetIds.includes(target.id) : !groupedIds.has(target.id));
   const readiness = useS36Readiness(series.classificationId, readinessVersion);
-  const { settings: s36Settings, error: s36Error, enabled: s36CharacterAvailable, excluded: s36CharacterExcluded, toggle: toggleS36Character } = useS36CharacterExclusion(series.classificationId, characterTarget?.id ?? null, s36PublicationApi);
-  const s36Driven = (targetId: string) => Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.excludedTargets.includes(targetId));
   const name = classifications.find(c => c.id === series.classificationId)?.name ?? "시리즈";
   const pickerScope = picking && picking.kind !== "hero" ? `${series.classificationId}:${editor?.target?.id ?? "new"}:${pickFromSeries ? "series" : "character"}:${all}` : null;
   const scope = `${series.classificationId}:${picking ? picking.kind === "hero" ? "pick-hero" : `pick-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ? `character-${targetId}` : currentGroup ? `group-${currentGroup.id}` : `series-${seriesGalleryView}`}:${all}${browseView ? `|${JSON.stringify(browseView)}` : ""}`;
@@ -535,6 +531,14 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     } catch (e) { setEditorError(commandErrorMessage(e, "캐릭터 설정을 저장하지 못했습니다.")); onChanged(); }
     finally { saving.current = false; setBusy(false); }
   }
+  /** Turn the character's automatic recognition off or on again; nothing else about it changes. */
+  async function toggleAutomaticRecognition(target: CharacterTarget) {
+    const draft = characterDraft(target);
+    await action(() => api.saveSettings({ id: target.id, expectedRevision: target.revision,
+      seriesClassificationId: series.classificationId, linkedClassificationId: target.linkedClassificationId ?? null,
+      displayName: target.displayName, description: draft.description, thumbnailAssetId: draft.thumbnail, enabled: !target.enabled,
+      referenceIds: draft.references }, true));
+  }
   async function requestHistoricalRefresh(target: CharacterTarget) {
     if (busy || !window.confirm("현재 레퍼런스로 이 시리즈의 미분류 이미지 전체를 확인할까요? 분류 제외와 수동 판단을 보존하며, 백그라운드에서 새 이미지보다 낮은 우선순위로 진행됩니다.")) return;
     setBusy(true); setEditorError(null);
@@ -557,9 +561,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         ...(browseView ? { view: browseView } : {}) }), signal)
     : null;
   const editorTarget = editor?.target ?? null;
-  const editorS36 = editorTarget
-    ? s36Driven(editorTarget.id) ? "학습 인식" : readiness.get(editorTarget.id) ? readinessLabel(readiness.get(editorTarget.id)!) : null
-    : null;
+  const editorS36 = editorTarget && readiness.get(editorTarget.id) ? readinessLabel(readiness.get(editorTarget.id)!) : null;
   const editorDirty = Boolean(editor && editor.target && JSON.stringify(editor.draft) !== JSON.stringify(characterDraft(editor.target)));
   const editorPanel = <AnchoredPanel open={Boolean(editor) && !picking} onOpenChange={open => { if (open) openEditor(characterTarget ?? null); else if (!picking && !busy) setEditor(null); }} title={editor?.target ? `${editor.target.displayName} · 캐릭터 정보` : "새 캐릭터"}
     trigger={characterTarget ? <Button size="icon" variant="ghost" className="character-info-trigger" aria-label="캐릭터 편집" aria-description={characterAttention ?? "캐릭터 정보 편집"}><PencilIcon aria-hidden="true" />{characterAttention && <span className="character-info-attention" aria-hidden="true">!</span>}</Button>
@@ -686,24 +688,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     ...faultItem,
     ...(characterTarget.ready && !characterTarget.manualOnly ? [{ id: "historical-refresh", label: "과거 미분류 이미지 갱신", disabled: busy, onSelect: () => void requestHistoricalRefresh(characterTarget) }] : []),
     { id: "convert-folder", label: "일반 폴더로 전환", disabled: busy, onSelect: () => { setEditor(null); setConverting(true); } },
-    ...(s36CharacterAvailable ? [{ id: "s36-exclusion", label: "자동 인식 끄기", checked: s36CharacterExcluded, disabled: busy, onSelect: () => toggleS36Character() }] : []),
+    ...(!characterTarget.manualOnly ? [{ id: "automatic-recognition", label: "자동 인식 끄기", checked: !characterTarget.enabled, disabled: busy, onSelect: () => void toggleAutomaticRecognition(characterTarget) }] : []),
   ] : [];
   const seriesMenuItems = [
     ...(!excludedOnly ? [{ id: "create-group", label: "그룹 만들기", onSelect: () => setGroupCreateRequest(v => v + 1) }] : []),
     { id: "pick-cover", label: "시리즈 표지 선택", onSelect: () => beginPick("hero") },
     ...(series.heroAssetId ? [{ id: "clear-cover", label: "시리즈 표지 해제", onSelect: () => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null })) }] : []),
-    ...(s36Settings || s36Error ? [{ id: "s36-setup", label: "학습 인식 설정", onSelect: () => setS36Setup(true) }] : []),
     ...faultItem,
     { id: "unregister-series", label: "시리즈 등록 해제", disabled: busy, onSelect: () => setUnregistering(true) },
   ];
-  const s36Stalled = Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.scoringEnabled);
-  // Recovery surfaces only while automation is actually off or stalled.
-  const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 인식 켜기</Button>
-    : s36Stalled && !current && !currentGroup ? <S36ScoringWarning disabled={busy || Boolean(picking)} onChanged={() => { setReadinessVersion(v => v + 1); refresh(); }} /> : null;
+  // Recovery surfaces only while automation is actually off.
+  const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 인식 켜기</Button> : null;
   const focusedName = currentExtras ? extrasOnlyGroup?.name ?? "기타" : current?.displayName ?? currentGroup?.name;
   // A character inside a group shows the group in its path: series › group › character.
   const currentCharacterGroup = current && !extrasOnlyGroup ? groups.find(group => group.seriesId === series.classificationId && (currentExtras ? group.extrasTargetId === current.id : group.targetIds.includes(current.id))) : undefined;
-  const currentStatus = characterTarget ? characterStatus(characterTarget, readiness.get(characterTarget.id), s36Driven(characterTarget.id)) : null;
+  const currentStatus = characterTarget ? characterStatus(characterTarget, readiness.get(characterTarget.id)) : null;
   const candidateReview = !picking && !current && !currentGroup && confirmCount > 0
     ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="맞음 · 아님을 기다리는 이미지를 하나씩 확인" onClick={() => setConfirmOpen(true)}>확인 {confirmCount.toLocaleString()}</Button>
     : null;
@@ -731,7 +730,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const shelfShown = !picking && !excludedOnly && !current;
   // The first page alone is not ready: the shelf and its count/header reads also change layout.
   // The S36 candidate count is not waited for (it only relabels or shows one header button).
-  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.loading || excludedLoading || (!s36Settings && !s36Error))));
+  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.loading || excludedLoading)));
   useEffect(() => {
     if (!pcPerfEnabled() || loading || shelfLoading || pageScope !== scope || error) return;
     return pcFolderReady(pcFolderScope({ kind: "classification", classificationId: series.classificationId, characterId: targetId, characterGroupId: groupId }), host.current,
@@ -829,7 +828,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 </button>
               </article>;
             }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => {
-              const status = characterStatus(target, readiness.get(target.id), s36Driven(target.id));
+              const status = characterStatus(target, readiness.get(target.id));
               const description = [...(status.warning ? ["확인 필요"] : []), ...status.detail].join(" · ");
               const index = orderedMembers.findIndex(member => member.id === target.id);
               const move = (direction: number) => void action(() => invoke("move_character_folder", {
@@ -935,9 +934,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
     {confirmOpen && <ConfirmList onClose={() => { setConfirmOpen(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} sources={confirmSource} decisions={confirmDecisionApi}
       scope={{ series: { id: series.classificationId, name } }} targets={[...targets, ...extras]} classifications={classifications} />}
-    {s36Setup && <Dialog open title="학습 인식 설정" onClose={() => setS36Setup(false)}>
-      <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
-    </Dialog>}
     <AssetViewer originRect={viewerOriginRect.current} items={viewerItems} activeId={viewer} onActiveIdChange={setViewer} onClose={() => { viewerOriginRect.current = undefined; setViewer(null); }} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())}
       onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset}
       totalCount={page.totalCount + viewerItems.length - page.items.length} classifications={classifications}

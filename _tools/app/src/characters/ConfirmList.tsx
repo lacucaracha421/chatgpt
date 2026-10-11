@@ -382,7 +382,7 @@ function reasonNote(item: ConfirmItem): string | null {
       ? `이미 ${item.targetName}(으)로 자동으로 넣은 이미지인데, 학습 인식이 지지하지 않습니다. 틀렸으면 아님을 눌러 주세요.`
       : `이미 ${item.targetName}(으)로 자동으로 넣은 이미지인데, 자동 태그가 이 이름을 읽지 않았습니다. 틀렸으면 아님을 눌러 주세요.`;
   }
-  if (item.recognition?.placed) return `기본 인식이 이미 ${item.targetName}(으)로 넣은 이미지입니다. 다른 추천을 다 본 뒤에 나오며, 틀렸으면 아님을 눌러 주세요.`;
+  if (item.recognition?.placed) return `인식이 이미 ${item.targetName}(으)로 넣은 이미지입니다. 다른 추천을 다 본 뒤에 나오며, 틀렸으면 아님을 눌러 주세요.`;
   return null;
 }
 

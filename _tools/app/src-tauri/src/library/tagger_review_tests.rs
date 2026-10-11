@@ -539,7 +539,7 @@ fn tagger_preview_token_binds_inputs_and_apply_rolls_back_both_sets() {
 fn tagger_veto_and_recommendations_block_s36_then_manual_reaccept_sticks() {
     use crate::library::{
         character_shadow::{Pending, Policy},
-        character_worker::S36Publication,
+        character_shadow_review::LearningTargets,
     };
     for veto in [false, true] {
         let f = Fixture::new();
@@ -574,8 +574,7 @@ fn tagger_veto_and_recommendations_block_s36_then_manual_reaccept_sticks() {
             native_at: "now".into(),
         };
         let response = serde_json::json!({"scores":{&t.id:0.01}});
-        let mut s36 = S36Publication::default();
-        s36.s36_series.insert(f.series.clone());
+        let s36 = LearningTargets::of([t.id.clone()]);
         // Vetoed pairs wait for a human; two-tagger agreement may pass S36's automatic rule.
         assert_eq!(
             f.library
@@ -893,14 +892,8 @@ fn tagger_crop_uses_latest_pair_and_normalizes_pixels() {
 }
 
 #[test]
-fn tagger_crop_shows_the_b36_box_in_an_s36_series() {
+fn tagger_crop_shows_the_b36_box_of_the_pending_pair() {
     let (f, _) = crop_fixture();
-    let config = serde_json::from_value(serde_json::json!({
-        "python":"unused","script":"unused","models":"unused","s36_series":[f.series]
-    }))
-    .unwrap();
-    *f.library.character_incremental.lock().unwrap() =
-        super::super::character_incremental::Engine::shadow_fixture(config);
     assert!(f
         .library
         .tagger_review_items()

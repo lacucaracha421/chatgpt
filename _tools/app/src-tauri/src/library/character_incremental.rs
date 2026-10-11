@@ -307,20 +307,6 @@ impl Library {
             }
         });
     }
-    /// The S36 series choice of the configured automation, or `None` before the automation
-    /// has been configured in this session (the choice is machine-local and only reaches the
-    /// library through the runtime configuration).
-    pub(crate) fn character_s36_series(&self) -> Option<BTreeSet<String>> {
-        let engine = self
-            .character_incremental
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        engine
-            .next_config
-            .as_ref()
-            .or(engine.config.as_ref())
-            .map(|config| config.s36.s36_series.clone())
-    }
     pub(crate) fn stop_character_incremental(&self) {
         self.character_shadow_backfill_cancel();
         let mut engine = self
@@ -878,6 +864,18 @@ impl Library {
                     .values()
                     .all(|source| source.check_identity(self).is_ok())
         });
+        // Without S36 scoring (off, no model, power saving) nobody could place a character
+        // 학습 인식 owns, so then 기본 인식 keeps classifying all of them.
+        let learning = if config.shadow_model.is_some() {
+            let ids = context
+                .targets
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>();
+            self.learning_targets(&tx, &ids)
+        } else {
+            Default::default()
+        };
         self.finalize_incremental_augmented(
             &tx,
             job,
@@ -886,7 +884,7 @@ impl Library {
             &reference_targets,
             &refresh_delta_targets,
             extra.map(|a| &a.response),
-            &config.s36,
+            &learning,
         )?;
         if let Some(a) = extra {
             for source in a.sources.values() {
@@ -1094,7 +1092,7 @@ impl Library {
             .shadow
             .pop_front();
         // Observations live in memory, so a restart or a settings change drops them.
-        // S36 series depend on the score for their membership: recover recent images.
+        // Characters 학습 인식 places depend on the score for their membership: recover recent images.
         let pending = pending.or_else(|| {
             self.s36_catch_up(config).unwrap_or_else(|error| {
                 eprintln!("S36 catch-up skipped: {error}");
@@ -1108,15 +1106,12 @@ impl Library {
         true
     }
 
-    /// One recently completed image in an S36 series that has no score under the
-    /// current policy. Each asset is checked at most once per queue run.
+    /// One recently completed image of a series with a character 학습 인식 places that has no
+    /// score under the current policy. Each asset is checked at most once per queue run.
     fn s36_catch_up(
         &self,
         config: &RuntimeConfig,
     ) -> Result<Option<super::character_shadow::Pending>> {
-        if config.s36.s36_series.is_empty() {
-            return Ok(None);
-        }
         let version = serde_json::from_slice::<Value>(&std::fs::read(
             config.script.with_file_name("s36_policy.json"),
         )?)?["version"]
@@ -1157,6 +1152,12 @@ impl Library {
                 )
             })
             .transpose()?;
+        // Who 학습 인식 places and in which series, worked out once and only when an
+        // unscored image is found.
+        let mut learning: Option<(
+            super::character_shadow_review::LearningTargets,
+            BTreeSet<String>,
+        )> = None;
         for asset in recent {
             {
                 let mut engine = self
@@ -1182,32 +1183,28 @@ impl Library {
             if scored {
                 continue;
             }
-            // Non-S36 series occur in the same recent-job window. Resolve their
-            // folder scope before loading reference rosters that cannot be scored here.
+            let overview = match learning.take() {
+                Some(overview) => overview,
+                None => self.learning_overview(&c)?,
+            };
+            let (owned, owned_series) = learning.insert(overview);
+            // Series without such a character occur in the same recent-job window. Resolve
+            // their folder scope before loading reference rosters that cannot be scored here.
             let scope = super::character_scope::resolve_character_scope(&c, &asset)?;
-            if !scope.is_some_and(|scope| {
-                scope
-                    .series_classification_ids
-                    .iter()
-                    .any(|series| config.s36.owns(Some(series)))
-            }) {
+            if owned.is_empty()
+                || !scope.is_some_and(|scope| {
+                    scope
+                        .series_classification_ids
+                        .iter()
+                        .any(|series| owned_series.contains(series))
+                })
+            {
                 continue;
             }
             let Some(pending) = self.character_shadow_candidate_on(&c, &asset)? else {
                 continue;
             };
-            let owned = {
-                let mut series = c.prepare(
-                    "SELECT series_classification_id FROM character_targets WHERE id=?1",
-                )?;
-                let mut owned = false;
-                for target in pending.outcomes.keys() {
-                    let id: Option<String> = series.query_row([target], |r| r.get(0)).optional()?;
-                    owned |= config.s36.owns(id.as_deref());
-                }
-                owned
-            };
-            if !owned {
+            if !pending.outcomes.keys().any(|target| owned.owns(target)) {
                 continue;
             }
             return Ok(Some(pending));
@@ -1400,7 +1397,7 @@ impl Library {
             reference_targets,
             refresh_delta_targets,
             None,
-            &super::character_worker::S36Publication::default(),
+            &super::character_shadow_review::LearningTargets::default(),
         )
     }
 
@@ -1413,19 +1410,13 @@ impl Library {
         reference_targets: &BTreeSet<String>,
         refresh_delta_targets: &BTreeSet<String>,
         augmentation: Option<&Value>,
-        s36: &super::character_worker::S36Publication,
+        learning: &super::character_shadow_review::LearningTargets,
     ) -> Result<()> {
-        // Targets of series switched to S36 get no B36 or augmentation membership here;
-        // S36 decides them after scoring (see `character_shadow::publish`).
-        let owned = context
-            .targets
-            .iter()
-            .filter(|t| s36.owns(t.series_classification_id.as_deref()))
-            .map(|t| t.id.as_str())
-            .collect::<BTreeSet<_>>();
+        // Characters 학습 인식 places get no B36 or augmentation membership here; S36 decides
+        // them after scoring (see `character_shadow::publish_s36`).
         let selectable = predictions
             .iter()
-            .filter(|p| !owned.contains(p.target_id.as_str()))
+            .filter(|p| !learning.owns(&p.target_id))
             .cloned()
             .collect::<Vec<_>>();
         let decisions=tx.prepare("SELECT target_id,decision,origin FROM character_decisions d WHERE source_asset_id=?1 AND NOT EXISTS(SELECT 1 FROM character_targets x WHERE x.id=d.target_id AND x.role='extras') ORDER BY sequence DESC")?

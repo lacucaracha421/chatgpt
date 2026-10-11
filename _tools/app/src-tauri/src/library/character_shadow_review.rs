@@ -916,7 +916,7 @@ impl Library {
     }
 }
 
-/// How close one character is to being classified by S36, from reviewed S36
+/// How close one character is to being placed by 학습 인식 (S36), from reviewed S36
 /// automatic candidates (newest policy) and the manual "accepted" examples.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -925,31 +925,147 @@ pub struct S36Readiness {
     /// Automatic candidates judged after scoring.
     pub reviewed: u32,
     pub wrong: u32,
+    /// Wrong answers allowed for `reviewed`, see [`allowed_wrong`].
+    pub allowed: u32,
     /// Manual acceptances for this character (S36's positive examples).
     pub examples: u32,
-    /// `ready`, `collecting`, `hold` or `keep`.
+    /// `learning` (학습 인식 places new images), `hold` (enough judged and examples, but too
+    /// many wrong: 기본 인식 again) or `collecting`.
     pub status: String,
 }
 
 pub const READY_REVIEWED: u32 = 30;
 pub const READY_EXAMPLES: u32 = 50;
 
-pub(super) fn readiness_status(reviewed: u32, wrong: u32, examples: u32) -> &'static str {
-    if wrong >= 4 {
-        "keep"
-    } else if wrong >= 2 {
-        "hold"
-    } else if reviewed >= READY_REVIEWED && examples >= READY_EXAMPLES {
-        "ready"
+/// Wrong answers a character may collect before 학습 인식 steps back: 5% of its judgments,
+/// rounded down, at least one.
+pub const fn allowed_wrong(reviewed: u32) -> u32 {
+    let share = reviewed / 20;
+    if share > 1 {
+        share
     } else {
-        "collecting"
+        1
     }
+}
+
+/// The one rule that decides, per character, between 기본 인식 (B36) and 학습 인식 (S36):
+/// at least [`READY_REVIEWED`] judged, at least [`READY_EXAMPLES`] examples and no more
+/// wrong than [`allowed_wrong`]. It is evaluated from the current numbers every time, so a
+/// character steps back when the allowance is exceeded and returns once within it again.
+pub(super) fn readiness_status(reviewed: u32, wrong: u32, examples: u32) -> &'static str {
+    if reviewed < READY_REVIEWED || examples < READY_EXAMPLES {
+        "collecting"
+    } else if wrong <= allowed_wrong(reviewed) {
+        "learning"
+    } else {
+        "hold"
+    }
+}
+
+/// The characters whose new images 학습 인식 places automatically right now (and so 기본 인식
+/// leaves alone). Computed from the library's decisions and the shadow cache; never stored.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct LearningTargets(BTreeSet<String>);
+impl LearningTargets {
+    pub(super) fn owns(&self, target_id: &str) -> bool {
+        self.0.contains(target_id)
+    }
+    pub(super) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    #[cfg(test)]
+    pub(super) fn of<I: IntoIterator<Item = String>>(ids: I) -> Self {
+        Self(ids.into_iter().collect())
+    }
+}
+
+/// Newest policy version of an open S36 shadow cache (the one every review list reads): the
+/// version of the latest score. The cache owner indexes `(scored_at, policy_version)`, so
+/// this is a lookup, not a scan; a copy without the index is only slower.
+fn newest_policy(cache: &Connection) -> Result<Option<String>> {
+    Ok(cache
+        .query_row(
+            "SELECT policy_version FROM scores ORDER BY scored_at DESC, policy_version DESC LIMIT 1",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+#[cfg(test)]
+pub(super) fn newest_policy_for_tests(cache: &Connection) -> Option<String> {
+    newest_policy(cache).unwrap()
+}
+
+/// Readiness of the given characters. Read-only. A pair counts as judged when its newest
+/// manual decision (not `cleared`) came after the newest policy scored it `automatic`;
+/// such a pair is wrong when that decision is a rejection. Pairs are looked up by key in the
+/// cache, so the cost follows the characters' decisions, not the size of the cache.
+pub(super) fn readiness_of(
+    c: &Connection,
+    cache: Option<&Connection>,
+    targets: &[String],
+) -> Result<Vec<S36Readiness>> {
+    let version = cache.map(newest_policy).transpose()?.flatten();
+    let mut score = match (&version, cache) {
+        (Some(_), Some(cache)) => Some(cache.prepare(
+            "SELECT scored_at FROM scores WHERE asset_id=?1 AND target_id=?2 AND policy_version=?3 AND verdict='automatic'",
+        )?),
+        _ => None,
+    };
+    let mut decisions = c.prepare(
+        "SELECT d.source_asset_id,d.decision,d.created_at FROM character_decisions d
+         WHERE d.target_id=?1 AND d.origin='manual' ORDER BY d.source_asset_id,d.sequence DESC",
+    )?;
+    let mut examples = c.prepare(
+        "SELECT COUNT(*) FROM (SELECT d.source_asset_id,
+           (SELECT x.decision FROM character_decisions x WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id ORDER BY x.sequence DESC LIMIT 1) AS latest
+         FROM character_decisions d WHERE d.target_id=?1 AND d.origin='manual' GROUP BY d.source_asset_id)
+         WHERE latest='accepted'",
+    )?;
+    let mut result = Vec::with_capacity(targets.len());
+    for target in targets {
+        let (mut reviewed, mut wrong) = (0u32, 0u32);
+        if let (Some(version), Some(score)) = (&version, score.as_mut()) {
+            let mut seen = BTreeSet::new();
+            for row in decisions.query_map([target], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })? {
+                let (asset, decision, at) = row?;
+                // Newest first: only the latest manual decision of a pair counts.
+                if !seen.insert(asset.clone()) || decision == "cleared" {
+                    continue;
+                }
+                let scored: Option<String> = score
+                    .query_row(params![asset, target, version], |r| r.get(0))
+                    .optional()?;
+                if scored.is_some_and(|scored| at > scored) {
+                    reviewed += 1;
+                    wrong += u32::from(decision == "rejected");
+                }
+            }
+        }
+        let examples: u32 = examples.query_row([target], |r| r.get(0))?;
+        result.push(S36Readiness {
+            target_id: target.clone(),
+            reviewed,
+            wrong,
+            allowed: allowed_wrong(reviewed),
+            examples,
+            status: readiness_status(reviewed, wrong, examples).to_string(),
+        });
+    }
+    Ok(result)
 }
 
 impl Library {
     /// Read-only: the shadow cache and the library decisions of one series.
     pub fn character_s36_readiness(&self, series_id: &str) -> Result<Vec<S36Readiness>> {
-        let rows = self.shadow_rows_cached(false)?.1;
+        let cache = open_shadow_cache(&self.root)?;
         let c = self.connection()?;
         let targets = c
             .prepare(
@@ -957,48 +1073,107 @@ impl Library {
             )?
             .query_map([series_id], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let in_series = targets.iter().collect::<BTreeSet<_>>();
-        let automatic = rows
-            .iter()
-            .flat_map(|rows| &rows.1)
-            .filter(|r| r.verdict == "automatic" && in_series.contains(&r.target_id))
-            .cloned()
-            .collect::<Vec<_>>();
-        let judged = latest_decisions(&c, &automatic, true)?;
-        // (reviewed, wrong) per character: automatic candidates judged after scoring.
-        let mut tallies = BTreeMap::<&str, (u32, u32)>::new();
-        for row in &automatic {
-            let Some((value, at)) = judged.get(&(row.target_id.clone(), row.asset_id.clone()))
-            else {
-                continue;
+        readiness_of(&c, cache.as_ref(), &targets)
+    }
+
+    /// Every character 학습 인식 places right now, and the series they belong to.
+    pub(super) fn learning_overview(
+        &self,
+        c: &Connection,
+    ) -> Result<(LearningTargets, BTreeSet<String>)> {
+        let targets = c
+            .prepare(
+                "SELECT id,series_classification_id FROM character_targets
+                 WHERE role='character' AND enabled=1 AND manual_only=0",
+            )?
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let ids = targets.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        let learning = self.learning_targets(c, &ids);
+        let series = targets
+            .into_iter()
+            .filter(|(id, _)| learning.owns(id))
+            .filter_map(|(_, series)| series)
+            .collect();
+        Ok((learning, series))
+    }
+
+    /// Which of the given characters 학습 인식 places automatically right now. A character
+    /// that is disabled or manual-only never is. When the shadow cache cannot be read, none
+    /// is, so 기본 인식 keeps classifying.
+    pub(super) fn learning_targets(
+        &self,
+        c: &Connection,
+        target_ids: &[String],
+    ) -> LearningTargets {
+        let read = || -> Result<LearningTargets> {
+            let Some(cache) = open_shadow_cache(&self.root)? else {
+                return Ok(LearningTargets::default());
             };
-            if at.as_str() > row.scored_at.as_str() && value != "cleared" {
-                let tally = tallies.entry(row.target_id.as_str()).or_default();
-                tally.0 += 1;
-                tally.1 += u32::from(value == "rejected");
-            }
+            let ids = serde_json::to_string(target_ids)?;
+            let automatic = c
+                .prepare(
+                    "SELECT id FROM character_targets
+                     WHERE id IN (SELECT value FROM json_each(?1))
+                       AND role='character' AND enabled=1 AND manual_only=0",
+                )?
+                .query_map([ids], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(LearningTargets(
+                readiness_of(c, Some(&cache), &automatic)?
+                    .into_iter()
+                    .filter(|r| r.status == "learning")
+                    .map(|r| r.target_id)
+                    .collect(),
+            ))
+        };
+        read().unwrap_or_else(|error| {
+            eprintln!("학습 인식 판단을 읽지 못해 기본 인식으로 계속합니다: {error}");
+            LearningTargets::default()
+        })
+    }
+}
+
+/// Test support: gives `target_id` raw rows the readiness rule counts, without assets or
+/// reference files. `accepted` and `rejected` are judged S36 automatic candidates (scored
+/// in `policy`, judged later by hand), `examples` more manual acceptances nobody scored.
+/// `tag` keeps the invented asset ids of separate calls apart.
+#[cfg(test)]
+pub(super) fn seed_readiness(
+    root: &Path,
+    c: &Connection,
+    target_id: &str,
+    policy: &str,
+    tag: &str,
+    (accepted, rejected, examples): (u32, u32, u32),
+) {
+    super::character_shadow::Cache::open(root).unwrap();
+    let cache = Connection::open(root.join(".cache/characters/s36_shadow.sqlite")).unwrap();
+    let decide = |asset: &str, decision: &str| {
+        c.execute(
+            "INSERT INTO character_decisions(target_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+             VALUES(?1,?2,'hash',?3,'fingerprint','{}','manual','2026-02-01T00:00:00Z')",
+            params![target_id, asset, decision],
+        )
+        .unwrap();
+    };
+    for (kind, count) in [("accepted", accepted), ("rejected", rejected)] {
+        for i in 0..count {
+            let asset = format!("seed-{tag}-{kind}-{i}");
+            cache
+                .execute(
+                    "INSERT INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections,origin)
+                     VALUES(?1,'hash',?2,0.05,'automatic',?3,'feature','none','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',100,'live')",
+                    params![asset, target_id, policy],
+                )
+                .unwrap();
+            decide(&asset, kind);
         }
-        let mut result = Vec::with_capacity(targets.len());
-        for target in &targets {
-            let (reviewed, wrong) = tallies.get(target.as_str()).copied().unwrap_or_default();
-            let examples: u32 = c.query_row(
-                "SELECT COUNT(*) FROM (SELECT d.source_asset_id,
-                   (SELECT x.decision FROM character_decisions x WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id ORDER BY x.sequence DESC LIMIT 1) AS latest
-                 FROM character_decisions d WHERE d.target_id=?1 AND d.origin='manual' GROUP BY d.source_asset_id)
-                 WHERE latest='accepted'",
-                [target],
-                |r| r.get(0),
-            )?;
-            let status = readiness_status(reviewed, wrong, examples).to_string();
-            result.push(S36Readiness {
-                target_id: target.clone(),
-                reviewed,
-                wrong,
-                examples,
-                status,
-            });
-        }
-        Ok(result)
+    }
+    for i in 0..examples {
+        decide(&format!("seed-{tag}-example-{i}"), "accepted");
     }
 }
 
@@ -2361,13 +2536,56 @@ mod tests {
         );
         assert!(scoped(Some(&f.series), Some("doubtful")).items.is_empty());
     }
+    /// The shared contract with the status screen: `src/characters/learningRule.fixture.json`
+    /// is also read by its vitest, which expects the same numbers.
+    #[test]
+    fn learning_rule_matches_the_shared_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../src/characters/learningRule.fixture.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture["readyReviewed"], READY_REVIEWED);
+        assert_eq!(fixture["readyExamples"], READY_EXAMPLES);
+        for case in fixture["cases"].as_array().unwrap() {
+            let (judged, wrong, examples) = (
+                case["judged"].as_u64().unwrap() as u32,
+                case["wrong"].as_u64().unwrap() as u32,
+                case["examples"].as_u64().unwrap() as u32,
+            );
+            assert_eq!(
+                allowed_wrong(judged),
+                case["allowed"].as_u64().unwrap() as u32,
+                "{case}"
+            );
+            assert_eq!(
+                readiness_status(judged, wrong, examples),
+                case["status"],
+                "{case}"
+            );
+        }
+    }
+
     #[test]
     fn s36_readiness_status_thresholds() {
-        assert_eq!(readiness_status(30, 1, 50), "ready");
+        assert_eq!(readiness_status(30, 1, 50), "learning");
         assert_eq!(readiness_status(29, 0, 80), "collecting");
         assert_eq!(readiness_status(40, 0, 49), "collecting");
-        assert_eq!(readiness_status(12, 2, 80), "hold");
-        assert_eq!(readiness_status(30, 4, 80), "keep");
+        // allowed = max(1, floor(5% of judged))
+        assert_eq!(
+            (allowed_wrong(0), allowed_wrong(30), allowed_wrong(39)),
+            (1, 1, 1)
+        );
+        assert_eq!(
+            (allowed_wrong(40), allowed_wrong(60), allowed_wrong(100)),
+            (2, 3, 5)
+        );
+        assert_eq!(readiness_status(30, 2, 80), "hold");
+        assert_eq!(readiness_status(44, 2, 80), "learning");
+        assert_eq!(readiness_status(44, 3, 80), "hold");
+        assert_eq!(readiness_status(100, 5, 80), "learning");
+        assert_eq!(readiness_status(100, 6, 80), "hold");
+        // Too few judged or examples is still collecting, whatever the wrong count.
+        assert_eq!(readiness_status(12, 2, 80), "collecting");
     }
 
     fn review_query(offset: u32, limit: u32, series_id: Option<&str>) -> ShadowReviewQuery {
@@ -2631,6 +2849,101 @@ mod tests {
         let readiness = f.library.character_s36_readiness(&f.series).unwrap();
         let row = readiness.iter().find(|r| r.target_id == target.id).unwrap();
         assert_eq!((row.reviewed, row.wrong), (2, 1));
-        assert_eq!(row.examples, 1);
+        assert_eq!((row.examples, row.allowed), (1, 1));
+        assert_eq!(row.status, "collecting");
+    }
+
+    #[test]
+    fn learning_follows_the_ratio_rule_falls_back_and_returns() {
+        let f = Fixture::new();
+        let target = f.ready("Ratio");
+        let id = target.id.clone();
+        let learning = || {
+            let c = f.library.connection().unwrap();
+            f.library.learning_targets(&c, &[id.clone()]).owns(&id)
+        };
+        let status = || {
+            let row = f.library.character_s36_readiness(&f.series).unwrap();
+            let row = row.into_iter().find(|r| r.target_id == id).unwrap();
+            (
+                row.reviewed,
+                row.wrong,
+                row.allowed,
+                row.examples,
+                row.status,
+            )
+        };
+        let seed = |tag: &str, counts: (u32, u32, u32)| {
+            let c = f.library.connection().unwrap();
+            seed_readiness(f.temp.path(), &c, &id, "v1", tag, counts);
+        };
+        // No score cache at all: nobody is learning, and the readiness read does not fail.
+        assert!(!learning());
+        assert_eq!(status().4, "collecting");
+        // 30 judged (1 wrong) but only 49 examples.
+        seed("a", (29, 1, 20));
+        assert_eq!(status(), (30, 1, 1, 49, "collecting".into()));
+        assert!(!learning());
+        seed("b", (0, 0, 1));
+        assert_eq!(status(), (30, 1, 1, 50, "learning".into()));
+        assert!(learning());
+        // One more wrong exceeds the allowance of 1: back to 기본 인식.
+        seed("c", (0, 1, 0));
+        assert_eq!(status(), (31, 2, 1, 50, "hold".into()));
+        assert!(!learning());
+        // The allowance grows with the judgments (40 judged allow 2): it returns by itself.
+        seed("d", (8, 0, 0));
+        assert!(!learning());
+        seed("e", (1, 0, 0));
+        assert_eq!(status(), (40, 2, 2, 59, "learning".into()));
+        assert!(learning());
+        // Manual-only and switched-off characters are never placed automatically.
+        let c = f.library.connection().unwrap();
+        c.execute(
+            "UPDATE character_targets SET manual_only=1 WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+        drop(c);
+        assert!(!learning());
+        let c = f.library.connection().unwrap();
+        c.execute(
+            "UPDATE character_targets SET manual_only=0,enabled=0 WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+        drop(c);
+        assert!(!learning());
+    }
+
+    #[test]
+    fn a_judgment_made_before_the_scoring_or_for_another_policy_does_not_count() {
+        let f = Fixture::new();
+        let target = f.ready("Early");
+        {
+            let c = f.library.connection().unwrap();
+            seed_readiness(f.temp.path(), &c, &target.id, "old", "old", (35, 0, 60));
+        }
+        let ready = |f: &Fixture| {
+            f.library.character_s36_readiness(&f.series).unwrap()[0]
+                .status
+                .clone()
+        };
+        assert_eq!(ready(&f), "learning");
+        // A newer policy rescored everything later than the decisions were made.
+        let cache =
+            Connection::open(f.temp.path().join(".cache/characters/s36_shadow.sqlite")).unwrap();
+        cache
+            .execute(
+                "UPDATE scores SET policy_version='new',scored_at='2026-03-01T00:00:00Z'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(ready(&f), "collecting");
+        // Judged again after the new scoring: counted again.
+        cache
+            .execute("UPDATE scores SET scored_at='2026-01-15T00:00:00Z'", [])
+            .unwrap();
+        assert_eq!(ready(&f), "learning");
     }
 }

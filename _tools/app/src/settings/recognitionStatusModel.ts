@@ -1,9 +1,6 @@
 import type { CharacterTarget } from "../characters/api";
-import { READY_EXAMPLES, READY_REVIEWED, type S36PublicationSettings, type S36Readiness } from "../characters/S36Publication";
+import type { S36PublicationSettings, S36Readiness } from "../characters/S36Publication";
 import type { ShadowReviewSummary, ShadowVerdictCounts } from "../characters/shadowReviewApi";
-
-/** Wrong answers a character may have collected before 학습 인식 steps back: 5% of its judgments, at least one. */
-export const allowedWrong = (judged: number) => Math.max(1, Math.floor(judged * 0.05));
 
 export type RecognitionInUse = "기본 인식" | "학습 인식" | "수동";
 export type RecognitionRow = {
@@ -21,11 +18,13 @@ export type RecognitionRow = {
 };
 export type RecognitionSeries = { seriesId: string; seriesName: string; rows: RecognitionRow[]; learning: number };
 
-/** Which recognition places the character's images now: 학습 인식 in a series switched to it (unless the character is excluded). */
-function inUse(target: CharacterTarget, settings: S36PublicationSettings | null): RecognitionInUse {
+/**
+ * Which recognition places the character's new images now. The library decides by the rule (its `status`);
+ * without the 학습 인식 preparation running nobody is placed by it, so 기본 인식 keeps working.
+ */
+function inUse(target: CharacterTarget, numbers: S36Readiness | undefined, settings: S36PublicationSettings | null): RecognitionInUse {
   if (!target.enabled || target.manualOnly) return "수동";
-  const seriesId = target.seriesClassificationId;
-  return seriesId && settings?.series.includes(seriesId) && !settings.excludedTargets.includes(target.id) ? "학습 인식" : "기본 인식";
+  return numbers?.status === "learning" && settings?.scoringEnabled !== false ? "학습 인식" : "기본 인식";
 }
 
 /** Characters grouped by series, each with its 판단 / 예시 / 틀림 numbers; busiest series first. */
@@ -43,9 +42,9 @@ export function recognitionSeries(
     if (!series) bySeries.set(seriesId, series = { seriesId, seriesName: seriesName(seriesId) ?? "시리즈 없음", rows: [], learning: 0 });
     const numbers = readiness.get(target.id);
     const judged = numbers?.reviewed ?? 0, examples = numbers?.examples ?? 0, wrong = numbers?.wrong ?? 0;
-    const recognition = inUse(target, settings);
-    series.rows.push({ targetId: target.id, name: target.displayName, recognition, judged, examples, wrong, allowed: allowedWrong(judged),
-      collecting: judged < READY_REVIEWED || examples < READY_EXAMPLES });
+    const recognition = inUse(target, numbers, settings);
+    series.rows.push({ targetId: target.id, name: target.displayName, recognition, judged, examples, wrong, allowed: numbers?.allowed ?? 1,
+      collecting: !numbers || numbers.status === "collecting" });
     if (recognition === "학습 인식") series.learning += 1;
   }
   const result = [...bySeries.values()];

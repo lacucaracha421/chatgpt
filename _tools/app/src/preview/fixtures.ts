@@ -385,7 +385,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "ignored_character_suggestions": return [];
     case "character_suggestions": return previewCharacterSuggestions(Number(args.minimum ?? 5));
     case "character_s36_readiness": return args.seriesId === PREVIEW_CHARACTER_SERIES_ID ? previewS36Readiness() : [];
-    case "character_s36_publication": return { series: [PREVIEW_CHARACTER_SERIES_ID], excludedTargets: ["t-lycaon", "t-anby"], scoringEnabled: true };
+    case "character_s36_publication": return { scoringEnabled: true };
     case "tagger_review_items": return previewTaggerReviewItems(previewAssets);
     case "character_confirm_counts": return previewConfirmCounts(args.seriesId as string | null | undefined);
     case "character_shadow_backfill_status": return { running: false, preparing: false, total: 0, scored: 0, skipped: 0, cancelled: false, error: null };

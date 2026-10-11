@@ -497,8 +497,8 @@ it("creates a group from the series overflow",async()=>{
 });
 
 it("shows compact name-only tiles with a warning mark only when S36 found mistakes",async()=>{
-  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: [], excludedTargets: [], scoringEnabled: true });
-  vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([{ targetId: "hina", reviewed: 30, wrong: 2, examples: 40, status: "hold" }]);
+  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ scoringEnabled: true });
+  vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([{ targetId: "hina", reviewed: 30, wrong: 2, allowed: 1, examples: 60, status: "hold" }]);
   await mount();
   const hina=await screen.findByRole("button",{name:"히나 열기"});
   await waitFor(()=>expect(hina.querySelector(".series-character__warning")).not.toBeNull());
@@ -963,7 +963,7 @@ it("opens the 확인 list from the series count line, not the series overflow", 
 });
 
 it("shows waiting items as a quiet action on the series count line, not a banner", async () => {
-  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: ["series"], excludedTargets: [], scoringEnabled: true });
+  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
   const { confirmSource } = await mount(undefined, false, [], undefined, false, { candidates: 37, shadowItems: ["a1"] });
   const user = userEvent.setup();
@@ -984,7 +984,7 @@ it("shows waiting items as a quiet action on the series count line, not a banner
 });
 
 it("hides the 확인 action inside a character", async () => {
-  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: ["series"], excludedTargets: [], scoringEnabled: true });
+  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
   await mount("hina", false, [], undefined, false, { candidates: 37 });
   await screen.findByRole("option", { name: "이미지 5.webp" });
@@ -992,7 +992,7 @@ it("hides the 확인 action inside a character", async () => {
 });
 
 it("shows 확인 on a series that does not use 학습 인식 too, so judgments can pile up everywhere", async () => {
-  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: [], excludedTargets: [], scoringEnabled: true });
+  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
   const { confirmSource } = await mount(undefined, false, [], undefined, false, { candidates: 37 });
   expect(await screen.findByRole("button", { name: "확인 37" })).toBeInTheDocument();
@@ -1005,8 +1005,8 @@ it("hides 확인 when nothing waits", async () => {
   expect(screen.queryByRole("button", { name: /확인 [0-9]/ })).not.toBeInTheDocument();
 });
 
-it("moves FAULT and the S36 series control into the series overflow", async () => {
-  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: [], excludedTargets: [], scoringEnabled: true });
+it("moves FAULT into the series overflow and offers no recognition selector", async () => {
+  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
   await mount(undefined, false, [], undefined, false, { fault: true });
   const user = userEvent.setup();
@@ -1017,19 +1017,19 @@ it("moves FAULT and the S36 series control into the series overflow", async () =
   await user.click(within(toolbar).getByRole("button", { name: "시리즈 더보기" }));
   expect(await screen.findByRole("menuitem", { name: "FAULT로 플레이" })).toBeInTheDocument();
   expect(screen.queryByRole("menuitem", { name: "확인" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("menuitem", { name: "학습 인식 설정" }));
-  const dialog = await screen.findByRole("dialog", { name: "학습 인식 설정" });
-  expect(within(dialog).getByRole("radiogroup", { name: "자동 분류 방식" })).toBeInTheDocument();
+  // Each character is placed by 기본 인식 or 학습 인식 by itself: nothing to choose per series.
+  expect(screen.queryByRole("menuitem", { name: "학습 인식 설정" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("radiogroup", { name: "자동 분류 방식" })).not.toBeInTheDocument();
 });
 
-it("shows S36 recovery in the header only while S36 classification is stalled", async () => {
-  vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: ["series"], excludedTargets: [], scoringEnabled: false });
-  vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
-  const invoke = vi.mocked(tauriCore.invoke).mockResolvedValue(undefined);
-  await mount(undefined);
-  expect(await screen.findByText("학습 인식 준비가 꺼져 있어 자동 분류가 멈춰 있습니다")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "켜기" }));
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_character_shadow_enabled", { enabled: true }));
+it("turns a character's automatic recognition off from 캐릭터 더보기 and nothing else changes", async () => {
+  const { api } = await mount("hina");
+  const save = vi.spyOn(api, "saveSettings");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "캐릭터 더보기" }));
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "자동 인식 끄기" }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: "hina", expectedRevision: 1, enabled: false, displayName: "히나" }), true));
+  expect(screen.queryByRole("menuitem", { name: "학습 인식 설정" })).not.toBeInTheDocument();
 });
 
 it("reaches each reference's crop check in one tap from the character panel and saves the choice", async () => {

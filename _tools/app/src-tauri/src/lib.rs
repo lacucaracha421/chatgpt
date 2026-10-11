@@ -544,7 +544,6 @@ pub fn run() {
             commands::characters::set_character_augmentation_enabled,
             commands::characters::set_character_shadow_enabled,
             commands::characters::character_s36_publication,
-            commands::characters::set_character_s36_publication,
             commands::characters::clear_character_s36_automatic,
             commands::characters::character_s36_readiness,
             commands::characters::character_review_inbound_status,

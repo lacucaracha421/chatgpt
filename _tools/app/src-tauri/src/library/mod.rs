@@ -83,6 +83,8 @@ pub mod character_subfolder_cleanup;
 mod character_shadow;
 pub mod character_shadow_backfill;
 pub mod character_shadow_review;
+#[cfg(test)]
+mod character_recognition_plan;
 mod character_sources;
 mod character_training;
 pub(crate) mod character_worker;

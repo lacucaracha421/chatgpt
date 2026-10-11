@@ -492,7 +492,6 @@ mod tests {
             augmentation_model: None,
             shadow_model: None,
             s36_shadow_disabled: true,
-            s36: Default::default(),
         };
         for n in 2..=17 {
             l.connection().unwrap().execute("INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,cover_artwork_id,created_at,updated_at) VALUES(?1,'m',?2,0,?2,'a','c','u')",params![format!("v{n}"),n]).unwrap();

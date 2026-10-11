@@ -1,32 +1,58 @@
 import { expect, it } from "vitest";
 import type { CharacterTarget } from "../characters/api";
-import type { S36Readiness } from "../characters/S36Publication";
-import { accuracyRows, allowedWrong, recognitionSeries } from "./recognitionStatusModel";
+import { READY_EXAMPLES, READY_REVIEWED, type S36Readiness } from "../characters/S36Publication";
+// The same file the library's Rust test checks `allowed_wrong` and `readiness_status` against.
+import rule from "../characters/learningRule.fixture.json";
+import { accuracyRows, recognitionSeries } from "./recognitionStatusModel";
 
 const target = (id: string, name: string, extra: Partial<CharacterTarget> = {}) => ({ id, displayName: name, seriesClassificationId: "zzz", enabled: true, manualOnly: false, role: "character", ...extra }) as CharacterTarget;
-const readiness = (targetId: string, reviewed: number, wrong: number, examples: number): S36Readiness => ({ targetId, reviewed, wrong, examples, status: "collecting" });
+const readiness = (targetId: string, reviewed: number, wrong: number, allowed: number, examples: number, status: S36Readiness["status"]): S36Readiness => ({ targetId, reviewed, wrong, allowed, examples, status });
+const enabled = { scoringEnabled: true };
 
-it("allows 5% of the judgments as wrong, at least one", () => {
-  expect([0, 1, 29, 30, 39, 40, 59, 60, 74, 100, 250].map(allowedWrong)).toEqual([1, 1, 1, 1, 1, 2, 2, 3, 3, 5, 12]);
+it("shares the rule's numbers with the library: same thresholds, and every fixture case reads the same on the screen", () => {
+  expect([rule.readyReviewed, rule.readyExamples]).toEqual([READY_REVIEWED, READY_EXAMPLES]);
+  const cases = rule.cases.map((c, index) => ({ c, id: `t${index}` }));
+  const targets = cases.map(({ id }) => target(id, id));
+  const rows = new Map(cases.map(({ c, id }) => [id, readiness(id, c.judged, c.wrong, c.allowed, c.examples, c.status as S36Readiness["status"])]));
+  const [series] = recognitionSeries(targets, rows, enabled, () => "시리즈");
+  const byId = new Map(series!.rows.map(row => [row.targetId, row]));
+  for (const { c, id } of cases) {
+    const row = byId.get(id)!;
+    expect([row.judged, row.examples, row.wrong, row.allowed]).toEqual([c.judged, c.examples, c.wrong, c.allowed]);
+    expect(row.recognition).toBe(c.status === "learning" ? "학습 인식" : "기본 인식");
+    expect(row.collecting).toBe(c.status === "collecting");
+    // 5% of the judgments rounded down, at least one: the figure shown beside the wrong count.
+    expect(c.allowed).toBe(Math.max(1, Math.floor(c.judged * 0.05)));
+    // The line a character must reach to be placed by 학습 인식.
+    const passes = c.judged >= rule.readyReviewed && c.examples >= rule.readyExamples && c.wrong <= c.allowed;
+    expect(c.status === "learning").toBe(passes);
+  }
 });
 
 it("lists each character with the recognition in use and its numbers", () => {
   const targets = [target("sna", "수나"), target("nam", "남궁우"), target("sisia", "시시아"), target("manual", "수동이", { enabled: false }), target("x", "기타", { role: "extras" })];
-  const rows = new Map([readiness("sna", 74, 0, 126), readiness("nam", 44, 2, 97), readiness("sisia", 36, 3, 42)].map(row => [row.targetId, row]));
-  const [series] = recognitionSeries(targets, rows, { series: ["zzz"], excludedTargets: ["sisia"], scoringEnabled: true }, id => id === "zzz" ? "젠레스" : undefined);
+  const rows = new Map([readiness("sna", 74, 0, 3, 126, "learning"), readiness("nam", 44, 2, 2, 97, "learning"), readiness("sisia", 36, 3, 1, 62, "hold")].map(row => [row.targetId, row]));
+  const [series] = recognitionSeries(targets, rows, enabled, id => id === "zzz" ? "젠레스" : undefined);
   expect(series!.seriesName).toBe("젠레스");
   expect(series!.rows.map(row => [row.name, row.recognition, row.judged, row.examples, row.wrong, row.allowed])).toEqual([
     ["수나", "학습 인식", 74, 126, 0, 3],
     ["남궁우", "학습 인식", 44, 97, 2, 2],
-    ["시시아", "기본 인식", 36, 42, 3, 1],
+    ["시시아", "기본 인식", 36, 62, 3, 1],
     ["수동이", "수동", 0, 0, 0, 1],
   ]);
-  expect(series!.rows.map(row => row.collecting)).toEqual([false, false, true, true]);
+  expect(series!.rows.map(row => row.collecting)).toEqual([false, false, false, true]);
   expect(series!.learning).toBe(2);
 });
 
-it("uses 기본 인식 where the series is not switched", () => {
-  const [series] = recognitionSeries([target("a", "에이")], new Map(), { series: [], excludedTargets: [], scoringEnabled: true }, () => undefined);
+it("shows 기본 인식 for everyone while the 학습 인식 preparation is off, since nothing is placed by it then", () => {
+  const rows = new Map([readiness("a", 74, 0, 3, 126, "learning")].map(row => [row.targetId, row]));
+  const [series] = recognitionSeries([target("a", "에이")], rows, { scoringEnabled: false }, () => undefined);
+  expect(series!.rows[0]!.recognition).toBe("기본 인식");
+  expect(series!.learning).toBe(0);
+});
+
+it("uses 기본 인식 where nothing has been judged yet", () => {
+  const [series] = recognitionSeries([target("a", "에이")], new Map(), enabled, () => undefined);
   expect(series!.rows[0]!.recognition).toBe("기본 인식");
   expect(series!.seriesName).toBe("시리즈 없음");
 });

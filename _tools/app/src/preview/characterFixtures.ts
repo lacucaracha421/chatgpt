@@ -186,13 +186,13 @@ export function previewShadowReviewSummary() {
   }
   return { automatic: candidatePairs.filter(pair => pair.verdict === "automatic").length, recommended: candidatePairs.filter(pair => pair.verdict === "recommended").length, targets: [...targets.values()] };
 }
-/** 확인 판단 / 맞음 예시 / 틀림 of the characters (the learning line is 30 and 50). */
+/** 확인 판단 / 맞음 예시 / 틀림 of the characters (the learning line is 30 and 50, wrong may be 5% of the judged, at least one). */
 export function previewS36Readiness() {
   const rows: [string, number, number, number, string][] = [
-    ["t-ellen", 74, 0, 126, "ready"], ["t-corin", 44, 2, 97, "ready"], ["t-lycaon", 36, 3, 42, "hold"],
-    ["t-anby", 46, 5, 111, "keep"], ["t-billy", 12, 0, 40, "collecting"], ["t-belle", 0, 0, 8, "collecting"],
+    ["t-ellen", 74, 0, 126, "learning"], ["t-corin", 44, 2, 97, "learning"], ["t-lycaon", 36, 3, 62, "hold"],
+    ["t-anby", 46, 5, 111, "hold"], ["t-billy", 12, 0, 40, "collecting"], ["t-belle", 0, 0, 8, "collecting"],
   ];
-  return rows.map(([targetId, reviewed, wrong, examples, status]) => ({ targetId, reviewed, wrong, examples, status }));
+  return rows.map(([targetId, reviewed, wrong, examples, status]) => ({ targetId, reviewed, wrong, allowed: Math.max(1, Math.floor(reviewed * 0.05)), examples, status }));
 }
 /** `character_confirm_counts`: each pair once under its highest kind (the tags and 학습 인식 doubting a placement beat a recognition suggestion). */
 export function previewConfirmCounts(seriesId?: string | null) {
