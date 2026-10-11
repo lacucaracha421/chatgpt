@@ -30,12 +30,26 @@ export type ReferenceInspection = {
 export const usableReferenceRegionStates = ["single", "selected", "automatic"] as const;
 
 /**
+ * A box that covers the entire frame, in either orientation. Mirrors the native
+ * `is_whole_frame`, which the save rule and the inspection share: such a box is not a person.
+ */
+export const isWholeFrameBox = (bounds: readonly number[], width: number, height: number) =>
+  bounds[0] === 0 && bounds[1] === 0
+  && ((bounds[2] === width && bounds[3] === height) || (bounds[2] === height && bounds[3] === width));
+
+/** A shared image (another character owns it) cannot use the whole frame as its person. */
+export const refusedAsWholeFrame = (region: ReferenceInspection, bounds: readonly number[] | null) =>
+  Boolean(region.otherCharacters?.length && bounds && isWholeFrameBox(bounds, region.width, region.height));
+
+/**
  * An image the user still has to place. A stale binding is recoverable whenever the
  * detector still offers boxes: the stored region went out of date, but the person can
  * be re-chosen. `no_region` never invents a crop, so it is not treated as a choice.
+ * A shared image whose current crop is the whole frame has no person yet either.
  */
 export const needsReferenceRegionChoice = (region: ReferenceInspection) =>
-  region.state === "needs_region" || (region.state === "stale_region" && region.boxes.length > 0);
+  region.state === "needs_region" || (region.state === "stale_region" && region.boxes.length > 0)
+  || (usableReferenceRegionStates.some(state => state === region.state) && refusedAsWholeFrame(region, regionBox(region, referenceRegionIndex(region))));
 
 /** A stored binding that no longer matches the image and detector. */
 export const staleReferenceRegion = (region: ReferenceInspection) => region.state === "stale_region";

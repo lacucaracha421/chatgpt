@@ -1,16 +1,17 @@
 import { useAssetMask } from "../privacy/PrivacyContext";
 import { AssetSvgImage } from "../privacy/AssetImage";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
 import { thumbnailUrl } from "../assets/mediaUrl";
-import { draftReferenceRegions, regionBox, referenceRegionBinding, referenceRegionIndex, staleReferenceRegion, usableReferenceRegionStates, needsReferenceRegionChoice, type ReferenceInspection, type ReferenceRegions } from "./api";
+import { draftReferenceRegions, refusedAsWholeFrame, regionBox, referenceRegionBinding, referenceRegionIndex, staleReferenceRegion, usableReferenceRegionStates, needsReferenceRegionChoice, type ReferenceInspection, type ReferenceRegions } from "./api";
 
 /** Mirrors the backend rule: automatic confirmation needs six supporting references. */
 export const AUTOMATIC_CHARACTER_REFERENCE_COUNT = 6;
 
 /** An inspection supplies a reference without asking anything only in these states. */
-const usableRegion = (region: ReferenceInspection) => usableReferenceRegionStates.some(state => state === region.state);
+const usableRegion = (region: ReferenceInspection) => usableReferenceRegionStates.some(state => state === region.state)
+  && !refusedAsWholeFrame(region, regionBox(region, referenceRegionIndex(region)));
 
 /** References the backend resolved on its own, i.e. common-person images it can use. */
 export const automaticReferenceCount = (inspections: ReferenceInspection[]) =>
@@ -35,12 +36,14 @@ type InspectionRequest = {
 /**
  * A person the user just chose counts at once, before the native reinspection returns: the
  * same row the inspection will report for a binding that names one of the image's boxes.
- * A binding that no longer matches the image or detector leaves the row as inspected.
+ * A binding that no longer matches the image or detector leaves the row as inspected, and so
+ * does a whole-frame choice on an image another character owns: the save refuses it.
  */
 export function withDraftChoices(inspections: ReferenceInspection[], draftRegions: ReferenceRegions): ReferenceInspection[] {
   return inspections.map(row => {
     const draft = draftRegions[row.assetId];
     if (!draft || draft.contentHash !== row.contentHash || draft.baselineFingerprint !== row.baselineFingerprint) return row;
+    if (refusedAsWholeFrame(row, draft.bounds)) return row;
     const index = row.boxes.findIndex(box => box.every((value, side) => value === draft.bounds[side]));
     return index < 0 ? row : { ...row, state: "selected", selectedIndex: index, automaticIndex: null };
   });
@@ -84,6 +87,7 @@ export function referenceRegionStatus(region: ReferenceInspection, draftRegions:
   if (region.state === "selected") return changedRegions[region.assetId] ? "직접 지정 · 저장 전" : "직접 지정 · 저장됨";
   if (region.state === "automatic") return "자동 확인";
   if (region.state === "single") return "한 명 감지 · 자동 사용";
+  if (region.otherCharacters?.length && region.boxes.length === 0) return `다른 캐릭터(${region.otherCharacters.join(", ")}) 이미지 · 인물을 찾지 못해 사용할 수 없음`;
   if (region.otherCharacters?.length) return `다른 캐릭터(${region.otherCharacters.join(", ")}) 이미지 · 인물 지정 필요`;
   return "인물 확인 필요 · 미사용";
 }
@@ -144,6 +148,7 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
   // "focus" checks one reference the user tapped and closes after a choice.
   const [mode, setMode] = useState<"required" | "correction" | "focus" | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const { inspections: current, error, retry } = inspection ?? localInspection;
   const inspections = current ?? [];
   const changedRegions = draftReferenceRegions(draftRegions, assetIds, savedRegions);
@@ -176,10 +181,18 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     }
   }, [chosen, choosable]);
 
+  // A request made before the inspection lands is kept until its reference can be chosen.
+  const handledFocus = useRef<number | null>(null);
   useEffect(() => {
-    if (!focusRequest || !choosable.some(region => region.assetId === focusRequest.assetId)) return;
+    if (!focusRequest || handledFocus.current === focusRequest.key || !choosable.some(region => region.assetId === focusRequest.assetId)) return;
+    handledFocus.current = focusRequest.key;
     setMode("focus"); setChosen(focusRequest.assetId);
-  }, [focusRequest?.key]);
+  }, [focusRequest?.key, choosable.length > 0]);
+
+  // A tapped or refused reference may sit below the fold: bring its chooser into view.
+  useEffect(() => {
+    if (mode === "focus" && chosen) sectionRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [mode, chosen]);
 
   // The shortfall workflow ends only when the threshold is genuinely met and no image shared
   // with another character still waits for its person. A pick
@@ -239,7 +252,7 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     ? position >= 0 ? { current: position + 1, total: unresolved.length }
       : { current: assetIds.indexOf(open.region.assetId) + 1, total: assetIds.length }
     : null;
-  return <section className="character-reference-regions" aria-label="인물 영역 확인">
+  return <section ref={sectionRef} className="character-reference-regions" aria-label="인물 영역 확인">
     {error && <><p role="alert">{error}</p>{retry && <Button size="sm" variant="ghost" disabled={busy} onClick={retry}>인물 확인 다시 시도</Button>}</>}
     {!error && mode === null && <div className="character-actions">
       {askRequired && <Button size="sm" disabled={busy} onClick={openRequired}>필요한 인물만 확인</Button>}

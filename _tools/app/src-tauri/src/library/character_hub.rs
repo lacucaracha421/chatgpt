@@ -1919,6 +1919,19 @@ pub(super) fn validate_character_selection_with_region(
     asset: &str,
     region: Option<&super::character_reference_regions::RegionBinding>,
 ) -> Result<()> {
+    validate_character_selection_at_slot(connection, series, target, asset, region, None)
+}
+
+/// [`validate_character_selection_with_region`] for the `slot`-th (1-based) reference of a
+/// settings save: a refusal names that slot so the user knows which reference needs a person.
+pub(super) fn validate_character_selection_at_slot(
+    connection: &Connection,
+    series: &str,
+    target: Option<&str>,
+    asset: &str,
+    region: Option<&super::character_reference_regions::RegionBinding>,
+    slot: Option<usize>,
+) -> Result<()> {
     super::characters::scoped_image(connection, series, asset)?;
     if series_asset_excluded(connection, series, asset)? {
         return Err(Error::Invalid(
@@ -1941,8 +1954,9 @@ pub(super) fn validate_character_selection_with_region(
             return Ok(());
         }
     }
+    let slot = slot.map(|n| format!("{n}번째 레퍼런스: ")).unwrap_or_default();
     Err(Error::InvalidMessage(format!(
-        "다른 캐릭터({})에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.",
+        "{slot}다른 캐릭터({})에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.",
         names.join(", ")
     )))
 }

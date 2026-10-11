@@ -1,6 +1,6 @@
 import { AssetSvgImage } from "../privacy/AssetImage";
 import { AssetImage } from "../privacy/AssetImage";
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { PhotoIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
@@ -76,6 +76,12 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
   const changedRegions = draftReferenceRegions(draft.referenceRegions, draft.references, characterDraft(target).referenceRegions);
   const headingId = useId();
   const [focusRequest, setFocusRequest] = useState<{ assetId: string; key: number } | null>(null);
+  // A refused save names the reference that still needs a person ("3번째 레퍼런스"): open its chooser.
+  useEffect(() => {
+    const slot = Number(/(\d+)번째 레퍼런스/.exec(error ?? "")?.[1]);
+    const assetId = slot > 0 ? draft.references[slot - 1] : undefined;
+    if (assetId) setFocusRequest(old => ({ assetId, key: (old?.key ?? 0) + 1 }));
+  }, [error]);
   const automatic = !target?.manualOnly && draft.enabled;
   const usable = inspections ? usableReferenceCount(inspections) : draft.references.length;
   const shortfall = automatic && usable < AUTOMATIC_CHARACTER_REFERENCE_COUNT

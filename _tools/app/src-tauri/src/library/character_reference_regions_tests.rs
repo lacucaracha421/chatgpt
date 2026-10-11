@@ -577,14 +577,14 @@ fn another_characters_image_is_refused_as_a_whole_image_reference_with_the_named
             true,
         )
         .unwrap_err();
-    assert_eq!(error.to_string(), SHARED_HINT);
+    assert_eq!(error.to_string(), format!("1번째 레퍼런스: {SHARED_HINT}"));
     // A box covering the whole frame is the whole image, whatever it is called.
     let whole = RegionBindings::from([("asset-5".to_string(), binding(&hash, [0, 0, 100, 80]))]);
     let error = f
         .library
         .save_character_settings(shared_settings(&midori, &["asset-5"], whole), true)
         .unwrap_err();
-    assert_eq!(error.to_string(), SHARED_HINT);
+    assert_eq!(error.to_string(), format!("1번째 레퍼런스: {SHARED_HINT}"));
     // Nothing of the refused saves remains, and the owner is untouched.
     assert!(read_regions(&f.library.connection().unwrap(), &midori.id)
         .unwrap()
@@ -706,6 +706,7 @@ fn region_scoped_reference_on_another_characters_image_supplies_only_the_region(
 #[test]
 fn inspection_asks_for_a_person_on_images_shared_with_another_character() {
     let mut detected = row_in_state("asset-0", "hash-0", "single");
+    detected.boxes = vec![[10, 10, 60, 90]];
     require_choice_for_shared(&mut detected, vec!["모모카".into()]);
     assert_eq!(detected.state, "needs_region");
     assert_eq!(
@@ -775,7 +776,7 @@ fn choosing_a_person_on_every_shared_reference_makes_the_save_pass() {
             true,
         )
         .unwrap_err();
-    assert!(error.to_string().starts_with("다른 캐릭터(모모카)에 등록된 이미지입니다."));
+    assert!(error.to_string().starts_with("2번째 레퍼런스: 다른 캐릭터(모모카)에 등록된 이미지입니다."));
     let legacy = f.library.get_character_target(&midori.id).unwrap();
     // A person chosen on both: both are saved and counted as usable.
     let saved = f
@@ -792,5 +793,92 @@ fn choosing_a_person_on_every_shared_reference_makes_the_save_pass() {
             true,
         )
         .unwrap();
+    assert_eq!(saved.usable_references().count(), 2);
+}
+
+/// The 다이아린 · 자오 shape (asset 6729c4fa): a 1482x2048 frame whose detection list ends
+/// with the whole frame, which the worker suggested.
+fn whole_frame_row(others: &[&str]) -> (ReferenceInspection, Vec<String>) {
+    let mut row = row_in_state("asset-0", "hash-0", "needs_region");
+    row.width = 1482;
+    row.height = 2048;
+    row.boxes = vec![[1014, 55, 1470, 972], [0, 0, 1482, 2048]];
+    row.suggested_index = Some(1);
+    (row, others.iter().map(|name| name.to_string()).collect())
+}
+
+#[test]
+fn a_shared_image_never_offers_or_suggests_the_whole_frame() {
+    let (mut row, others) = whole_frame_row(&["자오"]);
+    require_choice_for_shared(&mut row, others);
+    assert_eq!(row.state, "needs_region", "the person must still choose");
+    assert_eq!(row.boxes, vec![[1014, 55, 1470, 972]]);
+    assert_eq!((row.suggested_index, row.selected_index, row.automatic_index), (None, None, None));
+    assert_eq!(row.other_characters, vec!["자오".to_string()]);
+    // The save rule and the inspection agree on what the whole frame is, in both orientations.
+    assert!(is_whole_frame([0, 0, 1482, 2048], 1482, 2048));
+    assert!(is_whole_frame([0, 0, 2048, 1482], 1482, 2048));
+    assert!(!is_whole_frame([0, 0, 1482, 2047], 1482, 2048));
+}
+
+#[test]
+fn removing_whole_frame_boxes_keeps_every_index_on_its_own_box() {
+    let mut row = row_in_state("asset-0", "hash-0", "needs_region");
+    row.boxes = vec![[0, 0, 80, 100], [0, 0, 40, 50], [40, 50, 80, 100]];
+    row.suggested_index = Some(2);
+    require_choice_for_shared(&mut row, vec!["모모카".into()]);
+    assert_eq!(row.boxes, vec![[0, 0, 40, 50], [40, 50, 80, 100]]);
+    assert_eq!(row.suggested_index, Some(1));
+    // A draft that chose the whole frame is no choice for a shared image.
+    let mut drafted = row_in_state("asset-0", "hash-0", "selected");
+    drafted.boxes = vec![[0, 0, 40, 50], [0, 0, 80, 100]];
+    drafted.selected_index = Some(1);
+    require_choice_for_shared(&mut drafted, vec!["모모카".into()]);
+    assert_eq!((drafted.state.as_str(), drafted.selected_index), ("needs_region", None));
+    assert_eq!(drafted.boxes, vec![[0, 0, 40, 50]]);
+    // A person the user chose among real boxes keeps pointing at the same box.
+    let mut chosen = row_in_state("asset-0", "hash-0", "selected");
+    chosen.boxes = vec![[0, 0, 80, 100], [0, 0, 40, 50], [40, 50, 80, 100]];
+    chosen.selected_index = Some(2);
+    require_choice_for_shared(&mut chosen, vec!["모모카".into()]);
+    assert_eq!((chosen.state.as_str(), chosen.selected_index), ("selected", Some(1)));
+    // Nothing but the whole frame leaves no person to choose.
+    let mut only = row_in_state("asset-0", "hash-0", "single");
+    only.boxes = vec![[0, 0, 80, 100]];
+    require_choice_for_shared(&mut only, vec!["모모카".into()]);
+    assert_eq!((only.state.as_str(), only.boxes.len(), only.suggested_index), ("no_region", 0, None));
+}
+
+#[test]
+fn an_unshared_image_keeps_its_boxes_but_is_not_told_to_use_the_whole_frame() {
+    let (mut row, others) = whole_frame_row(&[]);
+    require_choice_for_shared(&mut row, others);
+    assert_eq!(row.boxes.len(), 2, "whole-frame use stays legal for an image nobody else owns");
+    assert_eq!(row.suggested_index, None);
+}
+
+#[test]
+fn the_slot_of_the_reference_still_missing_a_person_is_named_and_a_real_person_passes() {
+    let (f, _momoka, midori, hash) = shared_image_fixture();
+    let connection = f.library.connection().unwrap();
+    connection.execute("UPDATE assets SET width=100,height=80 WHERE id='asset-0'", []).unwrap();
+    let h0: String = connection
+        .query_row("SELECT content_hash FROM assets WHERE id='asset-0'", [], |r| r.get(0))
+        .unwrap();
+    drop(connection);
+    let ids = ["asset-5", "asset-0"];
+    // The first reference has its person; the second only the whole frame.
+    let whole = RegionBindings::from([
+        ("asset-5".to_string(), binding(&hash, [10, 10, 50, 70])),
+        ("asset-0".to_string(), binding(&h0, [0, 0, 100, 80])),
+    ]);
+    let error = f.library.save_character_settings(shared_settings(&midori, &ids, whole), true).unwrap_err();
+    assert_eq!(error.to_string(), format!("2번째 레퍼런스: {SHARED_HINT}"));
+    assert!(read_regions(&f.library.connection().unwrap(), &midori.id).unwrap().is_empty(), "the refused save is rolled back");
+    let person = RegionBindings::from([
+        ("asset-5".to_string(), binding(&hash, [10, 10, 50, 70])),
+        ("asset-0".to_string(), binding(&h0, [50, 10, 90, 70])),
+    ]);
+    let saved = f.library.save_character_settings(shared_settings(&midori, &ids, person), true).unwrap();
     assert_eq!(saved.usable_references().count(), 2);
 }

@@ -1130,13 +1130,15 @@ impl Library {
             .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
         let mut hashes = BTreeSet::new();
         let mut values = Vec::new();
-        for asset_id in asset_ids {
+        for (index, asset_id) in asset_ids.iter().enumerate() {
             if strict {
-                super::character_hub::validate_character_selection(
+                super::character_hub::validate_character_selection_at_slot(
                     transaction,
                     series,
                     Some(id),
                     asset_id,
+                    None,
+                    Some(index + 1),
                 )?;
             }
             let (hash, path) = scoped_image(transaction, series, asset_id)?;

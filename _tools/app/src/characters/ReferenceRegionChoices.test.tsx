@@ -479,3 +479,31 @@ it("keeps the chooser and its next image on screen while a chosen person is bein
   await act(async () => { release?.(); });
   expect(boxButtons()).toHaveLength(2);
 });
+
+/** 다이아린 · 자오 (asset 6729c4fa): a 1482x2048 frame whose detection list ends with the whole frame. */
+const frame = [[1014, 55, 1470, 972], [0, 0, 1482, 2048]] as [number, number, number, number][];
+const sharedFrame = (state: string, extra: Partial<ReferenceInspection> = {}): ReferenceInspection =>
+  ({ ...inspection("g", state, frame), width: 1482, height: 2048, suggestedIndex: 1, otherCharacters: ["자오"], ...extra });
+
+it("never counts a whole-frame choice on another character's image as a usable person", () => {
+  const row = sharedFrame("needs_region");
+  const whole = box("g", frame[1]);
+  // The draft the "추천 영역 사용" button would have made is refused by the save, so it is no choice.
+  expect(withDraftChoices([row], { g: whole })[0]).toBe(row);
+  expect(usableReferenceCount(withDraftChoices([row], { g: whole }))).toBe(0);
+  // A real person box on the same image is a choice.
+  expect(withDraftChoices([row], { g: box("g", frame[0]) })[0]).toMatchObject({ state: "selected", selectedIndex: 0 });
+  // A native answer that still carries the whole frame as the chosen crop is not usable either.
+  expect(usableReferenceCount([sharedFrame("selected", { selectedIndex: 1 })])).toBe(0);
+  // An image nobody else owns may still use the whole frame.
+  const own = { ...sharedFrame("selected", { selectedIndex: 1 }), otherCharacters: undefined };
+  expect(usableReferenceCount([own])).toBe(1);
+  expect(withDraftChoices([{ ...row, otherCharacters: undefined }], { g: whole })[0]).toMatchObject({ state: "selected", selectedIndex: 1 });
+});
+
+it("keeps asking for a person on a shared image when its only offered choice was the whole frame", async () => {
+  const rows = [sharedFrame("selected", { selectedIndex: 1 })];
+  render(<ReferenceRegionChoices seriesId="series" targetId="lara" assetIds={["g"]} draftRegions={{ g: box("g", frame[1]) }}
+    privacyMode={false} busy={false} api={vi.fn()} inspection={{ inspections: rows, error: null }} onChange={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "필요한 인물만 확인" })).toBeInTheDocument();
+});

@@ -168,3 +168,26 @@ it("opens one reference's crop from its strip tile, shows the crop in the tile, 
   await user.keyboard("{Enter}");
   expect(await screen.findByText("1/6")).toBeVisible();
 });
+
+it("keeps the '!' on a shared reference whose draft was the whole frame, and opens the chooser at the slot a refused save names", async () => {
+  const frame: [number, number, number, number][] = [[1014, 55, 1470, 972], [0, 0, 1482, 2048]];
+  const target: CharacterTarget = {
+    id: "character", displayName: "다이아린", seriesClassificationId: "series", linkedClassificationId: null,
+    enabled: true, manualOnly: false, revision: 1, ready: true, fingerprint: "fingerprint",
+    references: Array.from({ length: 3 }, (_, slot) => ({ slot, assetId: `ref-${slot}`, assetHash: `hash-${slot}`, status: "ready" })),
+  };
+  // The third reference is shared with 자오; the whole frame is the draft the old suggestion produced.
+  const wholeFrame = { contentHash: "hash-2", baselineFingerprint: "baseline", bounds: frame[1] };
+  const inspect = vi.fn(async (): Promise<ReferenceInspection[]> => target.references.map((ref, index) => index < 2
+    ? { assetId: ref.assetId!, contentHash: ref.assetHash, baselineFingerprint: "baseline", width: 200, height: 300, boxes: [[0, 0, 200, 300]], state: "single", selectedIndex: 0, automaticIndex: null, suggestedIndex: null }
+    : { assetId: ref.assetId!, contentHash: ref.assetHash, baselineFingerprint: "baseline", width: 1482, height: 2048, boxes: frame, state: "needs_region", selectedIndex: null, automaticIndex: null, suggestedIndex: 1, otherCharacters: ["자오"] }));
+  const message = "3번째 레퍼런스: 다른 캐릭터(자오)에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.";
+  const draft = { ...characterDraft(target), referenceRegions: { "ref-2": wholeFrame } };
+  render(<CharacterRegistry target={target} draft={draft} seriesId="series" api={{ inspectReferenceRegions: inspect }}
+    privacyMode={false} busy={false} error={message} onChange={vi.fn()} onPick={vi.fn()} />);
+  expect(await screen.findByRole("button", { name: "인물 영역 1 선택" })).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent(message);
+  // Nothing was applied from the whole-frame draft: the mark stays and the count excludes it.
+  expect(screen.getByRole("button", { name: "레퍼런스 3 크롭 확인" }).parentElement).toHaveTextContent("!");
+  expect(screen.getByRole("status")).toHaveTextContent("사용 가능 2장");
+});

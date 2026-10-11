@@ -37,9 +37,17 @@ pub struct ReferenceInspection {
     pub other_characters: Vec<String>,
 }
 
+/// True when a box covers the entire frame, in either orientation (EXIF may swap the axes of
+/// the stored dimensions). It is the one definition of "not a person" the save rule and the
+/// inspection share: such a box scopes nothing to a person.
+pub(super) fn is_whole_frame(bounds: [u32; 4], width: u32, height: u32) -> bool {
+    bounds == [0, 0, width, height] || bounds == [0, 0, height, width]
+}
+
 /// An image shared with another character supplies a reference only through a person the
 /// user chose. A detected or inferred person stays a suggestion, so the inspection asks for
-/// a choice exactly where a save would otherwise be refused.
+/// a choice exactly where a save would otherwise be refused. A whole-frame box is never such
+/// a person (the save refuses it), so a shared image does not offer it at all.
 fn require_choice_for_shared(row: &mut ReferenceInspection, others: Vec<String>) {
     if !others.is_empty() && matches!(row.state.as_str(), "single" | "automatic") {
         row.suggested_index = row.automatic_index.or(row.selected_index);
@@ -47,7 +55,40 @@ fn require_choice_for_shared(row: &mut ReferenceInspection, others: Vec<String>)
         row.automatic_index = None;
         row.state = "needs_region".into();
     }
+    if others.is_empty() {
+        // Nobody else owns the image, so a whole-frame use stays legal, but it is never
+        // recommended as the person to pick.
+        if row.state == "needs_region"
+            && row.suggested_index.is_some_and(|i| is_whole_frame(row.boxes[i], row.width, row.height))
+        {
+            row.suggested_index = None;
+        }
+    } else {
+        drop_whole_frame_boxes(row);
+    }
     row.other_characters = others;
+}
+
+/// Removes whole-frame boxes and keeps every index pointing at the same box it named before.
+/// A choice that named a removed box is no choice any more; an image left with no person box
+/// at all reports `no_region`.
+fn drop_whole_frame_boxes(row: &mut ReferenceInspection) {
+    let keep: Vec<bool> = row.boxes.iter().map(|b| !is_whole_frame(*b, row.width, row.height)).collect();
+    if keep.iter().all(|kept| *kept) {
+        return;
+    }
+    let remap = |index: Option<usize>| {
+        index.and_then(|i| keep[i].then(|| keep[..i].iter().filter(|kept| **kept).count()))
+    };
+    row.selected_index = remap(row.selected_index);
+    row.suggested_index = remap(row.suggested_index);
+    row.automatic_index = remap(row.automatic_index);
+    row.boxes = row.boxes.iter().zip(&keep).filter(|(_, kept)| **kept).map(|(b, _)| *b).collect();
+    let lost_choice = matches!(row.state.as_str(), "selected" | "single") && row.selected_index.is_none()
+        || row.state == "automatic" && row.automatic_index.is_none();
+    if lost_choice || row.state == "needs_region" {
+        row.state = if row.boxes.is_empty() { "no_region" } else { "needs_region" }.into();
+    }
 }
 
 /// Every region state the worker may report. `single`, `selected`, and `automatic` supply a
@@ -161,7 +202,7 @@ pub(super) fn is_person_region(
         connection.query_row("SELECT width,height FROM assets WHERE id=?1", [id], |r| {
             Ok((r.get(0)?, r.get(1)?))
         })?;
-    Ok(region.bounds != [0, 0, width, height] && region.bounds != [0, 0, height, width])
+    Ok(!is_whole_frame(region.bounds, width, height))
 }
 
 pub(super) fn apply_regions(connection: &Connection, target: &Target, allowed: &[String], regions: &RegionBindings) -> Result<bool> {
@@ -239,6 +280,12 @@ impl Library {
     /// The same bounded inspection, but draft bindings replace the stored choice for the
     /// requested images only. Inspection never persists a region selection.
     pub fn inspect_character_reference_regions_with_overrides(&self, series: &str, target_id: Option<&str>, ids: &[String], overrides: Option<&RegionBindings>, config: &RuntimeConfig) -> Result<Vec<ReferenceInspection>> {
+        self.inspect_rows(series, target_id, ids, overrides, config, true)
+    }
+
+    /// `shared_rule` applies the other-character rule to each row. Verifying a binding needs
+    /// the detector's raw boxes instead, so it can compare against exactly what was bound.
+    fn inspect_rows(&self, series: &str, target_id: Option<&str>, ids: &[String], overrides: Option<&RegionBindings>, config: &RuntimeConfig, shared_rule: bool) -> Result<Vec<ReferenceInspection>> {
         validate_inspection_ids(ids)?;
         let (inputs, regions) = {
             let c = self.connection()?;
@@ -274,10 +321,12 @@ impl Library {
             if super::characters::scoped_image(&c, series, id)? != (hash.clone(), path.clone()) {
                 return Err(Error::Stale);
             }
-            require_choice_for_shared(
-                row,
-                super::character_hub::other_character_names(&c, target_id, id)?,
-            );
+            if shared_rule {
+                require_choice_for_shared(
+                    row,
+                    super::character_hub::other_character_names(&c, target_id, id)?,
+                );
+            }
         }
         Ok(rows)
     }
@@ -285,7 +334,7 @@ impl Library {
     pub fn verify_reference_region_selections(&self, series: &str, regions: &RegionBindings, config: &RuntimeConfig) -> Result<()> {
         if regions.is_empty() {return Ok(());}
         let ids=regions.keys().cloned().collect::<Vec<_>>();
-        for row in self.inspect_character_reference_regions(series,None,&ids,config)? {
+        for row in self.inspect_rows(series,None,&ids,None,config,false)? {
             let region=&regions[&row.asset_id];
             if row.content_hash!=region.content_hash || row.baseline_fingerprint!=region.baseline_fingerprint
                 || !row.boxes.contains(&region.bounds) {return Err(Error::Stale);}
