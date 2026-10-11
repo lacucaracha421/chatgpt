@@ -25,6 +25,10 @@
 //!   undecided; a `split` would be a stronger veto than the person asked for). An entry
 //!   whose works are not in the local catalog yet waits and applies once the catalog catches
 //!   up; the cursor never waits for it.
+//!   Server `automatic: true` keepBoth entries remain automatic: local human history and
+//!   group vetoes win, and all connected group members pass the sequel guard before a
+//!   merge. Same-group entries add no link. Safety refusals queue one `cleared` report;
+//!   the server's retained decision history fences re-automation (no review loop).
 //!
 //! Runs in its own publication lane at most once a minute; the comparison and upload run
 //! only when the catalog or a decision changed (fingerprint), at most every ten minutes.
@@ -573,6 +577,7 @@ pub(super) fn apply_pending(c: &Connection) -> Result<bool, LibraryError> {
     }
     let revision = membership_revision(c)?;
     let mut changed = false;
+    let mut links: HashMap<String, HashSet<String>> = HashMap::new();
     for (left, right, origin, desired) in rows {
         let Some(desired) = desired else {
             // `cleared`: remove only the row this sync wrote.
@@ -600,6 +605,35 @@ pub(super) fn apply_pending(c: &Connection) -> Result<bool, LibraryError> {
             block("workMissing")?;
             continue;
         };
+        if origin.as_deref() == Some("auto") && desired == "confirm" {
+            // A server automatic decision stays automatic in the local ledger. Missing
+            // works above wait; a safety refusal is terminal locally and clears the
+            // server decision once. Its retained decision row prevents another auto pass.
+            let (Some(gl), Some(gr)) = (group_of(c, &left)?, group_of(c, &right)?) else {
+                refuse_server_auto(c, &left, &right)?;
+                continue;
+            };
+            if gl == gr {
+                c.execute(
+                    "UPDATE catalog_duplicate_pairs SET applied=1,blocked=NULL,updated_at=?3
+                    WHERE left_work_id=?1 AND right_work_id=?2",
+                    params![left, right, now()],
+                )?;
+                continue;
+            }
+            let lg = connected_groups(&gl, &links);
+            let rg = connected_groups(&gr, &links);
+            let mut veto = false;
+            for l in &lg {
+                for r in &rg {
+                    veto |= catalog_review::reviewed(c, &left, &right, l, r)?;
+                }
+            }
+            if veto || group_sequel_conflict(c, &lg, &rg)? {
+                refuse_server_auto(c, &left, &right)?;
+                continue;
+            }
+        }
         let exists: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM online_catalog_review_decisions WHERE left_anchor=?1 AND right_anchor=?2)",
             params![left, right],
@@ -621,6 +655,16 @@ pub(super) fn apply_pending(c: &Connection) -> Result<bool, LibraryError> {
             withdraw_auto_links(c, &left, &right, &revision)?;
         }
         write_decision(c, &a, &b, &desired)?;
+        if desired == "confirm" {
+            links
+                .entry(a.group_id.clone())
+                .or_default()
+                .insert(b.group_id.clone());
+            links
+                .entry(b.group_id.clone())
+                .or_default()
+                .insert(a.group_id.clone());
+        }
         c.execute(
             "UPDATE catalog_duplicate_pairs SET applied=1,blocked=NULL,updated_at=?3
              WHERE left_work_id=?1 AND right_work_id=?2",
@@ -681,6 +725,47 @@ fn record_entry(c: &Connection, item: &DecisionEntry) -> Result<(), LibraryError
         )?;
         return Ok(());
     }
+    if item.automatic && item.decision == "keepBoth" {
+        let human: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM catalog_duplicate_pairs
+             WHERE left_work_id=?1 AND right_work_id=?2 AND human=1)
+             OR EXISTS(SELECT 1 FROM online_catalog_review_decisions
+                 WHERE left_anchor=?1 AND right_anchor=?2 AND decision!='confirm')
+             OR (EXISTS(SELECT 1 FROM online_catalog_review_decisions
+                 WHERE left_anchor=?1 AND right_anchor=?2)
+                 AND NOT EXISTS(SELECT 1 FROM catalog_duplicate_pairs
+                 WHERE left_work_id=?1 AND right_work_id=?2 AND origin='auto' AND human=0))",
+            params![left, right],
+            |r| r.get(0),
+        )?;
+        if human {
+            // Preserve even cleared local human history and any owned decision row.
+            c.execute(
+                "INSERT OR IGNORE INTO catalog_duplicate_pairs
+                (left_work_id,right_work_id,human,updated_at) VALUES(?1,?2,1,?3)",
+                params![left, right, now()],
+            )?;
+            c.execute(
+                "UPDATE catalog_duplicate_pairs SET server_decision=?3,server_sequence=?4,
+                updated_at=?5 WHERE left_work_id=?1 AND right_work_id=?2",
+                params![left, right, server_decision, item.sequence, now()],
+            )?;
+            c.execute(
+                "UPDATE catalog_duplicate_pairs SET blocked='withdraw:'||?3
+                WHERE left_work_id=?1 AND right_work_id=?2",
+                params![left, right, uuid::Uuid::new_v4().to_string()],
+            )?;
+            return Ok(());
+        }
+        c.execute("INSERT INTO catalog_duplicate_pairs(left_work_id,right_work_id,server_decision,
+            server_sequence,human,origin,desired,applied,report,auto_operation_id,updated_at)
+            VALUES(?1,?2,?3,?4,0,'auto','confirm',0,'reported',?5,?6)
+            ON CONFLICT(left_work_id,right_work_id) DO UPDATE SET server_decision=excluded.server_decision,
+            server_sequence=excluded.server_sequence,origin='auto',desired='confirm',applied=0,
+            blocked=NULL,report='reported',auto_operation_id=excluded.auto_operation_id,updated_at=excluded.updated_at",
+            params![left, right, server_decision, item.sequence, item.operation_id, now()])?;
+        return Ok(());
+    }
     let desired = match item.decision.as_str() {
         "keepBoth" => Some("confirm"),
         "hideEdition" => {
@@ -713,6 +798,16 @@ fn record_entry(c: &Connection, item: &DecisionEntry) -> Result<(), LibraryError
             params![left, right, item.sequence, time],
         )?,
     };
+    Ok(())
+}
+
+fn refuse_server_auto(c: &Connection, left: &str, right: &str) -> Result<(), LibraryError> {
+    // No local decision was written: leave an existing local row alone.
+    c.execute(
+        "UPDATE catalog_duplicate_pairs SET origin=NULL,desired=NULL,applied=1,
+        blocked='withdraw:'||?3,updated_at=?4 WHERE left_work_id=?1 AND right_work_id=?2",
+        params![left, right, uuid::Uuid::new_v4().to_string(), now()],
+    )?;
     Ok(())
 }
 
@@ -1188,9 +1283,11 @@ impl Library {
             .connection()?
             .prepare(
                 "SELECT left_work_id,right_work_id,substr(blocked,10) FROM catalog_duplicate_pairs
-                 WHERE blocked LIKE 'withdraw:%' AND human=0 ORDER BY left_work_id,right_work_id LIMIT ?1",
+                 WHERE blocked LIKE 'withdraw:%' ORDER BY left_work_id,right_work_id LIMIT ?1",
             )?
-            .query_map([REPORTS_PER_PASS as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .query_map([REPORTS_PER_PASS as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
             .collect::<Result<_, _>>()?;
         for (left, right, operation_id) in withdrawn {
             let command = DecisionCommand {

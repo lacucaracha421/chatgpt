@@ -150,6 +150,9 @@ pub(crate) struct DecisionEntry {
     pub hidden_work_id: Option<String>,
     pub revision: i64,
     pub created_at: String,
+    /// Server confident-tier decision; absent in older logs (human semantics).
+    #[serde(default)]
+    pub automatic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

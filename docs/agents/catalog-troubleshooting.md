@@ -1,5 +1,39 @@
 # Lakomics catalog troubleshooting
 
+## Server automatic duplicate decisions
+
+At startup and on each server refresh, confident server-found candidates are recorded as `keepBoth`
+through the same transaction, candidate revision, decision revision and sequence log as
+mobile decisions. The refresh also checks existing live server candidates, including
+pairs already sharing an edition group. PC candidates, retired candidates and every
+pair with any decision history (including a cleared decision) are excluded. No catalog
+or library file is changed by this server pass.
+
+The confident rule matches the PC tier. Its shared test table is
+`server/lakomics-api/tests/fixtures/catalog_confident.json`. Discovery rules remain
+unchanged; the tier is checked from stored title, page, category, creator and language
+evidence, independently of the current group ids.
+
+To identify these decisions, inspect `GET /v1/mobile-catalog/duplicates/decisions`:
+automatic entries have `automatic: true`. Their operation ids are UUIDv5 of the
+candidate id in namespace `8c9d1c65-f23c-5f13-a83a-25b13f632d03`. This uses existing
+storage; no schema migration is needed. The log's only added field is the optional
+boolean `automatic` (absent means false). Older PCs ignore this field and retain their
+previous keepBoth behavior; the safety checks below require an updated PC.
+
+The updated PC keeps these links automatic, preserves local human decisions and checks
+negative group decisions and all cross-group members for sequel conflicts, including
+links accepted earlier in the same pass. A same-group pair is recorded without adding
+a link. Missing works wait until the PC catalog catches up. A safety refusal queues one
+`cleared` command at expected decision revision 1; the retained server decision history
+prevents automatic re-confirmation, so the candidate returns to mobile review without
+a loop. If a person has decided first, the clear conflicts and their decision wins.
+
+To undo an accepted automatic merge, open the decided duplicate list on mobile and
+choose **다른 작품**. That records `notDuplicate`; the next PC sync withdraws the
+automatic links under the existing veto rules. Nothing is hidden or deleted. A human
+merge or catalog lineage may still prevent the pair from separating, as before.
+
 ## Duplicate editions: installment guard (catalog-duplicates-v2)
 
 The desktop and server share `catalog-duplicates-v2` as the evidence algorithm; the

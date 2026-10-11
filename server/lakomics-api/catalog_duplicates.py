@@ -42,7 +42,7 @@ import threading
 import unicodedata
 from datetime import datetime, timezone
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
@@ -65,6 +65,8 @@ BUCKET = 8                   # catalog_review.rs BUCKET: larger title buckets ar
 TAGS = 64                    # catalog_review.rs TAGS: more tags = incomplete evidence
 MIN_TITLE = 8                # catalog_review.rs: titles shorter than 8 chars never match
 LOG = logging.getLogger(__name__)
+# Reserved namespace: one automatic operation per candidate for its entire lifetime.
+AUTO_NAMESPACE = UUID("8c9d1c65-f23c-5f13-a83a-25b13f632d03")
 # Serializes index writers in this process (refresh check vs. post-publication rebuild), so a
 # rebuild's DELETE never drops rows a concurrent check just indexed. Reentrant: the check
 # builds the index lazily through rebuild_title_index.
@@ -322,6 +324,19 @@ def lang_core(languages):
     return set(languages) - {"translated", "rewrite", "speechless", "text_cleaned", "textless_narrative"}
 
 
+def confident(a, b):
+    """PC duplicate_tier, independent of discovery and current edition membership."""
+    languages = lang_core(a["languages"])
+    gap = abs(a["pages"] - b["pages"])
+    return bool(set(title_keys(a["title"], a["titleJpn"])) & set(title_keys(b["title"], b["titleJpn"]))
+                and a["pages"] > 0 and b["pages"] > 0
+                and gap <= 2 and gap <= min(a["pages"], b["pages"]) // 10
+                and 1 <= a["category"] <= 11 and a["category"] == b["category"]
+                and languages and languages == lang_core(b["languages"])
+                and set(a["creators"]) & set(b["creators"])
+                and not sequel_conflict(a, b))
+
+
 def match_works(a, b):
     """``(reason, page_gap)`` when two works are a duplicate-edition candidate, else None.
 
@@ -410,7 +425,7 @@ def _upsert(db, provider, left, right, source, generation, reason, page_gap, alg
                    (candidate_id(provider, left, right), provider, left, right, source, generation, reason,
                     page_gap, algorithm, body, _bump(db), now, now))
         return True
-    if not replace_server and not row[5]:
+    if not replace_server and row[0] == "pc":
         return False
     if tuple(row) == (source, reason, page_gap, algorithm, body, 0):
         db.execute("""UPDATE catalog_duplicate_candidates SET generation=?
@@ -425,6 +440,52 @@ def _upsert(db, provider, left, right, source, generation, reason, page_gap, alg
 def _ordered(left, right):
     """Left is the smaller identity (string order, as the PC orders anchors)."""
     return (left, right, False) if left["workId"] < right["workId"] else (right, left, True)
+
+
+def automatic_operation(candidate):
+    return str(uuid5(AUTO_NAMESPACE, candidate))
+
+
+def _record_decision(db, row, operation, digest, decision, hidden=None):
+    """Shared command/automatic storage path. Caller holds BEGIN IMMEDIATE."""
+    pair = (row["provider"], row["left_work_id"], row["right_work_id"])
+    sequence = _state(db)["decision_sequence"] + 1
+    revision = (row["decision_revision"] or 0) + 1
+    now = now_iso()
+    db.execute("""INSERT INTO catalog_duplicate_decisions VALUES(?,?,?,?,?,?,?,?)
+        ON CONFLICT(provider,left_work_id,right_work_id) DO UPDATE SET decision=excluded.decision,
+        hidden_work_id=excluded.hidden_work_id,revision=excluded.revision,sequence=excluded.sequence,
+        updated_at=excluded.updated_at""",
+               (*pair, None if decision == "cleared" else decision, hidden, revision, sequence, now))
+    db.execute("UPDATE catalog_duplicate_state SET decision_sequence=? WHERE singleton=1", (sequence,))
+    db.execute("UPDATE catalog_duplicate_candidates SET changed=?,updated_at=? WHERE candidate_id=?",
+               (_bump(db), now, row["candidate_id"]))
+    result = {"version": 1, "operationId": operation, "candidateId": row["candidate_id"],
+              "provider": pair[0], "leftWorkId": pair[1], "rightWorkId": pair[2],
+              "decision": decision, "hiddenWorkId": hidden, "revision": revision, "sequence": sequence}
+    db.execute("INSERT INTO catalog_duplicate_decision_log VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+               (sequence, operation, digest, row["candidate_id"], *pair, decision,
+                hidden, revision, now, json.dumps(result)))
+    return result
+
+
+def auto_decide_pending(db):
+    """One pass over stored server evidence; never re-decide even a cleared pair.
+
+    Caller holds BEGIN IMMEDIATE. The decisions PK is the lifetime automation fence.
+    """
+    rows = db.execute(f"""{JOINED} WHERE c.source='server' AND c.removed=0
+        AND d.revision IS NULL ORDER BY c.id""").fetchall()
+    made = 0
+    for row in rows:
+        evidence = json.loads(row["evidence"])
+        if not confident(evidence["left"], evidence["right"]):
+            continue
+        operation = automatic_operation(row["candidate_id"])
+        digest = hashlib.sha256(encode({"automatic": True, "candidateId": row["candidate_id"]}).encode()).hexdigest()
+        _record_decision(db, row, operation, digest, "keepBoth")
+        made += 1
+    return made
 
 
 # ---------------------------------------------------------------------------------------
@@ -571,12 +632,13 @@ def check_new_works(db, catalog_conn, works, *, schema="catalog", provider=PROVI
             if stats["candidates"] >= MAX_SERVER_CANDIDATES:
                 break
             decided = db.execute("""SELECT 1 FROM catalog_duplicate_decisions WHERE provider=? AND left_work_id=?
-                AND right_work_id=? AND decision IS NOT NULL""", (provider, left_id, right_id)).fetchone()
+                AND right_work_id=?""", (provider, left_id, right_id)).fetchone()
             if decided:
                 continue
             if _upsert(db, provider, left_id, right_id, "server", None, reason, gap, ALGORITHM,
                        {"left": left, "right": right}, now, replace_server=False):
                 stats["candidates"] += 1
+        stats["automaticDecisions"] = auto_decide_pending(db)
         if digest is not None:
             db.execute("UPDATE catalog_duplicate_state SET index_digest=? WHERE singleton=1", (digest,))
         db.commit()
@@ -760,11 +822,14 @@ def _decode_cursor(cursor):
 
 
 def register(app, get_db, require_client, require_publisher):
-    """Install the routes; returns the startup hook (creates empty tables only)."""
+    """Install routes and the startup pass over never-decided server candidates."""
 
     def startup():
         with get_db() as db:
             startup_db(db)
+            db.execute("BEGIN IMMEDIATE")
+            auto_decide_pending(db)
+            db.commit()
 
     lifecycle(app).on_startup(startup)
 
@@ -910,25 +975,8 @@ def register(app, get_db, require_client, require_publisher):
                 fail(409, "duplicateDecisionConflict", "다른 기기에서 먼저 검토했습니다. 새로고침해 주세요.")
             if command.decision == "cleared" and row["decision"] is None:
                 fail(409, "duplicateDecisionConflict", "취소할 검토 결정이 없습니다.")
-            state = _state(db)
-            sequence = state["decision_sequence"] + 1
-            revision = current + 1
-            decision = None if command.decision == "cleared" else command.decision
-            now = now_iso()
-            db.execute("""INSERT INTO catalog_duplicate_decisions VALUES(?,?,?,?,?,?,?,?)
-                ON CONFLICT(provider,left_work_id,right_work_id) DO UPDATE SET decision=excluded.decision,
-                hidden_work_id=excluded.hidden_work_id,revision=excluded.revision,sequence=excluded.sequence,
-                updated_at=excluded.updated_at""", (*pair, decision, command.hiddenWorkId, revision, sequence, now))
-            db.execute("UPDATE catalog_duplicate_state SET decision_sequence=? WHERE singleton=1", (sequence,))
-            db.execute("UPDATE catalog_duplicate_candidates SET changed=?,updated_at=? WHERE candidate_id=?",
-                       (_bump(db), now, command.candidateId))
-            result = {"version": 1, "operationId": command.operationId, "candidateId": command.candidateId,
-                      "provider": pair[0], "leftWorkId": pair[1], "rightWorkId": pair[2],
-                      "decision": command.decision, "hiddenWorkId": command.hiddenWorkId,
-                      "revision": revision, "sequence": sequence}
-            db.execute("INSERT INTO catalog_duplicate_decision_log VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                       (sequence, command.operationId, digest, command.candidateId, *pair, command.decision,
-                        command.hiddenWorkId, revision, now, json.dumps(result)))
+            result = _record_decision(db, row, command.operationId, digest,
+                                      command.decision, command.hiddenWorkId)
             db.commit()
             return result
 
@@ -962,6 +1010,7 @@ def register(app, get_db, require_client, require_publisher):
             "items": [{"sequence": r["sequence"], "operationId": r["operation_id"], "candidateId": r["candidate_id"],
                        "provider": r["provider"], "leftWorkId": r["left_work_id"], "rightWorkId": r["right_work_id"],
                        "decision": r["decision"], "hiddenWorkId": r["hidden_work_id"], "revision": r["revision"],
-                       "createdAt": r["created_at"]} for r in rows]}, if_none_match)
+                       "createdAt": r["created_at"],
+                       "automatic": r["operation_id"] == automatic_operation(r["candidate_id"])} for r in rows]}, if_none_match)
 
     return startup

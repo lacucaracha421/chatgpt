@@ -96,6 +96,13 @@ class Fixture(unittest.TestCase):
 
 
 class RulePortTests(unittest.TestCase):
+    def test_confident_shared_table(self):
+        cases = json.loads((Path(__file__).parent / "fixtures/catalog_confident.json").read_text(encoding="utf-8"))
+        for case in cases:
+            with self.subTest(name=case["name"]):
+                self.assertEqual(dup.confident(case["left"], case["right"]), case["confident"])
+                self.assertEqual(dup.confident(case["right"], case["left"]), case["confident"])
+
     def test_sequel_guard_shared_table(self):
         cases = json.loads((Path(__file__).parent / "fixtures/catalog_installments.json").read_text(encoding="utf-8"))
         for case in cases:
@@ -145,6 +152,109 @@ class RulePortTests(unittest.TestCase):
         a["pages"], b["pages"] = 20, 22
         b["languages"].append("japanese")
         self.assertIsNone(dup.match_works(a, b))
+
+
+class AutomaticStorageTests(unittest.TestCase):
+    """Pure storage/rule tests also runnable with only the module's stdlib logic."""
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        dup.startup_db(self.db)
+        self.addCleanup(self.db.close)
+
+    def seed(self, left=None, right=None, source="server", removed=False):
+        left = left or work(1, "Original Long Title")
+        right = right or work(2, "Original Long Title")
+        a, b, _ = dup._ordered(evidence(left), evidence(right))
+        dup._upsert(self.db, "kHentai", a["workId"], b["workId"], source, None,
+                    "exactTitle", abs(a["pages"] - b["pages"]), dup.ALGORITHM,
+                    {"left": a, "right": b}, "now")
+        if removed:
+            self.db.execute("UPDATE catalog_duplicate_candidates SET removed=1")
+        self.db.commit()
+
+    def run_pass(self):
+        self.db.execute("BEGIN IMMEDIATE")
+        made = dup.auto_decide_pending(self.db)
+        self.db.commit()
+        return made
+
+    def test_existing_confident_same_group_is_decided_once(self):
+        self.seed(right=work(2, "Original Long Title", group="g1"))
+        self.assertEqual(self.run_pass(), 1)
+        row = self.db.execute("SELECT * FROM catalog_duplicate_decision_log").fetchone()
+        self.assertEqual((row["decision"], row["revision"], row["sequence"]), ("keepBoth", 1, 1))
+        self.assertEqual(row["operation_id"], dup.automatic_operation(row["candidate_id"]))
+        self.assertEqual(json.loads(row["result_json"])["sequence"], 1)
+        self.assertEqual(dup.status_head(self.db), 1)
+        self.assertEqual(self.db.execute("SELECT changed FROM catalog_duplicate_candidates").fetchone()[0], 2)
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(dup.status_head(self.db), 1)
+
+    def test_non_confident_stays_undecided(self):
+        for b in (work(2, "Original Long Title", pages=23),
+                  work(2, "Original Long Title", languages=("japanese",)),
+                  work(2, "Original Long Title", title_jpn="作品 第3話")):
+            with self.subTest(right=b):
+                self.seed(left=work(1, "Original Long Title", title_jpn="作品 第2話"), right=b)
+                self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(dup.status_head(self.db), 0)
+
+    def test_any_decision_history_including_cleared_is_untouched(self):
+        self.seed()
+        for decision in ("keepBoth", "hideEdition", "notDuplicate", None):
+            with self.subTest(decision=decision):
+                self.db.execute("INSERT OR REPLACE INTO catalog_duplicate_decisions VALUES(?,?,?,?,?,?,?,?)",
+                                ("kHentai", "1", "2", decision, None, 4, 4, "old"))
+                self.db.commit()
+                self.assertEqual(self.run_pass(), 0)
+                row = self.db.execute("SELECT * FROM catalog_duplicate_decisions").fetchone()
+                self.assertEqual((row["decision"], row["revision"], row["updated_at"]), (decision, 4, "old"))
+
+    def test_pc_and_removed_candidates_are_untouched(self):
+        self.seed(source="pc")
+        self.assertEqual(self.run_pass(), 0)
+        self.seed(removed=True)
+        self.assertEqual(self.run_pass(), 0)
+
+    def test_refresh_updates_server_evidence_but_never_pc_evidence(self):
+        self.seed(right=work(2, "Original Long Title", pages=23))
+        a, b = evidence(work(1, "Original Long Title")), evidence(work(2, "Original Long Title"))
+        self.assertTrue(dup._upsert(self.db, "kHentai", "1", "2", "server", None, "exactTitle", 0,
+                                  dup.ALGORITHM, {"left": a, "right": b}, "new", replace_server=False))
+        self.db.commit()
+        self.assertEqual(self.run_pass(), 1)
+        self.seed(left=work(3, "Other Long Title"), right=work(4, "Other Long Title"), source="pc")
+        self.assertFalse(dup._upsert(self.db, "kHentai", "3", "4", "server", None, "exactTitle", 0,
+                                   dup.ALGORITHM, {"left": a, "right": b}, "new", replace_server=False))
+
+    def test_refresh_inserts_logs_and_backfills_existing_pairs(self):
+        with closing(sqlite3.connect(":memory:")) as catalog:
+            catalog.executescript("""CREATE TABLE Works(Id INTEGER PRIMARY KEY,Title TEXT,TitleJpn TEXT,
+                FileCount INTEGER,Category INTEGER,Expunged INTEGER);
+                CREATE TABLE online_catalog_group_members(provider TEXT,work_id TEXT,
+                catalog_work_id INTEGER,group_id TEXT);
+                CREATE TABLE Tags(WorkId INTEGER,Namespace TEXT,Value TEXT);
+                INSERT INTO Works VALUES(10,'Original Long Title',NULL,20,2,0),
+                    (20,'Original Long Title',NULL,20,2,0);
+                INSERT INTO online_catalog_group_members VALUES('kHentai','10',10,'g10'),
+                    ('kHentai','20',20,'g20');
+                INSERT INTO Tags VALUES(10,'artist','kim'),(20,'artist','kim'),
+                    (10,'language','korean'),(20,'language','korean');""")
+            self.seed(right=work(2, "Original Long Title", group="g1"))
+            stats = dup.check_new_works(self.db, catalog, [20], schema="main")
+            self.assertEqual((stats["candidates"], stats["automaticDecisions"]), (1, 2))
+            logs = self.db.execute("SELECT * FROM catalog_duplicate_decision_log ORDER BY sequence").fetchall()
+            self.assertEqual([r["sequence"] for r in logs], [1, 2])
+            self.assertTrue(all(r["decision"] == "keepBoth" and r["revision"] == 1 for r in logs))
+            self.assertEqual(dup.check_new_works(self.db, catalog, [20], schema="main")["automaticDecisions"], 0)
+            # Use the command's writer to clear: the next refresh must preserve that history.
+            row = self.db.execute(dup.JOINED + " WHERE c.left_work_id='10'").fetchone()
+            self.db.execute("BEGIN IMMEDIATE")
+            dup._record_decision(self.db, row, str(uuid.uuid4()), "clear-digest", "cleared")
+            self.db.commit()
+            self.assertEqual(dup.check_new_works(self.db, catalog, [20], schema="main")["automaticDecisions"], 0)
+            self.assertEqual(dup.status_head(self.db), 3)
 
 
 class IncrementalCheckTests(Fixture):
@@ -221,6 +331,7 @@ class ApiTests(Fixture):
         app = FastAPI()
         startup = dup.register(app, self.get_db, api_auth.client_guard(self.get_db, None),
                                api_auth.publisher_guard(self.get_db))
+        self.startup = startup
         startup()
         self.client = TestClient(app)
 
@@ -245,6 +356,49 @@ class ApiTests(Fixture):
 
     def code(self, reply):
         return reply.json()["detail"]["code"]
+
+    def test_refresh_records_automatic_log_and_mobile_can_undo(self):
+        self.add(work(1, "Original Long Title"), work(2, "Original Long Title"))
+        self.assertEqual(self.check([2])["automaticDecisions"], 1)
+        self.assertEqual(self.listing()["counts"], {"undecided": 0, "decided": 1})
+        feed = self.client.get(PREFIX + "/decisions", headers=self.publisher).json()
+        [item] = feed["items"]
+        self.assertEqual(set(item), {"sequence", "operationId", "candidateId", "provider", "leftWorkId",
+                                    "rightWorkId", "decision", "hiddenWorkId", "revision", "createdAt", "automatic"})
+        self.assertTrue(item["automatic"])
+        self.assertEqual((item["decision"], item["revision"], item["sequence"]), ("keepBoth", 1, 1))
+        self.assertEqual(self.decide(item["candidateId"], "notDuplicate", expected=1).status_code, 200)
+        self.assertEqual(self.check([2])["automaticDecisions"], 0)
+        feed = self.client.get(PREFIX + "/decisions", headers=self.publisher).json()
+        self.assertFalse(feed["items"][-1]["automatic"])
+        self.assertEqual(feed["items"][-1]["decision"], "notDuplicate")
+
+    def test_refresh_backfills_existing_candidates_and_does_not_repeat_cleared(self):
+        a, b = evidence(work(1, "Original Long Title")), evidence(work(2, "Original Long Title", group="g1"))
+        with self.get_db() as db:
+            dup._upsert(db, "kHentai", "1", "2", "server", None, "exactTitle", 0, dup.ALGORITHM,
+                        {"left": a, "right": b}, "old")
+            db.commit()
+        self.assertEqual(self.check([])["automaticDecisions"], 1)
+        target = self.listing(state="decided")["items"][0]["candidateId"]
+        self.assertEqual(self.decide(target, "cleared", expected=1).status_code, 200)
+        self.assertEqual(self.check([])["automaticDecisions"], 0)
+        self.assertEqual(self.listing()["counts"]["undecided"], 1)
+        self.assertEqual(self.client.get(PREFIX + "/decisions", headers=self.publisher).json()["lastSequence"], 2)
+
+    def test_startup_backfills_only_never_decided_server_candidates_once(self):
+        with self.get_db() as db:
+            for left, right, source in [(1, 2, "server"), (3, 4, "pc"), (5, 6, "server")]:
+                dup._upsert(db, "kHentai", str(left), str(right), source, None, "exactTitle", 0,
+                            dup.ALGORITHM, {"left": evidence(work(left, "Original Long Title")),
+                                            "right": evidence(work(right, "Original Long Title"))}, "old")
+            db.execute("INSERT INTO catalog_duplicate_decisions VALUES('kHentai','5','6',NULL,NULL,2,2,'old')")
+            db.commit()
+        self.startup()
+        feed = self.client.get(PREFIX + "/decisions", headers=self.publisher).json()
+        self.assertEqual([(i["leftWorkId"], i["automatic"]) for i in feed["items"]], [("1", True)])
+        self.startup()
+        self.assertEqual(self.client.get(PREFIX + "/decisions", headers=self.publisher).json(), feed)
 
     def test_roles_and_bounds(self):
         a, b = work(1, "Original Long Title"), work(2, "Original Long Title")
@@ -282,12 +436,14 @@ class ApiTests(Fixture):
         self.assertEqual([(i["leftWorkId"], i["rightWorkId"]) for i in self.listing()["items"]], [("1", "3")])
 
     def test_server_candidates_survive_pc_replace_unless_covered(self):
+        # The server decides this confident pair itself; the candidate still survives a
+        # PC replace that does not cover server works.
         self.add(work(100, "Original Long Title"), work(200, "Original Long Title"))
         self.check([200])
         self.publish([], generation="pc-1")
-        self.assertEqual([i["source"] for i in self.listing()["items"]], ["server"])
+        self.assertEqual([i["source"] for i in self.listing(state="all")["items"]], ["server"])
         self.publish([], generation="pc-2", includesServerWorks=True)
-        self.assertEqual(self.listing()["items"], [])
+        self.assertEqual(self.listing(state="all")["items"], [])
 
     def test_final_upload_retires_old_pending_sequels_and_rejects_mobile_token(self):
         a = work(1, "Shared neutral title", title_jpn="作品 第2話")

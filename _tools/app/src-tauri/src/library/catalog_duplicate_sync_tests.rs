@@ -71,6 +71,7 @@ fn entry(sequence: i64, left: &str, right: &str, decision: &str) -> DecisionEntr
         hidden_work_id: (decision == "hideEdition").then(|| right.to_string()),
         revision: sequence,
         created_at: "2026-09-25T00:00:00Z".into(),
+        automatic: false,
     }
 }
 
@@ -462,6 +463,173 @@ fn catalog_duplicate_server_found_pair_applies_when_both_works_exist() {
     assert!(items
         .iter()
         .any(|i| i.left.work_id == "7" && i.right.work_id == "8"));
+}
+
+fn automatic_entry(sequence: i64, left: &str, right: &str) -> DecisionEntry {
+    DecisionEntry {
+        automatic: true,
+        ..entry(sequence, left, right, "keepBoth")
+    }
+}
+
+#[test]
+fn catalog_duplicate_confident_shared_table() {
+    let cases: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../server/lakomics-api/tests/fixtures/catalog_confident.json"
+    ))
+    .unwrap();
+    for case in cases.as_array().unwrap() {
+        let a: ReviewWork = serde_json::from_value(case["left"].clone()).unwrap();
+        let b: ReviewWork = serde_json::from_value(case["right"].clone()).unwrap();
+        let expected = if case["confident"].as_bool().unwrap() {
+            Tier::Confident
+        } else {
+            Tier::Uncertain
+        };
+        assert_eq!(duplicate_tier(&a, &b), expected, "{}", case["name"]);
+        assert_eq!(duplicate_tier(&b, &a), expected, "{}", case["name"]);
+    }
+}
+
+#[test]
+fn catalog_duplicate_server_automatic_merge_and_mobile_undo() {
+    let (_dir, c) = fixture();
+    assert!(receive(&c, &[automatic_entry(1, "1", "2")]));
+    assert!(same_group(&c, "1", "2").unwrap());
+    assert_eq!(decision(&c, "1", "2").as_deref(), Some("confirm"));
+    assert_eq!(
+        pair_state(&c, "1", "2"),
+        (0, Some("auto".into()), Some("reported".into()), None)
+    );
+    assert!(!apply_pending(&c).unwrap());
+    receive(&c, &[entry(2, "1", "2", "notDuplicate")]);
+    assert!(!same_group(&c, "1", "2").unwrap());
+    assert_eq!(decision(&c, "1", "2").as_deref(), Some("falsePositive"));
+}
+
+#[test]
+fn catalog_duplicate_server_automatic_same_group_records_without_new_link() {
+    let (_dir, c) = fixture();
+    catalog_groups::ensure_membership(&c).unwrap();
+    for (left, right) in [("1", "7"), ("2", "7")] {
+        write_decision(
+            &c,
+            &load(&c, left).unwrap().unwrap(),
+            &load(&c, right).unwrap().unwrap(),
+            "confirm",
+        )
+        .unwrap();
+    }
+    catalog_groups::rebuild(&c, &membership_revision(&c).unwrap()).unwrap();
+    assert!(!receive(&c, &[automatic_entry(1, "1", "2")]));
+    assert!(same_group(&c, "1", "2").unwrap());
+    assert_eq!(decision(&c, "1", "2"), None);
+    assert_eq!(pair_state(&c, "1", "2").3, None);
+    assert_eq!(cursor(&c), 1);
+}
+
+#[test]
+fn catalog_duplicate_server_automatic_group_guard_including_links_in_this_pass() {
+    for existing in [false, true] {
+        let (_dir, c) = fixture();
+        c.execute_batch("UPDATE catalog.Works SET Title='Shared neutral title',TitleJpn=CASE Id WHEN 1 THEN '作品 第2話' ELSE NULL END WHERE Id IN (1,2);
+            INSERT INTO catalog.Works(Id,Token,Title,TitleJpn,FileCount,Category) VALUES(3,'three','Shared neutral title','作品 第3話',20,2);
+            INSERT INTO catalog.Tags VALUES(3,'artist','alice'),(3,'language','korean');").unwrap();
+        if existing {
+            receive(&c, &[automatic_entry(1, "1", "2")]);
+            assert!(!receive(&c, &[automatic_entry(2, "2", "3")]));
+        } else {
+            assert!(receive(
+                &c,
+                &[automatic_entry(1, "1", "2"), automatic_entry(2, "2", "3")]
+            ));
+        }
+        assert!(same_group(&c, "1", "2").unwrap());
+        assert!(!same_group(&c, "1", "3").unwrap());
+        assert_eq!(decision(&c, "2", "3"), None);
+        assert!(pair_state(&c, "2", "3").3.unwrap().starts_with("withdraw:"));
+        assert!(!apply_pending(&c).unwrap());
+    }
+}
+
+#[test]
+fn catalog_duplicate_server_automatic_preserves_local_human_and_cleared_history() {
+    for desired in ["confirm", "falsePositive", "split"] {
+        let (_dir, c) = fixture();
+        catalog_groups::ensure_membership(&c).unwrap();
+        write_decision(
+            &c,
+            &load(&c, "1").unwrap().unwrap(),
+            &load(&c, "2").unwrap().unwrap(),
+            desired,
+        )
+        .unwrap();
+        assert!(!receive(&c, &[automatic_entry(1, "1", "2")]));
+        assert_eq!(decision(&c, "1", "2").as_deref(), Some(desired));
+        let blocked = pair_state(&c, "1", "2").3.unwrap();
+        assert!(blocked.starts_with("withdraw:"));
+        // The echo of the refused auto's cleared report must preserve the local row.
+        receive(
+            &c,
+            &[DecisionEntry {
+                operation_id: blocked[9..].into(),
+                ..entry(2, "1", "2", "cleared")
+            }],
+        );
+        assert_eq!(decision(&c, "1", "2").as_deref(), Some(desired));
+    }
+    let (_dir, c) = fixture();
+    receive(&c, &[entry(1, "1", "2", "cleared")]);
+    assert!(!receive(&c, &[automatic_entry(2, "1", "2")]));
+    assert_eq!(decision(&c, "1", "2"), None);
+    assert_eq!(pair_state(&c, "1", "2").0, 1);
+    assert!(pair_state(&c, "1", "2").3.unwrap().starts_with("withdraw:"));
+}
+
+#[test]
+fn catalog_duplicate_server_automatic_group_negative_veto_in_same_pass() {
+    let (_dir, c) = fixture();
+    catalog_groups::ensure_membership(&c).unwrap();
+    write_decision(
+        &c,
+        &load(&c, "1").unwrap().unwrap(),
+        &load(&c, "7").unwrap().unwrap(),
+        "falsePositive",
+    )
+    .unwrap();
+    assert!(receive(
+        &c,
+        &[automatic_entry(1, "1", "2"), automatic_entry(2, "2", "7")]
+    ));
+    assert!(same_group(&c, "1", "2").unwrap());
+    assert!(!same_group(&c, "2", "7").unwrap());
+    assert_eq!(decision(&c, "2", "7"), None);
+    assert!(pair_state(&c, "2", "7").3.unwrap().starts_with("withdraw:"));
+}
+
+#[test]
+fn catalog_duplicate_server_automatic_missing_work_waits() {
+    let (_dir, c) = fixture();
+    assert!(!receive(&c, &[automatic_entry(1, "1", "99")]));
+    assert_eq!(cursor(&c), 1);
+    assert_eq!(pair_state(&c, "1", "99").3.as_deref(), Some("workMissing"));
+    c.execute_batch("INSERT INTO catalog.Works(Id,Token,Title,FileCount,Category) VALUES(99,'n','Same title 01',20,2);
+        INSERT INTO catalog.Tags VALUES(99,'artist','alice'),(99,'language','korean');
+        UPDATE catalog.CrawlState SET Value='fixture-v2';").unwrap();
+    assert!(apply_pending(&c).unwrap());
+    assert!(same_group(&c, "1", "99").unwrap());
+}
+
+#[test]
+fn catalog_duplicate_older_log_entry_keeps_human_semantics() {
+    let (_dir, c) = fixture();
+    let mut json = serde_json::to_value(entry(1, "7", "8", "keepBoth")).unwrap();
+    json.as_object_mut().unwrap().remove("automatic");
+    let old: DecisionEntry = serde_json::from_value(json).unwrap();
+    assert!(!old.automatic);
+    assert!(receive(&c, &[old]));
+    assert_eq!(pair_state(&c, "7", "8").0, 1);
+    assert!(same_group(&c, "7", "8").unwrap());
 }
 
 #[test]
