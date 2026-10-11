@@ -9,12 +9,14 @@ Reconciled 2026-10-10 against committed `main` at `0be3353d`, using current sour
 Updated 2026-10-12 with the user (evening: the collector pass, drag/options and the 게임 folders are done; see the [2026-10-12 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-12--character-folders-video-and-worker-tooling)). PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; the 2026-10-10 server-independence slices are delivered (see the [evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-10-evening--server-ownership-of-wishlist-kakao-and-mangadex-binds)).
 
 1. **`VIEW-FILTER-001`** — show an active 보기 종류·비율 filter on every gallery it applies to, with a one-click clear (design in progress 2026-10-12).
-2. **`UI-REVIEW-20261011`** — remaining UI sweep items.
-3. **`COLLECTOR-TABLET-001`** — tablet collector (Helium) slices.
-4. **`CLOUD-POST-001` step 2** — retire the calendar/wishlist PUT fallback.
-5. **`PERF-ALL-001`** — remaining measured performance scenarios.
-6. **`COLLECTOR-IMGTEXT-001`** — image-text translation for hotlink-protected images.
-7. **Small residual debt** — `TABLET-PARITY-001`, `PC-REVIEW-001`, `HOME-OPT-001` test debt and the residual `USER-REQ-20260924` diagnostics.
+2. **`COLLECTOR-IMAGETEXT-001`** — next session (user 2026-10-12): keep an image's translation text with the saved image (resume from HOLD with the recorded decisions).
+3. **`CHAR-FOLDER-PERF-001`** — next session (user 2026-10-12): optimize the character folder screens (series, groups, characters); measure first per `docs/agents/implementation.md`.
+4. **`UI-REVIEW-20261011`** — remaining UI sweep items.
+5. **`COLLECTOR-TABLET-001`** — tablet collector (Helium) slices.
+6. **`CLOUD-POST-001` step 2** — retire the calendar/wishlist PUT fallback.
+7. **`PERF-ALL-001`** — remaining measured performance scenarios.
+8. **`COLLECTOR-IMGTEXT-001`** — image-text translation for hotlink-protected images.
+9. **Small residual debt** — `TABLET-PARITY-001`, `PC-REVIEW-001`, `HOME-OPT-001` test debt and the residual `USER-REQ-20260924` diagnostics.
 
 `LINUX-DESKTOP-001` stays (the user still uses Linux); other low-priority and held items keep their recorded order.
 
@@ -370,7 +372,7 @@ Status: `ACTIVE` — the tablet browser is Helium (`io.github.jqssun.helium`, Ch
 <a id="collector-imagetext-001--keep-image-translation-with-the-saved-image"></a>
 ## COLLECTOR-IMAGETEXT-001 — Keep an image's translation with the saved image (2026-10-12)
 
-Status: `HOLD` — deferred by the user (2026-10-12): the Lakomics app/server are being changed in another session; do not start until the user resumes it. User decisions (2026-10-12): only a translation already made before saving is attached (no automatic translation on save, no extra model call); the stored text is shown in the PC and tablet viewers (original/Korean lines, folded by default); not added to search for now. Today nothing can hold it: the capture carries source/media URL, folder and publish time, and assets have no text field. Entry point (2026-10-12): the 저장 button in the translation popover (COLLECTOR-TABLET-001 slice 2). Path: the collector attaches the cached `{original, korean}` lines for that image URL to the save request → the capture keeps them → PC import stores them per asset → viewers show them (PC first, tablet follows; viewer placement is a design decision for the design worker; a new tablet route needs the NetworkPolicy allowlist). Needs a server deploy. Start after COLLECTOR-TABLET-001 slice 1, which owns the same collector files.
+Status: `TODO` — resumed by the user for the next session (2026-10-12 evening); it was deferred earlier that day while the app/server were changed in another session. User decisions (2026-10-12): only a translation already made before saving is attached (no automatic translation on save, no extra model call); the stored text is shown in the PC and tablet viewers (original/Korean lines, folded by default); not added to search for now. Today nothing can hold it: the capture carries source/media URL, folder and publish time, and assets have no text field. Entry point (2026-10-12): the 저장 button in the translation popover (COLLECTOR-TABLET-001 slice 2). Path: the collector attaches the cached `{original, korean}` lines for that image URL to the save request → the capture keeps them → PC import stores them per asset → viewers show them (PC first, tablet follows; viewer placement is a design decision for the design worker; a new tablet route needs the NetworkPolicy allowlist). Needs a server deploy. Start after COLLECTOR-TABLET-001 slice 1, which owns the same collector files.
 
 <a id="view-filter-001--active-view-filter-indicator"></a>
 ## VIEW-FILTER-001 — Active view-filter indicator (2026-10-12)
