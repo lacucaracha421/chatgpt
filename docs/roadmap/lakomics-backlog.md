@@ -393,6 +393,14 @@ Status: `IDEA` — user 2026-10-03 liked this one among the brainstormed tools; 
 While browsing X, the collector marks each image as already in the library by image content, not only by URL, so reposts from other accounts are caught; it may also show a taste-match score based on the library. Today's collector saved marks are URL-based only (`extension-list/src/x-gallery.js` `savedMedia`). Reuse the PC similarity and artist-style data through the existing collector ↔ PC connection; the score's definition and privacy of what is sent stay open.
 Not chosen 2026-10-03 (judged impractical): source-loss monitoring, reverse-search quality upgrade, bookstore barcode check, yearly recap, tablet photo-frame mode.
 
+<a id="collector-translate-001--context-aware-web-page-translation"></a>
+## COLLECTOR-TRANSLATE-001 — Context-aware web page translation in the collector (2026-10-12)
+
+Status: `IDEA` — user 2026-10-12 wants this added to the Lakomics collector (`extension-list/`) after building the separate YouTube subtitle extension (`V:\yt-subs`, its own git repo); not approved to build. Goal: translate foreign (mainly Japanese) pages and posts into natural Korean, better than the browser's built-in translation.
+- **Reuse from `V:\yt-subs`:** the provider layer (Claude / Gemini choice, user's own API key in extension storage, retries, auth errors), the upfront glossary call with a user dictionary that wins over model terms, the shared Hangul-only rules (no leftover kana/kanji or bracketed originals, natural Korean instead of literal Sino-Korean readings), and the kana/kanji check with one retry. Copy or extract deliberately; the two extensions do not share code today.
+- **Text in images (user 2026-10-12):** in scope, but only for images the user explicitly picks — never automatic for every image on a page. The user found Claude Haiku already reads image text well; rough estimate ~0.02–0.05 ¢ per image input on Haiku 5.5 (unmeasured; measure on real images before promising costs).
+- **Open questions:** whole page vs selected text or post body only; how results appear (replace in place, side by side, hover); keeping page layout intact; per-site caching; cost limits for long pages; how it coexists with the collector's existing capture UI and `extension-list/AGENTS.md` rules.
+
 ## LINUX-DESKTOP-001 — Deeper CachyOS / KDE Plasma integration
 
 Status: `TODO` — user 2026-10-04 asked for deeper integration with the Linux PC (CachyOS, KDE Plasma 6 on Wayland). The dated record says dev-only, with no installed package/launcher; current machine state is (unverified 2026-10-10). Existing integration: close-to-tray, KDE Wallet via Secret Service, and the build-cache cleanup timer. All items are Linux-only additions; Windows behaviour must not change. Suggested order: 1 → 2 → 7 → 5, others as wanted.
