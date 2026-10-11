@@ -158,29 +158,20 @@ it("offers reference suggestions after curated-folder conversion and keeps conve
   expect(vi.mocked(invoke).mock.calls.some(([command])=>command==="confirm_reference_batch")).toBe(false);
 });
 
-it("shows inherited folder exclusions and lets the owning folder restore inclusion", async () => {
+it("offers no classification-exclusion item in the plain folder menu", async () => {
   const classifications = [...fixtureClassifications, { id: "nested", name: "바리에이션", kind: "tag" as const, parentId: "child", iconKey: null, colorKey: null }];
-  const hub = { targets: [], series: [{ classificationId: "series", heroAssetId: null, autoClassify: true }], groups: [], folderExclusions: ["child"], error: null, refresh: vi.fn(), revision: 0 } as any;
+  const hub = { targets: [], series: [{ classificationId: "series", heroAssetId: null, autoClassify: true }], groups: [], error: null, refresh: vi.fn(), revision: 0 } as any;
   vi.mocked(invoke).mockResolvedValue(undefined);
   const show = (id: string) => <CharacterFolderContent view={{ kind: "classification", classificationId: id }} hub={hub} classifications={classifications} galleryLayout="masonry" onGalleryLayoutChange={() => {}} privacyMode={false} onPrivacyModeChange={() => {}} metadataVisible onMetadataVisibleChange={() => {}} thumbnailRowHeight={180} onThumbnailRowHeightChange={() => {}} refreshVersion={0} onNavigate={() => {}} onAssetsChanged={() => {}}>
     <FolderRegistrationContext.Consumer>{tools => <div>{tools}</div>}</FolderRegistrationContext.Consumer>
   </CharacterFolderContent>;
-  const view = render(show("nested"));
+  render(show("nested"));
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "폴더 더보기" }));
-  expect(screen.getByRole("menuitem", { name: "히나 폴더에서 분류 제외됨" })).toHaveAttribute("aria-disabled", "true");
-  await user.keyboard("{Escape}");
-  hub.folderExclusions = ["child", "nested"];
-  view.rerender(show("nested"));
-  await user.click(screen.getByRole("button", { name: "폴더 더보기" }));
-  expect(screen.getByRole("menuitem", { name: "이 폴더의 제외 설정 해제" })).toBeEnabled();
-  await user.keyboard("{Escape}");
-  hub.folderExclusions = ["child"];
-  view.rerender(show("child"));
-  await user.click(screen.getByRole("button", { name: "폴더 더보기" }));
-  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에 다시 포함" }));
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_character_folder_excluded", { request: { classificationId: "child", excluded: false } }));
-  expect(hub.refresh).toHaveBeenCalled();
+  expect(screen.getByRole("menuitem", { name: "시리즈로 등록" })).toBeEnabled();
+  expect(screen.getByRole("menuitem", { name: "캐릭터로 만들기" })).toBeEnabled();
+  expect(screen.queryByText(/분류 제외|분류에서 제외|분류에 다시 포함|제외 설정 해제/)).not.toBeInTheDocument();
+  expect(invoke).not.toHaveBeenCalledWith("set_character_folder_excluded", expect.anything());
 });
 
 

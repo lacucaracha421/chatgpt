@@ -56,7 +56,6 @@
 .character-browser .folder-shelf .character-mosaic[data-count="3"] > :first-child { grid-row:1/-1; }
 .character-browser .folder-shelf .character-mosaic > span { min-width:0; min-height:0; height:100%; overflow:hidden; }
 .character-browser .folder-shelf .character-card-caption { display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:0; width:148px; padding:0; }
-.character-browser .folder-shelf .character-card__status { width:148px; margin-top:var(--space-1); color:var(--color-muted); font-size:var(--type-meta); }
 .character-browser .folder-filter.character-filters { margin:var(--space-3) 0 0; padding:0; border-top:0; }
 .character-header .top-bar__titles { flex:1 1 auto; min-width:0; overflow:hidden; }
 .character-header .character-breadcrumb { min-height:44px; max-width:100%; gap:0; overflow:auto; scrollbar-width:none; white-space:nowrap; }

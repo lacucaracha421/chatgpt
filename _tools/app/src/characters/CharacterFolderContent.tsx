@@ -1,6 +1,5 @@
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { CharacterFolderOrganizer } from "./CharacterFolderOrganizer";
-import { folderExclusionItem } from "./folderExclusion";
 import { FolderRegistrationContext } from "./FolderRegistrationContext";
 import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AreaEntering, READY_CAP_MS, viewReady } from "../shared/motion/AreaSwitch";
@@ -48,26 +47,7 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
   const folder = classifications.find(item => item.id === id);
   const series = hub.series.find(s => s.classificationId === id);
   const originalScope = Boolean(id && inOriginals(id, classifications));
-  const folderExclusions = hub.folderExclusions ?? [];
-  const seriesAncestor = (() => {
-    let current = folder;
-    const seen = new Set<string>();
-    while (current?.parentId && !seen.has(current.id)) {
-      seen.add(current.id);
-      const parentId = current.parentId;
-      if (hub.series.some(series => series.classificationId === parentId)) return true;
-      current = classifications.find(folder => folder.id === parentId);
-    }
-    return false;
-  })();
-  async function setExcluded(excluded: boolean) {
-    if (!id || busy) return;
-    setBusy(true); setError(null);
-    try { await characterHubApi.setFolderExcluded(id, excluded); hub.refresh(); onAssetsChanged(); }
-    catch (error) { setError(commandErrorMessage(error, "폴더의 분류 설정을 저장하지 못했습니다.")); }
-    finally { setBusy(false); }
-  }
-  if (series && !originalScope) return <FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} folderExclusions={folderExclusions} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} /></FolderKindSwitch>;
+  if (series && !originalScope) return <FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} /></FolderKindSwitch>;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);
@@ -76,7 +56,6 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
     finally { setBusy(false); }
   }
   return <FolderKindSwitch kind="plain"><FolderRegistrationContext.Provider value={folder?.parentId && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
-    ...((seriesAncestor && !hub.targets.some(target => target.linkedClassificationId === id)) || folderExclusions.includes(id!) ? [folderExclusionItem(id!, classifications, folderExclusions, excluded => void setExcluded(excluded))] : []),
     { id: "register-series", label: "시리즈로 등록", onSelect: () => void register() },
     { id: "make-character", label: "캐릭터로 만들기", onSelect: () => setOrganizeCharacter(true) },
   ]} /> : null}>

@@ -19,7 +19,7 @@ afterEach(() => { cleanup(); localStorage.removeItem(INFO_PANEL_KEY); vi.restore
 
 async function mount() {
   const api = createCharacterFixture(), targets = await api.targets();
-  const hubApi = { folderExclusions: vi.fn().mockResolvedValue([]), seriesFolders: vi.fn().mockResolvedValue([]), browse: vi.fn().mockResolvedValue({ items: fixtureAssets.slice(5), nextCursor: null, totalCount: 13 }),
+  const hubApi = { seriesFolders: vi.fn().mockResolvedValue([]), browse: vi.fn().mockResolvedValue({ items: fixtureAssets.slice(5), nextCursor: null, totalCount: 13 }),
     excludedAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }) } as unknown as CharacterHubApi;
   const shadowApi = { page: vi.fn(async () => ({ items: [], nextOffset: null, policyVersion: null, summary: emptyShadowSummary() })) } as unknown as ShadowReviewApi;
   const gateway = { listAssets: vi.fn().mockResolvedValue({ items: fixtureAssets, nextCursor: null }) } as unknown as LibraryGateway;

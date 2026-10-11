@@ -127,7 +127,7 @@ it("keeps missing-original status across picker pages and refreshes it on retry"
   expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "true");
 });
 
-async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { sort?: AssetSort; onSortChange?: (sort: AssetSort) => void; targetOverrides?: Partial<CharacterTarget>; seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string; candidates?: number; shadowItems?: string[]; fault?: boolean; gateway?: Partial<LibraryGateway>; inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]> }) {
+async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { sort?: AssetSort; onSortChange?: (sort: AssetSort) => void; targetOverrides?: Partial<CharacterTarget>; seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[];  privacyMode?: boolean; sourceUrl?: string; candidates?: number; shadowItems?: string[]; fault?: boolean; gateway?: Partial<LibraryGateway>; inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]> }) {
   const api=createCharacterFixture(), sourceTargets=await api.targets();
   const targets = sourceTargets.map(target => target.id === (targetId ?? "hina") ? {
     ...target,
@@ -137,7 +137,7 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   if (legacy?.inspect) api.inspectReferenceRegions = vi.fn(legacy.inspect) as unknown as typeof api.inspectReferenceRegions;
   if (pendingOnly) { api.reviewPending = vi.fn(async () => true); vi.spyOn(api, "review"); }
   const browse=vi.fn().mockResolvedValue({ items:fixtureAssets.slice(5).map(asset => ({ ...asset, sourceUrl: legacy?.sourceUrl ?? asset.sourceUrl })),nextCursor:null,totalCount:13 });
-  const hubApi={folderExclusions:vi.fn().mockResolvedValue([]),seriesFolders:vi.fn().mockResolvedValue(legacy?.folders ?? []),setFolderExcluded:vi.fn().mockResolvedValue(undefined),browse,saveSeries:vi.fn(),series:vi.fn(),createManualCharacter:vi.fn(),completeReview:vi.fn().mockResolvedValue(1),setSeriesAssetExcluded:vi.fn(),excludedAssets:vi.fn().mockResolvedValue({items:[],nextCursor:null,totalCount:legacy?.excludedCount ?? 0}),
+  const hubApi={seriesFolders:vi.fn().mockResolvedValue(legacy?.folders ?? []),browse,saveSeries:vi.fn(),series:vi.fn(),createManualCharacter:vi.fn(),completeReview:vi.fn().mockResolvedValue(1),setSeriesAssetExcluded:vi.fn(),excludedAssets:vi.fn().mockResolvedValue({items:[],nextCursor:null,totalCount:legacy?.excludedCount ?? 0}),
     referenceCandidates:vi.fn(async(targetId:string)=>{ const target=targets.find(item=>item.id===targetId)!; return {targetId,targetRevision:target.revision,referenceSetHash:`set-${targetId}`,confirmationMode:target.manualOnly?"initialize":"add_learned",minimumSelection:target.manualOnly?5:1,items:fixtureAssets.slice(5,7),suggestedAssetIds:fixtureAssets.slice(5,7).map(item=>item.id)}; }),
     confirmReferenceBatch:vi.fn(async()=>targets[0]),
     requestReferenceRefresh:vi.fn(async(targetId:string)=>({targetId,requestRevision:1,state:"pending" as const,eligibleCount:12})),
@@ -147,7 +147,7 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   const navigate=vi.fn(),changed=vi.fn();
   const onGalleryLayoutChange=vi.fn(),onMetadataVisibleChange=vi.fn(),onPrivacyModeChange=vi.fn(),onThumbnailRowHeightChange=vi.fn();
   const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn(),...legacy?.gateway} as unknown as LibraryGateway;
-  const browser=<SeriesBrowser folderExclusions={legacy?.exclusions ?? []} targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} sort={legacy?.sort} onSortChange={legacy?.onSortChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} />;
+  const browser=<SeriesBrowser targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} sort={legacy?.sort} onSortChange={legacy?.onSortChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} />;
   const content = withChrome ? <WorkspaceChromeProvider scope="series"><div className="workspace-navigation"><aside className="workspace-index"><ChromeSettingsDock /></aside>{browser}</div></WorkspaceChromeProvider> : browser;
   const rendered = render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
   const navigateToCharacter = (id?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId: id })}</LibraryProvider>);
@@ -737,8 +737,8 @@ it("shows only character states that need attention on overview cards", async ()
   expect(screen.queryByLabelText("레퍼런스 준비 완료")).not.toBeInTheDocument();
 });
 
-it("places ordinary folders beside characters with navigation and a persisted exclusion action", async () => {
-  const { navigate, hubApi, changed } = await mount(undefined, false, [], undefined, false, {
+it("places ordinary folders beside characters with navigation and no classification-exclusion UI", async () => {
+  const { navigate } = await mount(undefined, false, [], undefined, false, {
     folders: [{ classificationId: "machines", thumbnailAssetId: "asset-5" }], privacyMode: true,
   });
   const card = await screen.findByRole("button", { name: "기체 폴더 열기" });
@@ -747,34 +747,13 @@ it("places ordinary folders beside characters with navigation and a persisted ex
   expect(card.querySelector(".privacy-mask")).toHaveAttribute("aria-label", "비공개 모드");
   expect(screen.getByRole("button", {name: "히나 열기"}).querySelector("img[src]")).toBeNull();
   const user = userEvent.setup();
+  expect(card).toHaveAttribute("aria-description", "일반 폴더");
   expect(within(card).queryByText("제외")).not.toBeInTheDocument();
+  expect(card.closest("article")).not.toHaveTextContent("분류 제외");
+  expect(screen.queryByRole("button", { name: "기체 폴더 더보기" })).not.toBeInTheDocument();
+  expect(screen.queryByText("분류 제외")).not.toBeInTheDocument();
   await user.click(card);
   expect(navigate).toHaveBeenCalledWith({ kind: "classification", classificationId: "machines" });
-  await user.click(screen.getByRole("button", { name: "기체 폴더 더보기" }));
-  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에서 제외" }));
-  await waitFor(() => expect(hubApi.setFolderExcluded).toHaveBeenCalledWith("machines", true));
-  await waitFor(() => expect(changed).toHaveBeenCalled());
-});
-
-it("restores folder inclusion and leaves failed saves recoverable", async () => {
-  const { hubApi, changed } = await mount(undefined, false, [], undefined, false, {
-    folders: [{ classificationId: "machines", thumbnailAssetId: null }], exclusions: ["machines"],
-  });
-  const card = await screen.findByRole("button", { name: "기체 폴더 열기" });
-  expect(card).toHaveAttribute("aria-description", "캐릭터 분류 제외");
-  expect(within(card).getByText("제외")).toHaveClass("series-character__tag");
-  expect(card.closest("article")).toHaveClass("series-character--excluded");
-  vi.mocked(hubApi.setFolderExcluded).mockRejectedValueOnce(new Error("저장 실패"));
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "기체 폴더 더보기" }));
-  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에 다시 포함" }));
-  await screen.findByRole("alert");
-  expect(changed).not.toHaveBeenCalled();
-  expect(card).toHaveAttribute("aria-description", "캐릭터 분류 제외");
-  await user.click(screen.getByRole("button", { name: "기체 폴더 더보기" }));
-  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에 다시 포함" }));
-  await waitFor(() => expect(changed).toHaveBeenCalled());
-  expect(hubApi.setFolderExcluded).toHaveBeenLastCalledWith("machines", false);
 });
 
 

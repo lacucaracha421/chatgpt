@@ -27,7 +27,8 @@ afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 
 it('links inner series through classifications after characters and opens plain folders outside the hub',async()=>{
   const nested=structuredClone(index);
-  nested.nodes.push(node('folder','band','밴드물','series:s'),node('series','bocchi','봇치',null));
+  // An older publication may still mark a folder excluded; the shelf no longer shows it.
+  nested.nodes.push({...node('folder','band','밴드물','series:s'),excluded:true},node('series','bocchi','봇치',null));
   const classifications=[{id:'s',name:'Series',parent_id:null,asset_count:0},{id:'band',name:'밴드물',parent_id:'s',asset_count:0},{id:'bocchi',name:'봇치',parent_id:'s',asset_count:0}];
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?nested:page());
   const onOpenFolder=vi.fn();
@@ -35,6 +36,8 @@ it('links inner series through classifications after characters and opens plain 
   const inner=await screen.findByRole('button',{name:'봇치'});
   const shelf=inner.closest('.home-shelf__track')!;
   expect([...shelf.querySelectorAll('.character-card')].map(card=>card.getAttribute('data-kind'))).toEqual(['group','series','folder']);
+  expect(screen.queryByText('분류 제외')).toBeNull();
+  expect(shelf.textContent).not.toContain('분류 제외');
   fireEvent.click(inner);
   await screen.findByRole('heading',{name:'봇치'});
   act(()=>{expect(backRef.current?.()).toBe(true);});

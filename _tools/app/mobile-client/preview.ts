@@ -300,10 +300,10 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if(url.pathname.startsWith('/v1/library/characters')) {
     const revision='a'.repeat(64);
     const nodes=[
-      {id:'series:demo',kind:'series',sourceId:'demo',seriesId:'demo',parentId:null,name:'아카이브 시리즈',description:'',heroAssetId:'demo-0',thumbnailAssetId:'demo-0',manualOnly:false,excluded:false},
-      {id:'group:demo',kind:'group',sourceId:'demo',seriesId:'demo',parentId:'series:demo',name:'주요 캐릭터',description:'',thumbnailAssetId:'demo-1',manualOnly:false,excluded:false},
-      {id:'folder:demo',kind:'folder',sourceId:'demo',seriesId:'demo',parentId:'series:demo',name:'배경 자료',description:'',thumbnailAssetId:'demo-4',manualOnly:false,excluded:true},
-      ...Array.from({length:15},(_,i)=>({id:`character:demo-${i}`,kind:'character',sourceId:`demo-${i}`,seriesId:'demo',parentId:i<3?'group:demo':'series:demo',name:['서하','유리','하늘'][i%3]+(i>2?` ${i+1}`:''),description:'보관된 캐릭터 자료',thumbnailAssetId:`demo-${i}`,manualOnly:i%3===0,excluded:false}))
+      {id:'series:demo',kind:'series',sourceId:'demo',seriesId:'demo',parentId:null,name:'아카이브 시리즈',description:'',heroAssetId:'demo-0',thumbnailAssetId:'demo-0',manualOnly:false},
+      {id:'group:demo',kind:'group',sourceId:'demo',seriesId:'demo',parentId:'series:demo',name:'주요 캐릭터',description:'',thumbnailAssetId:'demo-1',manualOnly:false},
+      {id:'folder:demo',kind:'folder',sourceId:'demo',seriesId:'demo',parentId:'series:demo',name:'배경 자료',description:'',thumbnailAssetId:'demo-4',manualOnly:false},
+      ...Array.from({length:15},(_,i)=>({id:`character:demo-${i}`,kind:'character',sourceId:`demo-${i}`,seriesId:'demo',parentId:i<3?'group:demo':'series:demo',name:['서하','유리','하늘'][i%3]+(i>2?` ${i+1}`:''),description:'보관된 캐릭터 자료',thumbnailAssetId:`demo-${i}`,manualOnly:i%3===0}))
     ];
     // Home demos leave a fifth of the series unclassified (자산 현황's 캐릭터 자동 태그).
     const scopes=nodes.flatMap(n=>(n.kind==='series'?['all','unclassified','needs_review']:['all']).map(filter=>({nodeId:n.id,filter,totalCount:filter==='all'?120:homeDemo&&filter==='unclassified'?22:0,sourceCount:filter==='all'?120:0})));

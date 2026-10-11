@@ -16,13 +16,12 @@ export function useCharacterHub(refreshVersion: number) {
   // 기타 buckets are kept apart: every other screen lists characters only.
   const [extras, setExtras] = useState<CharacterTarget[]>([]);
   const [series, setSeries] = useState<CharacterSeries[]>([]);
-  const [folderExclusions, setFolderExclusions] = useState<string[]>([]);
   const [groups, setGroups] = useState<CharacterGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [seriesRevisions, setSeriesRevisions] = useState<SeriesRevisions>(NO_SERIES_REVISIONS);
   const library = useOptionalLibrary();
-  const pending = useRef<{ key: string; gateway: unknown; read: Promise<{ targets: CharacterTarget[]; series: CharacterSeries[]; folderExclusions: string[]; groups: CharacterGroup[] }> } | null>(null);
+  const pending = useRef<{ key: string; gateway: unknown; read: Promise<{ targets: CharacterTarget[]; series: CharacterSeries[]; groups: CharacterGroup[] }> } | null>(null);
   useLayoutEffect(() => {
     if (library) return publishSeriesDataRevision(library.gateway, library.library?.root, refreshVersion + revision, seriesRevisions);
   }, [library?.gateway, library?.library?.root, refreshVersion, revision, seriesRevisions]);
@@ -45,16 +44,15 @@ export function useCharacterHub(refreshVersion: number) {
     const key = JSON.stringify([library?.library?.root, refreshVersion, revision]);
     const gateway = library?.gateway;
     if (pending.current?.key !== key || pending.current.gateway !== gateway) {
-      const read = Promise.all([characterApi.targets(), characterHubApi.series(), characterHubApi.folderExclusions(), characterHubApi.allGroups()])
-        .then(([targets, series, folderExclusions, groups]) => ({ targets, series, folderExclusions, groups }));
+      const read = Promise.all([characterApi.targets(), characterHubApi.series(), characterHubApi.allGroups()])
+        .then(([targets, series, groups]) => ({ targets, series, groups }));
       const request = { key, gateway, read };
       pending.current = request;
       const clear = () => { if (pending.current === request) pending.current = null; };
       void read.then(clear, clear);
     }
-    void pending.current.read.then(({ targets, series, folderExclusions, groups }) => {
+    void pending.current.read.then(({ targets, series, groups }) => {
       if (active) {
-        setFolderExclusions(current => same(current, folderExclusions));
         setTargets(current => same(current, targets.filter(target => target.role !== "extras")));
         setExtras(current => same(current, targets.filter(target => target.role === "extras")));
         setSeries(current => same(current, series)); setGroups(current => same(current, groups)); setError(null);
@@ -62,5 +60,5 @@ export function useCharacterHub(refreshVersion: number) {
     }).catch(e => { if (active) setError(commandErrorMessage(e, "캐릭터 목록을 불러오지 못했습니다.")); });
     return () => { active = false; };
   }, [library?.gateway, library?.library?.root, refreshVersion, revision]);
-  return { targets, extras, series, groups, folderExclusions, error, refresh, revision, seriesRevisions, seriesAnalysed };
+  return { targets, extras, series, groups, error, refresh, revision, seriesRevisions, seriesAnalysed };
 }

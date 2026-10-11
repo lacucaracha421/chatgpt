@@ -33,9 +33,7 @@ export type ReferenceRefreshReceipt = {
   targetId: string; requestRevision: number; state: "pending" | "running" | "failed" | "completed"; eligibleCount: number;
 };
 export const characterHubApi = {
-  folderExclusions: (): Promise<string[]> => invoke("character_folder_exclusions"),
   seriesFolders: (seriesId: string): Promise<SeriesFolder[]> => invoke("character_series_folders", { seriesId }),
-  setFolderExcluded: (classificationId: string, excluded: boolean): Promise<void> => invoke("set_character_folder_excluded", { request: { classificationId, excluded } }),
   series: (): Promise<CharacterSeries[]> => invoke("character_series"),
   groups: async (seriesId: string): Promise<CharacterGroup[]> => (await invoke<Omit<CharacterGroup, "seriesId">[]>("character_groups", { seriesId })).map(group => ({ ...group, seriesId })),
   /** Every series' groups in one call, ordered by series, then name. */
@@ -50,5 +48,5 @@ export const characterHubApi = {
   confirmReferenceBatch: ({ regions, ...request }: ConfirmReferenceBatch): Promise<import("./api").CharacterTarget> => invoke("confirm_reference_batch", { request, regions: regions ?? {} }),
   requestReferenceRefresh: (targetId: string, expectedRevision: number): Promise<ReferenceRefreshReceipt> => invoke("request_character_reference_refresh", { targetId, expectedRevision }),
 };
-export type CharacterHubApi = Pick<typeof characterHubApi, "folderExclusions" | "seriesFolders" | "setFolderExcluded" | "series" | "saveSeries" | "browse" | "createManualCharacter" | "completeReview" | "setSeriesAssetExcluded" | "excludedAssets" | "referenceCandidates" | "confirmReferenceBatch" | "requestReferenceRefresh">;
+export type CharacterHubApi = Pick<typeof characterHubApi, "seriesFolders" | "series" | "saveSeries" | "browse" | "createManualCharacter" | "completeReview" | "setSeriesAssetExcluded" | "excludedAssets" | "referenceCandidates" | "confirmReferenceBatch" | "requestReferenceRefresh">;
 export type ReferenceCandidateApi = Pick<typeof characterHubApi, "referenceCandidates" | "confirmReferenceBatch">;

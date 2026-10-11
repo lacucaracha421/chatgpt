@@ -363,7 +363,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   // Hover prefetch of a folder switch's first page (read-only). Every library change below drops what it read.
   const folderPrefetchPlan = useRef<FolderPrefetchPlan>(() => null);
   folderPrefetchPlan.current = (target) => planFolderPrefetch(target, { current: view, gateway, series: characterHub.series, classifications: entries, sort: preferences.assetSort });
-  useEffect(() => invalidateFolderPrefetch(), [gateway, libraryRoot, assetRefresh, entries, albums, characterHub.revision, characterHub.series, characterHub.targets, characterHub.groups, characterHub.folderExclusions]);
+  useEffect(() => invalidateFolderPrefetch(), [gateway, libraryRoot, assetRefresh, entries, albums, characterHub.revision, characterHub.series, characterHub.targets, characterHub.groups]);
   // A mobile similarity decision applied on this PC trashed an image and resolved a pair.
   const handleSimilarityInbound = useCallback(() => {
     void refreshReviewCount().catch(() => undefined);

@@ -110,7 +110,6 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false,ratings}:{node:
       {isExtrasNode(node)?Array.from({length:9},(_,i)=><span key={i} aria-hidden="true"/>):node.kind==='group'&&previews.length?previews.map(id=><span key={id}><Preview id={id} rating={ratings?.[id]} paused={previewPaused}/></span>):node.thumbnailAssetId?<Preview id={node.thumbnailAssetId} rating={ratings?.[node.thumbnailAssetId]} paused={previewPaused}/>:node.kind==='folder'?<FolderIcon/>:<PhotoIcon/>}
     </span>
     <span className="character-card-caption"><strong>{isExtrasNode(node)?null:node.kind==='group'||node.kind==='series'?<UserGroupIcon/>:node.kind==='folder'?<FolderIcon/>:<UserIcon/>}<span className="folder-shelf__name">{characterNodeName(node)}</span></strong>{count!==undefined&&<small className="folder-shelf__meta">{count.toLocaleString('ko-KR')}장</small>}</span>
-    {node.excluded&&<small className="character-card__status">분류 제외</small>}
   </button>;
 }
 

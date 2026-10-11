@@ -376,7 +376,6 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "character_series": return [{ classificationId: PREVIEW_CHARACTER_SERIES_ID, heroAssetId: "asset-005", autoClassify: true }];
     case "all_character_groups": return previewCharacterGroups.map(({ seriesId: _seriesId, ...group }) => ({ ...group, seriesId: PREVIEW_CHARACTER_SERIES_ID }));
     case "character_groups": return previewCharacterGroups.map(({ seriesId: _seriesId, ...group }) => group);
-    case "character_folder_exclusions": return [];
     case "character_series_folders":
     case "character_suggestions":
     case "ignored_character_suggestions":

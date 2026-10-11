@@ -9,7 +9,7 @@ export type CharacterNode = {
   id:string; kind:'series'|'group'|'character'|'folder'; sourceId:string; seriesId:string;
   parentId:string|null; name:string; description:string; thumbnailAssetId:string|null;
   heroAssetId?:string|null;
-  manualOnly:boolean; excluded:boolean;
+  manualOnly:boolean;
   protectedAssetIds?:string[];
   /** `extras` is a 기타 bucket (a `character` node the screens call just "기타", always last among character cards).
    * Absent on older snapshots: an ordinary character. */

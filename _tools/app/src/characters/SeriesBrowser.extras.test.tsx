@@ -51,7 +51,7 @@ async function mount(options: Options = {}) {
     return { items, nextCursor: null, totalCount: items.length };
   });
   const requestReferenceRefresh = vi.fn(async (targetId: string) => ({ targetId, requestRevision: 1, state: "pending" as const, eligibleCount: 7 }));
-  const hubApi = { folderExclusions: vi.fn().mockResolvedValue([]), seriesFolders: vi.fn().mockResolvedValue([]), setFolderExcluded: vi.fn(), browse, saveSeries: vi.fn(), series: vi.fn(), createManualCharacter: vi.fn(),
+  const hubApi = { seriesFolders: vi.fn().mockResolvedValue([]), browse, saveSeries: vi.fn(), series: vi.fn(), createManualCharacter: vi.fn(),
     completeReview: vi.fn().mockResolvedValue(1), setSeriesAssetExcluded: vi.fn(), excludedAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }),
     referenceCandidates: vi.fn(), confirmReferenceBatch: vi.fn(), requestReferenceRefresh } as unknown as CharacterHubApi;
   const shadowApi = { page: vi.fn(async () => ({ items: [], nextOffset: null, policyVersion: null, summary: emptyShadowSummary() })), start: vi.fn(), cancel: vi.fn(),

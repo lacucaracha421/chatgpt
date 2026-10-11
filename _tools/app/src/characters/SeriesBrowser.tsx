@@ -42,7 +42,6 @@ import { CharacterRegistry, characterDraft, updateCharacterReferences, activeCha
 import { CharacterConversion } from "./CharacterConversion";
 import { CharacterTaggerTags } from "./CharacterTaggerTags";
 import { needsReferenceConfirmation, useReferenceRegionInspection } from "./ReferenceRegionChoices";
-import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
 import { ExtrasCard, useExtrasPreviews, useExtrasSuggestions } from "./ExtrasCard";
 import { ExtrasPromotionDialog, type ExtrasPromotionApi, type ExtrasPromotionOutcome } from "./ExtrasPromotionDialog";
@@ -67,7 +66,6 @@ export type CharacterGalleryDrag = Pick<ComponentProps<typeof AssetGallery>, "on
 type Props = {
   requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void;
   clearSelectionRequest?: number; galleryDrag?: CharacterGalleryDrag; albums?: AlbumEntry[];
-  folderExclusions?: string[];
   series: CharacterSeries; targetId?: string; groupId?: string; targets: CharacterTarget[];
   /** The 기타 buckets (kept apart from `targets`, which lists characters only). */
   extras?: CharacterTarget[]; groups?: CharacterGroup[]; classifications: ClassificationEntry[];
@@ -150,7 +148,7 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
   return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
 }
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
@@ -821,16 +819,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               const folder = classifications.find(folder => folder.id === item.classificationId);
               if (!folder) return null;
               const isSeries = item.isSeries === true;
-              const exclusion = folderExclusionItem(folder.id, classifications, folderExclusions, excluded => void action(() => hubApi.setFolderExcluded(folder.id, excluded)));
-              const excluded = !isSeries && (folderExclusions.includes(folder.id) || exclusion.disabled);
-              return <article className={`series-character folder-shelf__card${excluded ? " series-character--excluded" : ""}`} key={folder.id} inert={staleFolders}>
-                <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} ${isSeries ? "시리즈" : "폴더"} 열기`} aria-description={isSeries ? "캐릭터 시리즈" : excluded ? "캐릭터 분류 제외" : "일반 폴더"} {...folderIntent({ kind: "classification", classificationId: folder.id })} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
+              return <article className="series-character folder-shelf__card" key={folder.id} inert={staleFolders}>
+                <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} ${isSeries ? "시리즈" : "폴더"} 열기`} aria-description={isSeries ? "캐릭터 시리즈" : "일반 폴더"} {...folderIntent({ kind: "classification", classificationId: folder.id })} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
                   {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <StableImage draggable={false} loading="lazy" src={folderCardImage(item)!} alt="" /> : <span className="series-character__placeholder">{isSeries ? <UserGroupIcon aria-hidden="true" /> : <FolderIcon aria-hidden="true" />}{isSeries ? "시리즈" : "일반 폴더"}</span>}
-                  {excluded && <span className="series-character__tag" aria-hidden="true">제외</span>}
                   <strong>{isSeries ? <UserGroupIcon className="character-group-card__icon" aria-hidden="true" /> : <FolderIcon className="character-group-card__icon" aria-hidden="true" />}<span className="series-character__name">{folder.name}</span></strong>
                   {(folder.totalAssetCount ?? folder.assetCount) !== undefined && <small className="folder-shelf__meta">{(folder.totalAssetCount ?? folder.assetCount)!.toLocaleString("ko-KR")}장</small>}
                 </button>
-                {!isSeries && <Menu label={`${folder.name} 폴더 더보기`} triggerClassName="series-character__info" disabled={busy || staleFolders} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[exclusion]} />}
               </article>;
             }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => {
               const status = characterStatus(target, readiness.get(target.id), s36Driven(target.id));
