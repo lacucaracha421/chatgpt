@@ -49,3 +49,17 @@ it("counts analysed series without re-reading the hub", async () => {
   await act(async () => { await Promise.resolve(); });
   expect(api.targets).toHaveBeenCalledTimes(1);
 });
+
+it("keeps 기타 buckets apart from the characters every other screen lists", async () => {
+  const character = { id: "hina", role: "character" };
+  const legacy = { id: "old" };
+  const extras = { id: "extras", role: "extras", extrasGroupId: null };
+  api.targets.mockResolvedValue([character, legacy, extras]);
+  api.series.mockResolvedValue([]);
+  api.folderExclusions.mockResolvedValue([]);
+  api.allGroups.mockResolvedValue([]);
+  const { result } = renderHook(() => useCharacterHub(0));
+  await waitFor(() => expect(result.current.extras).toEqual([extras]));
+  // Data without a role (older hosts) is a character.
+  expect(result.current.targets).toEqual([character, legacy]);
+});

@@ -14,6 +14,9 @@
 .character-card { display:flex; flex-direction:column; min-width:0; background:transparent; border:0; padding:0; text-align:left; }
 .character-card-image { display:flex; align-items:center; justify-content:center; width:100%; height:clamp(52px,8dvh,92px); background:var(--color-surface); overflow:hidden; }
 .character-card-image img { width:100%; height:100%; object-fit:cover; }
+/* 기타: a dashed mosaic says "no name yet" (no pictures, no coloured edge). */
+.character-card-image--extras { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); gap:4px; padding:4px; box-sizing:border-box; border:1px dashed var(--color-border-strong); background:transparent; }
+.character-card-image--extras > span { border:1px dashed var(--color-border); background:var(--color-surface); }
 .character-card-caption { display:flex; justify-content:space-between; align-items:center; gap:6px; width:100%; padding:5px 0; font-size:12px; }
 .character-card-caption strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
 .character-card-caption span { white-space:nowrap; }

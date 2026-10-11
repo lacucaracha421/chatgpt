@@ -48,7 +48,8 @@ export const suggestionApi: SuggestionApi = {
   merge: request => mutation("merge_character_suggestion", request),
   context: async () => {
     const [targets, folders] = await Promise.all([characterApi.targets(), libraryGateway.listClassifications()]);
-    return { targets, folders };
+    // A 기타 is not a character a suggestion can be merged into.
+    return { targets: targets.filter(target => target.role !== "extras"), folders };
   },
   groups: seriesId => characterHubApi.groups(seriesId),
 };

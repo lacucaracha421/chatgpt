@@ -1,7 +1,7 @@
 import type {Classification,View} from './types';
-import type {CharacterIndex,CharacterNode} from './characterModel';
+import {characterNodeName,isExtrasNode,type CharacterIndex,type CharacterNode} from './characterModel';
 import {createKoreanMatcher} from '../src/shared/koreanSearch';
-export type Entry=Classification&{characterNode?:string;characterKind?:Exclude<CharacterNode['kind'],'series'>};
+export type Entry=Classification&{characterNode?:string;characterKind?:Exclude<CharacterNode['kind'],'series'>;/** A 기타 bucket: listed last among its siblings. */characterExtras?:true};
 export const LIBRARY_ROOT:View={tab:'library',root:true,title:'에셋'};
 export const ALL_ASSETS:View={tab:'library',title:'모든 자산'};
 export function mergeLibraryEntries(items:Classification[],characters?:CharacterIndex):Entry[]{
@@ -13,11 +13,11 @@ export function mergeLibraryEntries(items:Classification[],characters?:Character
       if(node.kind==='group'||node.kind==='character'){
         const id=node.kind==='group'?`character-group:${node.sourceId}`:node.id;
         const parent=node.parentId?.startsWith('group:')?`character-group:${node.parentId.slice(6)}`:node.seriesId;
-        merged.push({id,name:node.name,parent_id:parent,asset_count:characters?.scopes.find(s=>s.nodeId===node.id&&s.filter==='all')?.totalCount??0,characterNode:node.id,characterKind:node.kind});
+        merged.push({id,name:characterNodeName(node),parent_id:parent,asset_count:characters?.scopes.find(s=>s.nodeId===node.id&&s.filter==='all')?.totalCount??0,characterNode:node.id,characterKind:node.kind,...(isExtrasNode(node)?{characterExtras:true as const}:{})});
       }
     }
     const order=new Map((characters?.navigationOrder??[]).map((id,i)=>[id,i]));
-    merged.sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)||a.name.localeCompare(b.name,'ko'));
+    merged.sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)||Number(!!a.characterExtras)-Number(!!b.characterExtras)||a.name.localeCompare(b.name,'ko'));
     const linked=linkedCharacterFolders(merged,nodes);
     const kept=merged.filter(item=>!linked.has(item.id)).map(item=>linked.has(item.parent_id??'')?{...item,parent_id:linked.get(item.parent_id!)!}:item);
     const ids=new Set(kept.map(item=>item.id));
@@ -54,7 +54,7 @@ function linkedCharacterFolders(entries:Entry[],nodes:CharacterNode[]):Map<strin
   const withinSeries=(entry:Entry,series:string)=>{const seen=new Set<string>();let parent=entry.parent_id;while(parent&&!seen.has(parent)){if(parent===series)return true;seen.add(parent);parent=byId.get(parent)?.parent_id??null;}return false;};
   const result=new Map<string,string>();
   for(const node of nodes){
-    if(node.kind!=='character')continue;
+    if(node.kind!=='character'||isExtrasNode(node))continue;
     const folder=entries.find(entry=>!entry.characterNode&&key(entry.name)===key(node.name)&&withinSeries(entry,node.seriesId));
     if(folder&&!result.has(folder.id))result.set(folder.id,node.id);
   }

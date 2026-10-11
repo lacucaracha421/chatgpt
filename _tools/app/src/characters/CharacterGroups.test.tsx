@@ -88,3 +88,23 @@ it("masks group covers without requesting member images", () => {
  expect(container.querySelector("img[src]")).toBeNull();
  expect(container.querySelectorAll(".privacy-mask")).toHaveLength(2);
 });
+
+it("shows the 기타 card after the characters and lists 기타 in the heading, even for a group that only has a 기타", () => {
+  const { rerender } = render(<CharacterGroups seriesId="series" members={[members[0]]} groups={[]} extrasCard={<button>기타 열기</button>}>
+    {page => <>{page.map(member => <button key={member.id}>{member.displayName}</button>)}</>}
+  </CharacterGroups>);
+  expect(screen.getByRole("heading", { name: "캐릭터 1 · 기타" })).toBeVisible();
+  const shelf = screen.getByLabelText("등록 캐릭터");
+  expect(within(shelf).getAllByRole("button").map(button => button.textContent)).toEqual(["A", "기타 열기"]);
+  const only = { id: "only", name: "전쟁", revision: 1, targetIds: [], extrasTargetId: "extras" };
+  rerender(<CharacterGroups seriesId="series" members={members} groups={[only]} activeGroupId="only" extrasCard={<button>기타 열기</button>}>{children}</CharacterGroups>);
+  expect(screen.getByLabelText("전쟁 그룹 캐릭터")).toContainElement(screen.getByRole("button", { name: "기타 열기" }));
+});
+
+it("counts a group's 기타 images in its card", () => {
+  const withExtras = [{ ...groups[0]!, extrasTargetId: "extras" }];
+  render(<CharacterGroups seriesId="series" members={members} groups={withExtras} memberCounts={{ a: 7, b: 2, extras: 40 }}>{children}</CharacterGroups>);
+  const tile = screen.getByRole("button", { name: "그룹 이름 그룹 열기" });
+  expect(tile.querySelector("small")).toHaveTextContent("49장");
+  expect(tile).toHaveAttribute("aria-description", "2명 · A · B · 기타");
+});

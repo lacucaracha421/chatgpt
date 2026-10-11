@@ -51,3 +51,12 @@ it('shows the subtree total on a folder card, a series own character count, and 
  // The direct count itself is never repurposed.
  expect(entries.find(entry=>entry.id==='games')!.asset_count).toBe(10);
 });
+it('lists a 기타 as just 기타, after its sibling characters, without treating it as a character folder',()=>{
+ const extras={...characterNode('character','x','Group 기타','group:g'),role:'extras' as const};
+ const entries=mergeLibraryEntries([{id:'folder-x',name:'Group 기타',parent_id:'s',asset_count:1}],{...characters,nodes:[...characters.nodes.slice(0,2),extras,characters.nodes[2]]});
+ const group=entries.filter(e=>e.parent_id==='character-group:g');
+ expect(group.map(e=>e.name)).toEqual(['Character','기타']);
+ expect(group[1]).toMatchObject({characterExtras:true,characterKind:'character'});
+ // A folder that merely shares the stored name is not hidden as the 기타's linked folder.
+ expect(entries.some(e=>e.id==='folder-x')).toBe(true);
+});

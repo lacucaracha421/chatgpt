@@ -25,7 +25,9 @@ it("creates a display group and keeps its characters accessible",async()=>{
   const user=userEvent.setup();
   view.rerender(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groupCreateRequest={1}>{card}</CharacterGroups>);
   await user.type(screen.getByRole("textbox",{name:"그룹 이름"}),"학생회");
-  expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+  // Without a member the group is a 기타-only group; with one it is an ordinary save.
+  expect(screen.getByRole("button", { name: "기타만 있는 그룹 만들기" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "저장" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("checkbox",{name:"히나"}));
   await user.click(screen.getByRole("button",{name:"저장"}));
   expect(await screen.findByRole("button",{name:"학생회 그룹 열기"})).toBeInTheDocument();
@@ -34,6 +36,19 @@ it("creates a display group and keeps its characters accessible",async()=>{
   cleanup();
   render(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groups={[{id:"g",name:"학생회",revision:1,targetIds:["hina"]}]} activeGroupId="g">{members=><div>{members.map(target=><span key={target.id}>{target.displayName} 카드</span>)}</div>}</CharacterGroups>);
   expect(screen.getByText("히나 카드")).toBeInTheDocument();
+});
+
+it("creates a group that only has a 기타 when no character is checked", async () => {
+  const onGroupsChanged = vi.fn();
+  vi.mocked(invoke).mockResolvedValue(undefined);
+  const view = render(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groups={[]} onGroupsChanged={onGroupsChanged}>{() => null}</CharacterGroups>);
+  const user = userEvent.setup();
+  view.rerender(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groups={[]} onGroupsChanged={onGroupsChanged} groupCreateRequest={1}>{() => null}</CharacterGroups>);
+  await user.type(screen.getByRole("textbox", { name: "그룹 이름" }), "전쟁");
+  await user.click(screen.getByRole("button", { name: "기타만 있는 그룹 만들기" }));
+  await waitFor(() => expect(onGroupsChanged).toHaveBeenCalledOnce());
+  expect(invoke).toHaveBeenCalledWith("create_character_extras_group", { seriesId: "series", name: "전쟁" });
+  expect(invoke).not.toHaveBeenCalledWith("save_character_group", expect.anything());
 });
 
 it("dissolves an active group after its last member is unchecked and returns to the series", async () => {

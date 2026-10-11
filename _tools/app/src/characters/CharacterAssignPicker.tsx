@@ -9,6 +9,7 @@ import type { ClassificationEntry } from "../library/types";
 import { matchesKoreanSearch } from "../shared/koreanSearch";
 import { Button } from "../shared/ui/Button";
 import { characterAssignSuggestions, type CharacterAssignSuggestion, type CharacterTarget } from "./api";
+import { characterExtrasApi } from "./extrasApi";
 import type { CharacterGroup } from "./hubApi";
 import "./CharacterAssignPicker.css";
 
@@ -28,7 +29,21 @@ type Props = {
   currentTargetId?: string;
   onCreate?: (name: string) => void | Promise<void>;
   loadSuggestions?: (assetIds: string[]) => Promise<CharacterAssignSuggestion[]>;
+  /**
+   * The 기타 buckets that exist. When given (even empty), every series section also offers 기타 for the
+   * series and for each of its groups, creating a missing one with `ensureExtras` when it is chosen.
+   */
+  extras?: CharacterTarget[];
+  ensureExtras?: (seriesId: string, groupId: string | null) => Promise<CharacterTarget>;
 };
+
+/** A 기타 row for a bucket that does not exist yet; choosing it creates the bucket first. */
+const NEW_EXTRAS = "extras:new:";
+const isNewExtras = (target: CharacterTarget) => target.id.startsWith(NEW_EXTRAS);
+const shownName = (target: CharacterTarget) => target.role === "extras" ? "기타" : target.displayName;
+function newExtras(seriesId: string, groupId: string | null): CharacterTarget {
+  return { id: `${NEW_EXTRAS}${seriesId}:${groupId ?? ""}`, seriesClassificationId: seriesId, linkedClassificationId: null, displayName: "기타", enabled: false, manualOnly: true, revision: 0, references: [], ready: false, fingerprint: "", role: "extras", extrasGroupId: groupId };
+}
 
 type PickerRow = {
   key: string;
@@ -39,7 +54,7 @@ type PickerRow = {
   current?: boolean;
 };
 
-export function CharacterAssignPicker({ assetIds, targets, groups, classifications, counts, privacyMode, busy = false, onAssign, onClose, scopeSeriesId, currentTargetId, onCreate, loadSuggestions = characterAssignSuggestions }: Props) {
+export function CharacterAssignPicker({ assetIds, targets, groups, classifications, counts, privacyMode, busy = false, onAssign, onClose, scopeSeriesId, currentTargetId, onCreate, loadSuggestions = characterAssignSuggestions, extras, ensureExtras = characterExtrasApi.ensure }: Props) {
   const [query, setQuery] = useState("");
   const [activeScopeId, setActiveScopeId] = useState<string | null>(scopeSeriesId ?? null);
   const [suggestions, setSuggestions] = useState<CharacterAssignSuggestion[]>([]);
@@ -75,15 +90,16 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
     if (!target || (activeScopeId && target.seriesClassificationId !== activeScopeId)) return [];
     return [{ key: `recent:${target.id}`, target, context: activeScopeId ? undefined : seriesName(target), right: formatCount(counts[target.id] ?? 0), current: target.id === currentTargetId }];
   });
-  const seriesSections = useMemo(() => buildSeriesSections(targets, groups, classifications, counts), [classifications, counts, groups, targets]);
+  const seriesSections = useMemo(() => buildSeriesSections(targets, groups, classifications, counts, extras, scopeSeriesId), [classifications, counts, groups, targets, extras, scopeSeriesId]);
+  const extraById = useMemo(() => new Map(seriesSections.flatMap(section => [...section.groups.flatMap(group => group.rows), ...section.ungrouped]).filter(row => row.target.role === "extras").map(row => [row.target.id, row.target] as const)), [seriesSections]);
   const filteredRecommended = recommendedRows.filter(row => matchesKoreanSearch([row.target.displayName, row.context], query));
   const filteredRecent = recentRows.filter(row => matchesKoreanSearch([row.target.displayName, row.context], query));
   const filteredSeries = seriesSections.flatMap(section => {
     const grouped = section.groups.flatMap(group => {
-      const rows = group.rows.filter(row => matchesKoreanSearch([row.target.displayName, section.name, group.name], query));
+      const rows = group.rows.filter(row => matchesKoreanSearch([shownName(row.target), section.name, group.name], query));
       return rows.length ? [{ ...group, rows }] : [];
     });
-    const ungrouped = section.ungrouped.filter(row => matchesKoreanSearch([row.target.displayName, section.name], query));
+    const ungrouped = section.ungrouped.filter(row => matchesKoreanSearch([shownName(row.target), section.name], query));
     return grouped.length || ungrouped.length ? [{ ...section, groups: grouped, ungrouped }] : [];
   });
   const scopedSeries = activeScopeId ? filteredSeries.filter(section => section.id === activeScopeId) : filteredSeries;
@@ -118,8 +134,16 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
       return;
     }
     setMessage(null);
-    try { await onAssign(chosen); } catch { return; }
-    const nextRecent = rememberRecentIds(chosen.map(target => target.id), recentIds);
+    let resolved = chosen;
+    try {
+      // A 기타 that does not exist yet is created now, on first use.
+      resolved = await Promise.all(chosen.map(target => isNewExtras(target) ? ensureExtras(target.seriesClassificationId!, target.extrasGroupId ?? null) : target));
+      await onAssign(resolved);
+    } catch (reason) {
+      if (resolved === chosen) setMessage(reason instanceof Error && reason.message ? reason.message : "기타를 만들지 못했습니다.");
+      return;
+    }
+    const nextRecent = rememberRecentIds(resolved.filter(target => target.role !== "extras").map(target => target.id), recentIds);
     setRecentIds(nextRecent);
     onClose();
   };
@@ -129,7 +153,7 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
   };
   const renderRow = (row: PickerRow) => {
     const checked = checkedIds.includes(row.target.id);
-    return <button key={row.key} type="button" role="option" aria-selected={checked} aria-label={[row.target.displayName, row.context, row.right].filter(Boolean).join(" · ")}
+    return <button key={row.key} type="button" role="option" aria-selected={checked} aria-label={[shownName(row.target), row.context, row.right].filter(Boolean).join(" · ")}
       className={`character-assign-picker__row${row.indented ? " character-assign-picker__row--indented" : ""}`}
       data-highlighted={highlightKey === row.key || undefined}
       onPointerMove={() => setHighlightKey(row.key)}
@@ -138,7 +162,7 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
         else void assign([row.target]);
       }}>
       <CharacterThumbnail target={row.target} privacyMode={privacyMode} />
-      <span className="character-assign-picker__name">{row.target.displayName}{row.context && <small>{row.context}</small>}</span>
+      <span className="character-assign-picker__name">{shownName(row.target)}{row.context && <small>{row.context}</small>}</span>
       {row.current ? <span className="character-assign-picker__current">현재</span> : <span className="character-assign-picker__count">{row.right}</span>}
       {checked && <CheckIcon className="character-assign-picker__check" aria-hidden="true" />}
     </button>;
@@ -159,7 +183,7 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
       if (row) { event.preventDefault(); void assign([row.target]); }
     }
   };
-  const checkedTargets = checkedIds.flatMap(id => targetById.get(id) ?? []);
+  const checkedTargets = checkedIds.flatMap(id => targetById.get(id) ?? extraById.get(id) ?? []);
 
   return <div className="character-assign-picker ui-menu" role="listbox" aria-label="캐릭터에 넣기" aria-multiselectable="true" onKeyDown={keyDown} onClick={event => event.stopPropagation()}>
     <div className="character-assign-picker__search ui-text-input">
@@ -216,28 +240,45 @@ function CharacterThumbnail({ target, privacyMode }: { target: CharacterTarget; 
   return <AssetImage className="character-assign-picker__thumbnail" src={thumbnailUrl(assetId)} alt="" draggable={false} />;
 }
 
-function buildSeriesSections(targets: CharacterTarget[], groups: CharacterGroup[], classifications: ClassificationEntry[], counts: Record<string, number>) {
+function buildSeriesSections(targets: CharacterTarget[], groups: CharacterGroup[], classifications: ClassificationEntry[], counts: Record<string, number>, extras?: CharacterTarget[], scopeSeriesId?: string) {
   const nameById = new Map(classifications.map(entry => [entry.id, entry.name]));
   const groupByTarget = new Map<string, CharacterGroup>();
   groups.forEach(group => group.targetIds.forEach(id => groupByTarget.set(id, group)));
   const bySeries = new Map<string, CharacterTarget[]>();
+  // With 기타 offered, the open series is listed even when it has no character yet.
+  if (extras && scopeSeriesId) bySeries.set(scopeSeriesId, []);
   targets.forEach(target => {
     if (!target.seriesClassificationId) return;
     const members = bySeries.get(target.seriesClassificationId) ?? [];
     members.push(target); bySeries.set(target.seriesClassificationId, members);
   });
   const sortTargets = (a: CharacterTarget, b: CharacterTarget) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0) || a.displayName.localeCompare(b.displayName, "ko");
+  /** The series' or group's 기타 as the last row: the existing bucket, else one that is created when chosen. */
+  const extrasRow = (seriesId: string, group: CharacterGroup | null, indented: boolean) => {
+    if (!extras) return [];
+    const existing = group
+      ? extras.find(target => target.id === group.extrasTargetId || (target.extrasGroupId === group.id))
+      : extras.find(target => target.seriesClassificationId === seriesId && !target.extrasGroupId);
+    const target = existing ?? newExtras(seriesId, group?.id ?? null);
+    return [{ key: `all:${seriesId}:${group?.id ?? ""}:extras`, target, right: formatCount(counts[target.id] ?? 0), indented }];
+  };
   return [...bySeries].map(([id, members]) => {
-    const seriesGroups = groups.filter(group => group.seriesId === id && group.targetIds.some(targetId => members.some(target => target.id === targetId)))
+    const seriesGroups = groups.filter(group => group.seriesId === id && (extras || group.targetIds.some(targetId => members.some(target => target.id === targetId))))
       .map(group => ({
         id: group.id,
         name: group.name,
         count: group.targetIds.reduce((sum, targetId) => sum + (counts[targetId] ?? 0), 0),
-        rows: group.targetIds.flatMap(targetId => members.find(target => target.id === targetId) ?? []).sort(sortTargets)
-          .map(target => ({ key: `all:${id}:${group.id}:${target.id}`, target, right: formatCount(counts[target.id] ?? 0), indented: true })),
+        rows: [
+          ...group.targetIds.flatMap(targetId => members.find(target => target.id === targetId) ?? []).sort(sortTargets)
+            .map(target => ({ key: `all:${id}:${group.id}:${target.id}`, target, right: formatCount(counts[target.id] ?? 0), indented: true })),
+          ...extrasRow(id, group, true),
+        ],
       })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko"));
-    const ungrouped = members.filter(target => !groupByTarget.has(target.id)).sort(sortTargets)
-      .map(target => ({ key: `all:${id}:${target.id}`, target, right: formatCount(counts[target.id] ?? 0) }));
+    const ungrouped = [
+      ...members.filter(target => !groupByTarget.has(target.id)).sort(sortTargets)
+        .map(target => ({ key: `all:${id}:${target.id}`, target, right: formatCount(counts[target.id] ?? 0), indented: false })),
+      ...extrasRow(id, null, false),
+    ];
     return { id, name: nameById.get(id) ?? "시리즈 없음", count: members.reduce((sum, target) => sum + (counts[target.id] ?? 0), 0), groups: seriesGroups, ungrouped };
   }).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko"));
 }

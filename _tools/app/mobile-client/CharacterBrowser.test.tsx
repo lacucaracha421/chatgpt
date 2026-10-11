@@ -2,7 +2,7 @@ import type {ReactNode} from 'react';
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import type {Asset} from './types';
-import {CharacterBrowser} from './CharacterBrowser';
+import {CharacterBrowser,viewerCharacterContext} from './CharacterBrowser';
 import type {CharacterIndex,CharacterPage} from './characterModel';
 import type {SparseGallerySource} from './assetToc';
 
@@ -580,4 +580,44 @@ it('selects like the plain gallery, reports its loaded items and pages for a vie
   act(()=>{moreRef.current?.();});
   await screen.findByText('second');
   await waitFor(()=>expect(onItems.mock.calls.at(-1)?.[0].map((asset:Asset)=>asset.id)).toEqual(['first','second']));
+});
+
+it('shows a role:"extras" node as a 기타 card last among the character cards, in series and group screens',async()=>{
+  const withExtras=structuredClone(index);
+  // The stored name is "<group or series> 기타"; the cards say just 기타. Server order puts it first on purpose.
+  withExtras.nodes.unshift({...node('character','x-s','Series 기타','series:s'),role:'extras' as const},{...node('character','x-g','Group 기타','group:g'),role:'extras' as const});
+  withExtras.nodes.push(node('character','plain','Plain','series:s'),node('series','inner','Inner',null));
+  withExtras.scopes.push({nodeId:'character:x-s',filter:'all',totalCount:42,sourceCount:42},{nodeId:'character:x-g',filter:'all',totalCount:7,sourceCount:7});
+  const classifications=[{id:'s',name:'Series',parent_id:null,asset_count:0},{id:'inner',name:'Inner',parent_id:'s',asset_count:0}];
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?withExtras:page());
+  const view=render(<CharacterBrowser {...props} classifications={classifications} initialNode="series:s"/>);
+  const extras=await screen.findByRole('button',{name:'기타 · 42장'});
+  const track=extras.closest('.home-shelf__track')!;
+  // 그룹 → 그룹 밖 캐릭터 → 기타 → 안쪽 시리즈.
+  expect([...track.querySelectorAll('.character-card')].map(card=>card.getAttribute('aria-label'))).toEqual(['Group · 2장','Plain','기타 · 42장','Inner']);
+  expect(screen.queryByText('Series 기타')).toBeNull();
+  expect(track.querySelector('.character-card-image--extras')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'Group · 2장'}));
+  const groupExtras=await screen.findByRole('button',{name:'기타 · 7장'});
+  const members=[...groupExtras.closest('.home-shelf__track')!.querySelectorAll('.character-card')].map(card=>card.getAttribute('aria-label'));
+  expect(members).toEqual(['Character · 2장','기타 · 7장']);
+  fireEvent.click(groupExtras);
+  // Opening shows its images under the title 기타, with the group in the path.
+  await screen.findByRole('heading',{name:'기타'});
+  expect(mocks.api.mock.calls.some(([p])=>p.includes('node=character%3Ax-g'))).toBe(true);
+  expect(screen.getByRole('button',{name:'Group'})).toBeTruthy();
+  view.unmount();
+});
+
+it('keeps working with a snapshot that has no role: every character node is an ordinary character',async()=>{
+  render(<CharacterBrowser {...props} initialNode="group:g"/>);
+  const card=await screen.findByRole('button',{name:'Character · 2장'});
+  expect(card.querySelector('.character-card-image--extras')).toBeNull();
+  expect(screen.queryByRole('button',{name:/^기타/})).toBeNull();
+});
+
+it('names a 기타 in the manual-exclusion context so the viewer says 기타, not the stored name',()=>{
+  const capable={...structuredClone(index),libraryId:'b'.repeat(32),exclusionCursor:0,capabilities:{read:true,write:false,manualExclusion:true}};
+  const extras={...node('character','x','Group 기타','group:g'),role:'extras' as const,protectedAssetIds:[]};
+  expect(viewerCharacterContext(extras,capable)).toMatchObject({targetId:'x',name:'기타'});
 });

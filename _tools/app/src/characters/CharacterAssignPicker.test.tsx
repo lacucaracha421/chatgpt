@@ -123,3 +123,35 @@ it("clears a scoped picker with Backspace and offers other-series results plus c
   expect(screen.queryByRole("button", { name: "블루 아카이브 범위 빼기" })).not.toBeInTheDocument();
   expect(screen.getByRole("option", { name: /페른 · 40/ })).toBeVisible();
 });
+
+it("offers 기타 for the series and for each group, creating a missing one when it is chosen", async () => {
+  const user = userEvent.setup();
+  const onAssign = vi.fn();
+  const ensureExtras = vi.fn(async (seriesId: string, groupId: string | null) => ({
+    ...fixtureTarget("extras-new", "방과후 스위츠부 기타"), seriesClassificationId: seriesId, role: "extras" as const, extrasGroupId: groupId,
+  }));
+  const seriesExtras = { ...fixtureTarget("extras-series", "블루 아카이브 기타"), seriesClassificationId: "blue", role: "extras" as const, extrasGroupId: null };
+  render(<CharacterAssignPicker assetIds={["a"]} targets={targets} groups={groups} classifications={series} counts={{ ...counts, "extras-series": 12 }}
+    scopeSeriesId="blue" privacyMode={false} onAssign={onAssign} onClose={vi.fn()} extras={[seriesExtras]} ensureExtras={ensureExtras}
+    loadSuggestions={vi.fn().mockResolvedValue([])} />);
+  // The stored name is "<group or series> 기타"; every row says just 기타.
+  const groupRows = await screen.findByRole("group", { name: "방과후 스위츠부" });
+  const groupExtras = within(groupRows).getByRole("option", { name: /^기타/ });
+  expect(screen.getByRole("option", { name: "기타 · 12" })).toBeVisible();
+  expect(screen.queryByText(/블루 아카이브 기타/)).not.toBeInTheDocument();
+  // It is the last row of its group and of the series.
+  const rows = within(groupRows).getAllByRole("option");
+  expect(rows[rows.length - 1]).toBe(groupExtras);
+  await user.click(groupExtras);
+  await waitFor(() => expect(ensureExtras).toHaveBeenCalledWith("blue", "sweets"));
+  await waitFor(() => expect(onAssign).toHaveBeenCalledWith([expect.objectContaining({ id: "extras-new", role: "extras" })]));
+  // A 기타 is not remembered as a recent character.
+  expect(localStorage.getItem(CHARACTER_ASSIGN_RECENT_KEY)).not.toContain("extras");
+});
+
+it("offers no 기타 rows unless the owner opts in", async () => {
+  render(<CharacterAssignPicker assetIds={["a"]} targets={targets} groups={groups} classifications={series} counts={counts}
+    scopeSeriesId="blue" privacyMode={false} onAssign={vi.fn()} onClose={vi.fn()} loadSuggestions={vi.fn().mockResolvedValue([])} />);
+  await screen.findByRole("group", { name: "방과후 스위츠부" });
+  expect(screen.queryByRole("option", { name: /^기타/ })).not.toBeInTheDocument();
+});

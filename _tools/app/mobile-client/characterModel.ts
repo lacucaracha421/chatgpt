@@ -11,7 +11,13 @@ export type CharacterNode = {
   heroAssetId?:string|null;
   manualOnly:boolean; excluded:boolean;
   protectedAssetIds?:string[];
+  /** `extras` is a 기타 bucket (a `character` node the screens call just "기타", always last among character cards).
+   * Absent on older snapshots: an ordinary character. */
+  role?:'character'|'extras';
 };
+export const isExtrasNode=(node:Pick<CharacterNode,'role'>|undefined|null)=>node?.role==='extras';
+/** The stored name of a 기타 is "<group or series> 기타"; every screen shows just 기타. */
+export const characterNodeName=(node:Pick<CharacterNode,'name'|'role'>)=>node.role==='extras'?'기타':node.name;
 export type CharacterScope = {nodeId:string;filter:CharacterFilter;totalCount:number;sourceCount:number};
 /**
  * The manual-exclusion capability, kept as one value or nothing.
@@ -48,8 +54,9 @@ export function characterPath(node:string,filter:CharacterFilter,revision:string
   return `/v1/library/characters/assets?${params}`;
 }
 export function characterChildren(index:CharacterIndex,node:string|null,classifications:readonly Classification[]=[]) {
-  const rank={group:0,character:1,series:2,folder:3};
-  return index.nodes.filter(n=>characterParent(index,n,classifications)===node).sort((a,b)=>rank[a.kind]-rank[b.kind]);
+  // 그룹 → 그룹 밖 캐릭터 → 기타 → 안쪽 시리즈 → 폴더, as on the PC; the server's order holds within each kind.
+  const rank=(n:CharacterNode)=>n.kind==='group'?0:n.kind==='character'?(isExtrasNode(n)?2:1):n.kind==='series'?3:4;
+  return index.nodes.filter(n=>characterParent(index,n,classifications)===node).sort((a,b)=>rank(a)-rank(b));
 }
 export function characterParent(index:CharacterIndex,node:CharacterNode,classifications:readonly Classification[]=[]) {
   if(node.kind!=='series')return node.parentId;

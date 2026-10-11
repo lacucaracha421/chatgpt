@@ -13,6 +13,8 @@ function same<T>(current: T, next: T): T {
 
 export function useCharacterHub(refreshVersion: number) {
   const [targets, setTargets] = useState<CharacterTarget[]>([]);
+  // 기타 buckets are kept apart: every other screen lists characters only.
+  const [extras, setExtras] = useState<CharacterTarget[]>([]);
   const [series, setSeries] = useState<CharacterSeries[]>([]);
   const [folderExclusions, setFolderExclusions] = useState<string[]>([]);
   const [groups, setGroups] = useState<CharacterGroup[]>([]);
@@ -52,11 +54,13 @@ export function useCharacterHub(refreshVersion: number) {
     }
     void pending.current.read.then(({ targets, series, folderExclusions, groups }) => {
       if (active) {
-        setFolderExclusions(current => same(current, folderExclusions)); setTargets(current => same(current, targets));
+        setFolderExclusions(current => same(current, folderExclusions));
+        setTargets(current => same(current, targets.filter(target => target.role !== "extras")));
+        setExtras(current => same(current, targets.filter(target => target.role === "extras")));
         setSeries(current => same(current, series)); setGroups(current => same(current, groups)); setError(null);
       }
     }).catch(e => { if (active) setError(commandErrorMessage(e, "캐릭터 목록을 불러오지 못했습니다.")); });
     return () => { active = false; };
   }, [library?.gateway, library?.library?.root, refreshVersion, revision]);
-  return { targets, series, groups, folderExclusions, error, refresh, revision, seriesRevisions, seriesAnalysed };
+  return { targets, extras, series, groups, folderExclusions, error, refresh, revision, seriesRevisions, seriesAnalysed };
 }
