@@ -57,8 +57,10 @@ export function SeriesUnregisterDialog({ seriesId, seriesName, api = characterEx
       <p className="character-extras-dialog__summary"><strong>{seriesName}</strong></p>
       <BusyLabel busy={!preview && !error}><p className="character-message" role="status">확인하는 중…</p></BusyLabel>
       {preview && !result && <>
-        <p>{unregisterSummary(preview)}</p>
-        <p className="character-extras-dialog__note">이미지와 폴더는 그대로 두고, 이 폴더는 일반 폴더가 됩니다.</p>
+        {blocked ? <p>지금은 등록을 해제할 수 없습니다.</p> : <>
+          <p>{unregisterSummary(preview)}</p>
+          <p className="character-extras-dialog__note">이미지와 폴더는 그대로 두고, 이 폴더는 일반 폴더가 됩니다.</p>
+        </>}
         {preview.collisions.length > 0 && !preview.refusal && <p className="character-message" role="alert">‘{preview.destinationName ?? "상위 시리즈"}’에 같은 이름이 이미 있습니다: {preview.collisions.join(", ")}</p>}
         {preview.refusal && <p className="character-message" role="alert">{preview.refusal}</p>}
       </>}

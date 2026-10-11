@@ -1,5 +1,6 @@
 import type { AssetQuery, AssetSummary, CollectionSummary, ReleaseTitle, MangaIndexIdentity } from "../library/types.ts";
 import type { ArtistSummary } from "../artists/types.ts";
+import { PREVIEW_CHARACTER_SERIES_ID, previewCharacterBrowse, previewCharacterGroups, previewCharacterSidebarCounts, previewCharacterTargets, previewExtrasSuggestions, previewUnregisterPreview } from "./characterFixtures.ts";
 
 export const PREVIEW_FIXTURE_MARKER = "lakomics-preview-fixture-20260929";
 
@@ -371,18 +372,32 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "encrypted_vault_status": return { state: "absent", vaultId: null, root: null, itemCount: null, trashedCount: null, remembered: false };
     case "exchange_snapshot": return { availability: { state: "ready", message: null, needsToken: false }, selfName: "Preview PC", devices: [{ deviceId: "tablet-preview", name: "Galaxy Tab Preview", kind: "tablet" }], outgoing: [], incoming: [], received: [], unseen: 0, folder: "/preview/exchange", tokenConfigured: true };
     case "character_incremental_status": return { running: true, workActive: false, paused: false, automationEnabled: true, broadFolderEnabled: false, completed: 300, confirmed: 84, definitionRevision: 0, seriesRevisions: {}, historyRefreshActive: false, persistentError: null, activeWork: null, historyRefreshes: [] };
-    case "list_character_targets": return [];
-    case "character_series":
-    case "all_character_groups":
+    case "list_character_targets": return previewCharacterTargets;
+    case "character_series": return [{ classificationId: PREVIEW_CHARACTER_SERIES_ID, heroAssetId: "asset-005", autoClassify: true }];
+    case "all_character_groups": return previewCharacterGroups.map(({ seriesId: _seriesId, ...group }) => ({ ...group, seriesId: PREVIEW_CHARACTER_SERIES_ID }));
+    case "character_groups": return previewCharacterGroups.map(({ seriesId: _seriesId, ...group }) => group);
     case "character_folder_exclusions": return [];
+    case "character_series_folders":
+    case "character_suggestions":
+    case "ignored_character_suggestions":
+    case "character_s36_readiness": return [];
+    case "character_s36_publication": return { series: [], excludedTargets: [], scoringEnabled: false };
+    case "character_extras": return previewCharacterTargets.filter(item => item.role === "extras").map(item => ({ targetId: item.id, seriesId: PREVIEW_CHARACTER_SERIES_ID, groupId: item.extrasGroupId, name: item.displayName }));
+    case "character_extras_suggestions": return previewExtrasSuggestions(String(args.targetId ?? ""));
+    case "character_series_unregister_preview": return previewUnregisterPreview(String(args.seriesId ?? PREVIEW_CHARACTER_SERIES_ID));
+    case "browse_character_assets": return previewCharacterBrowse(args, previewAssets);
+    case "character_series_excluded_assets": return { items: [], nextCursor: null, totalCount: 0 };
+    case "promote_character_extras": return { target: { ...previewCharacterTargets[0]!, id: "t-new", displayName: String((args.request as { displayName?: string } | undefined)?.displayName ?? "와이즈"), role: "character", revision: 1 }, movedCount: ((args.request as { assetIds?: string[] } | undefined)?.assetIds ?? []).length, referenceCount: ((args.request as { referenceAssetIds?: string[] } | undefined)?.referenceAssetIds ?? []).length, recognition: true };
+    case "request_character_reference_refresh": return { targetId: String(args.targetId ?? ""), requestRevision: 1, state: "pending", eligibleCount: 214 };
     case "character_shadow_review_summary": return { automatic: 0, recommended: 0, targets: [] };
     case "character_shadow_review_page": return { items: [], nextOffset: null, summary: { automatic: { pending: 0 }, recommended: { pending: 0 } } };
-    case "character_sidebar_counts": return { targets: {}, groups: {} };
+    case "character_sidebar_counts": return previewCharacterSidebarCounts();
     case "index_missing_similarity_hashes": return { remaining: 0, failed: 0 };
     case "get_image_similarity_scan": return null;
     case "list_similarity_reviews": return { items: [], nextCursor: null, totalCount: 2 };
     case "similarity_review_inbound_status": return { applied: 0 };
     case "list_trash": return { items: [], nextCursor: null, totalCount: 4, totalBytes: 8_400_000 };
+    case "purge_expired_trash": return { deletedCount: 0, failedAssetIds: [] };
     case "get_trash_policy": return { retentionDays: 30 };
     case "prepare_pending_videos": return { processed: 0, remaining: 0, failed: 0, changedAssetIds: [] };
     case "get_internal_playback_url": return `/preview-media/playback/${encodeURIComponent(String(args.assetId ?? "preview"))}`;

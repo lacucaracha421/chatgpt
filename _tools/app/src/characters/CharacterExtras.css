@@ -1,13 +1,21 @@
 /* 기타: the nameless bucket card, the 캐릭터로 dialog and the series unregister dialog. */
 .character-extras-card__mosaic { box-sizing: border-box; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: var(--space-1); width: 100%; aspect-ratio: 3 / 4; padding: var(--space-1); border: 1px dashed var(--color-border-strong); border-radius: var(--radius-tile); transition: border-color var(--motion-micro) var(--ease-standard); }
 .character-extras-card__mosaic > span { border: 1px dashed var(--color-border); border-radius: var(--radius-tile); background: var(--color-surface); }
+/* On the shelf a card is 132 x 170 like its character and group siblings (folder-shelf.css), not 3 : 4 of the width. */
+.folder-shelf .character-extras-card__mosaic { width: 132px; height: 170px; aspect-ratio: auto; border-radius: 2px; }
+.folder-shelf .character-extras-card__mosaic > span { border-radius: 2px; }
+.folder-shelf .character-extras-card__hint-frame { right: auto; width: 132px; height: 170px; aspect-ratio: auto; }
+/* The image count (shown on hover) goes to the top corner so it never half-hides behind the suggestion line at the bottom. */
+.folder-shelf .series-character--extras .folder-shelf__meta { top: var(--space-1); transform: none; }
 .series-character--extras .series-character__open:hover .character-extras-card__mosaic { border-color: var(--color-muted); }
 .series-character--extras .series-character__open:active .character-extras-card__mosaic { border-color: var(--color-accent); }
 .series-character--extras .series-character__open:focus-visible .character-extras-card__mosaic { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
 
 /* The suggestion line sits over the lower edge of the mosaic; the frame passes clicks through to the card around it. */
 .character-extras-card__hint-frame { position: absolute; top: 0; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: flex-end; aspect-ratio: 3 / 4; padding: var(--space-2); pointer-events: none; }
-.character-extras-card__hint { box-sizing: border-box; max-width: 100%; padding: 0 var(--space-1); overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font: inherit; font-size: var(--text-xs); line-height: var(--line-ui); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; pointer-events: auto; opacity: 0; transform: translateY(var(--space-1)); transition: opacity var(--motion-small) var(--ease-standard), transform var(--motion-small) var(--ease-standard), border-color var(--motion-micro) var(--ease-standard); }
+.character-extras-card__hint { box-sizing: border-box; display: flex; max-width: 100%; padding: 0 var(--space-1); overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font: inherit; font-size: var(--text-xs); line-height: var(--line-ui); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; pointer-events: auto; opacity: 0; transform: translateY(var(--space-1)); transition: opacity var(--motion-small) var(--ease-standard), transform var(--motion-small) var(--ease-standard), border-color var(--motion-micro) var(--ease-standard); }
+.character-extras-card__hint-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.character-extras-card__hint-rest { flex: none; white-space: pre; }
 .character-extras-card__hint[data-shown] { opacity: 1; transform: none; }
 .character-extras-card__hint:hover { border-color: var(--color-accent); }
 .character-extras-card__hint:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
@@ -17,6 +25,9 @@
 .character-extras-dialog { display: flex; flex-direction: column; gap: var(--space-3); }
 .character-extras-dialog p, .character-extras-dialog ul { margin: 0; }
 .character-extras-dialog__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+/* The group select stacks its label above, like the 이름 field beside it. */
+.character-extras-dialog__fields .ui-select { flex-direction: column; align-items: stretch; gap: var(--space-1); }
+.character-extras-dialog__fields .ui-select select { width: 100%; }
 .character-extras-dialog__summary { font-size: var(--text-md); }
 .character-extras-dialog__note { color: var(--color-muted); font-size: var(--text-xs); line-height: var(--line-copy); }
 .character-extras-dialog__facts { display: flex; flex-direction: column; gap: var(--space-1); padding: 0; list-style: none; font-variant-numeric: tabular-nums; }

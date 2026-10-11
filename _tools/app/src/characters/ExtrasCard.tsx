@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { EllipsisHorizontalCircleIcon } from "@heroicons/react/24/outline";
 import { characterExtrasApi, type ExtrasSuggestion } from "./extrasApi";
 import { extrasTagName, strongestExtrasSuggestion } from "./extrasNames";
 import "./CharacterExtras.css";
@@ -20,9 +21,14 @@ export function useExtrasSuggestions(targetId: string | null, version: number, a
   return targetId && read?.targetId === targetId ? read.rows : [];
 }
 
-/** "<한국어 이름> N장 · 캐릭터로": the one line a 기타 card shows for its strongest suggestion. */
+/** "<한국어 이름> N장 · 캐릭터로": the one line a 기타 card shows for its strongest suggestion, as the name and the rest. */
+export function extrasSuggestionParts(suggestion: ExtrasSuggestion) {
+  return { name: extrasTagName(suggestion.tag).name, rest: ` ${suggestion.imageCount.toLocaleString("ko-KR")}장 · 캐릭터로` };
+}
+
 export function extrasSuggestionLine(suggestion: ExtrasSuggestion) {
-  return `${extrasTagName(suggestion.tag).name} ${suggestion.imageCount.toLocaleString("ko-KR")}장 · 캐릭터로`;
+  const { name, rest } = extrasSuggestionParts(suggestion);
+  return `${name}${rest}`;
 }
 
 /**
@@ -50,12 +56,15 @@ export function ExtrasCard({ count, suggestions = [], onOpen, onPromote }: {
   return <article className="series-character folder-shelf__card series-character--extras">
     <button type="button" className="series-character__open" aria-label="기타 열기" aria-description="아직 이름 없는 사람의 이미지" onClick={onOpen}>
       <span className="character-extras-card__mosaic" aria-hidden="true">{Array.from({ length: 9 }, (_, index) => <span key={index} />)}</span>
-      <strong><span className="series-character__name">기타</span></strong>
+      <strong><EllipsisHorizontalCircleIcon className="folder-shelf__icon" aria-hidden="true" /><span className="series-character__name">기타</span></strong>
       <small className="folder-shelf__meta" aria-hidden={count === undefined || undefined}>{count === undefined ? null : `${count.toLocaleString("ko-KR")}장`}</small>
     </button>
     {suggestion && <span className="character-extras-card__hint-frame">
       <button type="button" className="character-extras-card__hint" data-shown={shown || undefined} aria-label={`${extrasTagName(suggestion.tag).name} ${suggestion.imageCount.toLocaleString("ko-KR")}장 캐릭터로`}
-        onClick={() => onPromote(suggestion)}>{extrasSuggestionLine(suggestion)}</button>
+        onClick={() => onPromote(suggestion)}>
+        {/* A long name is shortened with an ellipsis; the count and 캐릭터로 always stay readable. */}
+        <span className="character-extras-card__hint-name">{extrasSuggestionParts(suggestion).name}</span><span className="character-extras-card__hint-rest">{extrasSuggestionParts(suggestion).rest}</span>
+      </button>
     </span>}
   </article>;
 }
