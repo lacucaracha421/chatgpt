@@ -349,6 +349,13 @@ fn installment_tokens(title: &str) -> InstallmentTokens {
     static BRACKETS: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|【[^】]*】|<[^>]*>").unwrap()
     });
+    // A bracket holding nothing but a short number or range, e.g. `[1~3]`, is a volume span.
+    static BRACKET_NUMBER: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r"\[\s*([0-9]{1,3}(?:[.\-~][0-9]{1,3})?)\s*\]|\(\s*([0-9]{1,3}(?:[.\-~][0-9]{1,3})?)\s*\)|\{\s*([0-9]{1,3}(?:[.\-~][0-9]{1,3})?)\s*\}|【\s*([0-9]{1,3}(?:[.\-~][0-9]{1,3})?)\s*】",
+        )
+        .unwrap()
+    });
     static PLAIN: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"[0-9]+(?:[.\-~][0-9]+)?|xii|xi|viii|vii|vi|iv|iii|ii|ix|v|x").unwrap()
     });
@@ -471,6 +478,13 @@ fn installment_tokens(title: &str) -> InstallmentTokens {
         };
         add(&mut out, "seq", canonical);
     }
+    s = BRACKET_NUMBER
+        .replace_all(&s, |caps: &regex::Captures| {
+            let number = (1..=4).find_map(|i| caps.get(i)).unwrap();
+            add(&mut out, "n", normnum(number.as_str()));
+            " "
+        })
+        .into_owned();
     let outside = BRACKETS.replace_all(&s, " ");
     for m in PLAIN.find_iter(&outside) {
         let (prev, next) = (before(&outside, m.start()), after(&outside, m.end()));
@@ -490,6 +504,16 @@ fn installment_tokens(title: &str) -> InstallmentTokens {
         } else if prev.is_none_or(char::is_whitespace)
             && next.is_none_or(|c| c.is_whitespace() || ":!?~-.,".contains(c))
         {
+            // "Omoi x Omoware": a lone x between two words is a "×", not the numeral 10.
+            if v == "x"
+                && outside[m.end()..]
+                    .trim_start()
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphabetic)
+            {
+                continue;
+            }
             let n = match v {
                 "ii" => 2,
                 "iii" => 3,

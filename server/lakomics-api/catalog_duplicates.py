@@ -213,6 +213,9 @@ _KNUM = re.compile(r"(?:第\s*)?([〇一二三四五六七八九十]+)(話|巻|�
 _PART = re.compile(r"前編|中編|後編|前篇|中篇|後篇|上巻|中巻|下巻|上編|中編|下編|전편|상편|중편|후편|하편|zenpen|kouhen|chuuhen|jouhen|gehen|zokuhen|上|中|下")
 _EXTRA = re.compile(r"after ?story|after|extra|omake|epilogue|prologue|gaiden|bangai|続編|続き|番外編?|外伝|後日談|おまけ|후일담|외전|번외|애프터|에필로그|프롤로그|엑스트라|오마케|계속편|속편")
 _BRACKETS = re.compile(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|【[^】]*】|<[^>]*>")
+_BRACKET_NUMBER = re.compile("|".join(
+    opener + r"\s*([0-9]{1,3}(?:[.\-~][0-9]{1,3})?)\s*" + closer
+    for opener, closer in ((r"\[", r"\]"), (r"\(", r"\)"), (r"\{", r"\}"), ("【", "】"))).replace(r"\s", _SPACE))
 _PLAIN = re.compile(r"[0-9]+(?:[.\-~][0-9]+)?|xii|xi|viii|vii|vi|iv|iii|ii|ix|v|x")
 _ROMAN = dict(zip(("ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"), range(2, 13)))
 _PART_VALUES = {v: str(n) for n, values in (
@@ -282,6 +285,10 @@ def _installment_tokens(title):
         if m[0].isascii() and (letter(prev) or letter(next_)):
             continue
         add("seq", _EXTRA_VALUES.get(m[0], "cont"))
+    def bracket_number(m):
+        add("n", _normnum(next(g for g in m.groups() if g)))
+        return " "
+    s = _BRACKET_NUMBER.sub(bracket_number, s)
     outside = _BRACKETS.sub(" ", s)
     for m in _PLAIN.finditer(outside):
         v = m[0]
@@ -293,6 +300,9 @@ def _installment_tokens(title):
                 continue
             add("n", _normnum(v))
         elif (not prev or prev in _WHITESPACE) and (not next_ or next_ in _WHITESPACE or next_ in ":!?~-.,"):
+            # "Omoi x Omoware": a lone x between two words is a "×", not the numeral 10.
+            if v == "x" and outside[m.end():].lstrip()[:1].isalpha():
+                continue
             add("n", str(_ROMAN[v]))
     return out
 
