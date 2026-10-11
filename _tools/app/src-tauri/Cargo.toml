@@ -40,6 +40,8 @@ tiny_http = "0.12.0"
 ureq = { version = "3.4.0", features = ["json"] }
 url = "2"
 regex = "1"
+# Already used by url/idna; expose NFKC for catalog installment identity.
+icu_normalizer = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
 zip = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }
 quick-xml = { version = "=0.42.0", default-features = false }
 ring = "0.17.14"

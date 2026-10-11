@@ -36,8 +36,10 @@ import functools
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import threading
+import unicodedata
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
@@ -51,7 +53,7 @@ from app_lifecycle import lifecycle
 
 PREFIX = "/v1/mobile-catalog/duplicates"
 PROVIDER = "kHentai"
-ALGORITHM = "translated-title-multisignal-canary-v2"  # catalog_review.rs ALGORITHM
+ALGORITHM = "catalog-duplicates-v2"  # catalog_review.rs ALGORITHM
 MAX_CURSOR = 9_007_199_254_740_991
 MAX_BODY_BYTES = 8 * 1024 * 1024
 MAX_ITEMS = 5_000
@@ -192,14 +194,142 @@ def exact_title_match(a, b):
     return any(len(left) >= MIN_TITLE and left in rights for left in lefts)
 
 
+_NUM = r"([0-9]+(?:[.\-~][0-9]+)?)"
+_SPACE = "[" + re.escape("".join(sorted(_WHITESPACE))) + "]"
+_TYPED = [(kind, re.compile(pattern.replace(r"\b", r"(?a:\b)").replace(r"\s", _SPACE))) for kind, pattern in (
+    ("ch", r"(?:第\s*)?" + _NUM + r"\s*(?:話|话|화)"),
+    ("ch", r"\b(?:ch|chap|chapter|ep|episode|act|case|lesson|stage)\.?\s*" + _NUM),
+    ("vol", r"(?:第\s*)?" + _NUM + r"\s*(?:巻|卷|권)"),
+    ("vol", r"\b(?:vol|volume|v)\.?\s*" + _NUM),
+    ("part", r"(?:第\s*)?" + _NUM + r"\s*(?:편|부|章|篇|編)"),
+    ("part", r"\b(?:part|pt)\.?\s*" + _NUM),
+    ("ord", r"([0-9]+)\s*(?:st|nd|rd|th)\b"),
+    ("hash", r"#\s*" + _NUM),
+)]
+_KNUM = re.compile(r"(?:第\s*)?([〇一二三四五六七八九十]+)(話|巻|卷|章|部|編|篇)".replace(r"\s", _SPACE))
+_PART = re.compile(r"前編|中編|後編|前篇|中篇|後篇|上巻|中巻|下巻|上編|中編|下編|전편|상편|중편|후편|하편|zenpen|kouhen|chuuhen|jouhen|gehen|zokuhen|上|中|下")
+_EXTRA = re.compile(r"after ?story|after|extra|omake|epilogue|prologue|gaiden|bangai|続編|続き|番外編?|外伝|後日談|おまけ|후일담|외전|번외|애프터|에필로그|프롤로그|엑스트라|오마케|계속편|속편")
+_BRACKETS = re.compile(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|【[^】]*】|<[^>]*>")
+_PLAIN = re.compile(r"[0-9]+(?:[.\-~][0-9]+)?|xii|xi|viii|vii|vi|iv|iii|ii|ix|v|x")
+_ROMAN = dict(zip(("ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"), range(2, 13)))
+_PART_VALUES = {v: str(n) for n, values in (
+    (1, ("前編", "前篇", "上巻", "上編", "上", "전편", "상편", "zenpen", "jouhen")),
+    (2, ("中編", "中篇", "中巻", "中", "중편", "chuuhen")),
+    (3, ("後編", "後篇", "下巻", "下編", "下", "후편", "하편", "kouhen", "gehen")),
+) for v in values}
+_EXTRA_VALUES = {v: kind for kind, values in (
+    ("after", ("afterstory", "after story", "after", "애프터", "후일담", "後日談")),
+    ("extra", ("extra", "엑스트라")), ("omake", ("omake", "おまけ", "오마케")),
+    ("epilogue", ("epilogue", "에필로그")), ("prologue", ("prologue", "프롤로그")),
+    ("gaiden", ("gaiden", "외전", "外伝")), ("bangai", ("bangai", "번외", "番外", "番外編")),
+) for v in values}
+
+
+def _normnum(value):
+    components = re.split(r"([.\-~])", value)
+    return "".join("-" if v == "~" else v if i % 2 or (i and components[i-1] == ".")
+                   else v.lstrip("0") or "0" for i, v in enumerate(components))
+
+
+def _installment_tokens(title):
+    """Faithful port of installment_tokens; shared fixture: catalog_installments.json."""
+    s = unicodedata.normalize("NFKC", title or "").lower()
+    out = {}
+
+    def add(kind, value):
+        out.setdefault(kind, set()).add(value)
+
+    for kind, pattern in _TYPED:
+        def typed(m):
+            add(kind, _normnum(m[1]))
+            return " "
+        s = pattern.sub(typed, s)
+
+    def kanji(m):
+        digits = "〇一二三四五六七八九"
+        if "十" in m[1]:
+            a, b = m[1].split("十", 1)
+            value = str((max(digits.find(a[0]), 0) if a else 1) * 10 + (max(digits.find(b[0]), 0) if b else 0))
+        else:
+            value = _normnum("".join(str(digits.index(c)) for c in m[1]))
+        add("vol" if m[2] in ("巻", "卷") else "ch" if m[2] == "話" else "part", value)
+        return " "
+    s = _KNUM.sub(kanji, s)
+
+    def neighbors(text, m):
+        return text[m.start()-1] if m.start() else "", text[m.end()] if m.end() < len(text) else ""
+
+    def letter(c):
+        return bool(c) and "a" <= c <= "z"
+
+    def part_boundary(c):
+        return not c or c in _WHITESPACE or c in "-~・[]()"
+
+    def part(m):
+        v = m[0]
+        prev, next_ = neighbors(s, m)
+        if ((v.isascii() and (letter(prev) or letter(next_)))
+                or (len(v) == 1 and (not part_boundary(prev) or not part_boundary(next_)))):
+            return v
+        add("seq" if v == "zokuhen" else "part", "cont" if v == "zokuhen" else _PART_VALUES[v])
+        return " "
+    s = _PART.sub(part, s)
+    for m in _EXTRA.finditer(s):
+        prev, next_ = neighbors(s, m)
+        if m[0].isascii() and (letter(prev) or letter(next_)):
+            continue
+        add("seq", _EXTRA_VALUES.get(m[0], "cont"))
+    outside = _BRACKETS.sub(" ", s)
+    for m in _PLAIN.finditer(outside):
+        v = m[0]
+        prev, next_ = neighbors(outside, m)
+        if v[0].isdigit():
+            if ((prev and (prev.isascii() and prev.isalnum() or prev in ".-~#"))
+                    or (next_ and (next_.isascii() and next_.isalnum() or "\u3040" <= next_ <= "\u30ff"
+                                   or "\u3400" <= next_ <= "\u9fff" or "\uac00" <= next_ <= "\ud7a3"))):
+                continue
+            add("n", _normnum(v))
+        elif (not prev or prev in _WHITESPACE) and (not next_ or next_ in _WHITESPACE or next_ in ":!?~-.,"):
+            add("n", str(_ROMAN[v]))
+    return out
+
+
+def installments(title, title_jpn):
+    return (_installment_tokens(title),
+            _installment_tokens(title_jpn) if title_jpn and title_jpn.strip() else None)
+
+
+def sequel_conflict(a, b):
+    ta, ja = installments(a["title"], a["titleJpn"])
+    tb, jb = installments(b["title"], b["titleJpn"])
+    for kind in ta.keys() | tb.keys() | (ja or {}).keys() | (jb or {}).keys():
+        va = ta.get(kind, set()) | (ja or {}).get(kind, set())
+        vb = tb.get(kind, set()) | (jb or {}).get(kind, set())
+        if va == vb:
+            continue
+        if va and vb:
+            return True
+        values, primary, other_jpn = (va, ta, jb) if va else (vb, tb, ja)
+        if values == {"1"}:
+            continue
+        if not primary.get(kind) and other_jpn is None:
+            continue
+        return True
+    return False
+
+
+def lang_core(languages):
+    return set(languages) - {"translated", "rewrite", "speechless", "text_cleaned", "textless_narrative"}
+
+
 def match_works(a, b):
     """``(reason, page_gap)`` when two works are a duplicate-edition candidate, else None.
 
     Same checks, in the same sense, as the pair loop of `generate` in catalog_review.rs:
-    distinct groups, positive page counts, equal pages (or, only for the added-Korean-
-    title variant, a gap of at most 2 pages and at most 10% of the smaller count),
-    category 1..=11 and equal, non-empty equal language lists, and at least one shared
-    `artist:`/`group:` tag. Differences:
+    distinct groups, positive page counts, equal pages (or, for a Korean-alternate
+    title, a gap of at most 2 pages and at most 10% of the smaller count), category
+    1..=11 and equal, non-empty language lists with equal cores, a shared
+    `artist:`/`group:` tag, and no installment conflict. Differences:
 
     * Rust compares `group_id`s from membership rows; a work known only from a refresh
       payload (not in the artifact yet) has `groupId=None`, which never equals anything.
@@ -213,10 +343,10 @@ def match_works(a, b):
     exact = exact_title_match(a, b)
     gap = abs(a["pages"] - b["pages"])
     pages_match = a["pages"] == b["pages"] or (
-        not exact and gap <= 2 and gap <= max(min(a["pages"], b["pages"]), 0) // 10)
+        not exact and gap <= 2 and gap <= min(a["pages"], b["pages"]) // 10)
     if (not pages_match or not 1 <= a["category"] <= 11 or a["category"] != b["category"]
-            or not a["languages"] or a["languages"] != b["languages"]
-            or not set(a["creators"]) & set(b["creators"])):
+            or not a["languages"] or lang_core(a["languages"]) != lang_core(b["languages"])
+            or not set(a["creators"]) & set(b["creators"]) or sequel_conflict(a, b)):
         return None
     return ("exactTitle", 0) if exact else ("koreanAlternateTitle", gap)
 
@@ -672,6 +802,20 @@ def register(app, get_db, require_client, require_publisher):
                 stale = db.execute(f"""SELECT provider,left_work_id,right_work_id FROM catalog_duplicate_candidates
                     WHERE removed=0 AND source IN ({','.join('?' * len(sources))})
                     AND (generation IS NULL OR generation!=?)""", (*sources, publication.generation)).fetchall()
+                # The PC deliberately cannot retire all server-only works. It can still
+                # retire an undecided server candidate whose stored evidence is now a
+                # sequel, without requiring that work to exist in the PC catalog.
+                server_pending = db.execute("""SELECT c.provider,c.left_work_id,c.right_work_id,c.evidence
+                    FROM catalog_duplicate_candidates c LEFT JOIN catalog_duplicate_decisions d
+                    ON d.provider=c.provider AND d.left_work_id=c.left_work_id AND d.right_work_id=c.right_work_id
+                    WHERE c.removed=0 AND c.source='server' AND d.decision IS NULL""").fetchall()
+                stale_keys = {tuple(row) for row in stale}
+                for row in server_pending:
+                    evidence = json.loads(row["evidence"])
+                    key = (row["provider"], row["left_work_id"], row["right_work_id"])
+                    if key not in stale_keys and sequel_conflict(evidence["left"], evidence["right"]):
+                        stale.append(key)
+                        stale_keys.add(key)
                 for row in stale:
                     db.execute("""UPDATE catalog_duplicate_candidates SET removed=1,changed=?,updated_at=?
                         WHERE provider=? AND left_work_id=? AND right_work_id=?""", (_bump(db), now, *row))

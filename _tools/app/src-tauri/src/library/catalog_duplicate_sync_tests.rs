@@ -10,6 +10,8 @@ use crate::library::collection_personal_edits::tests::configure;
 
 const ENDPOINT: &str = "https://sync.example.test";
 
+// Pair 5/6 deliberately has only a modifier and no core language: it remains a
+// review candidate, but cannot be automatically confirmed by the new tier.
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS CrawlState(Key TEXT PRIMARY KEY,Value TEXT);
     INSERT OR REPLACE INTO CrawlState VALUES('lakomics.catalog.contentRevision','fixture-v1');
     CREATE TABLE Works(Id INTEGER PRIMARY KEY,Token TEXT,ParentGid INTEGER,ParentKey TEXT,
@@ -22,7 +24,7 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS CrawlState(Key TEXT PRIMARY KEY
     (6,'six','(C108) [Circle (Artist)] Summer Witch Story | 여름의 마녀 (Series) [Korean]',NULL,33,2),
     (7,'seven','Unrelated alpha title',NULL,20,2),(8,'eight','Unrelated beta title',NULL,22,2);
     INSERT INTO Tags VALUES(1,'artist','alice'),(2,'artist','alice'),(1,'language','korean'),(2,'language','korean'),
-    (5,'artist','bob'),(6,'artist','bob'),(5,'language','korean'),(6,'language','korean'),
+    (5,'artist','bob'),(6,'artist','bob'),(5,'language','translated'),(6,'language','translated'),
     (7,'artist','carol'),(8,'artist','dave'),(7,'language','korean'),(8,'language','korean');";
 
 fn fixture() -> (TempDir, Connection) {
@@ -137,17 +139,17 @@ fn catalog_duplicate_tier_is_conservative() {
         ),
         Tier::Confident
     );
-    // Any tolerance or missing signal is uncertain.
+    // Bounded page tolerance and K titles are confident; missing signals are uncertain.
     assert_eq!(
         duplicate_tier(&base, &rw("2", title, 21, &["artist:alice"])),
-        Tier::Uncertain
+        Tier::Confident
     );
     assert_eq!(
         duplicate_tier(
             &base,
             &rw("2", "Same exact title | 같은 제목", 20, &["artist:alice"])
         ),
-        Tier::Uncertain
+        Tier::Confident
     );
     assert_eq!(
         duplicate_tier(&base, &rw("2", title, 20, &["artist:bob"])),
@@ -174,6 +176,98 @@ fn catalog_duplicate_tier_is_conservative() {
         ),
         Tier::Uncertain
     );
+}
+
+#[test]
+fn catalog_duplicate_k_tier_page_gap_and_language_core() {
+    let a = rw("1", "Original long title", 20, &["artist:kim"]);
+    let mut b = rw(
+        "2",
+        "Original long title | 한국어 제목",
+        22,
+        &["artist:kim"],
+    );
+    b.languages.extend(
+        [
+            "translated",
+            "rewrite",
+            "speechless",
+            "text_cleaned",
+            "textless_narrative",
+        ]
+        .map(str::to_owned),
+    );
+    assert_eq!(duplicate_tier(&a, &b), Tier::Confident);
+    assert!(catalog_review::pair_match(&a, &b).is_some());
+    b.pages = 23;
+    assert_eq!(duplicate_tier(&a, &b), Tier::Uncertain);
+    assert!(catalog_review::pair_match(&a, &b).is_none());
+    b.pages = 21;
+    let mut small = a.clone();
+    small.pages = 19;
+    assert_eq!(duplicate_tier(&small, &b), Tier::Uncertain);
+    b.pages = 22;
+    b.languages.push("japanese".into());
+    assert_eq!(duplicate_tier(&a, &b), Tier::Uncertain);
+}
+
+#[test]
+fn catalog_duplicate_group_guard_blocks_sequel_chain_in_one_pass_and_existing_group() {
+    for existing in [false, true] {
+        let (_dir, c) = fixture();
+        c.execute_batch("UPDATE catalog.Works SET Title='Shared neutral title',TitleJpn=CASE Id WHEN 1 THEN '作品 第2話' ELSE NULL END WHERE Id IN (1,2);
+            INSERT INTO catalog.Works(Id,Token,Title,TitleJpn,FileCount,Category) VALUES(3,'three','Shared neutral title','作品 第3話',20,2);
+            INSERT INTO catalog.Tags VALUES(3,'artist','alice'),(3,'language','korean');").unwrap();
+        catalog_groups::ensure_membership(&c).unwrap();
+        if existing {
+            write_decision(
+                &c,
+                &load(&c, "1").unwrap().unwrap(),
+                &load(&c, "2").unwrap().unwrap(),
+                "confirm",
+            )
+            .unwrap();
+            let revision = membership_revision(&c).unwrap();
+            catalog_groups::rebuild(&c, &revision).unwrap();
+        }
+        let found = scan(&c).unwrap();
+        let made = auto_confirm(&c, &found).unwrap();
+        assert_eq!(
+            made,
+            if existing {
+                vec![]
+            } else {
+                vec![pair("1", "2")]
+            }
+        );
+        assert!(same_group(&c, "1", "2").unwrap());
+        assert!(!same_group(&c, "1", "3").unwrap());
+        assert!(!same_group(&c, "2", "3").unwrap());
+        assert_eq!(decision(&c, "2", "3"), None);
+    }
+}
+
+#[test]
+fn catalog_duplicate_scan_chooses_best_work_pair_before_group_deduplication() {
+    let (_dir, c) = fixture();
+    c.execute_batch("UPDATE catalog.Works SET Title='Shared neutral title',TitleJpn=NULL WHERE Id IN (1,2);
+        UPDATE catalog.Tags SET Value='translated' WHERE WorkId IN (1,2) AND Namespace='language';
+        INSERT INTO catalog.Works(Id,Token,Title,FileCount,Category) VALUES(3,'three','Shared neutral title',20,2),(4,'four','Shared neutral title | 한국어 제목',22,2);
+        INSERT INTO catalog.Tags VALUES(3,'artist','alice'),(4,'artist','alice'),(3,'language','korean'),(4,'language','korean');").unwrap();
+    catalog_groups::ensure_membership(&c).unwrap();
+    let (g1, g2) = (
+        group_of(&c, "1").unwrap().unwrap(),
+        group_of(&c, "2").unwrap().unwrap(),
+    );
+    c.execute("UPDATE online_catalog_group_members SET group_id=?1 WHERE provider='kHentai' AND work_id='3'", [&g1]).unwrap();
+    c.execute("UPDATE online_catalog_group_members SET group_id=?1 WHERE provider='kHentai' AND work_id='4'", [&g2]).unwrap();
+    let found = scan(&c).unwrap();
+    assert_eq!(keys(&found), vec![pair("3", "4"), pair("5", "6")]);
+    assert_eq!(
+        duplicate_tier(&found[0].left, &found[0].right),
+        Tier::Confident
+    );
+    assert_eq!(auto_confirm(&c, &found).unwrap(), vec![pair("3", "4")]);
 }
 
 #[test]

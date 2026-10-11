@@ -2368,6 +2368,7 @@ dependencies = [
  "drag",
  "futures-lite",
  "gtk",
+ "icu_normalizer",
  "image 0.25.10",
  "libc",
  "pdqhash",

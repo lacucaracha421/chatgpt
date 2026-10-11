@@ -1,5 +1,35 @@
 use super::*;
 
+#[test]
+fn catalog_review_sequel_guard_shared_table() {
+    let cases: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../server/lakomics-api/tests/fixtures/catalog_installments.json"
+    )))
+    .unwrap();
+    for case in cases.as_array().unwrap() {
+        let make = |id: &str, title: &str, jpn: &str| ReviewWork {
+            work_id: id.into(),
+            group_id: id.into(),
+            title: case[title].as_str().unwrap().into(),
+            title_jpn: case
+                .get(jpn)
+                .map_or(Some("Shared neutral title".into()), |v| {
+                    v.as_str().map(str::to_owned)
+                }),
+            pages: 30,
+            category: 2,
+            creators: vec!["artist:kim".into()],
+            languages: vec!["korean".into()],
+        };
+        let (a, b) = (make("1", "left", "leftJpn"), make("2", "right", "rightJpn"));
+        let conflict = case["conflict"].as_bool().unwrap();
+        assert_eq!(sequel_conflict(&a, &b), conflict, "{case}");
+        assert_eq!(sequel_conflict(&b, &a), conflict, "reverse: {case}");
+        assert_eq!(pair_match(&a, &b).is_none(), conflict, "pair: {case}");
+    }
+}
+
 fn queue_decide(
     c: &Connection,
     cache: &QueueCache,

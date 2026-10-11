@@ -54,7 +54,7 @@ pub(super) const AUTO_DECISIONS: i64 = 5_000;
 /// Automatic merge reports sent per pass.
 const REPORTS_PER_PASS: usize = 500;
 /// Part of the fingerprint: a rule or tier change compares and uploads again.
-const RULES: &str = "catalog-duplicates-v1";
+const RULES: &str = "catalog-duplicates-v2";
 
 /// How sure the PC is that a candidate pair is the same work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,21 +65,22 @@ pub(crate) enum Tier {
     Uncertain,
 }
 
-/// Confident only when every signal agrees with no tolerance: the full title (or the
-/// Japanese title) is identical after whitespace/case normalization (8+ characters), the
-/// page counts are equal, the category (1..=11) and the non-empty language list are equal,
-/// and at least one `artist:`/`group:` tag is shared. Everything else the candidate rule
-/// accepts is uncertain: a match only after dropping an appended Korean title, any page
-/// difference, missing creators or languages, or a category mismatch.
+/// Exact or Korean-alternate titles, bounded page tolerance, shared creators and equal
+/// core languages. Installment evidence can veto even an otherwise confident pair.
 pub(crate) fn duplicate_tier(a: &ReviewWork, b: &ReviewWork) -> Tier {
-    let confident = catalog_review::exact_title_match(a, b)
+    let languages = catalog_review::lang_core(&a.languages);
+    let confident = !title_keys(&a.title, a.title_jpn.as_deref())
+        .is_disjoint(&title_keys(&b.title, b.title_jpn.as_deref()))
         && a.pages > 0
-        && a.pages == b.pages
+        && b.pages > 0
+        && a.pages.abs_diff(b.pages) <= 2
+        && a.pages.abs_diff(b.pages) <= a.pages.min(b.pages) as u64 / 10
         && (1..=11).contains(&a.category)
         && a.category == b.category
-        && !a.languages.is_empty()
-        && a.languages == b.languages
-        && a.creators.iter().any(|c| b.creators.contains(c));
+        && !languages.is_empty()
+        && languages == catalog_review::lang_core(&b.languages)
+        && a.creators.iter().any(|c| b.creators.contains(c))
+        && !catalog_review::sequel_conflict(a, b);
     if confident {
         Tier::Confident
     } else {
@@ -215,9 +216,9 @@ pub(super) fn scan(c: &Connection) -> Result<Vec<Found>, LibraryError> {
             }
         }
     }
-    // Undecided only, and one pair per edition-group pair (the first by work id).
-    let mut groups = HashSet::new();
-    let mut found = Vec::new();
+    // Evaluate every eligible work pair before deduping by edition groups. Prefer a
+    // confident pair; ties retain the deterministic first pair by work id.
+    let mut groups: BTreeMap<(String, String), Found> = BTreeMap::new();
     for ((left, right), pair) in pairs {
         let (gl, gr) = (&pair.left.group_id, &pair.right.group_id);
         let group_pair = if gl < gr {
@@ -225,7 +226,7 @@ pub(super) fn scan(c: &Connection) -> Result<Vec<Found>, LibraryError> {
         } else {
             (gr.clone(), gl.clone())
         };
-        if groups.contains(&group_pair) || catalog_review::reviewed(c, &left, &right, gl, gr)? {
+        if catalog_review::reviewed(c, &left, &right, gl, gr)? {
             continue;
         }
         if let (Some(mut a), Some(mut b)) = (anchor(c, gl)?, anchor(c, gr)?) {
@@ -236,9 +237,18 @@ pub(super) fn scan(c: &Connection) -> Result<Vec<Found>, LibraryError> {
                 continue;
             }
         }
-        groups.insert(group_pair);
-        found.push(pair);
+        let replace = groups.get(&group_pair).is_none_or(|previous| {
+            duplicate_tier(&previous.left, &previous.right) == Tier::Uncertain
+                && duplicate_tier(&pair.left, &pair.right) == Tier::Confident
+        });
+        if replace {
+            groups.insert(group_pair, pair);
+        }
     }
+    let mut found: Vec<_> = groups.into_values().collect();
+    found.sort_by(|a, b| {
+        (&a.left.work_id, &a.right.work_id).cmp(&(&b.left.work_id, &b.right.work_id))
+    });
     Ok(found)
 }
 
@@ -409,6 +419,58 @@ fn membership_revision(c: &Connection) -> Result<String, LibraryError> {
     catalog_groups::ensure_membership(c)
 }
 
+// Include links accepted earlier in this pass without rebuilding the whole catalog for
+// each pair. The durable membership is rebuilt once below, as before.
+fn connected_groups(group: &str, links: &HashMap<String, HashSet<String>>) -> HashSet<String> {
+    let mut groups = HashSet::from([group.to_owned()]);
+    let mut pending = vec![group.to_owned()];
+    while let Some(current) = pending.pop() {
+        if let Some(neighbors) = links.get(&current) {
+            for next in neighbors {
+                if groups.insert(next.clone()) {
+                    pending.push(next.clone());
+                }
+            }
+        }
+    }
+    groups
+}
+
+fn group_works(
+    c: &Connection,
+    groups: &HashSet<String>,
+) -> Result<Option<Vec<ReviewWork>>, LibraryError> {
+    let mut works = Vec::new();
+    for group in groups {
+        let ids = c.prepare("SELECT work_id FROM online_catalog_group_members WHERE provider='kHentai' AND group_id=?1 ORDER BY work_id")?
+            .query_map([group], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        for id in ids {
+            let Some(work) = load(c, &id)? else {
+                return Ok(None);
+            };
+            works.push(work);
+        }
+    }
+    Ok(Some(works))
+}
+
+fn group_sequel_conflict(
+    c: &Connection,
+    left: &HashSet<String>,
+    right: &HashSet<String>,
+) -> Result<bool, LibraryError> {
+    let (Some(a), Some(b)) = (group_works(c, left)?, group_works(c, right)?) else {
+        // Incomplete membership evidence cannot authorize an automatic merge.
+        return Ok(true);
+    };
+    Ok(a.iter()
+        .any(|a| b.iter().any(|b| catalog_review::sequel_conflict(a, b))))
+}
+
 /// Confirm every confident, never-seen pair locally (bounded by [`AUTO_DECISIONS`]) and queue
 /// its `keepBoth` report. A pair with any row in `catalog_duplicate_pairs` was decided by a
 /// person or already handled by automation, so it is never confirmed again. A confirmation
@@ -423,6 +485,7 @@ pub(super) fn auto_confirm(
         |r| r.get(0),
     )?;
     let mut made = Vec::new();
+    let mut links: HashMap<String, HashSet<String>> = HashMap::new();
     for pair in found {
         if duplicate_tier(&pair.left, &pair.right) != Tier::Confident {
             continue;
@@ -443,7 +506,18 @@ pub(super) fn auto_confirm(
         if seen || gl == gr || catalog_review::reviewed(c, left, right, &gl, &gr)? {
             continue;
         }
-        write_decision(c, &pair.left, &pair.right, "confirm")?;
+        let left_groups = connected_groups(&gl, &links);
+        let right_groups = connected_groups(&gr, &links);
+        if group_sequel_conflict(c, &left_groups, &right_groups)? {
+            continue;
+        }
+        let (Some(a), Some(b)) = (load(c, left)?, load(c, right)?) else {
+            continue;
+        };
+        if duplicate_tier(&a, &b) != Tier::Confident {
+            continue;
+        }
+        write_decision(c, &a, &b, "confirm")?;
         c.execute(
             "INSERT INTO catalog_duplicate_pairs(left_work_id,right_work_id,origin,desired,applied,report,
                 auto_operation_id,updated_at) VALUES(?1,?2,'auto','confirm',1,'pending',?3,?4)",
@@ -451,6 +525,8 @@ pub(super) fn auto_confirm(
         )?;
         count += 1;
         made.push((left.clone(), right.clone()));
+        links.entry(gl.clone()).or_default().insert(gr.clone());
+        links.entry(gr).or_default().insert(gl);
     }
     if made.is_empty() {
         return Ok(made);
@@ -868,7 +944,9 @@ impl Library {
         };
         let mut changed = self.apply_catalog_duplicate_decisions()?;
         if self.sync_held(endpoint) || client.held() {
-            if changed { self.request_catalog_preparation(); }
+            if changed {
+                self.request_catalog_preparation();
+            }
             return received;
         }
         let uploaded = self.upload_due_catalog_duplicates(client, publisher_token, endpoint);

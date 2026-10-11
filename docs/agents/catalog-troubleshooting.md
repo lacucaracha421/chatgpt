@@ -1,5 +1,60 @@
 # Lakomics catalog troubleshooting
 
+## Duplicate editions: installment guard (catalog-duplicates-v2)
+
+The desktop and server share `catalog-duplicates-v2` as the evidence algorithm; the
+desktop fingerprint rules also use this version. An existing queue cache or completed
+upload fingerprint therefore cannot suppress the next comparison/full upload.
+
+Candidate discovery retains its existing exact-title/equal-pages and Korean-alternate
+title/page-gap-at-most-2 rules. It now rejects conflicting installment evidence and
+compares languages after removing `translated`, `rewrite`, `speechless`, `text_cleaned`
+and `textless_narrative`. No trailing-tag title stripping or general exact-title
+page-tolerance discovery is added in this step.
+
+The confident tier accepts exact or Korean-alternate title keys with positive page
+counts, a gap at most 2 and at most one tenth of the smaller count, equal categories
+1..=11, a shared creator and equal non-empty core language sets. Every eligible work
+pair is evaluated before edition-group deduplication; a confident pair takes precedence.
+Before an automatic confirmation, all members of both groups are checked for installment
+conflicts. Links accepted earlier in the same pass participate in that check, so an
+unnumbered or incomplete-title bridge cannot merge conflicting sequels transitively.
+Incomplete member evidence blocks automatic confirmation.
+
+Installment extraction uses NFKC, canonical numeric/range values and chapter, volume,
+part, ordinal, hash-number, standalone-number/Roman and extra-story kinds. A lone first
+installment can match an unnumbered title. Numbers known only from a Japanese title do
+not conflict with a work whose Japanese title is absent. The desktop and server tests
+read the same table at `server/lakomics-api/tests/fixtures/catalog_installments.json`.
+NFKC reuses the already locked ICU normalizer dependency with compiled data only.
+
+After the final chunk of the next full PC upload, omitted PC candidates are retired
+by generation, including newly excluded sequels. `includesServerWorks` stays false:
+unrelated server-only candidates survive. The final chunk additionally retires
+undecided server candidates with a sequel conflict in their stored evidence. Intermediate
+chunks do not retire them. Each retirement increments the candidate change revision and
+appears as `removed: true` in the mobile changes feed. Existing decisions and merges are
+preserved; this step does not undo prior confirmations.
+
+Desktop pending review tokens include evidence and its algorithm. Old pending evidence
+is non-actionable; regenerated candidates have fresh tokens and require reloading the
+queue. Mobile uses stable `candidateId` plus `expectedRevision` (decision revision),
+not the desktop token. For a retired candidate, an unsent mobile decision receives
+HTTP 409 `duplicateCandidateMissing`; the existing mobile outbox drops the rejected
+intent and refreshes the list. An already accepted operation still replays its original
+receipt. Surviving candidates retain their identity and decision revision; the version
+bump alone does not invalidate their mobile requests.
+
+Controller verification (no app launch, deployment or production-library writes):
+
+```sh
+# Repository root; the targeted Rust suites include the shared guard table.
+bash scripts/cargo-test.sh -- -- catalog_review catalog_duplicate
+
+# server/lakomics-api, using the server virtual environment.
+python -m unittest tests.test_catalog_duplicates tests.test_catalog_duplicate_races
+```
+
 ## CATALOG-003 — Independent Korean/Japanese ingestion
 
 Implementation verification: 105 Rust catalog regressions passed (the real-data

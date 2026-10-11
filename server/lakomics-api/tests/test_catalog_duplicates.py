@@ -3,6 +3,7 @@
 No app.py import: a bare FastAPI app, a temporary control database and a small
 catalog artifact built from the production content DDL.
 """
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -95,6 +96,16 @@ class Fixture(unittest.TestCase):
 
 
 class RulePortTests(unittest.TestCase):
+    def test_sequel_guard_shared_table(self):
+        cases = json.loads((Path(__file__).parent / "fixtures/catalog_installments.json").read_text(encoding="utf-8"))
+        for case in cases:
+            with self.subTest(case=case):
+                a = evidence(work(1, case["left"], title_jpn=case.get("leftJpn", "Shared neutral title")))
+                b = evidence(work(2, case["right"], title_jpn=case.get("rightJpn", "Shared neutral title")))
+                self.assertEqual(dup.sequel_conflict(a, b), case["conflict"])
+                self.assertEqual(dup.sequel_conflict(b, a), case["conflict"])
+                self.assertEqual(dup.match_works(a, b) is None, case["conflict"])
+
     def test_normalize_matches_rust_whitespace_and_lowercase(self):
         self.assertEqual(dup.normalize("  Foo　\tBAR  baz "), "foo bar baz")
         # U+001C..U+001F are not Rust whitespace although Python's str.split() splits on them.
@@ -121,6 +132,19 @@ class RulePortTests(unittest.TestCase):
         self.assertIsNone(dup.match_works(a, evidence(work(2, "Original Long Title", artists=("artist:lee",)))))
         zero = evidence(work(3, "Original Long Title", category=0))
         self.assertIsNone(dup.match_works(zero, evidence(work(4, "Original Long Title", category=0))))
+
+    def test_k_page_gap_and_language_core(self):
+        a = evidence(work(1, "Original Long Title"))
+        b = evidence(work(2, "Original Long Title | 한국어 제목", pages=22,
+                          languages=("korean", "translated", "rewrite", "speechless", "text_cleaned", "textless_narrative")))
+        self.assertEqual(dup.match_works(a, b), ("koreanAlternateTitle", 2))
+        b["pages"] = 23
+        self.assertIsNone(dup.match_works(a, b))
+        a["pages"], b["pages"] = 19, 21
+        self.assertIsNone(dup.match_works(a, b))
+        a["pages"], b["pages"] = 20, 22
+        b["languages"].append("japanese")
+        self.assertIsNone(dup.match_works(a, b))
 
 
 class IncrementalCheckTests(Fixture):
@@ -264,6 +288,38 @@ class ApiTests(Fixture):
         self.assertEqual([i["source"] for i in self.listing()["items"]], ["server"])
         self.publish([], generation="pc-2", includesServerWorks=True)
         self.assertEqual(self.listing()["items"], [])
+
+    def test_final_upload_retires_old_pending_sequels_and_rejects_mobile_token(self):
+        a = work(1, "Shared neutral title", title_jpn="作品 第2話")
+        b = work(2, "Shared neutral title", title_jpn="作品 第3話")
+        safe_a, safe_b = work(3, "Safe neutral title"), work(4, "Safe neutral title")
+        # Seed evidence discovered under the old rules; do not run the new matcher.
+        with self.get_db() as db:
+            for left, right, source in ((a, b, "server"), (safe_a, safe_b, "server")):
+                dup._upsert(db, "kHentai", str(left["id"]), str(right["id"]), source, None,
+                            "exactTitle", 0, "translated-title-multisignal-canary-v2",
+                            {"left": evidence(left), "right": evidence(right)}, "now")
+            db.commit()
+        pending = dup.candidate_id("kHentai", "1", "2")
+        revision = self.listing()["revision"]
+        self.assertEqual(self.publish([], generation="v2", final=False).json()["retired"], 0)
+        self.assertEqual(self.publish([], generation="v2", final=True).json()["retired"], 1)
+        self.assertEqual([i["leftWorkId"] for i in self.listing()["items"]], ["3"])
+        changes = self.client.get(PREFIX + "/changes", headers=self.auth, params={"after": revision}).json()
+        self.assertEqual([(i["candidateId"], i["removed"]) for i in changes["items"]], [(pending, True)])
+        self.assertEqual(self.code(self.decide(pending)), "duplicateCandidateMissing")
+
+    def test_final_upload_preserves_decided_server_sequel(self):
+        a = work(1, "Shared neutral title", title_jpn="作品 第2話")
+        b = work(2, "Shared neutral title", title_jpn="作品 第3話")
+        with self.get_db() as db:
+            dup._upsert(db, "kHentai", "1", "2", "server", None, "exactTitle", 0,
+                        "translated-title-multisignal-canary-v2", {"left": evidence(a), "right": evidence(b)}, "now")
+            db.commit()
+        pending = dup.candidate_id("kHentai", "1", "2")
+        self.assertEqual(self.decide(pending).status_code, 200)
+        self.assertEqual(self.publish([], generation="v2").json()["retired"], 0)
+        self.assertEqual(len(self.listing(state="decided")["items"]), 1)
 
     def test_decisions_conflicts_filters_and_feeds(self):
         a, b, c = work(1, "Original Long Title"), work(2, "Original Long Title"), work(3, "Original Long Title")

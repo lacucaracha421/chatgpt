@@ -3,11 +3,10 @@ use super::{catalog_groups, error::LibraryError, Library};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-#[cfg(test)]
-use std::collections::BTreeSet;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::LazyLock;
 
-pub(super) const ALGORITHM: &str = "translated-title-multisignal-canary-v2";
+pub(super) const ALGORITHM: &str = "catalog-duplicates-v2";
 #[cfg(test)]
 const WINDOW: usize = 500;
 pub(super) const BUCKET: usize = 8;
@@ -293,7 +292,9 @@ pub(super) fn review_title(s: &str) -> String {
     let translation = alternate[..suffix].trim();
     if original.chars().count() < 8
         || translation.contains('|')
-        || !translation.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))
+        || !translation
+            .chars()
+            .any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))
     {
         return normalized;
     }
@@ -311,6 +312,270 @@ pub(super) fn exact_title_match(a: &ReviewWork, b: &ReviewWork) -> bool {
                     .any(|right| left == normalize(right))
         })
 }
+type InstallmentTokens = BTreeMap<String, BTreeSet<String>>;
+
+pub(super) struct Installments {
+    primary: InstallmentTokens,
+    japanese: Option<InstallmentTokens>,
+}
+
+// Mirrored in catalog_duplicates.py; both suites read catalog_installments.json.
+fn installment_tokens(title: &str) -> InstallmentTokens {
+    static TYPED: LazyLock<Vec<(&str, regex::Regex)>> = LazyLock::new(|| {
+        [
+            ("ch", r"(?:第\s*)?([0-9]+(?:[.\-~][0-9]+)?)\s*(?:話|话|화)"),
+            ("ch", r"(?-u:\b)(?:ch|chap|chapter|ep|episode|act|case|lesson|stage)\.?\s*([0-9]+(?:[.\-~][0-9]+)?)"),
+            ("vol", r"(?:第\s*)?([0-9]+(?:[.\-~][0-9]+)?)\s*(?:巻|卷|권)"),
+            ("vol", r"(?-u:\b)(?:vol|volume|v)\.?\s*([0-9]+(?:[.\-~][0-9]+)?)"),
+            ("part", r"(?:第\s*)?([0-9]+(?:[.\-~][0-9]+)?)\s*(?:편|부|章|篇|編)"),
+            ("part", r"(?-u:\b)(?:part|pt)\.?\s*([0-9]+(?:[.\-~][0-9]+)?)"),
+            ("ord", r"([0-9]+)\s*(?:st|nd|rd|th)(?-u:\b)"),
+            ("hash", r"#\s*([0-9]+(?:[.\-~][0-9]+)?)"),
+        ].into_iter().map(|(kind, pattern)| (kind, regex::Regex::new(pattern).unwrap())).collect()
+    });
+    static KNUM: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?:第\s*)?([〇一二三四五六七八九十]+)(話|巻|卷|章|部|編|篇)").unwrap()
+    });
+    static PART: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+        r"前編|中編|後編|前篇|中篇|後篇|上巻|中巻|下巻|上編|中編|下編|전편|상편|중편|후편|하편|zenpen|kouhen|chuuhen|jouhen|gehen|zokuhen|上|中|下"
+    ).unwrap()
+    });
+    static EXTRA: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+        r"after ?story|after|extra|omake|epilogue|prologue|gaiden|bangai|続編|続き|番外編?|外伝|後日談|おまけ|후일담|외전|번외|애프터|에필로그|프롤로그|엑스트라|오마케|계속편|속편"
+    ).unwrap()
+    });
+    static BRACKETS: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|【[^】]*】|<[^>]*>").unwrap()
+    });
+    static PLAIN: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"[0-9]+(?:[.\-~][0-9]+)?|xii|xi|viii|vii|vi|iv|iii|ii|ix|v|x").unwrap()
+    });
+    let mut s = icu_normalizer::ComposingNormalizer::new_nfkc()
+        .normalize(title)
+        .to_lowercase();
+    let mut out = InstallmentTokens::new();
+    fn add(out: &mut InstallmentTokens, kind: &str, value: impl Into<String>) {
+        out.entry(kind.into()).or_default().insert(value.into());
+    }
+    fn normnum(value: &str) -> String {
+        // Normalize integer components, preserving decimal fractional leading zeros.
+        let mut result = String::new();
+        let mut fractional = false;
+        for component in value.split_inclusive(['.', '-', '~']) {
+            let (digits, separator) = if component.ends_with(['.', '-', '~']) {
+                (
+                    &component[..component.len() - 1],
+                    &component[component.len() - 1..],
+                )
+            } else {
+                (component, "")
+            };
+            let digits = if fractional {
+                digits
+            } else {
+                digits.trim_start_matches('0')
+            };
+            result.push_str(if digits.is_empty() { "0" } else { digits });
+            result.push_str(if separator == "~" { "-" } else { separator });
+            fractional = separator == ".";
+        }
+        result
+    }
+    for (kind, re) in TYPED.iter() {
+        s = re
+            .replace_all(&s, |caps: &regex::Captures| {
+                add(&mut out, kind, normnum(&caps[1]));
+                " "
+            })
+            .into_owned();
+    }
+    s = KNUM
+        .replace_all(&s, |caps: &regex::Captures| {
+            let digit = |c| {
+                "〇一二三四五六七八九"
+                    .chars()
+                    .position(|x| x == c)
+                    .unwrap_or(0)
+            };
+            let value = if let Some((a, b)) = caps[1].split_once('十') {
+                (a.chars().next().map(digit).unwrap_or(1) * 10
+                    + b.chars().next().map(digit).unwrap_or(0))
+                .to_string()
+            } else {
+                normnum(
+                    &caps[1]
+                        .chars()
+                        .map(|c| digit(c).to_string())
+                        .collect::<String>(),
+                )
+            };
+            let kind = match &caps[2] {
+                "巻" | "卷" => "vol",
+                "話" => "ch",
+                _ => "part",
+            };
+            add(&mut out, kind, value);
+            " "
+        })
+        .into_owned();
+    let before = |s: &str, start: usize| s[..start].chars().next_back();
+    let after = |s: &str, end: usize| s[end..].chars().next();
+    let ascii_letter = |c: Option<char>| c.is_some_and(|c| c.is_ascii_lowercase());
+    let part_boundary =
+        |c: Option<char>| c.is_none_or(|c| c.is_whitespace() || "-~・[]()".contains(c));
+    s = PART
+        .replace_all(&s, |caps: &regex::Captures| {
+            let m = caps.get(0).unwrap();
+            let v = m.as_str();
+            if (v.is_ascii()
+                && (ascii_letter(before(&s, m.start())) || ascii_letter(after(&s, m.end()))))
+                || (v.chars().count() == 1
+                    && (!part_boundary(before(&s, m.start()))
+                        || !part_boundary(after(&s, m.end()))))
+            {
+                return v.to_owned();
+            }
+            let value = match v {
+                "前編" | "前篇" | "上巻" | "上編" | "上" | "전편" | "상편" | "zenpen"
+                | "jouhen" => "1",
+                "中編" | "中篇" | "中巻" | "中" | "중편" | "chuuhen" => "2",
+                "zokuhen" => {
+                    add(&mut out, "seq", "cont");
+                    return " ".into();
+                }
+                _ => "3",
+            };
+            add(&mut out, "part", value);
+            " ".into()
+        })
+        .into_owned();
+    for m in EXTRA.find_iter(&s) {
+        let v = m.as_str();
+        if v.is_ascii() && (ascii_letter(before(&s, m.start())) || ascii_letter(after(&s, m.end())))
+        {
+            continue;
+        }
+        let canonical = match v {
+            "afterstory" | "after story" | "after" | "애프터" | "후일담" | "後日談" => {
+                "after"
+            }
+            "extra" | "엑스트라" => "extra",
+            "omake" | "おまけ" | "오마케" => "omake",
+            "epilogue" | "에필로그" => "epilogue",
+            "prologue" | "프롤로그" => "prologue",
+            "gaiden" | "외전" | "外伝" => "gaiden",
+            "bangai" | "번외" | "番外" | "番外編" => "bangai",
+            _ => "cont",
+        };
+        add(&mut out, "seq", canonical);
+    }
+    let outside = BRACKETS.replace_all(&s, " ");
+    for m in PLAIN.find_iter(&outside) {
+        let (prev, next) = (before(&outside, m.start()), after(&outside, m.end()));
+        let v = m.as_str();
+        if v.starts_with(|c: char| c.is_ascii_digit()) {
+            if prev.is_some_and(|c| c.is_ascii_alphanumeric() || ".-~#".contains(c))
+                || next.is_some_and(|c| {
+                    c.is_ascii_alphanumeric()
+                        || ('\u{3040}'..='\u{30ff}').contains(&c)
+                        || ('\u{3400}'..='\u{9fff}').contains(&c)
+                        || ('\u{ac00}'..='\u{d7a3}').contains(&c)
+                })
+            {
+                continue;
+            }
+            add(&mut out, "n", normnum(v));
+        } else if prev.is_none_or(char::is_whitespace)
+            && next.is_none_or(|c| c.is_whitespace() || ":!?~-.,".contains(c))
+        {
+            let n = match v {
+                "ii" => 2,
+                "iii" => 3,
+                "iv" => 4,
+                "v" => 5,
+                "vi" => 6,
+                "vii" => 7,
+                "viii" => 8,
+                "ix" => 9,
+                "x" => 10,
+                "xi" => 11,
+                _ => 12,
+            };
+            add(&mut out, "n", n.to_string());
+        }
+    }
+    out
+}
+
+pub(super) fn installments(title: &str, title_jpn: Option<&str>) -> Installments {
+    Installments {
+        primary: installment_tokens(title),
+        japanese: title_jpn
+            .filter(|s| !s.trim().is_empty())
+            .map(installment_tokens),
+    }
+}
+
+pub(super) fn sequel_conflict(a: &ReviewWork, b: &ReviewWork) -> bool {
+    let a = installments(&a.title, a.title_jpn.as_deref());
+    let b = installments(&b.title, b.title_jpn.as_deref());
+    let union = |side: &Installments| {
+        let mut tokens = side.primary.clone();
+        if let Some(jpn) = &side.japanese {
+            for (kind, values) in jpn {
+                tokens
+                    .entry(kind.clone())
+                    .or_default()
+                    .extend(values.iter().cloned());
+            }
+        }
+        tokens
+    };
+    let (ta, tb) = (union(&a), union(&b));
+    let empty = BTreeSet::new();
+    for kind in ta.keys().chain(tb.keys()) {
+        let (va, vb) = (
+            ta.get(kind).unwrap_or(&empty),
+            tb.get(kind).unwrap_or(&empty),
+        );
+        if va == vb {
+            continue;
+        }
+        if !va.is_empty() && !vb.is_empty() {
+            return true;
+        }
+        let (values, numbered, other) = if va.is_empty() {
+            (vb, &b, &a)
+        } else {
+            (va, &a, &b)
+        };
+        if values.len() == 1 && values.contains("1") {
+            continue;
+        }
+        // A missing Japanese title is incomplete evidence, not an unnumbered edition.
+        if !numbered.primary.contains_key(kind) && other.japanese.is_none() {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+pub(super) fn lang_core(languages: &[String]) -> BTreeSet<&str> {
+    languages
+        .iter()
+        .map(String::as_str)
+        .filter(|v| {
+            !matches!(
+                *v,
+                "translated" | "rewrite" | "speechless" | "text_cleaned" | "textless_narrative"
+            )
+        })
+        .collect()
+}
+
 pub(super) fn work(c: &Connection, id: &str) -> Result<ReviewWork, LibraryError> {
     let mut w = c.query_row("SELECT w.Id,m.group_id,w.Title,w.TitleJpn,w.FileCount,COALESCE(w.Category,0)
         FROM catalog.Works w JOIN online_catalog_group_members m ON m.provider='kHentai' AND m.catalog_work_id=w.Id WHERE w.Id=?1",
@@ -355,8 +620,9 @@ pub(super) fn pair_match(a: &ReviewWork, b: &ReviewWork) -> Option<(bool, u64)> 
         || !(1..=11).contains(&a.category)
         || a.category != b.category
         || a.languages.is_empty()
-        || a.languages != b.languages
+        || lang_core(&a.languages) != lang_core(&b.languages)
         || !a.creators.iter().any(|v| b.creators.contains(v))
+        || sequel_conflict(a, b)
     {
         return None;
     }
