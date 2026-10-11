@@ -42,6 +42,35 @@ afterEach(() => {
 });
 
 describe("VideoPlayer", () => {
+  it("reveals once after startup paint and never restores the poster on playback, loops or host updates", () => {
+    vi.useFakeTimers();
+    const { container, rerender } = render(<VideoPlayer asset={videoAsset()} poster="poster.webp" loop />);
+    const video = screen.getByLabelText("sample.webm 영상") as HTMLVideoElement;
+    fireEvent.play(video);
+    presentFrame(video, 0, { expectedDisplayTime: performance.now() + 16 });
+    expect(container.querySelector("img.video-player__freeze")).not.toBeNull();
+    act(() => vi.advanceTimersToNextFrame());
+    expect(container.querySelector("img.video-player__freeze")).not.toBeNull();
+    act(() => vi.advanceTimersToNextFrame());
+    expect(container.querySelector("img.video-player__freeze")).toBeNull();
+
+    const removeAttribute = vi.spyOn(video, "removeAttribute");
+    const setAttribute = vi.spyOn(video, "setAttribute");
+    for (const time of [0.04, 0.08, 0]) {
+      video.currentTime = time;
+      fireEvent.timeUpdate(video);
+      fireEvent.waiting(video);
+      fireEvent.stalled(video);
+      fireEvent.seeked(video);
+      fireEvent.playing(video);
+      rerender(<VideoPlayer asset={videoAsset(90_000)} poster="revised-poster.webp" loop />);
+      expect(container.querySelector("img.video-player__freeze")).toBeNull();
+      expect(container.querySelector("video")).toBe(video);
+    }
+    expect(removeAttribute.mock.calls.some(([name]) => name === "src")).toBe(false);
+    expect(setAttribute.mock.calls.some(([name]) => name === "src")).toBe(false);
+  });
+
   it("keeps an independent poster through media events until a frame is presented", () => {
     const { container, rerender } = render(<VideoPlayer asset={videoAsset()} poster="poster.webp" />);
     const video = screen.getByLabelText("sample.webm 영상") as HTMLVideoElement;

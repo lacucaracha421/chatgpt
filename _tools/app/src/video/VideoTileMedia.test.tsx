@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); workload.restricted = false; workload.ready = true; vi.useRealTimers(); vi.restoreAllMocks(); });
 
-it("plays the video live on hover, keeping prepared frames until its first frame shows", () => {
+it("plays the video live on hover, holding one still until its first frame shows", () => {
   const request = vi.fn();
   const release = vi.fn();
   const { container, rerender } = render(<VideoTileMedia asset={video()} active={false} onRequestActive={request} onReleaseActive={release} onRetry={vi.fn()} />);
@@ -39,19 +39,32 @@ it("plays the video live on hover, keeping prepared frames until its first frame
   expect(media.loop).toBe(true);
   expect(media.play).toHaveBeenCalledOnce();
   expect(media).not.toHaveAttribute("data-shown");
-  // Until the video plays, the prepared frames keep the tile alive.
+  // Playback startup must not cycle unrelated prepared frames underneath the video.
   loadStill();
-  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/1"));
+  const startupStill = screen.getByRole("img", { name: "clip.webm" }).getAttribute("src");
   act(() => vi.advanceTimersByTime(720));
   loadStill();
-  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/3"));
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", startupStill!);
 
   fireEvent.playing(media);
-  presentFrame(media);
+  presentFrame(media, 0, { expectedDisplayTime: performance.now() + 16 });
+  expect(media).not.toHaveAttribute("data-shown");
+  act(() => vi.advanceTimersToNextFrame());
+  expect(media).not.toHaveAttribute("data-shown");
+  act(() => vi.advanceTimersToNextFrame());
   expect(media).toHaveAttribute("data-shown");
+  for (const image of container.querySelectorAll("img")) expect(image.style.opacity).toBe("0");
   const still = screen.getByRole("img", { name: "clip.webm" }).getAttribute("src");
   act(() => vi.advanceTimersByTime(1_440));
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", still!);
+  for (const time of [0.04, 0.08, 0]) {
+    media.currentTime = time;
+    fireEvent.timeUpdate(media);
+    fireEvent.waiting(media);
+    fireEvent.playing(media);
+    expect(media).toHaveAttribute("data-shown");
+    for (const image of container.querySelectorAll("img")) expect(image.style.opacity).toBe("0");
+  }
 
   fireEvent.pointerLeave(container.querySelector(".video-tile")!);
   expect(release).toHaveBeenCalledOnce();

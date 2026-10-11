@@ -4,6 +4,68 @@ import { mockVideoFrames } from "./videoFrameTestUtils";
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
+it("keeps the still until a submitted frame has had a paint opportunity after its display time", () => {
+  vi.useFakeTimers();
+  mockVideoFrames();
+  const video = document.createElement("video");
+  const ready = vi.fn();
+  waitForVideoFrame(video, 0, ready);
+  const callback = vi.mocked(video.requestVideoFrameCallback).mock.calls[0][0];
+  // Decode readiness is independent of the compositor's future display time.
+  Object.defineProperties(video, { readyState: { value: 2 }, videoWidth: { value: 1920 } });
+  callback(performance.now(), { mediaTime: 0, expectedDisplayTime: performance.now() + 16 } as VideoFrameCallbackMetadata);
+  expect(ready).not.toHaveBeenCalled();
+  vi.advanceTimersToNextFrame();
+  expect(ready).not.toHaveBeenCalled();
+  vi.advanceTimersToNextFrame();
+  expect(ready).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("cancels a submitted frame's pending reveal when a newer seek supersedes it", () => {
+  vi.useFakeTimers();
+  mockVideoFrames();
+  const video = document.createElement("video");
+  const ready = vi.fn();
+  const cancel = waitForVideoFrame(video, 0, ready);
+  const callback = vi.mocked(video.requestVideoFrameCallback).mock.calls[0][0];
+  Object.defineProperties(video, { readyState: { value: 2 }, videoWidth: { value: 1920 } });
+  callback(performance.now(), { mediaTime: 0, expectedDisplayTime: performance.now() + 16 } as VideoFrameCallbackMetadata);
+  cancel();
+  vi.advanceTimersByTime(100);
+  expect(ready).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("allows a paint after a later display time without requiring another paused video frame", () => {
+  vi.useFakeTimers();
+  const present = mockVideoFrames();
+  const video = document.createElement("video");
+  video.currentTime = 5;
+  const ready = vi.fn();
+  waitForVideoFrame(video, 5, ready);
+  present(video, 5, { expectedDisplayTime: performance.now() + 64 });
+  vi.advanceTimersByTime(64);
+  expect(ready).not.toHaveBeenCalled();
+  vi.advanceTimersToNextFrame();
+  expect(ready).toHaveBeenCalledOnce();
+});
+
+it("rechecks the position after waiting for paint instead of revealing a superseded frame", () => {
+  vi.useFakeTimers();
+  const present = mockVideoFrames();
+  const video = document.createElement("video");
+  const ready = vi.fn();
+  waitForVideoFrame(video, 0, ready);
+  present(video, 0, { expectedDisplayTime: performance.now() + 16 });
+  video.currentTime = 5;
+  vi.advanceTimersByTime(32);
+  expect(ready).not.toHaveBeenCalled();
+  present(video, 5, { expectedDisplayTime: performance.now() + 16 });
+  vi.advanceTimersByTime(32);
+  expect(ready).toHaveBeenCalledOnce();
+});
+
 it("ignores cancelled callbacks and pre-seek frames", () => {
   const present = mockVideoFrames();
   const video = document.createElement("video");

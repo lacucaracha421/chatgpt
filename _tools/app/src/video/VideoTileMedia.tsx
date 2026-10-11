@@ -64,6 +64,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     return () => { cancelFrame.current?.(); presented.current = false; frozenRef.current = false; setFrozen(false); video.pause(); video.removeAttribute("src"); video.load(); setVideoShown(false); };
   }, [active, asset.id, playbackRequested, playbackSrc, privacyMode]);
   useEffect(() => {
+    // Once startup is requested, hold the current still instead of cycling unrelated frames.
+    if (playbackRequested) return;
     if (!active || privacyMode || videoShown || previewRatio !== null || asset.media.scrubFrameCount <= 1) {
       setHoverFrame(null);
       return;
@@ -79,9 +81,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     return () => {
       if (frameTimer.current !== null) window.clearInterval(frameTimer.current);
       frameTimer.current = null;
-      setHoverFrame(null);
     };
-  }, [active, asset.media.scrubFrameCount, privacyMode, videoShown, previewRatio]);
+  }, [active, asset.media.scrubFrameCount, privacyMode, videoShown, previewRatio, playbackRequested]);
   useEffect(() => () => { cancelFrame.current?.(); clearTimers(); cellWatch.current?.(); }, []);
   const leave = () => { cancelFrame.current?.(); pendingSeek.current = null; presented.current = false; frozenRef.current = false; setFrozen(false); cellWatch.current?.(); clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); setVideoShown(false); onReleaseActive(); };
   const leaveRef = useRef(leave);
@@ -213,7 +214,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   wantedStill.current = stillUrl;
   return <div className="video-tile" onPointerEnter={enterTile} onPointerLeave={leaveTile}>
     {/* 재생 프리뷰가 위에 깔리므로, 영상 첫 프레임이 뜨기 전까지는 scrub 미리보기 프레임을 img로 보여준다. */}
-    {stillUrl && <StableImage src={stillUrl} alt={alt} decoding="async" decodeFirst={false} draggable={false} onLoad={event => {
+    {stillUrl && <StableImage src={stillUrl} alt={alt} style={{opacity: videoShown && !scrubbing ? 0 : undefined}} decoding="async" decodeFirst={false} draggable={false} onLoad={event => {
       const image = event.currentTarget;
       const loaded = image.getAttribute("src");
       const decoded = () => {

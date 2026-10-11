@@ -17,13 +17,13 @@ export function mockVideoFrames() {
   vi.spyOn(HTMLVideoElement.prototype, "cancelVideoFrameCallback").mockImplementation(function (this: HTMLVideoElement, handle) {
     callbacks.get(this)?.delete(handle);
   });
-  return (video: HTMLVideoElement, mediaTime = video.currentTime) => {
+  return (video: HTMLVideoElement, mediaTime = video.currentTime, metadata: Partial<VideoFrameCallbackMetadata> = {}) => {
     Object.defineProperty(video, "readyState", { configurable: true, value: 2 });
     Object.defineProperty(video, "videoWidth", { configurable: true, value: 1920 });
     Object.defineProperty(video, "videoHeight", { configurable: true, value: 1080 });
     const pending = callbacks.get(video);
     const frame = [...(pending?.values() ?? [])];
     pending?.clear();
-    act(() => frame.forEach(callback => callback(0, { mediaTime } as VideoFrameCallbackMetadata)));
+    act(() => frame.forEach(callback => callback(performance.now(), { ...metadata, mediaTime } as VideoFrameCallbackMetadata)));
   };
 }
