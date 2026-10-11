@@ -27,7 +27,7 @@ export function opensAsSeries(id: string, series: CharacterSeries[], classificat
   return series.some(entry => entry.classificationId === id) && !inOriginals(id, classifications);
 }
 
-export function CharacterFolderContent({ children, sort, onSortChange, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onAssetsChanged, onReviewVideos, onMembershipChanged }: {
+export function CharacterFolderContent({ children, sort, onSortChange, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onAssetsChanged, onReviewVideos, onMembershipChanged, groupEditRequest, onGroupEditRequestHandled }: {
   requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void;
   clearSelectionRequest?: number; galleryDrag?: CharacterGalleryDrag;
   /** The asset sort shared with plain folders (App preferences); series, groups and characters use it too. */
@@ -40,6 +40,8 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
   refreshVersion: number; onNavigate: (view: AssetView) => void; onAssetsChanged: () => void;
   /** Passed to series folders as plain folders get them: 선택한 영상 비교 and the counts after an asset edit. */
   onReviewVideos?: (assetIds: string[]) => void; onMembershipChanged?: () => void;
+  /** The sidebar's 그룹 편집, handed to the series screen that owns the group editor. */
+  groupEditRequest?: { groupId: string; token: number } | null; onGroupEditRequestHandled?: () => void;
 }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [organizeCharacter, setOrganizeCharacter] = useState(false);
@@ -47,7 +49,7 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
   const folder = classifications.find(item => item.id === id);
   const series = hub.series.find(s => s.classificationId === id);
   const originalScope = Boolean(id && inOriginals(id, classifications));
-  if (series && !originalScope) return <FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} /></FolderKindSwitch>;
+  if (series && !originalScope) return <FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={onGroupEditRequestHandled} /></FolderKindSwitch>;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);

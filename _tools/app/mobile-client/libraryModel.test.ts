@@ -60,3 +60,8 @@ it('lists a 기타 as just 기타, after its sibling characters, without treatin
  // A folder that merely shares the stored name is not hidden as the 기타's linked folder.
  expect(entries.some(e=>e.id==='folder-x')).toBe(true);
 });
+it('lists a series group before its arranged folders in the classification list',()=>{
+ const folders=[{id:'s',name:'Series',parent_id:null,asset_count:9},{id:'f1',name:'Zeta',parent_id:'s',asset_count:1},{id:'f2',name:'Alpha',parent_id:'s',asset_count:1}];
+ const entries=mergeLibraryEntries(folders,{...characters,navigationOrder:['s','f1','f2']});
+ expect(entries.filter(e=>e.parent_id==='s').map(e=>e.id)).toEqual(['character-group:g','f1','f2']);
+});

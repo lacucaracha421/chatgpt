@@ -235,6 +235,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
   const [createClassificationRequest, setCreateClassificationRequest] = useState(0);
   const [createAlbumRequest, setCreateAlbumRequest] = useState(0);
+  const [groupEditRequest, setGroupEditRequest] = useState<{ groupId: string; token: number } | null>(null);
+  const groupEditToken = useRef(0);
   const [browserStatus, setBrowserStatus] = useState<AssetBrowserStatus>({
     loadedCount: 0,
     selectedAsset: null,
@@ -760,6 +762,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 updatePreferences({ expandedAlbumIds })
               }
               onSidebarWidthChange={setSidebarWidth}
+              onEditGroup={group => {
+                navigateView({ kind: "classification", classificationId: group.seriesId, characterGroupId: group.id });
+                setGroupEditRequest({ groupId: group.id, token: ++groupEditToken.current });
+              }}
               onCharactersChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}
               onChanged={() => void refreshClassifications()}
               onAlbumsChanged={() => void refreshAlbums()}
@@ -873,7 +879,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <ArtistHub view={view} onNavigate={navigateView} privacyMode={preferences.privacyMode} />
                 ) : (
                   <HomeAssetDestination active={homeAsset} onExit={homeAsset && requestedAsset ? leaveHomeAsset : undefined}>
-                  <CharacterFolderContent albums={albums} sort={preferences.assetSort} onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} galleryLayout={preferences.galleryLayout} onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })} privacyMode={preferences.privacyMode} onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })} metadataVisible={preferences.metadataVisible} onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })} thumbnailRowHeight={preferences.thumbnailRowHeight} onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }} onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }} onMembershipChanged={refreshMembershipCounts}>
+                  <CharacterFolderContent albums={albums} sort={preferences.assetSort} onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={() => setGroupEditRequest(null)} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} galleryLayout={preferences.galleryLayout} onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })} privacyMode={preferences.privacyMode} onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })} metadataVisible={preferences.metadataVisible} onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })} thumbnailRowHeight={preferences.thumbnailRowHeight} onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }} onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }} onMembershipChanged={refreshMembershipCounts}>
                   <AssetBrowser
                     navigationMemory={assetNavigationMemory.current}
                     view={view}

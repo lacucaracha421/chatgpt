@@ -18,10 +18,21 @@ export function mergeLibraryEntries(items:Classification[],characters?:Character
     }
     const order=new Map((characters?.navigationOrder??[]).map((id,i)=>[id,i]));
     merged.sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)||Number(!!a.characterExtras)-Number(!!b.characterExtras)||a.name.localeCompare(b.name,'ko'));
+    groupsBeforeFolders(merged);
     const linked=linkedCharacterFolders(merged,nodes);
     const kept=merged.filter(item=>!linked.has(item.id)).map(item=>linked.has(item.parent_id??'')?{...item,parent_id:linked.get(item.parent_id!)!}:item);
     const ids=new Set(kept.map(item=>item.id));
     return kept.map(item=>({...item,parent_id:ids.has(item.parent_id??'')?item.parent_id:null}));
+}
+/** Under a series the groups come before its folders, whatever order the folders were arranged in; each side keeps its order. */
+function groupsBeforeFolders(entries:Entry[]){
+  const slots=new Map<string|null,number[]>();
+  entries.forEach((entry,index)=>{const key=entry.parent_id??null;slots.set(key,[...(slots.get(key)??[]),index]);});
+  const before=[...entries];
+  for(const indexes of slots.values()){
+    const items=indexes.map(index=>before[index]),reordered=[...items.filter(item=>item.characterKind==='group'),...items.filter(item=>item.characterKind!=='group')];
+    indexes.forEach((slot,n)=>{entries[slot]=reordered[n];});
+  }
 }
 /**
  * The count a folder card shows: the whole subtree, as the PC's shelf and sidebar do.

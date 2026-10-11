@@ -491,7 +491,7 @@ it("Home revisit shows retained content while its overview refresh is pending", 
   expect(gateway.releaseCalendar.calendar).toHaveBeenCalledTimes(1);
   expect(gateway.releaseCalendar.wishlist).toHaveBeenCalledTimes(1);
   await advance(1200);
-  expect(within(home).getByRole("button", {name: /태거7/})).toBeVisible();
+  expect(within(home).getByRole("button", {name: /확인7/})).toBeVisible();
   expect(document.querySelector(".home-view")).toBe(home);
   expect(document.querySelector(".home-view img")).toBe(thumbnail);
 });

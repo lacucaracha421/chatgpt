@@ -150,3 +150,21 @@ it("reads no 기타 images for a group whose members already fill the mosaic, an
   await waitFor(() => expect(container.querySelector(".character-group-card__slot svg")).toBeTruthy());
   expect(container.querySelector(".character-group-card__mosaic")).toHaveAttribute("data-count", "1");
 });
+
+it("opens the editor of the group named by the sidebar's request once, and tells its owner", () => {
+  const handled = vi.fn();
+  const request = { groupId: "group", token: 1 };
+  const { rerender } = render(<CharacterGroups seriesId="series" members={members} groups={groups} editGroupRequest={request} onEditGroupRequestHandled={handled}>{children}</CharacterGroups>);
+  expect(screen.getByRole("dialog", { name: "캐릭터 그룹 편집" })).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "그룹 이름" })).toHaveValue("그룹 이름");
+  expect(handled).toHaveBeenCalledOnce();
+  rerender(<CharacterGroups seriesId="series" members={members} groups={groups} editGroupRequest={request} onEditGroupRequestHandled={handled}>{children}</CharacterGroups>);
+  expect(handled).toHaveBeenCalledOnce();
+});
+
+it("ignores an edit request for a group of another series", () => {
+  const handled = vi.fn();
+  render(<CharacterGroups seriesId="series" members={members} groups={groups} editGroupRequest={{ groupId: "elsewhere", token: 1 }} onEditGroupRequestHandled={handled}>{children}</CharacterGroups>);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(handled).not.toHaveBeenCalled();
+});

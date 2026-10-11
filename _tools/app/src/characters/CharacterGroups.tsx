@@ -41,10 +41,13 @@ type Props = {
   groupCreateRequest?: number;
   /** Increments open the current group's editor (the titlebar 그룹 더보기 menu owns the entry). */
   groupEditRequest?: number;
+  /** Opens the editor of this series' group (the sidebar's 그룹 편집); handled once per request. */
+  editGroupRequest?: { groupId: string; token: number } | null;
+  onEditGroupRequestHandled?: () => void;
   children: (members: CharacterTarget[]) => ReactNode;
 };
 
-export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, suggestionCards = [], extrasCard, suggestionCount = 0, extrasPreviewApi, extrasPreviewVersion = 0, memberCounts = {}, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, children }: Props) {
+export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, suggestionCards = [], extrasCard, suggestionCount = 0, extrasPreviewApi, extrasPreviewVersion = 0, memberCounts = {}, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, editGroupRequest = null, onEditGroupRequestHandled, children }: Props) {
   const [loadedGroups, setLoadedGroups] = useState<Group[]>([]);
   const [draft, setDraft] = useState<Group | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -62,6 +65,15 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     const group = groups.find(item => item.id === activeGroupId);
     if (group) setDraft({ ...group, targetIds: [...group.targetIds] });
   }, [groupEditRequest]);
+  const handledEditToken = useRef<number | null>(null);
+  useEffect(() => {
+    if (!editGroupRequest || handledEditToken.current === editGroupRequest.token) return;
+    const group = groups.find(item => item.id === editGroupRequest.groupId);
+    if (!group) return;
+    handledEditToken.current = editGroupRequest.token;
+    setDraft({ ...group, targetIds: [...group.targetIds] });
+    onEditGroupRequestHandled?.();
+  }, [editGroupRequest, providedGroups, loadedGroups]);
   useEffect(() => {
     if (providedGroups) return;
     let alive = true;

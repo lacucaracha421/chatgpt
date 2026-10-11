@@ -17,6 +17,13 @@ if (params.get("privacy") === "1") {
   try { current = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch { /* reset malformed preview state */ }
   localStorage.setItem(key, JSON.stringify({ ...current, privacyMode: true }));
 }
+if (params.get("expanded")) {
+  // Open these classification folders in the sidebar tree (e.g. ?expanded=class-game,class-zzz).
+  const key = "lakomics.uiPreferences.v1";
+  let current: Record<string, unknown> = {};
+  try { current = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch { /* reset malformed preview state */ }
+  localStorage.setItem(key, JSON.stringify({ ...current, expandedClassificationIds: params.get("expanded")!.split(",") }));
+}
 if (params.get("panel") === "info") {
   // A click only focuses (2026-09-29); the 정보 dock follows its saved open state, so open it here.
   localStorage.setItem("lakomics.assets.infoPanel.open.v1", "true");

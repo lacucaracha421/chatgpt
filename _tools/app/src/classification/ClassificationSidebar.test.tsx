@@ -161,6 +161,7 @@ function renderSidebar(
           }}
           onChanged={onChanged}
           onClearAssetSelection={props.onClearAssetSelection ?? onClearAssetSelection}
+          onEditGroup={props.onEditGroup}
         />
       </LibraryProvider>
     );
@@ -228,6 +229,79 @@ describe("ClassificationSidebar", () => {
     });
     expect(screen.getByRole("treeitem", { name: "Blue Archive" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("treeitem", { name: "Zulu" })).not.toBeInTheDocument();
+  });
+
+  describe("character group rows", () => {
+    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
+    const kisaki = { ...fixtureTarget("kisaki", "키사키"), seriesClassificationId: "work", linkedClassificationId: null };
+    const group = { id: "g1", seriesId: "work", name: "가방팟", revision: 1, targetIds: ["hina", "kisaki"], extrasTargetId: "g1-extras" };
+    const countedGateway = () => ({ ...gateway(), characterSidebarCounts: vi.fn().mockResolvedValue({ targets: { hina: 5, kisaki: 7, "g1-extras": 3 }, groups: {} }) });
+    const options = { characters: [hina, kisaki], characterGroups: [group], expandedIds: ["root", "work"] };
+
+    it("lists groups under their series before its folders, with the card's count and no rows for characters or 기타", async () => {
+      renderSidebar(countedGateway(), options);
+      expect(screen.getAllByRole("treeitem").map(row => row.getAttribute("aria-label"))).toEqual(["Games", "Blue Archive", "가방팟", "Arona"]);
+      expect(screen.queryByRole("treeitem", { name: "히나" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("treeitem", { name: "기타" })).not.toBeInTheDocument();
+      const row = screen.getByRole("treeitem", { name: "가방팟" });
+      expect(row).not.toHaveAttribute("aria-expanded");
+      expect(row.querySelector(".classification-sidebar__tree-folder")).not.toBeNull();
+      await waitFor(() => expect(row).toHaveTextContent("15"));
+    });
+
+    it("keeps several groups in the order the group cards have, not alphabetical", () => {
+      renderSidebar(countedGateway(), { ...options, characterGroups: [{ ...group, id: "g2", name: "하나", targetIds: [] }, group] });
+      expect(screen.getAllByRole("treeitem").map(row => row.getAttribute("aria-label"))).toEqual(["Games", "Blue Archive", "하나", "가방팟", "Arona"]);
+    });
+
+    it("keeps the group row out of folder-only actions", () => {
+      renderSidebar(countedGateway(), { ...options, onEditGroup: vi.fn() });
+      const row = screen.getByRole("treeitem", { name: "가방팟" });
+      expect(row).not.toHaveAttribute("data-classification-id");
+      fireEvent.contextMenu(row);
+      expect(screen.getAllByRole("menuitem").map(item => item.textContent)).toEqual(["그룹 열기", "그룹 편집"]);
+    });
+
+    it("opens the group screen when the row is clicked", async () => {
+      const user = userEvent.setup();
+      const { onViewChange } = renderSidebar(countedGateway(), options);
+      await user.click(screen.getByRole("treeitem", { name: "가방팟" }));
+      expect(onViewChange).toHaveBeenCalledWith({ kind: "classification", classificationId: "work", characterGroupId: "g1" });
+      expect(screen.getByRole("treeitem", { name: "가방팟" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("treeitem", { name: "Blue Archive" })).toHaveAttribute("aria-selected", "false");
+    });
+
+    it.each([
+      ["the group", { characterGroupId: "g1" }],
+      ["one of its characters", { characterId: "kisaki" }],
+      ["the group's 기타", { characterId: "g1-extras" }],
+    ])("keeps the group row selected while %s is open", (_label, extra) => {
+      renderSidebar(countedGateway(), { ...options, view: { kind: "classification", classificationId: "work", ...extra } });
+      expect(screen.getByRole("treeitem", { name: "가방팟" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("treeitem", { name: "Blue Archive" })).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("keeps the series selected for a character outside every group", () => {
+      const ako = { ...fixtureTarget("ako", "아코"), seriesClassificationId: "work", linkedClassificationId: null };
+      renderSidebar(countedGateway(), { ...options, characters: [hina, kisaki, ako], view: { kind: "classification", classificationId: "work", characterId: "ako" } });
+      expect(screen.getByRole("treeitem", { name: "Blue Archive" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("treeitem", { name: "가방팟" })).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("reveals the series when a group is opened from outside the tree and asks the owner to edit it", async () => {
+      const user = userEvent.setup();
+      const onEditGroup = vi.fn();
+      renderSidebar(countedGateway(), { ...options, expandedIds: [], view: { kind: "classification", classificationId: "work", characterGroupId: "g1" }, onEditGroup });
+      await waitFor(() => expect(screen.getByRole("treeitem", { name: "가방팟" })).toBeVisible());
+      fireEvent.contextMenu(screen.getByRole("treeitem", { name: "가방팟" }));
+      await user.click(screen.getByRole("menuitem", { name: "그룹 편집" }));
+      expect(onEditGroup).toHaveBeenCalledWith(group);
+    });
+
+    it("leaves out a group whose series is not in the tree", () => {
+      renderSidebar(countedGateway(), { ...options, characterGroups: [{ ...group, seriesId: "elsewhere" }] });
+      expect(screen.queryByRole("treeitem", { name: "가방팟" })).not.toBeInTheDocument();
+    });
   });
 
   it("keeps the Originals root visible but protects its storage-only identity", async () => {

@@ -84,6 +84,8 @@ type Props = {
   onReviewVideos?: (assetIds: string[]) => void;
   /** Album, folder and trash counts after an asset edit; the series screen itself is not reloaded. */
   onMembershipChanged?: () => void;
+  /** The sidebar's 그룹 편집: open this group's editor once the group screen is showing. */
+  groupEditRequest?: { groupId: string; token: number } | null; onGroupEditRequestHandled?: () => void;
 };
 type TrashUndo = { scope: string; removed: { asset: AssetSummary; index: number }[] };
 type Editor = { target: CharacterTarget | null; draft: CharacterEditorDraft };
@@ -148,7 +150,7 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
   return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
 }
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged, groupEditRequest: requestedGroupEdit = null, onGroupEditRequestHandled }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
@@ -814,7 +816,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: shelfExtras.id });
               }} /> : undefined}
             suggestionCards={!currentGroup && !suggestionsHidden ? seriesSuggestions.map(suggestion => <CharacterSuggestionTile key={suggestion.tag} suggestion={suggestion} state={suggestions} privacyMode={privacyMode} onChanged={onChanged} />) : undefined}
-            headerAccessory={!currentGroup ? <>{candidateReview}{seriesSuggestions.length > 0 && <Button size="sm" variant="ghost" onClick={() => setHiddenSuggestions(ids => suggestionsHidden ? ids.filter(id => id !== series.classificationId) : [...ids, series.classificationId])}>{suggestionsHidden ? "제안 보기" : "제안 숨기기"}</Button>}</> : undefined} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest}
+            headerAccessory={!currentGroup ? <>{candidateReview}{seriesSuggestions.length > 0 && <Button size="sm" variant="ghost" onClick={() => setHiddenSuggestions(ids => suggestionsHidden ? ids.filter(id => id !== series.classificationId) : [...ids, series.classificationId])}>{suggestionsHidden ? "제안 보기" : "제안 숨기기"}</Button>}</> : undefined} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest} editGroupRequest={requestedGroupEdit} onEditGroupRequestHandled={onGroupEditRequestHandled}
             folderCards={!staleFolders && folders.length > 0 ? folders.map(item => {
               const folder = classifications.find(folder => folder.id === item.classificationId);
               if (!folder) return null;
