@@ -764,16 +764,17 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             folderCards={!staleFolders && folders.length > 0 ? folders.map(item => {
               const folder = classifications.find(folder => folder.id === item.classificationId);
               if (!folder) return null;
+              const isSeries = item.isSeries === true;
               const exclusion = folderExclusionItem(folder.id, classifications, folderExclusions, excluded => void action(() => hubApi.setFolderExcluded(folder.id, excluded)));
-              const excluded = folderExclusions.includes(folder.id) || exclusion.disabled;
+              const excluded = !isSeries && (folderExclusions.includes(folder.id) || exclusion.disabled);
               return <article className={`series-character folder-shelf__card${excluded ? " series-character--excluded" : ""}`} key={folder.id} inert={staleFolders}>
-                <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} {...folderIntent({ kind: "classification", classificationId: folder.id })} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
-                  {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <StableImage draggable={false} loading="lazy" src={folderCardImage(item)!} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
+                <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} ${isSeries ? "시리즈" : "폴더"} 열기`} aria-description={isSeries ? "캐릭터 시리즈" : excluded ? "캐릭터 분류 제외" : "일반 폴더"} {...folderIntent({ kind: "classification", classificationId: folder.id })} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
+                  {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <StableImage draggable={false} loading="lazy" src={folderCardImage(item)!} alt="" /> : <span className="series-character__placeholder">{isSeries ? <UserGroupIcon aria-hidden="true" /> : <FolderIcon aria-hidden="true" />}{isSeries ? "시리즈" : "일반 폴더"}</span>}
                   {excluded && <span className="series-character__tag" aria-hidden="true">제외</span>}
-                  <strong><FolderIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{folder.name}</span></strong>
+                  <strong>{isSeries ? <UserGroupIcon className="character-group-card__icon" aria-hidden="true" /> : <FolderIcon className="character-group-card__icon" aria-hidden="true" />}<span className="series-character__name">{folder.name}</span></strong>
                   {(folder.totalAssetCount ?? folder.assetCount) !== undefined && <small className="folder-shelf__meta">{(folder.totalAssetCount ?? folder.assetCount)!.toLocaleString("ko-KR")}장</small>}
                 </button>
-                <Menu label={`${folder.name} 폴더 더보기`} triggerClassName="series-character__info" disabled={busy || staleFolders} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[exclusion]} />
+                {!isSeries && <Menu label={`${folder.name} 폴더 더보기`} triggerClassName="series-character__info" disabled={busy || staleFolders} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[exclusion]} />}
               </article>;
             }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => {
               const status = characterStatus(target, readiness.get(target.id), s36Driven(target.id));

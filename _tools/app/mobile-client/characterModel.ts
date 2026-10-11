@@ -1,5 +1,5 @@
 import {assetSearchParams,type AssetSearchName} from '../src/assets/assetSearch';
-import type {AssetFiltersValue} from './types';
+import type {AssetFiltersValue,Classification} from './types';
 import {EMPTY_FILTERS, filterParams, sortOf} from './assetFilters';
 import type {ScopedAssetPage} from './scopedAssetToc';
 export type CharacterFilter = 'all' | 'unclassified' | 'needs_review';
@@ -47,9 +47,14 @@ export function characterPath(node:string,filter:CharacterFilter,revision:string
   params.set('sort',sortOf(filters)==='oldest'?'oldest':'newest');params.delete('seed');
   return `/v1/library/characters/assets?${params}`;
 }
-export function characterChildren(index:CharacterIndex,node:string|null) {
-  const rank={series:0,group:0,character:1,folder:2};
-  return index.nodes.filter(n=>n.parentId===node).sort((a,b)=>rank[a.kind]-rank[b.kind]);
+export function characterChildren(index:CharacterIndex,node:string|null,classifications:readonly Classification[]=[]) {
+  const rank={group:0,character:1,series:2,folder:3};
+  return index.nodes.filter(n=>characterParent(index,n,classifications)===node).sort((a,b)=>rank[a.kind]-rank[b.kind]);
+}
+export function characterParent(index:CharacterIndex,node:CharacterNode,classifications:readonly Classification[]=[]) {
+  if(node.kind!=='series')return node.parentId;
+  const parent=classifications.find(c=>c.id===node.sourceId)?.parent_id;
+  return index.nodes.find(n=>(n.kind==='series'||n.kind==='folder')&&n.sourceId===parent)?.id??node.parentId;
 }
 /**
  * The character node a manual exclusion may name, or `null` when this view has none.

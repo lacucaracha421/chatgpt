@@ -441,6 +441,97 @@ mod tests {
     }
 
     #[test]
+    fn nested_series_images_leave_parent_unclassified_in_pc_and_publication() {
+        let (_temp, library) = fixture();
+        let connection = library.connection().unwrap();
+        connection.execute_batch("INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES
+            ('n','tag','Inner','s','2026'),('deep','tag','Deep','n','2026'),
+            ('indirect','tag','Indirect inner','f','2026'),('leaf','tag','Leaf','indirect','2026');
+            INSERT INTO character_series(classification_id,auto_classify) VALUES('n',0),('indirect',0);
+            UPDATE asset_classifications SET classification_id='deep' WHERE asset_id='u';
+            INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+            VALUES('v','v','image','v','assets/v.png','thumbnails/v.webp',1,1,1,'2026-09-13T00:00:00Z','normal'),
+            ('w','w','image','w','assets/w.png','thumbnails/w.webp',1,1,1,'2026-09-13T00:00:00Z','normal');
+            INSERT INTO asset_classifications VALUES('v','leaf'),('w','f');").unwrap();
+        drop(connection);
+        let mut connection = Connection::open_with_flags(
+            library.root().join("library.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let snapshot = snapshot_from_connection(&mut connection, None, &|_| {}).unwrap();
+        let query = |series: &str, filter| BrowseQuery {
+            series_id: series.into(),
+            target_id: None,
+            group_id: None,
+            reference_target_id: None,
+            after: None,
+            limit: 100,
+            all: false,
+            series_filter: Some(filter),
+        };
+        for series in ["s", "n", "indirect"] {
+            for filter in [SeriesGalleryFilter::Unclassified, SeriesGalleryFilter::All] {
+                let page = library
+                    .browse_character_assets(query(series, filter))
+                    .unwrap();
+                let scope = snapshot
+                    .scopes
+                    .iter()
+                    .find(|scope| {
+                        scope.node_id == format!("series:{series}")
+                            && scope.filter
+                                == match filter {
+                                    SeriesGalleryFilter::All => "all",
+                                    _ => "unclassified",
+                                }
+                    })
+                    .unwrap();
+                assert_eq!(page.total_count as usize, scope.asset_ids.len());
+                assert_eq!(
+                    page.items.iter().map(|a| a.id.clone()).collect::<Vec<_>>(),
+                    scope.asset_ids
+                );
+                let sorted = library
+                    .browse_character_assets_with_view(
+                        query(series, filter),
+                        &crate::library::character_hub::BrowseView {
+                            sort: crate::library::models::AssetSort::Oldest,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(sorted.total_count, page.total_count);
+                assert_eq!(sorted.items.len(), page.items.len());
+                if series == "s" {
+                    assert!(scope.asset_ids.contains(&"w".into()));
+                    if matches!(filter, SeriesGalleryFilter::Unclassified) {
+                        assert_eq!(scope.asset_ids, vec!["w".to_string()]);
+                    }
+                    for id in ["u", "v"] {
+                        assert_eq!(
+                            scope.asset_ids.iter().any(|asset| asset == id),
+                            matches!(filter, SeriesGalleryFilter::All)
+                        );
+                    }
+                    assert!(
+                        !scope.asset_ids.contains(&"z".into())
+                            || matches!(filter, SeriesGalleryFilter::All)
+                    );
+                } else {
+                    assert_eq!(page.total_count, 1);
+                }
+            }
+        }
+        // Nested series keep the existing publication shape; clients derive placement from classifications.
+        assert!(snapshot
+            .nodes
+            .iter()
+            .filter(|n| n.kind == "series")
+            .all(|n| n.parent_id.is_none()));
+    }
+
+    #[test]
     fn character_publication_matches_shared_fixture_and_pc_queries() {
         let (_temp, library) = fixture();
         let mut connection = Connection::open_with_flags(

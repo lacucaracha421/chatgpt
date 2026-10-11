@@ -154,6 +154,21 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   return {api,browse,shadowApi,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter};
 }
 
+it("shows an inner series after characters and before ordinary folders without an exclusion menu", async () => {
+  const {navigate}=await mount(undefined, false, [], undefined, false, { folders: [
+    {classificationId:"series",isSeries:true,thumbnailAssetId:null},
+    {classificationId:"machines",thumbnailAssetId:"asset-5"},
+  ] });
+  const inner=await screen.findByRole("button",{name:/시리즈 열기$/});
+  expect(inner).toHaveAttribute("aria-description","캐릭터 시리즈");
+  const buttons=[...inner.closest('.home-shelf__track')!.querySelectorAll('.series-character__open')];
+  expect(buttons.indexOf(inner)).toBeGreaterThan(buttons.indexOf(screen.getByRole("button",{name:"히나 열기"})));
+  expect(buttons.indexOf(inner)).toBeLessThan(buttons.indexOf(screen.getByRole("button",{name:"기체 폴더 열기"})));
+  expect(inner.closest('article')!.querySelector('.series-character__info')).toBeNull();
+  fireEvent.click(inner);
+  expect(navigate).toHaveBeenCalledWith({kind:"classification",classificationId:"series"});
+});
+
 it("keeps the character screen until the returning folder page and shelf thumbnails are ready", async () => {
   const mounted = await mount();
   await screen.findByRole("option", { name: "이미지 5.webp" });

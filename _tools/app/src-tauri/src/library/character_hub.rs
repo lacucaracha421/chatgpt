@@ -82,6 +82,7 @@ pub struct BrowsePage {
 }
 
 pub(crate) const SERIES_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
+              nested_series_scope(id) AS (SELECT s.classification_id FROM character_series s JOIN scope p ON p.id=s.classification_id WHERE s.classification_id<>?1 UNION SELECT c.id FROM classification_entries c JOIN nested_series_scope s ON c.parent_id=s.id),
               ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
               SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
               AND (?2 IS NOT NULL OR ?3 OR ?4='all' OR NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id))
@@ -97,7 +98,8 @@ pub(crate) const SERIES_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELE
                     SELECT 1 FROM character_autotag_jobs j WHERE j.asset_id=a.id AND j.state='completed' AND j.review_state='partially_resolved'
                     AND NOT EXISTS(SELECT 1 FROM character_review_completions c WHERE c.asset_id=j.asset_id AND c.generation=j.generation AND c.source_generation=j.source_generation)
                   ))
-                  OR ((?4 IS NULL OR ?4='unclassified') AND NOT EXISTS(SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
+                  OR ((?4 IS NULL OR ?4='unclassified') AND NOT EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM nested_series_scope))
+                    AND NOT EXISTS(SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
                     AND NOT EXISTS(SELECT 1 FROM character_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
                     AND NOT EXISTS(SELECT 1 FROM character_learned_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)))))";
 

@@ -17,6 +17,7 @@ pub struct FolderExclusionRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SeriesFolder {
     pub classification_id: String,
+    pub is_series: bool,
     pub thumbnail_asset_id: Option<String>,
     /// The thumbnail Asset's current thumbnail revision, for a cacheable thumbnail URL.
     pub thumbnail_revision: Option<String>,
@@ -88,14 +89,17 @@ impl Library {
         let result = connection.prepare(
             "WITH RECURSIVE folders(id) AS (
                 SELECT c.id FROM classification_entries c WHERE c.parent_id=?1
-                AND NOT EXISTS(SELECT 1 FROM character_series s WHERE s.classification_id=c.id)
                 AND NOT EXISTS(SELECT 1 FROM character_targets t WHERE t.linked_classification_id=c.id)
              ), scope(root,id) AS (
                 SELECT id,id FROM folders UNION SELECT s.root,c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
-             ) SELECT f.id,(SELECT a.id FROM scope s JOIN asset_classifications ac ON ac.classification_id=s.id
+             ) SELECT f.id,COALESCE((SELECT a.id FROM character_series cs JOIN assets a ON a.id=cs.hero_asset_id
+                WHERE cs.classification_id=f.id AND a.status='normal' AND a.thumbnail_relative_path IS NOT NULL),
+                (SELECT a.id FROM scope s JOIN asset_classifications ac ON ac.classification_id=s.id
                 JOIN assets a ON a.id=ac.asset_id WHERE s.root=f.id AND a.status='normal' AND a.thumbnail_relative_path IS NOT NULL
-                ORDER BY a.collected_at DESC,a.id DESC LIMIT 1) FROM folders f JOIN classification_entries c ON c.id=f.id ORDER BY c.name COLLATE NOCASE,f.id",
-        )?.query_map([series_id], |row| Ok(SeriesFolder { classification_id: row.get(0)?, thumbnail_asset_id: row.get(1)?, thumbnail_revision: None }))?
+                ORDER BY a.collected_at DESC,a.id DESC LIMIT 1)),
+                EXISTS(SELECT 1 FROM character_series cs WHERE cs.classification_id=f.id)
+                FROM folders f JOIN classification_entries c ON c.id=f.id ORDER BY 3 DESC,c.name COLLATE NOCASE,f.id",
+        )?.query_map([series_id], |row| Ok(SeriesFolder { classification_id: row.get(0)?, is_series: row.get(2)?, thumbnail_asset_id: row.get(1)?, thumbnail_revision: None }))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let revisions = super::characters::thumbnail_revisions(
             &connection,
@@ -295,6 +299,28 @@ mod tests {
             f.library.character_folder_exclusions().unwrap(),
             vec![machines]
         );
+    }
+
+    #[test]
+    fn character_folder_cards_include_inner_series_before_plain_folders() {
+        let f = Fixture::new();
+        f.ready("Pilot");
+        let plain = folder(&f, &f.series, "A plain folder");
+        let inner = folder(&f, &f.series, "Z inner series");
+        move_asset(&f, "asset-5", &inner);
+        let connection = f.library.connection().unwrap();
+        connection.execute(
+            "INSERT INTO character_series(classification_id,auto_classify,hero_asset_id) VALUES(?1,0,'asset-5')",
+            [&inner],
+        ).unwrap();
+        drop(connection);
+        let cards = f.library.character_series_folders(&f.series).unwrap();
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].classification_id, inner);
+        assert!(cards[0].is_series);
+        assert_eq!(cards[0].thumbnail_asset_id.as_deref(), Some("asset-5"));
+        assert_eq!(cards[1].classification_id, plain);
+        assert!(!cards[1].is_series);
     }
 
     #[test]

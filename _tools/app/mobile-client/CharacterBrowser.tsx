@@ -24,7 +24,7 @@ import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc} from 
 import {pagePath,RequestGate} from './model';
 import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters} from './assetFilters';
-import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
+import {characterParent,characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import {FolderShelf} from './FolderCards';
 import {useLevelMotion} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
@@ -114,7 +114,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false,ratings}:{node:
   </button>;
 }
 
-export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,optionsHost,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,selection,onItems,moreRef,hiddenIds}:{search?:readonly AssetSearchName[];onSearch?(query?:string):void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** The host's view sheet receives the character scope's sort and filters. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void;
+export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,optionsHost,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,selection,onItems,moreRef,hiddenIds}:{classifications?:readonly import('./types').Classification[];onOpenFolder?(classificationId:string):void;search?:readonly AssetSearchName[];onSearch?(query?:string):void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** The host's view sheet receives the character scope's sort and filters. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void;
   /** Selection mode, as in the tablet's plain gallery (long press, then taps toggle). */hiddenIds?:ReadonlySet<string>;selection?:{ids:ReadonlySet<string>;onSelect(id:string):void;onToggle(id:string):void;onClear():void};
   /** The loaded items, for the host's selection bar and a viewer opened from here. */onItems?(items:Asset[]):void;
   /** Loads the next page; the host's viewer calls it near its end. */moreRef?:MutableRefObject<(()=>void)|null>}) {
@@ -140,7 +140,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   const indexGate=useRef(new RequestGate()),pageGate=useRef(new RequestGate()),moreGate=useRef(new RequestGate());
   const cache=useRef(new Map<string,Cached>()),morePending=useRef(false);
   const [filterHelpOpen,setFilterHelpOpen]=useState(false);
-  const latest=useRef({index,where,page,active,paused,committed,onInvalidSearch});latest.current={index,where,page,active,paused,committed,onInvalidSearch};
+  const latest=useRef({index,where,page,active,paused,committed,onInvalidSearch,classifications});latest.current={index,where,page,active,paused,committed,onInvalidSearch,classifications};
   // The filter set is part of the location, so it is already part of this key.
   const key=(revision:string,location:Location)=>`${revision}:${location.node}:${location.filter}:${filterKey(location.filters)}:${assetSearchSelectionKey(location.search)}`;
   const remember=useCallback(()=>{
@@ -225,7 +225,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
       // overview, so decline it and let the host restore the actual prior context.
       if(!drilled.current)return false;
       const node=s.index?.nodes.find(n=>n.id===s.where.node);
-      const parent=node?.parentId??null;
+      const parent=node&&s.index?characterParent(s.index,node,s.classifications):null;
       if(!parent&&appliedInitialNode.current)return false;
       // Stepping back up to the folder this boundary was opened with ends the drill-down, so
       // the next Back leaves the boundary instead of walking into a synthetic series parent.
@@ -392,17 +392,17 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   const galleryItems=(entering?[]:page?.items??(stale?lastPage.current!.items:[])).filter(item=>!hiddenIds?.has(item.id));
   const place=navigating&&lastPlace.current?lastPlace.current:where;
   const node=index?.nodes.find(n=>n.id===place.node);
-  const children=index?characterChildren(index,place.node):[];
+  const children=index?characterChildren(index,place.node,classifications):[];
   const scope=index?.scopes.find(s=>s.nodeId===place.node&&s.filter===place.filter);
   const ancestors:CharacterNode[]=[];
-  let parent=node?.parentId;
-  while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
+  let parent=node&&index?characterParent(index,node,classifications):null;
+  while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=characterParent(index,found,classifications);}
   const folderStrip=!!node&&node.kind!=='character';
   // Keep the containing shelf mounted while a character is open. Returning reuses its
   // decoded image elements and horizontal offset, rather than replaying blank cards.
   const shelfHidden=node?.kind==='character'&&!children.length;
   const shelfPlace=shelfHidden?[...ancestors].reverse().find(item=>item.kind!=='character')?.id??null:place.node;
-  const shelfChildren=index?characterChildren(index,shelfPlace):[];
+  const shelfChildren=index?characterChildren(index,shelfPlace,classifications):[];
   const foldable=folderStrip&&shelfChildren.length>0;
   const childCharacterCount=shelfChildren.filter(child=>child.kind!=='folder').length;
   const childFolderCount=shelfChildren.filter(child=>child.kind==='folder').length;
@@ -412,7 +412,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     <SegmentedControl<CharacterFilter> label="이미지 범위" options={SERIES_FILTERS.map(filter=>({value:filter,label:filter==='unclassified'?'미분류':'전체',count:scopeCount(filter)}))} value={place.filter} onChange={applyCharacterFilter}/>
     <IconButton label="미분류와 전체 설명" icon={InformationCircleIcon} onClick={()=>setFilterHelpOpen(true)}/>
   </div>;
-  const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
+  const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>child.kind==='folder'?onOpenFolder?.(child.sourceId):enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
   const overview=<>
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>다시 시도</Button></div>}
     {index&&!index.ready&&<EmptyState title="캐릭터 보기가 아직 공유되지 않았습니다" hint="PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다."/>}

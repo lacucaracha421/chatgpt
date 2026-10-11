@@ -2,6 +2,7 @@ import type {ReactNode} from 'react';
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import type {Asset} from './types';
+import type {CharacterIndex} from './characterModel';
 import type {HomeProps} from './Home';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>reason instanceof Error?reason.message:'connection failed',
@@ -49,6 +50,32 @@ const openAll=async()=>{fireEvent.click(await screen.findByRole('button',{name:/
 const openFolder=async(name:RegExp)=>{fireEvent.click(await screen.findByRole('button',{name}));await screen.findByText('tile-p1');};
 const openSort=()=>{if(!screen.queryByRole('dialog',{name:'보기'}))fireEvent.click(screen.getByRole('button',{name:'보기'}));};
 const sortOptions=()=>within(screen.getByRole('radiogroup',{name:'정렬'})).getAllByRole('radio').map(option=>option.textContent);
+
+it('opens 만화 › 밴드물 as a library folder with 봇치 and 걸밴크 series cards from today\'s publication',async()=>{
+  const revision='a'.repeat(64);
+  const node=(kind:'series'|'folder',id:string,name:string,parentId:string|null)=>({id:`${kind}:${id}`,kind,sourceId:id,seriesId:kind==='series'?id:'manga',parentId,name,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false});
+  const characters:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,publishedAt:'2026',nodes:[node('series','manga','만화',null),node('folder','band','밴드물','series:manga'),node('series','bocchi','봇치',null),node('series','gbc','걸밴크',null)],scopes:[]};
+  const classifications={items:[{id:'manga',name:'만화',parent_id:null,asset_count:0},{id:'band',name:'밴드물',parent_id:'manga',asset_count:0},{id:'bocchi',name:'봇치',parent_id:'band',asset_count:0},{id:'gbc',name:'걸밴크',parent_id:'band',asset_count:0}]};
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path==='/v1/library/characters')return characters;
+    if(path.startsWith('/v1/library/classifications'))return classifications;
+    if(path.startsWith('/v1/library/characters/assets'))return {...page([]),revision,totalCount:0,sourceCount:0};
+    if(path.startsWith('/v1/library/assets'))return page(['band-image']);
+    return server(undefined)(path);
+  });
+  render(<App/>);
+  fireEvent.click(await screen.findByRole('button',{name:/^만화/}));
+  fireEvent.click(await screen.findByRole('button',{name:/^밴드물/}));
+  const bocchi=await screen.findByRole('button',{name:/^봇치/});
+  const gbc=screen.getByRole('button',{name:/^걸밴크/});
+  expect(bocchi.querySelector('.character-glyph')).toBeTruthy();
+  expect(gbc.querySelector('.character-glyph')).toBeTruthy();
+  expect(screen.getByText('tile-band-image')).toBeTruthy();
+  expect(assetPaths().some(path=>params(path).get('classification_id')==='band')).toBe(true);
+  expect(mocks.api.mock.calls.some(([path])=>String(path).includes('node=folder%3Aband'))).toBe(false);
+  fireEvent.click(bocchi);
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('node=series%3Abocchi'))).toBe(true));
+});
 
 describe('folder list request',()=>{
   it('asks for the subtree counts and shows a folder card\'s whole subtree',async()=>{
