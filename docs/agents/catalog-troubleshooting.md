@@ -46,8 +46,9 @@ compares languages after removing `translated`, `rewrite`, `speechless`, `text_c
 and `textless_narrative`. No trailing-tag title stripping or general exact-title
 page-tolerance discovery is added in this step.
 
-The confident tier accepts exact or Korean-alternate title keys with positive page
-counts, a gap at most 2 and at most one tenth of the smaller count, equal categories
+The confident tier (v2 wording; v3 below drops the absolute cap) accepts exact or
+Korean-alternate title keys with positive page counts, a gap at most 2 and at most one
+tenth of the smaller count, equal categories
 1..=11, a shared creator and equal non-empty core language sets. Every eligible work
 pair is evaluated before edition-group deduplication; a confident pair takes precedence.
 Before an automatic confirmation, all members of both groups are checked for installment
@@ -88,6 +89,32 @@ bash scripts/cargo-test.sh -- -- catalog_review catalog_duplicate
 # server/lakomics-api, using the server virtual environment.
 python -m unittest tests.test_catalog_duplicates tests.test_catalog_duplicate_races
 ```
+
+## Duplicate editions: page tolerance (catalog-duplicates-v3)
+
+`catalog-duplicates-v3` (desktop `ALGORITHM`/`RULES`, server `ALGORITHM`, bumped in
+lockstep; a full re-compare and upload follows on the next sync) widens the page
+tolerance of step v2. A 2026-10-11 read-only preview judged 2,916 not-yet-merged
+candidate pairs with an LLM. Among pairs with no installment conflict and equal core
+languages, a gap of more than 2 pages but at most 10% of the shorter work was the same
+work in 256 of 267 cases and different in none; short works whose gap was at most 2 but
+above 10% had 12 "different" results; 10-25% had 5 "different"; larger gaps were worse.
+Decision (user, 2026-10-11): automatic merging goes up to 10%.
+
+* Candidate rule (`pair_match`, `match_works`): exact **and** Korean-alternate titles admit
+  a page gap of at most `floor(min(pages) / 10)` (was: exact titles equal pages only;
+  Korean-alternate gap at most 2 and 10%). Equal pages always pass. Every pair admitted
+  before is still admitted.
+* Confident rule (`duplicate_tier`, server `confident`): the same gap bound, and the
+  absolute cap of 2 is gone. Short works stay strict: 15 pages tolerate 1, under 10 pages
+  tolerate only equal pages. All other conditions and the group-level installment guard
+  are unchanged.
+* Contract: `pageGap` is 0..=100,000 (a tenth of the page-count bound; was 0..=2) and the
+  desktop sends the real gap. Deploy the server first: an older server rejects a
+  larger `pageGap`. An exact-title candidate now also carries its gap, and its
+  `reasonText` reads "... 페이지 수 차이 N쪽" when the gap is not zero.
+* Shared table `tests/fixtures/catalog_confident.json` gained the 40/43, 50/55, 50/56,
+  15/17, 5/5 and sequel 40/43 cases; both suites read it.
 
 ## CATALOG-003 — Independent Korean/Japanese ingestion
 

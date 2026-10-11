@@ -376,12 +376,12 @@ fn catalog_review_appended_translation_with_small_page_difference() {
     for (title, pages, expected) in [
         (translated.to_string(), 34, true),
         (translated.to_string(), 32, true),
-        (translated.to_string(), 35, false),
+        (translated.to_string(), 35, true),
+        (translated.to_string(), 36, false),
         (translated.replace("(C108)", "(C109)"), 34, false),
         (translated.replace("(Genshin Impact)", "(Other Series)"), 34, false),
         (translated.replace("[Korean]", "[Korean] [Digital]"), 34, false),
         (translated.replace("Tsukero! |", "Tsukero! 2 |"), 34, false),
-        (original.to_string(), 34, false),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let c = fixture(&dir.path().join("test.sqlite"));
@@ -400,7 +400,21 @@ fn catalog_review_appended_translation_with_small_page_difference() {
             assert!(generate(&c).unwrap().rows.is_empty());
         }
     }
-    // A two-page difference on a short work is not a small proportional change.
+    // v3: an exact title tolerates the same tenth of the smaller work (32 pages: 3).
+    for (pages, expected) in [(32, true), (34, true), (35, true), (36, false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let c = fixture(&dir.path().join("test.sqlite"));
+        c.execute("UPDATE catalog.Works SET Title=?1,TitleJpn=NULL,FileCount=32 WHERE Id=1", [original]).unwrap();
+        c.execute("UPDATE catalog.Works SET Title=?1,TitleJpn=NULL,FileCount=?2 WHERE Id=2", params![original, pages]).unwrap();
+        let page = generate(&c).unwrap();
+        assert_eq!(!page.rows.is_empty(), expected, "exact title, {pages}");
+        if expected && pages == 32 {
+            assert!(page.rows[0].evidence.reason.contains("페이지 수, 분류"));
+        } else if expected {
+            assert!(page.rows[0].evidence.reason.contains(&format!("페이지 수 차이 {}쪽", pages - 32)));
+        }
+    }
+    // A two-page difference on a short work is not a small proportional change (v3: a tenth of 10 pages is 1).
     let dir = tempfile::tempdir().unwrap();
     let c = fixture(&dir.path().join("test.sqlite"));
     c.execute("UPDATE catalog.Works SET Title=?1,TitleJpn=NULL,FileCount=10 WHERE Id=1", [original]).unwrap();

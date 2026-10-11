@@ -18,6 +18,8 @@ pub(crate) const MAX_TAGS: usize = 64;
 pub(crate) const MAX_TAG_CHARS: usize = 520;
 pub(crate) const MAX_TEXT_CHARS: usize = 8192;
 pub(crate) const MAX_COUNT: i64 = 1_000_000;
+/// Largest `pageGap` a candidate carries: a tenth of the largest page count (v3 rule).
+pub(crate) const MAX_PAGE_GAP: u64 = (MAX_COUNT / 10) as u64;
 /// Decision log page size (the server allows 1..=200).
 pub(crate) const PAGE_LIMIT: i64 = 100;
 pub(crate) const MAX_CURSOR: i64 = 9_007_199_254_740_991;
@@ -104,7 +106,7 @@ impl CandidateItem {
     pub(crate) fn valid(&self) -> bool {
         self.provider == PROVIDER
             && ["exactTitle", "koreanAlternateTitle"].contains(&self.reason.as_str())
-            && (0..=2).contains(&self.page_gap)
+            && (0..=MAX_PAGE_GAP as i64).contains(&self.page_gap)
             && valid_token(&self.algorithm)
             && self.left.work_id < self.right.work_id
             && self.left.valid()

@@ -53,7 +53,8 @@ from app_lifecycle import lifecycle
 
 PREFIX = "/v1/mobile-catalog/duplicates"
 PROVIDER = "kHentai"
-ALGORITHM = "catalog-duplicates-v2"  # catalog_review.rs ALGORITHM
+ALGORITHM = "catalog-duplicates-v3"  # catalog_review.rs ALGORITHM
+MAX_PAGE_GAP = 100_000  # a tenth of the 1,000,000 page-count bound; cloud/catalog_duplicates.rs
 MAX_CURSOR = 9_007_199_254_740_991
 MAX_BODY_BYTES = 8 * 1024 * 1024
 MAX_ITEMS = 5_000
@@ -324,13 +325,18 @@ def lang_core(languages):
     return set(languages) - {"translated", "rewrite", "speechless", "text_cleaned", "textless_narrative"}
 
 
+def tolerated_page_gap(a_pages, b_pages):
+    """A tenth of the smaller page count, rounded down (catalog_review.rs tolerated_page_gap)."""
+    return max(min(a_pages, b_pages), 0) // 10
+
+
 def confident(a, b):
     """PC duplicate_tier, independent of discovery and current edition membership."""
     languages = lang_core(a["languages"])
     gap = abs(a["pages"] - b["pages"])
     return bool(set(title_keys(a["title"], a["titleJpn"])) & set(title_keys(b["title"], b["titleJpn"]))
                 and a["pages"] > 0 and b["pages"] > 0
-                and gap <= 2 and gap <= min(a["pages"], b["pages"]) // 10
+                and gap <= tolerated_page_gap(a["pages"], b["pages"])
                 and 1 <= a["category"] <= 11 and a["category"] == b["category"]
                 and languages and languages == lang_core(b["languages"])
                 and set(a["creators"]) & set(b["creators"])
@@ -341,8 +347,8 @@ def match_works(a, b):
     """``(reason, page_gap)`` when two works are a duplicate-edition candidate, else None.
 
     Same checks, in the same sense, as the pair loop of `generate` in catalog_review.rs:
-    distinct groups, positive page counts, equal pages (or, for a Korean-alternate
-    title, a gap of at most 2 pages and at most 10% of the smaller count), category
+    distinct groups, positive page counts, a page gap of at most 10% of the smaller
+    count rounded down (exact or Korean-alternate title; equal pages always pass), category
     1..=11 and equal, non-empty language lists with equal cores, a shared
     `artist:`/`group:` tag, and no installment conflict. Differences:
 
@@ -357,19 +363,20 @@ def match_works(a, b):
         return None
     exact = exact_title_match(a, b)
     gap = abs(a["pages"] - b["pages"])
-    pages_match = a["pages"] == b["pages"] or (
-        not exact and gap <= 2 and gap <= min(a["pages"], b["pages"]) // 10)
+    pages_match = gap <= tolerated_page_gap(a["pages"], b["pages"])
     if (not pages_match or not 1 <= a["category"] <= 11 or a["category"] != b["category"]
             or not a["languages"] or lang_core(a["languages"]) != lang_core(b["languages"])
             or not set(a["creators"]) & set(b["creators"]) or sequel_conflict(a, b)):
         return None
-    return ("exactTitle", 0) if exact else ("koreanAlternateTitle", gap)
+    return ("exactTitle" if exact else "koreanAlternateTitle", gap)
 
 
 def reason_text(reason, page_gap):
     """The PC's Korean evidence sentence for a reason code."""
-    if reason == "exactTitle":
+    if reason == "exactTitle" and page_gap == 0:
         return "제목 일치 · 작가/그룹 중복 · 페이지 수, 분류, 언어 일치"
+    if reason == "exactTitle":
+        return f"제목 일치 · 작가/그룹 중복 · 분류, 언어 일치 · 페이지 수 차이 {page_gap}쪽"
     return f"덧붙인 한국어 제목 제외 시 제목 일치 · 작가/그룹 중복 · 분류, 언어 일치 · 페이지 수 차이 {page_gap}쪽"
 
 
@@ -745,7 +752,7 @@ class EvidenceWork(Strict):
 class Candidate(Strict):
     provider: Provider
     reason: Reason
-    pageGap: int = Field(ge=0, le=2)
+    pageGap: int = Field(ge=0, le=MAX_PAGE_GAP)
     algorithm: Token
     left: EvidenceWork
     right: EvidenceWork

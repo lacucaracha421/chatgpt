@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::LazyLock;
 
-pub(super) const ALGORITHM: &str = "catalog-duplicates-v2";
+pub(super) const ALGORITHM: &str = "catalog-duplicates-v3";
 #[cfg(test)]
 const WINDOW: usize = 500;
 pub(super) const BUCKET: usize = 8;
@@ -611,8 +611,7 @@ fn anchor(c: &Connection, group: &str) -> Result<String, LibraryError> {
 pub(super) fn pair_match(a: &ReviewWork, b: &ReviewWork) -> Option<(bool, u64)> {
     let exact_title = exact_title_match(a, b);
     let page_gap = a.pages.abs_diff(b.pages);
-    let pages_match = a.pages == b.pages
-        || (!exact_title && page_gap <= 2 && page_gap <= a.pages.min(b.pages).max(0) as u64 / 10);
+    let pages_match = page_gap <= tolerated_page_gap(a.pages, b.pages);
     if a.group_id == b.group_id
         || a.pages <= 0
         || b.pages <= 0
@@ -629,9 +628,17 @@ pub(super) fn pair_match(a: &ReviewWork, b: &ReviewWork) -> Option<(bool, u64)> 
     Some((exact_title, page_gap))
 }
 
+/// Page gap two editions of one work may have: a tenth of the smaller count, rounded
+/// down (equal pages always pass; counts at or below zero tolerate nothing).
+pub(super) fn tolerated_page_gap(a: i64, b: i64) -> u64 {
+    a.min(b).max(0) as u64 / 10
+}
+
 pub(super) fn reason_text(exact_title: bool, page_gap: u64) -> String {
-    if exact_title {
+    if exact_title && page_gap == 0 {
         "제목 일치 · 작가/그룹 중복 · 페이지 수, 분류, 언어 일치".into()
+    } else if exact_title {
+        format!("제목 일치 · 작가/그룹 중복 · 분류, 언어 일치 · 페이지 수 차이 {page_gap}쪽")
     } else {
         format!("덧붙인 한국어 제목 제외 시 제목 일치 · 작가/그룹 중복 · 분류, 언어 일치 · 페이지 수 차이 {page_gap}쪽")
     }

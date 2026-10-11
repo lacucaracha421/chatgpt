@@ -129,7 +129,7 @@ class RulePortTests(unittest.TestCase):
     def test_match_rules(self):
         a = evidence(work(1, "Original Long Title"))
         self.assertEqual(dup.match_works(a, evidence(work(2, "original  long title"))), ("exactTitle", 0))
-        self.assertIsNone(dup.match_works(a, evidence(work(2, "Original Long Title", pages=21))))
+        self.assertEqual(dup.match_works(a, evidence(work(2, "Original Long Title", pages=21))), ("exactTitle", 1))
         korean = evidence(work(2, "Original Long Title | 한국어 제목", pages=21))
         self.assertEqual(dup.match_works(a, korean), ("koreanAlternateTitle", 1))
         self.assertIsNone(dup.match_works(a, evidence(work(2, "Original Long Title | 한국어 제목", pages=23))))
@@ -152,6 +152,29 @@ class RulePortTests(unittest.TestCase):
         a["pages"], b["pages"] = 20, 22
         b["languages"].append("japanese")
         self.assertIsNone(dup.match_works(a, b))
+
+
+    def test_v3_page_tolerance_is_a_tenth_of_the_smaller_work(self):
+        self.assertEqual(dup.ALGORITHM, "catalog-duplicates-v3")
+        for pages, other, reason, candidate in (
+                (40, 43, "exactTitle", True), (50, 55, "exactTitle", True), (50, 56, "exactTitle", False),
+                (15, 16, "exactTitle", True), (15, 17, "exactTitle", False), (5, 5, "exactTitle", True),
+                (9, 10, "exactTitle", False), (50, 55, "koreanAlternateTitle", True),
+                (50, 56, "koreanAlternateTitle", False)):
+            with self.subTest(pages=pages, other=other, reason=reason):
+                title = "Original Long Title | 한국어 제목" if reason == "koreanAlternateTitle" else "Original Long Title"
+                a = evidence(work(1, "Original Long Title", pages=pages))
+                b = evidence(work(2, title, pages=other))
+                expected = (reason, abs(pages - other)) if candidate else None
+                self.assertEqual(dup.match_works(a, b), expected)
+                self.assertEqual(dup.match_works(b, a), expected)
+                self.assertEqual(dup.confident(a, b), candidate)
+
+    def test_reason_text_reads_for_larger_gaps(self):
+        self.assertEqual(dup.reason_text("exactTitle", 0), "제목 일치 · 작가/그룹 중복 · 페이지 수, 분류, 언어 일치")
+        self.assertIn("페이지 수 차이 5쪽", dup.reason_text("exactTitle", 5))
+        self.assertNotIn("페이지 수, 분류", dup.reason_text("exactTitle", 5))
+        self.assertIn("페이지 수 차이 12쪽", dup.reason_text("koreanAlternateTitle", 12))
 
 
 class AutomaticStorageTests(unittest.TestCase):
@@ -356,6 +379,15 @@ class ApiTests(Fixture):
 
     def code(self, reply):
         return reply.json()["detail"]["code"]
+
+    def test_publish_accepts_v3_page_gaps_and_still_bounds_them(self):
+        a, b = work(1, "Original Long Title", pages=50), work(2, "Original Long Title", pages=55)
+        self.assertEqual(self.publish([self.item(a, b, gap=5)]).status_code, 200)
+        [row] = self.listing()["items"]
+        self.assertEqual((row["pageGap"], row["algorithm"]), (5, "catalog-duplicates-v3"))
+        self.assertIn("페이지 수 차이 5쪽", row["reasonText"])
+        self.assertEqual(self.publish([self.item(a, b, gap=dup.MAX_PAGE_GAP)], generation="gen-2").status_code, 200)
+        self.assertEqual(self.publish([self.item(a, b, gap=dup.MAX_PAGE_GAP + 1)], generation="gen-3").status_code, 422)
 
     def test_refresh_records_automatic_log_and_mobile_can_undo(self):
         self.add(work(1, "Original Long Title"), work(2, "Original Long Title"))

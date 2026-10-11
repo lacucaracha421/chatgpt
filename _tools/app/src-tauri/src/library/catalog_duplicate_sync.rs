@@ -45,7 +45,7 @@ use super::{
 };
 use crate::cloud::catalog_duplicates::{
     candidate_id, CandidateItem, CommandOutcome, DecisionCommand, DecisionEntry, EvidenceWork,
-    Publication, CHUNK_ITEMS, MAX_CHUNK_BYTES, PAGE_LIMIT, PROVIDER,
+    Publication, CHUNK_ITEMS, MAX_CHUNK_BYTES, MAX_PAGE_GAP, PAGE_LIMIT, PROVIDER,
 };
 use crate::cloud::client::CloudClient;
 use crate::library::credential;
@@ -58,7 +58,7 @@ pub(super) const AUTO_DECISIONS: i64 = 5_000;
 /// Automatic merge reports sent per pass.
 const REPORTS_PER_PASS: usize = 500;
 /// Part of the fingerprint: a rule or tier change compares and uploads again.
-const RULES: &str = "catalog-duplicates-v2";
+const RULES: &str = "catalog-duplicates-v3";
 
 /// How sure the PC is that a candidate pair is the same work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,8 +77,7 @@ pub(crate) fn duplicate_tier(a: &ReviewWork, b: &ReviewWork) -> Tier {
         .is_disjoint(&title_keys(&b.title, b.title_jpn.as_deref()))
         && a.pages > 0
         && b.pages > 0
-        && a.pages.abs_diff(b.pages) <= 2
-        && a.pages.abs_diff(b.pages) <= a.pages.min(b.pages) as u64 / 10
+        && a.pages.abs_diff(b.pages) <= catalog_review::tolerated_page_gap(a.pages, b.pages)
         && (1..=11).contains(&a.category)
         && a.category == b.category
         && !languages.is_empty()
@@ -864,7 +863,7 @@ pub(super) fn candidate_items(
                 "koreanAlternateTitle"
             }
             .into(),
-            page_gap: gap.min(3) as i64,
+            page_gap: gap.min(MAX_PAGE_GAP) as i64,
             algorithm: ALGORITHM.into(),
             left: evidence_work(&a),
             right: evidence_work(&b),

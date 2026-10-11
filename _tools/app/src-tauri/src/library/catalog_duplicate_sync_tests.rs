@@ -213,6 +213,47 @@ fn catalog_duplicate_k_tier_page_gap_and_language_core() {
 }
 
 #[test]
+fn catalog_duplicate_v3_page_tolerance_is_a_tenth_of_the_smaller_work() {
+    assert_eq!(ALGORITHM, "catalog-duplicates-v3");
+    for (pages, other, korean, candidate) in [
+        (40, 43, false, true),
+        (50, 55, false, true),
+        (50, 56, false, false),
+        (15, 16, false, true),
+        (15, 17, false, false),
+        (5, 5, false, true),
+        (9, 10, false, false),
+        (50, 55, true, true),
+        (50, 56, true, false),
+    ] {
+        let a = rw("1", "Original long title", pages, &["artist:kim"]);
+        let title = if korean {
+            "Original long title | 한국어 제목"
+        } else {
+            "Original long title"
+        };
+        let b = rw("2", title, other, &["artist:kim"]);
+        let expected = if candidate {
+            Tier::Confident
+        } else {
+            Tier::Uncertain
+        };
+        for (x, y) in [(&a, &b), (&b, &a)] {
+            assert_eq!(duplicate_tier(x, y), expected, "{pages} vs {other}");
+            assert_eq!(
+                catalog_review::pair_match(x, y),
+                candidate.then(|| (!korean, pages.abs_diff(other))),
+                "{pages} vs {other}"
+            );
+        }
+    }
+    assert!(catalog_review::reason_text(true, 0).contains("페이지 수, 분류"));
+    let text = catalog_review::reason_text(true, 5);
+    assert!(text.contains("페이지 수 차이 5쪽") && !text.contains("페이지 수, 분류"));
+    assert!(catalog_review::reason_text(false, 12).contains("페이지 수 차이 12쪽"));
+}
+
+#[test]
 fn catalog_duplicate_group_guard_blocks_sequel_chain_in_one_pass_and_existing_group() {
     for existing in [false, true] {
         let (_dir, c) = fixture();
@@ -803,8 +844,14 @@ fn catalog_duplicate_upload_chunks_share_one_generation_and_end_final() {
     assert!(empty[0].is_final && empty[0].items.is_empty());
     // Items the server would refuse are never built.
     let mut bad = item(1, 2);
-    bad.page_gap = 3;
+    bad.page_gap = 100_001;
     assert!(!bad.valid());
+    let mut bad = item(1, 2);
+    bad.page_gap = -1;
+    assert!(!bad.valid());
+    let mut wide = item(1, 2);
+    wide.page_gap = 100_000;
+    assert!(wide.valid());
     let mut bad = item(1, 2);
     bad.left.creators = vec!["x".repeat(521)];
     assert!(!bad.valid());
@@ -1191,11 +1238,19 @@ fn the_decision_log_is_read_only_when_its_shared_head_moved() {
         .unwrap();
     let mut moved = logs(5, 0);
     moved.catalog_duplicate_decisions = Some(7);
-    observe(endpoint, &status_with(Some(moved)), unix_now(), Source::Watcher);
+    observe(
+        endpoint,
+        &status_with(Some(moved)),
+        unix_now(),
+        Source::Watcher,
+    );
     library
         .connection()
         .unwrap()
-        .execute("UPDATE catalog_duplicate_sync SET last_polled=0 WHERE endpoint=?1", [endpoint])
+        .execute(
+            "UPDATE catalog_duplicate_sync SET last_polled=0 WHERE endpoint=?1",
+            [endpoint],
+        )
         .unwrap();
     assert!(library
         .sync_catalog_duplicates_with(&dead, "publisher", Some("client"), endpoint)
