@@ -36,8 +36,10 @@ export const characterHubApi = {
   seriesFolders: (seriesId: string): Promise<SeriesFolder[]> => invoke("character_series_folders", { seriesId }),
   series: (): Promise<CharacterSeries[]> => invoke("character_series"),
   groups: async (seriesId: string): Promise<CharacterGroup[]> => (await invoke<Omit<CharacterGroup, "seriesId">[]>("character_groups", { seriesId })).map(group => ({ ...group, seriesId })),
-  /** Every series' groups in one call, ordered by series, then name. */
+  /** Every series' groups in one call, ordered by series, then the person's order (see `reorderGroups`). */
   allGroups: (): Promise<CharacterGroup[]> => invoke("all_character_groups"),
+  /** Stores the order of one series' groups: every group of the series, once each. */
+  reorderGroups: (seriesId: string, groupIds: string[]): Promise<void> => invoke("reorder_character_groups", { seriesId, groupIds }),
   saveSeries: (request: CharacterSeries): Promise<CharacterSeries> => invoke("save_character_series", { request }),
   browse: ({ view, ...query }: CharacterBrowseQuery): Promise<CharacterBrowsePage> => invoke("browse_character_assets", view ? { query, view } : { query }),
   createManualCharacter: (request: ManualCharacterRequest): Promise<import("./api").CharacterTarget> => invoke("create_manual_character", { request }),

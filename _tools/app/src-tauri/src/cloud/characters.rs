@@ -296,7 +296,7 @@ pub(crate) fn snapshot_from_connection_with_roles(
         [],
         |r| r.get(0),
     )?;
-    let navigation_order =
+    let mut navigation_order: Vec<String> =
         serde_json::from_str(&order).map_err(|_| LibraryError::InvalidCloudResponse)?;
     let mut nodes = Vec::new();
     let series = tx.prepare("SELECT s.classification_id,c.name,(SELECT id FROM assets WHERE id=s.hero_asset_id AND status='normal') FROM character_series s JOIN classification_entries c ON c.id=s.classification_id ORDER BY c.name COLLATE NOCASE,c.id")?
@@ -308,7 +308,7 @@ pub(crate) fn snapshot_from_connection_with_roles(
         series_node.hero_asset_id = hero;
         nodes.push(series_node);
         let groups = tx
-            .prepare("SELECT id,name FROM character_groups WHERE series_id=?1 ORDER BY name,id")?
+            .prepare("SELECT id,name FROM character_groups WHERE series_id=?1 ORDER BY position IS NULL,position,name,id")?
             .query_map([&id], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })?
@@ -341,6 +341,15 @@ pub(crate) fn snapshot_from_connection_with_roles(
         nodes.extend(folders);
         if nodes.len() > 10_000 {
             return Err(LibraryError::InvalidCloudResponse);
+        }
+    }
+    // The person's order of each series' groups travels as their node ids (`group:<id>`), after
+    // the folder order the PC sends; nodes are already in that order within a series. A reader
+    // that does not know group entries ignores them.
+    let mut listed = std::collections::HashSet::<String>::from_iter(navigation_order.iter().cloned());
+    for n in nodes.iter().filter(|n| n.kind == "group") {
+        if navigation_order.len() < 20_000 && listed.insert(n.id.clone()) {
+            navigation_order.push(n.id.clone());
         }
     }
     let mut scopes = Vec::new();

@@ -162,6 +162,8 @@ function renderSidebar(
           onChanged={onChanged}
           onClearAssetSelection={props.onClearAssetSelection ?? onClearAssetSelection}
           onEditGroup={props.onEditGroup}
+          onReorderGroups={props.onReorderGroups}
+          onPointerDragStart={props.onPointerDragStart}
         />
       </LibraryProvider>
     );
@@ -296,6 +298,63 @@ describe("ClassificationSidebar", () => {
       fireEvent.contextMenu(screen.getByRole("treeitem", { name: "가방팟" }));
       await user.click(screen.getByRole("menuitem", { name: "그룹 편집" }));
       expect(onEditGroup).toHaveBeenCalledWith(group);
+    });
+
+    describe("reordering", () => {
+      const second = { ...group, id: "g2", name: "하나", targetIds: [], extrasTargetId: "g2-extras" };
+      const third = { ...group, id: "g3", name: "셋", targetIds: [], extrasTargetId: "g3-extras" };
+      const three = { ...options, characterGroups: [group, second, third] };
+      const labels = () => screen.getAllByRole("menuitem").map(item => item.textContent);
+
+      it("offers moving a group up or down only where there is room, among its own series' groups", async () => {
+        const user = userEvent.setup();
+        const onReorderGroups = vi.fn();
+        renderSidebar(countedGateway(), { ...three, onReorderGroups });
+        fireEvent.contextMenu(screen.getByRole("treeitem", { name: "가방팟" }));
+        expect(labels()).toEqual(["그룹 열기", "아래로 이동"]);
+        await user.keyboard("{Escape}");
+        fireEvent.contextMenu(screen.getByRole("treeitem", { name: "하나" }));
+        expect(labels()).toEqual(["그룹 열기", "위로 이동", "아래로 이동"]);
+        await user.click(screen.getByRole("menuitem", { name: "위로 이동" }));
+        expect(onReorderGroups).toHaveBeenCalledWith("work", ["g2", "g1", "g3"]);
+      });
+
+      it("moves the focused group row with Alt+arrow keys and leaves the other arrows alone", () => {
+        const onReorderGroups = vi.fn();
+        renderSidebar(countedGateway(), { ...three, onReorderGroups });
+        const row = screen.getByRole("treeitem", { name: "하나" });
+        fireEvent.keyDown(row, { key: "ArrowDown", altKey: true });
+        expect(onReorderGroups).toHaveBeenLastCalledWith("work", ["g1", "g3", "g2"]);
+        fireEvent.keyDown(row, { key: "ArrowUp", altKey: true });
+        expect(onReorderGroups).toHaveBeenLastCalledWith("work", ["g2", "g1", "g3"]);
+        onReorderGroups.mockClear();
+        fireEvent.keyDown(screen.getByRole("treeitem", { name: "셋" }), { key: "ArrowDown", altKey: true });
+        fireEvent.keyDown(row, { key: "ArrowDown" });
+        expect(onReorderGroups).not.toHaveBeenCalled();
+      });
+
+      it("starts a group drag from the row, but only when the owner can store an order", () => {
+        const onPointerDragStart = vi.fn();
+        renderSidebar(countedGateway(), { ...three, onPointerDragStart });
+        fireEvent.pointerDown(screen.getByRole("treeitem", { name: "하나" }), { button: 0 });
+        expect(onPointerDragStart).not.toHaveBeenCalled();
+        cleanup();
+        renderSidebar(countedGateway(), { ...three, onPointerDragStart, onReorderGroups: vi.fn() });
+        fireEvent.pointerDown(screen.getByRole("treeitem", { name: "하나" }), { button: 0 });
+        expect(onPointerDragStart).toHaveBeenCalledWith({ kind: "character-group", groupId: "g2", seriesId: "work" }, expect.anything());
+        // A folder row still drags as a folder.
+        fireEvent.pointerDown(screen.getByRole("treeitem", { name: "Arona" }), { button: 0 });
+        expect(onPointerDragStart).toHaveBeenLastCalledWith({ kind: "classification", entryId: "tag" }, expect.anything());
+      });
+
+      it("marks the drop place on the group row only for a group drop target, as folder rows do", () => {
+        renderSidebar(countedGateway(), { ...three, dragTarget: { kind: "character-group", entryId: "g2", position: "after", valid: true } });
+        const row = screen.getByRole("treeitem", { name: "하나" });
+        expect(row).toHaveAttribute("data-drop-state", "valid");
+        expect(row).toHaveAttribute("data-drop-position", "after");
+        expect(row).toHaveAttribute("data-series-id", "work");
+        expect(screen.getByRole("treeitem", { name: "가방팟" })).not.toHaveAttribute("data-drop-state");
+      });
     });
 
     it("leaves out a group whose series is not in the tree", () => {

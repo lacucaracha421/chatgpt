@@ -1048,6 +1048,21 @@ pub async fn all_character_groups(
         .map_err(|_| super::background_task_error())?
         .map_err(Into::into)
 }
+/// Stores the order of one series' character groups (every group of the series, once each).
+#[tauri::command]
+pub async fn reorder_character_groups(
+    series_id: String,
+    group_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.reorder_character_groups(&series_id, &group_ids)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
 #[tauri::command]
 pub async fn save_character_group(
     request: crate::library::character_groups::GroupDraft,

@@ -56,7 +56,10 @@ export function characterPath(node:string,filter:CharacterFilter,revision:string
 export function characterChildren(index:CharacterIndex,node:string|null,classifications:readonly Classification[]=[]) {
   // 그룹 → 그룹 밖 캐릭터 → 기타 → 안쪽 시리즈 → 폴더, as on the PC; the server's order holds within each kind.
   const rank=(n:CharacterNode)=>n.kind==='group'?0:n.kind==='character'?(isExtrasNode(n)?2:1):n.kind==='series'?3:4;
-  return index.nodes.filter(n=>characterParent(index,n,classifications)===node).sort((a,b)=>rank(a)-rank(b));
+  // Groups follow the order the PC published (`group:<id>` entries of navigationOrder); a snapshot without them keeps the server's order.
+  const order=new Map((index.navigationOrder??[]).map((id,i)=>[id,i]));
+  const place=(n:CharacterNode)=>n.kind==='group'?order.get(n.id)??Number.MAX_SAFE_INTEGER:0;
+  return index.nodes.filter(n=>characterParent(index,n,classifications)===node).sort((a,b)=>rank(a)-rank(b)||place(a)-place(b));
 }
 /**
  * The 기타 that stands for a group with no member character (it is the group's only child), or

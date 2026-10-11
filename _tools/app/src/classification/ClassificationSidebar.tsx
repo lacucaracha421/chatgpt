@@ -20,6 +20,7 @@ import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 import type { CharacterTarget } from "../characters/api";
 import type { CharacterGroup } from "../characters/hubApi";
+import { steppedGroupIds } from "../characters/groupOrder";
 import "./ClassificationSidebar.css";
 
 type ClassificationSidebarProps = {
@@ -50,6 +51,8 @@ type ClassificationSidebarProps = {
   onCharactersChanged?: () => void;
   /** 그룹 편집 on a group row: the owner opens the group's editor (the series screen owns the dialog). */
   onEditGroup?: (group: CharacterGroup) => void;
+  /** Stores a new order of one series' groups (every group of the series): the owner shows it at once and reverts it when storing fails. */
+  onReorderGroups?: (seriesId: string, groupIds: string[]) => void;
   dragTarget?: ClassificationDropTarget | null;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
@@ -99,6 +102,7 @@ export function ClassificationSidebar({
   onChanged,
   onAlbumsChanged = onChanged,
   onEditGroup,
+  onReorderGroups,
   onExpandedIdsChange,
   onExpandedAlbumIdsChange = () => undefined,
   onSidebarWidthChange,
@@ -404,6 +408,17 @@ export function ClassificationSidebar({
     }
   }
 
+  /** The keyboard and menu way to reorder: one place up or down among the series' groups. */
+  function moveGroup(groupId: string, step: -1 | 1) {
+    const group = visibleGroups.find(item => item.id === groupId);
+    const ids = group ? steppedGroupIds(visibleGroups, group.seriesId, groupId, step) : null;
+    if (group && ids) onReorderGroups?.(group.seriesId, ids);
+  }
+  function canMoveGroup(groupId: string, step: -1 | 1) {
+    const group = visibleGroups.find(item => item.id === groupId);
+    return Boolean(onReorderGroups && group && steppedGroupIds(visibleGroups, group.seriesId, groupId, step));
+  }
+
   function handleTreeKeyDown(
     event: React.KeyboardEvent<HTMLDivElement>,
     node: SidebarTreeNode,
@@ -412,6 +427,11 @@ export function ClassificationSidebar({
     const scopedExpandedIds = node.entry.treeKind === "album" ? expandedAlbumIds : expandedIds;
     const index = scopedVisibleNodes.indexOf(node);
     const parentId = node.entry.parentId;
+    if (event.altKey && !event.ctrlKey && !event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown") && node.entry.characterGroupId) {
+      event.preventDefault();
+      moveGroup(node.entry.characterGroupId, event.key === "ArrowUp" ? -1 : 1);
+      return;
+    }
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -539,6 +559,8 @@ export function ClassificationSidebar({
               view={view}
               selectedGroupId={selectedGroup ? selectedGroupId : null}
               onEditGroup={onEditGroup ? (groupId) => { const group = visibleGroups.find(item => item.id === groupId); if (group) onEditGroup(group); } : undefined}
+              onMoveGroup={onReorderGroups ? moveGroup : undefined}
+              canMoveGroup={canMoveGroup}
               expandedIds={expandedIds}
               pinnedIds={pinnedIds}
               onTogglePin={togglePin}
@@ -692,7 +714,7 @@ function QuickViewButton({ icon, label, count, onClick, selected }: { icon: Reac
   );
 }
 
-function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, selectedGroupId = null, onEditGroup, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, selectedGroupId = null, onEditGroup, onMoveGroup, canMoveGroup, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
   pinnedIds?: string[];
   onTogglePin?: (entry: SidebarTreeEntry) => void;
   activeRowId: string | null;
@@ -719,6 +741,9 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   /** The group whose row is selected; its series row is then not selected itself. */
   selectedGroupId?: string | null;
   onEditGroup?: (groupId: string) => void;
+  /** One place up or down among the series' groups (the keyboard and menu alternative to dragging a group row). */
+  onMoveGroup?: (groupId: string, step: -1 | 1) => void;
+  canMoveGroup?: (groupId: string, step: -1 | 1) => boolean;
   dragTarget?: ClassificationDropTarget | null;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
@@ -738,6 +763,9 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
       ? selectedGroupId === node.entry.characterGroupId
       : view.kind === "classification" && view.classificationId === node.entry.id && !selectedGroupId;
   const virtualEntry = Boolean(node.entry.characterGroupId);
+  const dropHere = virtualEntry
+    ? dragTarget?.kind === "character-group" && dragTarget.entryId === node.entry.characterGroupId
+    : dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id;
   const editingName = inlineEdit?.type === "rename" && inlineEdit.entry.id === node.entry.id;
   const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
   const originalsRoot = isOriginalsRoot(node.entry);
@@ -755,6 +783,8 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
       <ContextMenu items={virtualEntry ? [
         { id: "open-group", label: "그룹 열기", onSelect: () => onViewChange(treeEntryView(node.entry)) },
         ...(onEditGroup ? [{ id: "edit-group", label: "그룹 편집", onSelect: () => onEditGroup(node.entry.characterGroupId!) }] : []),
+        ...(onMoveGroup && canMoveGroup?.(node.entry.characterGroupId!, -1) ? [{ id: "move-group-up", label: "위로 이동", onSelect: () => onMoveGroup(node.entry.characterGroupId!, -1) }] : []),
+        ...(onMoveGroup && canMoveGroup?.(node.entry.characterGroupId!, 1) ? [{ id: "move-group-down", label: "아래로 이동", onSelect: () => onMoveGroup(node.entry.characterGroupId!, 1) }] : []),
       ] : actions}>
         <div
           ref={(element) => {
@@ -764,9 +794,10 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           className="classification-sidebar__tree-row"
           data-classification-id={node.entry.treeKind === "classification" && !virtualEntry ? node.entry.id : undefined}
           data-character-group-id={node.entry.characterGroupId}
+          data-series-id={node.entry.characterGroupId ? node.entry.seriesId : undefined}
           data-album-id={node.entry.treeKind === "album" ? node.entry.id : undefined}
-          data-drop-state={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
-          data-drop-position={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? dragTarget.position : undefined}
+          data-drop-state={dragTarget && dropHere ? (dragTarget.valid ? "valid" : "invalid") : undefined}
+          data-drop-position={dragTarget && dropHere ? dragTarget.position : undefined}
           role="treeitem"
           aria-label={node.entry.name}
           aria-selected={selected}
@@ -789,7 +820,11 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
             }
             onRowKeyDown(event, node);
           }}
-          onPointerDown={(event) => { if (!virtualEntry && !originalsRoot && event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: node.entry.treeKind, entryId: node.entry.id }, event); }}
+          onPointerDown={(event) => {
+            if (originalsRoot || event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+            if (!virtualEntry) onPointerDragStart?.({ kind: node.entry.treeKind, entryId: node.entry.id }, event);
+            else if (onMoveGroup && node.entry.seriesId) onPointerDragStart?.({ kind: "character-group", groupId: node.entry.characterGroupId!, seriesId: node.entry.seriesId }, event);
+          }}
           onPointerMove={onPointerDragMove}
           onPointerUp={onPointerDragEnd}
           onPointerCancel={onPointerDragCancel}
@@ -825,7 +860,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
               : "var(--color-sidebar-connector)",
           } as CSSProperties}
         >
-          {revealed.current && node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} selectedGroupId={selectedGroupId} onEditGroup={onEditGroup} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+          {revealed.current && node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} selectedGroupId={selectedGroupId} onEditGroup={onEditGroup} onMoveGroup={onMoveGroup} canMoveGroup={canMoveGroup} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>
       </div>}

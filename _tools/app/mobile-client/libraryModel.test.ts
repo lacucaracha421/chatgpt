@@ -65,3 +65,14 @@ it('lists a series group before its arranged folders in the classification list'
  const entries=mergeLibraryEntries(folders,{...characters,navigationOrder:['s','f1','f2']});
  expect(entries.filter(e=>e.parent_id==='s').map(e=>e.id)).toEqual(['character-group:g','f1','f2']);
 });
+it('lists a series\' groups in the published group order, and by name for a snapshot without group entries',()=>{
+ const withGroups={...characters,nodes:[characters.nodes[0],characterNode('group','h','Hares','series:s'),characterNode('group','g','Group','series:s'),characterNode('group','i','Interns','series:s')]};
+ const folders=[{id:'s',name:'Series',parent_id:null,asset_count:9},{id:'f1',name:'Zeta',parent_id:'s',asset_count:1}];
+ const under=(index:CharacterIndex)=>mergeLibraryEntries(folders,index).filter(e=>e.parent_id==='s').map(e=>e.id);
+ // Old snapshot: groups first, by name, then the folders.
+ expect(under({...withGroups,navigationOrder:['s','f1']})).toEqual(['character-group:g','character-group:h','character-group:i','f1']);
+ // New snapshot: the PC's group order, still before the folders; other entries of the order are untouched.
+ expect(under({...withGroups,navigationOrder:['s','f1','group:i','group:g','group:h']})).toEqual(['character-group:i','character-group:g','character-group:h','f1']);
+ // A group the order does not list yet follows the listed ones.
+ expect(under({...withGroups,navigationOrder:['group:i','group:h']})).toEqual(['character-group:i','character-group:h','character-group:g','f1']);
+});

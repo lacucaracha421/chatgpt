@@ -374,8 +374,13 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "character_incremental_status": return { running: true, workActive: false, paused: false, automationEnabled: true, broadFolderEnabled: false, completed: 300, confirmed: 84, definitionRevision: 0, seriesRevisions: {}, historyRefreshActive: false, persistentError: null, activeWork: null, historyRefreshes: [] };
     case "list_character_targets": return previewCharacterTargets;
     case "character_series": return [{ classificationId: PREVIEW_CHARACTER_SERIES_ID, heroAssetId: "asset-005", autoClassify: true }];
-    case "all_character_groups": return previewCharacterGroups.map(({ seriesId: _seriesId, ...group }) => ({ ...group, seriesId: PREVIEW_CHARACTER_SERIES_ID }));
-    case "character_groups": return previewCharacterGroups.map(({ seriesId: _seriesId, ...group }) => group);
+    case "all_character_groups": return orderedPreviewGroups().map(({ seriesId: _seriesId, ...group }) => ({ ...group, seriesId: PREVIEW_CHARACTER_SERIES_ID }));
+    case "character_groups": return orderedPreviewGroups().map(({ seriesId: _seriesId, ...group }) => group);
+    case "reorder_character_groups": {
+      if (new URLSearchParams(window.location.search).get("groupReorder") === "fail") throw "캐릭터 설정이 바뀌었습니다. 새로고침 후 다시 시도해 주세요.";
+      previewGroupOrder = (args.groupIds as string[] | undefined) ?? previewGroupOrder;
+      return null;
+    }
     case "character_series_folders":
     case "character_suggestions":
     case "ignored_character_suggestions":
@@ -407,6 +412,13 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "list_metadata_backups": return [{ id: "backup-20260929", createdAt: "2026-09-29T02:00:00.000Z", byteSize: 1_240_000 }];
     default: return emptyCommand(command);
   }
+}
+
+/** The order a person gave the groups in this preview session (the fixtures list them by their own order until then). */
+let previewGroupOrder: string[] | null = null;
+function orderedPreviewGroups() {
+  const order = previewGroupOrder;
+  return order ? [...previewCharacterGroups].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)) : previewCharacterGroups;
 }
 
 function notesRequest(args: Record<string, unknown>): unknown {

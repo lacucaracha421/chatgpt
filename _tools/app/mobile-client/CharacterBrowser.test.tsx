@@ -674,3 +674,19 @@ it('fills a group card with its 기타 images: a 기타-only group shows up to f
   expect(shown(only).filter(Boolean)).toHaveLength(4);
   expect(mocks.api.mock.calls.filter(([p])=>p.includes('node=character%3Afill-x-only'))).toHaveLength(1);
 });
+
+it('lists a series groups in the order the PC published, and in the server order for an old snapshot',async()=>{
+  const groups=structuredClone(index);
+  groups.nodes.push(node('group','h','Hares','series:s'),node('group','i','Interns','series:s'));
+  const cards=()=>[...document.querySelectorAll('.character-card[data-kind="group"]')].map(card=>card.textContent);
+  // An old snapshot has no group entries: the server's order stays.
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(groups):page());
+  const first=render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  await screen.findByRole('button',{name:/Interns/});
+  expect(cards().map(text=>text?.replace(/\d.*$/,''))).toEqual(['Group','Hares','Interns']);
+  first.unmount();cleanup();
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?{...structuredClone(groups),navigationOrder:['series:s','group:i','group:g','group:h']}:page());
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  await screen.findByRole('button',{name:/Interns/});
+  expect(cards().map(text=>text?.replace(/\d.*$/,''))).toEqual(['Interns','Group','Hares']);
+});

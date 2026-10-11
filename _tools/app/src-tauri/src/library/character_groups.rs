@@ -32,6 +32,39 @@ pub struct GroupDraft {
     pub delete: bool,
 }
 
+/// Stores the person's order of one series' groups: `group_ids` must be exactly the series'
+/// groups, each once. Positions are 1..n; the group rows' `revision` is left alone, because an
+/// order is not an edit (an open group editor stays valid). The character hub and the mobile
+/// publication notice the change through the `character_groups` update.
+pub(super) fn reorder_character_groups_in(
+    connection: &Connection,
+    series_id: &str,
+    group_ids: &[String],
+) -> Result<()> {
+    if group_ids.len() > 1000 {
+        return Err(Error::Invalid("그룹 순서를 확인해 주세요."));
+    }
+    let mut stored = connection
+        .prepare("SELECT id FROM character_groups WHERE series_id=?1 ORDER BY id")?
+        .query_map([series_id], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut requested = group_ids.to_vec();
+    requested.sort();
+    if requested.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(Error::Invalid("그룹 순서를 확인해 주세요."));
+    }
+    stored.sort();
+    if requested != stored {
+        // A group was added, removed or belongs to another series since the list was read.
+        return Err(Error::Stale);
+    }
+    let mut update = connection.prepare("UPDATE character_groups SET position=?3 WHERE id=?1 AND series_id=?2 AND position IS NOT ?3")?;
+    for (index, id) in group_ids.iter().enumerate() {
+        update.execute(params![id, series_id, index as i64 + 1])?;
+    }
+    Ok(())
+}
+
 /// A group's 기타 target id, if the group has one.
 fn group_extras(connection: &Connection, group_id: &str) -> Result<Option<String>> {
     Ok(connection
@@ -169,13 +202,14 @@ pub(super) fn save_character_group_in(
     Ok(id)
 }
 
-/// Groups of one series, or of all series when `series_id` is None, with their members:
-/// two statements whatever the group count.
+/// Groups of one series, or of all series when `series_id` is None, with their members, in
+/// the person's order (placed groups by position, then unplaced ones by name): two statements
+/// whatever the group count.
 pub(super) fn groups_in(connection: &Connection, series_id: Option<&str>) -> Result<Vec<Group>> {
     let mut groups = connection
         .prepare_cached(
             "SELECT id,series_id,name,revision FROM character_groups
-             WHERE ?1 IS NULL OR series_id=?1 ORDER BY series_id,name,id",
+             WHERE ?1 IS NULL OR series_id=?1 ORDER BY series_id,position IS NULL,position,name,id",
         )?
         .query_map([series_id], |row| {
             Ok(Group {
@@ -224,9 +258,19 @@ impl Library {
         groups_in(&*self.connection()?, Some(series_id))
     }
 
-    /// Every series' groups in one read (by series, then name), for the character hub.
+    /// Every series' groups in one read (by series, then the person's order), for the character hub.
     pub fn all_character_groups(&self) -> Result<Vec<Group>> {
         groups_in(&*self.connection()?, None)
+    }
+
+    /// Puts the groups of one series in the given order (all of them, once each).
+    pub fn reorder_character_groups(&self, series_id: &str, group_ids: &[String]) -> Result<()> {
+        let mut connection = self.connection()?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        reorder_character_groups_in(&transaction, series_id, group_ids)?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn save_character_group(&self, draft: GroupDraft) -> Result<()> {
@@ -300,6 +344,259 @@ mod tests {
         assert!(shape(&all).contains(&(f.series.clone(), "Duo".into(), duo)));
         assert!(shape(&all).contains(&(f.series.clone(), "Alpha".into(), vec![d.id.clone()])));
         assert_eq!(all.len(), 3);
+    }
+
+    fn group_in(f: &Fixture, series: &str, name: &str, target: &str) -> String {
+        save_character_group_in(
+            &f.library.connection().unwrap(),
+            GroupDraft {
+                id: None,
+                series_id: series.into(),
+                expected_revision: None,
+                name: name.into(),
+                target_ids: vec![target.into()],
+                delete: false,
+            },
+        )
+        .unwrap()
+    }
+
+    fn names(groups: &[Group]) -> Vec<String> {
+        groups.iter().map(|g| g.name.clone()).collect()
+    }
+
+    fn group_ids(library: &Library, series: &str) -> Vec<String> {
+        library
+            .character_groups(series)
+            .unwrap()
+            .iter()
+            .map(|g| g.id.clone())
+            .collect()
+    }
+
+    fn generation(f: &Fixture) -> i64 {
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT generation FROM mobile_publication_state WHERE kind='characters'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn reorder_character_groups_stores_validates_and_lists_the_order_everywhere() {
+        let f = Fixture::new();
+        let mut ids: Vec<String> = ["A", "B", "C"].iter().map(|n| f.ready(n).id).collect();
+        ids.push(f.ready_in_series("D", &f.child).id);
+        let alpha = group_in(&f, &f.series, "Alpha", &ids[0]);
+        let beta = group_in(&f, &f.series, "Beta", &ids[1]);
+        let gamma = group_in(&f, &f.series, "Gamma", &ids[2]);
+        let other = group_in(&f, &f.child, "Other", &ids[3]);
+        // Nobody reordered yet: name order, as before.
+        assert_eq!(
+            names(&f.library.character_groups(&f.series).unwrap()),
+            ["Alpha", "Beta", "Gamma"]
+        );
+        let revisions: Vec<i64> = f
+            .library
+            .character_groups(&f.series)
+            .unwrap()
+            .iter()
+            .map(|g| g.revision)
+            .collect();
+
+        let before = generation(&f);
+        f.library
+            .reorder_character_groups(&f.series, &[gamma.clone(), alpha.clone(), beta.clone()])
+            .unwrap();
+        assert!(
+            generation(&f) > before,
+            "the mobile publication must become dirty"
+        );
+        let ordered = f.library.character_groups(&f.series).unwrap();
+        assert_eq!(names(&ordered), ["Gamma", "Alpha", "Beta"]);
+        // An order is not an edit: revisions (and so an open editor) stay valid.
+        assert_eq!(
+            ordered.iter().map(|g| g.revision).collect::<Vec<_>>(),
+            [revisions[2], revisions[0], revisions[1]]
+        );
+        // The hub's single read lists the same order, series by series.
+        let all = f.library.all_character_groups().unwrap();
+        let in_series = |series: &str| {
+            all.iter()
+                .filter(|g| g.series_id == series)
+                .map(|g| g.id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            in_series(&f.series),
+            [gamma.clone(), alpha.clone(), beta.clone()]
+        );
+        assert_eq!(in_series(&f.child), [other.clone()]);
+
+        // Saving the same order again changes nothing (no spurious publication).
+        let settled = generation(&f);
+        f.library
+            .reorder_character_groups(&f.series, &[gamma.clone(), alpha.clone(), beta.clone()])
+            .unwrap();
+        assert_eq!(generation(&f), settled);
+
+        // A group created later in an ordered series goes last; renaming keeps the place.
+        let late = f.ready("E");
+        let newest = group_in(&f, &f.series, "Aaa late", &late.id);
+        assert_eq!(
+            names(&f.library.character_groups(&f.series).unwrap()),
+            ["Gamma", "Alpha", "Beta", "Aaa late"]
+        );
+        let alpha_group = f.library.character_groups(&f.series).unwrap().remove(1);
+        save(&f, Some(&alpha_group), alpha_group.target_ids.clone()).unwrap();
+        assert_eq!(
+            names(&f.library.character_groups(&f.series).unwrap()),
+            ["Gamma", "Group", "Beta", "Aaa late"]
+        );
+
+        // Refused: a list that lacks a group, repeats one, names another series' group, an
+        // unknown group, or is empty. Nothing changes.
+        let current = group_ids(&f.library, &f.series);
+        assert_eq!(current.len(), 4);
+        for bad in [
+            vec![gamma.clone(), alpha.clone(), beta.clone()],
+            vec![
+                gamma.clone(),
+                gamma.clone(),
+                alpha.clone(),
+                beta.clone(),
+                newest.clone(),
+            ],
+            vec![gamma.clone(), alpha.clone(), beta.clone(), other.clone()],
+            vec![gamma.clone(), alpha.clone(), beta.clone(), "missing".into()],
+            vec![],
+        ] {
+            assert!(
+                f.library.reorder_character_groups(&f.series, &bad).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(f
+            .library
+            .reorder_character_groups(&f.child, &[alpha.clone()])
+            .is_err());
+        assert_eq!(group_ids(&f.library, &f.series), current);
+        assert_eq!(group_ids(&f.library, &f.child), [other.clone()]);
+        // A series without groups accepts only the empty list.
+        f.library.reorder_character_groups(&f.outside, &[]).unwrap();
+        assert!(f
+            .library
+            .reorder_character_groups(&f.outside, &[beta.clone()])
+            .is_err());
+
+        // The order survives a restart.
+        let path = f.temp.path().to_path_buf();
+        drop(f.library);
+        let reopened = Library::open(&path).unwrap();
+        assert_eq!(
+            names(&reopened.character_groups(&f.series).unwrap()),
+            ["Gamma", "Group", "Beta", "Aaa late"]
+        );
+    }
+
+    #[test]
+    fn reorder_character_groups_is_published_as_group_node_ids_after_the_folder_order() {
+        let f = Fixture::new();
+        let a = f.ready("A");
+        let b = f.ready("B");
+        let first = group_in(&f, &f.series, "Alpha", &a.id);
+        let second = group_in(&f, &f.series, "Beta", &b.id);
+        let snapshot = |library: &Library| {
+            let mut connection = library.connection().unwrap();
+            serde_json::to_value(
+                crate::cloud::characters::snapshot_from_connection(&mut connection, None, &|_| {})
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let strings = |value: &serde_json::Value| {
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        let group_nodes = |value: &serde_json::Value| {
+            value["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|n| n["kind"] == "group")
+                .map(|n| n["id"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        f.library
+            .save_mobile_navigation_order(vec!["folder-1".into(), f.series.clone()])
+            .unwrap();
+        let before = snapshot(&f.library);
+        assert_eq!(
+            group_nodes(&before),
+            [format!("group:{first}"), format!("group:{second}")]
+        );
+        assert_eq!(
+            strings(&before["navigationOrder"]),
+            [
+                "folder-1".to_string(),
+                f.series.clone(),
+                format!("group:{first}"),
+                format!("group:{second}")
+            ]
+        );
+
+        f.library
+            .reorder_character_groups(&f.series, &[second.clone(), first.clone()])
+            .unwrap();
+        let after = snapshot(&f.library);
+        assert_eq!(
+            group_nodes(&after),
+            [format!("group:{second}"), format!("group:{first}")]
+        );
+        assert_eq!(
+            strings(&after["navigationOrder"]),
+            [
+                "folder-1".to_string(),
+                f.series.clone(),
+                format!("group:{second}"),
+                format!("group:{first}")
+            ]
+        );
+        // The server keys a revision on the content: the order must change it.
+        assert_ne!(before["navigationOrder"], after["navigationOrder"]);
+        // No groups, no group entries: the PC's own order is published as it is.
+        for group in [&first, &second] {
+            let revision = f
+                .library
+                .character_groups(&f.series)
+                .unwrap()
+                .iter()
+                .find(|g| &g.id == group)
+                .unwrap()
+                .revision;
+            f.library
+                .save_character_group(GroupDraft {
+                    id: Some(group.clone()),
+                    series_id: f.series.clone(),
+                    expected_revision: Some(revision),
+                    name: "x".into(),
+                    target_ids: vec![],
+                    delete: false,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            strings(&snapshot(&f.library)["navigationOrder"]),
+            ["folder-1".to_string(), f.series.clone()]
+        );
     }
 
     #[test]

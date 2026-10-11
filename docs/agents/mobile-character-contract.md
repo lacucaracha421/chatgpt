@@ -58,6 +58,11 @@ characters appear once in a group scope. Ordinary folder viewing remains distinc
 from exclusion from automatic classification. The exporter does not infer roles
 from names or change the quiet character workflow.
 
+`navigationOrder` is the PC's folder order followed by the group node IDs (`group:ID`) in the
+order a person gave a series' groups (PC sidebar drag, stored per series in the library). The
+server stores the list opaquely; a reader ranks a series' groups by their position in it and
+keeps the node order for a snapshot without group entries.
+
 This navigation projection does not carry reference image bytes/evidence, decision
 history, prediction jobs or local media paths. An upgraded snapshot adds protected
 base/learned reference asset IDs for exclusion safety, not an authoritative character

@@ -10,6 +10,7 @@ import {
 } from './useClassificationAuthoritySync';
 import { useCharacterAutomation, type AutomaticCharacterChange } from "../characters/useCharacterAutomation";
 import { useCharacterHub } from "../characters/useCharacterHub";
+import { movedGroupIds } from "../characters/groupOrder";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { HomeAssetDestination } from "../home/HomeAssetDestination";
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
@@ -76,7 +77,7 @@ import { FaultGameProvider } from "../games/FaultGame";
 
 import { CloudStatusCenter } from "./CloudStatusCenter";
 import { backNavigationTab, initialWorkspaceView } from "./workspaceNavigation";
-import { nativeDropClientPoint, outsideViewport, sameAssetIds, sidebarTargetAt, type SidebarDropTarget } from "./workspaceDragTargets";
+import { nativeDropClientPoint, outsideViewport, sameAssetIds, sidebarTargetAt, swallowNextClick, type SidebarDropTarget } from "./workspaceDragTargets";
 import { subscribeToExtensionIngest, useExtensionIngest, useNativeDragEnd, useWorkspaceAuthorityEvents, useWorkspaceShortcuts, type ExtensionIngestListener } from "./useWorkspaceEvents";
 import { useMetadataImport } from "./useMetadataImport";
 import { useDailyLibraryMaintenance } from "./useDailyLibraryMaintenance";
@@ -632,6 +633,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     transitionDrag({ type: "finish" });
     setDragTarget(null);
     event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (current.phase === "dragging" && current.payload.kind === "character-group") swallowNextClick();
     if (!target?.valid || current.phase !== "dragging") return;
     void performInternalDrop(current.payload, target);
   }
@@ -664,7 +666,17 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     return () => window.clearInterval(timer);
   }, [dragState.phase, entries, albums]);
 
+  /** Shows the new order of a series' groups at once; when storing it fails the old order returns with a message. */
+  function reorderCharacterGroups(seriesId: string, groupIds: string[]) {
+    characterHub.reorderGroups(seriesId, groupIds).catch((error) => setMessage(commandErrorMessage(error, "그룹 순서를 바꾸지 못했습니다. 원래 순서로 되돌렸습니다.")));
+  }
+
   async function performInternalDrop(payload: InternalDragPayload, target: SidebarDropTarget) {
+    if (payload.kind === "character-group") {
+      const groupIds = movedGroupIds(characterHub.groups, payload.seriesId, payload.groupId, target.entryId, target.position === "before" ? "before" : "after");
+      if (groupIds) reorderCharacterGroups(payload.seriesId, groupIds);
+      return;
+    }
     try {
       if (payload.kind === "assets") {
         if (target.kind === "album") {
@@ -766,6 +778,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 navigateView({ kind: "classification", classificationId: group.seriesId, characterGroupId: group.id });
                 setGroupEditRequest({ groupId: group.id, token: ++groupEditToken.current });
               }}
+              onReorderGroups={reorderCharacterGroups}
               onCharactersChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}
               onChanged={() => void refreshClassifications()}
               onAlbumsChanged={() => void refreshAlbums()}

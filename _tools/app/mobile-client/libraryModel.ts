@@ -17,7 +17,9 @@ export function mergeLibraryEntries(items:Classification[],characters?:Character
       }
     }
     const order=new Map((characters?.navigationOrder??[]).map((id,i)=>[id,i]));
-    merged.sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)||Number(!!a.characterExtras)-Number(!!b.characterExtras)||a.name.localeCompare(b.name,'ko'));
+    // A group's place is its node id (`group:<id>`) in the published order; a snapshot without group entries ranks them last, by name, as before.
+    const place=(entry:Entry)=>order.get(entry.id)??(entry.characterKind==='group'?order.get(entry.characterNode!):undefined)??Number.MAX_SAFE_INTEGER;
+    merged.sort((a,b)=>place(a)-place(b)||Number(!!a.characterExtras)-Number(!!b.characterExtras)||a.name.localeCompare(b.name,'ko'));
     groupsBeforeFolders(merged);
     const linked=linkedCharacterFolders(merged,nodes);
     const kept=merged.filter(item=>!linked.has(item.id)).map(item=>linked.has(item.parent_id??'')?{...item,parent_id:linked.get(item.parent_id!)!}:item);

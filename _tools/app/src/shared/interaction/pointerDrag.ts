@@ -1,7 +1,9 @@
 export type InternalDragPayload =
   | { kind: "assets"; assetIds: string[] }
   | { kind: "classification"; entryId: string }
-  | { kind: "album"; entryId: string };
+  | { kind: "album"; entryId: string }
+  /** A character group row of the sidebar, dragged to another place among its own series' groups. */
+  | { kind: "character-group"; groupId: string; seriesId: string };
 
 export type PointerDragState =
   | { phase: "idle" }
@@ -10,7 +12,8 @@ export type PointerDragState =
 
 export type ClassificationDropPosition = "inside" | "before" | "after";
 export type ClassificationDropTarget = {
-  kind: "classification" | "album" | "character";
+  /** `character-group`: `entryId` is a group id and the position is `before` or `after` it. */
+  kind: "classification" | "album" | "character" | "character-group";
   entryId: string;
   position: ClassificationDropPosition;
   valid: boolean;

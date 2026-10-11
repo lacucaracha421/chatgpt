@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useCharacterHub } from "./useCharacterHub";
 
 const api = vi.hoisted(() => ({
-  targets: vi.fn(), series: vi.fn(), allGroups: vi.fn(),
+  targets: vi.fn(), series: vi.fn(), allGroups: vi.fn(), reorderGroups: vi.fn(),
 }));
 vi.mock("./api", () => ({ characterApi: { targets: api.targets } }));
 vi.mock("./hubApi", () => ({ characterHubApi: api }));
@@ -59,4 +59,36 @@ it("keeps 기타 buckets apart from the characters every other screen lists", as
   await waitFor(() => expect(result.current.extras).toEqual([extras]));
   // Data without a role (older hosts) is a character.
   expect(result.current.targets).toEqual([character, legacy]);
+});
+
+it("shows a chosen group order at once, keeps it over later reads, and puts the old order back when storing fails", async () => {
+  const groups = [
+    { id: "a", seriesId: "s", targetIds: [], name: "A", revision: 1 },
+    { id: "b", seriesId: "s", targetIds: [], name: "B", revision: 1 },
+    { id: "x", seriesId: "t", targetIds: [], name: "X", revision: 1 },
+  ];
+  api.targets.mockResolvedValue([]);
+  api.series.mockResolvedValue([]);
+  api.allGroups.mockResolvedValue(groups);
+  let finish!: () => void, fail!: (error: unknown) => void;
+  api.reorderGroups
+    .mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }))
+    .mockReturnValueOnce(new Promise<void>((_resolve, reject) => { fail = reject; }));
+  const { result } = renderHook(() => useCharacterHub(0));
+  await waitFor(() => expect(result.current.groups).toHaveLength(3));
+  const ids = () => result.current.groups.map(group => group.id);
+  let first!: Promise<void>;
+  act(() => { first = result.current.reorderGroups("s", ["b", "a"]); });
+  // Before the command has answered, the new order is already on screen; the other series stays put.
+  expect(ids()).toEqual(["b", "a", "x"]);
+  expect(api.reorderGroups).toHaveBeenCalledWith("s", ["b", "a"]);
+  await act(async () => { finish(); await first; });
+  await waitFor(() => expect(api.allGroups).toHaveBeenCalledTimes(2));
+  // A read that still lists the old order does not undo it.
+  expect(ids()).toEqual(["b", "a", "x"]);
+  let second!: Promise<void>;
+  act(() => { second = result.current.reorderGroups("s", ["a", "b"]).catch(() => undefined); });
+  expect(ids()).toEqual(["a", "b", "x"]);
+  await act(async () => { fail(new Error("stale")); await second; });
+  expect(ids()).toEqual(["b", "a", "x"]);
 });

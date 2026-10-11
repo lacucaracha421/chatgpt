@@ -4,13 +4,14 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 127;
+pub(crate) const SCHEMA_VERSION: i64 = 128;
 
-/// Test helper: undoes migrations 0103 through 0127 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0128 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    ALTER TABLE character_groups DROP COLUMN position;
     DROP TRIGGER character_extras_insert_valid;
     DROP TRIGGER character_extras_update_valid;
     DROP TRIGGER character_extras_no_reference;
@@ -779,6 +780,11 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 126 {
             transaction.execute_batch(include_str!("../../migrations/0127_character_extras.sql"))?;
+        }
+        if version <= 127 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0128_character_group_position.sql"
+            ))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

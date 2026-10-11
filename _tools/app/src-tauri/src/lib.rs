@@ -501,6 +501,7 @@ pub fn run() {
             commands::characters::apply_character_subfolder_cleanup,
             commands::characters::character_sidebar_counts,
             commands::characters::save_character_group,
+            commands::characters::reorder_character_groups,
             commands::characters::character_conversion_preview,
             commands::characters::character_series_move_preview,
             commands::characters::move_character_to_series,

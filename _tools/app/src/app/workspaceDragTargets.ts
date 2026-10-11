@@ -3,7 +3,18 @@ import type { ClassificationDropTarget, InternalDragPayload } from "../shared/in
 
 export type SidebarDropTarget = Exclude<ClassificationDropTarget, { kind: "character" }>;
 
+/** A group row is a drop place only for another group of the same series; the upper half drops before it, the lower half after. */
+function groupTargetAt(x: number, y: number, payload: Extract<InternalDragPayload, { kind: "character-group" }>): SidebarDropTarget | null {
+  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-character-group-id]");
+  const entryId = element?.dataset.characterGroupId;
+  if (!element || !entryId) return null;
+  const rect = element.getBoundingClientRect();
+  const position = rect.height > 0 && y - rect.top >= rect.height / 2 ? "after" : "before";
+  return { kind: "character-group", entryId, position, valid: entryId !== payload.groupId && element.dataset.seriesId === payload.seriesId };
+}
+
 export function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): SidebarDropTarget | null {
+  if (payload.kind === "character-group") return groupTargetAt(x, y, payload);
   const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id]");
   const kind = element?.dataset.albumId ? "album" : "classification";
   const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;
@@ -63,4 +74,11 @@ export function sameAssetIds(left: string[] | null, right: string[]) {
 
 export function outsideViewport(x: number, y: number) {
   return x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight;
+}
+
+/** The click that follows a finished drag lands on the dragged row (it holds the pointer); it must not open that row. */
+export function swallowNextClick() {
+  const swallow = (event: Event) => { event.stopPropagation(); event.preventDefault(); };
+  window.addEventListener("click", swallow, { capture: true, once: true });
+  window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 100);
 }
