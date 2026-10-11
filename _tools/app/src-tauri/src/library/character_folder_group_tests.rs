@@ -360,3 +360,28 @@ fn character_folder_group_chunks_more_than_two_hundred_unassigned_assets() {
         .unwrap();
     assert_eq!(count(&f, "SELECT COUNT(*) FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE t.extras_group_id=?1", &result.group_id), 404);
 }
+
+#[test]
+fn character_folder_group_counts_a_reference_image_as_having_its_character() {
+    // A reference is not a relation, but the 기타 guard refuses it like one.
+    let f = fixture();
+    {
+        let c = f.library.connection().unwrap();
+        c.execute(
+            "INSERT INTO character_references(target_id,slot,asset_id,asset_hash)
+             SELECT id,0,'asset-2','reference-hash' FROM character_targets
+             WHERE series_classification_id=?1 AND role='character' AND display_name='주인공'",
+            [&f.series],
+        )
+        .unwrap();
+    }
+    let preview = f.library.character_folder_group_preview(&f.child).unwrap();
+    assert_eq!(preview.character_asset_count, 3);
+    assert_eq!(preview.unassigned_asset_count, 2);
+    assert!(preview.refusal.is_none());
+    let result = f
+        .library
+        .tidy_character_folder_into_group(&f.child, &preview.token)
+        .unwrap();
+    assert_eq!(count(&f, "SELECT COUNT(*) FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE t.extras_group_id=?1", &result.group_id), 2);
+}

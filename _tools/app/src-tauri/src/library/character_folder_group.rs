@@ -154,7 +154,16 @@ fn plan(connection: &Connection, folder_id: &str) -> Result<Plan> {
     let mut other_asset_count = 0;
     for asset in &assets {
         if asset.1 == "normal" && matches!(asset.2.as_str(), "image" | "video" | "gif") {
-            if asset.4 {
+            // The same rule the 기타 guard applies: a reference or learned reference of a
+            // series character also counts as having that character.
+            let has_character = asset.4
+                || match series_id.as_deref() {
+                    Some(series) => {
+                        super::characters::has_real_character(connection, series, &asset.0)?
+                    }
+                    None => false,
+                };
+            if has_character {
                 character_assets.push(asset.0.clone());
             } else {
                 unassigned_assets.push(asset.0.clone());
