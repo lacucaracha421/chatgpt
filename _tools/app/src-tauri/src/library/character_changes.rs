@@ -79,8 +79,11 @@ impl CharacterChanges {
         }
     }
 
+    /// Also moves the S36 review lists: the taggers' readings and links decide which pairs they
+    /// leave out.
     pub(crate) fn suggestion_inputs_changed(&self) {
         self.suggestion_inputs.fetch_add(1, Ordering::AcqRel);
+        self.shadow_review_inputs.fetch_add(1, Ordering::AcqRel);
     }
 
     /// The whole database was replaced (snapshot restore): nothing read before is current.

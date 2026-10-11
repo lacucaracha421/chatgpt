@@ -68,3 +68,26 @@ it("builds the accuracy table from the judged counts", () => {
   ]);
   expect(accuracyRows(null, null).map(row => row.percent)).toEqual([null, null, null]);
 });
+
+it("keeps the automatic judgments apart from the people's: the totals follow the shared rule, the split is shown", () => {
+  const cases = rule.automaticCases.map((c, index) => ({ c, id: `a${index}` }));
+  const rows = new Map(cases.map(({ c, id }) => [id, { targetId: id, reviewed: c.judged, reviewedAuto: c.auto, wrong: c.wrong, wrongAuto: c.wrongAuto, allowed: c.allowed, examples: c.examples, status: c.status as S36Readiness["status"] }]));
+  const [series] = recognitionSeries(cases.map(({ id }) => target(id, id)), rows, enabled, () => "시리즈");
+  const byId = new Map(series!.rows.map(row => [row.targetId, row]));
+  for (const { c, id } of cases) {
+    const row = byId.get(id)!;
+    expect([row.judged, row.judgedAuto, row.wrong, row.wrongAuto, row.examples]).toEqual([c.manual + c.auto, c.auto, c.wrongManual + c.wrongAuto, c.wrongAuto, c.examples]);
+    expect(row.judged).toBe(c.judged);
+    expect(row.wrong).toBe(c.wrong);
+    expect(c.allowed).toBe(Math.max(1, Math.floor(c.judged * 0.05)));
+    expect(row.recognition).toBe(c.status === "learning" ? "학습 인식" : "기본 인식");
+    // Examples are the people's acceptances alone, so the automatic judgments never lift them.
+    expect(c.status === "learning").toBe(c.judged >= rule.readyReviewed && c.examples >= rule.readyExamples && c.wrong <= c.allowed);
+  }
+});
+
+it("treats a library that does not report the automatic split as all by people", () => {
+  const rows = new Map([readiness("a", 30, 0, 1, 50, "learning")].map(row => [row.targetId, row]));
+  const [series] = recognitionSeries([target("a", "에이")], rows, enabled, () => undefined);
+  expect([series!.rows[0]!.judgedAuto, series!.rows[0]!.wrongAuto]).toEqual([0, 0]);
+});

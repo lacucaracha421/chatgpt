@@ -49,7 +49,13 @@ export async function readShadowList(api: Pick<ShadowReviewApi, "page">, mode: S
   return items;
 }
 
-export type ConfirmRead = { items: ConfirmItem[]; /** The kinds whose list could not be read this time. */ failed: ConfirmKind[] };
+export type ConfirmRead = {
+  items: ConfirmItem[];
+  /** 인식 추천 of characters far from 학습 인식 that nothing else brings up: left out of `items` (and the counts) unless the scope is one character. */
+  folded: ConfirmItem[];
+  /** The kinds whose list could not be read this time. */
+  failed: ConfirmKind[];
+};
 
 /**
  * Reads the three lists for one scope and merges them. A list that fails is reported in `failed` and the
@@ -69,5 +75,11 @@ export async function readConfirmItems(sources: ConfirmSources, scope: ConfirmSc
   if (!isLive() || !candidates || !doubtful) return null;
   const inScope = <T extends { targetId: string }>(items: readonly T[]) => scope.target ? items.filter(item => item.targetId === scope.target!.id) : items;
   const tagItems = tagger.filter(item => (!seriesId || item.seriesId === seriesId));
-  return { items: mergeConfirmItems({ tagger: inScope(tagItems), candidates: inScope(candidates), doubtful: inScope(doubtful), targets }), failed };
+  // One character's own list shows everything it has; any wider list leaves out the folded ones.
+  const fold = !scope.target;
+  const shown = inScope(candidates).filter(item => !(fold && item.folded));
+  const items = mergeConfirmItems({ tagger: inScope(tagItems), candidates: shown, doubtful: inScope(doubtful), targets });
+  const have = new Set(items.map(item => item.key));
+  const folded = fold ? mergeConfirmItems({ tagger: [], candidates: inScope(candidates).filter(item => item.folded), doubtful: [], targets }).filter(item => !have.has(item.key)) : [];
+  return { items, folded, failed };
 }

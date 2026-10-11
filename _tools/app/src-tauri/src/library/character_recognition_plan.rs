@@ -5,13 +5,19 @@
 //! rule and which recognition places its images before this change (the series switch in
 //! `character-runtime.json`) and after it (the rule in `character_shadow_review`).
 //!
+//! Per character it also prints the judgments (people / automatic tags), the wrong ones, the
+//! examples and the status before this change (people's judgments only) and now (the taggers'
+//! agreement counted), and the 확인 totals as they stand: shown and folded away.
+//!
 //! ```text
 //! LAKOMICS_RECOGNITION_PLAN_DB=<copy of library.sqlite> \
 //! LAKOMICS_RECOGNITION_PLAN_CACHE=<copy of .cache/characters/s36_shadow.sqlite> \
 //! [LAKOMICS_RECOGNITION_PLAN_RUNTIME=<copy of character-runtime.json>] \
 //! bash scripts/cargo-test.sh -- --lib -- --ignored --nocapture recognition_plan_preview
 //! ```
-use super::character_shadow_review::readiness_of;
+use super::character_shadow_review::{
+    confirm_totals_in, is_close_to_switching, judgments_of, readiness_of, Auto,
+};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, path::PathBuf, time::Instant};
@@ -91,10 +97,15 @@ fn plan(
     let started = Instant::now();
     let readiness = readiness_of(library, cache, &ids).unwrap();
     let elapsed = started.elapsed();
+    // The rule before the taggers' agreement counted: people's judgments alone.
+    let manual_only = judgments_of(library, cache, &ids, Auto::Off)
+        .unwrap()
+        .readiness;
+    let confirm = confirm_totals_in(library, cache).unwrap();
 
     let mut rows = Vec::new();
     let mut changed = Vec::new();
-    for (target, numbers) in targets.iter().zip(&readiness) {
+    for ((target, numbers), manual) in targets.iter().zip(&readiness).zip(&manual_only) {
         let (id, name, series_id, series, enabled, manual_only) = target;
         let automatic = *enabled && !manual_only;
         let before = if !automatic {
@@ -117,8 +128,11 @@ fn plan(
         };
         let row = json!({
             "seriesId": series_id, "series": series, "targetId": id, "name": name,
-            "judged": numbers.reviewed, "examples": numbers.examples, "wrong": numbers.wrong,
-            "allowed": numbers.allowed, "status": numbers.status, "before": before, "after": after,
+            "judged": numbers.reviewed, "judgedManual": numbers.reviewed - numbers.reviewed_auto, "judgedAuto": numbers.reviewed_auto,
+            "examples": numbers.examples, "wrong": numbers.wrong, "wrongManual": numbers.wrong - numbers.wrong_auto, "wrongAuto": numbers.wrong_auto,
+            "allowed": numbers.allowed, "statusBefore": manual.status, "status": numbers.status,
+            "closeToSwitching": is_close_to_switching(numbers.reviewed, numbers.examples),
+            "before": before, "after": after,
         });
         if before != after {
             changed.push(row.clone());
@@ -126,6 +140,12 @@ fn plan(
         rows.push(row);
     }
     let count = |engine: &str, key: &str| rows.iter().filter(|r| r[key] == engine).count();
+    let status = |key: &str, value: &str| rows.iter().filter(|r| r[key] == value).count();
+    let status_changed = rows
+        .iter()
+        .filter(|r| r["statusBefore"] != r["status"])
+        .cloned()
+        .collect::<Vec<_>>();
     json!({
         "oldSwitchSource": switch_source,
         "scoreCache": cache.is_some(),
@@ -134,6 +154,14 @@ fn plan(
         "before": {"S36": count("S36", "before"), "B36": count("B36", "before"), "manual": count("manual", "before")},
         "after": {"S36": count("S36", "after"), "B36": count("B36", "after"), "manual": count("manual", "after")},
         "changed": changed,
+        "statusBefore": {"learning": status("statusBefore", "learning"), "hold": status("statusBefore", "hold"), "collecting": status("statusBefore", "collecting")},
+        "statusAfter": {"learning": status("status", "learning"), "hold": status("status", "hold"), "collecting": status("status", "collecting")},
+        "statusChanged": status_changed,
+        "confirm": {
+            "shown": confirm.counts.recognition + confirm.counts.tag + confirm.counts.recheck,
+            "recognition": confirm.counts.recognition, "tag": confirm.counts.tag, "recheck": confirm.counts.recheck,
+            "foldedItems": confirm.folded_items, "foldedCharacters": confirm.folded_characters,
+        },
         "rows": rows,
     })
 }
@@ -228,6 +256,26 @@ fn the_plan_shows_who_changes_from_the_old_series_switch_to_the_rule() {
         (&json!(30), &json!(1), &json!(1), &json!(50))
     );
     assert_eq!(report["changed"].as_array().unwrap().len(), 1);
+    // Nobody but people judged here, so the split is all theirs and the status did not move.
+    assert_eq!(
+        (
+            &passing_row["judgedManual"],
+            &passing_row["judgedAuto"],
+            &passing_row["wrongAuto"],
+            &passing_row["statusBefore"],
+            &passing_row["status"]
+        ),
+        (
+            &json!(30),
+            &json!(0),
+            &json!(0),
+            &json!("learning"),
+            &json!("learning")
+        )
+    );
+    assert_eq!(report["statusChanged"].as_array().unwrap().len(), 0);
+    assert_eq!(report["confirm"]["shown"], json!(0));
+    assert_eq!(report["confirm"]["foldedItems"], json!(0));
 }
 
 #[test]

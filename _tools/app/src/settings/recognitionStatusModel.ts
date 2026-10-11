@@ -7,11 +7,15 @@ export type RecognitionRow = {
   targetId: string;
   name: string;
   recognition: RecognitionInUse;
-  /** 확인에서 판단한 학습 인식 후보 (the readiness count of reviewed automatic candidates). */
+  /** 확인에서 판단한 학습 인식 후보 (the readiness count of reviewed automatic candidates), people and the automatic tags together. */
   judged: number;
+  /** Of `judged`, the ones the automatic tags judged by agreeing (자동). */
+  judgedAuto: number;
   /** 맞음 예시. */
   examples: number;
   wrong: number;
+  /** Of `wrong`, the ones the automatic tags judged (자동). */
+  wrongAuto: number;
   allowed: number;
   /** Whether the numbers are still short of the 학습 인식 line (30 판단, 50 예시). */
   collecting: boolean;
@@ -42,8 +46,9 @@ export function recognitionSeries(
     if (!series) bySeries.set(seriesId, series = { seriesId, seriesName: seriesName(seriesId) ?? "시리즈 없음", rows: [], learning: 0 });
     const numbers = readiness.get(target.id);
     const judged = numbers?.reviewed ?? 0, examples = numbers?.examples ?? 0, wrong = numbers?.wrong ?? 0;
+    const judgedAuto = numbers?.reviewedAuto ?? 0, wrongAuto = numbers?.wrongAuto ?? 0;
     const recognition = inUse(target, numbers, settings);
-    series.rows.push({ targetId: target.id, name: target.displayName, recognition, judged, examples, wrong, allowed: numbers?.allowed ?? 1,
+    series.rows.push({ targetId: target.id, name: target.displayName, recognition, judged, judgedAuto, examples, wrong, wrongAuto, allowed: numbers?.allowed ?? 1,
       collecting: !numbers || numbers.status === "collecting" });
     if (recognition === "학습 인식") series.learning += 1;
   }

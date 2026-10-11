@@ -37,6 +37,8 @@ const seriesKey = (group: ConfirmGroup) => group.seriesId ?? "";
 export function ConfirmOverview({ targets, seriesName, version, restricted, privacyMode, onBack, onOpen, sources = confirmSources }: Props) {
   useBackHandler(onBack, 50);
   const [tallies, setTallies] = useState<ConfirmTally[] | null>(null);
+  const [foldedTallies, setFoldedTallies] = useState<ConfirmTally[]>([]);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [reading, setReading] = useState(false);
   const [unread, setUnread] = useState<ConfirmKind[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -53,14 +55,16 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
     readConfirmItems(sources, {}, targetsRef.current, () => live).then(read => {
       if (!live || !read) return;
       if (read.failed.length === CONFIRM_KINDS.length) { setError("확인 목록을 읽지 못했습니다."); return; }
-      setTallies(tallyConfirm(read.items)); setUnread(read.failed);
+      setTallies(tallyConfirm(read.items)); setFoldedTallies(tallyConfirm(read.folded)); setUnread(read.failed);
     }, (e: unknown) => {
       if (live) setError(commandErrorMessage(e, "확인 목록을 읽지 못했습니다."));
     }).finally(() => { if (live) setReading(false); });
     return () => { live = false; };
   }, [sources, restricted, version, retry]);
 
-  const groups = useMemo(() => tallies ? confirmGroups(tallies, targets, seriesName) : [], [tallies, targets, seriesName]);
+  const groups = useMemo(() => tallies ? confirmGroups(tallies, targets, seriesName, foldedTallies) : [], [tallies, foldedTallies, targets, seriesName]);
+  // Series that only have folded characters are listed under their name but hold nothing to count.
+  const counted = useMemo(() => groups.filter(group => group.counts.total > 0), [groups]);
   const totals = useMemo(() => groups.reduce((sum, group) => {
     for (const kind of CONFIRM_KINDS) sum[kind] += group.counts[kind];
     sum.total += group.counts.total;
@@ -75,10 +79,10 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
       <SectionLabel as="h2" className="workspace-section-label" title="제안" />
       <IndexRow label="새 캐릭터 제안" count={suggestionCount} current={false} onClick={() => document.getElementById("new-character-suggestions")?.scrollIntoView({ block: "start" })} />
     </>}
-    {groups.length > 0 && !restricted && <>
+    {counted.length > 0 && !restricted && <>
       <SectionLabel as="h2" className="workspace-section-label" title="시리즈" />
       <IndexRow label="전체" count={totals.total} current={!current} onClick={() => setSelected(ALL)} />
-      {groups.map(group => <IndexRow key={seriesKey(group)} label={group.seriesName} count={group.counts.total} current={current === group}
+      {counted.map(group => <IndexRow key={seriesKey(group)} label={group.seriesName} count={group.counts.total} current={current === group}
         onClick={() => setSelected(seriesKey(group))} />)}
     </>}
   </nav>;
@@ -105,12 +109,14 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
             <span className="crv-count numeric">{group.counts.total.toLocaleString()}<small>건</small></span>
             <Split counts={group.counts} />
             <span className="crv-space" />
-            {group.seriesId && <Button size="sm" variant="ghost" className="crv-group__open" aria-label={`${group.seriesName} 전체 확인 ${group.counts.total}건`}
+            {group.seriesId && group.counts.total > 0 && <Button size="sm" variant="ghost" className="crv-group__open" aria-label={`${group.seriesName} 전체 확인 ${group.counts.total}건`}
               onClick={() => onOpen({ series: { id: group.seriesId!, name: group.seriesName } })}>시리즈 전체 확인<ChevronRightIcon aria-hidden="true" /></Button>}
           </header>
           <div className="crv-characters">
             {group.characters.map(character => <CharacterRow key={character.targetId} group={group} character={character} privacyMode={privacyMode} onOpen={onOpen} />)}
           </div>
+          {group.folded.length > 0 && <FoldedCharacters group={group} privacyMode={privacyMode} open={expanded.has(seriesKey(group))} onOpen={onOpen}
+            onToggle={() => setExpanded(previous => { const next = new Set(previous); if (!next.delete(seriesKey(group))) next.add(seriesKey(group)); return next; })} />}
         </section>)}
       </div>
     </>;
@@ -123,9 +129,9 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
     <div className="crv-scroll">
       <div className="crv-page">
         {!restricted && <CharacterSuggestionsOverview version={version} privacyMode={privacyMode} onCount={setSuggestionCount} onSaved={() => setRetry(value => value + 1)} />}
-        {tallies && !restricted && !error && groups.length > 0 && <div className="crv-summary">
+        {tallies && !restricted && !error && counted.length > 0 && <div className="crv-summary">
           <span className="crv-count crv-count--lg numeric">{totals.total.toLocaleString()}<small>건</small></span>
-          <span className="crv-summary__t">{groups.length.toLocaleString()}개 시리즈 · {groups.reduce((sum, group) => sum + group.characters.length, 0).toLocaleString()}명
+          <span className="crv-summary__t">{counted.length.toLocaleString()}개 시리즈 · {counted.reduce((sum, group) => sum + group.characters.length, 0).toLocaleString()}명
             <Split counts={totals} /></span>
           <span className="crv-space" />
           <Button size="sm" onClick={() => onOpen({})}>전체 확인</Button>
@@ -163,4 +169,19 @@ function CharacterRow({ group, character, privacyMode, onOpen }: { group: Confir
     <span className="crv-count numeric">{character.counts.total.toLocaleString()}<small>건</small></span>
     <ChevronRightIcon className="crv-chevron" aria-hidden="true" />
   </button>;
+}
+
+/**
+ * 인식 추천 of characters still far from switching to 학습 인식: kept out of the counts, one step away.
+ * Opening a character here lists everything it has, folded items included.
+ */
+function FoldedCharacters({ group, privacyMode, open, onToggle, onOpen }: { group: ConfirmGroup; privacyMode: boolean; open: boolean; onToggle: () => void; onOpen: (scope: ConfirmScope) => void }) {
+  return <div className="crv-folded">
+    <Button size="sm" variant="ghost" className="crv-folded__toggle" aria-expanded={open} onClick={onToggle}>
+      {open ? "접기" : `더 보기 (${group.folded.length.toLocaleString()}명)`}
+    </Button>
+    {open && <div className="crv-characters" aria-label={`${group.seriesName} 더 보기`}>
+      {group.folded.map(character => <CharacterRow key={character.targetId} group={group} character={character} privacyMode={privacyMode} onOpen={onOpen} />)}
+    </div>}
+  </div>;
 }

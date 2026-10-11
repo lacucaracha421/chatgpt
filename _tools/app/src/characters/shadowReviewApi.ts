@@ -16,6 +16,8 @@ export type ShadowReviewItem = {
   knn3: number | null;
   nativeOutcome: string;
   scoredAt: string;
+  /** An 인식 추천 of a character far from 학습 인식: the 확인 overview folds it and the counts leave it out. */
+  folded?: boolean;
 };
 export type ShadowVerdictCounts = { pending: number; accepted: number; rejected: number };
 export type ShadowTierCounts = { automatic: ShadowVerdictCounts; recommended: ShadowVerdictCounts };

@@ -19,5 +19,16 @@
     { "judged": 46, "examples": 60, "wrong": 5, "allowed": 2, "status": "hold" },
     { "judged": 100, "examples": 200, "wrong": 5, "allowed": 5, "status": "learning" },
     { "judged": 100, "examples": 200, "wrong": 6, "allowed": 5, "status": "hold" }
+  ],
+  "automaticCases": [
+    { "manual": 20, "auto": 10, "wrongManual": 0, "wrongAuto": 0, "examples": 50, "judged": 30, "wrong": 0, "allowed": 1, "status": "learning" },
+    { "manual": 0, "auto": 30, "wrongManual": 0, "wrongAuto": 0, "examples": 50, "judged": 30, "wrong": 0, "allowed": 1, "status": "learning" },
+    { "manual": 10, "auto": 19, "wrongManual": 0, "wrongAuto": 0, "examples": 80, "judged": 29, "wrong": 0, "allowed": 1, "status": "collecting" },
+    { "manual": 40, "auto": 0, "wrongManual": 0, "wrongAuto": 0, "examples": 49, "judged": 40, "wrong": 0, "allowed": 2, "status": "collecting" },
+    { "manual": 10, "auto": 20, "wrongManual": 0, "wrongAuto": 1, "examples": 50, "judged": 30, "wrong": 1, "allowed": 1, "status": "learning" },
+    { "manual": 10, "auto": 20, "wrongManual": 1, "wrongAuto": 1, "examples": 50, "judged": 30, "wrong": 2, "allowed": 1, "status": "hold" },
+    { "manual": 20, "auto": 20, "wrongManual": 1, "wrongAuto": 1, "examples": 60, "judged": 40, "wrong": 2, "allowed": 2, "status": "learning" },
+    { "manual": 20, "auto": 20, "wrongManual": 2, "wrongAuto": 1, "examples": 60, "judged": 40, "wrong": 3, "allowed": 2, "status": "hold" },
+    { "manual": 0, "auto": 100, "wrongManual": 0, "wrongAuto": 6, "examples": 200, "judged": 100, "wrong": 6, "allowed": 5, "status": "hold" }
   ]
 }

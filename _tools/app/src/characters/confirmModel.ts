@@ -124,30 +124,43 @@ export function tallyConfirm(items: readonly ConfirmItem[]): ConfirmTally[] {
 }
 
 export type ConfirmCharacter = { targetId: string; name: string; counts: ConfirmCounts; thumbnailAssetId: string | null };
-export type ConfirmGroup = { seriesId: string | null; seriesName: string; counts: ConfirmCounts; characters: ConfirmCharacter[] };
+export type ConfirmGroup = {
+  seriesId: string | null; seriesName: string; counts: ConfirmCounts; characters: ConfirmCharacter[];
+  /** Characters whose 인식 추천 is folded behind "더 보기": not counted in `counts` or anywhere above the series. */
+  folded: ConfirmCharacter[];
+};
 
-/** 확인 split by series and character, busiest first; a character without a known series lands in "기타" (last). */
+/**
+ * 확인 split by series and character, busiest first; a character without a known series lands in "기타" (last).
+ * `folded` are the 인식 추천 tallies of characters far from switching: they sit under their series, never in its counts.
+ */
 export function confirmGroups(
   tallies: readonly ConfirmTally[],
   targets: readonly CharacterTarget[],
   seriesName: (id: string) => string | undefined,
+  folded: readonly ConfirmTally[] = [],
 ): ConfirmGroup[] {
   const byId = new Map(targets.map(target => [target.id, target]));
   const groups = new Map<string, ConfirmGroup>();
-  for (const tally of tallies) {
-    if (tally.counts.total === 0) continue;
+  const place = (tally: ConfirmTally, onGroup: (group: ConfirmGroup, character: ConfirmCharacter) => void) => {
+    if (tally.counts.total === 0) return;
     const target = byId.get(tally.targetId);
     const seriesId = target?.seriesClassificationId ?? tally.seriesId ?? null;
     const key = seriesId ?? "";
     let group = groups.get(key);
-    if (!group) groups.set(key, group = { seriesId, seriesName: (seriesId && seriesName(seriesId)) || "기타", counts: emptyConfirmCounts(), characters: [] });
+    if (!group) groups.set(key, group = { seriesId, seriesName: (seriesId && seriesName(seriesId)) || "기타", counts: emptyConfirmCounts(), characters: [], folded: [] });
+    onGroup(group, { targetId: tally.targetId, name: tally.targetName, counts: tally.counts,
+      thumbnailAssetId: target?.thumbnailAssetId ?? target?.references.find(reference => reference.status === "ready" && reference.assetId)?.assetId ?? null });
+  };
+  for (const tally of tallies) place(tally, (group, character) => {
     for (const kind of CONFIRM_KINDS) group.counts[kind] += tally.counts[kind];
     group.counts.total += tally.counts.total;
-    group.characters.push({ targetId: tally.targetId, name: tally.targetName, counts: tally.counts,
-      thumbnailAssetId: target?.thumbnailAssetId ?? target?.references.find(reference => reference.status === "ready" && reference.assetId)?.assetId ?? null });
-  }
+    group.characters.push(character);
+  });
+  for (const tally of folded) place(tally, (group, character) => { group.folded.push(character); });
   const result = [...groups.values()];
-  for (const group of result) group.characters.sort((a, b) => b.counts.total - a.counts.total || a.name.localeCompare(b.name, "ko"));
+  const byBusiest = (a: ConfirmCharacter, b: ConfirmCharacter) => b.counts.total - a.counts.total || a.name.localeCompare(b.name, "ko");
+  for (const group of result) { group.characters.sort(byBusiest); group.folded.sort(byBusiest); }
   return result.sort((a, b) => Number(a.seriesId === null) - Number(b.seriesId === null) || b.counts.total - a.counts.total || a.seriesName.localeCompare(b.seriesName, "ko"));
 }
 

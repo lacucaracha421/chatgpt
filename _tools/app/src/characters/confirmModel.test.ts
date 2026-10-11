@@ -54,3 +54,16 @@ it("tallies per character and groups per series, busiest first, with 기타 for 
   expect(groups[0]!.counts).toEqual({ recognition: 1, tag: 2, recheck: 0, total: 3 });
   expect(confirmSplitText(groups[0]!.counts)).toBe("인식 추천 1 · 태그 추천 2");
 });
+
+it("lists folded characters under their series without adding to its counts", () => {
+  const items = mergeConfirmItems({ tagger: [], candidates: [shadowItem("c1", "hina", "히나")], doubtful: [], targets });
+  const folded = mergeConfirmItems({ tagger: [], candidates: [shadowItem("f1", "kisaki", "키사키", { folded: true }), shadowItem("f2", "kisaki", "키사키", { folded: true })], doubtful: [], targets });
+  const groups = confirmGroups(tallyConfirm(items), targets, id => id === "series" ? "백합" : undefined, tallyConfirm(folded));
+  expect(groups).toHaveLength(1);
+  expect(groups[0]!.counts.total).toBe(1);
+  expect(groups[0]!.characters.map(character => character.name)).toEqual(["히나"]);
+  expect(groups[0]!.folded.map(character => [character.name, character.counts.total])).toEqual([["키사키", 2]]);
+  // A series that only has folded characters still gets its group, with nothing counted.
+  const onlyFolded = confirmGroups([], targets, id => id === "series" ? "백합" : undefined, tallyConfirm(folded));
+  expect(onlyFolded.map(group => [group.seriesName, group.counts.total, group.folded.length])).toEqual([["백합", 0, 1]]);
+});

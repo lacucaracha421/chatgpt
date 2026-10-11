@@ -154,6 +154,7 @@ impl Library {
         let wanted = candidates
             .items
             .iter()
+            .filter(|item| !item.folded)
             .map(|item| item.target_id.clone())
             .chain(doubtful.items.iter().map(|item| item.target_id.clone()))
             .collect::<BTreeSet<_>>()
@@ -225,7 +226,7 @@ impl Library {
                 entry.2 = knn3.filter(|v| v.is_finite());
             }
         };
-        for item in &candidates.items {
+        for item in candidates.items.iter().filter(|item| !item.folded) {
             if target(&item.target_id)?.is_none() {
                 continue;
             }
@@ -331,16 +332,23 @@ impl Library {
         let scored = super::character_shadow_review::shadow_cache_scored_marker(self.root())
             .map_err(character_error)?;
         let connection = self.connection()?;
-        let (decisions, targets, broad): (Option<i64>, Option<String>, Option<bool>) = connection
-            .query_row(
-                "SELECT (SELECT MAX(sequence) FROM character_decisions),
-                        (SELECT MAX(updated_at) || ':' || COUNT(*) || ':' || SUM(revision) FROM character_targets),
-                        (SELECT broad_folder_scope FROM character_autotag_control WHERE singleton=1)",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?;
-        // The broad-folder setting hides or shows candidates, so it is part of the input.
-        let input = serde_json::json!([decisions, scored, targets, acknowledged, broad]);
+        let (decisions, targets, broad, tagger): (
+            Option<i64>,
+            Option<String>,
+            Option<bool>,
+            String,
+        ) = connection.query_row(
+            "SELECT (SELECT MAX(sequence) FROM character_decisions),
+                    (SELECT MAX(updated_at) || ':' || COUNT(*) || ':' || SUM(revision) FROM character_targets),
+                    (SELECT broad_folder_scope FROM character_autotag_control WHERE singleton=1),
+                    (SELECT COUNT(*) FROM character_target_tagger_tags) || ':' ||
+                    (SELECT COUNT(*) FROM asset_tagger_coverage)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?;
+        // The broad-folder setting hides or shows candidates, and so do the taggers' readings
+        // (a pair they agree on needs no person), so both are part of the input.
+        let input = serde_json::json!([decisions, scored, targets, acknowledged, broad, tagger]);
         Ok(hex(input.to_string()))
     }
 

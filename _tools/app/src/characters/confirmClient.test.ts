@@ -52,3 +52,21 @@ it("reports a list that failed and still returns the others", async () => {
 it("adds the three kinds of a count read", () => {
   expect(confirmTotal({ recognition: 3, tag: 4, recheck: 5 })).toBe(12);
 });
+
+it("folds the 인식 추천 of far characters out of a wide read, keeps what else brings them up, and shows them in their own list", async () => {
+  const sources = confirmSourceFor({
+    tagger: async () => [tag("t1", "kisaki", "other")],
+    candidates: [shadowItem("c1", "hina", "히나"), shadowItem("f1", "kisaki", "키사키", { folded: true }), shadowItem("f2", "kisaki", "키사키", { folded: true }), shadowItem("t1", "kisaki", "키사키", { folded: true })],
+    doubtful: [shadowItem("f2", "kisaki", "키사키", { verdict: "none" })],
+  });
+  const all = await readConfirmItems(sources, {}, targets);
+  // f1 is folded; t1 stays as the tag list's own 태그 추천; f2 is a 다시 확인 whatever the fold says.
+  expect(all?.items.map(item => [item.assetId, item.kind]).sort()).toEqual([["c1", "recognition"], ["f2", "recheck"], ["t1", "tag"]]);
+  expect(all?.folded.map(item => item.assetId)).toEqual(["f1"]);
+  // A series list folds as well; one character's own list shows everything it has.
+  const series = await readConfirmItems(sources, { series: { id: "other", name: "다른" } }, targets);
+  expect(series?.folded.map(item => item.assetId)).toEqual(["f1"]);
+  const one = await readConfirmItems(sources, { series: { id: "other", name: "다른" }, target: { id: "kisaki", name: "키사키" } }, targets);
+  expect(one?.items.map(item => item.assetId).sort()).toEqual(["f1", "f2", "t1"]);
+  expect(one?.folded).toEqual([]);
+});

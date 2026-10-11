@@ -392,6 +392,19 @@ impl Library {
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        // Pairs the taggers settled by agreement need no person (the same set the 확인 counts
+        // leave out).
+        let agreed = self.agreed_pairs(
+            &connection,
+            &rows
+                .iter()
+                .map(|row| (row.target_id.as_str(), row.asset.id.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let rows = rows
+            .into_iter()
+            .filter(|row| !agreed.contains(&(row.target_id.clone(), row.asset.id.clone())))
+            .collect::<Vec<_>>();
 
         let ids = rows
             .iter()

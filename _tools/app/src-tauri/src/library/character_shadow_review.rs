@@ -4,6 +4,7 @@
 //! scorer called `automatic` or `recommended`. Judgments go through the normal
 //! manual decision path (`record_character_decisions`); nothing here writes to
 //! the shadow cache or the library, and shadow rows never become evidence.
+use super::auto_tags::CHARACTER_MIN_SCORE;
 use super::{
     characters::{Error, Result},
     Library,
@@ -52,6 +53,10 @@ pub struct ShadowReviewItem {
     pub knn3: Option<f64>,
     pub native_outcome: String,
     pub scored_at: String,
+    /// An 인식 추천 of a character still far from 학습 인식 (see [`is_close_to_switching`]): the
+    /// 확인 overview folds it, the counts and the tablet feed leave it out. Always false in the
+    /// `doubtful` list.
+    pub folded: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, PartialEq)]
@@ -196,7 +201,12 @@ fn shadow_rows(root: &Path, doubtful: bool) -> Result<Option<(String, Vec<Shadow
     let Some(c) = open_shadow_cache(root)? else {
         return Ok(None);
     };
-    let origin = if super::character_shadow::cache_has_origin(&c)? {
+    rows_of_cache(&c, doubtful)
+}
+
+/// [`shadow_rows`] over an already open cache connection.
+fn rows_of_cache(c: &Connection, doubtful: bool) -> Result<Option<(String, Vec<ShadowRow>)>> {
+    let origin = if super::character_shadow::cache_has_origin(c)? {
         "origin"
     } else {
         "'live'"
@@ -444,6 +454,8 @@ struct PendingRow {
     original_name: String,
     width: u32,
     height: u32,
+    /// See [`ShadowReviewItem::folded`].
+    folded: bool,
 }
 
 /// The part of a review list computed from the database rows under one [`ListKey`]: the
@@ -504,9 +516,11 @@ impl ReviewCache {
     }
 }
 
-/// The database part of a review list. `rows` is the newest policy's rows (`None`: no cache).
+/// The database part of a review list. `rows` is the newest policy's rows (`None`: no cache) and
+/// `cache` the open score cache they came from (the judgments behind [`ListPolicy`] read it).
 fn prepare(
     c: &Connection,
+    cache: Option<&Connection>,
     rows: Option<&ShadowRows>,
     doubtful: bool,
     series_id: Option<&str>,
@@ -554,6 +568,15 @@ fn prepare(
     };
     let manual = latest_decisions(c, &rows, true)?;
     let assets = eligible_assets(c, &rows)?;
+    let policy = if doubtful {
+        ListPolicy::default()
+    } else {
+        ListPolicy::build(
+            c,
+            cache,
+            rows.iter().map(|row| row.target_id.clone()).collect(),
+        )?
+    };
     let mut prepared = Prepared {
         policy_version: Some(version.clone()),
         ..Prepared::default()
@@ -597,11 +620,17 @@ fn prepare(
         else {
             continue;
         };
+        // A person needs to look at neither a pair the taggers settled by agreement nor an
+        // image 학습 인식 has already placed for a character it owns.
+        if !doubtful && policy.settles(&row) {
+            continue;
+        }
         target_ids.insert(row.target_id.clone());
         prepared.pending.push(PendingRow {
             original_name: original_name.clone(),
             width: u32::try_from(*width).unwrap_or(0),
             height: u32::try_from(*height).unwrap_or(0),
+            folded: !doubtful && policy.far.contains(&row.target_id),
             row,
         });
     }
@@ -652,6 +681,7 @@ fn assemble(
             knn3: row.knn3,
             native_outcome: row.native_outcome.clone(),
             scored_at: row.scored_at.clone(),
+            folded: pending.folded,
         });
     }
     ShadowReviewItems {
@@ -680,6 +710,169 @@ fn validate_page_query(query: &ShadowReviewQuery) -> Result<bool> {
         return Err(Error::Invalid("한 번에 1~200개 항목을 불러올 수 있습니다."));
     }
     Ok(doubtful)
+}
+
+/// The 확인 counts, and what the overview folds away (인식 추천 of characters far from
+/// switching that nothing else brings up).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ConfirmTotals {
+    pub counts: ConfirmCounts,
+    pub folded_items: u32,
+    pub folded_characters: u32,
+}
+
+/// Pairs among the given ones that the taggers judged correct by agreement, see
+/// [`Library::agreed_pairs`].
+pub(super) fn agreed_pairs_of(
+    c: &Connection,
+    cache: Option<&Connection>,
+    pairs: &[(&str, &str)],
+) -> Result<BTreeSet<(String, String)>> {
+    let targets = pairs
+        .iter()
+        .map(|(target, _)| (*target).to_owned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if targets.is_empty() || cache.is_none() {
+        return Ok(BTreeSet::new());
+    }
+    let judged = judgments_of(c, cache, &targets, Auto::Full)?;
+    Ok(pairs
+        .iter()
+        .filter(|(target, asset)| {
+            judged
+                .agreed
+                .get(*target)
+                .is_some_and(|assets| assets.contains(*asset))
+        })
+        .map(|(target, asset)| ((*target).to_owned(), (*asset).to_owned()))
+        .collect())
+}
+
+/// The pending tag pairs (target, asset, reason) of the whole library or one series.
+fn pending_tag_rows(
+    c: &Connection,
+    series_id: Option<&str>,
+) -> Result<Vec<(String, String, String)>> {
+    Ok(c.prepare(
+        "SELECT target_id,asset_id,reason FROM character_tagger_pending
+         WHERE ?1 IS NULL OR series_id=?1",
+    )?
+    .query_map([series_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?
+    .collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// [`Library::confirm_totals`] over open connections to a library and its score cache, for the
+/// recognition-plan preview.
+pub(super) fn confirm_totals_in(
+    c: &Connection,
+    cache: Option<&Connection>,
+) -> Result<ConfirmTotals> {
+    let rows = |doubtful: bool| -> Result<Option<ShadowRows>> {
+        Ok(match cache {
+            Some(cache) => rows_of_cache(cache, doubtful)?.map(Arc::new),
+            None => None,
+        })
+    };
+    confirm_totals_of(
+        c,
+        cache,
+        rows(false)?.as_ref(),
+        rows(true)?.as_ref(),
+        pending_tag_rows(c, None)?,
+        None,
+    )
+}
+
+/// Exact 확인 counts from the rows of both shadow lists and the pending tag pairs
+/// (target, asset, reason), each pair once under its highest kind. `series_id` limits the
+/// shadow lists; the caller limits the tag pairs the same way.
+fn confirm_totals_of(
+    connection: &Connection,
+    cache: Option<&Connection>,
+    candidates: Option<&ShadowRows>,
+    doubtful: Option<&ShadowRows>,
+    tags: Vec<(String, String, String)>,
+    series_id: Option<&str>,
+) -> Result<ConfirmTotals> {
+    // Pairs still waiting in one shadow list whose character exists and is enabled, with
+    // whether the overview folds them.
+    let pending =
+        |rows: Option<&ShadowRows>, doubtful: bool| -> Result<Vec<(String, String, bool)>> {
+            let prepared = prepare(connection, cache, rows, doubtful, series_id)?;
+            let folded = prepared
+                .pending
+                .iter()
+                .map(|pending| pending.folded)
+                .collect::<Vec<_>>();
+            let rows = prepared
+                .pending
+                .into_iter()
+                .map(|pending| pending.row)
+                .collect::<Vec<_>>();
+            let enabled = enabled_target_names(connection, &rows)?;
+            Ok(rows
+                .into_iter()
+                .zip(folded)
+                .filter(|(row, _)| enabled.contains_key(&row.target_id))
+                .map(|(row, folded)| (row.target_id, row.asset_id, folded))
+                .collect())
+        };
+    let recognition = pending(candidates, false)?;
+    let recheck_by_recognition = pending(doubtful, true)?;
+    // 0 tag, 1 recognition, 2 recheck: a pair takes the highest kind any list gives it.
+    let mut kinds = BTreeMap::<(String, String), u8>::new();
+    let agreed = agreed_pairs_of(
+        connection,
+        cache,
+        &tags
+            .iter()
+            .map(|(target, asset, _)| (target.as_str(), asset.as_str()))
+            .collect::<Vec<_>>(),
+    )?;
+    for (target_id, asset_id, reason) in tags {
+        if agreed.contains(&(target_id.clone(), asset_id.clone())) {
+            continue;
+        }
+        kinds.insert((target_id, asset_id), if reason == "veto" { 2 } else { 0 });
+    }
+    let mut folded = BTreeSet::new();
+    for (target_id, asset_id, is_folded) in recognition {
+        if is_folded {
+            folded.insert((target_id, asset_id));
+            continue;
+        }
+        let kind = kinds.entry((target_id, asset_id)).or_insert(1);
+        *kind = (*kind).max(1);
+    }
+    for (target_id, asset_id, _) in recheck_by_recognition {
+        kinds.insert((target_id, asset_id), 2);
+    }
+    folded.retain(|key| !kinds.contains_key(key));
+    let mut counts = ConfirmCounts::default();
+    for kind in kinds.into_values() {
+        match kind {
+            2 => counts.recheck += 1,
+            1 => counts.recognition += 1,
+            _ => counts.tag += 1,
+        }
+    }
+    Ok(ConfirmTotals {
+        counts,
+        folded_items: folded.len() as u32,
+        folded_characters: folded
+            .iter()
+            .map(|(target, _)| target)
+            .collect::<BTreeSet<_>>()
+            .len() as u32,
+    })
 }
 
 impl Library {
@@ -742,59 +935,36 @@ impl Library {
     /// validates no reference files and builds no fingerprints, so Home and a series header can
     /// afford it; the tag pairs are read from the same pending view the tag list uses.
     pub fn character_confirm_counts(&self, series_id: Option<&str>) -> Result<ConfirmCounts> {
+        Ok(self.confirm_totals(series_id)?.counts)
+    }
+
+    /// [`Self::character_confirm_counts`] with what the 확인 overview folds away.
+    pub(crate) fn confirm_totals(&self, series_id: Option<&str>) -> Result<ConfirmTotals> {
         let candidates = self.shadow_rows_cached(false)?.1;
         let doubtful = self.shadow_rows_cached(true)?.1;
+        let cache = open_shadow_cache(&self.root)?;
         let connection = self.connection()?;
-        // Pairs still waiting in one shadow list whose character exists and is enabled.
-        let pending =
-            |rows: Option<&ShadowRows>, doubtful: bool| -> Result<BTreeSet<(String, String)>> {
-                let prepared = prepare(&connection, rows, doubtful, series_id)?;
-                let rows = prepared
-                    .pending
-                    .into_iter()
-                    .map(|pending| pending.row)
-                    .collect::<Vec<_>>();
-                let enabled = enabled_target_names(&connection, &rows)?;
-                Ok(rows
-                    .into_iter()
-                    .filter(|row| enabled.contains_key(&row.target_id))
-                    .map(|row| (row.target_id, row.asset_id))
-                    .collect())
-            };
-        let recognition = pending(candidates.as_ref(), false)?;
-        let recheck_by_recognition = pending(doubtful.as_ref(), true)?;
-        // 0 tag, 1 recognition, 2 recheck: a pair takes the highest kind any list gives it.
-        let mut kinds = BTreeMap::<(String, String), u8>::new();
-        let mut tags = connection.prepare(
-            "SELECT target_id,asset_id,reason FROM character_tagger_pending
-             WHERE ?1 IS NULL OR series_id=?1",
-        )?;
-        for row in tags.query_map([series_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })? {
-            let (target_id, asset_id, reason) = row?;
-            kinds.insert((target_id, asset_id), if reason == "veto" { 2 } else { 0 });
-        }
-        for key in recognition {
-            let kind = kinds.entry(key).or_insert(1);
-            *kind = (*kind).max(1);
-        }
-        for key in recheck_by_recognition {
-            kinds.insert(key, 2);
-        }
-        let mut counts = ConfirmCounts::default();
-        for kind in kinds.into_values() {
-            match kind {
-                2 => counts.recheck += 1,
-                1 => counts.recognition += 1,
-                _ => counts.tag += 1,
-            }
-        }
-        Ok(counts)
+        let tags = pending_tag_rows(&connection, series_id)?;
+        confirm_totals_of(
+            &connection,
+            cache.as_ref(),
+            candidates.as_ref(),
+            doubtful.as_ref(),
+            tags,
+            series_id,
+        )
+    }
+
+    /// The pairs the taggers judged correct by agreement and nobody judged by hand: a pair among
+    /// the given (character, image) ones is one of them when 학습 인식 scored it automatic.
+    /// The tag list drops these exactly as the recognition list does.
+    pub(super) fn agreed_pairs(
+        &self,
+        c: &Connection,
+        pairs: &[(&str, &str)],
+    ) -> Result<BTreeSet<(String, String)>> {
+        let cache = open_shadow_cache(&self.root)?;
+        agreed_pairs_of(c, cache.as_ref(), pairs)
     }
 
     pub fn character_shadow_review_page(
@@ -815,8 +985,15 @@ impl Library {
     ) -> Result<ShadowReviewPage> {
         let doubtful = validate_page_query(&query)?;
         let rows = shadow_rows(&self.root, doubtful)?.map(Arc::new);
+        let cache = open_shadow_cache(&self.root)?;
         let c = self.connection()?;
-        let prepared = prepare(&c, rows.as_ref(), doubtful, query.series_id.as_deref())?;
+        let prepared = prepare(
+            &c,
+            cache.as_ref(),
+            rows.as_ref(),
+            doubtful,
+            query.series_id.as_deref(),
+        )?;
         drop(c);
         // Characters are read after releasing the database lock so their reference file
         // checks never hold it.
@@ -895,7 +1072,14 @@ impl Library {
                 cache
                     .prepared_count
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                Arc::new(prepare(&c, rows.as_ref(), doubtful, series_id)?)
+                let cache = open_shadow_cache(&self.root)?;
+                Arc::new(prepare(
+                    &c,
+                    cache.as_ref(),
+                    rows.as_ref(),
+                    doubtful,
+                    series_id,
+                )?)
             }
         };
         drop(c);
@@ -922,9 +1106,14 @@ impl Library {
 #[serde(rename_all = "camelCase")]
 pub struct S36Readiness {
     pub target_id: String,
-    /// Automatic candidates judged after scoring.
+    /// Automatic candidates judged: by people after scoring, plus the ones the taggers judged
+    /// by independent agreement ([`TaggerSignals`]); `reviewed_auto` of them are the latter.
     pub reviewed: u32,
+    pub reviewed_auto: u32,
+    /// Judged candidates that were wrong (a rejection, or a confident disagreement of the
+    /// taggers); `wrong_auto` of them are the latter.
     pub wrong: u32,
+    pub wrong_auto: u32,
     /// Wrong answers allowed for `reviewed`, see [`allowed_wrong`].
     pub allowed: u32,
     /// Manual acceptances for this character (S36's positive examples).
@@ -997,15 +1186,199 @@ pub(super) fn newest_policy_for_tests(cache: &Connection) -> Option<String> {
     newest_policy(cache).unwrap()
 }
 
-/// Readiness of the given characters. Read-only. A pair counts as judged when its newest
-/// manual decision (not `cleared`) came after the newest policy scored it `automatic`;
-/// such a pair is wrong when that decision is a rejection. Pairs are looked up by key in the
-/// cache, so the cost follows the characters' decisions, not the size of the cache.
+/// Characters closer than this to 학습 인식 are worth a person's time on 인식 추천: at least
+/// [`NEAR_JUDGED`] judged candidates or [`NEAR_EXAMPLES`] manual examples. The rest are folded in
+/// the 확인 overview and left out of the counts and the tablet feed. The only place these
+/// numbers live.
+pub const NEAR_JUDGED: u32 = 15;
+pub const NEAR_EXAMPLES: u32 = 30;
+
+pub const fn is_close_to_switching(reviewed: u32, examples: u32) -> bool {
+    reviewed >= NEAR_JUDGED || examples >= NEAR_EXAMPLES
+}
+
+/// How much of the automatic judgment [`judgments_of`] computes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Auto {
+    /// People's judgments only (the rule before the taggers' agreement counted).
+    Off,
+    /// Only for characters that already have [`READY_EXAMPLES`] examples: the others cannot be
+    /// placed by 학습 인식 whatever the taggers say, so classification skips the tagger reads.
+    ReadyOnly,
+    /// Every character.
+    Full,
+}
+
+/// What the two automatic taggers (PixAI and canary) say about the images of one character.
+/// "Sure" is [`CHARACTER_MIN_SCORE`] (the app's 확실 line); a tagger reads a character when
+/// its best score over the tags linked to that character is sure. Only characters that have
+/// linked tags in both taggers' vocabularies get signals.
+#[derive(Debug, Default)]
+struct TaggerSignals {
+    /// Both taggers read this character: an independent 맞음.
+    agree: BTreeSet<String>,
+    /// Both taggers read one other character of the same series, and neither reads this one:
+    /// an independent 아님. An image this character is also read on is never in here.
+    disagree: BTreeSet<String>,
+}
+
+fn tagger_signals(c: &Connection, targets: &[String]) -> Result<HashMap<String, TaggerSignals>> {
+    let ids = serde_json::to_string(targets)?;
+    let known = c
+        .prepare(
+            "SELECT t.id,t.series_classification_id FROM character_targets t
+             WHERE t.id IN (SELECT value FROM json_each(?1))
+               AND t.role='character' AND t.series_classification_id IS NOT NULL
+               AND EXISTS(SELECT 1 FROM character_target_tagger_tags m
+                          JOIN tagger_character_vocabulary v ON v.tag=m.tag
+                          WHERE m.target_id=t.id AND v.source='pixai')
+               AND EXISTS(SELECT 1 FROM character_target_tagger_tags m
+                          JOIN tagger_character_vocabulary v ON v.tag=m.tag
+                          WHERE m.target_id=t.id AND v.source='canary')",
+        )?
+        .query_map([&ids], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
+    if known.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let series = serde_json::to_string(&known.values().collect::<BTreeSet<_>>())?;
+    let peers = c
+        .prepare(
+            "SELECT id,series_classification_id FROM character_targets
+             WHERE role='character'
+               AND series_classification_id IN (SELECT value FROM json_each(?1))",
+        )?
+        .query_map([&series], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let peer_ids = serde_json::to_string(&peers.iter().map(|(id, _)| id).collect::<Vec<_>>())?;
+    // How many taggers read each (character, image): 2 is both.
+    let mut reads = HashMap::<String, HashMap<String, u32>>::new();
+    for row in c
+        .prepare(
+            "SELECT m.target_id,s.asset_id,COUNT(DISTINCT s.source)
+             FROM character_target_tagger_tags m
+             JOIN asset_tagger_character_scores s ON s.tag=m.tag AND s.score>=?2
+             JOIN assets a ON a.id=s.asset_id AND a.status='normal' AND a.media_kind='image'
+             WHERE m.target_id IN (SELECT value FROM json_each(?1))
+             GROUP BY m.target_id,s.asset_id",
+        )?
+        .query_map(params![peer_ids, CHARACTER_MIN_SCORE], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, u32>(2)?,
+            ))
+        })?
+    {
+        let (target, asset, sources) = row?;
+        reads.entry(target).or_default().insert(asset, sources);
+    }
+    // Per series: the images some character is read on by both taggers, and which characters.
+    let mut sure = HashMap::<&str, HashMap<&str, Vec<&str>>>::new();
+    for (peer, series) in &peers {
+        for (asset, sources) in reads.get(peer).into_iter().flatten() {
+            if *sources >= 2 {
+                sure.entry(series)
+                    .or_default()
+                    .entry(asset)
+                    .or_default()
+                    .push(peer);
+            }
+        }
+    }
+    let mut result = HashMap::new();
+    for (target, series) in &known {
+        let own = reads.get(target);
+        let mut signals = TaggerSignals::default();
+        for (asset, sources) in own.into_iter().flatten() {
+            if *sources >= 2 {
+                signals.agree.insert(asset.clone());
+            }
+        }
+        for (asset, owners) in sure.get(series.as_str()).into_iter().flatten() {
+            if owners.iter().any(|owner| *owner != target.as_str())
+                && !own.is_some_and(|own| own.contains_key(*asset))
+            {
+                signals.disagree.insert((*asset).to_owned());
+            }
+        }
+        result.insert(target.clone(), signals);
+    }
+    Ok(result)
+}
+
+/// The numbers of the learning rule per character, and the pairs the taggers judged correct.
+pub(super) struct Judgments {
+    pub readiness: Vec<S36Readiness>,
+    /// Per character: images whose pair the taggers judged correct by agreement and nobody
+    /// has judged by hand. The 확인 list leaves these out.
+    agreed: HashMap<String, BTreeSet<String>>,
+}
+
+/// Readiness of the given characters, with the taggers' agreement counted. Read-only.
 pub(super) fn readiness_of(
     c: &Connection,
     cache: Option<&Connection>,
     targets: &[String],
 ) -> Result<Vec<S36Readiness>> {
+    Ok(judgments_of(c, cache, targets, Auto::Full)?.readiness)
+}
+
+fn scored_at(
+    score: &mut rusqlite::Statement<'_>,
+    asset: &str,
+    target: &str,
+    version: &str,
+) -> Result<Option<String>> {
+    Ok(score
+        .query_row(params![asset, target, version], |r| r.get(0))
+        .optional()?)
+}
+
+/// One character's numbers from its people's judgments `(judged, wrong)`, the taggers'
+/// `(judged, wrong)` and its manual examples; the one place the totals and the status are made.
+fn readiness_row(
+    target_id: &str,
+    (manual, manual_wrong): (u32, u32),
+    (auto, auto_wrong): (u32, u32),
+    examples: u32,
+) -> S36Readiness {
+    let reviewed = manual + auto;
+    let wrong = manual_wrong + auto_wrong;
+    S36Readiness {
+        target_id: target_id.to_owned(),
+        reviewed,
+        reviewed_auto: auto,
+        wrong,
+        wrong_auto: auto_wrong,
+        allowed: allowed_wrong(reviewed),
+        examples,
+        status: readiness_status(reviewed, wrong, examples).to_string(),
+    }
+}
+
+/// Judged candidates of the characters, the one rule behind [`readiness_status`].
+///
+/// A candidate is a pair (character, image) the newest policy scored `automatic`. It is judged
+/// - by a person when the newest manual decision (not `cleared`) came after that scoring; wrong
+///   when the decision is a rejection;
+/// - otherwise by the taggers ([`TaggerSignals`]): correct when both read the character, wrong
+///   when both read another character of its series and neither reads this one. A newest manual
+///   rejection blocks an agreement, and a manual acceptance blocks a disagreement.
+///
+/// A pair is judged once, a person's judgment first. Examples are manual acceptances only. Pairs
+/// are looked up by key in the cache, so the cost follows the characters' decisions and tagger
+/// readings, not the size of the cache.
+pub(super) fn judgments_of(
+    c: &Connection,
+    cache: Option<&Connection>,
+    targets: &[String],
+    auto: Auto,
+) -> Result<Judgments> {
     let version = cache.map(newest_policy).transpose()?.flatten();
     let mut score = match (&version, cache) {
         (Some(_), Some(cache)) => Some(cache.prepare(
@@ -1023,10 +1396,38 @@ pub(super) fn readiness_of(
          FROM character_decisions d WHERE d.target_id=?1 AND d.origin='manual' GROUP BY d.source_asset_id)
          WHERE latest='accepted'",
     )?;
+    let example_counts = targets
+        .iter()
+        .map(|target| Ok(examples.query_row([target], |r| r.get::<_, u32>(0))?))
+        .collect::<Result<Vec<_>>>()?;
+    let signals = if version.is_none() {
+        HashMap::new()
+    } else {
+        let wanted = targets
+            .iter()
+            .zip(&example_counts)
+            .filter(|(_, count)| match auto {
+                Auto::Off => false,
+                Auto::ReadyOnly => **count >= READY_EXAMPLES,
+                Auto::Full => true,
+            })
+            .map(|(target, _)| target.clone())
+            .collect::<Vec<_>>();
+        if wanted.is_empty() {
+            HashMap::new()
+        } else {
+            tagger_signals(c, &wanted)?
+        }
+    };
+    let mut agreed = HashMap::new();
     let mut result = Vec::with_capacity(targets.len());
-    for target in targets {
-        let (mut reviewed, mut wrong) = (0u32, 0u32);
+    for (target, examples) in targets.iter().zip(example_counts) {
+        let (mut manual, mut manual_wrong) = (0u32, 0u32);
+        let (mut judged_auto, mut wrong_auto) = (0u32, 0u32);
         if let (Some(version), Some(score)) = (&version, score.as_mut()) {
+            // Newest first: only the latest manual decision of a pair counts, and a `cleared`
+            // one leaves the pair without any.
+            let mut latest = HashMap::<String, (String, String)>::new();
             let mut seen = BTreeSet::new();
             for row in decisions.query_map([target], |r| {
                 Ok((
@@ -1036,30 +1437,114 @@ pub(super) fn readiness_of(
                 ))
             })? {
                 let (asset, decision, at) = row?;
-                // Newest first: only the latest manual decision of a pair counts.
-                if !seen.insert(asset.clone()) || decision == "cleared" {
-                    continue;
-                }
-                let scored: Option<String> = score
-                    .query_row(params![asset, target, version], |r| r.get(0))
-                    .optional()?;
-                if scored.is_some_and(|scored| at > scored) {
-                    reviewed += 1;
-                    wrong += u32::from(decision == "rejected");
+                if seen.insert(asset.clone()) && decision != "cleared" {
+                    latest.insert(asset, (decision, at));
                 }
             }
+            for (asset, (decision, at)) in &latest {
+                if scored_at(score, asset, target, version)?.is_some_and(|scored| *at > scored) {
+                    manual += 1;
+                    manual_wrong += u32::from(decision == "rejected");
+                }
+            }
+            if let Some(signals) = signals.get(target) {
+                let mut settled = BTreeSet::new();
+                for (assets, correct) in [(&signals.agree, true), (&signals.disagree, false)] {
+                    for asset in assets {
+                        let Some(scored) = scored_at(score, asset, target, version)? else {
+                            continue;
+                        };
+                        match latest.get(asset) {
+                            Some((_, at)) if *at > scored => continue,
+                            Some((decision, _)) if decision == "rejected" => continue,
+                            Some(_) if !correct => continue,
+                            _ => {}
+                        }
+                        judged_auto += 1;
+                        if correct {
+                            settled.insert(asset.clone());
+                        } else {
+                            wrong_auto += 1;
+                        }
+                    }
+                }
+                agreed.insert(target.clone(), settled);
+            }
         }
-        let examples: u32 = examples.query_row([target], |r| r.get(0))?;
-        result.push(S36Readiness {
-            target_id: target.clone(),
-            reviewed,
-            wrong,
-            allowed: allowed_wrong(reviewed),
+        result.push(readiness_row(
+            target,
+            (manual, manual_wrong),
+            (judged_auto, wrong_auto),
             examples,
-            status: readiness_status(reviewed, wrong, examples).to_string(),
-        });
+        ));
     }
-    Ok(result)
+    Ok(Judgments {
+        readiness: result,
+        agreed,
+    })
+}
+
+/// How the 확인 list treats the pairs of one list, from the judgments of its characters.
+#[derive(Debug, Default)]
+struct ListPolicy {
+    /// Characters 학습 인식 places right now.
+    learning: BTreeSet<String>,
+    /// Characters still far from switching ([`is_close_to_switching`]).
+    far: BTreeSet<String>,
+    agreed: HashMap<String, BTreeSet<String>>,
+}
+
+impl ListPolicy {
+    fn build(
+        c: &Connection,
+        cache: Option<&Connection>,
+        targets: BTreeSet<String>,
+    ) -> Result<Self> {
+        if targets.is_empty() {
+            return Ok(Self::default());
+        }
+        let ids = targets.into_iter().collect::<Vec<_>>();
+        let judged = judgments_of(c, cache, &ids, Auto::Full)?;
+        let automatic = automatic_targets(c, &ids)?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let mut policy = Self {
+            agreed: judged.agreed,
+            ..Self::default()
+        };
+        for r in judged.readiness {
+            if !is_close_to_switching(r.reviewed, r.examples) {
+                policy.far.insert(r.target_id.clone());
+            }
+            if r.status == "learning" && automatic.contains(&r.target_id) {
+                policy.learning.insert(r.target_id);
+            }
+        }
+        Ok(policy)
+    }
+
+    /// Whether a person has nothing to do with this candidate: the taggers judged it correct, or
+    /// 학습 인식 already placed it for a character it owns.
+    fn settles(&self, row: &ShadowRow) -> bool {
+        (row.native_outcome == "accepted_automatic" && self.learning.contains(&row.target_id))
+            || (row.verdict == "automatic"
+                && self
+                    .agreed
+                    .get(&row.target_id)
+                    .is_some_and(|assets| assets.contains(&row.asset_id)))
+    }
+}
+
+/// The given characters 학습 인식 may place: enabled and not manual-only.
+fn automatic_targets(c: &Connection, target_ids: &[String]) -> Result<Vec<String>> {
+    let ids = serde_json::to_string(target_ids)?;
+    Ok(c.prepare(
+        "SELECT id FROM character_targets
+         WHERE id IN (SELECT value FROM json_each(?1))
+           AND role='character' AND enabled=1 AND manual_only=0",
+    )?
+    .query_map([ids], |r| r.get::<_, String>(0))?
+    .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 impl Library {
@@ -1112,17 +1597,10 @@ impl Library {
             let Some(cache) = open_shadow_cache(&self.root)? else {
                 return Ok(LearningTargets::default());
             };
-            let ids = serde_json::to_string(target_ids)?;
-            let automatic = c
-                .prepare(
-                    "SELECT id FROM character_targets
-                     WHERE id IN (SELECT value FROM json_each(?1))
-                       AND role='character' AND enabled=1 AND manual_only=0",
-                )?
-                .query_map([ids], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let automatic = automatic_targets(c, target_ids)?;
             Ok(LearningTargets(
-                readiness_of(c, Some(&cache), &automatic)?
+                judgments_of(c, Some(&cache), &automatic, Auto::ReadyOnly)?
+                    .readiness
                     .into_iter()
                     .filter(|r| r.status == "learning")
                     .map(|r| r.target_id)
@@ -1370,7 +1848,9 @@ mod tests {
 
         #[test]
         fn shadow_review_page_statement_count_is_independent_of_row_count() {
-            const MAX_PAGE_STATEMENTS: u64 = 24;
+            // The per-character judgment reads (newest policy, examples, decisions, tagger readings) are
+            // a fixed handful for one character, whatever the number of rows.
+            const MAX_PAGE_STATEMENTS: u64 = 28;
             const MAX_SUMMARY_STATEMENTS: u64 = 14;
             install_trace();
             let small = fixture_with_rows(5);
@@ -1727,6 +2207,8 @@ mod tests {
                 knn3: row.knn3,
                 native_outcome: row.native_outcome,
                 scored_at: row.scored_at,
+                // Every fixture character here is far from switching.
+                folded: !doubtful,
             });
         }
         page
@@ -2237,6 +2719,18 @@ mod tests {
     fn confirm_counts_count_each_pair_once_under_its_highest_kind() {
         let f = Fixture::new();
         let target = f.ready("Count");
+        {
+            let c = f.library.connection().unwrap();
+            // Close enough to switching that its 인식 추천 are not folded away.
+            seed_readiness(
+                f.temp.path(),
+                &c,
+                &target.id,
+                "v1",
+                "near",
+                (0, 0, NEAR_EXAMPLES),
+            );
+        }
         for number in 8..14 {
             series_asset(&f, &format!("asset-{number}"));
         }
@@ -2586,6 +3080,406 @@ mod tests {
         assert_eq!(readiness_status(100, 6, 80), "hold");
         // Too few judged or examples is still collecting, whatever the wrong count.
         assert_eq!(readiness_status(12, 2, 80), "collecting");
+    }
+
+    /// Links `tag` to the character; both taggers know it.
+    fn link_tag(f: &Fixture, target: &Target, tag: &str) {
+        let c = f.library.connection().unwrap();
+        for source in ["pixai", "canary"] {
+            c.execute(
+                "INSERT OR IGNORE INTO tagger_character_vocabulary VALUES(?1,?2)",
+                params![source, tag],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "INSERT OR IGNORE INTO character_target_tagger_tags VALUES(?1,?2)",
+            params![target.id, tag],
+        )
+        .unwrap();
+        f.library.character_changes.suggestion_inputs_changed();
+    }
+
+    /// What each tagger reads for `tag` on `asset` (`None`: it processed the image and read nothing).
+    fn tagger_reads(f: &Fixture, asset: &str, tag: &str, pixai: Option<f64>, canary: Option<f64>) {
+        let c = f.library.connection().unwrap();
+        for (source, score) in [("pixai", pixai), ("canary", canary)] {
+            c.execute(
+                "INSERT OR IGNORE INTO asset_tagger_coverage VALUES(?1,?2)",
+                params![asset, source],
+            )
+            .unwrap();
+            if let Some(score) = score {
+                c.execute(
+                    "INSERT OR REPLACE INTO asset_tagger_character_scores VALUES(?1,?2,?3,?4)",
+                    params![asset, source, tag, score],
+                )
+                .unwrap();
+            }
+        }
+        f.library.character_changes.suggestion_inputs_changed();
+    }
+
+    const OLD: &str = "2026-01-01T00:00:00Z";
+
+    /// A scored automatic candidate of the character, scored long before any decision.
+    fn candidate(f: &Fixture, target: &Target, asset: &str) {
+        let known: bool = f
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM assets WHERE id=?1)",
+                [asset],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if !known {
+            series_asset(f, asset);
+        }
+        insert(
+            f.temp.path(),
+            &[(asset, &target.id, "automatic", 0.1, "v1", "none", OLD)],
+        );
+    }
+
+    fn numbers(f: &Fixture, target: &Target) -> (u32, u32, u32, u32, u32, String) {
+        let c = f.library.connection().unwrap();
+        let cache = open_shadow_cache(f.temp.path()).unwrap();
+        let row = readiness_of(&c, cache.as_ref(), std::slice::from_ref(&target.id)).unwrap();
+        let row = &row[0];
+        (
+            row.reviewed,
+            row.reviewed_auto,
+            row.wrong,
+            row.wrong_auto,
+            row.examples,
+            row.status.clone(),
+        )
+    }
+
+    fn items_of(f: &Fixture, target: &Target) -> Vec<String> {
+        let mut ids = page(f, 0, 200)
+            .items
+            .into_iter()
+            .filter(|item| item.target_id == target.id)
+            .map(|item| item.asset_id)
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn the_taggers_judge_by_agreement_and_by_confident_disagreement() {
+        let f = Fixture::new();
+        let here = f.ready("Here");
+        let other = f.ready("Other");
+        let untagged = f.ready("Untagged");
+        link_tag(&f, &here, "here_tag");
+        link_tag(&f, &other, "other_tag");
+        for id in ["x1", "x2", "x3", "x4", "x5", "x6", "x7"] {
+            candidate(&f, &here, id);
+        }
+        // x1: both read Here. x2: only one tagger does, so nothing is judged. x3: both read the
+        // other character and neither reads Here. x4: both read the other one, but one tagger also
+        // reads Here, which is no disagreement.
+        tagger_reads(&f, "x1", "here_tag", Some(0.9), Some(0.95));
+        tagger_reads(&f, "x2", "here_tag", Some(0.9), Some(0.5));
+        tagger_reads(&f, "x3", "other_tag", Some(0.9), Some(0.9));
+        tagger_reads(&f, "x4", "other_tag", Some(0.9), Some(0.9));
+        tagger_reads(&f, "x4", "here_tag", Some(0.9), None);
+        // x5: both read Here but a person rejected it; x6: both read the other one but a person
+        // accepted Here; x7: both read Here and a person accepted it. A person's judgment counts
+        // once and in place of the taggers'.
+        for id in ["x5", "x7"] {
+            tagger_reads(&f, id, "here_tag", Some(0.9), Some(0.9));
+        }
+        tagger_reads(&f, "x6", "other_tag", Some(0.9), Some(0.9));
+        candidate(&f, &here, "x8");
+        tagger_reads(&f, "x8", "here_tag", Some(0.84), Some(0.9));
+        decide(&f, &here, "x5", DecisionKind::Rejected);
+        decide(&f, &here, "x6", DecisionKind::Accepted);
+        decide(&f, &here, "x7", DecisionKind::Accepted);
+        // Judged: x1 by the taggers (correct), x3 by the taggers (wrong), x5 by a person (wrong),
+        // x6 and x7 by a person. x8 stays unjudged: 0.84 is below the 확실 line.
+        // Examples are the two acceptances (x6, x7).
+        assert_eq!(
+            numbers(&f, &here),
+            (5, 2, 2, 1, 2, "collecting".to_string())
+        );
+        // Without the taggers the rule counts the people's three alone.
+        let c = f.library.connection().unwrap();
+        let cache = open_shadow_cache(f.temp.path()).unwrap();
+        let manual = judgments_of(&c, cache.as_ref(), &[here.id.clone()], Auto::Off)
+            .unwrap()
+            .readiness;
+        assert_eq!((manual[0].reviewed, manual[0].wrong), (3, 1));
+        drop(c);
+        // A character without tagger tags gets no automatic judgment, though its peers' readings
+        // are as sure as ever.
+        candidate(&f, &untagged, "x3");
+        assert_eq!(
+            numbers(&f, &untagged),
+            (0, 0, 0, 0, 0, "collecting".to_string())
+        );
+        // A character that only one tagger knows (no vocabulary for the other) gets none either.
+        let lonely = f.ready("Lonely");
+        {
+            let c = f.library.connection().unwrap();
+            c.execute(
+                "INSERT OR IGNORE INTO tagger_character_vocabulary VALUES('pixai','lonely_tag')",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO character_target_tagger_tags VALUES(?1,'lonely_tag')",
+                [&lonely.id],
+            )
+            .unwrap();
+        }
+        candidate(&f, &lonely, "x3");
+        assert_eq!(
+            numbers(&f, &lonely),
+            (0, 0, 0, 0, 0, "collecting".to_string())
+        );
+        // The other character was never scored by S36 here, so it has nothing to judge either.
+        assert_eq!(
+            numbers(&f, &other),
+            (0, 0, 0, 0, 0, "collecting".to_string())
+        );
+    }
+
+    #[test]
+    fn a_character_reaches_learning_through_the_taggers_and_its_settled_pairs_leave_the_list() {
+        let f = Fixture::new();
+        let here = f.ready("Here");
+        let other = f.ready("Other");
+        link_tag(&f, &here, "here_tag");
+        link_tag(&f, &other, "other_tag");
+        {
+            let c = f.library.connection().unwrap();
+            seed_readiness(f.temp.path(), &c, &here.id, "v1", "e", (0, 0, 50));
+        }
+        let agreed = (0..29).map(|i| format!("ok-{i}")).collect::<Vec<_>>();
+        for id in &agreed {
+            candidate(&f, &here, id);
+            tagger_reads(&f, id, "here_tag", Some(0.9), Some(0.9));
+        }
+        // One image a person has to look at: only one tagger reads it.
+        candidate(&f, &here, "look");
+        tagger_reads(&f, "look", "here_tag", Some(0.95), Some(0.2));
+        let learning = || {
+            let c = f.library.connection().unwrap();
+            f.library
+                .learning_targets(&c, &[here.id.clone()])
+                .owns(&here.id)
+        };
+        assert_eq!(
+            numbers(&f, &here),
+            (29, 29, 0, 0, 50, "collecting".to_string())
+        );
+        assert!(!learning());
+        // The agreeing pairs need nobody; the unsure one stays.
+        assert_eq!(items_of(&f, &here), ["look"]);
+        // The thirtieth agreement makes it learning, without anyone pressing a button.
+        candidate(&f, &here, "ok-last");
+        tagger_reads(&f, "ok-last", "here_tag", Some(0.9), Some(0.9));
+        assert_eq!(
+            numbers(&f, &here),
+            (30, 30, 0, 0, 50, "learning".to_string())
+        );
+        assert!(learning());
+        // A confident disagreement is one wrong; one is allowed at 30 judged, two are not.
+        candidate(&f, &here, "no-1");
+        tagger_reads(&f, "no-1", "other_tag", Some(0.9), Some(0.9));
+        assert_eq!(
+            numbers(&f, &here),
+            (31, 31, 1, 1, 50, "learning".to_string())
+        );
+        candidate(&f, &here, "no-2");
+        tagger_reads(&f, "no-2", "other_tag", Some(0.9), Some(0.9));
+        assert_eq!(numbers(&f, &here), (32, 32, 2, 2, 50, "hold".to_string()));
+        assert!(!learning());
+        // Disagreeing pairs stay in the list for a person; so does the unsure one.
+        assert_eq!(items_of(&f, &here), ["look", "no-1", "no-2"]);
+        // A person's rejection of an agreeing pair replaces the automatic 맞음 (counted once).
+        decide(&f, &here, "ok-0", DecisionKind::Rejected);
+        assert_eq!(numbers(&f, &here), (32, 31, 3, 2, 50, "hold".to_string()));
+        // The tagger examples never lift the example count.
+        assert_eq!(numbers(&f, &here).4, 50);
+    }
+
+    #[test]
+    fn placed_items_of_a_learning_character_leave_the_list_and_those_of_others_stay() {
+        let f = Fixture::new();
+        let ready = f.ready("Ready");
+        let waiting = f.ready("Waiting");
+        {
+            let c = f.library.connection().unwrap();
+            seed_readiness(f.temp.path(), &c, &ready.id, "v1", "r", (30, 0, 20));
+            seed_readiness(f.temp.path(), &c, &waiting.id, "v1", "w", (3, 0, 40));
+        }
+        for (target, id) in [(&ready, "placed-r"), (&waiting, "placed-w")] {
+            series_asset(&f, id);
+            insert(
+                f.temp.path(),
+                &[(
+                    id,
+                    &target.id,
+                    "automatic",
+                    0.1,
+                    "v1",
+                    "accepted_automatic",
+                    OLD,
+                )],
+            );
+        }
+        for (target, id) in [(&ready, "fresh-r"), (&waiting, "fresh-w")] {
+            candidate(&f, target, id);
+        }
+        assert_eq!(numbers(&f, &ready).5, "learning");
+        assert_eq!(numbers(&f, &waiting).5, "collecting");
+        assert_eq!(items_of(&f, &ready), ["fresh-r"]);
+        assert_eq!(items_of(&f, &waiting), ["fresh-w", "placed-w"]);
+    }
+
+    #[test]
+    fn confirm_counts_leave_out_settled_pairs_and_fold_far_characters() {
+        let f = Fixture::new();
+        let far = f.ready("Far");
+        let near = f.ready("Near");
+        link_tag(&f, &near, "near_tag");
+        {
+            let c = f.library.connection().unwrap();
+            // Far: nothing judged, 29 examples. Near: 30 examples.
+            seed_readiness(
+                f.temp.path(),
+                &c,
+                &far.id,
+                "v1",
+                "f",
+                (0, 0, NEAR_EXAMPLES - 1),
+            );
+            seed_readiness(
+                f.temp.path(),
+                &c,
+                &near.id,
+                "v1",
+                "n",
+                (0, 0, NEAR_EXAMPLES),
+            );
+        }
+        for (target, id) in [
+            (&far, "far-1"),
+            (&far, "far-2"),
+            (&near, "near-1"),
+            (&near, "near-2"),
+        ] {
+            candidate(&f, target, id);
+        }
+        // near-2 is settled by the taggers' agreement.
+        tagger_reads(&f, "near-2", "near_tag", Some(0.9), Some(0.9));
+        let page = page(&f, 0, 50);
+        let folded = |target: &Target, asset: &str| {
+            page.items
+                .iter()
+                .find(|item| item.target_id == target.id && item.asset_id == asset)
+                .map(|item| item.folded)
+        };
+        assert_eq!(folded(&far, "far-1"), Some(true));
+        assert_eq!(folded(&near, "near-1"), Some(false));
+        assert_eq!(folded(&near, "near-2"), None);
+        let totals = f.library.confirm_totals(None).unwrap();
+        assert_eq!(
+            totals,
+            ConfirmTotals {
+                counts: ConfirmCounts {
+                    recognition: 1,
+                    tag: 0,
+                    recheck: 0
+                },
+                folded_items: 2,
+                folded_characters: 1,
+            }
+        );
+        assert_eq!(
+            f.library.character_confirm_counts(None).unwrap(),
+            totals.counts
+        );
+        // Tag recommendations and rechecks of a far character always count; the settled pair
+        // does not, even when the tag list brings it up.
+        {
+            let c = f.library.connection().unwrap();
+            for (target, asset, reason) in [
+                (&far.id, "far-1", "recommendation"),
+                (&near.id, "near-2", "recommendation"),
+            ] {
+                c.execute(
+                    "INSERT INTO character_tagger_candidates(target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+                     VALUES(?1,?2,?3,?4,0.9,0.9,'now')",
+                    params![target, asset, content_hash(asset), reason],
+                )
+                .unwrap();
+            }
+        }
+        // The tag list itself leaves the settled pair out too.
+        let listed = f
+            .library
+            .tagger_review_items()
+            .unwrap()
+            .into_iter()
+            .map(|item| (item.target_id, item.asset.id))
+            .collect::<Vec<_>>();
+        assert_eq!(listed, [(far.id.clone(), "far-1".to_string())]);
+        let totals = f.library.confirm_totals(None).unwrap();
+        assert_eq!(
+            (
+                totals.counts.recognition,
+                totals.counts.tag,
+                totals.counts.recheck,
+                totals.folded_items
+            ),
+            // far-1 is now a tag recommendation, so it is no longer folded; far-2 still is.
+            (1, 1, 0, 1)
+        );
+        // A far character that gets a judged tail steps out of the fold.
+        {
+            let c = f.library.connection().unwrap();
+            seed_readiness(f.temp.path(), &c, &far.id, "v1", "g", (NEAR_JUDGED, 0, 0));
+        }
+        let totals = f.library.confirm_totals(None).unwrap();
+        assert_eq!((totals.counts.recognition, totals.folded_items), (3, 0));
+    }
+
+    #[test]
+    fn the_overview_threshold_is_judged_fifteen_or_thirty_examples() {
+        assert!(!is_close_to_switching(NEAR_JUDGED - 1, NEAR_EXAMPLES - 1));
+        assert!(is_close_to_switching(NEAR_JUDGED, 0));
+        assert!(is_close_to_switching(0, NEAR_EXAMPLES));
+        assert_eq!((NEAR_JUDGED, NEAR_EXAMPLES), (15, 30));
+    }
+
+    #[test]
+    fn readiness_rows_follow_the_shared_fixture_with_the_automatic_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../src/characters/learningRule.fixture.json"
+        ))
+        .unwrap();
+        for case in fixture["automaticCases"].as_array().unwrap() {
+            let n = |key: &str| case[key].as_u64().unwrap() as u32;
+            let row = readiness_row(
+                "t",
+                (n("manual"), n("wrongManual")),
+                (n("auto"), n("wrongAuto")),
+                n("examples"),
+            );
+            assert_eq!(row.reviewed, n("judged"), "{case}");
+            assert_eq!(row.reviewed_auto, n("auto"), "{case}");
+            assert_eq!(row.wrong, n("wrong"), "{case}");
+            assert_eq!(row.wrong_auto, n("wrongAuto"), "{case}");
+            assert_eq!(row.allowed, n("allowed"), "{case}");
+            assert_eq!(row.status, case["status"], "{case}");
+        }
     }
 
     fn review_query(offset: u32, limit: u32, series_id: Option<&str>) -> ShadowReviewQuery {

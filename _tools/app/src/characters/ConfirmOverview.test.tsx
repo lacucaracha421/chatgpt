@@ -76,3 +76,33 @@ it("reads the list again when a suggestion is registered, so its tag-read images
   await userEvent.setup().click(screen.getByRole("button", { name: "제안 저장됨" }));
   expect(await within(await screen.findByRole("region", { name: "백합" })).findByRole("button", { name: "백합 › 키사키 확인 1건" })).toHaveTextContent("태그 추천 1");
 });
+
+it("folds the 인식 추천 of far characters behind 더 보기, counts only the rest, and opens a folded character on its own", async () => {
+  const sources = confirmSourceFor({
+    candidates: [shadowItem("c1", "hina", "히나"), shadowItem("f1", "kisaki", "키사키", { folded: true }), shadowItem("f2", "kisaki", "키사키", { folded: true })],
+    doubtful: [],
+  });
+  const onOpen = vi.fn();
+  render(<ConfirmOverview sources={sources} targets={targets} seriesName={id => id === "series" ? "백합" : undefined} version={0} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={onOpen} />);
+  const user = userEvent.setup();
+  const series = await screen.findByRole("region", { name: "백합" });
+  expect(series).toHaveTextContent("1건");
+  expect(within(series).queryByRole("button", { name: /키사키/ })).toBeNull();
+  await user.click(within(series).getByRole("button", { name: "더 보기 (1명)" }));
+  const folded = within(series).getByRole("button", { name: "백합 › 키사키 확인 2건" });
+  await user.click(folded);
+  expect(onOpen).toHaveBeenLastCalledWith({ series: { id: "series", name: "백합" }, target: { id: "kisaki", name: "키사키" } });
+  // The series total and the whole list leave the folded ones out.
+  expect(screen.getByRole("button", { name: "백합 전체 확인 1건" })).toBeInTheDocument();
+  await user.click(within(series).getByRole("button", { name: "접기" }));
+  expect(within(series).queryByRole("button", { name: /키사키/ })).toBeNull();
+});
+
+it("keeps a series that only has folded characters reachable and counts nothing for it", async () => {
+  const sources = confirmSourceFor({ candidates: [shadowItem("f1", "kisaki", "키사키", { folded: true })], doubtful: [] });
+  render(<ConfirmOverview sources={sources} targets={targets} seriesName={id => id === "series" ? "백합" : undefined} version={0} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={vi.fn()} />);
+  const series = await screen.findByRole("region", { name: "백합" });
+  expect(within(series).getByRole("button", { name: "더 보기 (1명)" })).toBeInTheDocument();
+  expect(within(series).queryByRole("button", { name: /전체 확인/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "전체 확인" })).toBeNull();
+});

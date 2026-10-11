@@ -100,6 +100,19 @@ fn automatic_acceptance(f: &Fixture, target: &Target, asset: &str) -> i64 {
     c.last_insert_rowid()
 }
 
+/// Close enough to switching that the character's 인식 추천 are offered (not folded away).
+fn near(f: &Fixture, target: &Target) {
+    let c = f.library.connection().unwrap();
+    crate::library::character_shadow_review::seed_readiness(
+        f.temp.path(),
+        &c,
+        &target.id,
+        "v1",
+        "near",
+        (0, 0, crate::library::character_shadow_review::NEAR_EXAMPLES),
+    );
+}
+
 fn pairs(content: &FeedContent) -> Vec<(String, Vec<&'static str>, String)> {
     content
         .items
@@ -112,6 +125,7 @@ fn pairs(content: &FeedContent) -> Vec<(String, Vec<&'static str>, String)> {
 fn s36_candidates_match_the_desktop_review_list_and_its_pages() {
     let f = Fixture::new();
     let target = f.ready("Shadow");
+    near(&f, &target);
     let ids: Vec<String> = (8..16).map(|i| format!("asset-{i}")).collect();
     for id in &ids {
         series_asset(&f, id, true);
@@ -175,6 +189,7 @@ fn s36_candidates_match_the_desktop_review_list_and_its_pages() {
 fn the_feed_matches_the_desktop_confirm_counts_and_leaves_out_saved_b36_scans() {
     let f = Fixture::new();
     let target = f.ready("Shadow");
+    near(&f, &target);
     for id in ["asset-8", "asset-9", "asset-10", "asset-11", "asset-12"] {
         series_asset(&f, id, true);
     }
@@ -223,6 +238,7 @@ fn the_feed_matches_the_desktop_confirm_counts_and_leaves_out_saved_b36_scans() 
 fn sources_merge_per_pair_with_basis_and_only_committed_assets() {
     let f = Fixture::new();
     let target = f.ready("Shadow");
+    near(&f, &target);
     for id in ["asset-8", "asset-9", "asset-10"] {
         series_asset(&f, id, true);
     }
@@ -379,6 +395,7 @@ fn state(f: &Fixture, sql: &str) {
 fn feed_publication_is_debounced_throttled_and_skips_an_unchanged_body() {
     let f = Fixture::new();
     let target = f.ready("Shadow");
+    near(&f, &target);
     series_asset(&f, "asset-8", true);
     scores(&f, &[("asset-8", &target.id, "recommended", 0.3)]);
     let (base, handle) = scripted(vec![
@@ -612,4 +629,40 @@ fn unchanged_feed_skips_five_minute_build_and_verifies_after_thirty_without_io()
     );
     assert_eq!(publish(), FeedOutcome::Unchanged);
     assert_eq!(publish(), FeedOutcome::NotDue);
+}
+
+#[test]
+fn the_feed_leaves_out_what_the_desktop_folds_and_still_matches_the_counts() {
+    let f = Fixture::new();
+    let far = f.ready("Far");
+    let close = f.ready("Close");
+    near(&f, &close);
+    series_asset(&f, "asset-8", true);
+    series_asset(&f, "asset-9", true);
+    scores(
+        &f,
+        &[
+            ("asset-8", &far.id, "automatic", 0.1),
+            ("asset-9", &close.id, "automatic", 0.1),
+        ],
+    );
+    // Both are pending on the desktop list; the far character's is folded away there.
+    let all = f.library.shadow_review_items(None).unwrap();
+    assert_eq!(
+        all.items
+            .iter()
+            .map(|i| (i.asset_id.as_str(), i.folded))
+            .collect::<Vec<_>>(),
+        [("asset-9", false), ("asset-8", true)]
+    );
+    let feed = f.library.character_review_feed_content().unwrap();
+    assert_eq!(
+        pairs(&feed),
+        [("asset-9".to_string(), vec!["s36"], "automatic".to_string())]
+    );
+    let counts = f.library.character_confirm_counts(None).unwrap();
+    assert_eq!(
+        feed.items.len() as i64,
+        (counts.recognition + counts.recheck) as i64
+    );
 }
