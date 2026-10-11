@@ -1686,6 +1686,97 @@ fn arbitration_releases_monie_only_when_the_rival_is_safely_weaker() {
 }
 
 #[test]
+fn an_automatic_acceptance_records_its_person_box_for_the_shared_image_rule() {
+    use crate::library::character_reference_regions::{known_owner, known_people_of_others};
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready("B");
+    add_learned_reference(&f, &a.id);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE assets SET width=100,height=100 WHERE id='asset-5'",
+            [],
+        )
+        .unwrap();
+    character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-5",
+        character_autotag::Cause::Ingestion,
+    )
+    .unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    let context = f
+        .library
+        .character_autotag_context(&tx, &job, &"a".repeat(64))
+        .unwrap();
+    let evidence = vec![
+        json!({"matchedReferences":[]}),
+        json!({"matchedReferences":(0..6).collect::<Vec<_>>(), "referenceDistances": vec![0.1; 6]}),
+    ];
+    let prediction = Prediction {
+        target_id: a.id.clone(),
+        result: ScanResult {
+            asset_id: job.asset_id.clone(),
+            content_hash: job.content_hash.clone(),
+            state: "recommended".into(),
+            error: None,
+            evidence: Some(
+                json!({"passed":true,"wholeFallback":false,"bestQueryCrop":1,
+                "queryBoxes":[[0,0,40,100],[60,0,100,100]],"evidence":evidence}),
+            ),
+        },
+    };
+    let unmatched = Prediction {
+        target_id: b.id.clone(),
+        result: ScanResult {
+            asset_id: job.asset_id.clone(),
+            content_hash: job.content_hash.clone(),
+            state: "unmatched".into(),
+            error: None,
+            evidence: Some(
+                json!({"passed":false,"wholeFallback":false,"bestQueryCrop":0,
+                "queryBoxes":[[0,0,40,100],[60,0,100,100]],
+                "evidence":[{"matchedReferences":[]},{"matchedReferences":[]}]}),
+            ),
+        },
+    };
+    f.library
+        .finalize_incremental(
+            &tx,
+            &job,
+            &context,
+            &[prediction, unmatched],
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    drop(c);
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-5").unwrap(),
+        vec![a.id.clone()]
+    );
+    let connection = f.library.connection().unwrap();
+    // B sees A person on this image; A sees nobody else.
+    let people = known_people_of_others(&connection, Some(&b.id), "asset-5").unwrap();
+    assert_eq!(people.len(), 1);
+    assert_eq!(
+        (people[0].character.as_str(), people[0].bounds),
+        ("A", [60.0, 0.0, 100.0, 100.0])
+    );
+    assert!(known_people_of_others(&connection, Some(&a.id), "asset-5")
+        .unwrap()
+        .is_empty());
+    // The person A was accepted on is taken; the other one is free.
+    assert!(known_owner(&people, [60, 0, 100, 100]).is_some());
+    assert!(known_owner(&people, [0, 0, 40, 100]).is_none());
+}
+
+#[test]
 fn arbitration_keeps_weak_six_vote_companion_crop_for_review() {
     let f = Fixture::new();
     let target = f.ready("A");

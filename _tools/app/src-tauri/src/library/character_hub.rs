@@ -1948,13 +1948,22 @@ pub(super) fn validate_character_selection_at_slot(
         }
         _ => None,
     };
+    let slot = slot.map(|n| format!("{n}번째 레퍼런스: ")).unwrap_or_default();
     if let Some(region) = region.or(stored.as_ref()) {
         if super::character_reference_regions::is_person_region(connection, series, asset, region)?
         {
-            return Ok(());
+            // The person must not be one another character is already registered on.
+            let people =
+                super::character_reference_regions::known_people_of_others(connection, target, asset)?;
+            return match super::character_reference_regions::known_owner(&people, region.bounds) {
+                Some(owner) => Err(Error::InvalidMessage(format!(
+                    "{slot}이 인물은 {} 등록돼 있어요. 다른 인물을 골라 주세요.",
+                    super::character_reference_regions::with_ro(&owner.character)
+                ))),
+                None => Ok(()),
+            };
         }
     }
-    let slot = slot.map(|n| format!("{n}번째 레퍼런스: ")).unwrap_or_default();
     Err(Error::InvalidMessage(format!(
         "{slot}다른 캐릭터({})에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.",
         names.join(", ")

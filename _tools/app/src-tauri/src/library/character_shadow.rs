@@ -495,7 +495,7 @@ impl Library {
             if placed_by_base_on_same_person(&tx, &pending.asset_id, &target.id, crops)? {
                 continue;
             }
-            let snapshot = json!({
+            let mut snapshot = json!({
                 "scanId": null,
                 "prediction": {
                     "engine": "s36",
@@ -507,6 +507,14 @@ impl Library {
                 },
                 "references": target.usable_references().collect::<Vec<_>>(),
             });
+            // The person this acceptance was made on: an index into the image's detector boxes,
+            // which `character_reference_regions::known_people_of_others` resolves later.
+            if let Some(crop) = crops
+                .and_then(|c| c.get(&target.id))
+                .and_then(Value::as_u64)
+            {
+                snapshot["prediction"]["queryCrop"] = json!(crop);
+            }
             tx.execute(
                 "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
                  VALUES(?1,?2,?2,?3,'accepted',?4,?5,'automatic',?6)",
@@ -1047,6 +1055,11 @@ mod tests {
             f.library.character_relations_for_asset("asset-5").unwrap(),
             vec![target.id.clone()]
         );
+        // The person the acceptance was made on is recorded as an index into the image boxes.
+        let crop: i64 = f.library.connection().unwrap().query_row(
+            "SELECT json_extract(reference_snapshot,'$.prediction.queryCrop') FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5'",
+            [&target.id], |r| r.get(0)).unwrap();
+        assert_eq!(crop, 0);
     }
     #[test]
     fn s36_publication_accepts_two_characters_on_two_people_and_a_closer_base_character_still_blocks(

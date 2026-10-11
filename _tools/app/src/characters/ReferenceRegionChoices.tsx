@@ -4,14 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
 import { thumbnailUrl } from "../assets/mediaUrl";
-import { draftReferenceRegions, refusedAsWholeFrame, regionBox, referenceRegionBinding, referenceRegionIndex, staleReferenceRegion, usableReferenceRegionStates, needsReferenceRegionChoice, type ReferenceInspection, type ReferenceRegions } from "./api";
+import { draftReferenceRegions, refusedAsWholeFrame, regionBox, takenBoxOwner, referenceRegionBinding, referenceRegionIndex, staleReferenceRegion, usableReferenceRegionStates, needsReferenceRegionChoice, type ReferenceInspection, type ReferenceRegions } from "./api";
 
 /** Mirrors the backend rule: automatic confirmation needs six supporting references. */
 export const AUTOMATIC_CHARACTER_REFERENCE_COUNT = 6;
 
 /** An inspection supplies a reference without asking anything only in these states. */
 const usableRegion = (region: ReferenceInspection) => usableReferenceRegionStates.some(state => state === region.state)
-  && !refusedAsWholeFrame(region, regionBox(region, referenceRegionIndex(region)));
+  && !refusedAsWholeFrame(region, regionBox(region, referenceRegionIndex(region)))
+  && takenBoxOwner(region, referenceRegionIndex(region)) === null;
 
 /** References the backend resolved on its own, i.e. common-person images it can use. */
 export const automaticReferenceCount = (inspections: ReferenceInspection[]) =>
@@ -45,7 +46,8 @@ export function withDraftChoices(inspections: ReferenceInspection[], draftRegion
     if (!draft || draft.contentHash !== row.contentHash || draft.baselineFingerprint !== row.baselineFingerprint) return row;
     if (refusedAsWholeFrame(row, draft.bounds)) return row;
     const index = row.boxes.findIndex(box => box.every((value, side) => value === draft.bounds[side]));
-    return index < 0 ? row : { ...row, state: "selected", selectedIndex: index, automaticIndex: null };
+    // A person another character is registered on is no choice: the save refuses it.
+    return index < 0 || takenBoxOwner(row, index) !== null ? row : { ...row, state: "selected", selectedIndex: index, automaticIndex: null };
   });
 }
 
@@ -87,6 +89,7 @@ export function referenceRegionStatus(region: ReferenceInspection, draftRegions:
   if (region.state === "selected") return changedRegions[region.assetId] ? "직접 지정 · 저장 전" : "직접 지정 · 저장됨";
   if (region.state === "automatic") return "자동 확인";
   if (region.state === "single") return "한 명 감지 · 자동 사용";
+  if (region.boxes.length > 0 && region.takenBoxes?.length === region.boxes.length) return `이미지의 인물이 모두 다른 캐릭터(${[...new Set(region.takenBoxes.map(taken => taken.character))].join(", ")})로 등록돼 있어 사용할 수 없음`;
   if (region.otherCharacters?.length && region.boxes.length === 0) return `다른 캐릭터(${region.otherCharacters.join(", ")}) 이미지 · 인물을 찾지 못해 사용할 수 없음`;
   if (region.otherCharacters?.length) return `다른 캐릭터(${region.otherCharacters.join(", ")}) 이미지 · 인물 지정 필요`;
   return "인물 확인 필요 · 미사용";
@@ -97,9 +100,9 @@ export const currentReferenceCrop = (region: ReferenceInspection) => usableRegio
 export const isUsableReferenceRegion = usableRegion;
 
 /** Cropped region preview. Inspection reports upright image dimensions. */
-function RegionImage({ assetId, box, width, height, label, selectionLabel, privacyMode, disabled, onSelect }: {
+function RegionImage({ assetId, box, width, height, label, selectionLabel, takenBy, privacyMode, disabled, onSelect }: {
   assetId: string; box: [number, number, number, number]; width: number; height: number; label: string;
-  selectionLabel?: string; privacyMode: boolean; disabled: boolean; onSelect: () => void;
+  selectionLabel?: string; takenBy?: string; privacyMode: boolean; disabled: boolean; onSelect: () => void;
 }) {
   const masked=useAssetMask(assetId,privacyMode);
   const cropWidth = Math.max(box[2] - box[0], 1);
@@ -117,9 +120,11 @@ function RegionImage({ assetId, box, width, height, label, selectionLabel, priva
     backgroundPositionY: `${position(box[1], height, cropHeight)}%`,
     backgroundSize: `${(width / cropWidth) * 100}% ${(height / cropHeight) * 100}%`,
   };
-  return <button type="button" className={`character-region-frame${masked ? " character-private" : ""}`} style={style}
-    disabled={disabled} aria-label={label} aria-pressed={Boolean(selectionLabel)} aria-description={selectionLabel} onClick={onSelect}>
-    {selectionLabel && <span className="character-region-frame__selection">{selectionLabel}</span>}
+  // A person another character is registered on is shown dimmed with that name and cannot be chosen.
+  return <button type="button" className={`character-region-frame${takenBy ? " character-region-frame--taken" : ""}${masked ? " character-private" : ""}`} style={style}
+    disabled={disabled || Boolean(takenBy)} aria-label={label} aria-pressed={takenBy ? undefined : Boolean(selectionLabel)} aria-description={selectionLabel} onClick={onSelect}>
+    {takenBy ? <span className="character-region-frame__selection">{takenBy} 인물</span>
+      : selectionLabel && <span className="character-region-frame__selection">{selectionLabel}</span>}
   </button>;
 }
 
@@ -232,7 +237,7 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
   const open = mode && active ? { mode, region: active } : null;
   // A suggestion is only useful when it differs from the crop already in effect.
   const suggested = open?.region.suggestedIndex !== null && open?.region.suggestedIndex !== undefined && open.region.suggestedIndex !== referenceRegionIndex(open.region)
-    ? open.region.suggestedIndex : null;
+    && takenBoxOwner(open.region, open.region.suggestedIndex) === null ? open.region.suggestedIndex : null;
   // A shortfall with something unresolved is the only reason to interrupt the user.
   const askRequired = Boolean(current) && needsReferenceConfirmation(inspections);
   // Correcting an inferred, chosen, or stale crop is always possible, but never requested.
@@ -290,7 +295,8 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
       <p className="character-message">{regionStatus(open.region)}</p>
       <div className="character-region-options">{open.region.boxes.map((box, index) =>
         <RegionImage key={`${open.region.assetId}-${index}`} assetId={open.region.assetId} box={box} width={open.region.width} height={open.region.height}
-          label={`인물 영역 ${index + 1} 선택`}
+          label={takenBoxOwner(open.region, index) ? `인물 영역 ${index + 1} · ${takenBoxOwner(open.region, index)} 인물` : `인물 영역 ${index + 1} 선택`}
+          takenBy={takenBoxOwner(open.region, index) ?? undefined}
           selectionLabel={usableRegion(open.region) && referenceRegionIndex(open.region) === index ? open.region.state === "selected" ? "직접 지정한 인물" : "자동 선택된 인물" : undefined}
           privacyMode={privacyMode} disabled={busy}
           onSelect={() => pick(index)} />)}</div>

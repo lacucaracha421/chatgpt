@@ -35,6 +35,205 @@ pub struct ReferenceInspection {
     /// Other characters this image already belongs to. Filled natively, never by the worker.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub other_characters: Vec<String>,
+    /// Boxes (indexes into `boxes`) that are known to be another character's person on this
+    /// image. Filled natively, never by the worker; such a box cannot be chosen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub taken_boxes: Vec<TakenBox>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TakenBox {
+    pub index: usize,
+    pub character: String,
+}
+
+/// A person of an image that another character is already registered on.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct KnownPerson {
+    pub character: String,
+    pub bounds: [f64; 4],
+}
+
+/// Two boxes are the same person when their intersection over union reaches this share.
+/// The inspection and the save rule both decide through [`known_owner`], so they agree.
+const SAME_PERSON_IOU: f64 = 0.5;
+
+fn iou(a: &[f64; 4], b: &[f64; 4]) -> f64 {
+    let overlap = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0) * (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+    let union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - overlap;
+    if union > 0.0 { overlap / union } else { 0.0 }
+}
+
+/// The character a chosen box belongs to, when it overlaps a known person of another one.
+pub(super) fn known_owner(people: &[KnownPerson], bounds: [u32; 4]) -> Option<&KnownPerson> {
+    let chosen = bounds.map(f64::from);
+    people.iter().find(|person| iou(&chosen, &person.bounds) >= SAME_PERSON_IOU)
+}
+
+/// A frame-sized box names nobody, in either orientation (EXIF may swap the axes).
+fn whole_frame_f(b: &[f64; 4], width: u32, height: u32) -> bool {
+    let (w, h) = (f64::from(width), f64::from(height));
+    b[0] == 0.0 && b[1] == 0.0 && ((b[2] == w && b[3] == h) || (b[2] == h && b[3] == w))
+}
+
+/// Where a judgment's own record points at one person box.
+enum Crop {
+    Box([f64; 4]),
+    /// An index into the detector's boxes for this image, which S36 records instead of a box.
+    Index(usize),
+}
+
+/// The person one automatic or recommended judgment was about: `bestQueryCrop` of a B36
+/// evidence (a scan, a stored decision snapshot), or the `queryCrop` S36 records. Only a
+/// passed result counts, and never a whole-image fallback.
+fn crop_of(evidence: &Value) -> Option<Crop> {
+    if evidence["wholeFallback"] == true {
+        return None;
+    }
+    if evidence["engine"] == "s36" {
+        return usize::try_from(evidence["queryCrop"].as_u64()?).ok().map(Crop::Index);
+    }
+    if evidence["passed"] != true {
+        return None;
+    }
+    let index = usize::try_from(evidence["bestQueryCrop"].as_u64()?).ok()?;
+    super::character_scan::box_region(evidence["queryBoxes"].as_array()?.get(index)?).map(Crop::Box)
+}
+
+/// The people of `asset` that characters other than `target` are registered on, read from
+/// data that is already stored (no migration, no backfill):
+///
+/// * the character's own reference region on the image;
+/// * the person its current acceptance was made on: the crop in the decision snapshot (B36
+///   evidence, or the crop index S36 records), else the passed recommendation the review
+///   showed for that character and image;
+/// * nothing for a membership-only acceptance (맞음 · 위치 틀림) or when no box is known.
+///
+/// A box that covers the whole frame is never a person. An unknown box is simply absent, so
+/// the caller keeps allowing any non-whole-frame person.
+pub(super) fn known_people_of_others(
+    connection: &Connection,
+    target: Option<&str>,
+    asset: &str,
+) -> Result<Vec<KnownPerson>> {
+    use rusqlite::OptionalExtension;
+    let Some((Some(hash), width, height)) = connection
+        .query_row("SELECT content_hash,width,height FROM assets WHERE id=?1", [asset], |r| {
+            Ok((r.get::<_, Option<String>>(0)?, r.get::<_, u32>(1)?, r.get::<_, u32>(2)?))
+        })
+        .optional()?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut people: Vec<KnownPerson> = Vec::new();
+    let mut add = |character: &str, bounds: [f64; 4]| {
+        let person = KnownPerson { character: character.to_string(), bounds };
+        if !whole_frame_f(&bounds, width, height) && !people.contains(&person) {
+            people.push(person);
+        }
+    };
+    let regions = connection
+        .prepare_cached(
+            "SELECT t.display_name,g.bounds_json FROM character_reference_regions g
+             JOIN character_targets t ON t.id=g.target_id
+             WHERE g.asset_id=?1 AND g.asset_hash=?3 AND t.role='character' AND (?2 IS NULL OR t.id<>?2)
+             ORDER BY t.display_name",
+        )?
+        .query_map(params![asset, target, hash], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    for (name, bounds) in regions {
+        if let Ok(b) = serde_json::from_str::<[u32; 4]>(&bounds) {
+            add(&name, b.map(f64::from));
+        }
+    }
+    let accepted = connection
+        .prepare_cached(&format!(
+            "SELECT t.id,t.display_name,d.reference_snapshot FROM character_relations r
+             JOIN character_decisions d ON d.sequence=r.sequence
+             JOIN character_targets t ON t.id=r.target_id
+             WHERE r.asset_id=?1 AND d.asset_hash=?3 AND t.role='character' AND (?2 IS NULL OR t.id<>?2)
+               AND NOT {}
+             ORDER BY t.display_name",
+            super::characters::learning_disabled_sql("d")
+        ))?
+        .query_map(params![asset, target, hash], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    // Newest scan of this image: its result for one character, or the detector's boxes.
+    let latest_result = |character: Option<&str>| -> Option<Value> {
+        let json: Option<String> = connection
+            .query_row(
+                "SELECT p.result_json FROM character_autotag_evidence e
+                 JOIN character_autotag_predictions p ON p.evidence_id=e.id AND (?3 IS NULL OR p.target_id=?3)
+                 WHERE e.asset_id=?1 AND e.content_hash=?2 ORDER BY e.generation DESC LIMIT 1",
+                params![asset, hash, character],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        serde_json::from_str(&json?).ok()
+    };
+    for (id, name, snapshot) in accepted {
+        let snapshot: Value = serde_json::from_str(&snapshot).unwrap_or(Value::Null);
+        // The crop the judgment itself recorded; failing that, the recommendation the review
+        // showed for this very character and image (the person box the user accepted).
+        let crop = crop_of(&snapshot["prediction"])
+            .or_else(|| crop_of(&latest_result(Some(&id))?["evidence"]));
+        let bounds = match crop {
+            Some(Crop::Box(bounds)) => Some(bounds),
+            Some(Crop::Index(index)) => latest_result(None)
+                .and_then(|result| result["evidence"]["queryBoxes"].as_array()?.get(index).cloned())
+                .as_ref()
+                .and_then(super::character_scan::box_region),
+            None => None,
+        };
+        if let Some(bounds) = bounds {
+            add(&name, bounds);
+        }
+    }
+    Ok(people)
+}
+
+/// Marks the boxes of an inspected shared image that belong to another character. A taken
+/// box is never a suggestion, an automatic pick, or the chosen person any more; an image
+/// whose chosen person is taken asks for a choice again.
+fn mark_taken_boxes(row: &mut ReferenceInspection, people: &[KnownPerson]) {
+    row.taken_boxes = row
+        .boxes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, b)| {
+            known_owner(people, *b).map(|owner| TakenBox { index, character: owner.character.clone() })
+        })
+        .collect();
+    if row.taken_boxes.is_empty() {
+        return;
+    }
+    let taken = |index: Option<usize>| index.is_some_and(|i| row.taken_boxes.iter().any(|t| t.index == i));
+    let chosen_taken = taken(row.selected_index) || taken(row.automatic_index);
+    if taken(row.suggested_index) {
+        row.suggested_index = None;
+    }
+    if chosen_taken {
+        row.selected_index = None;
+        row.automatic_index = None;
+        row.state = "needs_region".into();
+    }
+}
+
+/// A name followed by 로 or 으로, by its last syllable (no final consonant or ㄹ takes 로).
+pub(super) fn with_ro(name: &str) -> String {
+    let particle = match name.chars().last() {
+        Some(c) if ('\u{ac00}'..='\u{d7a3}').contains(&c) => {
+            let final_consonant = (c as u32 - 0xac00) % 28;
+            if final_consonant == 0 || final_consonant == 8 { "로" } else { "으로" }
+        }
+        _ => "로",
+    };
+    format!("{name}{particle}")
 }
 
 /// True when a box covers the entire frame, in either orientation (EXIF may swap the axes of
@@ -322,10 +521,12 @@ impl Library {
                 return Err(Error::Stale);
             }
             if shared_rule {
-                require_choice_for_shared(
-                    row,
-                    super::character_hub::other_character_names(&c, target_id, id)?,
-                );
+                let others = super::character_hub::other_character_names(&c, target_id, id)?;
+                let shared = !others.is_empty();
+                require_choice_for_shared(row, others);
+                if shared {
+                    mark_taken_boxes(row, &known_people_of_others(&c, target_id, id)?);
+                }
             }
         }
         Ok(rows)

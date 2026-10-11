@@ -22,6 +22,7 @@ fn row_in_state(asset_id: &str, hash: &str, state: &str) -> ReferenceInspection 
         state: state.into(),
         automatic_index: None,
         other_characters: Vec::new(),
+        taken_boxes: Vec::new(),
     };
     match state {
         // An explicit binding resolves to the crop the user named.
@@ -881,4 +882,216 @@ fn the_slot_of_the_reference_still_missing_a_person_is_named_and_a_real_person_p
     ]);
     let saved = f.library.save_character_settings(shared_settings(&midori, &ids, person), true).unwrap();
     assert_eq!(saved.usable_references().count(), 2);
+}
+
+/// A recommendation the review showed for one character on one image (what a person looking
+/// at the single view accepted), stored the way the automatic scan stores it.
+fn recommend(f: &crate::library::characters::tests::Fixture, target: &Target, asset: &str, evidence: Value) {
+    let connection = f.library.connection().unwrap();
+    let hash: String = connection
+        .query_row("SELECT content_hash FROM assets WHERE id=?1", [asset], |r| r.get(0))
+        .unwrap();
+    let id = format!("evidence-{}-{asset}", target.id);
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+             VALUES(?1,?2,1,1,?3,'c','r','{}','[]','2026')",
+            params![id, asset, hash],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json) VALUES(?1,?2,?3,?4,?5)",
+            params![
+                id,
+                target.id,
+                f.series,
+                target.fingerprint,
+                json!({"assetId":asset,"contentHash":hash,"state":"recommended","evidence":evidence}).to_string()
+            ],
+        )
+        .unwrap();
+}
+
+fn two_people(best: usize) -> Value {
+    json!({"passed":true,"wholeFallback":false,"bestQueryCrop":best,"distance":0.1,
+        "queryBoxes":[[10,10,50,70],[50,10,90,70]]})
+}
+
+fn choose(f: &crate::library::characters::tests::Fixture, target: &Target, hash: &str, bounds: [u32; 4]) -> Result<()> {
+    crate::library::character_hub::validate_character_selection_with_region(
+        &f.library.connection().unwrap(),
+        &f.series,
+        Some(&target.id),
+        "asset-5",
+        Some(&binding(hash, bounds)),
+    )
+}
+
+fn clear_recommendations(f: &crate::library::characters::tests::Fixture) {
+    let connection = f.library.connection().unwrap();
+    connection.execute("DELETE FROM character_autotag_predictions", []).unwrap();
+    connection.execute("DELETE FROM character_autotag_evidence", []).unwrap();
+}
+
+#[test]
+fn a_person_another_character_is_registered_on_cannot_be_chosen_but_the_others_can() {
+    let (f, momoka, midori, hash) = shared_image_fixture();
+    // No box is known for 모모카 on this image: today's behaviour, any person is allowed.
+    assert!(known_people_of_others(&f.library.connection().unwrap(), Some(&midori.id), "asset-5")
+        .unwrap()
+        .is_empty());
+    assert!(choose(&f, &midori, &hash, [10, 10, 50, 70]).is_ok());
+    assert!(choose(&f, &midori, &hash, [50, 10, 90, 70]).is_ok());
+    // The review showed 모모카 her first person and she was accepted.
+    recommend(&f, &momoka, "asset-5", two_people(0));
+    let people = known_people_of_others(&f.library.connection().unwrap(), Some(&midori.id), "asset-5").unwrap();
+    assert_eq!(people, vec![KnownPerson { character: "모모카".into(), bounds: [10.0, 10.0, 50.0, 70.0] }]);
+    // The owner herself is never blocked by her own person.
+    assert!(known_people_of_others(&f.library.connection().unwrap(), Some(&momoka.id), "asset-5")
+        .unwrap()
+        .is_empty());
+    // The same person, or one that overlaps it enough, is refused with the owner name.
+    for bounds in [[10, 10, 50, 70], [12, 10, 50, 70]] {
+        let error = choose(&f, &midori, &hash, bounds).unwrap_err();
+        assert_eq!(error.to_string(), "이 인물은 모모카로 등록돼 있어요. 다른 인물을 골라 주세요.");
+    }
+    // The other person, and a box that only touches the first one, pass.
+    assert!(choose(&f, &midori, &hash, [50, 10, 90, 70]).is_ok());
+    assert!(choose(&f, &midori, &hash, [40, 10, 90, 70]).is_ok());
+    // A settings save names the slot and keeps nothing of the refused choice.
+    let error = f
+        .library
+        .save_character_settings(
+            shared_settings(
+                &midori,
+                &["asset-5"],
+                RegionBindings::from([("asset-5".to_string(), binding(&hash, [10, 10, 50, 70]))]),
+            ),
+            true,
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "1번째 레퍼런스: 이 인물은 모모카로 등록돼 있어요. 다른 인물을 골라 주세요."
+    );
+    assert!(read_regions(&f.library.connection().unwrap(), &midori.id).unwrap().is_empty());
+    f.library
+        .save_character_settings(
+            shared_settings(
+                &midori,
+                &["asset-5"],
+                RegionBindings::from([("asset-5".to_string(), binding(&hash, [50, 10, 90, 70]))]),
+            ),
+            true,
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_membership_only_acceptance_or_an_unpassed_recommendation_registers_no_person() {
+    let (f, momoka, midori, hash) = shared_image_fixture();
+    // A recommendation that did not pass, and one over the whole image, name nobody.
+    let mut unpassed = two_people(0);
+    unpassed["passed"] = json!(false);
+    recommend(&f, &momoka, "asset-5", unpassed);
+    assert!(choose(&f, &midori, &hash, [10, 10, 50, 70]).is_ok());
+    clear_recommendations(&f);
+    recommend(
+        &f,
+        &momoka,
+        "asset-5",
+        json!({"passed":true,"wholeFallback":true,"bestQueryCrop":0,"queryBoxes":[[0,0,100,80]]}),
+    );
+    assert!(choose(&f, &midori, &hash, [10, 10, 50, 70]).is_ok());
+    // 맞음 · 위치 틀림 states that the shown box was wrong: it records nothing about a person.
+    clear_recommendations(&f);
+    recommend(&f, &momoka, "asset-5", two_people(0));
+    assert!(choose(&f, &midori, &hash, [10, 10, 50, 70]).is_err());
+    let momoka = f.library.get_character_target(&momoka.id).unwrap();
+    f.library
+        .record_character_decisions(crate::library::characters::DecisionRequest {
+            target_id: momoka.id.clone(),
+            expected_fingerprint: momoka.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: crate::library::characters::DecisionKind::AcceptedWrongRegion,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    assert!(known_people_of_others(&f.library.connection().unwrap(), Some(&midori.id), "asset-5")
+        .unwrap()
+        .is_empty());
+    assert!(choose(&f, &midori, &hash, [10, 10, 50, 70]).is_ok());
+}
+
+#[test]
+fn a_recorded_decision_crop_an_s36_crop_index_and_an_own_reference_region_each_name_a_person() {
+    let (f, momoka, midori, hash) = shared_image_fixture();
+    let set_snapshot = |snapshot: Value| {
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE character_decisions SET reference_snapshot=?1 WHERE target_id=?2 AND source_asset_id='asset-5'",
+                params![snapshot.to_string(), momoka.id],
+            )
+            .unwrap();
+    };
+    let people = || known_people_of_others(&f.library.connection().unwrap(), Some(&midori.id), "asset-5").unwrap();
+    // A B36 acceptance stores the crop it was made on.
+    set_snapshot(json!({"prediction": two_people(1), "references": []}));
+    assert_eq!(people()[0].bounds, [50.0, 10.0, 90.0, 70.0]);
+    // An S36 acceptance stores only the index; the image detector boxes resolve it lazily.
+    set_snapshot(json!({"prediction":{"engine":"s36","queryCrop":0},"references":[]}));
+    assert!(people().is_empty(), "no detector boxes known yet");
+    recommend(&f, &midori, "asset-5", two_people(1));
+    assert_eq!(people()[0].bounds, [10.0, 10.0, 50.0, 70.0]);
+    // The character own reference region on the image is its person too (not whole frame).
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_reference_regions(target_id,asset_id,asset_hash,baseline_fingerprint,bounds_json) VALUES(?1,'asset-5',?2,?3,?4)",
+            params![momoka.id, hash, BASELINE, "[50,10,90,70]"],
+        )
+        .unwrap();
+    let bounds: Vec<_> = people().into_iter().map(|p| p.bounds).collect();
+    assert_eq!(bounds, vec![[50.0, 10.0, 90.0, 70.0], [10.0, 10.0, 50.0, 70.0]]);
+}
+
+#[test]
+fn the_inspection_marks_a_taken_box_and_never_suggests_or_keeps_it_chosen() {
+    let people = [KnownPerson { character: "자오".into(), bounds: [10.0, 10.0, 50.0, 70.0] }];
+    let mut row = row_in_state("asset-0", "hash-0", "needs_region");
+    row.boxes = vec![[10, 10, 50, 70], [50, 10, 90, 70]];
+    row.suggested_index = Some(0);
+    mark_taken_boxes(&mut row, &people);
+    assert_eq!(row.taken_boxes, vec![TakenBox { index: 0, character: "자오".into() }]);
+    assert_eq!((row.suggested_index, row.state.as_str()), (None, "needs_region"));
+    // A chosen person that turns out to be taken is no choice any more.
+    let mut chosen = row_in_state("asset-0", "hash-0", "selected");
+    chosen.boxes = vec![[11, 10, 50, 70], [50, 10, 90, 70]];
+    chosen.selected_index = Some(0);
+    mark_taken_boxes(&mut chosen, &people);
+    assert_eq!((chosen.selected_index, chosen.state.as_str()), (None, "needs_region"));
+    // Someone else person is left alone.
+    let mut other = row_in_state("asset-0", "hash-0", "selected");
+    other.boxes = vec![[10, 10, 50, 70], [50, 10, 90, 70]];
+    other.selected_index = Some(1);
+    mark_taken_boxes(&mut other, &people);
+    assert_eq!((other.selected_index, other.state.as_str()), (Some(1), "selected"));
+    assert_eq!(serde_json::to_value(&other).unwrap()["takenBoxes"][0]["character"], json!("자오"));
+    let mut none = row_in_state("asset-0", "hash-0", "single");
+    mark_taken_boxes(&mut none, &[]);
+    assert!(serde_json::to_value(&none).unwrap().get("takenBoxes").is_none());
+}
+
+#[test]
+fn the_particle_after_a_character_name_follows_its_last_syllable() {
+    assert_eq!(with_ro("자오"), "자오로");
+    assert_eq!(with_ro("다이아린"), "다이아린으로");
+    assert_eq!(with_ro("모모카"), "모모카로");
+    assert_eq!(with_ro("아델"), "아델로");
+    assert_eq!(with_ro("Zoe"), "Zoe로");
 }

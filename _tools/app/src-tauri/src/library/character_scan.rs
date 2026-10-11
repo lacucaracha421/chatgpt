@@ -864,7 +864,7 @@ pub(super) fn evidence_regions(evidence: Option<&Value>, minimum: usize) -> Opti
     Some(regions)
 }
 
-fn box_region(value: &Value) -> Option<[f64; 4]> {
+pub(super) fn box_region(value: &Value) -> Option<[f64; 4]> {
     let b = value.as_array()?;
     if b.len() != 4 {
         return None;

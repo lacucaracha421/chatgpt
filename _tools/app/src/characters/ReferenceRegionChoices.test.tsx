@@ -507,3 +507,42 @@ it("keeps asking for a person on a shared image when its only offered choice was
     privacyMode={false} busy={false} api={vi.fn()} inspection={{ inspections: rows, error: null }} onChange={vi.fn()} />);
   expect(screen.getByRole("button", { name: "필요한 인물만 확인" })).toBeInTheDocument();
 });
+
+/** 다이아린 · 자오: 자오 is already registered on the first person of this image. */
+const taken = (state: string, extra: Partial<ReferenceInspection> = {}): ReferenceInspection =>
+  ({ ...inspection("g", state, multi), otherCharacters: ["자오"], takenBoxes: [{ index: 0, character: "자오" }], ...extra });
+
+it("shows a person another character is registered on dimmed with that name, and cannot select it", async () => {
+  const api = vi.fn(async () => [...six.map(id => inspection(id, "single")), taken("needs_region")]);
+  const user = userEvent.setup();
+  render(<Harness assetIds={[...six, "g"]} respond={api} />);
+  await user.click(await screen.findByRole("button", { name: "필요한 인물만 확인" }));
+  const owned = screen.getByRole("button", { name: "인물 영역 1 · 자오 인물" });
+  expect(owned).toBeDisabled();
+  expect(within(owned).getByText("자오 인물")).toBeVisible();
+  expect(owned).not.toHaveAttribute("aria-pressed");
+  await user.click(owned);
+  expect(draft()).toEqual({});
+  // The free person is still chosen as before.
+  await user.click(screen.getByRole("button", { name: "인물 영역 2 선택" }));
+  await waitFor(() => expect(draft()).toEqual({ g: box("g", multi[1]) }));
+});
+
+it("never offers a taken box as the suggestion and never counts it as a chosen person", () => {
+  const row = taken("needs_region", { suggestedIndex: 0 });
+  expect(withDraftChoices([row], { g: box("g", multi[0]) })[0]).toBe(row);
+  expect(withDraftChoices([row], { g: box("g", multi[1]) })[0]).toMatchObject({ state: "selected", selectedIndex: 1 });
+  // A native answer whose chosen crop is the taken one is not usable either.
+  expect(usableReferenceCount([taken("selected", { selectedIndex: 0 })])).toBe(0);
+  expect(usableReferenceCount([taken("selected", { selectedIndex: 1 })])).toBe(1);
+});
+
+it("says so when every person of a shared image is already registered", async () => {
+  const all = taken("needs_region", { takenBoxes: [{ index: 0, character: "자오" }, { index: 1, character: "자오" }] });
+  const api = vi.fn(async () => [...six.map(id => inspection(id, "single")), all]);
+  const user = userEvent.setup();
+  render(<Harness assetIds={[...six, "g"]} respond={api} />);
+  await user.click(await screen.findByRole("button", { name: "필요한 인물만 확인" }));
+  expect(screen.getByText("이미지의 인물이 모두 다른 캐릭터(자오)로 등록돼 있어 사용할 수 없음")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "추천 영역 사용" })).not.toBeInTheDocument();
+});

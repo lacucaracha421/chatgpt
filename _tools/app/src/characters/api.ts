@@ -19,7 +19,14 @@ export type ReferenceInspection = {
   /** Other characters this image already belongs to. Such an image is used only through a
    * person the user chose, so a detected or inferred person arrives as `needs_region`. */
   otherCharacters?: string[];
+  /** Boxes (indexes into `boxes`) already registered as another character's person. Such a box
+   * cannot be chosen; the save refuses it too. Absent when no person is known for the image. */
+  takenBoxes?: { index: number; character: string }[];
 };
+
+/** The character a box is already registered to, or null when it is free to choose. */
+export const takenBoxOwner = (region: ReferenceInspection, index: number | null): string | null =>
+  index === null ? null : region.takenBoxes?.find(taken => taken.index === index)?.character ?? null;
 
 /**
  * Region states that supply a usable reference without asking the user anything.
@@ -49,7 +56,8 @@ export const refusedAsWholeFrame = (region: ReferenceInspection, bounds: readonl
  */
 export const needsReferenceRegionChoice = (region: ReferenceInspection) =>
   region.state === "needs_region" || (region.state === "stale_region" && region.boxes.length > 0)
-  || (usableReferenceRegionStates.some(state => state === region.state) && refusedAsWholeFrame(region, regionBox(region, referenceRegionIndex(region))));
+  || (usableReferenceRegionStates.some(state => state === region.state)
+    && (refusedAsWholeFrame(region, regionBox(region, referenceRegionIndex(region))) || takenBoxOwner(region, referenceRegionIndex(region)) !== null));
 
 /** A stored binding that no longer matches the image and detector. */
 export const staleReferenceRegion = (region: ReferenceInspection) => region.state === "stale_region";
