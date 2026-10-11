@@ -81,10 +81,63 @@ function Preview({id,paused,label='',rating}:{id?:string|null;paused:boolean;lab
   },[id,paused,cached,loaded,masked,rating]);
   return masked?<span className="privacy-mask" aria-label="이미지 숨김"/>:preview?<StableImage key={id} src={preview} alt={label}/>:<PhotoIcon aria-hidden="true"/>;
 }
-/** The images a folder card shows: a group's mosaic of its members, otherwise its own thumbnail. */
+/** The group's own 기타, if it has one. */
+const groupExtrasNode=(index:CharacterIndex|undefined,group:CharacterNode)=>index?.nodes.find(n=>n.parentId===group.id&&isExtrasNode(n));
+const GROUP_MOSAIC_SLOTS=4;
+/** A group's member pictures (the covers of its characters), at most one mosaic's worth. */
+const groupMemberPreviewIds=(index:CharacterIndex|undefined,group:CharacterNode)=>
+  [...new Set(index?.nodes.filter(n=>n.parentId===group.id&&!isExtrasNode(n)&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,GROUP_MOSAIC_SLOTS);
+/** A group's 기타 images read so far: the newest of its scope, kept (per 기타) while a newer publication is read. */
+type ExtrasFill={revision:string;ids:string[];ratings:Record<string,ContentRating|null>};
+const extrasFills=new Map<string,ExtrasFill>();
+/**
+ * The images a folder card shows. A group's mosaic is its members' covers first and, when fewer than four,
+ * its own 기타 images (the cover the index carries, then the newest read for the group); otherwise the node's thumbnail.
+ */
 function cardPreviewIds(index:CharacterIndex|undefined,child:CharacterNode):string[] {
-  if(child.kind==='group')return [...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4);
+  if(child.kind==='group'){
+    const own=groupMemberPreviewIds(index,child),extras=groupExtrasNode(index,child);
+    if(!extras||own.length>=GROUP_MOSAIC_SLOTS)return own;
+    const fill=extrasFills.get(extras.id);
+    return [...new Set([...own,...(extras.thumbnailAssetId?[extras.thumbnailAssetId]:[]),...(fill?.ids??[])])].slice(0,GROUP_MOSAIC_SLOTS);
+  }
   return child.thumbnailAssetId?[child.thumbnailAssetId]:[];
+}
+/** The ratings a card's pictures are masked by: the index's, plus those of the 기타 images read for a group. */
+function cardRatings(index:CharacterIndex|undefined,child:CharacterNode):CharacterIndex["contentRatings"] {
+  const extras=child.kind==='group'?groupExtrasNode(index,child):undefined,fill=extras&&extrasFills.get(extras.id);
+  return fill?{...fill.ratings,...index?.contentRatings}:index?.contentRatings;
+}
+/**
+ * Reads the newest images of each shown group's 기타 when the group has fewer than four member covers, once per
+ * publication, so a group with only a 기타 (or few members) fills its mosaic. The covers shown stay while a read is under way.
+ */
+function useGroupExtrasFill(index:CharacterIndex|undefined,groups:readonly CharacterNode[],enabled:boolean) {
+  const [,setVersion]=useState(0);
+  const wanted=index?.ready&&index.revision?groups.filter(group=>group.kind==='group').flatMap(group=>{
+    const extras=groupExtrasNode(index,group);
+    return extras&&groupMemberPreviewIds(index,group).length<GROUP_MOSAIC_SLOTS?[extras.id]:[];
+  }):[];
+  const key=`${index?.revision??''}:${wanted.join('|')}`;
+  useEffect(()=>{
+    const revision=index?.revision;
+    if(!enabled||!revision||!wanted.length)return;
+    const controller=new AbortController();
+    void (async()=>{
+      for(const id of wanted){
+        if(extrasFills.get(id)?.revision===revision)continue;
+        try{
+          const page=await api<CharacterPage>(characterPath(id,'all',revision,null),controller.signal);
+          if(controller.signal.aborted)return;
+          extrasFills.delete(id);
+          extrasFills.set(id,{revision,ids:page.items.slice(0,GROUP_MOSAIC_SLOTS).map(asset=>asset.id),ratings:Object.fromEntries(page.items.slice(0,GROUP_MOSAIC_SLOTS).map(asset=>[asset.id,asset.contentRating??null]))});
+          while(extrasFills.size>128)extrasFills.delete(extrasFills.keys().next().value!);
+          setVersion(value=>value+1);
+        }catch{if(controller.signal.aborted)return;}
+      }
+    })();
+    return()=>controller.abort();
+  },[enabled,key]);
 }
 /**
  * No flash on change: the next place's first shelf covers are fetched and decoded with its first
@@ -405,6 +458,7 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
   const shelfHidden=node?.kind==='character'&&!children.length||!!soloExtras;
   const shelfPlace=shelfHidden?[...ancestors].reverse().find(item=>item.kind!=='character')?.id??null:place.node;
   const shelfChildren=index?characterChildren(index,shelfPlace,classifications):[];
+  useGroupExtrasFill(index,shelfChildren,active&&!paused&&!shelfHidden);
   const foldable=folderStrip&&shelfChildren.length>0;
   const childCharacterCount=shelfChildren.filter(child=>child.kind!=='folder'&&!isExtrasNode(child)).length;
   const childFolderCount=shelfChildren.filter(child=>child.kind==='folder').length;
@@ -415,7 +469,7 @@ export function CharacterBrowser({classifications=[],onOpenFolder,search,onSearc
     <SegmentedControl<CharacterFilter> label="이미지 범위" options={SERIES_FILTERS.map(filter=>({value:filter,label:filter==='unclassified'?'미분류':'전체',count:scopeCount(filter)}))} value={place.filter} onChange={applyCharacterFilter}/>
     <IconButton label="미분류와 전체 설명" icon={InformationCircleIcon} onClick={()=>setFilterHelpOpen(true)}/>
   </div>;
-  const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>child.kind==='folder'?onOpenFolder?.(child.sourceId):enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
+  const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={cardRatings(index,child)} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>child.kind==='folder'?onOpenFolder?.(child.sourceId):enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
   const overview=<>
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>다시 시도</Button></div>}
     {index&&!index.ready&&<EmptyState title="캐릭터 보기가 아직 공유되지 않았습니다" hint="PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다."/>}

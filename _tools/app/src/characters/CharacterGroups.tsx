@@ -10,6 +10,8 @@ import { groupMemberImage, groupPreviewMembers } from "./shelfImages";
 import type { CharacterTarget } from "./api";
 import { FolderShelf } from "../assets/FolderShelf";
 import { characterExtrasApi } from "./extrasApi";
+import { useExtrasPreviews } from "./ExtrasCard";
+import type { CharacterHubApi } from "./hubApi";
 
 type Group = { id: string; name: string; revision: number; targetIds: string[]; extrasTargetId?: string | null };
 type Props = {
@@ -25,6 +27,13 @@ type Props = {
   /** The 기타 card: always the last character card, after the characters (and before suggestions and folders). */
   extrasCard?: ReactNode;
   suggestionCount?: number;
+  /**
+   * Where a group card reads its 기타 images from. A group card's mosaic is its members' pictures first,
+   * then (up to four slots in all) its own 기타's newest images; without this, a group shows members only.
+   */
+  extrasPreviewApi?: Pick<CharacterHubApi, "browse">;
+  /** Changes when the 기타 images may have changed; a group card re-reads then and keeps its pictures meanwhile. */
+  extrasPreviewVersion?: number;
   memberCounts?: Record<string, number | undefined>;
   /** Quiet action on the right of the series count line (e.g. waiting S36 candidates). */
   headerAccessory?: ReactNode;
@@ -35,7 +44,7 @@ type Props = {
   children: (members: CharacterTarget[]) => ReactNode;
 };
 
-export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, suggestionCards = [], extrasCard, suggestionCount = 0, memberCounts = {}, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, children }: Props) {
+export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, suggestionCards = [], extrasCard, suggestionCount = 0, extrasPreviewApi, extrasPreviewVersion = 0, memberCounts = {}, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, children }: Props) {
   const [loadedGroups, setLoadedGroups] = useState<Group[]>([]);
   const [draft, setDraft] = useState<Group | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -81,7 +90,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     ...(!current && rootFolders.length ? [["폴더", rootFolders.length]] : []),
   ] as [string, number][];
   const cards: ReactNode[] = [
-    ...rootGroups.map(group => <CharacterGroupCard key={group.id} group={group} members={members} memberCounts={memberCounts} privacyMode={privacyMode} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />),
+    ...rootGroups.map(group => <CharacterGroupCard key={group.id} seriesId={seriesId} group={group} members={members} extrasPreviewApi={extrasPreviewApi} extrasPreviewVersion={extrasPreviewVersion} memberCounts={memberCounts} privacyMode={privacyMode} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />),
     ...(visibleMembers.length > 0 ? [<Fragment key="members">{children(visibleMembers)}</Fragment>] : []),
     ...(extrasCard ? [<Fragment key="extras">{extrasCard}</Fragment>] : []),
     ...suggestionCards,
@@ -144,19 +153,31 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   </>;
 }
 
-function CharacterGroupCard({ group, members, memberCounts, privacyMode, onOpen, onEdit }: { group: Group; members: CharacterTarget[]; memberCounts: Record<string, number | undefined>; privacyMode: boolean; onOpen: () => void; onEdit: () => void }) {
+const GROUP_MOSAIC_SLOTS = 4;
+
+function CharacterGroupCard({ seriesId, group, members, extrasPreviewApi, extrasPreviewVersion, memberCounts, privacyMode, onOpen, onEdit }: { seriesId: string; group: Group; extrasPreviewApi?: Pick<CharacterHubApi, "browse">; extrasPreviewVersion: number; members: CharacterTarget[]; memberCounts: Record<string, number | undefined>; privacyMode: boolean; onOpen: () => void; onEdit: () => void }) {
   const { groupMembers, previews } = groupPreviewMembers(group, members);
+  // Members first; the free slots (if any) are filled with the group's own 기타 images. At most one read per card and refresh.
+  const wantsExtras = Boolean(extrasPreviewApi && group.extrasTargetId && previews.length < GROUP_MOSAIC_SLOTS);
+  const extrasRead = useExtrasPreviews(seriesId, wantsExtras ? group.extrasTargetId! : null, extrasPreviewVersion, extrasPreviewApi);
+  const extrasPreviews = wantsExtras ? (extrasRead ?? []).slice(0, GROUP_MOSAIC_SLOTS - previews.length) : [];
+  const slotCount = previews.length + extrasPreviews.length;
+  const pending = wantsExtras && extrasRead === undefined && previews.length === 0;
   const count = [...groupMembers.map(member => member.id), ...(group.extrasTargetId ? [group.extrasTargetId] : [])].reduce<number | undefined>((sum, id) => {
     const next = memberCounts[id];
     return next === undefined ? sum : (sum ?? 0) + next;
   }, undefined);
   return <article className="series-character folder-shelf__card series-character--group">
     <button className="series-character__open" aria-label={`${group.name} 그룹 열기`} aria-description={`${group.targetIds.length.toLocaleString()}명${groupMembers.length ? ` · ${groupMembers.map(member => member.displayName).join(" · ")}` : ""}${group.extrasTargetId ? " · 기타" : ""}`} onClick={onOpen}>
-      <span className="character-group-card__mosaic" data-count={Math.max(1, previews.length)}>
-        {previews.length ? previews.map(target => {
+      <span className="character-group-card__mosaic" data-count={Math.max(1, slotCount)}>
+        {previews.map(target => {
           const image = groupMemberImage(target);
           return privacyMode ? <span key={target.id} className="character-group-card__slot privacy-mask" aria-label="비공개 모드"/> : image ? <AssetImage key={target.id} draggable={false} loading="lazy" src={image} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
-        }) : <span className="character-group-card__slot"><UserGroupIcon aria-hidden="true" /></span>}
+        })}
+        {extrasPreviews.map(preview => privacyMode
+          ? <span key={`extras:${preview.id}`} className="character-group-card__slot privacy-mask" aria-label="비공개 모드"/>
+          : <AssetImage key={`extras:${preview.id}`} draggable={false} loading="lazy" src={preview.src} alt="" />)}
+        {slotCount === 0 && <span className="character-group-card__slot">{!pending && <UserGroupIcon aria-hidden="true" />}</span>}
       </span>
       <strong><UserGroupIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
       <small className="folder-shelf__meta" aria-hidden={count === undefined || undefined}>{count === undefined ? null : `${count.toLocaleString("ko-KR")}장`}</small>

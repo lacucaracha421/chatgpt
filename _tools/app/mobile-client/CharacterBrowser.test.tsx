@@ -643,3 +643,34 @@ it('opens a group whose only child is its 기타 straight to the 기타 images u
   act(()=>{expect(backRef.current?.()).toBe(true);});
   expect(await screen.findByRole('heading',{name:'Series'})).toBeTruthy();
 });
+
+it('fills a group card with its 기타 images: a 기타-only group shows up to four, a group with one member fills the rest',async()=>{
+  const filled=structuredClone(index);
+  const cover=(id:string,thumbnailAssetId:string)=>({...node('character',id,id,'group:fill-one'),thumbnailAssetId});
+  filled.nodes=[
+    node('series','s','Series',null),
+    node('group','fill-only','Only 기타','series:s'),{...node('character','fill-x-only','Only 기타 기타','group:fill-only'),role:'extras' as const,thumbnailAssetId:'only-1'},
+    node('group','fill-one','One member','series:s'),cover('fill-m','member-1'),{...node('character','fill-x-one','One member 기타','group:fill-one'),role:'extras' as const,thumbnailAssetId:'one-1'},
+  ];
+  filled.scopes.push({nodeId:'group:fill-only',filter:'all',totalCount:6,sourceCount:6},{nodeId:'group:fill-one',filter:'all',totalCount:6,sourceCount:6});
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/characters'))return structuredClone(filled);
+    const node=new URL(path,'https://test').searchParams.get('node');
+    if(node==='character:fill-x-only')return page(['only-1','only-2','only-3','only-4','only-5','only-6']);
+    if(node==='character:fill-x-one')return page(['one-1','one-2','one-3','one-4']);
+    return page();
+  });
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  const only=await screen.findByRole('button',{name:'Only 기타 · 6장'});
+  const one=screen.getByRole('button',{name:'One member · 6장'});
+  const shown=(card:HTMLElement)=>[...card.querySelectorAll('.character-mosaic > span')].map(slot=>slot.querySelector('img')?.getAttribute('src')??'');
+  await waitFor(()=>expect(only.querySelector('.character-mosaic')?.getAttribute('data-count')).toBe('4'));
+  await waitFor(()=>expect(one.querySelector('.character-mosaic')?.getAttribute('data-count')).toBe('4'));
+  const requested=mocks.loadThumbnail.mock.calls.map(([asset])=>asset.id);
+  // Members first, then the 기타's newest images; one read per 기타.
+  expect(requested).toEqual(expect.arrayContaining(['only-1','only-2','only-3','only-4','member-1','one-1','one-2','one-3']));
+  expect(requested).not.toContain('only-5');expect(requested).not.toContain('one-4');
+  await waitFor(()=>expect(shown(one).filter(Boolean)).toHaveLength(4));
+  expect(shown(only).filter(Boolean)).toHaveLength(4);
+  expect(mocks.api.mock.calls.filter(([p])=>p.includes('node=character%3Afill-x-only'))).toHaveLength(1);
+});

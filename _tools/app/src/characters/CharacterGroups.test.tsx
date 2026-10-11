@@ -1,7 +1,8 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 import { CharacterGroups } from "./CharacterGroups";
 import { fixtureTarget } from "./characterFixtures";
+import type { CharacterHubApi } from "./hubApi";
 
 afterEach(cleanup);
 const members = [fixtureTarget("a", "A"), fixtureTarget("b", "B"), fixtureTarget("c", "C")];
@@ -107,4 +108,45 @@ it("counts a group's 기타 images in its card", () => {
   const tile = screen.getByRole("button", { name: "그룹 이름 그룹 열기" });
   expect(tile.querySelector("small")).toHaveTextContent("49장");
   expect(tile).toHaveAttribute("aria-description", "2명 · A · B · 기타");
+});
+
+type BrowseApi = Pick<CharacterHubApi, "browse"> & { browse: ReturnType<typeof vi.fn> };
+const extrasBrowse = (ids: string[]) => ({ browse: vi.fn(async () => ({ items: ids.map(id => ({ id, thumbnailRevision: null })), nextCursor: null })) }) as unknown as BrowseApi;
+const extrasSrcs = (container: HTMLElement) => [...container.querySelectorAll(".character-group-card__mosaic img")].map(image => image.getAttribute("src") ?? "");
+
+it("fills a group that has only a 기타 with up to four of its 기타 images", async () => {
+  const only = [{ id: "only", name: "전쟁", revision: 1, targetIds: [], extrasTargetId: "extras" }];
+  const api = extrasBrowse(["x1", "x2", "x3", "x4", "x5"]);
+  const { container } = render(<CharacterGroups seriesId="series" members={members} groups={only} extrasPreviewApi={api}>{children}</CharacterGroups>);
+  await waitFor(() => expect(extrasSrcs(container)).toHaveLength(4));
+  expect(container.querySelector(".character-group-card__mosaic")).toHaveAttribute("data-count", "4");
+  expect(extrasSrcs(container).map(src => src.split("/").pop())).toEqual(["x1", "x2", "x3", "x4"]);
+  expect(api.browse).toHaveBeenCalledTimes(1);
+  expect(api.browse).toHaveBeenCalledWith(expect.objectContaining({ seriesId: "series", targetId: "extras", limit: 4 }));
+});
+
+it("fills the free slots of a group with one member after the member's cover, and masks every slot in privacy mode", async () => {
+  const one = [{ id: "one", name: "한 명", revision: 1, targetIds: ["a"], extrasTargetId: "extras" }];
+  const withCover = members.map(member => ({ ...member, thumbnailAssetId: `cover-${member.id}` }));
+  const api = extrasBrowse(["x1", "x2", "x3", "x4"]);
+  const { container, rerender } = render(<CharacterGroups seriesId="series" members={withCover} groups={one} extrasPreviewApi={api}>{children}</CharacterGroups>);
+  await waitFor(() => expect(extrasSrcs(container)).toHaveLength(4));
+  expect(extrasSrcs(container).map(src => src.split("/").pop())).toEqual(["cover-a", "x1", "x2", "x3"]);
+  rerender(<CharacterGroups seriesId="series" members={withCover} groups={one} extrasPreviewApi={api} privacyMode>{children}</CharacterGroups>);
+  expect(container.querySelector("img[src]")).toBeNull();
+  expect(container.querySelectorAll(".character-group-card__mosaic .privacy-mask")).toHaveLength(4);
+});
+
+it("reads no 기타 images for a group whose members already fill the mosaic, and keeps the empty slot when nothing exists", async () => {
+  const four = [fixtureTarget("a", "A"), fixtureTarget("b", "B"), fixtureTarget("c", "C"), fixtureTarget("d", "D")];
+  const full = [{ id: "full", name: "가득", revision: 1, targetIds: ["a", "b", "c", "d"], extrasTargetId: "extras" }];
+  const api = extrasBrowse(["x1"]);
+  const { rerender, container } = render(<CharacterGroups seriesId="series" members={four} groups={full} extrasPreviewApi={api}>{children}</CharacterGroups>);
+  expect(api.browse).not.toHaveBeenCalled();
+  const bare = [{ id: "bare", name: "빈", revision: 1, targetIds: [], extrasTargetId: "extras" }];
+  const empty = extrasBrowse([]);
+  rerender(<CharacterGroups seriesId="series" members={four} groups={bare} extrasPreviewApi={empty}>{children}</CharacterGroups>);
+  await waitFor(() => expect(empty.browse).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(container.querySelector(".character-group-card__slot svg")).toBeTruthy());
+  expect(container.querySelector(".character-group-card__mosaic")).toHaveAttribute("data-count", "1");
 });
