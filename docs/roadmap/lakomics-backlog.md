@@ -6,17 +6,15 @@ Reconciled 2026-10-10 against committed `main` at `0be3353d`, using current sour
 
 ## Current priority
 
-Updated 2026-10-12 with the user. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; the 2026-10-10 server-independence slices are delivered (see the [evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-10-evening--server-ownership-of-wishlist-kakao-and-mangadex-binds)).
+Updated 2026-10-12 with the user (evening: the collector pass, drag/options and the 게임 folders are done; see the [2026-10-12 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-12--character-folders-video-and-worker-tooling)). PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; the 2026-10-10 server-independence slices are delivered (see the [evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-10-evening--server-ownership-of-wishlist-kakao-and-mangadex-binds)).
 
-1. **`COLLECTOR-VERIFY-20261012`** — real-Chrome use of the 2026-10-12 collector features (fix what the user reports).
-2. **`COLLECTOR-DRAG-001` and `COLLECTOR-OPTIONS-001`** — finish drag-to-save on player controls and the options page reorganisation.
-3. **`UI-REVIEW-20261011`** — remaining UI sweep items.
-4. **`COLLECTOR-TABLET-001`** — verify the collector in the Titanium browser on the Galaxy Tab first; it gates the tablet translation chip.
-5. **`CLOUD-POST-001` step 2** — retire the calendar/wishlist PUT fallback.
-6. **`PERF-ALL-001`** — remaining measured performance scenarios.
-7. **게임 series folders** (`USER-FEEDBACK-20261009`) — agree the structure with the user before any library write.
-8. **`COLLECTOR-IMGTEXT-001`** — image-text translation for hotlink-protected images.
-9. **Small residual debt** — `TABLET-PARITY-001`, `PC-REVIEW-001`, `HOME-OPT-001` test debt and the residual `USER-REQ-20260924` diagnostics.
+1. **`VIEW-FILTER-001`** — show an active 보기 종류·비율 filter on every gallery it applies to, with a one-click clear (design in progress 2026-10-12).
+2. **`UI-REVIEW-20261011`** — remaining UI sweep items.
+3. **`COLLECTOR-TABLET-001`** — tablet collector (Helium) slices.
+4. **`CLOUD-POST-001` step 2** — retire the calendar/wishlist PUT fallback.
+5. **`PERF-ALL-001`** — remaining measured performance scenarios.
+6. **`COLLECTOR-IMGTEXT-001`** — image-text translation for hotlink-protected images.
+7. **Small residual debt** — `TABLET-PARITY-001`, `PC-REVIEW-001`, `HOME-OPT-001` test debt and the residual `USER-REQ-20260924` diagnostics.
 
 `LINUX-DESKTOP-001` stays (the user still uses Linux); other low-priority and held items keep their recorded order.
 
@@ -24,7 +22,7 @@ Updated 2026-10-12 with the user. PC remains canonical for design; tablet follow
 
 User rule (2026-10-12): a device/native check the user does not mention afterwards counts as passed. The checks listed here on 2026-10-12 (AV interactions, 더보기/휴지통, tablet Collections header and live Kakao, tablet similarity apply, Windows natural-language search, tablet content search after nightly captioning, character candidate-group output) are therefore treated as accepted; reopen one only when the user reports a problem.
 
-- **Real Chrome — collector features of 2026-10-12:** see `COLLECTOR-VERIFY-20261012` (not yet used by the user).
+- Nothing open (the user confirmed the 2026-10-12 collector features and the character/video work on 2026-10-12).
 
 ## UI-REVIEW-20261011 — Automated UI sweep findings
 
@@ -292,7 +290,7 @@ Status: `PARTIAL` — PC release and tablet 0.9.52 visible fixes were checked by
 - **Kakao live acceptance (`VERIFY`):** search rules and 연결 점검 A+B shipped (`595de29b`, `856788df`), deployed 2026-10-09. Live search/refresh checks remain in [Waiting on the user](#waiting-on-the-user-devicenative-checks). Server binding execution and live tablet Kakao linking were confirmed by the user on 2026-10-10 (0.9.54); see the [evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-10-evening--server-ownership-of-wishlist-kakao-and-mangadex-binds). Do not label deployment or bind handover pending.
 - **Tablet Collections header (`VERIFY`):** common buttons in the top bar, fixed-width type segment and swipe-down shade implemented (`b5bec8ef`, 0.9.53 `a64480f6`); the device check remains in the top list.
 - **만화 series folders (done, user 2026-10-12):** the user reports 만화 is now organised as series folders; the 2026-10-09 "only 만화 shows 미분류/전체" answer and the "tidy 만화 like 게임" proposal are closed.
-- **게임 series folders (`TODO`, user 2026-10-12):** the user wants to organise 게임 into series folders the same way as 만화. Agree the target structure with the user before any library write (production-library changes need explicit approval).
+- **게임 series folders (done, user 2026-10-12):** 게임 registered as a series and its sub-series regrouped; see the [2026-10-12 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-12--character-folders-video-and-worker-tooling).
 
 ## USER-REQ-20261007 — Tablet 더보기 and one combined 휴지통
 
@@ -351,18 +349,13 @@ Status: `PARTIAL` — clarify any remaining inventory/recorded-era metric defini
 
 Since 2026-10-12 the collector is named **Lakomics Companion** (manifest 3.5.3). Done on 2026-10-12 (listed in the last section): X translation port, stuck fix and speed; YouTube subtitles with a server cache; custom right-click menu; image-text and page-body translation. The separate standalone extension `V:\yt-subs` ("자막다듬이" 1.0.2, its own git repo) stays independent; the collector hides its own YouTube button when the standalone one is on the page. Source rules: `extension-list/AGENTS.md`; behavior: [extension-list/README.md](../../extension-list/README.md).
 
-<a id="collector-verify-20261012--real-chrome-verification-pass"></a>
-## COLLECTOR-VERIFY-20261012 — Real-Chrome verification pass (2026-10-12)
-
-Status: `VERIFY` — the 2026-10-12 collector features (`1de6eb98`, `4761d367`, `f31ff1fb`, `08f9cf62`) were shipped with unit tests and committed; no real-Chrome pass is recorded. Check in the user's Chrome with the unpacked extension: right-click menu suppression and the native-menu escapes (Shift+right-click, site menus, touch, collect gesture); clipboard read/write prompts (new `clipboardRead/Write`, `pageCapture`, `offscreen` permissions); page save as MHTML; YouTube subtitles in the collector (AI button, per-line bands, standalone-button coexistence) and the server subtitle cache (`GET/PUT/DELETE /v1/extension/subtitles`: local miss reads the server, complete results upload; confirm the deployed server and paired scope); image-text and page-body translation on real pages; X translation speed and no stuck 번역 중 posts. Report results per feature; do not claim a feature from tests alone.
-
 <a id="collector-translate-001--context-aware-web-page-translation"></a>
 ## COLLECTOR-TRANSLATE-001 — Context-aware web page translation in the collector (2026-10-12)
 
 Status: `PARTIAL` — user 2026-10-12: translate foreign (mainly Japanese) text into natural Korean, better than the browser's built-in translation. Delivered in the collector the same day (see the last section): shared translation core with Korean rules and user dictionary, X posts, right-click selection translation, image-text translation and page-body translation. Remaining:
 - **Constraint (user 2026-10-12):** text in images only for images the user explicitly picks — never automatic for every image on a page.
 - **Cost:** the user found Claude Haiku already reads image text well; the estimate ~0.02–0.05 ¢ per image on Haiku 5.5 is unmeasured — measure on real images before promising costs. Cost limits for long pages (page-body translation) are not designed.
-- **Open:** per-site caching beyond the per-tab image cache and the X cache; how page-body translation coexists with the collector's capture UI under `extension-list/AGENTS.md`. Real-browser behavior: `COLLECTOR-VERIFY-20261012`. Hotlink-protected images: `COLLECTOR-IMGTEXT-001`.
+- **Open:** per-site caching beyond the per-tab image cache and the X cache; how page-body translation coexists with the collector's capture UI under `extension-list/AGENTS.md`. Real-browser behavior was confirmed by the user on 2026-10-12. Hotlink-protected images: `COLLECTOR-IMGTEXT-001`.
 
 <a id="collector-imgtext-001--hotlink-protected-image-text-translation"></a>
 ## COLLECTOR-IMGTEXT-001 — Image-text translation for hotlink-protected images (2026-10-12)
@@ -379,15 +372,10 @@ Status: `ACTIVE` — the tablet browser is Helium (`io.github.jqssun.helium`, Ch
 
 Status: `HOLD` — deferred by the user (2026-10-12): the Lakomics app/server are being changed in another session; do not start until the user resumes it. User decisions (2026-10-12): only a translation already made before saving is attached (no automatic translation on save, no extra model call); the stored text is shown in the PC and tablet viewers (original/Korean lines, folded by default); not added to search for now. Today nothing can hold it: the capture carries source/media URL, folder and publish time, and assets have no text field. Entry point (2026-10-12): the 저장 button in the translation popover (COLLECTOR-TABLET-001 slice 2). Path: the collector attaches the cached `{original, korean}` lines for that image URL to the save request → the capture keeps them → PC import stores them per asset → viewers show them (PC first, tablet follows; viewer placement is a design decision for the design worker; a new tablet route needs the NetworkPolicy allowlist). Needs a server deploy. Start after COLLECTOR-TABLET-001 slice 1, which owns the same collector files.
 
-<a id="collector-options-001--options-page-reorganisation-and-theme-unification"></a>
-## COLLECTOR-OPTIONS-001 — Options page reorganisation and theme unification (2026-10-12)
+<a id="view-filter-001--active-view-filter-indicator"></a>
+## VIEW-FILTER-001 — Active view-filter indicator (2026-10-12)
 
-Status: `DONE` — shipped in 3.5.6 (`4957e893`): seven sections with a sticky nav, auto-save, clears in 저장공간 with inline confirms, key↔model links, bundled Pretendard and the paper/ink theme.
-
-<a id="collector-drag-001--drag-to-save-ignores-video-player-controls"></a>
-## COLLECTOR-DRAG-001 — Drag-to-save ignores video player controls (2026-10-12)
-
-Status: `DONE` — shipped in 3.5.4/3.5.5 (`fc59c40c`, `db78c486`): drags starting on player controls (incl. unlabeled ones such as X's volume slider) and the native control strip no longer open the save picker.
+Status: `IN_PROGRESS` — the 보기 → 종류·비율 filters persist across folders, series, groups and characters (intended). On 2026-10-12 a leftover 영상-only filter made a 14-image 기타-only group open as "이미지 0 / 조건에 맞는 이미지가 없습니다"; the data and queries were correct (Sol, read-only check). User decision (2026-10-12): keep the persistence, but show the active filter clearly wherever it applies (e.g. "영상만 보는 중") with a one-click clear, and name it in the empty state. Design by the Opus design worker, then implementation; PC first, tablet in the same round if it has the same filters.
 
 <a id="collector-picker-001--arca-live-post-editor-library-image-picker"></a>
 ## COLLECTOR-PICKER-001 — Arca Live post-editor image picker from Lakomics (2026-10-08)
