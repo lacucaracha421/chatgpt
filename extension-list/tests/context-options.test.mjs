@@ -14,7 +14,7 @@ test('context menu defaults on, persists switch/excluded hosts, and reloads with
   const g=await fixture(f.memory['lakomics:context-menu:v1']);assert.equal(g.doc.getElementById('context-menu-enabled').checked,false);assert.equal(g.doc.getElementById('context-menu-excluded').value,'example.com\nsub.site.test');f.close();g.close();
 });
 test('invalid site lines produce feedback and do not save malformed exclusions',async()=>{
-  const f=await fixture();f.doc.getElementById('context-menu-excluded').value='https://example.com/path';f.doc.getElementById('context-menu-form').dispatchEvent(new f.w.Event('submit',{cancelable:true}));await tick();assert.equal(f.memory['lakomics:context-menu:v1'],undefined);assert.match(f.doc.getElementById('context-menu-status').textContent,/호스트/);f.close();
+  const f=await fixture();f.doc.getElementById('context-menu-excluded').value='https://example.com/path';f.doc.getElementById('context-menu-form').dispatchEvent(new f.w.Event('submit',{cancelable:true}));await tick();assert.equal(f.memory['lakomics:context-menu:v1'],undefined);assert.match(f.doc.getElementById('context-menu-error').textContent,/호스트/);f.close();
 });
 test('X card has text tint, square-free 4px block radius, header/close control, and no colored stripe',async()=>{
   const x=await readFile(new URL('../src/x-translate.js',import.meta.url),'utf8');assert.equal(x.includes('border-left'),false);assert.match(x,/background:color-mix\(in srgb,currentColor 6%,transparent\)/);assert.match(x,/margin:8px 0 12px;padding:8px 12px 12px/);assert.match(x,/번역 닫기/);assert.match(x,/color-mix\(in srgb,currentColor 55%,transparent\)/);assert.match(x,/hover:none/);

@@ -117,8 +117,9 @@ test('right-click translation model select lists the X models, loads and saves c
   w.eval(optionsSource); await tick(); await tick();
   const select = w.document.querySelector('#context-menu-model');
   assert.deepEqual([...select.options].map(option => option.value), ['', ...models.map(model => model.id)]);
-  assert.equal(select.options[0].textContent, 'X 번역과 같게'); assert.equal(select.value, '');
-  assert.match(w.document.querySelector('#context-menu-section').textContent, /Sonnet 5\.5를 추천해요/);
+  assert.equal(select.options[0].textContent, 'X 번역과 같게 (Gemini 3.1 Flash Lite)'); assert.equal(select.value, '');
+  assert.match(w.document.querySelector('#help-context-menu-model').textContent, /Sonnet 5\.5/);
+  assert.equal(w.document.querySelector('#help-context-menu-model').hidden, true);
   select.value = 'anthropic:claude-sonnet-5-5';
   select.dispatchEvent(new w.Event('change', { bubbles: true })); await tick(); await tick();
   assert.equal(JSON.stringify(updates), JSON.stringify([{ type: 'translation:update', contextModel: 'anthropic:claude-sonnet-5-5' }]));
@@ -129,7 +130,7 @@ test('right-click translation model select lists the X models, loads and saves c
   dom.window.close();
 });
 
-test('disconnect needs a second press and the header states the connection in text', async () => {
+test('disconnect needs inline confirmation and the header states the connection in text', async () => {
   const dom = new JSDOM(html, { url: 'https://extension.test/options.html', runScripts: 'outside-only' });
   const w = dom.window, messages = [];
   let paired = true;
@@ -145,11 +146,11 @@ test('disconnect needs a second press and the header states the connection in te
   assert.equal(doc.querySelector('#state-label').textContent, '연결됨');
   button.click(); await tick();
   assert.equal(messages.includes('disconnect'), false);
-  assert.equal(button.classList.contains('confirm'), true);
-  assert.match(doc.querySelector('#pair-status').textContent, /한 번 더/);
-  button.click(); await tick(); await tick();
+  assert.equal(doc.querySelector('#confirm-disconnect').classList.contains('open'), true);
+  assert.equal(doc.activeElement.textContent, '취소');
+  doc.querySelector('#confirm-disconnect [data-commit]').click(); await tick(); await tick();
   assert.equal(messages.filter(type => type === 'disconnect').length, 1);
   assert.equal(doc.querySelector('#state-label').textContent, '연결 안 됨');
-  assert.equal(button.classList.contains('confirm'), false);
+  assert.equal(doc.querySelector('#confirm-disconnect').classList.contains('open'), false);
   w.close();
 });

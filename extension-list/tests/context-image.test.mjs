@@ -499,7 +499,8 @@ test('options lists only vision-capable models for 이미지 글자 번역 and s
   const select = w.document.getElementById('context-menu-image-model');
   assert.deepEqual([...select.options].map(option => option.value), ['google/gemini-3.1-flash-lite', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5']);
   assert.equal(select.value, 'anthropic:claude-haiku-5-5');
-  assert.match(w.document.getElementById('context-menu-section').textContent, /작은 글씨나 세로쓰기가 잘 안 읽히면 Sonnet 5\.5로 바꿔 보세요\./);
+  assert.match(w.document.getElementById('help-context-menu-model').textContent, /작은 글씨나 세로쓰기가 잘 안 읽히면 이미지 모델도 Sonnet 5\.5로/);
+  assert.equal(w.document.getElementById('help-context-menu-model').hidden, true);
   assert.match(w.document.querySelector('label[for="context-menu-image-model"]').textContent, /이미지 글자 번역 모델/);
   select.value = 'anthropic:claude-sonnet-5-5'; select.dispatchEvent(new w.Event('change'));
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -514,5 +515,5 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.5', 'the controller bumps the version');
+  assert.equal(manifest.version, '3.5.6', 'the controller bumps the version');
 });

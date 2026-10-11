@@ -510,3 +510,26 @@ for (const outcome of ["chosen-capture", "chosen-rewrite", "last-resort"]) {
     assert.equal(h.logs.at(-1)[1].source, outcome === "last-resort" ? "capture-fallback" : outcome === "chosen-capture" ? "captured" : "rewritten");
   });
 }
+
+
+test("options deep links and queries retain access while foreign authorities, paths and frames are refused", async t => {
+  const original = globalThis.chrome;
+  t.after(() => { globalThis.chrome = original; });
+  const stored = {};
+  globalThis.chrome = { storage: { local: {
+    get: async () => stored, set: async values => Object.assign(stored, values), remove: async () => {},
+  } }, runtime: { onMessage: { addListener() {} } } };
+  const service = loadWorker();
+  const sender = url => ({id:'test', frameId:0, url});
+  for (const suffix of ['', '#translation-section', '?from=menu#translation-section']) {
+    const own = sender('chrome-extension://test/options/options.html'+suffix);
+    assert.equal((await service.handle({type:'youtube:settings'}, own)).ok, true);
+    assert.equal((await service.handle({type:'youtube:update', patch:{fontScale:1.15}}, own)).ok, true);
+  }
+  for (const url of ['chrome-extension://other/options/options.html', 'chrome-extension://test/options/options.html/extra', 'https://test/options/options.html', 'invalid']) {
+    assert.equal((await service.handle({type:'youtube:settings'}, sender(url))).code, 'forbidden_sender');
+  }
+  for (const extra of [{id:'other'}, {frameId:1}]) {
+    assert.equal((await service.handle({type:'youtube:settings'}, {...sender('chrome-extension://test/options/options.html#translation-section'), ...extra})).code, 'forbidden_sender');
+  }
+});

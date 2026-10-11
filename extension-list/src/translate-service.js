@@ -641,8 +641,9 @@
       const dictionaryChanged = core.dictionaryRevision(userTerms) !== core.dictionaryRevision(settings.userTerms);
       invalidate();
       settings = {
-        apiKey: typeof message.apiKey === "string" ? message.apiKey.trim() : settings.apiKey,
-        anthropicApiKey: typeof message.anthropicApiKey === "string" ? message.anthropicApiKey.trim() : settings.anthropicApiKey,
+        // An empty save is a no-op. Only the options page's confirmed clear removes a key.
+        apiKey: message.clearApiKey === true ? "" : typeof message.apiKey === "string" && message.apiKey.trim() ? message.apiKey.trim() : settings.apiKey,
+        anthropicApiKey: message.clearAnthropicApiKey === true ? "" : typeof message.anthropicApiKey === "string" && message.anthropicApiKey.trim() ? message.anthropicApiKey.trim() : settings.anthropicApiKey,
         enabled: typeof message.enabled === "boolean" ? message.enabled : settings.enabled,
         model: nextModel,
         contextModel: Object.hasOwn(message, "contextModel") ? validContextModel(message.contextModel) : settings.contextModel,

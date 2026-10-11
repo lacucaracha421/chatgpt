@@ -50,7 +50,7 @@ function setup(t, { paired = true } = {}) {
 test('manifest registers only YouTube MAIN/start hook and isolated/idle UI without changing version', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('unlimitedStorage'));
-  assert.equal(manifest.version, '3.5.5');
+  assert.equal(manifest.version, '3.5.6');
   assert.equal(manifest.background.type, undefined);
   const hook = manifest.content_scripts.find(item => item.js?.includes('src/youtube/page-hook.js'));
   const ui = manifest.content_scripts.find(item => item.js?.includes('src/youtube/content.js'));
@@ -261,7 +261,7 @@ test('options save/load every YouTube field, share dictionary, and show server c
   }
   const first = await open(); t.after(() => first.window.close());
   const doc = first.window.document;
-  assert.equal(doc.getElementById('youtube-clear-server').hidden, true);
+  assert.equal(doc.getElementById('youtube-clear-server-row').hidden, true);
   const fields = { enabled: false, model: 'claude-sonnet-5-5', translate: false, register: 'banmal',
     speakers: true, glossarySonnet: true, fontScale: 1.3, position: 'raised', showOriginal: true };
   for (const [key, value] of Object.entries(fields)) {
@@ -273,13 +273,14 @@ test('options save/load every YouTube field, share dictionary, and show server c
   assert.equal((await h.service.readSettings()).userTerms[0].source, 'Jeff');
   paired = true;
   const second = await open(); t.after(() => second.window.close());
-  assert.equal(second.window.document.getElementById('youtube-clear-server').hidden, false);
+  assert.equal(second.window.document.getElementById('youtube-clear-server-row').hidden, false);
   for (const [key, value] of Object.entries(fields)) {
     const node = second.window.document.getElementById('youtube-' + key);
     assert.equal(typeof value === 'boolean' ? node.checked : node.value, typeof value === 'boolean' ? value : String(value));
   }
   second.window.document.getElementById('youtube-clear').click(); await tick();
-  assert.match(second.window.document.getElementById('youtube-status').textContent, /지웠/);
+  second.window.document.querySelector('#confirm-youtube-clear [data-commit]').click(); await tick();
+  assert.match(second.window.document.getElementById('storage-status').textContent, /자막 지움/);
   assert.equal(h.calls.length, 0);
 });
 

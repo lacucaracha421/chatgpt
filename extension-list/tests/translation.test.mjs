@@ -1113,3 +1113,21 @@ test('a key rejection blocks the tab, then one quiet recheck resumes translation
   assert.equal(requests,2);
   assert.equal(w.document.querySelector('.lakomics-translation[data-error="false"]')?.textContent,'다시 번역됨'); w.close();
 });
+
+
+test('empty key saves retain credentials; confirmed clears remove only the named provider and never expose keys', async () => {
+  const f = fixture(claudeSettings());
+  for (const apiKey of ['', '   ']) {
+    const result = await f.handle({type:'translation:update', apiKey, anthropicApiKey:apiKey});
+    assert.equal(result.hasOpenRouterKey, true); assert.equal(result.hasAnthropicKey, true);
+    assert.equal(result.apiKey, undefined); assert.equal(result.anthropicApiKey, undefined);
+    assert.equal(f.memory['lakomics:translation:v1'].apiKey, 'or-key');
+    assert.equal(f.memory['lakomics:translation:v1'].anthropicApiKey, 'ant-key');
+  }
+  assert.equal((await f.handle({type:'translation:update', apiKey:'', clearApiKey:true}, {...ownSender,url:'https://x.com',frameId:0,tab:{id:3}})).ok, false);
+  const cleared = await f.handle({type:'translation:update', apiKey:'', clearApiKey:true});
+  assert.equal(cleared.hasOpenRouterKey, false); assert.equal(cleared.hasAnthropicKey, true);
+  const both = await f.handle({type:'translation:update', anthropicApiKey:'', clearAnthropicApiKey:true});
+  assert.equal(both.hasAnthropicKey, false);
+  assert.equal(both.apiKey, undefined); assert.equal(both.anthropicApiKey, undefined);
+});

@@ -290,7 +290,9 @@ test('options dictionary saves sanitized mappings, reports count and survives re
   const w=await open();
   w.document.getElementById('translation-dictionary').value='Apple → 사과\nWind -> 바람\nInvalid';
   await w.document.getElementById('translation-dictionary-form').onsubmit({preventDefault(){}});
-  assert.equal(w.document.getElementById('translation-dictionary-status').textContent,'2개 저장됨'); w.close();
+  assert.equal(w.document.getElementById('translation-dictionary-status').textContent,'2개');
+  assert.match(w.document.getElementById('translation-dictionary-error').textContent,/1줄을 읽지 못/);
+  assert.match(w.document.getElementById('translation-dictionary').value,/Invalid/); w.close();
   const again=await open();
   assert.equal(again.document.getElementById('translation-dictionary').value,'Apple = 사과\nWind = 바람'); again.close();
 });

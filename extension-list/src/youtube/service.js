@@ -407,8 +407,13 @@ async function getCached(videoId) {
 
 
  function optionsSender(sender) {
-   return sender.id === chrome.runtime.id && (sender.frameId == null || sender.frameId === 0) &&
-     sender.url === chrome.runtime.getURL("options/options.html");
+   if (sender.id !== chrome.runtime.id || (sender.frameId != null && sender.frameId !== 0)) return false;
+   try {
+     const actual = new URL(sender.url), expected = new URL(chrome.runtime.getURL("options/options.html"));
+     // Ignore a deep link/query, but retain the extension authority and exact page path.
+     return actual.origin === expected.origin && actual.protocol === expected.protocol &&
+       actual.host === expected.host && actual.pathname === expected.pathname && !actual.username && !actual.password;
+   } catch { return false; }
  }
  function youtubeSender(sender) {
    if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)) return false;
