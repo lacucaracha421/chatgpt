@@ -507,7 +507,7 @@ fn prepare(
     let mut rows = match series_id {
         Some(series_id) => {
             let in_series = c
-                .prepare("SELECT id FROM character_targets WHERE series_classification_id=?1")?
+                .prepare("SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1")?
                 .query_map([series_id], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<BTreeSet<_>, _>>()?;
             all.iter()
@@ -883,7 +883,7 @@ impl Library {
         let c = self.connection()?;
         let targets = c
             .prepare(
-                "SELECT id FROM character_targets WHERE series_classification_id=?1 ORDER BY id",
+                "SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1 ORDER BY id",
             )?
             .query_map([series_id], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

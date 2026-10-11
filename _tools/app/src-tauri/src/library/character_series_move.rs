@@ -97,6 +97,11 @@ impl Library {
         destination_id: &str,
     ) -> Result<SeriesMovePreview> {
         let target = self.read_character_target(c, target_id)?;
+        if target.is_extras() {
+            return Err(Error::Invalid(
+                "기타는 다른 시리즈로 옮길 수 없습니다. 시리즈 등록 해제로 함께 옮겨집니다.",
+            ));
+        }
         if target.series_classification_id.as_deref() == Some(destination_id) {
             return Err(Error::Invalid("이미 이 시리즈에 속한 캐릭터입니다."));
         }

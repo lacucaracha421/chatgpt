@@ -75,6 +75,10 @@ export function draftReferenceRegions(regions: ReferenceRegions | undefined, ref
 
 export type CharacterRef = { slot: number; assetId: string | null; assetHash: string; status: string; region?: ReferenceRegion | null };
 export type CharacterTarget = { id: string; folderOrder?: number | null; seriesClassificationId: string | null; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean; manualOnly: boolean; revision: number; references: CharacterRef[]; learnedReferences?: CharacterRef[]; ready: boolean; fingerprint: string;
+  /** "extras" is a 기타 bucket: shown as just "기타", last in its group or series, never recognised. Absent on older data: a character. */
+  role?: "character" | "extras";
+  /** The group a group's 기타 belongs to; null for characters and for a series' own 기타. */
+  extrasGroupId?: string | null;
   /** Current thumbnail revisions of the thumbnail and reference Assets by id (absent: no thumbnail), for cacheable card URLs. */
   thumbnailRevisions?: Record<string, string> };
 export type TargetDraft = { id: string | null; expectedRevision: number | null; seriesClassificationId: string; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean };

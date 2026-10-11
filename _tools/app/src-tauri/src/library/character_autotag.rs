@@ -163,14 +163,14 @@ pub(super) fn refresh_character_review_state(
         .prepare(
             "SELECT r.target_id FROM character_relations r
              JOIN character_targets t ON t.id=r.target_id
-             WHERE r.asset_id=?1 AND t.series_classification_id IN (SELECT value FROM json_each(?2)) ORDER BY r.target_id",
+             WHERE r.asset_id=?1 AND t.role='character' AND t.series_classification_id IN (SELECT value FROM json_each(?2)) ORDER BY r.target_id",
         )?
         .query_map(params![asset_id, series_ids], |row| row.get::<_, String>(0))?
         .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()?;
     let reference_known: bool = connection.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM character_targets t
-            WHERE t.series_classification_id IN (SELECT value FROM json_each(?2)) AND (
+            WHERE t.role='character' AND t.series_classification_id IN (SELECT value FROM json_each(?2)) AND (
                 EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=t.id AND r.asset_id=?1 AND r.asset_hash=?3)
                 OR EXISTS(SELECT 1 FROM character_learned_references r WHERE r.target_id=t.id AND r.asset_id=?1 AND r.asset_hash=?3)
             )
@@ -663,7 +663,7 @@ impl Library {
             return Ok(Vec::new());
         };
         let ids = connection.prepare("SELECT t.id FROM character_targets t
-                WHERE t.series_classification_id IN (SELECT value FROM json_each(?1)) AND t.enabled=1 AND t.manual_only=0 ORDER BY t.id")?
+                WHERE t.role='character' AND t.series_classification_id IN (SELECT value FROM json_each(?1)) AND t.enabled=1 AND t.manual_only=0 ORDER BY t.id")?
             .query_map([serde_json::to_string(&scope.series_classification_ids)?],|r|r.get::<_,String>(0))?
             .collect::<std::result::Result<Vec<_>,_>>()?;
         let mut targets = Vec::new();

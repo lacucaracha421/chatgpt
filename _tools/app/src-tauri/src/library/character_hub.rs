@@ -1898,7 +1898,7 @@ pub(super) fn other_character_names(
     Ok(connection
         .prepare_cached(
             "SELECT DISTINCT t.display_name FROM character_targets t
-             WHERE (?2 IS NULL OR t.id<>?2) AND (
+             WHERE t.role='character' AND (?2 IS NULL OR t.id<>?2) AND (
                  EXISTS(SELECT 1 FROM character_relations r WHERE r.target_id=t.id AND r.asset_id=?1)
                  OR EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=t.id AND r.asset_id=?1)
                  OR EXISTS(SELECT 1 FROM character_learned_references r WHERE r.target_id=t.id AND r.asset_id=?1))

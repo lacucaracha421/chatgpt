@@ -57,6 +57,7 @@ mod character_augmentation;
 pub mod character_autotag;
 pub(crate) mod character_changes;
 pub mod character_conversion;
+pub mod character_extras;
 pub(crate) mod character_exclusions;
 #[cfg(test)]
 #[path = "character_exclusions_tests.rs"]
@@ -77,6 +78,7 @@ pub(crate) mod character_review_sync;
 pub mod character_scan;
 mod character_scope;
 pub mod character_series_move;
+pub mod character_series_unregister;
 mod character_shadow;
 pub mod character_shadow_backfill;
 pub mod character_shadow_review;

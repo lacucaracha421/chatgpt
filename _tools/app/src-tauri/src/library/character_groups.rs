@@ -1,5 +1,5 @@
 //! Presentation-only groups never update recognition targets or classifications.
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -7,14 +7,17 @@ use super::{
     Library,
 };
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Group {
     pub id: String,
     pub series_id: String,
     pub name: String,
     pub revision: i64,
+    /// The group's real characters. The group's 기타 is not listed here; see `extras_target_id`.
     pub target_ids: Vec<String>,
+    /// The group's 기타 (a target with role `extras`), once it exists.
+    pub extras_target_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -27,6 +30,28 @@ pub struct GroupDraft {
     pub target_ids: Vec<String>,
     #[serde(default)]
     pub delete: bool,
+}
+
+/// A group's 기타 target id, if the group has one.
+fn group_extras(connection: &Connection, group_id: &str) -> Result<Option<String>> {
+    Ok(connection
+        .query_row(
+            "SELECT id FROM character_targets WHERE role='extras' AND extras_group_id=?1",
+            [group_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Whether the group's 기타 currently holds an image.
+fn group_extras_has_images(connection: &Connection, group_id: &str) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM character_targets t
+            JOIN character_relations r ON r.target_id=t.id
+            WHERE t.role='extras' AND t.extras_group_id=?1)",
+        [group_id],
+        |row| row.get(0),
+    )?)
 }
 
 pub(super) fn save_character_group_in(
@@ -49,18 +74,54 @@ pub(super) fn save_character_group_in(
     } else if draft.delete {
         return Err(Error::NotFound);
     }
-    if draft.delete || (draft.id.is_some() && draft.target_ids.is_empty()) {
+    let own_extras = if draft.id.is_some() {
+        group_extras(connection, &id)?
+    } else {
+        None
+    };
+    // The group's own 기타 may be listed by a caller that echoes `Group` members; it is
+    // always kept, never counted as a real member, and no other group's 기타 is accepted.
+    let target_ids = draft
+        .target_ids
+        .iter()
+        .filter(|target| own_extras.as_deref() != Some(target.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let extras_has_images = draft.id.is_some() && group_extras_has_images(connection, &id)?;
+    if draft.delete {
+        if extras_has_images {
+            return Err(Error::Invalid(
+                "기타에 이미지가 있는 그룹은 지울 수 없습니다. 기타를 먼저 비워 주세요.",
+            ));
+        }
         connection.execute("DELETE FROM character_groups WHERE id=?1", [&id])?;
         return Ok(id);
     }
-    if draft.target_ids.is_empty() {
+    if draft.id.is_some() && target_ids.is_empty() {
+        if extras_has_images {
+            // A group that only keeps its 기타: release the real members, keep the group.
+            connection.execute(
+                "DELETE FROM character_group_members WHERE group_id=?1
+                 AND target_id IN (SELECT id FROM character_targets WHERE role='character')",
+                [&id],
+            )?;
+            connection.execute(
+                "UPDATE character_groups SET revision=revision+1 WHERE id=?1",
+                [&id],
+            )?;
+            return Ok(id);
+        }
+        connection.execute("DELETE FROM character_groups WHERE id=?1", [&id])?;
+        return Ok(id);
+    }
+    if target_ids.is_empty() {
         return Err(Error::Invalid(
             "그룹에 넣을 캐릭터를 하나 이상 선택해 주세요.",
         ));
     }
 
     let name = draft.name.trim();
-    if name.is_empty() || name.chars().count() > 100 || draft.target_ids.len() > 1000 {
+    if name.is_empty() || name.chars().count() > 100 || target_ids.len() > 1000 {
         return Err(Error::Invalid("그룹 이름과 캐릭터 목록을 확인해 주세요."));
     }
     let series: bool = connection.query_row(
@@ -71,9 +132,9 @@ pub(super) fn save_character_group_in(
     if !series {
         return Err(Error::Invalid("등록된 시리즈를 선택해 주세요."));
     }
-    for target in &draft.target_ids {
+    for target in &target_ids {
         let valid: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM character_targets WHERE id=?1 AND series_classification_id=?2) \
+            "SELECT EXISTS(SELECT 1 FROM character_targets WHERE id=?1 AND series_classification_id=?2 AND role='character') \
              AND NOT EXISTS(SELECT 1 FROM character_group_members WHERE target_id=?1 AND group_id<>?3)",
             params![target, draft.series_id, id],
             |row| row.get(0),
@@ -91,22 +152,26 @@ pub(super) fn save_character_group_in(
     )?;
     // Add first, then remove only deselected members. Temporarily clearing the
     // group would activate the empty-group trigger during an ordinary edit.
-    for target in &draft.target_ids {
+    for target in &target_ids {
         connection.execute(
             "INSERT INTO character_group_members(target_id,group_id) VALUES(?1,?2) ON CONFLICT(target_id) DO NOTHING",
             params![target, id],
         )?;
     }
     connection.execute(
-        "DELETE FROM character_group_members WHERE group_id=?1 AND target_id NOT IN (SELECT value FROM json_each(?2))",
-        params![id, serde_json::to_string(&draft.target_ids)?],
+        "DELETE FROM character_group_members WHERE group_id=?1 AND target_id NOT IN (SELECT value FROM json_each(?2))
+         AND target_id NOT IN (SELECT id FROM character_targets WHERE role='extras')",
+        params![id, serde_json::to_string(&target_ids)?],
     )?;
+    if own_extras.is_some() {
+        super::character_extras::rename_group_extras_in(connection, &id, name)?;
+    }
     Ok(id)
 }
 
 /// Groups of one series, or of all series when `series_id` is None, with their members:
 /// two statements whatever the group count.
-fn groups_in(connection: &Connection, series_id: Option<&str>) -> Result<Vec<Group>> {
+pub(super) fn groups_in(connection: &Connection, series_id: Option<&str>) -> Result<Vec<Group>> {
     let mut groups = connection
         .prepare_cached(
             "SELECT id,series_id,name,revision FROM character_groups
@@ -119,25 +184,37 @@ fn groups_in(connection: &Connection, series_id: Option<&str>) -> Result<Vec<Gro
                 name: row.get(2)?,
                 revision: row.get(3)?,
                 target_ids: Vec::new(),
+                extras_target_id: None,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut members = std::collections::BTreeMap::<String, Vec<String>>::new();
+    let mut extras = std::collections::BTreeMap::<String, String>::new();
     for row in connection
         .prepare_cached(
-            "SELECT m.group_id,m.target_id FROM character_group_members m
+            "SELECT m.group_id,m.target_id,t.role FROM character_group_members m
              JOIN character_groups g ON g.id=m.group_id
+             JOIN character_targets t ON t.id=m.target_id
              WHERE ?1 IS NULL OR g.series_id=?1 ORDER BY m.group_id,m.target_id",
         )?
         .query_map([series_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?
     {
-        let (group, target) = row?;
-        members.entry(group).or_default().push(target);
+        let (group, target, role) = row?;
+        if role == "extras" {
+            extras.insert(group, target);
+        } else {
+            members.entry(group).or_default().push(target);
+        }
     }
     for group in &mut groups {
         group.target_ids = members.remove(&group.id).unwrap_or_default();
+        group.extras_target_id = extras.remove(&group.id);
     }
     Ok(groups)
 }

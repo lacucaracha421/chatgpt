@@ -163,6 +163,22 @@ impl Library {
         }
         let connection = self.connection()?;
         let target = self.read_character_target(&connection, target_id)?;
+        if target.is_extras() {
+            return Err(Error::Invalid(super::characters::EXTRAS_FIXED));
+        }
+        self.reference_candidates_in(&connection, &target, limit, pool)
+    }
+
+    /// The candidate selection for an already-read target, on the caller's connection or
+    /// transaction (the promotion of a 기타 runs it before anything is committed).
+    pub(super) fn reference_candidates_in(
+        &self,
+        connection: &rusqlite::Connection,
+        target: &Target,
+        limit: usize,
+        pool: bool,
+    ) -> Result<ReferenceCandidateSet> {
+        let target_id = target.id.as_str();
         let series = target
             .series_classification_id
             .as_deref()
@@ -185,7 +201,7 @@ impl Library {
              JOIN assets a ON a.id=r.asset_id AND a.status='normal' AND a.media_kind='image'
              WHERE r.target_id=?1
                AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
-               AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=a.id AND other.target_id<>?1)
+               AND NOT EXISTS(SELECT 1 FROM character_relations other JOIN character_targets ot ON ot.id=other.target_id AND ot.role='character' WHERE other.asset_id=a.id AND other.target_id<>?1)
                AND NOT EXISTS(SELECT 1 FROM character_references base WHERE base.target_id=?1 AND base.asset_id=a.id)
                AND NOT EXISTS(SELECT 1 FROM character_learned_references learned WHERE learned.target_id=?1 AND learned.asset_id=a.id)
                AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions excluded WHERE excluded.target_id=?1 AND excluded.asset_id=a.id)

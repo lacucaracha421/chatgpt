@@ -43,6 +43,9 @@ pub enum Error {
 
 const REFERENCE_COUNT: usize = 5;
 pub(super) const MAX_REFERENCES: usize = 25;
+/// 기타 is never a recognition target: its name, folder link, references and settings are fixed.
+pub(super) const EXTRAS_FIXED: &str =
+    "기타는 이름이나 레퍼런스, 자동 인식 설정을 바꿀 수 없습니다.";
 const CHARACTER_ASSIGN_SCORE: f64 = 0.85;
 const SCOPED_IMAGE: &str = "WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id = ?1
@@ -170,10 +173,12 @@ pub(super) fn read_character_target_rows(
     let rows = connection
             .prepare_cached("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
             (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal'),manual_only,
-            (SELECT position FROM character_folder_order WHERE target_id=character_targets.id AND legacy_sidebar=0)
+            (SELECT position FROM character_folder_order WHERE target_id=character_targets.id AND legacy_sidebar=0),
+            role,extras_group_id
             FROM character_targets WHERE id IN (SELECT value FROM json_each(?1))")?
             .query_map([&ids_json], |r| Ok(Target {
                 id:r.get(0)?,folder_order:r.get(9)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
+                role:r.get(10)?,extras_group_id:r.get(11)?,
                 enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new(),thumbnail_revisions:BTreeMap::new()
             }))?
             .map(|row| row.map(|target| (target.id.clone(), target)))
@@ -340,6 +345,11 @@ pub struct Target {
     pub thumbnail_asset_id: Option<String>,
     pub enabled: bool,
     pub manual_only: bool,
+    /// `"character"`, or `"extras"` for a 기타 bucket (never a recognition target; the screens
+    /// show just "기타" and keep it last).
+    pub role: String,
+    /// The group a group's 기타 belongs to; null for characters and for a series' 기타.
+    pub extras_group_id: Option<String>,
     pub revision: i64,
     pub references: Vec<Reference>,
     pub learned_references: Vec<Reference>,
@@ -390,6 +400,11 @@ impl Target {
                     .filter_map(|reference| reference.asset_id.as_ref()),
             )
             .map(String::as_str)
+    }
+
+    /// A 기타 bucket: manual membership only, never recognized, never learned from.
+    pub fn is_extras(&self) -> bool {
+        self.role == "extras"
     }
 
     /// The two tables are legacy storage only; every valid reference has equal weight.
@@ -574,6 +589,9 @@ impl Library {
         }
         let target = if let Some(id) = request.target_id {
             let target = self.read_character_target(&tx, &id)?;
+            if target.is_extras() {
+                return Err(Error::Invalid(EXTRAS_FIXED));
+            }
             if target.series_classification_id.as_deref() != Some(&request.series_id)
                 || request.expected_fingerprint.as_deref() != Some(&target.fingerprint)
             {
@@ -652,7 +670,7 @@ impl Library {
             "SELECT COUNT(*) FROM character_relations r
              JOIN assets a ON a.id=r.asset_id AND a.status='normal' AND a.media_kind='image'
              WHERE r.target_id=?1
-               AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=r.asset_id AND other.target_id<>r.target_id)
+               AND NOT EXISTS(SELECT 1 FROM character_relations other JOIN character_targets ot ON ot.id=other.target_id AND ot.role='character' WHERE other.asset_id=r.asset_id AND other.target_id<>r.target_id)
                AND NOT EXISTS(SELECT 1 FROM character_references base WHERE base.target_id=r.target_id AND base.asset_id=r.asset_id)
                AND NOT EXISTS(SELECT 1 FROM character_learned_references learned WHERE learned.target_id=r.target_id AND learned.asset_id=r.asset_id)
                AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions excluded WHERE excluded.target_id=r.target_id AND excluded.asset_id=r.asset_id)",
@@ -853,6 +871,9 @@ impl Library {
         let now = chrono::Utc::now().to_rfc3339();
         let id = if let Some(id) = draft.id {
             let previous = self.read_character_target(transaction, &id)?;
+            if previous.is_extras() {
+                return Err(Error::Invalid(EXTRAS_FIXED));
+            }
             if draft.expected_revision != Some(previous.revision) {
                 return Err(Error::Stale);
             }
@@ -921,6 +942,9 @@ impl Library {
             ));
         }
         let target = self.read_character_target(transaction, id)?;
+        if target.is_extras() {
+            return Err(Error::Invalid(EXTRAS_FIXED));
+        }
         if target.revision != expected_revision {
             return Err(Error::Stale);
         }
@@ -1017,6 +1041,9 @@ impl Library {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let target = self.read_character_target(&transaction, id)?;
+        if target.is_extras() {
+            return Err(Error::Invalid(EXTRAS_FIXED));
+        }
         if target.revision != expected_revision {
             return Err(Error::Stale);
         }
@@ -1091,6 +1118,9 @@ impl Library {
             ));
         }
         let previous = self.read_character_target(transaction, id)?;
+        if previous.is_extras() {
+            return Err(Error::Invalid(EXTRAS_FIXED));
+        }
         if previous.revision != expected_revision {
             return Err(Error::Stale);
         }
@@ -1433,7 +1463,7 @@ impl Library {
              JOIN asset_tagger_character_scores score ON score.asset_id=selected.asset_id
              JOIN character_target_tagger_tags mapping ON mapping.tag=score.tag
              JOIN character_targets t ON t.id=mapping.target_id
-             WHERE t.enabled=1 AND t.series_classification_id IS NOT NULL
+             WHERE t.enabled=1 AND t.role='character' AND t.series_classification_id IS NOT NULL
                AND score.score>={CHARACTER_ASSIGN_SCORE}
                AND NOT EXISTS(
                    SELECT 1 FROM asset_classifications ac
@@ -1531,6 +1561,30 @@ impl Library {
         let target = self.read_character_target(&transaction, &request.target_id)?;
         if target.fingerprint != request.expected_fingerprint {
             return Err(Error::Stale);
+        }
+        if target.is_extras() {
+            // 기타 only holds images by a person's hand: put in (맞음) and take out (빼기).
+            // "아님" would block nothing useful and could be counted as a wrong placement.
+            if !matches!(
+                request.decision,
+                DecisionKind::Accepted | DecisionKind::Cleared
+            ) || request.scan_id.is_some()
+            {
+                return Err(Error::Invalid(
+                    "기타에는 넣기와 빼기만 할 수 있습니다.",
+                ));
+            }
+            if request.decision == DecisionKind::Accepted {
+                if let Some(series) = target.series_classification_id.as_deref() {
+                    for asset_id in &ids {
+                        if has_real_character(transaction, series, asset_id)? {
+                            return Err(Error::Invalid(
+                                "이미 캐릭터가 있는 이미지는 기타에 넣을 수 없습니다. 먼저 그 캐릭터에서 빼 주세요.",
+                            ));
+                        }
+                    }
+                }
+            }
         }
         if request.baseline_fingerprint.is_some() && !target.ready {
             return Err(Error::Invalid("기준 이미지 설정을 확인해 주세요."));
@@ -1698,7 +1752,14 @@ impl Library {
                 |row| row.get(0),
             )
             .optional()?;
-        if previous.as_deref() == Some(DecisionKind::Rejected.stored()) {
+        // A tablet that does not know 기타 lists it as a character; its "제외" there means
+        // taking the image out of that bucket (빼기), never a wrong placement.
+        let stored = if target.is_extras() {
+            DecisionKind::Cleared.stored()
+        } else {
+            DecisionKind::Rejected.stored()
+        };
+        if previous.as_deref() == Some(stored) {
             super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
             return Ok(false);
         }
@@ -1707,8 +1768,8 @@ impl Library {
         transaction.execute(
             "INSERT INTO character_decisions
                 (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
-                VALUES(?1,?2,?2,?3,'rejected',?4,NULL,?5,?6)",
-            params![target.id, asset_id, hash, target.fingerprint, references, now],
+                VALUES(?1,?2,?2,?3,?7,?4,NULL,?5,?6)",
+            params![target.id, asset_id, hash, target.fingerprint, references, now, stored],
         )?;
         transaction.execute(
             "DELETE FROM character_review_completions WHERE asset_id=?1",
@@ -1896,6 +1957,25 @@ impl Library {
         }
         Ok(targets)
     }
+}
+
+/// The image already belongs to a real character of this series (an accepted placement, a
+/// reference or a learned reference). 기타 is only for people who have no character yet.
+pub(super) fn has_real_character(
+    connection: &Connection,
+    series: &str,
+    asset_id: &str,
+) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM character_targets t
+            WHERE t.series_classification_id=?1 AND t.role='character' AND (
+                EXISTS(SELECT 1 FROM character_relations r WHERE r.target_id=t.id AND r.asset_id=?2)
+                OR EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=t.id AND r.asset_id=?2)
+                OR EXISTS(SELECT 1 FROM character_learned_references r WHERE r.target_id=t.id AND r.asset_id=?2)))",
+        params![series, asset_id],
+        |row| row.get(0),
+    )?)
 }
 
 fn manual_move_asset_hash(

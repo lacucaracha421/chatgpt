@@ -1428,7 +1428,7 @@ impl Library {
             .filter(|p| !owned.contains(p.target_id.as_str()))
             .cloned()
             .collect::<Vec<_>>();
-        let decisions=tx.prepare("SELECT target_id,decision,origin FROM character_decisions WHERE source_asset_id=?1 ORDER BY sequence DESC")?
+        let decisions=tx.prepare("SELECT target_id,decision,origin FROM character_decisions d WHERE source_asset_id=?1 AND NOT EXISTS(SELECT 1 FROM character_targets x WHERE x.id=d.target_id AND x.role='extras') ORDER BY sequence DESC")?
             .query_map([&job.asset_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut latest = BTreeMap::new();
         for (id, decision, _) in &decisions {

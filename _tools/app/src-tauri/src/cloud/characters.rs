@@ -33,6 +33,12 @@ struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     hero_asset_id: Option<String>,
     manual_only: bool,
+    /// `"extras"` marks a 기타 bucket so a newer tablet can show just "기타"; an older tablet that
+    /// never reads the field lists it as a character with its stored name. Emitted only when the
+    /// server accepts it (see [`PUBLISH_EXTRAS_ROLE`]); absent otherwise, so a snapshot without
+    /// 기타 buckets is byte-identical to before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<&'static str>,
     excluded: bool,
     /// Assets that *define* this character: every base and learned reference.
     ///
@@ -190,6 +196,7 @@ fn node(
         thumbnail_asset_id: thumbnail,
         hero_asset_id: None,
         manual_only: false,
+        role: None,
         excluded: false,
         protected_asset_ids: None,
     }
@@ -231,6 +238,30 @@ pub(crate) fn snapshot_from_connection_with_feature(
     connection: &mut Connection,
     base_revision: Option<String>,
     feature: Option<Feature>,
+    progress: Reporter<'_>,
+) -> Result<Snapshot, LibraryError> {
+    snapshot_from_connection_with_roles(
+        connection,
+        base_revision,
+        feature,
+        PUBLISH_EXTRAS_ROLE,
+        progress,
+    )
+}
+
+/// Whether publication marks 기타 buckets with `role:"extras"`.
+///
+/// The server's strict node schema accepts the optional field since 2026-10-11; deploy that
+/// server before a PC that sends it (an older server answers 422 for the whole snapshot).
+/// A tablet that ignores the field lists a 기타 as a character under its stored name.
+pub(crate) const PUBLISH_EXTRAS_ROLE: bool = true;
+
+/// [`snapshot_from_connection_with_feature`] with an explicit choice about `role:"extras"`.
+pub(crate) fn snapshot_from_connection_with_roles(
+    connection: &mut Connection,
+    base_revision: Option<String>,
+    feature: Option<Feature>,
+    emit_roles: bool,
     progress: Reporter<'_>,
 ) -> Result<Snapshot, LibraryError> {
     let tx = connection.transaction()?;
@@ -285,10 +316,11 @@ pub(crate) fn snapshot_from_connection_with_feature(
         for (group, name) in groups {
             nodes.push(node("group", group, &id, Some(parent.clone()), name, None));
         }
-        let targets = tx.prepare("SELECT t.id,t.display_name,t.description,t.manual_only,(SELECT id FROM assets WHERE id=t.thumbnail_asset_id AND status='normal'),gm.group_id FROM character_targets t LEFT JOIN character_group_members gm ON gm.target_id=t.id WHERE t.series_classification_id=?1 ORDER BY t.display_name COLLATE NOCASE,t.id")?
+        let targets = tx.prepare("SELECT t.id,t.display_name,t.description,t.manual_only,(SELECT id FROM assets WHERE id=t.thumbnail_asset_id AND status='normal'),gm.group_id,t.role FROM character_targets t LEFT JOIN character_group_members gm ON gm.target_id=t.id WHERE t.series_classification_id=?1 ORDER BY t.display_name COLLATE NOCASE,t.id")?
             .query_map([&id], |r| {
                 let mut n = node("character",r.get(0)?,&id,Some(r.get::<_,Option<String>>(5)?.map(|g|format!("group:{g}")).unwrap_or(parent.clone())),r.get(1)?,r.get(4)?);
-                n.description=r.get(2)?; n.manual_only=r.get(3)?; Ok(n)
+                n.description=r.get(2)?; n.manual_only=r.get(3)?;
+                n.role=(emit_roles && r.get::<_,String>(6)?=="extras").then_some("extras"); Ok(n)
             })?.collect::<Result<Vec<_>,_>>()?;
         for mut n in targets {
             // Only emitted under the adopted feature, so a legacy snapshot stays exactly the
@@ -438,6 +470,89 @@ mod tests {
             .unwrap();
         drop(c);
         (temp, library)
+    }
+
+    #[test]
+    fn extras_are_published_as_characters_and_marked_only_when_the_role_is_accepted() {
+        let (_temp, library) = fixture();
+        library.connection().unwrap().execute_batch(
+            "INSERT INTO character_targets(id,series_classification_id,display_name,enabled,manual_only,role,created_at,updated_at)
+               VALUES('x','s','Series 기타',1,1,'extras','2026','2026');
+             INSERT INTO character_targets(id,series_classification_id,display_name,enabled,manual_only,role,extras_group_id,created_at,updated_at)
+               VALUES('gx','s','Group 기타',1,1,'extras','g','2026','2026');
+             INSERT INTO character_group_members VALUES('gx','g');
+             INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,created_at)
+               VALUES('x','x','x','x','accepted','fixture','[]','2026');",
+        ).unwrap();
+        let mut connection = Connection::open_with_flags(
+            library.root().join("library.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        // Without the role (an older server), no `role` key appears anywhere.
+        let plain = serde_json::to_value(
+            snapshot_from_connection_with_roles(&mut connection, None, None, false, &|_| {})
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(plain["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|node| node.get("role").is_none()));
+        let find = |value: &serde_json::Value, id: &str| {
+            value["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|node| node["id"] == id)
+                .cloned()
+                .unwrap()
+        };
+        // Both buckets are ordinary character nodes under their series or group.
+        assert_eq!(find(&plain, "character:x")["parentId"], "series:s");
+        assert_eq!(find(&plain, "character:gx")["parentId"], "group:g");
+        assert_eq!(find(&plain, "character:gx")["manualOnly"], true);
+        // Once the server accepts it, only the 기타 nodes carry the extra field.
+        let marked = serde_json::to_value(
+            snapshot_from_connection_with_roles(&mut connection, None, None, true, &|_| {})
+                .unwrap(),
+        )
+        .unwrap();
+        for id in ["character:x", "character:gx"] {
+            assert_eq!(find(&marked, id)["role"], "extras");
+        }
+        for node in marked["nodes"].as_array().unwrap() {
+            if node["id"] != "character:x" && node["id"] != "character:gx" {
+                assert!(node.get("role").is_none(), "{node}");
+            }
+        }
+        // The server accepts the role (2026-10-11), so the default publication marks 기타.
+        assert!(PUBLISH_EXTRAS_ROLE);
+        assert_eq!(
+            serde_json::to_value(
+                snapshot_from_connection(&mut connection, None, &|_| {}).unwrap()
+            )
+            .unwrap(),
+            marked
+        );
+        // Otherwise the snapshots are identical.
+        let mut stripped = marked.clone();
+        for node in stripped["nodes"].as_array_mut().unwrap() {
+            node.as_object_mut().unwrap().remove("role");
+        }
+        assert_eq!(stripped, plain);
+        // The bucket's own images are its scope, like any character's.
+        let scope = |value: &serde_json::Value, node: &str| {
+            value["scopes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|scope| scope["nodeId"] == node && scope["filter"] == "all")
+                .map(|scope| scope["assetIds"].clone())
+                .unwrap()
+        };
+        assert_eq!(scope(&marked, "character:x"), serde_json::json!(["x"]));
     }
 
     #[test]

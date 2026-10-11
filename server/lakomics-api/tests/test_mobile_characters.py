@@ -68,6 +68,17 @@ class MobileCharactersTests(unittest.TestCase):
         body["navigationOrder"] = ["character:c", "s"]
         self.assertNotEqual(self.publish(body).json()["revision"], first)
 
+    def test_extras_role_is_optional_and_only_published_when_sent(self):
+        body = fixture()
+        plain = self.publish(body).json()["revision"]
+        self.assertTrue(all("role" not in node for node in self.index()["nodes"]))
+        body["baseRevision"] = plain
+        body["nodes"][-1]["role"] = "extras"
+        self.assertNotEqual(self.publish(body).json()["revision"], plain)
+        self.assertEqual(self.index()["nodes"][-1]["role"], "extras")
+        body["nodes"][-1]["role"] = "team"
+        self.assertEqual(self.publish(body).status_code, 422)
+
     def test_unpublished_empty_auth_and_no_mutation_routes(self):
         self.assertFalse(self.index()["ready"])
         self.assertFalse(self.index()["capabilities"]["write"])

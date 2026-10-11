@@ -1209,3 +1209,99 @@ pub async fn set_character_folder_excluded(
         .map_err(|_| super::background_task_error())?
         .map_err(Into::into)
 }
+
+#[tauri::command]
+pub async fn character_extras(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::character_extras::ExtrasEntry>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_extras())
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+/// The 기타 of a series (no `group_id`) or of one of its groups; created on first use.
+#[tauri::command]
+pub async fn ensure_character_extras(
+    series_id: String,
+    group_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::library::characters::Target, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.ensure_character_extras(&series_id, group_id.as_deref())
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+/// A group that has only a 기타 (no real member yet).
+#[tauri::command]
+pub async fn create_character_extras_group(
+    series_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_extras::ExtrasGroupResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.create_character_extras_group(&series_id, &name)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+/// Names the automatic tags read on at least five images of this 기타.
+#[tauri::command]
+pub async fn character_extras_suggestions(
+    target_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::character_extras::ExtrasSuggestion>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_extras_suggestions(&target_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+/// "캐릭터로": make a character of chosen 기타 images in one transaction.
+#[tauri::command]
+pub async fn promote_character_extras(
+    request: crate::library::character_extras::PromoteExtrasRequest,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_extras::PromoteExtrasResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.promote_character_extras(request))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_series_unregister_preview(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_series_unregister::SeriesUnregisterPreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.character_series_unregister_preview(&series_id)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+/// "시리즈 등록 해제": characters, groups and 기타 move to the nearest registered ancestor.
+#[tauri::command]
+pub async fn unregister_character_series(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_series_unregister::SeriesUnregisterResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.unregister_character_series(&series_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}

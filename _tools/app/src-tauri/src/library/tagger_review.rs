@@ -219,7 +219,7 @@ const PAIRS_SQL: &str = r#"
 WITH known AS (
  SELECT t.id,t.display_name,t.series_classification_id,c.name
  FROM character_targets t JOIN classification_entries c ON c.id=t.series_classification_id
- WHERE EXISTS(SELECT 1 FROM character_target_tagger_tags m JOIN tagger_character_vocabulary v ON v.tag=m.tag WHERE m.target_id=t.id AND v.source='pixai')
+ WHERE t.role='character' AND EXISTS(SELECT 1 FROM character_target_tagger_tags m JOIN tagger_character_vocabulary v ON v.tag=m.tag WHERE m.target_id=t.id AND v.source='pixai')
  AND EXISTS(SELECT 1 FROM character_target_tagger_tags m JOIN tagger_character_vocabulary v ON v.tag=m.tag WHERE m.target_id=t.id AND v.source='canary')
 ), scored AS (
  SELECT t.*,a.id asset_id,a.content_hash,

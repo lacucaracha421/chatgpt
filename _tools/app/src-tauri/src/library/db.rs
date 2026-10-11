@@ -4,13 +4,39 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 126;
+pub(crate) const SCHEMA_VERSION: i64 = 127;
 
-/// Test helper: undoes migrations 0103 through 0126 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0127 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TRIGGER character_extras_insert_valid;
+    DROP TRIGGER character_extras_update_valid;
+    DROP TRIGGER character_extras_no_reference;
+    DROP TRIGGER character_extras_no_learned_reference;
+    DROP TRIGGER character_extras_no_tagger_tag;
+    DROP TRIGGER character_extras_member_guard;
+    DROP TRIGGER character_extras_leave_on_accept;
+    DROP TRIGGER character_extras_group_deleted;
+    DROP TRIGGER character_group_remove_empty;
+    CREATE TRIGGER character_group_remove_empty
+    AFTER DELETE ON character_group_members
+    BEGIN
+        DELETE FROM character_groups
+        WHERE id = OLD.group_id
+          AND NOT EXISTS (SELECT 1 FROM character_group_members WHERE group_id = OLD.group_id);
+    END;
+    DROP TRIGGER character_group_series_changed;
+    CREATE TRIGGER character_group_series_changed AFTER UPDATE OF series_classification_id ON character_targets
+    WHEN OLD.series_classification_id IS NOT NEW.series_classification_id BEGIN
+     UPDATE character_groups SET revision=revision+1 WHERE id IN (SELECT group_id FROM character_group_members WHERE target_id=NEW.id);
+     DELETE FROM character_group_members WHERE target_id=NEW.id;
+    END;
+    DROP INDEX character_extras_one_per_series;
+    DROP INDEX character_extras_one_per_group;
+    ALTER TABLE character_targets DROP COLUMN extras_group_id;
+    ALTER TABLE character_targets DROP COLUMN role;
     DROP TABLE caption_publication_state;
     DROP TABLE caption_publication_digests;
     DROP TABLE collection_authority_people_reconcile;
@@ -750,6 +776,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 125 {
             transaction.execute_batch(include_str!("../../migrations/0126_caption_publication.sql"))?;
+        }
+        if version <= 126 {
+            transaction.execute_batch(include_str!("../../migrations/0127_character_extras.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

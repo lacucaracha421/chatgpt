@@ -211,7 +211,7 @@ impl Library {
               AND NOT EXISTS(SELECT 1 FROM asset_classifications other WHERE other.asset_id=a.id AND other.classification_id<>ac.classification_id)
               AND (j.review_state='partially_resolved' OR NOT EXISTS(
                   SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id
-                  WHERE r.asset_id=a.id AND t.series_classification_id=?2))
+                  WHERE r.asset_id=a.id AND t.role='character' AND t.series_classification_id=?2))
               AND {REFRESH_ELIGIBLE}
         "#), params![target_id,series_id,request_revision,now])?;
         transaction.execute("UPDATE character_reference_refreshes SET discovery_complete=1,eligible_count=?3,

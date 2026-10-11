@@ -277,7 +277,7 @@ impl Library {
             .connection()?
             .prepare(
                 "SELECT id FROM character_targets
-                 WHERE enabled=1 AND series_classification_id IS NOT NULL ORDER BY id",
+                 WHERE enabled=1 AND role='character' AND series_classification_id IS NOT NULL ORDER BY id",
             )?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -660,7 +660,7 @@ impl Library {
     pub fn character_review_pending_map(&self) -> Result<std::collections::BTreeMap<String, bool>> {
         let ids = self
             .connection()?
-            .prepare("SELECT id FROM character_targets ORDER BY display_name COLLATE NOCASE, id")?
+            .prepare("SELECT id FROM character_targets WHERE role='character' ORDER BY display_name COLLATE NOCASE, id")?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         // Reference file checks without the database lock; the badge queries take it again.
@@ -701,7 +701,7 @@ impl Library {
         }
         .into_iter()
         .filter(|t| {
-            t.series_classification_id.as_deref() == Some(&query.series_id)
+            !t.is_extras() && t.series_classification_id.as_deref() == Some(&query.series_id)
                 && query.target_id.as_ref().is_none_or(|id| id == &t.id)
         })
         .collect();

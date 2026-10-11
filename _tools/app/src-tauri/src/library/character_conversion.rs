@@ -28,6 +28,11 @@ impl Library {
         target_id: &str,
     ) -> Result<ConversionPreview> {
         let target = self.read_character_target(connection, target_id)?;
+        if target.is_extras() {
+            return Err(Error::Invalid(
+                "기타는 폴더로 바꿀 수 없습니다. 이미지를 캐릭터로 옮기거나 빼 주세요.",
+            ));
+        }
         let series = target
             .series_classification_id
             .as_deref()

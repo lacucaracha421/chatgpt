@@ -124,7 +124,7 @@ fn names(db: &Connection) -> Result<BTreeMap<String, (Value, String)>, LibraryEr
     let mut rows = BTreeMap::new();
     let mut stmt = db.prepare(
         "SELECT t.id,t.display_name,e.name FROM character_targets t
-        LEFT JOIN classification_entries e ON e.id=t.series_classification_id ORDER BY t.id",
+        LEFT JOIN classification_entries e ON e.id=t.series_classification_id WHERE t.role='character' ORDER BY t.id",
     )?;
     let mut query = stmt.query([])?;
     while let Some(row) = query.next()? {

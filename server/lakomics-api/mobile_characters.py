@@ -45,6 +45,8 @@ class Node(Strict):
     manualOnly: bool = False
     excluded: bool = False
     protectedAssetIds: list[ID] | None = Field(default=None, max_length=250_000)
+    # "extras" marks a 기타 bucket (PC slice 2a); absent for every other node.
+    role: Literal["character", "extras"] | None = None
 
 
 class Scope(Strict):
@@ -210,6 +212,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                 item = node.model_dump()
                 if node.protectedAssetIds is None:
                     item.pop('protectedAssetIds')
+                if node.role is None:
+                    item.pop('role')
                 if item["thumbnailAssetId"] not in assets:
                     item["thumbnailAssetId"] = None
                 if item["heroAssetId"] not in assets:

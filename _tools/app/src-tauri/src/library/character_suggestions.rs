@@ -460,6 +460,9 @@ impl Library {
         let mut c = self.connection()?;
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let target = self.read_character_target(&tx, &request.target_id)?;
+        if target.is_extras() {
+            return Err(Error::Invalid(super::characters::EXTRAS_FIXED));
+        }
         if target.fingerprint != request.expected_fingerprint {
             return Err(Error::Stale);
         }
