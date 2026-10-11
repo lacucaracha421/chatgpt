@@ -20,9 +20,7 @@
 .collection-shelf>p{margin:8px 0}
 
 .collection-chips .filter-chip svg:first-child{width:16px}
-.collection-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px 12px}
-@media(min-width:700px){.collection-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(min-width:1100px){.collection-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+.collection-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,144px),1fr));gap:22px 12px}
 .collection-showcase-note{margin:4px 0 14px}
 .collection-more-status{text-align:center;padding:16px 0}
 .collection-releases__skeleton-row{width:min(420px,100%);height:48px;margin:16px auto}
@@ -55,6 +53,8 @@
 
 /* Work detail */
 .collection-detail{padding-top:0}
+.app-body:has(.mobile-collections.has-detail){overflow:hidden}
+.mobile-collections.has-detail .collection-detail{padding-bottom:calc(var(--touch-target) + var(--space-8))}
 .collection-block{margin-top:28px}
 .collection-block>h2{margin-bottom:12px}
 .collection-editions{padding:0 0 12px}

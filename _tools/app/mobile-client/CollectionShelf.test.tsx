@@ -1,10 +1,36 @@
-import {act, fireEvent, cleanup, render, waitFor} from '@testing-library/react';
+import {act, fireEvent, cleanup, render, renderHook, waitFor} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
 import type {CollectionSummary} from './collectionModel';
 const mocks = vi.hoisted(() => ({native: vi.fn()}));
 vi.mock('./transport', () => ({native: mocks.native}));
-import {ShelfTile, workCaseData} from './CollectionShelf';
+import {shelfColumns, ShelfTile, useShelfColumns, workCaseData} from './CollectionShelf';
 import {READY_CAP_MS} from '../src/shared/motion/AreaSwitch';
+
+it('packs the same tile density into both tablet orientations, including shelf gaps', () => {
+  for (const gap of [12, 16]) {
+    expect(shelfColumns(674, 4, gap)).toBe(4);
+    expect(shelfColumns(1078, 4, gap)).toBe(6);
+  }
+  expect(shelfColumns(674, 3)).toBe(3);
+  expect(shelfColumns(1078, 3)).toBe(5);
+  expect(shelfColumns(674, 6)).toBe(6);
+  expect(shelfColumns(1078, 6)).toBe(10);
+  expect(shelfColumns(100, 4)).toBe(4);
+});
+
+it('uses the initial width immediately and updates mounted shelf rows on rotation', () => {
+  const previous = window.innerWidth;
+  try {
+    window.innerWidth = 674;
+    const {result, unmount} = renderHook(() => useShelfColumns());
+    expect(result.current(4)).toBe(4);
+    act(() => { window.innerWidth = 1078; window.dispatchEvent(new Event('resize')); });
+    expect(result.current(4)).toBe(6);
+    act(() => { window.innerWidth = 674; window.dispatchEvent(new Event('resize')); });
+    expect(result.current(4)).toBe(4);
+    unmount();
+  } finally { window.innerWidth = previous; }
+});
 
 const item: CollectionSummary = {id: 'manga', name: '만화 제목', author: '작가 이름', type: 'manga', showcase: false,
   selectedWorkArtworkId: 'first', volumes: [

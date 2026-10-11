@@ -36,6 +36,21 @@ const metadataBlock=()=>screen.getByRole('region',{name:'작품 정보'}).queryS
 /** The fixture as a manga, which opens on the shared book and bookcase instead of the case. */
 const mangaItem=():CollectionDetail=>({...item,type:'manga'});
 const bookcaseLabels=()=>within(screen.getByRole('group',{name:'권별 책장'})).getAllByRole('button').map(button=>button.getAttribute('aria-label'));
+beforeEach(()=>{vi.stubGlobal('innerWidth',674);});
+it.each(['grid','shelf'] as const)('keeps %s content mounted while rotation adds columns',async(layout)=>{
+  localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout,perRow:4}));
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  await screen.findByText(item.name);
+  const tile=document.querySelector(layout==='shelf'?'.collection-card':'.collection-tile')!;
+  const count=()=>layout==='shelf'?document.querySelector('.collection-list')?.getAttribute('data-per-row'):(document.querySelector('.collection-grid.is-counted') as HTMLElement).style.getPropertyValue('--columns');
+  expect(count()).toBe('4');
+  act(()=>{window.innerWidth=1078;window.dispatchEvent(new Event('resize'));});
+  expect(count()).toBe('6');
+  expect(document.contains(tile)).toBe(true);
+  expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.game.v1')!).perRow).toBe(4);
+  act(()=>{window.innerWidth=674;window.dispatchEvent(new Event('resize'));});
+  expect(count()).toBe('4');
+});
 beforeEach(()=>{localStorage.clear();for(const kind of ['game','manga','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));resetReleaseStore();resetMangaShelfDetails();mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 

@@ -16,7 +16,7 @@ import {moreWorkFacts, workFacts} from '../src/collections/work/workFacts';
 import {withProductCodeCopy} from '../src/collections/work/ProductCodeCopy';
 import {writeClipboard} from './ViewerInfo';
 import {latestKoreanRelease} from '../src/collections/releaseCaption';
-import {ShelfTile, ShelfViewSheet, useShelfViews} from './CollectionShelf';
+import {ShelfTile, ShelfViewSheet, useShelfColumns, useShelfViews} from './CollectionShelf';
 import {useShelfPutDown} from '../src/collections/useShelfPutDown';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import {TabletMangaShelf} from './CollectionMangaShelf';
@@ -415,6 +415,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [sheet,setSheet]=useState<'sort'|'rating'|'view'|'performerSort'|null>(null);
   // 보기 per type (격자 · 선반, 한 줄에 N개), the case a tap turned to the front, and the order a work was opened from.
   const [viewOf,patchView]=useShelfViews();
+  const columns=useShelfColumns();
   const [picked,setPicked]=useState<string|null>(null),[order,setOrder]=useState<string[]>(()=>directWork?[directWork]:[]);
   // 만화 · 선반: the picked spine, and the volume a shelf opened its work at.
   const [mangaPick,setMangaPick]=useState<MangaShelfPick>(null),[openedVolume,setOpenedVolume]=useState<{id:string;volumeId:string}|null>(null);
@@ -695,11 +696,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const workList=(listed:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals)=>{
     const items=deletedWorks.size?listed.filter(work=>!deletedWorks.has(work.id)):listed;
     const settings=viewOf(kind),order=items.map(work=>work.id);
-    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:settings.perRow,grouping:'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
+    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
       render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>}/>;
     if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={visible} privacy={privacyMode}
       owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)}/>;
-    return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':settings.perRow} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
+    return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':columns(settings.perRow)} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
   };
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
   const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}</div></div>;
@@ -757,7 +758,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:(main.busy&&!main.committed)||showAvLoading?showAvLoading&&<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
         <AvViewTabs view={avView} onView={chooseAvView}/>
-        {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={view.perRow} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer}/>}
+        {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={columns(view.perRow,16)} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer}/>}
       </>}
       <BusyLabel busy={!!(main.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
@@ -796,7 +797,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     </Overlay>
-    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={avPerformerView(viewOf('av')).perRow} order={performerOrder} authority={edits.authority} managementRequest={performerManagementRequest}
+    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={columns(avPerformerView(viewOf('av')).perRow)} order={performerOrder} authority={edits.authority} managementRequest={performerManagementRequest}
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
     </>, work: workView}}/>}
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>

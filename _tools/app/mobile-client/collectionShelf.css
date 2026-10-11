@@ -54,6 +54,11 @@
 .tablet-work__info .work-info dl > div { grid-template-columns: 72px minmax(0, 1fr); }
 .tablet-work__info .work-code > .work-code__copy { margin-block: calc((var(--touch) - var(--type-body) * 1.4) / -2); }
 .tablet-work__skeleton { display: block; height: clamp(320px, 52vh, 640px); margin: 0 calc(var(--mobile-gutter) * -1); }
+@media (orientation: landscape) {
+  .tablet-work .work-stage.tablet-work__stage { height: clamp(160px, 30dvh, 240px); }
+  .tablet-work__manga-stage { height: clamp(120px, 20dvh, 180px); }
+  .tablet-work__skeleton { height: clamp(160px, 30dvh, 240px); }
+}
 .tablet-work-people { display: flex; flex-direction: column; }
 .tablet-work-person.ui-button { justify-content: flex-start; gap: var(--space-3); min-height: var(--row-height-2); height: auto; padding: var(--space-2) 0; text-align: left; background: transparent; border: 0; }
 .tablet-work-person span { display: flex; flex-direction: column; min-width: 0; }

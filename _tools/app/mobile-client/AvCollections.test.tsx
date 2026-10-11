@@ -28,6 +28,7 @@ const props={active:true,paused:false,backRef:{current:null}};
 const openAv=async()=>fireEvent.click(await screen.findByRole('radio',{name:'AV'}));
 
 beforeEach(()=>{
+  vi.stubGlobal('innerWidth',674);
     localStorage.clear();setOutboxConnection('https://test.example');for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
   mocks.native.mockImplementation(async(_operation,payload)=>({url:`https://example.invalid/${payload.artworkId??'asset'}-${payload.variant}`}));
   mocks.api.mockImplementation(async(path:string)=>{
@@ -39,7 +40,7 @@ beforeEach(()=>{
     return page([]);
   });
 });
-afterEach(()=>{cleanup();vi.restoreAllMocks();});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 describe('tablet AV collections',()=>{
   it('renders the 작품 list and the 배우별 shelves from the same fixture, and opens the performer page',async()=>{

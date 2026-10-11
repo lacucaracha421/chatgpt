@@ -39,9 +39,7 @@
 .mobile-catalog .catalog-view-count{color:var(--color-filter-text);font-size:var(--type-meta)}
 .mobile-catalog .catalog-view-default{color:var(--color-muted);font-size:var(--type-meta)}
 .catalog-count-error{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-muted)}
-.catalog-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px 12px}
-@media(min-width:700px){.catalog-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(min-width:1100px){.catalog-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+.catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr));gap:22px 12px}
 .catalog-card{display:flex;flex-direction:column;padding:0;border:0;background:transparent;color:inherit;text-align:left;min-width:0;cursor:pointer;font:inherit}
 .catalog-card:disabled{cursor:wait}
 .catalog-card:active .catalog-cover{opacity:.8}

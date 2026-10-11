@@ -73,12 +73,14 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
   };
   return <Dialog open title={title} onClose={onClose}><DialogDescription className="sr-only">작품 정보를 저장합니다.</DialogDescription>
     <form className={`library-sheet collection-authority-form${form.mode === 'create' ? ' collection-create-form' : ''}`} onSubmit={event => { event.preventDefault(); if (!pending) save(); }}>
-      <Field label="이름" error={nameConflict ? '같은 종류에 같은 이름의 작품이 있습니다.' : undefined}><TextInput value={draft.name} maxLength={COLLECTION_NAME_MAX} disabled={pending} onChange={event => change('name', event.target.value)}/></Field>
-      {form.mode === 'create' && <><Field label="설명"><TextInput value={draft.description} maxLength={2000} disabled={pending} onChange={event => change('description', event.target.value)}/></Field>
-        <SegmentedControl label="유형" fullWidth options={createTypes} value={createType} onChange={setCreateType}/></>}
-      {form.mode === 'edit' && COLLECTION_EDIT_FIELDS[type].map(field => <Field key={field.key} label={field.label}><TextInput {...COLLECTION_EDIT_INPUT[field.control]} value={draft[field.key] ?? ''} maxLength={field.maxLength} disabled={pending} onChange={event => change(field.key, event.target.value)}/></Field>)}
-      {intent?.state === 'conflict' && !nameConflict && <p role="alert">다른 기기에서 작품 정보가 바뀌었거나 변경을 받지 못했습니다. 내용을 확인해 주세요.</p>}
-      <BusyLabel busy={pending} idle=""><Badge>대기</Badge></BusyLabel>{error && <p role="alert">{error}</p>}
+      <div className="collection-authority-form__fields">
+        <Field label="이름" error={nameConflict ? '같은 종류에 같은 이름의 작품이 있습니다.' : undefined}><TextInput value={draft.name} maxLength={COLLECTION_NAME_MAX} disabled={pending} onChange={event => change('name', event.target.value)}/></Field>
+        {form.mode === 'create' && <><Field label="설명"><TextInput value={draft.description} maxLength={2000} disabled={pending} onChange={event => change('description', event.target.value)}/></Field>
+          <SegmentedControl label="유형" fullWidth options={createTypes} value={createType} onChange={setCreateType}/></>}
+        {form.mode === 'edit' && COLLECTION_EDIT_FIELDS[type].map(field => <Field key={field.key} label={field.label}><TextInput {...COLLECTION_EDIT_INPUT[field.control]} value={draft[field.key] ?? ''} maxLength={field.maxLength} disabled={pending} onChange={event => change(field.key, event.target.value)}/></Field>)}
+        {intent?.state === 'conflict' && !nameConflict && <p role="alert">다른 기기에서 작품 정보가 바뀌었거나 변경을 받지 못했습니다. 내용을 확인해 주세요.</p>}
+        <BusyLabel busy={pending} idle=""><Badge>대기</Badge></BusyLabel>{error && <p role="alert">{error}</p>}
+      </div>
       <div className="ui-dialog__actions"><Button type="button" variant={form.mode === 'create' ? 'quiet' : 'secondary'} onClick={onClose}>{form.mode === 'create' ? '취소' : '닫기'}</Button><Button type="submit" variant="primary" disabled={pending || form.mode === 'create' && !draft.name.trim()}>저장</Button></div>
     </form>
   </Dialog>;

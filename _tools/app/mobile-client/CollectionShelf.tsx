@@ -1,4 +1,4 @@
-import {memo, useCallback, useRef, useState, type ReactNode} from 'react';
+import {memo, useCallback, useLayoutEffect, useRef, useState, type ReactNode} from 'react';
 import {LightCase} from '../src/collections/case/LightCase';
 import {workCasePlatform, type CaseData} from '../src/collections/case/CollectionCase';
 import {PerRowControl} from '../src/shared/ui/PerRowControl';
@@ -17,6 +17,20 @@ export type ShelfView = {layout: ShelfLayout; perRow: number};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
 export const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
+/** The stored density describes portrait tiles; rotation adds tiles without changing that choice. */
+export function shelfColumns(viewportWidth: number, portraitColumns: number = SHELF_PER_ROW.fallback, gap = 12): number {
+  const minimumWidth = (144 + gap) * SHELF_PER_ROW.fallback / portraitColumns - gap;
+  return Math.max(portraitColumns, Math.floor((viewportWidth - 48 + gap) / (minimumWidth + gap)));
+}
+export function useShelfColumns(): (portraitColumns: number, gap?: number) => number {
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useLayoutEffect(() => {
+    const resize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  return (portraitColumns, gap) => shelfColumns(width, portraitColumns, gap);
+}
 /** Every type starts on the shelf; stored user choices take precedence. */
 const fallbackView = (): ShelfView => ({layout: 'shelf', perRow: SHELF_PER_ROW.fallback});
 
@@ -85,6 +99,7 @@ export function ShelfViewSheet({type, view, onChange, onClose}: {type: Collectio
     <ViewOptionsSection title="배치">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
       <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
+      <p className="hint">세로 화면 기준입니다. 가로 화면에서는 같은 크기로 더 많이 표시합니다.</p>
     </ViewOptionsSection>
   </div></BottomSheet>;
 }

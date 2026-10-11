@@ -41,6 +41,7 @@ class FirstScreenObserver {
 }
 
 beforeEach(()=>{
+  vi.stubGlobal('innerWidth',674);
   observed=[];mocks.caseRenders=0;
   // Deterministic S11 portrait fixture; jsdom does not lay out grid tracks.
   vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(768);
