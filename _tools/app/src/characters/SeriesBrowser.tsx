@@ -44,7 +44,7 @@ import { CharacterTaggerTags } from "./CharacterTaggerTags";
 import { needsReferenceConfirmation, useReferenceRegionInspection } from "./ReferenceRegionChoices";
 import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
-import { ExtrasCard, useExtrasSuggestions } from "./ExtrasCard";
+import { ExtrasCard, useExtrasPreviews, useExtrasSuggestions } from "./ExtrasCard";
 import { ExtrasPromotionDialog, type ExtrasPromotionApi, type ExtrasPromotionOutcome } from "./ExtrasPromotionDialog";
 import { ExtrasPromotionDone } from "./ExtrasPromotionDone";
 import { SeriesUnregisterDialog } from "./SeriesUnregisterDialog";
@@ -264,6 +264,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     : seriesExtras.find(t => !t.extrasGroupId);
   const extrasForSuggestions = currentExtras ? current : !targetId ? shelfExtras : undefined;
   const extrasSuggestions = useExtrasSuggestions(extrasForSuggestions?.id ?? null, refreshVersion + reload + analysisRevision, extrasApi);
+  const extrasPreviews = useExtrasPreviews(series.classificationId, shelfExtras?.id ?? null, refreshVersion + reload + analysisRevision, hubApi);
   const seriesGalleryView = seriesGalleryState.seriesId === series.classificationId ? seriesGalleryState.view : "unclassified";
   const excludedOnly = seriesGalleryView === "excluded";
   const seriesGalleryViews = legacyExcludedCount > 0
@@ -803,7 +804,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           <CharacterGroups key={`${library?.root ?? ""}:${series.classificationId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
             onGroupsChanged={onChanged} suggestionCount={currentGroup ? 0 : seriesSuggestions.length}
-            extrasCard={shelfExtras ? <ExtrasCard count={characterCounts[shelfExtras.id]} suggestions={extrasSuggestions}
+            extrasCard={shelfExtras ? <ExtrasCard count={characterCounts[shelfExtras.id]} previews={extrasPreviews} privacyMode={privacyMode} suggestions={extrasSuggestions}
               onOpen={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: shelfExtras.id })}
               onPromote={suggestion => {
                 setPreselect({ targetId: shelfExtras.id, tag: suggestion.tag, assetIds: suggestion.assetIds.slice(0, MAX_PROMOTION_IMAGES) });

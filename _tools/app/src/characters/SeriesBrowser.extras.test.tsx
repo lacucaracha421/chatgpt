@@ -37,13 +37,19 @@ type Options = {
   targetId?: string; groupId?: string; groups?: CharacterGroup[]; extras?: CharacterTarget[];
   suggestions?: Record<string, ExtrasSuggestion[]>;
   preview?: Awaited<ReturnType<typeof characterExtrasApi.unregisterPreview>>;
+  /** What a 기타's gallery read returns (default: the loaded images). */
+  extrasItems?: typeof loaded;
+  privacyMode?: boolean;
 };
 async function mount(options: Options = {}) {
   const api = createCharacterFixture();
   const targets = (await api.targets()).map(target => target);
   const extras = options.extras ?? [seriesExtras, groupExtras];
   vi.spyOn(api, "targets").mockResolvedValue([...targets, ...extras]);
-  const browse = vi.fn().mockResolvedValue({ items: loaded, nextCursor: null, totalCount: loaded.length });
+  const browse = vi.fn(async (query: { targetId: string | null }) => {
+    const items = query.targetId?.startsWith("extras") ? options.extrasItems ?? loaded : loaded;
+    return { items, nextCursor: null, totalCount: items.length };
+  });
   const requestReferenceRefresh = vi.fn(async (targetId: string) => ({ targetId, requestRevision: 1, state: "pending" as const, eligibleCount: 7 }));
   const hubApi = { folderExclusions: vi.fn().mockResolvedValue([]), seriesFolders: vi.fn().mockResolvedValue([]), setFolderExcluded: vi.fn(), browse, saveSeries: vi.fn(), series: vi.fn(), createManualCharacter: vi.fn(),
     completeReview: vi.fn().mockResolvedValue(1), setSeriesAssetExcluded: vi.fn(), excludedAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }),
@@ -66,7 +72,7 @@ async function mount(options: Options = {}) {
   const gateway = { listAssets: vi.fn().mockResolvedValue({ items: fixtureAssets, nextCursor: null }), openLibrary: vi.fn() } as unknown as LibraryGateway;
   const browser = <SeriesBrowser series={{ classificationId: "series", heroAssetId: null, autoClassify: true }} targetId={options.targetId} groupId={options.groupId}
     targets={targets} extras={extras} groups={options.groups ?? [band]} classifications={fixtureClassifications} galleryLayout="masonry" onGalleryLayoutChange={vi.fn()}
-    privacyMode={false} onPrivacyModeChange={vi.fn()} metadataVisible onMetadataVisibleChange={vi.fn()} thumbnailRowHeight={180} onThumbnailRowHeightChange={vi.fn()}
+    privacyMode={options.privacyMode ?? false} onPrivacyModeChange={vi.fn()} metadataVisible onMetadataVisibleChange={vi.fn()} thumbnailRowHeight={180} onThumbnailRowHeightChange={vi.fn()}
     refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} extrasApi={extrasApi} promotionApi={promotionApi} />;
   const rendered = render(<LibraryProvider gateway={gateway}>{browser}</LibraryProvider>);
   const open = (targetId?: string, groupId?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId, groupId })}</LibraryProvider>);
@@ -82,6 +88,30 @@ it("shows the 기타 card last among the character cards with the strongest sugg
   expect(await screen.findByRole("button", { name: "아바라이 렌지 6장 캐릭터로" })).toHaveTextContent("아바라이 렌지 6장 · 캐릭터로");
   fireEvent.click(screen.getByRole("button", { name: "기타 열기" }));
   expect(navigate).toHaveBeenCalledWith({ kind: "classification", classificationId: "series", characterId: "extras-series" });
+});
+
+it("fills the 기타 card with the first four of its own images, like a group card", async () => {
+  const { hubApi } = await mount();
+  const card = (await screen.findByRole("button", { name: "기타 열기" })).querySelector(".character-group-card__mosaic") as HTMLElement;
+  await waitFor(() => expect(card.querySelectorAll("img")).toHaveLength(4));
+  expect(card).toHaveAttribute("data-count", "4");
+  expect([...card.querySelectorAll("img")].map(img => img.getAttribute("src"))).toEqual(loaded.slice(0, 4).map(asset => expect.stringContaining(`/thumbnail/${asset.id}`)));
+  expect(hubApi.browse).toHaveBeenCalledWith(expect.objectContaining({ seriesId: "series", targetId: "extras-series", limit: 4, after: null }));
+  expect(card.querySelector(".character-group-card__slot")).toBeNull();
+});
+
+it("shows a single neutral slot on a 기타 without images, and masks the images in privacy mode", async () => {
+  const empty = await mount({ extrasItems: [] });
+  const emptyCard = (await screen.findByRole("button", { name: "기타 열기" })).querySelector(".character-group-card__mosaic") as HTMLElement;
+  await waitFor(() => expect(emptyCard.querySelector(".character-group-card__slot svg")).not.toBeNull());
+  expect(emptyCard).toHaveAttribute("data-count", "1");
+  expect(emptyCard.querySelectorAll("img")).toHaveLength(0);
+  expect(empty.hubApi.browse).toHaveBeenCalledWith(expect.objectContaining({ targetId: "extras-series", limit: 4 }));
+  cleanup();
+  await mount({ privacyMode: true });
+  const masked = (await screen.findByRole("button", { name: "기타 열기" })).querySelector(".character-group-card__mosaic") as HTMLElement;
+  await waitFor(() => expect(masked.querySelectorAll(".privacy-mask")).toHaveLength(4));
+  expect(masked.querySelectorAll("img")).toHaveLength(0);
 });
 
 it("shows no 기타 card until a bucket exists", async () => {

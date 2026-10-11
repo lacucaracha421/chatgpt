@@ -20,7 +20,8 @@ const seeds: Seed[] = [
   { id: "t-billy", name: "빌리 키드", thumbnail: 83, images: [81, 92] },
   { id: "t-belle", name: "벨", thumbnail: 95, images: [93, 100] },
   { id: "x-group-victoria", name: "빅토리아 가정부 서비스 기타", thumbnail: 101, images: [101, 112], extrasGroupId: "g-victoria", extras: true },
-  { id: "x-group-hares", name: "카룬 토끼굴 기타", thumbnail: 113, images: [113, 118], extrasGroupId: "g-hares", extras: true },
+  { id: "x-group-hares", name: "카룬 토끼굴 기타", thumbnail: 113, images: [113, 112], // an empty range: this 기타 holds no images yet
+    extrasGroupId: "g-hares", extras: true },
   { id: "x-series", name: "젠레스 존 제로 기타", thumbnail: 121, images: [121, 160], extras: true },
 ];
 
@@ -48,7 +49,7 @@ export const previewCharacterGroups = [
 export function previewCharacterSidebarCounts() {
   return {
     targets: Object.fromEntries(seeds.map(seed => [seed.id, imagesByTarget.get(seed.id)!.length])),
-    groups: { "g-victoria": 24 + 16 + 18 + 12, "g-hares": 22 + 12 + 6 },
+    groups: { "g-victoria": 24 + 16 + 18 + 12, "g-hares": 22 + 12 },
   };
 }
 

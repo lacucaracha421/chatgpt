@@ -1,15 +1,10 @@
 /* 기타: the nameless bucket card, the 캐릭터로 dialog and the series unregister dialog. */
-.character-extras-card__mosaic { box-sizing: border-box; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: var(--space-1); width: 100%; aspect-ratio: 3 / 4; padding: var(--space-1); border: 1px dashed var(--color-border-strong); border-radius: var(--radius-tile); transition: border-color var(--motion-micro) var(--ease-standard); }
-.character-extras-card__mosaic > span { border: 1px dashed var(--color-border); border-radius: var(--radius-tile); background: var(--color-surface); }
-/* On the shelf a card is 132 x 170 like its character and group siblings (folder-shelf.css), not 3 : 4 of the width. */
-.folder-shelf .character-extras-card__mosaic { width: 132px; height: 170px; aspect-ratio: auto; border-radius: 2px; }
-.folder-shelf .character-extras-card__mosaic > span { border-radius: 2px; }
 .folder-shelf .character-extras-card__hint-frame { right: auto; width: 132px; height: 170px; aspect-ratio: auto; }
 /* The image count (shown on hover) goes to the top corner so it never half-hides behind the suggestion line at the bottom. */
 .folder-shelf .series-character--extras .folder-shelf__meta { top: var(--space-1); transform: none; }
-.series-character--extras .series-character__open:hover .character-extras-card__mosaic { border-color: var(--color-muted); }
-.series-character--extras .series-character__open:active .character-extras-card__mosaic { border-color: var(--color-accent); }
-.series-character--extras .series-character__open:focus-visible .character-extras-card__mosaic { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+/* The card's focus ring surrounds the whole mosaic (not each image), also when it holds only the empty slot. */
+.series-character--extras .series-character__open:focus-visible .character-group-card__mosaic { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+.series-character--extras .series-character__open:focus-visible img { outline: none; }
 
 /* The suggestion line sits over the lower edge of the mosaic; the frame passes clicks through to the card around it. */
 .character-extras-card__hint-frame { position: absolute; top: 0; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: flex-end; aspect-ratio: 3 / 4; padding: var(--space-2); pointer-events: none; }
@@ -49,6 +44,6 @@
 .character-extras-refs__cover:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
 .character-extras-refs__cover:disabled { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
-  .character-extras-card__hint, .character-extras-card__mosaic, .character-extras-refs__open, .character-extras-refs__cover { transition: none; }
+  .character-extras-card__hint, .character-extras-refs__open, .character-extras-refs__cover { transition: none; }
   .character-extras-card__hint { transform: none; }
 }

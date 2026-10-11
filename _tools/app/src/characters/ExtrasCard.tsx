@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { EllipsisHorizontalCircleIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalCircleIcon, PhotoIcon } from "@heroicons/react/24/outline";
+import { AssetImage } from "../privacy/AssetImage";
+import { assetThumbnailUrl } from "../assets/mediaUrl";
 import { characterExtrasApi, type ExtrasSuggestion } from "./extrasApi";
+import { characterHubApi, type CharacterHubApi } from "./hubApi";
 import { extrasTagName, strongestExtrasSuggestion } from "./extrasNames";
 import "./CharacterExtras.css";
 
@@ -21,6 +24,30 @@ export function useExtrasSuggestions(targetId: string | null, version: number, a
   return targetId && read?.targetId === targetId ? read.rows : [];
 }
 
+type PreviewReader = Pick<CharacterHubApi, "browse">;
+export type ExtrasPreview = { id: string; src: string };
+const EXTRAS_PREVIEW_COUNT = 4;
+
+/**
+ * Up to four of a 기타's own images (newest first, as its gallery lists them) for the card's mosaic: the
+ * first page of the same read the gallery makes, cut to four. `undefined` until the first read lands;
+ * the shown list stays while a refresh is read (no flash) and is replaced only when the 기타 changes
+ * or the new read lands.
+ */
+export function useExtrasPreviews(seriesId: string, targetId: string | null, version: number, api: PreviewReader = characterHubApi): ExtrasPreview[] | undefined {
+  const [read, setRead] = useState<{ targetId: string; previews: ExtrasPreview[] } | null>(null);
+  useEffect(() => {
+    if (!targetId) return;
+    let active = true;
+    void api.browse({ seriesId, targetId, groupId: null, all: false, after: null, limit: EXTRAS_PREVIEW_COUNT }).then(
+      page => { if (active) setRead({ targetId, previews: page.items.slice(0, EXTRAS_PREVIEW_COUNT).map(asset => ({ id: asset.id, src: assetThumbnailUrl(asset) })) }); },
+      () => { if (active) setRead(old => old?.targetId === targetId ? old : { targetId, previews: [] }); },
+    );
+    return () => { active = false; };
+  }, [api, seriesId, targetId, version]);
+  return targetId && read?.targetId === targetId ? read.previews : undefined;
+}
+
 /** "<한국어 이름> N장 · 캐릭터로": the one line a 기타 card shows for its strongest suggestion, as the name and the rest. */
 export function extrasSuggestionParts(suggestion: ExtrasSuggestion) {
   return { name: extrasTagName(suggestion.tag).name, rest: ` ${suggestion.imageCount.toLocaleString("ko-KR")}장 · 캐릭터로` };
@@ -32,11 +59,14 @@ export function extrasSuggestionLine(suggestion: ExtrasSuggestion) {
 }
 
 /**
- * The 기타 card: always the last character card of a series or group. A dashed mosaic says "no name
- * yet"; when the automatic tags read one name on five or more of its images, one line offers 캐릭터로.
+ * The 기타 card: always the last character card of a series or group. Its mosaic is the group card's, filled
+ * with the 기타's own images; when the automatic tags read one name on five or more of its images, one line offers 캐릭터로.
  */
-export function ExtrasCard({ count, suggestions = [], onOpen, onPromote }: {
+export function ExtrasCard({ count, previews, privacyMode = false, suggestions = [], onOpen, onPromote }: {
   count?: number;
+  /** The 기타's newest images; `undefined` while the first read is under way (a quiet empty slot, no icon). */
+  previews?: readonly ExtrasPreview[];
+  privacyMode?: boolean;
   suggestions?: readonly ExtrasSuggestion[];
   onOpen: () => void;
   /** Opens the 기타 with this suggestion's images selected. */
@@ -55,7 +85,12 @@ export function ExtrasCard({ count, suggestions = [], onOpen, onPromote }: {
   }, [Boolean(suggestion)]);
   return <article className="series-character folder-shelf__card series-character--extras">
     <button type="button" className="series-character__open" aria-label="기타 열기" aria-description="아직 이름 없는 사람의 이미지" onClick={onOpen}>
-      <span className="character-extras-card__mosaic" aria-hidden="true">{Array.from({ length: 9 }, (_, index) => <span key={index} />)}</span>
+      <span className="character-group-card__mosaic" data-count={Math.max(1, previews?.length ?? 0)}>
+        {previews?.length ? previews.map(preview => privacyMode
+          ? <span key={preview.id} className="character-group-card__slot privacy-mask" aria-label="비공개 모드"/>
+          : <AssetImage key={preview.id} draggable={false} loading="lazy" src={preview.src} alt="" />)
+          : <span className="character-group-card__slot">{previews && <PhotoIcon aria-hidden="true" />}</span>}
+      </span>
       <strong><EllipsisHorizontalCircleIcon className="folder-shelf__icon" aria-hidden="true" /><span className="series-character__name">기타</span></strong>
       <small className="folder-shelf__meta" aria-hidden={count === undefined || undefined}>{count === undefined ? null : `${count.toLocaleString("ko-KR")}장`}</small>
     </button>
