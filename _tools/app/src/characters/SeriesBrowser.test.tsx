@@ -894,6 +894,29 @@ it("asks for one unresolved reference and stores the choice in the draft only", 
   await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ referenceRegions: { "image-0": { contentHash: "hash-image-0", baselineFingerprint: "baseline", bounds: [200, 40, 380, 520] } } }), true));
 });
 
+it("drops the refusal about another character's image once its person is chosen", async () => {
+  const hint = "다른 캐릭터(자오)에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.";
+  const two: [number, number, number, number][] = [[10, 20, 110, 220], [200, 40, 380, 520]];
+  const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) =>
+    assetIds.map(id => id !== "image-0" ? inspection(id, "single")
+      : regions?.[id] ? { ...inspection(id, "selected", two), selectedIndex: 1, otherCharacters: ["자오"] }
+      : { ...inspection(id, "needs_region", two), suggestedIndex: 0, otherCharacters: ["자오"] }));
+  const { api, user, panel } = await openReferences(inspect);
+  const save = vi.spyOn(api, "saveSettings").mockRejectedValueOnce(new Error(hint));
+  await within(panel).findByRole("button", { name: "필요한 인물만 확인" });
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  expect(await within(panel).findByText(hint)).toBeInTheDocument();
+  expect(within(panel).getByRole("button", { name: /레퍼런스 1 크롭 확인/ }).parentElement).toHaveTextContent("!");
+  // The right person (not 자오's) is chosen: the old refusal must not keep contradicting the draft,
+  // the "!" mark goes, and the usable count rises without the section blinking.
+  await user.click(within(panel).getByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
+  expect(within(panel).queryByText(hint)).not.toBeInTheDocument();
+  await waitFor(() => expect(within(panel).getByRole("button", { name: /레퍼런스 1 크롭 확인/ }).parentElement).not.toHaveTextContent("!"));
+  expect(within(panel).getByText(/사용 가능 5장/)).toBeInTheDocument();
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
 it("keeps asking only through the quiet button until the requirement is met", async () => {
   const calls: { regions: Record<string, unknown> }[] = [];
   const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => {

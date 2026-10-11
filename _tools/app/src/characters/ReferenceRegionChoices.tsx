@@ -32,22 +32,49 @@ type InspectionRequest = {
   api?: (import("./api").CharacterApi)["inspectReferenceRegions"]; revision?: string;
 };
 
-/** One inspection owner can feed both the unopened info indicator and the editor. */
+/**
+ * A person the user just chose counts at once, before the native reinspection returns: the
+ * same row the inspection will report for a binding that names one of the image's boxes.
+ * A binding that no longer matches the image or detector leaves the row as inspected.
+ */
+export function withDraftChoices(inspections: ReferenceInspection[], draftRegions: ReferenceRegions): ReferenceInspection[] {
+  return inspections.map(row => {
+    const draft = draftRegions[row.assetId];
+    if (!draft || draft.contentHash !== row.contentHash || draft.baselineFingerprint !== row.baselineFingerprint) return row;
+    const index = row.boxes.findIndex(box => box.every((value, side) => value === draft.bounds[side]));
+    return index < 0 ? row : { ...row, state: "selected", selectedIndex: index, automaticIndex: null };
+  });
+}
+
+/**
+ * One inspection owner can feed both the unopened info indicator and the editor.
+ *
+ * Choosing a person changes only the draft regions, so the reinspection it triggers keeps
+ * showing the last result for the same references (with the choice applied) instead of
+ * dropping to nothing: the "!" marks, the usable count and the chooser must not blink while
+ * the native side answers. Any other change (series, character, reference list, revision,
+ * retry) still starts from nothing.
+ */
 export function useReferenceRegionInspection({ seriesId, targetId, assetIds, draftRegions, api, revision }: InspectionRequest): ReferenceRegionInspection {
   const [attempt, setAttempt] = useState(0);
   const key = JSON.stringify([seriesId, targetId, assetIds, draftRegions, revision, attempt]);
-  const [result, setResult] = useState<(ReferenceRegionInspection & { key: string; api: InspectionRequest["api"] }) | null>(null);
+  const scope = JSON.stringify([seriesId, targetId, [...assetIds].sort(), revision, attempt]);
+  const [result, setResult] = useState<(ReferenceRegionInspection & { key: string; scope: string; api: InspectionRequest["api"] }) | null>(null);
   useEffect(() => {
     if (!api || !seriesId || !assetIds.length) return;
     let active = true;
     api(seriesId, targetId, assetIds, draftRegions)
-      .then(inspections => { if (active) setResult({ key, api, inspections, error: null }); })
+      .then(inspections => { if (active) setResult({ key, scope, api, inspections, error: null }); })
       .catch(reason => {
-        if (active) setResult({ key, api, inspections: null, error: commandErrorMessage(reason, "인물 영역을 확인하지 못했습니다.") });
+        if (active) setResult({ key, scope, api, inspections: null, error: commandErrorMessage(reason, "인물 영역을 확인하지 못했습니다.") });
       });
     return () => { active = false; };
   }, [key, api]);
-  const current = api && result?.key === key && result.api === api ? result : { inspections: null, error: null };
+  const none = { inspections: null, error: null };
+  const current = !api || !result ? none
+    : result.key === key && result.api === api ? result
+    : result.scope === scope && result.inspections ? { inspections: withDraftChoices(result.inspections, draftRegions), error: null }
+    : none;
   return { ...current, retry: () => setAttempt(value => value + 1) };
 }
 

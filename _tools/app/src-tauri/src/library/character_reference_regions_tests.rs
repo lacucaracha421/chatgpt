@@ -735,3 +735,62 @@ fn inspection_asks_for_a_person_on_images_shared_with_another_character() {
         .get("otherCharacters")
         .is_none());
 }
+
+/// 다이아린 · 자오 case: a character already holds images another character owns (saved
+/// before the shared-image rule, so without a person). Choosing a person for each of them
+/// and saving makes them usable references; one unresolved image still blocks the save.
+#[test]
+fn choosing_a_person_on_every_shared_reference_makes_the_save_pass() {
+    let (f, _momoka, midori, _hash) = shared_image_fixture();
+    let connection = f.library.connection().unwrap();
+    connection
+        .execute("UPDATE assets SET width=100,height=80 WHERE id IN ('asset-0','asset-1','asset-5')", [])
+        .unwrap();
+    let hash_of = |id: &str| -> String {
+        connection
+            .query_row("SELECT content_hash FROM assets WHERE id=?1", [id], |r| r.get(0))
+            .unwrap()
+    };
+    let (h0, h1) = (hash_of("asset-0"), hash_of("asset-1"));
+    drop(connection);
+    // The lenient path predates the rule: these references carry no person.
+    let legacy = f
+        .library
+        .replace_character_references_selection(
+            &midori.id,
+            midori.revision,
+            &["asset-0".to_string(), "asset-1".to_string()],
+            false,
+        )
+        .unwrap();
+    // Only one person chosen: the other shared image still has none.
+    let error = f
+        .library
+        .save_character_settings(
+            shared_settings(
+                &legacy,
+                &["asset-0", "asset-1"],
+                RegionBindings::from([("asset-0".to_string(), binding(&h0, [50, 10, 90, 70]))]),
+            ),
+            true,
+        )
+        .unwrap_err();
+    assert!(error.to_string().starts_with("다른 캐릭터(모모카)에 등록된 이미지입니다."));
+    let legacy = f.library.get_character_target(&midori.id).unwrap();
+    // A person chosen on both: both are saved and counted as usable.
+    let saved = f
+        .library
+        .save_character_settings(
+            shared_settings(
+                &legacy,
+                &["asset-0", "asset-1"],
+                RegionBindings::from([
+                    ("asset-0".to_string(), binding(&h0, [50, 10, 90, 70])),
+                    ("asset-1".to_string(), binding(&h1, [50, 10, 90, 70])),
+                ]),
+            ),
+            true,
+        )
+        .unwrap();
+    assert_eq!(saved.usable_references().count(), 2);
+}

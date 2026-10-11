@@ -576,7 +576,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         try { const asset = await gateway.getAsset(assetId); setExternalAsset(asset); setViewer(assetId); }
         catch (error) { setEditorError(commandErrorMessage(error, "원본을 열지 못했습니다.")); }
       })()}
-      onChange={draft => setEditor({ ...editor, draft })} onPick={beginPick}
+      // A refusal belongs to the draft that was saved; editing the draft (a chosen person, a removed
+      // reference) makes it stale, so it leaves rather than contradicting what is now on screen.
+      onChange={draft => { setEditor({ ...editor, draft }); setEditorError(null); }} onPick={beginPick}
       onRecommendReferences={editor.target ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined}
       />}
     {editor?.target && <CharacterTaggerTags key={editor.target.id} targetId={editor.target.id} disabled={busy} />}

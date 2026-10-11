@@ -2,7 +2,7 @@ import { act, cleanup, render, renderHook, screen, waitFor, within } from "@test
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { ReferenceRegionChoices, AUTOMATIC_CHARACTER_REFERENCE_COUNT, usableReferenceCount, automaticReferenceCount, useReferenceRegionInspection } from "./ReferenceRegionChoices";
+import { ReferenceRegionChoices, AUTOMATIC_CHARACTER_REFERENCE_COUNT, usableReferenceCount, automaticReferenceCount, useReferenceRegionInspection, withDraftChoices } from "./ReferenceRegionChoices";
 import type { ReferenceInspection, ReferenceRegions } from "./api";
 
 afterEach(cleanup);
@@ -417,4 +417,65 @@ it("asks for a person on an image shared with another character even with six us
   // Once the chosen person is honoured nothing is required any more.
   await waitFor(() => expect(boxButtons()).toHaveLength(0));
   expect(screen.queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+});
+
+it("counts a chosen person at once while the reinspection is still pending, without dropping the result", async () => {
+  // 다이아린 · 자오: two images another character owns arrive as needs_region ("!" marks).
+  const shared = (assetId: string) => ({ ...inspection(assetId, "needs_region", multi), suggestedIndex: 0, otherCharacters: ["자오"] });
+  const resolvers: ((rows: ReferenceInspection[]) => void)[] = [];
+  const api = vi.fn(() => new Promise<ReferenceInspection[]>(resolve => { resolvers.push(resolve); }));
+  const rows = [inspection("a", "single"), inspection("b", "single"), inspection("c", "single"), shared("d"), shared("e")];
+  const { result, rerender } = renderHook(({ draftRegions }: { draftRegions: ReferenceRegions }) => useReferenceRegionInspection({
+    seriesId: "series", targetId: "dialyn", assetIds: ["a", "b", "c", "d", "e"], draftRegions, api,
+  }), { initialProps: { draftRegions: {} as ReferenceRegions } });
+  expect(result.current.inspections).toBeNull();
+  await act(async () => { resolvers[0]!(rows); });
+  expect(usableReferenceCount(result.current.inspections!)).toBe(3);
+  // Choosing the right person (the second box, not 자오's) in the draft: the answer is pending.
+  rerender({ draftRegions: { d: box("d", multi[1]) } });
+  expect(api).toHaveBeenCalledTimes(2);
+  const pending = result.current.inspections!;
+  expect(pending).not.toBeNull();
+  expect(pending.find(row => row.assetId === "d")).toMatchObject({ state: "selected", selectedIndex: 1, automaticIndex: null });
+  expect(pending.find(row => row.assetId === "e")?.state).toBe("needs_region");
+  expect(usableReferenceCount(pending)).toBe(4);
+  // The native answer replaces the optimistic row without ever passing through nothing.
+  await act(async () => { resolvers[1]!([...rows.slice(0, 3), { ...inspection("d", "selected", multi), selectedIndex: 1, otherCharacters: ["자오"] }, shared("e")]); });
+  expect(usableReferenceCount(result.current.inspections!)).toBe(4);
+});
+
+it("applies only a draft choice that still names one of the image's boxes", () => {
+  const rows = [inspection("d", "needs_region", multi), inspection("e", "needs_region", multi), inspection("f", "needs_region", multi)];
+  const applied = withDraftChoices(rows, {
+    d: box("d", multi[1]),
+    e: box("e", [1, 1, 2, 2]),
+    f: { ...box("f", multi[0]), contentHash: "changed" },
+  });
+  expect(applied.map(row => row.state)).toEqual(["selected", "needs_region", "needs_region"]);
+  expect(applied[0]).toMatchObject({ selectedIndex: 1 });
+});
+
+it("keeps the chooser and its next image on screen while a chosen person is being rechecked", async () => {
+  const shared = (assetId: string, regions: ReferenceRegions) => regions[assetId]
+    ? { ...inspection(assetId, "selected", multi), selectedIndex: 1, otherCharacters: ["자오"] }
+    : { ...inspection(assetId, "needs_region", multi), suggestedIndex: 0, otherCharacters: ["자오"] };
+  let release: (() => void) | null = null;
+  const respond = vi.fn(async (_ids: string[], regions: ReferenceRegions) => {
+    const rows = [inspection("a", "single"), inspection("b", "single"), inspection("c", "single"), shared("d", regions), shared("e", regions)];
+    if (Object.keys(regions).length) await new Promise<void>(resolve => { release = resolve; });
+    return rows;
+  });
+  const user = userEvent.setup();
+  render(<Harness assetIds={["a", "b", "c", "d", "e"]} respond={respond} />);
+  await user.click(await screen.findByRole("button", { name: "필요한 인물만 확인" }));
+  expect(screen.getByText("1/2")).toBeInTheDocument();
+  await user.click(screen.getAllByRole("button", { name: "인물 영역 2 선택" })[0]!);
+  await waitFor(() => expect(draft()).toEqual({ d: box("d", multi[1]) }));
+  // The recheck has not answered yet, yet the section did not blink away: the next image is up.
+  expect(respond).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole("region", { name: "인물 영역 확인" })).toBeInTheDocument();
+  expect(boxButtons()).toHaveLength(2);
+  expect(screen.getByText("1/1")).toBeInTheDocument();
+  await act(async () => { release?.(); });
+  expect(boxButtons()).toHaveLength(2);
 });
