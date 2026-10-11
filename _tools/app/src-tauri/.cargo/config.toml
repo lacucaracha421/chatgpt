@@ -3,3 +3,8 @@
 # allocation otherwise serializes on that lock across threads (the parallel Rust test
 # suite ran ~5x slower). Nothing here reads sqlite3_memory_used or heap limits.
 LIBSQLITE3_FLAGS = "-DSQLITE_DEFAULT_MEMSTATUS=0"
+
+# LLVM's linker ships with the Rust toolchain and links the one large app crate faster
+# than MSVC link.exe (measured 2026-10-12, see git log).
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
