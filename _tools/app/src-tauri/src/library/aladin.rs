@@ -73,6 +73,11 @@ static VOLUME_PATTERNS: LazyLock<[Regex; 3]> = LazyLock::new(|| {
     ]
     .map(|pattern| Regex::new(pattern).unwrap())
 });
+/// `<base> [제M부 ]<N>: <subtitle>`: the volume number sits before a colon and a subtitle
+/// ("죠죠의 기묘한 모험 제6부 64: 스톤 오션(Stone Ocean)(1)"); the base keeps no part, subtitle or counter.
+static SUBTITLED_VOLUME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(.+?)\s+(?:제\s*[0-9]+\s*부\s+)?([0-9]{1,3})\s*:\s*\S").unwrap()
+});
 
 /// Words that make a whole token a non-volume product. Compared on tokens (runs of
 /// letters and digits), never as substrings, so "소설가의" is not "소설".
@@ -177,6 +182,20 @@ pub(crate) fn classify_product(title: &str) -> ProductKind {
         || is_excluded_product(&cleaned)
     {
         return ProductKind::Excluded;
+    }
+    if let Some(captures) = SUBTITLED_VOLUME.captures(&cleaned) {
+        let volume_number = captures[2]
+            .parse::<i64>()
+            .ok()
+            .filter(|number| (1..=999).contains(number));
+        let base_title = captures[1].trim_end_matches([' ', '-', '.']).trim().to_owned();
+        return match volume_number {
+            Some(volume_number) if !base_title.is_empty() => ProductKind::Volume(ParsedVolumeProduct {
+                volume_number,
+                base_title,
+            }),
+            _ => ProductKind::Excluded,
+        };
     }
     for regex in VOLUME_PATTERNS.iter() {
         let Some(captures) = regex.captures(&cleaned) else {

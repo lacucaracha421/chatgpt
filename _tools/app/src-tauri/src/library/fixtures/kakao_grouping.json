@@ -21,7 +21,16 @@
     {"id": "part-7", "title": "Series (리부트) 1", "author": "작가", "publisher": "출판", "isbn13": null, "date": null},
     {"id": "part-8", "title": "Series (신장판) 1", "author": "작가", "publisher": "출판", "isbn13": null, "date": null},
     {"id": "part-9", "title": "Series (unknown 한글) 1", "author": "작가", "publisher": "출판", "isbn13": null, "date": null},
-    {"id": "part-10", "title": "Series (1부 한정판) 1", "author": "작가", "publisher": "출판", "isbn13": null, "date": null}
+    {"id": "part-10", "title": "Series (1부 한정판) 1", "author": "작가", "publisher": "출판", "isbn13": null, "date": null},
+    {"id": "jo-28", "title": "죠죠의 기묘한 모험 28", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000128", "date": null},
+    {"id": "jo-10", "title": "죠죠의 기묘한 모험 10: 선혈의 비눗방울", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000110", "date": null},
+    {"id": "jo-18", "title": "죠죠의 기묘한 모험 18:  꿈의 DEATH", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000118", "date": null},
+    {"id": "jo-47", "title": "죠죠의 기묘한 모험 47: 안녕히, 모리오초: 황금의 마음", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000147", "date": null},
+    {"id": "jo-64", "title": "죠죠의 기묘한 모험 제6부 64: 스톤 오션(Stone Ocean)(1)", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000164", "date": null},
+    {"id": "jo-80", "title": "죠죠의 기묘한 모험 제6부 80: 스톤 오션(Stone Ocean)(17)", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000180", "date": null},
+    {"id": "jo-a10", "title": "죠죠의 기묘한 모험 10: 선혈의 비눗방울", "author": "아라키 히로히코", "publisher": "애니북스", "isbn13": "9780000000210", "date": null},
+    {"id": "lion-1", "title": "죠죠리온 1: 어서 오세요, 모리오초에", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000301", "date": null},
+    {"id": "lion-10", "title": "죠죠리온 10: 로카카카 나무를 쫓아라!", "author": "아라키 히로히코", "publisher": "문학동네", "isbn13": "9780000000310", "date": null}
   ],
   "groups": [
     {"title": "Series (1부)", "author": "작가", "publisher": "출판", "fingerprint": "aa37bc1dbaaf25fe5e8895497e233471df533ee2c85792985ca81350b1691b73", "volumes": [[1, "part-0"]], "ignored": 0},
@@ -39,6 +48,9 @@
     {"title": "별의 아이", "author": "작가", "publisher": "출판", "fingerprint": "bc3f0d7e2a47bd78d2382f3f745dc02e7ebca9a39af9912b0620dc8b2f339378", "volumes": [[1, "o1"]], "ignored": 0},
     {"title": "봇치·더·록!", "author": "하마지 아키", "publisher": "학산문화사", "fingerprint": "ab4cddbcc0af4dcd5295c8f3e26f8966251b920f271624f029b4009ab53e350c", "volumes": [[1, "b1"], [2, "b2"]], "ignored": 0},
     {"title": "위치 워치", "author": "시노하라 켄타", "publisher": "(주)서울문화사", "fingerprint": "87f813738c4c66000eaa6a9d34a0280e2f9a03973ea02804284fd1302528bf2f", "volumes": [[1, "w1"], [2, "w2"]], "ignored": 0},
+    {"title": "죠죠리온", "author": "아라키 히로히코", "publisher": "문학동네", "fingerprint": "966142066b402b4e010a59d86e2cff596826ca84a49b0032a0618886aa3a16d1", "volumes": [[1, "lion-1"], [10, "lion-10"]], "ignored": 0},
+    {"title": "죠죠의 기묘한 모험", "author": "아라키 히로히코", "publisher": "문학동네", "fingerprint": "a505d92bdd7380d3662ff004d55d0794f4fd9146e95816268e380082a1438573", "volumes": [[10, "jo-10"], [18, "jo-18"], [28, "jo-28"], [47, "jo-47"], [64, "jo-64"], [80, "jo-80"]], "ignored": 0},
+    {"title": "죠죠의 기묘한 모험", "author": "아라키 히로히코", "publisher": "애니북스", "fingerprint": "ebba9ef273e484d971561eb7abe31b82daf16c80317e940a897d5677eb8ba3cb", "volumes": [[10, "jo-a10"]], "ignored": 0},
     {"title": "찍히지 않습니다", "author": "코노시마 루카", "publisher": "S코믹스", "fingerprint": "f4f85684a8e3b6ffa9a541313f3a8a6c7f177bb52c0f5930a815e142b8984c1b", "volumes": [[7, "g7"]], "ignored": 0},
     {"title": "찍히지 않습니다", "author": "코노시마 루카", "publisher": "소미미디어", "fingerprint": "c557ed93e8a96c8ab2babe9bb088cefebacb262b45f8b86253f6f2678a9e3bb8", "volumes": [[1, "g1"]], "ignored": 0}
   ]

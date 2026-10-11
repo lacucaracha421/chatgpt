@@ -475,6 +475,9 @@ _VOLUME_PATTERNS = (
     re.compile(r"(?:\s|^)(?:vol(?:ume)?\.?)\s*(\d+)\s*\Z", re.IGNORECASE),
     re.compile(r"(?:\s|-)(\d+)\s*\Z"),
 )
+# "<base> [제M부 ]<N>: <subtitle>": the volume number sits before a colon and a subtitle
+# ("죠죠의 기묘한 모험 제6부 64: 스톤 오션(Stone Ocean)(1)"); base never keeps the part, subtitle or counter.
+_SUBTITLED_VOLUME = re.compile(r"\A(.+?)\s+(?:제\s*[0-9]+\s*부\s+)?([0-9]{1,3})\s*:\s*\S")
 # Whole-token exclusions (never substrings: "소설가의" is not "소설"); see aladin.rs.
 _EXCLUDED_TOKENS = frozenset((
     "소설", "소설판", "소설책", "노벨", "라이트노벨", "화집", "화보집", "설정집", "팬북", "아트북",
@@ -553,6 +556,11 @@ def classify_product(title):
     if (not cleaned or _RANGE.search(cleaned) or _PART_MARK.search(cleaned)
             or _is_excluded_product(cleaned)):
         return None
+    subtitled = _SUBTITLED_VOLUME.match(cleaned)
+    if subtitled is not None:
+        number = int(subtitled.group(2))
+        base = subtitled.group(1).rstrip(" -.").strip()
+        return (number, base) if 1 <= number <= 999 and base else None
     for pattern in _VOLUME_PATTERNS:
         match = pattern.search(cleaned)
         if match is None:

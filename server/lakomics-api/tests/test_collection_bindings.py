@@ -324,6 +324,24 @@ class KakaoSearch(Base):
         for title, expected in cases.items():
             self.assertEqual(bindings.parse_volume_product(title), expected, title)
 
+    def test_volume_number_before_a_colon_and_subtitle(self):
+        series = "죠죠의 기묘한 모험"
+        cases = {f"{series} 10: 선혈의 비눗방울": (10, series),
+                 f"{series} 47: 안녕히, 모리오초: 황금의 마음": (47, series),
+                 f"{series} 18:  꿈의 DEATH": (18, series),
+                 f"{series} 제6부 64: 스톤 오션(Stone Ocean)(1)": (64, series),
+                 f"{series} 제6부 80: 스톤 오션(Stone Ocean)(17)": (80, series),
+                 "죠죠리온 10: 로카카카 나무를 쫓아라!": (10, "죠죠리온"),
+                 "던전밥 3 : 부제 2024": (3, "던전밥"), "Re:Zero 2: 다른 세계": (2, "Re:Zero"),
+                 # Unchanged: well-formed titles, years, and titles with a plain trailing number.
+                 "감옥학원 3": (3, "감옥학원"), f"{series} 28": (28, series),
+                 "오타쿠에게 상냥한 갸루는 없다?! 2": (2, "오타쿠에게 상냥한 갸루는 없다?!"),
+                 "스파이 패밀리 2024: 부제": None, "던전밥 1000: 부제": None, "던전밥: 부제": None,
+                 "던전밥 0: 부제": None, "던전밥 3: 1~5": None, "던전밥 소설 3: 부제": None,
+                 "던전밥 1.5: 부제": None, "12: 부제": None}
+        for title, expected in cases.items():
+            self.assertEqual(bindings.parse_volume_product(title), expected, title)
+
     def test_product_titles_match_the_shared_fixture_the_pc_also_reads(self):
         fixture = json.loads((PC_FIXTURES / "product_titles.json").read_text(encoding="utf-8"))
         for case in fixture["cases"]:
