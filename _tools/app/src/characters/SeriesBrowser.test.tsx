@@ -979,7 +979,7 @@ it("opens the 확인 list from the series count line, not the series overflow", 
   await user.keyboard("{Escape}");
   await user.click(await screen.findByRole("button", { name: "확인 1" }));
   const dialog = await screen.findByRole("dialog", { name: "확인" });
-  expect(await within(dialog).findByRole("heading", { name: "히나?" })).toBeInTheDocument();
+  expect(await within(dialog).findByRole("button", { name: "히나 · a1.png" })).toBeInTheDocument();
   expect(confirmSource.shadow.page).toHaveBeenCalledWith(expect.objectContaining({ seriesId: "series" }));
   await user.click(within(dialog).getByRole("button", { name: "확인 닫기" }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "확인" })).not.toBeInTheDocument());

@@ -129,6 +129,9 @@ const tagPairs: (PendingPair & { reason: "recommendation" | "veto"; pixai: numbe
   { targetId: "t-belle", asset: 165, reason: "recommendation", pixai: 0.87, canary: 0.89 },
   { targetId: "t-ellen", asset: 10, reason: "veto", pixai: 0.12, canary: 0.1 },
   { targetId: "t-corin", asset: 30, reason: "veto", pixai: 0.2, canary: 0.08 },
+  // More of the same two characters, so the 확인 grid has a screenful to mark.
+  ...[170, 171, 172, 173, 174, 175, 176, 177].map((asset, index) => ({ targetId: "t-anby", asset, reason: "recommendation" as const, pixai: 0.86 + index * 0.01, canary: index % 3 === 0 ? 0.64 : 0.9 })),
+  ...[178, 179, 180, 181, 182].map((asset, index) => ({ targetId: "t-ellen", asset, reason: "recommendation" as const, pixai: 0.88 + index * 0.01, canary: 0.91 })),
 ];
 const candidatePairs: (PendingPair & { verdict: "automatic" | "recommended"; knn3: number })[] = [
   { targetId: "t-ellen", asset: 166, verdict: "automatic", knn3: 0.31 },
@@ -136,8 +139,10 @@ const candidatePairs: (PendingPair & { verdict: "automatic" | "recommended"; knn
   { targetId: "t-anby", asset: 162, verdict: "automatic", knn3: 0.27 },
   { targetId: "t-ellen", asset: 167, verdict: "recommended", knn3: 0.44 },
   { targetId: "t-lycaon", asset: 169, verdict: "recommended", knn3: 0.47 },
+  ...[183, 184, 185, 186].map((asset, index) => ({ targetId: "t-ellen", asset, verdict: "recommended" as const, knn3: 0.4 + index * 0.01 })),
+  ...[187, 188, 189].map((asset, index) => ({ targetId: "t-anby", asset, verdict: "automatic" as const, knn3: 0.26 + index * 0.01 })),
 ];
-const doubtfulPairs: PendingPair[] = [{ targetId: "t-billy", asset: 85 }, { targetId: "t-ellen", asset: 12 }];
+const doubtfulPairs: PendingPair[] = [{ targetId: "t-billy", asset: 85 }, { targetId: "t-ellen", asset: 12 }, { targetId: "t-ellen", asset: 14 }, { targetId: "t-anby", asset: 64 }];
 const assetId = (number: number) => `asset-${String(number).padStart(3, "0")}`;
 const targetOf = (id: string) => previewCharacterTargets.find(item => item.id === id)!;
 

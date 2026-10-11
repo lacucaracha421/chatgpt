@@ -168,3 +168,48 @@ export function confirmGroups(
 export function confirmSplitText(counts: ConfirmCounts): string {
   return CONFIRM_KINDS.filter(kind => counts[kind] > 0).map(kind => `${confirmKindLabel[kind]} ${counts[kind].toLocaleString()}`).join(" · ");
 }
+
+/**
+ * 한 장씩 보기 필요: an image that carries a person box can be 맞음 · 위치 틀림 instead, and 맞음 would teach
+ * the box as it is. Only a person looking at that one image can say which, so the grid never decides it in bulk.
+ */
+export const needsSingleLook = (item: Pick<ConfirmItem, "crop">): boolean => item.crop !== null;
+
+export type ConfirmCharacterGroup = { targetId: string; targetName: string; referenceAssetIds: string[]; items: ConfirmItem[] };
+
+/** The shown items grouped by suggested character, in the order each character first appears; items keep their own order. */
+export function groupByCharacter(items: readonly ConfirmItem[]): ConfirmCharacterGroup[] {
+  const groups = new Map<string, ConfirmCharacterGroup>();
+  for (const item of items) {
+    let group = groups.get(item.targetId);
+    if (!group) groups.set(item.targetId, group = { targetId: item.targetId, targetName: item.targetName, referenceAssetIds: item.referenceAssetIds.slice(0, 4), items: [] });
+    group.items.push(item);
+  }
+  return [...groups.values()];
+}
+
+/** Keys from `from` to `to` inclusive in the given visual order (either direction); just `to` when `from` is not in the order. */
+export function keyRange(order: readonly string[], from: string | null, to: string): string[] {
+  const start = from === null ? -1 : order.indexOf(from);
+  const end = order.indexOf(to);
+  if (end < 0) return [];
+  if (start < 0) return [to];
+  return order.slice(Math.min(start, end), Math.max(start, end) + 1);
+}
+
+/** Why the image is listed, in plain words: its kind, any other source that brought it up, and 확실/불확실. */
+export function reasonBadges(item: ConfirmItem): string[] {
+  const badges = [confirmKindLabel[item.kind]];
+  if (item.kind === "recheck" && item.recognition && !item.recognition.doubtful) badges.push(confirmKindLabel.recognition);
+  if (item.kind !== "tag" && item.tags && item.tags.reason !== "veto") badges.push(confirmKindLabel.tag);
+  // 확실/불확실 is how firmly the tags read the name; a doubted placement says why in its note instead.
+  if (item.tags && item.tags.reason === "recommendation") badges.push(`자동 태그 ${item.tags.sure ? "확실" : "불확실"}`);
+  return badges;
+}
+
+/** One quiet line on a grid tile for what is being questioned (다시 확인) or already placed. */
+export function tileNote(item: ConfirmItem): string | null {
+  if (item.kind === "recheck") return item.recognition?.doubtful ? "학습 인식이 지지하지 않음" : "자동 태그가 이 이름을 읽지 않음";
+  if (item.recognition?.placed) return "인식이 이미 넣은 이미지";
+  return null;
+}

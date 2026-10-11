@@ -2,20 +2,24 @@ import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useAssetMask } from "../privacy/PrivacyContext";
 import { AssetImage } from "../privacy/AssetImage";
 import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { XMarkIcon } from "@heroicons/react/24/outline";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { ArrowUturnLeftIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { Badge } from "../shared/ui/Badge";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { assetUrl, thumbnailUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ClassificationEntry } from "../library/types";
 import type { CharacterTarget, DecisionRequest, DecisionRequestKind } from "./api";
 import { confirmSources, readConfirmItems, type ConfirmScope, type ConfirmSources } from "./confirmClient";
-import { CONFIRM_KINDS, confirmCounts, confirmKindLabel, type ConfirmItem, type ConfirmKind } from "./confirmModel";
+import { CONFIRM_KINDS, confirmCounts, confirmKindLabel, groupByCharacter, keyRange, needsSingleLook, reasonBadges, type ConfirmItem, type ConfirmKind } from "./confirmModel";
+import { ConfirmGrid } from "./ConfirmGrid";
 import { classificationIsInSeries, taggerDecisionApi, type TaggerDecisionApi } from "./taggerReviewClient";
 import "./ConfirmList.css";
+
+export { reasonBadges };
 
 const REFILL_STRIP = 12;
 
@@ -40,15 +44,18 @@ type Folder = { key: string; state: "inside" | "outside" };
 const decisionRequest = (item: ConfirmItem, decision: DecisionRequestKind): DecisionRequest => ({
   targetId: item.targetId, expectedFingerprint: item.targetFingerprint, assetIds: [item.assetId], decision, baselineFingerprint: null, scanId: null,
 });
-/** One 모두 맞음 run: how many were stored, and which ones could not be (they stay in the list). */
-type BulkResult = { done: number; failed: { item: ConfirmItem; message: string }[] };
+/** What the grid is about to apply: 아님 for the marked, 맞음 for the rest of what is shown. */
+type BulkAsk = { accept: ConfirmItem[]; reject: ConfirmItem[]; single: number };
+/** One bulk run: how many were stored per decision, and which ones could not be (they stay in the grid). */
+type BulkResult = { accepted: number; rejected: number; failed: { item: ConfirmItem; message: string }[] };
 const BATCH_MAX = 200;
 const LOOKUP_AT_ONCE = 8;
 const decisionText = (decision: Decision) => decision === "rejected" ? "아님" : decision === "accepted" ? "맞음" : "맞음 · 위치 틀림";
 
 /**
- * 확인: one image at a time, in a list that holds 태그 추천, 인식 추천 and 다시 확인. 맞음 / 아님 /
- * 맞음 · 위치 틀림 are ordinary manual decisions; only the reason badges differ by kind.
+ * 확인: every candidate of the active tab at once. A click marks one 아님; the apply button stores 아님 for
+ * the marked and 맞음 for the rest. A tile opens alone in the one-at-a-time view (맞음 / 아님 / 맞음 · 위치 틀림).
+ * The three kinds (태그 추천, 인식 추천, 다시 확인) only differ in their reason badges.
  */
 export function ConfirmList({ scope, targets, classifications, privacyMode = false, onClose, onChanged, sources = confirmSources, decisions = taggerDecisionApi }: Props) {
   const [items, setItems] = useState<ConfirmItem[]>([]);
@@ -59,19 +66,23 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const [last, setLast] = useState<Judgment | null>(null);
   const [kind, setKind] = useState<ConfirmKind | "all">("all");
-  const [skipped, setSkipped] = useState<ReadonlySet<string>>(() => new Set());
+  const [marked, setMarked] = useState<ReadonlySet<string>>(() => new Set());
+  const [zoomKey, setZoomKey] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [bulkAsk, setBulkAsk] = useState<ConfirmItem[] | null>(null);
+  const [bulkAsk, setBulkAsk] = useState<BulkAsk | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [folder, setFolder] = useState<Folder | null>(null);
   const judged = useRef(new Map<string, Judgment>());
   const pending = useRef(false);
-  const currentKey = useRef<string | null>(null);
   const targetsRef = useRef(targets);
   targetsRef.current = targets;
   const classificationsRef = useRef(classifications);
   classificationsRef.current = classifications;
+  const anchor = useRef<string | null>(null);
+  const gridScroll = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef(0);
+  const gridSeen = useRef(false);
   const seriesId = scope?.series?.id;
   const targetId = scope?.target?.id;
 
@@ -80,16 +91,13 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
     ...(targetId ? { target: { id: targetId, name: scope?.target?.name ?? "" } } : {}),
   }), [seriesId, targetId, scope?.series?.name, scope?.target?.name]);
 
-  // Old content stays until the new read lands; the image on screen keeps its place across a reload.
+  // Old content stays until the new read lands; marks and the open image keep their place across a reload.
   useEffect(() => {
     let live = true;
     setLoading(true);
     void readConfirmItems(sources, readScope, targetsRef.current, () => live).then(read => {
       if (!live || !read) return;
-      const next = read.items.filter(item => !judged.current.has(item.key));
-      const keep = currentKey.current ? next.findIndex(item => item.key === currentKey.current) : -1;
-      if (keep > 0) next.unshift(...next.splice(keep, 1));
-      setItems(next);
+      setItems(read.items.filter(item => !judged.current.has(item.key)));
       setFailed(read.failed);
       setLoaded(true);
     }).finally(() => { if (live) setLoading(false); });
@@ -98,10 +106,21 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
 
   const counts = useMemo(() => confirmCounts(items), [items]);
   const activeKind = kind !== "all" && counts[kind] > 0 ? kind : "all";
-  const shown = useMemo(() => items.filter(item => (activeKind === "all" || item.kind === activeKind) && !skipped.has(item.key)), [items, activeKind, skipped]);
-  const current = shown[0];
-  currentKey.current = current?.key ?? null;
-  const next = shown[1];
+  const shown = useMemo(() => items.filter(item => activeKind === "all" || item.kind === activeKind), [items, activeKind]);
+  const groups = useMemo(() => groupByCharacter(shown), [shown]);
+  /** The visual order of the grid; the one-at-a-time view walks the same order. */
+  const ordered = useMemo(() => groups.flatMap(group => group.items), [groups]);
+  const eligible = useMemo(() => ordered.filter(item => !needsSingleLook(item)), [ordered]);
+  const eligibleKeys = useRef<string[]>([]);
+  eligibleKeys.current = eligible.map(item => item.key);
+  const markedShown = useMemo(() => eligible.filter(item => marked.has(item.key)), [eligible, marked]);
+  const restCount = eligible.length - markedShown.length;
+  const singleCount = ordered.length - eligible.length;
+
+  const currentIndex = zoomKey ? ordered.findIndex(item => item.key === zoomKey) : -1;
+  const current = currentIndex >= 0 ? ordered[currentIndex] : undefined;
+  const zooming = current !== undefined;
+  const next = zooming && ordered.length > 1 ? ordered[(currentIndex + 1) % ordered.length] : undefined;
   const nextMasked = useAssetMask(next?.assetId, privacyMode);
   useEffect(() => {
     if (!next || nextMasked) return;
@@ -109,6 +128,12 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
     image.src = assetUrl(next.assetId);
     return () => { image.src = ""; };
   }, [next?.assetId, nextMasked]);
+  // Back from one image to the grid, as Escape and the back button do.
+  useBackHandler(() => { setZoomKey(null); }, 110, zooming && !bulkAsk);
+  // The grid returns where it was.
+  useLayoutEffect(() => {
+    if (!zooming && gridScroll.current) gridScroll.current.scrollTop = savedScroll.current;
+  }, [zooming]);
 
   // Mobile judgments applied in the background move the list; read again when the counter moves.
   useEffect(() => {
@@ -147,10 +172,32 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
     return () => { live = false; };
   }, [current?.key, decisions]);
 
+  const toggle = useCallback((item: ConfirmItem, event: MouseEvent) => {
+    if (pending.current) return;
+    const keys = event.shiftKey ? keyRange(eligibleKeys.current, anchor.current, item.key) : [item.key];
+    anchor.current = item.key;
+    setBulkResult(null);
+    setMarked(previous => {
+      const turnOn = !previous.has(item.key);
+      const rest = new Set(previous);
+      for (const key of keys) { if (turnOn) rest.add(key); else rest.delete(key); }
+      return rest;
+    });
+  }, []);
+  const openZoom = useCallback((item: ConfirmItem) => {
+    if (pending.current) return;
+    savedScroll.current = gridScroll.current?.scrollTop ?? savedScroll.current;
+    setDecisionError(null);
+    setZoomKey(item.key);
+  }, []);
+  const clearMarks = () => { setMarked(new Set()); anchor.current = null; };
+  const chooseKind = (tab: ConfirmKind | "all") => { setKind(tab); setZoomKey(null); };
+
   async function judge(decision: Decision) {
     if (!current || pending.current) return;
     if (decision === "accepted_wrong_region" && !current.crop) return;
     const item = current;
+    const following = next?.key ?? null;
     pending.current = true;
     setBusy(true); setDecisionError(null); setBulkResult(null);
     try {
@@ -166,6 +213,8 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
       const judgment = { item, decision, moved };
       judged.current.set(item.key, judgment);
       setItems(previous => previous.filter(row => row.key !== item.key));
+      setMarked(previous => { if (!previous.has(item.key)) return previous; const rest = new Set(previous); rest.delete(item.key); return rest; });
+      setZoomKey(following);
       setLast(moved ? null : judgment);
       onChanged?.();
     } catch (e) {
@@ -183,7 +232,6 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
       await decisions.decide(decisionRequest(last.item, "cleared"));
       judged.current.delete(last.item.key);
       setItems(previous => [last.item, ...previous.filter(row => row.key !== last.item.key)]);
-      setSkipped(previous => { const rest = new Set(previous); rest.delete(last.item.key); return rest; });
       setLast(null);
       onChanged?.();
     } catch (e) {
@@ -193,17 +241,20 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
       setBusy(false);
     }
   }
-  /** 모두 맞음: every asked item gets what 맞음 gives it. Moves go one by one; the rest are stored in batches, and a refused batch is retried item by item to find which ones failed. */
-  async function acceptAll(batch: readonly ConfirmItem[]) {
-    if (batch.length === 0 || pending.current) return;
+  /**
+   * 아님 for the marked, 맞음 for the rest. A tag-listed image outside its series that is judged 맞음 is moved in one by one;
+   * every other judgment is stored in batches, and a refused batch is retried item by item to find which ones failed.
+   */
+  async function applyBulk({ accept, reject }: BulkAsk) {
+    if (accept.length + reject.length === 0 || pending.current) return;
     pending.current = true;
     setBusy(true); setBulkRunning(true); setDecisionError(null); setBulkResult(null);
     const done: Judgment[] = [];
-    const failed: BulkResult["failed"] = [];
-    const fail = (item: ConfirmItem, e: unknown) => failed.push({ item, message: commandErrorMessage(e, "판단을 저장하지 못했습니다.") });
+    const failedRows: BulkResult["failed"] = [];
+    const fail = (item: ConfirmItem, e: unknown) => failedRows.push({ item, message: commandErrorMessage(e, "판단을 저장하지 못했습니다.") });
     try {
-      const plain: ConfirmItem[] = [];
-      const lookups = batch.filter(item => item.fromTags);
+      const plain: { item: ConfirmItem; decision: "accepted" | "rejected" }[] = [];
+      const lookups = accept.filter(item => item.fromTags);
       const outside = new Set<string>();
       for (let start = 0; start < lookups.length; start += LOOKUP_AT_ONCE) {
         await Promise.all(lookups.slice(start, start + LOOKUP_AT_ONCE).map(async item => {
@@ -213,24 +264,25 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
           } catch (e) { fail(item, e); }
         }));
       }
-      const lookedUpFailed = new Set(failed.map(row => row.item.key));
-      for (const item of batch) {
+      const lookedUpFailed = new Set(failedRows.map(row => row.item.key));
+      for (const item of accept) {
         if (lookedUpFailed.has(item.key)) continue;
-        if (!outside.has(item.key)) { plain.push(item); continue; }
+        if (!outside.has(item.key)) { plain.push({ item, decision: "accepted" }); continue; }
         try {
           await decisions.move(item.targetId, item.targetFingerprint, [item.assetId], true);
           done.push({ item, decision: "accepted", moved: true });
         } catch (e) { fail(item, e); }
       }
+      for (const item of reject) plain.push({ item, decision: "rejected" });
       for (let start = 0; start < plain.length; start += BATCH_MAX) {
         const chunk = plain.slice(start, start + BATCH_MAX);
         try {
-          await decisions.decideBatch(chunk.map(item => decisionRequest(item, "accepted")));
-          done.push(...chunk.map(item => ({ item, decision: "accepted" as const, moved: false })));
+          await decisions.decideBatch(chunk.map(row => decisionRequest(row.item, row.decision)));
+          done.push(...chunk.map(row => ({ item: row.item, decision: row.decision, moved: false })));
         } catch {
-          for (const item of chunk) {
-            try { await decisions.decide(decisionRequest(item, "accepted")); done.push({ item, decision: "accepted", moved: false }); }
-            catch (e) { fail(item, e); }
+          for (const row of chunk) {
+            try { await decisions.decide(decisionRequest(row.item, row.decision)); done.push({ item: row.item, decision: row.decision, moved: false }); }
+            catch (e) { fail(row.item, e); }
           }
         }
       }
@@ -239,24 +291,26 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
       const gone = new Set(done.map(judgment => judgment.item.key));
       if (gone.size > 0) {
         setItems(previous => previous.filter(row => !gone.has(row.key)));
+        setMarked(previous => { const rest = new Set(previous); for (const key of gone) rest.delete(key); return rest; });
         setLast(null);
         onChanged?.();
       }
-      setBulkResult({ done: done.length, failed });
+      setBulkResult({ accepted: done.filter(j => j.decision === "accepted").length, rejected: done.filter(j => j.decision === "rejected").length, failed: failedRows });
       setBulkAsk(null);
       pending.current = false;
       setBulkRunning(false);
       setBusy(false);
     }
   }
-  function skip() {
-    if (!current || busy) return;
-    setDecisionError(null);
-    setSkipped(previous => new Set(previous).add(current.key));
+  function askBulk() {
+    if (pending.current || eligible.length === 0) return;
+    setBulkAsk({ accept: eligible.filter(item => !marked.has(item.key)), reject: markedShown, single: singleCount });
   }
-  function jumpTo(item: ConfirmItem) {
-    if (busy || item.key === current?.key) return;
-    setItems(previous => [item, ...previous.filter(row => row.key !== item.key)]);
+  /** One at a time: on to the next image without deciding this one. */
+  function skip() {
+    if (!current || busy || !next) return;
+    setDecisionError(null);
+    setZoomKey(next.key);
   }
   const retry = () => setReload(value => value + 1);
 
@@ -265,10 +319,14 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const scopeName = [scope?.series?.name, scope?.target?.name].filter(Boolean).join(" › ");
   const tabs: (ConfirmKind | "all")[] = ["all", ...CONFIRM_KINDS.filter(candidate => counts[candidate] > 0)];
   const allFailed = failed.length === CONFIRM_KINDS.length;
+  const markedCount = markedShown.length;
+  const applyLabel = markedCount === 0 ? "모두 맞음" : restCount === 0 ? `아님 ${markedCount.toLocaleString()}장 처리` : `아님 ${markedCount.toLocaleString()}장 빼고 나머지 맞음`;
+  const intro = !gridSeen.current;
+  useEffect(() => { if (!zooming && ordered.length > 0) gridSeen.current = true; }, [zooming, ordered.length]);
 
   return <Dialog open variant="fullscreen" title="확인" onClose={onClose}
     onKeyDown={event => {
-      if (bulkAsk) return;
+      if (bulkAsk || !zooming) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
       const key = event.key.toLowerCase();
       if (key === "arrowright" || key === "d") { event.preventDefault(); void judge("accepted"); }
@@ -282,12 +340,11 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
         <h2>확인</h2>
         {scopeName && <small className="confirm-list__scope">{scopeName}</small>}
         <div className="confirm-list__tabs" role="tablist" aria-label="확인 종류">
-          {tabs.map(tab => <button key={tab} type="button" role="tab" aria-selected={activeKind === tab} disabled={busy} onClick={() => setKind(tab)}>
+          {tabs.map(tab => <button key={tab} type="button" role="tab" aria-selected={activeKind === tab} disabled={busy} onClick={() => chooseKind(tab)}>
             {tab === "all" ? "전체" : confirmKindLabel[tab]} <span className="numeric">{counts[tab === "all" ? "total" : tab].toLocaleString()}</span>
           </button>)}
         </div>
         <span className="confirm-list__remaining" aria-live="polite">남은 항목 <b className="numeric">{(activeKind === "all" ? counts.total : counts[activeKind]).toLocaleString()}</b></span>
-        <Button size="sm" variant="quiet" disabled={busy || shown.length === 0} onClick={() => setBulkAsk(shown)}>모두 맞음</Button>
         <Button size="icon" variant="ghost" aria-label="확인 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </header>
       <BusyLabel busy={loading && !loaded}><p className="character-message confirm-list__notice" role="status">불러오는 중…</p></BusyLabel>
@@ -295,7 +352,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
         {failed.map(item => confirmKindLabel[item]).join(" · ")} 목록을 읽지 못했습니다. <Button size="sm" onClick={retry}>다시 시도</Button>
       </p>}
       {bulkResult && <p className="character-message confirm-list__notice" role="status">
-        {bulkResult.done > 0 && `${bulkResult.done.toLocaleString()}장을 맞음으로 처리했습니다. 한 번에 되돌릴 수는 없습니다.`}
+        {bulkResultText(bulkResult)}
         {bulkResult.failed.length > 0 && ` ${bulkResult.failed.length.toLocaleString()}장은 저장하지 못해 목록에 남겼습니다: ${failedNames(bulkResult.failed)}. ${bulkResult.failed[0]!.message}`}
       </p>}
       {allFailed
@@ -305,6 +362,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
             <div className="confirm-list__body">
               <ConfirmImage key={current.key} item={current} privacyMode={privacyMode} />
               <aside className="confirm-list__panel" aria-label="확인 정보">
+                <Button className="confirm-list__back" size="sm" variant="ghost" disabled={busy} onClick={() => setZoomKey(null)}><ArrowUturnLeftIcon aria-hidden="true" />목록으로 <kbd>Esc</kbd></Button>
                 <div className="confirm-list__badges">{reasonBadges(current).map(text => <Badge key={text}>{text}</Badge>)}</div>
                 <h3 className="confirm-list__character">{current.targetName}?</h3>
                 {current.referenceAssetIds.length > 0 && <ul className="confirm-list__references" aria-label={`${current.targetName} 레퍼런스`}>
@@ -318,7 +376,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
                   <Button variant="primary" disabled={busy} onClick={() => void judge("accepted")}>맞음 <kbd>→</kbd><kbd>D</kbd></Button>
                   <Button disabled={busy} onClick={() => void judge("rejected")}>아님 <kbd>←</kbd><kbd>A</kbd></Button>
                   {current.crop && <Button disabled={busy} onClick={() => void judge("accepted_wrong_region")}>맞음 · 위치 틀림 <kbd>W</kbd></Button>}
-                  <Button variant="ghost" disabled={busy} onClick={skip}>건너뛰기 <kbd>↓</kbd><kbd>S</kbd></Button>
+                  <Button variant="ghost" disabled={busy || !next} onClick={skip}>건너뛰기 <kbd>↓</kbd><kbd>S</kbd></Button>
                 </div>
                 <p className="confirm-list__meta">아님 = {current.targetName}에서 빼고 다시 넣지 않음</p>
                 {last && <Button className="confirm-list__undo" size="sm" variant="ghost" disabled={busy} onClick={() => void undo()}>되돌리기: {last.item.targetName} {decisionText(last.decision)} <kbd>Z</kbd></Button>}
@@ -326,20 +384,30 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
               </aside>
             </div>
             <ul className="confirm-list__strip" aria-label="다음 이미지">
-              {shown.slice(0, REFILL_STRIP).map((item, index) => <li key={item.key}>
-                <button type="button" aria-label={`${item.targetName} · ${item.originalName}`} aria-current={index === 0 ? "true" : undefined} disabled={busy} onClick={() => jumpTo(item)}>
+              {Array.from({ length: Math.min(REFILL_STRIP, ordered.length) }, (_, offset) => ordered[(currentIndex + offset) % ordered.length]!).map((item, index) => <li key={item.key}>
+                <button type="button" aria-label={`${item.targetName} · ${item.originalName}`} aria-current={index === 0 ? "true" : undefined} disabled={busy} onClick={() => openZoom(item)}>
                   <AssetImage src={thumbnailUrl(item.assetId)} alt="" className={privacyMode ? "character-private" : undefined} loading="lazy" draggable={false} />
                 </button>
               </li>)}
             </ul>
           </>
-          : loading && !loaded
-            ? null
-            : skipped.size > 0 && items.length > 0
-              ? <EmptyState title="건너뛴 항목만 남았습니다">
-                <Button size="sm" onClick={() => setSkipped(new Set())}>건너뛴 항목 다시 보기</Button>
-                {last && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void undo()}>되돌리기: {last.item.targetName} {decisionText(last.decision)} <kbd>Z</kbd></Button>}
-              </EmptyState>
+          : ordered.length > 0
+            ? <>
+              <div className="confirm-list__marks">
+                <span className="confirm-list__marks-count" aria-live="polite">아님 <b className="numeric">{markedCount.toLocaleString()}</b>장 표시됨</span>
+                <Button size="sm" variant="quiet" disabled={busy || markedCount === 0} onClick={clearMarks}>표시 모두 지우기</Button>
+                {singleCount > 0 && <span className="confirm-list__marks-single">한 장씩 보기 필요 <b className="numeric">{singleCount.toLocaleString()}</b>장</span>}
+              </div>
+              <ConfirmGrid groups={groups} grouped={groups.length > 1} marked={marked} privacyMode={privacyMode} intro={intro} scrollRef={gridScroll} onToggle={toggle} onZoom={openZoom} />
+              <footer className="confirm-list__apply">
+                <span className="confirm-list__apply-sum">맞음 <b className="numeric">{restCount.toLocaleString()}</b>장 · 아님 <b className="numeric">{markedCount.toLocaleString()}</b>장</span>
+                {decisionError && <span className="character-message" role="alert">{decisionError}</span>}
+                {last && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void undo()}>되돌리기: {last.item.targetName} {decisionText(last.decision)}</Button>}
+                <Button variant="primary" disabled={busy || eligible.length === 0} onClick={askBulk}>{applyLabel}</Button>
+              </footer>
+            </>
+            : loading && !loaded
+              ? null
               : <EmptyState title="확인할 항목이 없습니다">
                 <p className="confirm-list__empty-copy">새 이미지를 분석하면 여기에 나타납니다.</p>
                 {last && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void undo()}>되돌리기: {last.item.targetName} {decisionText(last.decision)} <kbd>Z</kbd></Button>}
@@ -347,13 +415,17 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
                 <Button size="sm" onClick={retry}>새로고침</Button>
               </EmptyState>}
     </section>
-    {bulkAsk && <Dialog open title="모두 맞음" onClose={() => { if (!bulkRunning) setBulkAsk(null); }}>
+    {bulkAsk && <Dialog open title={applyLabel} onClose={() => { if (!bulkRunning) setBulkAsk(null); }}>
       <div className="confirm-list__bulk">
-        <p>{bulkAsk.length.toLocaleString()}장을 모두 맞음으로 처리할까요?</p>
+        <p>{bulkAsk.reject.length === 0
+          ? `${bulkAsk.accept.length.toLocaleString()}장을 모두 맞음으로 처리할까요?`
+          : `맞음 ${bulkAsk.accept.length.toLocaleString()}장, 아님 ${bulkAsk.reject.length.toLocaleString()}장을 저장할까요?`}</p>
+        {bulkAsk.single > 0 && <p className="confirm-list__meta">한 장씩 보기 필요 {bulkAsk.single.toLocaleString()}장은 그대로 둡니다.</p>}
+        <p className="confirm-list__meta">한 번에 되돌릴 수는 없습니다.</p>
         <div className="ui-dialog__actions">
           <Button disabled={bulkRunning} onClick={() => setBulkAsk(null)}>취소</Button>
-          <Button variant="primary" disabled={bulkRunning} onClick={() => void acceptAll(bulkAsk)}>
-            <BusyLabel busy={bulkRunning} idle="모두 맞음" delay={400}>처리 중…</BusyLabel>
+          <Button variant="primary" disabled={bulkRunning} onClick={() => void applyBulk(bulkAsk)}>
+            <BusyLabel busy={bulkRunning} idle="적용" delay={400}>처리 중…</BusyLabel>
           </Button>
         </div>
       </div>
@@ -361,19 +433,17 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   </Dialog>;
 }
 
+function bulkResultText({ accepted, rejected }: BulkResult): string {
+  if (accepted === 0 && rejected === 0) return "";
+  const stored = rejected === 0 ? `${accepted.toLocaleString()}장을 맞음으로 처리했습니다.`
+    : accepted === 0 ? `${rejected.toLocaleString()}장을 아님으로 처리했습니다.`
+      : `맞음 ${accepted.toLocaleString()}장, 아님 ${rejected.toLocaleString()}장을 처리했습니다.`;
+  return `${stored} 한 번에 되돌릴 수는 없습니다.`;
+}
+
 function failedNames(failed: BulkResult["failed"]): string {
   const names = failed.slice(0, 3).map(({ item }) => `${item.targetName} · ${item.originalName}`).join(", ");
   return failed.length > 3 ? `${names} 외 ${(failed.length - 3).toLocaleString()}장` : names;
-}
-
-/** Why the image is listed, in plain words: its kind, any other source that brought it up, and 확실/불확실. */
-export function reasonBadges(item: ConfirmItem): string[] {
-  const badges = [confirmKindLabel[item.kind]];
-  if (item.kind === "recheck" && item.recognition && !item.recognition.doubtful) badges.push(confirmKindLabel.recognition);
-  if (item.kind !== "tag" && item.tags && item.tags.reason !== "veto") badges.push(confirmKindLabel.tag);
-  // 확실/불확실 is how firmly the tags read the name; a doubted placement says why in its note instead.
-  if (item.tags && item.tags.reason === "recommendation") badges.push(`자동 태그 ${item.tags.sure ? "확실" : "불확실"}`);
-  return badges;
 }
 
 function reasonNote(item: ConfirmItem): string | null {
