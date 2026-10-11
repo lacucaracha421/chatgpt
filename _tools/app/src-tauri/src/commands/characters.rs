@@ -1305,3 +1305,33 @@ pub async fn unregister_character_series(
         .map_err(|_| super::background_task_error())?
         .map_err(Into::into)
 }
+
+/// "하위 폴더를 그룹으로 정리": what the cleanup would do (read-only).
+#[tauri::command]
+pub async fn character_subfolder_cleanup_plan(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_subfolder_cleanup::CleanupPlan, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.character_subfolder_cleanup_plan(&series_id)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+/// Runs the cleanup in one transaction; any refusal or failure changes nothing.
+#[tauri::command]
+pub async fn apply_character_subfolder_cleanup(
+    request: crate::library::character_subfolder_cleanup::CleanupRequest,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_subfolder_cleanup::CleanupResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.apply_character_subfolder_cleanup(request)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}

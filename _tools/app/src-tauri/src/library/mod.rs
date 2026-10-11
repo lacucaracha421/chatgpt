@@ -79,6 +79,7 @@ pub mod character_scan;
 mod character_scope;
 pub mod character_series_move;
 pub mod character_series_unregister;
+pub mod character_subfolder_cleanup;
 mod character_shadow;
 pub mod character_shadow_backfill;
 pub mod character_shadow_review;

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     character_autotag,
@@ -24,7 +24,7 @@ use super::{
 /// Only a create introduces the Classification, so only a create omits the expectation;
 /// every other structural command presents the revision the queue implies.
 fn enqueue_structural(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     command_type: &str,
     classification_id: &str,
     fields: serde_json::Map<String, serde_json::Value>,
@@ -266,6 +266,16 @@ impl Library {
     pub fn delete_classification(&self, id: &str) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        Self::delete_classification_in(&transaction, id)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// [`Self::delete_classification`] inside the caller's transaction.
+    pub(super) fn delete_classification_in(
+        transaction: &Connection,
+        id: &str,
+    ) -> Result<(), LibraryError> {
         let entry =
             find_classification(&transaction, id)?.ok_or(LibraryError::ClassificationNotFound)?;
         if classification_has_role(&transaction, id, "originals")? {
@@ -311,7 +321,6 @@ impl Library {
             id,
             serde_json::Map::new(),
         )?;
-        transaction.commit()?;
         Ok(())
     }
 
@@ -447,7 +456,21 @@ impl Library {
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let asset_ids = validated_asset_ids(&transaction, asset_ids)?;
+        Self::change_asset_classifications_in(&transaction, asset_ids, add_ids, remove_ids)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// [`Self::change_asset_classifications`] inside the caller's transaction. Returns how
+    /// many assets actually changed (an asset already in the wanted state is skipped).
+    pub(super) fn change_asset_classifications_in(
+        transaction: &Connection,
+        asset_ids: &[String],
+        add_ids: &[String],
+        remove_ids: &[String],
+    ) -> Result<usize, LibraryError> {
+        let mut changed = 0usize;
+        let asset_ids = validated_asset_ids(transaction, asset_ids)?;
         let add_ids: BTreeSet<_> = add_ids.iter().map(String::as_str).collect();
         let remove_ids: BTreeSet<_> = remove_ids.iter().map(String::as_str).collect();
         for classification_id in add_ids.iter().chain(remove_ids.iter()) {
@@ -476,6 +499,7 @@ impl Library {
             if before == after {
                 continue;
             }
+            changed += 1;
             if managed {
                 // The authority cannot represent more than one Classification per Asset,
                 // so a patch that would leave several is refused *before* committing
@@ -497,8 +521,7 @@ impl Library {
             // locally — the case that most needs them fresh.
             character_autotag::enqueue(&transaction,asset_id,character_autotag::Cause::Classification)?;
         }
-        transaction.commit()?;
-        Ok(())
+        Ok(changed)
     }
 }
 

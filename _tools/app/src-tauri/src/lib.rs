@@ -497,6 +497,8 @@ pub fn run() {
             commands::characters::promote_character_extras,
             commands::characters::character_series_unregister_preview,
             commands::characters::unregister_character_series,
+            commands::characters::character_subfolder_cleanup_plan,
+            commands::characters::apply_character_subfolder_cleanup,
             commands::characters::character_sidebar_counts,
             commands::characters::save_character_group,
             commands::characters::character_conversion_preview,

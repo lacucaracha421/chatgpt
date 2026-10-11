@@ -172,7 +172,32 @@ impl Library {
     pub fn unregister_character_series(&self, series_id: &str) -> Result<SeriesUnregisterResult> {
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Plan { preview, moving } = plan(&tx, series_id)?;
+        let (result, moving) = Self::unregister_in(&tx, series_id)?;
+        tx.commit()?;
+        drop(connection);
+        self.cancel_scans_of(&moving);
+        Ok(result)
+    }
+
+    /// Stop only an obsolete explicit scan of a moved character, not the native queue.
+    pub(super) fn cancel_scans_of(&self, moved_targets: &[String]) {
+        if let Some(scan) = self.character_scan_status() {
+            if moved_targets.contains(&scan.target_id)
+                && matches!(scan.state.as_str(), "running" | "cancelling")
+            {
+                let _ = self.cancel_character_scan(&scan.id);
+            }
+        }
+    }
+
+    /// The body of [`Self::unregister_character_series`] inside the caller's transaction.
+    /// Returns the result and the moved targets, whose obsolete scans the caller stops after
+    /// the commit.
+    pub(super) fn unregister_in(
+        tx: &Connection,
+        series_id: &str,
+    ) -> Result<(SeriesUnregisterResult, Vec<String>)> {
+        let Plan { preview, moving } = plan(tx, series_id)?;
         if let Some(refusal) = preview.refusal {
             return Err(Error::InvalidMessage(refusal));
         }
@@ -294,22 +319,15 @@ impl Library {
             "DELETE FROM character_series WHERE classification_id=?1",
             [series_id],
         )?;
-        tx.commit()?;
-        drop(connection);
-        // Stop only an obsolete explicit scan of a moved character, not the native queue.
-        if let Some(scan) = self.character_scan_status() {
-            if moving.contains(&scan.target_id)
-                && matches!(scan.state.as_str(), "running" | "cancelling")
-            {
-                let _ = self.cancel_character_scan(&scan.id);
-            }
-        }
-        Ok(SeriesUnregisterResult {
-            series_id: series_id.to_owned(),
-            destination_id: preview.destination_id,
-            moved_character_count: moved_characters,
-            moved_group_count: preview.group_count,
-        })
+        Ok((
+            SeriesUnregisterResult {
+                series_id: series_id.to_owned(),
+                destination_id: preview.destination_id,
+                moved_character_count: moved_characters,
+                moved_group_count: preview.group_count,
+            },
+            moving,
+        ))
     }
 }
 
