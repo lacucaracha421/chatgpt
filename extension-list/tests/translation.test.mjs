@@ -4,6 +4,8 @@ import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import {JSDOM} from '../../_tools/app/node_modules/jsdom/lib/api.js';
 const service = await readFile(new URL('../src/translate-service.js', import.meta.url), 'utf8');
+const coreSources = await Promise.all(['korean-rules', 'korean', 'terms', 'deadline'].map(name => readFile(new URL(`../src/translation/${name}.js`, import.meta.url), 'utf8')));
+const ownSender = {id:'fixture-extension',url:'chrome-extension://fixture-extension/options/options.html'};
 const content = await readFile(new URL('../src/x-translate.js', import.meta.url), 'utf8');
 function fakeTimers(w) {
   let now = 0, nextId = 0;
@@ -50,15 +52,16 @@ function translationWindow(html, handleMessage) {
 function fixture(initial={}, fetcher) {
   const memory = structuredClone(initial), calls = [], gets = [], sets = [];
   const context = vm.createContext({ AbortController, setTimeout, clearTimeout,
-    chrome:{storage:{local:{async get(keys){gets.push(keys); return structuredClone(memory);},async set(v){sets.push(Object.keys(v)); Object.assign(memory,structuredClone(v));},async remove(keys){keys.forEach(k=>delete memory[k]);}}}},
+    chrome:{runtime:{id:ownSender.id},storage:{local:{async get(keys){gets.push(keys); return structuredClone(memory);},async set(v){sets.push(Object.keys(v)); Object.assign(memory,structuredClone(v));},async remove(keys){keys.forEach(k=>delete memory[k]);}}}},
     fetch:async(url,init)=>{calls.push({url,init}); return fetcher ? fetcher(url,init) : {ok:true,json:async()=>({choices:[{message:{content:'안녕하세요 [[LINK_0]]'}}]})};},
   });
+  for (const source of coreSources) vm.runInContext(source,context);
   vm.runInContext(service,context);
-  return {memory,calls,gets,sets,handle:message=>context.LakomicsTranslation.handle(message)};
+  return {memory,calls,gets,sets,handle:(message,sender=ownSender)=>context.LakomicsTranslation.handle(message,sender)};
 }
-const SHARD='lakomics:translation-cache:v3:';
+const SHARD='lakomics:translation-cache:v4:';
 const shardKeys=memory=>Object.keys(memory).filter(key=>key.startsWith(SHARD));
-const cachedTexts=memory=>shardKeys(memory).flatMap(key=>memory[key].map(([text])=>text));
+const cachedTexts=memory=>shardKeys(memory).flatMap(key=>memory[key].map(([text])=>text.slice(text.indexOf('\n')+1)));
 const legacy = {'xtranslate:gm:oit.settings.v2':{provider:'ollama',openrouterApiKey:'fixture-key',ollamaApiKey:'retired',autoTranslate:true},'xtranslate:gm:oit.cache.v2':{old:'cache'}};
 
 test('migration preserves OpenRouter key and automatic preference, removes retired settings without exposing keys',async()=>{
@@ -134,14 +137,15 @@ test('output without Korean is a silent no-translation result, cached, while unt
 test('single and batch requests time out at 12 and 18 seconds',async()=>{
   const delays=[], memory=structuredClone(legacy);
   const context=vm.createContext({ AbortController, clearTimeout,
-    setTimeout:(callback,delay)=>{ delays.push(delay); return setTimeout(callback,delay>=12000?0:delay); },
+    setTimeout:(callback,delay)=>{ delays.push(delay); return setTimeout(callback,delay===12000||delay===18000?0:delay); },
     chrome:{storage:{local:{async get(){return structuredClone(memory);},async set(v){Object.assign(memory,structuredClone(v));},async remove(){}}}},
     fetch:(url,init)=>new Promise((resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new Error('aborted')))),
   });
+  for (const source of coreSources) vm.runInContext(source,context);
   vm.runInContext(service,context);
   assert.equal((await context.LakomicsTranslation.handle({type:'translation:request',text:'Slow post'})).code,'timeout');
   assert.equal((await context.LakomicsTranslation.handle({type:'translation:request-batch',items:[{id:'1',text:'Slow a'},{id:'2',text:'Slow b'}]})).code,'timeout');
-  assert.deepEqual(delays.filter(delay=>delay>=12000),[12000,12000,18000,18000]);
+  assert.deepEqual(delays.filter(delay=>delay===12000||delay===18000),[12000,12000,18000,18000]);
 });
 
 test('Gemini 3.5 Flash Lite is offered while 3.1 Flash Lite stays the default',async()=>{
@@ -200,17 +204,17 @@ test('placeholder validation accepts reordered links',async()=>{
   assert.equal(result.ok,true); assert.equal(result.text,'안녕 [[LINK_1]] 그리고 [[LINK_0]]');
 });
 
-test('background scheduler allows two translations in flight',async()=>{
+test('background scheduler allows four translations in flight',async()=>{
   let active=0,maxActive=0; const releases=[];
   const f=fixture(legacy,async()=>{
     active+=1; maxActive=Math.max(maxActive,active);
     return new Promise(resolve=>releases.push(()=>{active-=1; resolve({ok:true,json:async()=>({choices:[{message:{content:'번역됨'}}]})});}));
   });
-  const jobs=['One','Two','Three'].map(text=>f.handle({type:'translation:request',text}));
-  await new Promise(resolve=>setTimeout(resolve,20)); assert.equal(maxActive,2);
-  releases.shift()(); await new Promise(resolve=>setTimeout(resolve,20)); assert.equal(maxActive,2);
+  const jobs=['One','Two','Three','Four','Five'].map(text=>f.handle({type:'translation:request',text}));
+  await new Promise(resolve=>setTimeout(resolve,20)); assert.equal(maxActive,4);
+  releases.shift()(); await new Promise(resolve=>setTimeout(resolve,20)); assert.equal(maxActive,4);
   while(releases.length) releases.shift()();
-  await Promise.all(jobs); assert.equal(f.calls.length,3);
+  await Promise.all(jobs); assert.equal(f.calls.length,5);
 });
 
 test('transient server failure retries once before succeeding',async()=>{
@@ -233,7 +237,7 @@ test('language detection trusts explicit tags but skips tiny foreign snippets',(
   w.close();
 });
 
-test('visible tweets use one fast lane request and keep the remainder in a four-item batch',async()=>{
+test('visible tweets use one fast lane request and two-item batches',async()=>{
   const html=Array.from({length:5},(_,i)=>`<div data-testid="tweetText" lang="en">Post number ${i} text</div>`).join('');
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
   const batches=[]; let singles=0;
@@ -245,7 +249,7 @@ test('visible tweets use one fast lane request and keep the remainder in a four-
     else if(message.type==='translation:request-batch'){batches.push(message.items.length); callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`번역 ${item.id}`}))});}
   }},storage:{onChanged:{addListener(){}}}};
   w.eval(content); await clock.advance(120);
-  assert.equal(singles,1); assert.deepEqual(batches,[4]); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
+  assert.equal(singles,1); assert.deepEqual(batches,[2,2]); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
 });
 
 test('rate limit header parsing falls back to the default unless the header states a value',()=>{
@@ -393,10 +397,12 @@ test('re-enabling automatic translation resets failure state and translates once
   assert.equal(requests,1); assert.ok(w.document.querySelector('.lakomics-translation').dataset.error==='true');
   succeed=true;
   const toggle=w.document.getElementById('lakomics-translation-controls').shadowRoot.getElementById('auto');
-  toggle.checked=false; await toggle.onchange(); await clock.advance(600);
+  toggle.checked=false;
+  w.chrome.runtime.sendMessage({type:'translation:update',enabled:false},()=>{}); await clock.advance(600);
   assert.equal(w.document.querySelector('.lakomics-translation'),null);
   assert.equal(enabled,false);
-  toggle.checked=true; await toggle.onchange(); await clock.advance(600);
+  toggle.checked=true;
+  w.chrome.runtime.sendMessage({type:'translation:update',enabled:true},()=>{}); await clock.advance(600);
   assert.equal(requests,2,'re-enabling translates once, not as a retry loop');
   assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'false');
   assert.equal(w.document.querySelector('.lakomics-translation').textContent,'복구 번역'); w.close();
@@ -548,7 +554,7 @@ test('one X tab keeps the fast lane and first batch in flight together',async()=
     else if(message.type==='translation:request-batch'){batchCalls+=1; finish(callback,{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`번역 ${item.id}`}))});}
   }},storage:{onChanged:{addListener(){}}}};
   w.eval(content); await clock.advance(380);
-  assert.equal(singleCalls,1); assert.equal(batchCalls,2); assert.equal(maxActive,2); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,8); w.close();
+  assert.equal(singleCalls,1); assert.equal(batchCalls,4); assert.equal(maxActive,2); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,8); w.close();
 });
 
 test('runtime mounts as soon as body exists without waiting for DOMContentLoaded',()=>{
@@ -574,17 +580,17 @@ test('initial visible tweet scan starts a translation without the 120 ms debounc
 test('first visible tweet uses a single fast lane while the next batch starts concurrently',async()=>{
   const html=Array.from({length:5},(_,i)=>`<div data-testid="tweetText" lang="en">Fast lane post ${i}</div>`).join('');
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
-  let singleCalls=0,batchCalls=0,releaseBatch;
+  let singleCalls=0,batchCalls=0,releaseBatches=[];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:280+i*45,bottom:320+i*45});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){singleCalls+=1; callback({ok:true,text:'가장 먼저 번역'});}
-    else if(message.type==='translation:request-batch'){batchCalls+=1; releaseBatch=()=>callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`배치 ${item.id}`}))});}
+    else if(message.type==='translation:request-batch'){batchCalls+=1; releaseBatches.push(()=>callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`배치 ${item.id}`}))}));}
   }},storage:{onChanged:{addListener(){}}}};
   w.eval(content); await clock.advance(40);
-  assert.equal(singleCalls,1); assert.equal(batchCalls,1); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,1);
-  releaseBatch(); await clock.advance(30); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
+  assert.equal(singleCalls,1); assert.equal(batchCalls,2); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,1);
+  releaseBatches.forEach(finish=>finish()); await clock.advance(30); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
 });
 test('a no-translation result shows no card and is not requested again',async()=>{
   let requests=0;
@@ -627,6 +633,8 @@ test('a slow batch does not hold the other slot: the next group starts as soon a
   // carries the next batch instead of waiting for the slow one.
   assert.equal(singles,1); assert.equal(batches.length,2);
   batches.forEach(release=>release()); await clock.advance(50);
+  assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5);
+  batches.slice(2).forEach(release=>release()); await clock.advance(50);
   assert.equal(w.document.querySelectorAll('.lakomics-translation').length,9); w.close();
 });
 
@@ -662,7 +670,9 @@ test('a slow request shows a quiet pending line that the result replaces, fast a
   w.eval(content); await clock.advance(100);
   assert.equal(fast.nextElementSibling.textContent,'빠른 번역');
   assert.equal(slow.nextElementSibling?.className==='lakomics-translation',false);
-  await clock.advance(200);
+  await clock.advance(299);
+  assert.equal(slow.nextElementSibling?.className==='lakomics-translation',false);
+  await clock.advance(1);
   assert.equal(slow.nextElementSibling.dataset.state,'pending'); assert.equal(slow.nextElementSibling.textContent,'번역 중…');
   release(); await clock.advance(10);
   assert.equal(slow.nextElementSibling.textContent,'느린 번역'); assert.equal(slow.nextElementSibling.dataset.state,undefined);
@@ -756,7 +766,7 @@ test('posts just below the viewport are translated ahead, after the ones on scre
   }},storage:{onChanged:{addListener(){}}}};
   w.eval(content); await clock.advance(200);
   assert.deepEqual(sent,['On screen post','Ahead post']);
-  assert.equal(options.rootMargin,'25% 0px 150% 0px'); w.close();
+  assert.equal(options.rootMargin,`${w.innerHeight*.25}px 0px ${w.innerHeight*3}px 0px`); w.close();
 });
 
 function showMoreWindow(url, html) {
@@ -888,8 +898,8 @@ test('a sub model without its key never hides the main model failure',async()=>{
   assert.equal(f.calls.every(call=>call.url.includes('openrouter')),true);
 });
 
-test('Claude models allow four requests in flight; other models keep two',async()=>{
-  for (const [settings,expected] of [[claudeSettings(),4],[legacy,2]]) {
+test('Claude models allow six requests in flight; OpenRouter allows four',async()=>{
+  for (const [settings,expected] of [[claudeSettings(),6],[legacy,4]]) {
     let active=0,maxActive=0; const releases=[];
     const f=fixture(settings,async()=>{
       active+=1; maxActive=Math.max(maxActive,active);
@@ -903,18 +913,19 @@ test('Claude models allow four requests in flight; other models keep two',async(
   }
 });
 
-test('the old single cache moves into shards once and later wakes read only what they need',async()=>{
+test('the prompt revision discards old caches and later wakes read only requested shards',async()=>{
   const old=Array.from({length:40},(_,i)=>[`old ${i}`,`오래됨 ${i}`]);
-  const f=fixture({...legacy,'lakomics:translation-cache:v2':old});
-  assert.equal((await f.handle({type:'translation:request',text:'old 7'})).text,'오래됨 7');
-  assert.equal(f.calls.length,0);
+  const f=fixture({...legacy,'lakomics:translation-cache:v2':old,'lakomics:translation-cache:v3:0':old},async()=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
+  assert.equal((await f.handle({type:'translation:request',text:'old 7'})).text,'새 번역');
+  assert.equal(f.calls.length,1);
   assert.equal(f.memory['lakomics:translation-cache:v2'],undefined);
-  assert.equal(f.memory['lakomics:translation:storage-v3'],true);
-  assert.deepEqual(cachedTexts(f.memory).sort(),old.map(([text])=>text).sort());
-  assert.equal(shardKeys(f.memory).length>1,true);
+  assert.equal(f.memory['lakomics:translation:storage-v4'],true);
+  assert.equal(f.memory['lakomics:translation-cache:v3:0'],undefined);
+  await new Promise(resolve=>setTimeout(resolve,1700));
+  assert.deepEqual(cachedTexts(f.memory),['old 7']);
   // A restarted worker reads settings and single shards, never the whole storage area.
   const again=fixture(structuredClone(f.memory));
-  assert.equal((await again.handle({type:'translation:request',text:'old 9'})).text,'오래됨 9');
+  assert.equal((await again.handle({type:'translation:request',text:'old 7'})).text,'새 번역');
   assert.equal(again.calls.length,0);
   assert.equal(again.gets.some(keys=>keys===null||keys===undefined),false);
   assert.equal(again.sets.length,0,'unchanged settings are not rewritten');
@@ -939,15 +950,16 @@ test('a full shard evicts its least recently used entry',async()=>{
   const target=shardKeys(probe.memory)[0];
   const same=[]; for(let i=0;same.length<96;i++){
     const text=`post ${i}`;
-    let hash=2166136261; for(let j=0;j<text.length;j++) hash=Math.imul(hash^text.charCodeAt(j),16777619);
+    const key='0\n'+text;
+    let hash=2166136261; for(let j=0;j<key.length;j++) hash=Math.imul(hash^key.charCodeAt(j),16777619);
     if(SHARD+((hash>>>0)%16)===target) same.push(text);
   }
-  const stored=same.slice(0,94).map(text=>[text,`옛 ${text}`]);
-  const f=fixture({...legacy,'lakomics:translation:storage-v3':true,[target]:stored},async()=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
+  const stored=same.slice(0,94).map(text=>['0\n'+text,`옛 ${text}`]);
+  const f=fixture({...legacy,'lakomics:translation:storage-v4':true,[target]:stored},async()=>({ok:true,json:async()=>({choices:[{message:{content:'새 번역'}}]})}));
   assert.equal((await f.handle({type:'translation:request',text:same[0]})).text,`옛 ${same[0]}`);
   assert.equal((await f.handle({type:'translation:request',text:same[94]})).text,'새 번역');
   await new Promise(resolve=>setTimeout(resolve,1700));
-  const texts=f.memory[target].map(([text])=>text);
+  const texts=f.memory[target].map(([text])=>text.slice(text.indexOf('\n')+1));
   assert.equal(texts.length,94); assert.equal(texts.includes(same[0]),true); assert.equal(texts.includes(same[1]),false);
   assert.deepEqual(texts.slice(-2),[same[0],same[94]]);
 });
@@ -1005,11 +1017,19 @@ test('"다시 시도" re-requests a parked failure at once without a reload',asy
   const element=w.document.querySelector('div'), clock=fakeTimers(w);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
+  let retryHandler;
+  const addListener=w.EventTarget.prototype.addEventListener;
+  w.EventTarget.prototype.addEventListener=function(type,handler,...args){
+    if(type==='click' && this.classList?.contains('lakomics-translation-retry')) retryHandler=handler;
+    return addListener.call(this,type,handler,...args);
+  };
   w.eval(content); await clock.advance(600);
   const retry=w.document.querySelector('.lakomics-translation-retry');
   assert.equal(retry.textContent,'다시 시도');
   let bubbled=false; w.document.body.addEventListener('click',()=>{bubbled=true;});
   succeed=true; retry.click(); await clock.advance(400);
+  assert.equal(requests,1,'synthetic clicks must not start API work');
+  retryHandler({isTrusted:true,preventDefault(){},stopPropagation(){}}); await clock.advance(400);
   assert.equal(bubbled,false,'the button never opens the post');
   assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'다시 성공');
   assert.equal(w.document.querySelector('.lakomics-translation-retry'),null); w.close();
@@ -1026,7 +1046,7 @@ test('a reply that never comes frees its slot after the watchdog and retries',as
   }},storage:{onChanged:{addListener(){}}}};
   w.eval(content); await clock.advance(1000);
   assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 중…');
-  await clock.advance(75000);
+  await clock.advance(43000);
   assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 곧 자동 재시도');
   await clock.advance(4500);
   assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'복구됨'); w.close();

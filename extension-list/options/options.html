@@ -43,5 +43,10 @@
     <form id="translation-anthropic-key-form"><input id="translation-anthropic-key" type="password" aria-label="Anthropic API 키" autocomplete="off" placeholder="Anthropic API 키 (Claude 모델용)"><button>키 저장</button></form>
     <button id="translation-clear" type="button">캐시 비우기</button>
   </section>
+  <section id="translation-dictionary-section">
+    <div class="section-head"><label for="translation-dictionary">내 용어 사전</label><output id="translation-dictionary-status" aria-live="polite"></output></div>
+    <p class="hint" id="translation-dictionary-help">한 줄에 원문 = 한국어로 입력하세요. →와 -&gt;도 사용할 수 있습니다. 최대 200개, 원문과 한국어는 각각 80자까지 저장됩니다.</p>
+    <form id="translation-dictionary-form"><textarea id="translation-dictionary" rows="6" aria-describedby="translation-dictionary-help" spellcheck="false" placeholder="りんごジュース = 사과 주스"></textarea><button>사전 저장</button></form>
+  </section>
 </main>
-<script src="../src/classification-tree.js"></script><script src="../src/arc-collector.js"></script><script src="options.js"></script></body></html>
+<script src="../src/classification-tree.js"></script><script src="../src/arc-collector.js"></script><script src="../src/translation/terms.js"></script><script src="options.js"></script></body></html>

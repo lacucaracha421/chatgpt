@@ -1,4 +1,4 @@
-importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translate-service.js", "av-lookup.js");
+importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translation/korean-rules.js", "translation/korean.js", "translation/terms.js", "translation/deadline.js", "translate-service.js", "av-lookup.js");
 
 (() => {
   "use strict";
@@ -50,7 +50,7 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
   }
 
   async function handleMessage(message, sender = {}) {
-    if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message);
+    if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message, sender);
     switch (message?.type) {
       case "pair:review": {
         if (!globalThis.LakomicsListApi.parsePairing(message.value)) return { ok: false, code: "invalid_pairing" };

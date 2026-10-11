@@ -13,3 +13,4 @@
 
 #translation-section>label{display:flex;align-items:center;gap:8px;margin-bottom:12px}#translation-enabled{flex:none;min-height:16px;accent-color:var(--ivory)}#translation-key-form,#translation-anthropic-key-form{margin-bottom:12px}
 .state{display:flex;align-items:center;gap:8px;color:var(--quiet);font-size:12px}.state #state-dot{margin:0}#disconnect.confirm{border-color:#e3b987;color:#e3b987}
+#translation-dictionary-form{align-items:flex-start}#translation-dictionary{flex:1;min-width:0;resize:vertical;padding:7px 10px;font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:3px}#translation-dictionary:focus-visible{outline:2px solid var(--ivory);outline-offset:2px}#translation-dictionary-section .section-head>label{font-weight:600}

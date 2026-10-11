@@ -16,16 +16,19 @@
   const EXPAND_WAIT_MS = 1500;
   // A reply that never comes would hold a request slot (and its "번역 중…" lines) until the
   // page is reloaded; past this the request counts as a transient failure.
-  const SEND_TIMEOUT_MS = 75000;
+  const SEND_TIMEOUT_MS = 45000;
+  const WATCHDOG_MS = 43000; // Worker budget (39.3 s) plus delivery margin.
   // Transient failures retry by themselves this many times, then on viewport re-entry.
   const AUTO_RETRY_DELAYS_MS = [4000, 15000];
   let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true, inFlight = 0;
-  let initialSettings = null;
+  let initialSettings = null, refreshSerial = 0;
   // requested holds elements whose request (or queued fallback) is outstanding, so the
   // other slot never sends the same post twice.
   const pending = new Set(), observed = new Set(), requested = new Set(), fallbacks = [];
   let completed = new WeakMap(), failures = new WeakMap(), outsideViewport = new WeakSet(), intersection, ui;
   const rendered = new Map(), toggles = new Map();
+  const owners = new Map();
+  let scrollDirection = 1, lastScrollY = globalThis.scrollY || 0;
   // Main-tweet articles whose "Show more" was pressed, with the time to stop waiting.
   const expansions = new WeakMap();
 
@@ -34,7 +37,7 @@
       let settled = false;
       const finish = result => { if (!settled) { settled = true; clearTimeout(timer); resolve(result); } };
       const timer = setTimeout(() => finish({ ok: false, code: "worker_failed" }), SEND_TIMEOUT_MS);
-      try { chrome.runtime.sendMessage(message, result => finish(chrome.runtime.lastError ? { ok: false, code: "worker_failed" } : result)); }
+      try { chrome.runtime.sendMessage(message, result => finish(chrome.runtime.lastError ? { ok: false, code: "worker_failed" } : result || { ok: false, code: "worker_failed" })); }
       catch { finish({ ok: false, code: "worker_failed" }); }
     });
   }
@@ -106,13 +109,12 @@
     setTimeout(() => scan(), EXPAND_WAIT_MS + 20);
     return true;
   }
-  // Posts up to 1.5 screens below (and a quarter screen above) are translated ahead
-  // while the slots are free, so they are usually ready on arrival; posts on screen
-  // still come first because work is ordered by distance from the viewport centre.
-  const AHEAD_SCREENS = 1.5, BEHIND_SCREENS = 0.25;
+  // Prefetch three screens in the scroll direction, keeping a small margin behind.
+  // On-screen posts always win, ordered by distance from the viewport centre.
+  const AHEAD_SCREENS = 3, BEHIND_SCREENS = 0.25;
   function near(element) {
     const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && rect.bottom > -innerHeight * BEHIND_SCREENS && rect.top < innerHeight * (1 + AHEAD_SCREENS);
+    return rect.width > 0 && rect.height > 0 && rect.bottom > -innerHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS) && rect.top < innerHeight * (1 + (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS));
   }
   function visible(element) {
     const rect = element.getBoundingClientRect();
@@ -138,7 +140,7 @@
     return theme;
   }
   const currentTheme = () => lastTheme ?? applyTheme();
-  const PENDING_DELAY_MS = 250, COLLAPSE_MIN_HEIGHT = 44;
+  const PENDING_DELAY_MS = 400, COLLAPSE_MIN_HEIGHT = 44;
   function removeResult(element) {
     rendered.get(element)?.remove();
     rendered.delete(element);
@@ -148,9 +150,10 @@
   }
   // A quiet "번역 중…" line appears only when a request outlasts a short delay, so fast
   // answers never flash; the result later replaces it in place.
-  function showPending(element) {
+  function showPending(candidate, requestEpoch) {
+    const element = candidate.element;
     setTimeout(() => {
-      if (!requested.has(element) || !element.isConnected) return;
+      if (owners.get(element) !== candidate || !current(candidate, requestEpoch)) return;
       const card = rendered.get(element);
       if (card && card.dataset.error !== "true") return;
       removeResult(element);
@@ -186,6 +189,7 @@
     button.textContent = "다시 시도";
     button.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation();
+      if (event.isTrusted !== true) return;
       if (!enabled || !hasApiKey || blocked) return;
       failures.delete(element); completed.delete(element); removeResult(element);
       pending.add(element); fastLanePending = true;
@@ -201,9 +205,11 @@
     node.setAttribute("aria-hidden", "true"); node.textContent = text;
     element.after(node); rendered.set(element, node);
   }
-  function render(element, snapshot, text, error = false) {
-    removeResult(element);
-    const node = document.createElement("div");
+  function render(element, snapshot, text, error = false, replaceText = false) {
+    const previous = replaceText && rendered.get(element);
+    if (!previous) removeResult(element);
+    const node = previous || document.createElement("div");
+    if (previous) node.replaceChildren();
     node.className = "lakomics-translation";
     node.dataset.error = String(error);
     node.dataset.theme = currentTheme();
@@ -233,10 +239,10 @@
       anchor.href = url.href; anchor.textContent = link.label; anchor.rel = "noopener noreferrer";
       node.append(anchor);
     }
-    element.after(node);
+    if (!previous) element.after(node);
     rendered.set(element, node);
-    if (!error) collapseOriginal(element, node);
-    else addRetry(element, node);
+    if (!error && !previous) collapseOriginal(element, node);
+    else if (error) addRetry(element, node);
   }
   function failure(code, retryable = false, autoRetry = false) {
     if (code === "http_401" || code === "api_key_missing") return "번역 API 키를 확인하세요";
@@ -253,7 +259,7 @@
     updateControlState();
   }
   function isTransientFailure(code) {
-    return ["timeout", "network_error", "worker_failed"].includes(code) || /^http_5\d\d$/.test(code || "");
+    return ["timeout", "network_error", "worker_failed", "disabled"].includes(code) || /^http_5\d\d$/.test(code || "");
   }
   function failuresFor(element, signature) {
     const record = failures.get(element);
@@ -285,15 +291,19 @@
   }
   function collectBatch(limit = MAX_BATCH_ITEMS, forceSingle = false) {
     const center = innerHeight / 2;
+    const lane = rect => rect.bottom > 0 && rect.top < innerHeight ? 0
+      : (scrollDirection > 0 ? rect.top >= innerHeight : rect.bottom <= 0) ? 1 : 2;
     const elements = [...pending].filter(element => element.isConnected && near(element))
       .sort((a, b) => {
         const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
-        return Math.abs((ar.top + ar.bottom) / 2 - center) - Math.abs((br.top + br.bottom) / 2 - center);
+        return lane(ar) - lane(br) || Math.abs((ar.top + ar.bottom) / 2 - center) - Math.abs((br.top + br.bottom) / 2 - center);
       });
     const batch = [];
-    let chars = 0;
+    let chars = 0, batchLane = null;
     for (const element of elements) {
       if (batch.length >= limit) break;
+      const elementLane = lane(element.getBoundingClientRect());
+      if (batch.length && (elementLane !== batchLane || (batchLane === 0 && batch.length >= 2))) break;
       // Keep an in-flight post queued: if its text changes meanwhile, the stale answer
       // is dropped and the new text is requested once the slot frees.
       if (requested.has(element)) continue;
@@ -315,6 +325,7 @@
         break;
       }
       if (batch.length && chars + snapshot.text.length > MAX_BATCH_CHARS) { pending.add(element); continue; }
+      batchLane = elementLane;
       chars += snapshot.text.length;
       batch.push({ id: String(++requestSerial), element, snapshot, single: forceSingle });
     }
@@ -345,7 +356,10 @@
     setTimeout(() => {
       if (requestEpoch !== epoch || !enabled || !hasApiKey || blocked) return;
       for (const { candidate, record } of retry) {
-        if (current(candidate, requestEpoch) && failures.get(candidate.element) === record) pending.add(candidate.element);
+        if (current(candidate, requestEpoch) && failures.get(candidate.element) === record) {
+          if (near(candidate.element)) pending.add(candidate.element);
+          else removeResult(candidate.element);
+        }
       }
       schedule();
     }, delay);
@@ -355,6 +369,12 @@
   const AUTH_RECHECK_MS = 30000;
   let authRecheckAvailable = true;
   function blockFor(code) {
+    for (const [element, candidate] of owners) {
+      if (current(candidate, epoch)) render(element, candidate.snapshot, failure(code), true);
+    }
+    for (const [element, node] of rendered) {
+      if (node.dataset.state === "pending" && element.isConnected) render(element, source(element), failure(code), true);
+    }
     blocked = true;
     pending.clear();
     setNotice(failure(code), "error");
@@ -371,6 +391,7 @@
   function handleTopFailure(candidates, result, requestEpoch) {
     const code = result?.code;
     if (["http_401", "http_402", "http_403", "api_key_missing"].includes(code)) {
+      for (const candidate of candidates) if (current(candidate, requestEpoch)) render(candidate.element, candidate.snapshot, failure(code), true);
       blockFor(code);
       return "blocked";
     }
@@ -417,10 +438,10 @@
   }
   function handleItem(candidate, item, requestEpoch) {
     if (!current(candidate, requestEpoch)) return;
-    if (item?.ok) { accept(candidate, item.text); return; }
+    if (item?.ok && (item.text === null || typeof item.text === "string")) { accept(candidate, item.text); if (item.qualityRetry) queueQuality(candidate, item.text, requestEpoch); return; }
     if (item?.code === "invalid_translation" && !candidate.single) {
       // Re-ask alone in its own slot turn, without holding up other groups.
-      requested.add(candidate.element);
+      claim(candidate, requestEpoch);
       fallbacks.push({ candidate, requestEpoch });
       return;
     }
@@ -428,51 +449,96 @@
   }
   async function requestGroup(batch) {
     if (batch.length === 1 && batch[0].single) {
-      const result = await send({ type: "translation:request", text: batch[0].snapshot.text });
-      return result?.ok ? { ok: true, items: [{ id: batch[0].id, ok: true, text: result.text }] } : result;
+      const result = await send({ type: "translation:request", text: batch[0].snapshot.text, priority: visible(batch[0].element) ? 0 : 1 });
+      return result?.ok ? { ok: true, items: [{ id: batch[0].id, ok: true, text: result.text, qualityRetry: result.qualityRetry }] } : result;
     }
-    return send({ type: "translation:request-batch", items: batch.map(candidate => ({ id: candidate.id, text: candidate.snapshot.text })) });
+    return send({ type: "translation:request-batch", priority: batch.some(candidate => visible(candidate.element)) ? 0 : 1, items: batch.map(candidate => ({ id: candidate.id, text: candidate.snapshot.text })) });
   }
   async function runGroup(batch, requestEpoch) {
     const result = await requestGroup(batch);
-    for (const candidate of batch) requested.delete(candidate.element);
+    batch = batch.filter(candidate => owners.get(candidate.element) === candidate);
+    const items = new Map((Array.isArray(result?.items) ? result.items : []).filter(item => item && typeof item.id === "string").map(item => [item.id, item]));
+    for (const candidate of batch) release(candidate, requestEpoch);
     if (requestEpoch !== epoch || !enabled) return;
     if (!result?.ok) { handleTopFailure(batch, result || { code: "worker_failed" }, requestEpoch); return; }
-    const items = new Map((result.items || []).map(item => [item.id, item]));
     for (const candidate of batch) handleItem(candidate, items.get(candidate.id), requestEpoch);
   }
   async function runFallback({ candidate, requestEpoch }) {
     // A batch item the main model answered badly is asked of the sub model first.
     const result = await send({ type: "translation:request", text: candidate.snapshot.text, fallback: true });
-    requested.delete(candidate.element);
+    if (owners.get(candidate.element) !== candidate) return;
+    release(candidate, requestEpoch);
     if (!current(candidate, requestEpoch)) return;
-    if (result?.ok) accept(candidate, result.text);
+    if (result?.ok && (result.text === null || typeof result.text === "string")) { accept(candidate, result.text); if (result.qualityRetry) queueQuality(candidate, result.text, requestEpoch); }
     else handleTopFailure([candidate], result || { code: "worker_failed" }, requestEpoch);
   }
-  // Two continuous slots: whenever one frees, the next queued fallback or group starts
-  // at once. After new posts come into view, the one nearest the viewport centre goes
-  // alone first so the post being read appears first.
+  function release(candidate, requestEpoch) {
+    if (owners.get(candidate.element) !== candidate) return;
+    owners.delete(candidate.element); requested.delete(candidate.element);
+    clearTimeout(candidate.watchdog);
+    if (requestEpoch === epoch && candidate.element.isConnected && source(candidate.element).signature !== candidate.snapshot.signature) {
+      removeResult(candidate.element);
+      pending.add(candidate.element);
+    }
+  }
+  function claim(candidate, requestEpoch) {
+    owners.set(candidate.element, candidate); requested.add(candidate.element);
+    candidate.startedAt ??= Date.now();
+    candidate.watchdog = setTimeout(() => {
+      if (owners.get(candidate.element) !== candidate) return;
+      release(candidate, requestEpoch);
+      if (current(candidate, requestEpoch)) handleTopFailure([candidate], { code: "timeout" }, requestEpoch);
+      schedule(true);
+    }, Math.max(0, WATCHDOG_MS - (Date.now() - candidate.startedAt)));
+  }
+  const qualityJobs = [];
+  function queueQuality(candidate, text, requestEpoch) {
+    if (typeof text === "string") qualityJobs.push({ candidate, text, requestEpoch });
+  }
+  async function runQuality({ candidate, text, requestEpoch }) {
+    const result = await send({ type: "translation:quality", text: candidate.snapshot.text, previous: text });
+    if (!current(candidate, requestEpoch) || completed.get(candidate.element) !== candidate.snapshot.signature) return;
+    if (result?.ok && typeof result.text === "string" && result.text !== text) render(candidate.element, candidate.snapshot, result.text, false, true);
+  }
   function drain() {
     while (inFlight < maxInFlight && enabled && hasApiKey && !blocked) {
       const requestEpoch = epoch;
-      let work = null;
-      while (!work && fallbacks.length) {
-        const fallback = fallbacks.shift();
-        if (current(fallback.candidate, fallback.requestEpoch)) work = () => runFallback(fallback);
-        else requested.delete(fallback.candidate.element);
-      }
-      if (!work) {
-        let batch = [];
-        if (fastLanePending) { batch = collectBatch(1, true); fastLanePending = false; }
-        if (!batch.length) batch = collectBatch();
-        if (!batch.length) break;
-        for (const candidate of batch) { requested.add(candidate.element); showPending(candidate.element); }
+      let work = null, batch = [];
+      if (fastLanePending) { batch = collectBatch(1, true); fastLanePending = false; }
+      if (!batch.length) batch = collectBatch();
+      if (batch.length) {
+        for (const candidate of batch) { claim(candidate, requestEpoch); showPending(candidate, requestEpoch); }
         work = () => runGroup(batch, requestEpoch);
       }
+      while (!work && fallbacks.length) {
+        const fallback = fallbacks.shift();
+        if (owners.get(fallback.candidate.element) === fallback.candidate && current(fallback.candidate, fallback.requestEpoch) && near(fallback.candidate.element)) {
+          batch = [fallback.candidate]; work = () => runFallback(fallback);
+        } else {
+          const owned = owners.get(fallback.candidate.element) === fallback.candidate;
+          release(fallback.candidate, fallback.requestEpoch);
+          if (owned && current(fallback.candidate, fallback.requestEpoch)) { removeResult(fallback.candidate.element); pending.add(fallback.candidate.element); }
+        }
+      }
+      while (!work && qualityJobs.length) {
+        const job = qualityJobs.shift();
+        if (current(job.candidate, job.requestEpoch) && near(job.candidate.element)) work = () => runQuality(job);
+      }
+      if (!work) break;
       inFlight += 1; running = true; updateControlState();
-      void Promise.resolve().then(work).catch(() => {}).finally(() => {
-        inFlight -= 1; running = inFlight > 0; updateControlState();
-        drain();
+      // Bound the whole slot too: a dead worker or malformed response must not strand it.
+      void new Promise((resolve, reject) => {
+        const remaining = batch.length ? Math.min(...batch.map(candidate => Math.max(0, WATCHDOG_MS - (Date.now() - candidate.startedAt)))) : WATCHDOG_MS;
+        const timeout = setTimeout(() => reject(new Error("Translation slot timed out")), remaining);
+        Promise.resolve().then(work).then(resolve, reject).finally(() => clearTimeout(timeout));
+      }).catch(() => {
+        for (const candidate of batch) {
+          if (owners.get(candidate.element) !== candidate) continue;
+          release(candidate, requestEpoch);
+          if (current(candidate, requestEpoch)) handleTopFailure([candidate], { code: "worker_failed" }, requestEpoch);
+        }
+      }).finally(() => {
+        inFlight -= 1; running = inFlight > 0; updateControlState(); drain();
       });
     }
   }
@@ -489,6 +555,7 @@
     for (const node of record.removedNodes) if (touchesTweetText(node)) return true;
     return false;
   }
+  let viewportState = new WeakMap();
   function scan(immediate = false) {
     for (const element of observed) {
       if (!element.isConnected) {
@@ -505,9 +572,17 @@
         intersection?.observe(element);
       }
       const snapshot = source(element);
+      const onScreen = visible(element), wasOnScreen = viewportState.get(element);
+      viewportState.set(element, onScreen);
+      const previousFailure = failures.get(element);
+      if (onScreen && wasOnScreen === false && previousFailure) {
+        if (isTransientFailure(previousFailure.code)) failures.delete(element);
+        else if (previousFailure.retryOnReentry) { previousFailure.retryOnReentry = false; previousFailure.nextAttemptAt = 0; }
+      }
       // Recycled text is a new job even if its previous translation failed.
       const record = failures.get(element);
-      const changed = Boolean(record && record.signature !== snapshot.signature)
+      const owner = owners.get(element);
+      const changed = Boolean(owner && owner.snapshot.signature !== snapshot.signature) || Boolean(record && record.signature !== snapshot.signature)
         || (completed.has(element) && completed.get(element) !== snapshot.signature);
       if (changed) {
         completed.delete(element);
@@ -524,17 +599,21 @@
   function reset() {
     epoch += 1;
     fastLanePending = true;
-    pending.clear(); requested.clear(); fallbacks.length = 0;
+    pending.clear(); requested.clear(); fallbacks.length = 0; qualityJobs.length = 0;
+    for (const candidate of owners.values()) clearTimeout(candidate.watchdog);
+    owners.clear();
     completed = new WeakMap();
     failures = new WeakMap();
     outsideViewport = new WeakSet();
+    viewportState = new WeakMap();
     for (const element of [...rendered.keys()]) removeResult(element);
   }
   async function refresh() {
+    const serial = ++refreshSerial;
     const prefetched = initialSettings;
     initialSettings = null;
     const settings = prefetched ? await prefetched : await send({ type: "translation:settings" });
-    if (!settings?.ok) return;
+    if (!settings?.ok || serial !== refreshSerial) return;
     reset();
     enabled = settings.enabled;
     hasApiKey = settings.hasApiKey;
@@ -593,7 +672,8 @@
       ui.popover.hidden = !ui.popover.hidden;
       ui.button.setAttribute("aria-expanded", String(!ui.popover.hidden));
     };
-    ui.toggle.onchange = async () => {
+    ui.toggle.onchange = async event => {
+      if (event?.isTrusted !== true) { ui.toggle.checked = enabled; return; }
       const result = await send({ type: "translation:update", enabled: ui.toggle.checked });
       // A successful write refreshes every tab through storage.onChanged.
       if (!result?.ok) {
@@ -601,7 +681,8 @@
         setNotice("번역 설정 저장 실패", "warning");
       }
     };
-    shadow.getElementById("clear").onclick = async () => {
+    shadow.getElementById("clear").onclick = async event => {
+      if (event?.isTrusted !== true) return;
       const result = await send({ type: "translation:clear" });
       if (result?.ok) {
         reset();
@@ -631,7 +712,7 @@
         if (enabled && hasApiKey && !blocked) scan();
       }
     });
-    intersection = new IntersectionObserver(entries => {
+    const onIntersection = entries => {
       for (const entry of entries) {
         if (!entry.isIntersecting) { outsideViewport.add(entry.target); continue; }
         const record = failures.get(entry.target);
@@ -644,7 +725,25 @@
         pending.add(entry.target);
       }
       schedule();
-    }, { rootMargin: `${BEHIND_SCREENS * 100}% 0px ${AHEAD_SCREENS * 100}% 0px` });
+    };
+    function observeWindow() {
+      intersection?.disconnect?.();
+      // Pixel margins track viewport height; IO percentage margins use viewport width.
+      const above = innerHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS);
+      const below = innerHeight * (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS);
+      intersection = new IntersectionObserver(onIntersection, { rootMargin: `${above}px 0px ${below}px 0px` });
+      for (const element of observed) intersection.observe(element);
+    }
+    observeWindow();
+    let scrollTimer = null;
+    globalThis.addEventListener("scroll", () => {
+      const y = globalThis.scrollY || 0, direction = Math.sign(y - lastScrollY);
+      lastScrollY = y;
+      if (direction && direction !== scrollDirection) { scrollDirection = direction; observeWindow(); }
+      if (scrollTimer !== null) return;
+      scrollTimer = setTimeout(() => { scrollTimer = null; scan(true); }, 50);
+    }, { passive: true });
+    globalThis.addEventListener("resize", () => { observeWindow(); scan(); });
     let scanTimer = null;
     new MutationObserver(records => {
       if (!records.some(relevantMutation)) return;

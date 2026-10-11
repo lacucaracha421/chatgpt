@@ -130,6 +130,8 @@
     $("translation-fallback").value = result.fallbackModel || "";
     $("translation-key").placeholder = result.hasOpenRouterKey ? "OpenRouter 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
     $("translation-anthropic-key").placeholder = result.hasAnthropicKey ? "Anthropic 키 저장됨 · 변경할 키 입력" : "Anthropic API 키 (Claude 모델용)";
+    $("translation-dictionary").value = (result.userTerms || []).map(term => `${term.source} = ${term.korean}`).join("\n");
+    $("translation-dictionary-status").textContent = `${(result.userTerms || []).length}개 저장됨`;
   }
   $("translation-model").onchange = async () => {
     const result = await send({ type: "translation:update", model: $("translation-model").value });
@@ -162,6 +164,17 @@
   $("translation-clear").onclick = async () => {
     const result = await send({ type: "translation:clear" });
     $("translation-status").textContent = result?.ok ? "캐시를 비웠습니다" : "캐시 삭제 실패";
+  };
+  $("translation-dictionary-form").onsubmit = async event => {
+    event.preventDefault();
+    const userTerms = LakomicsTranslationCore.parseUserTerms($("translation-dictionary").value);
+    try {
+      const result = await send({ type: "translation:update", userTerms });
+      if (!result?.ok) { $("translation-dictionary-status").textContent = "사전 저장 실패"; return; }
+      const saved = result.userTerms || userTerms;
+      $("translation-dictionary").value = saved.map(term => `${term.source} = ${term.korean}`).join("\n");
+      $("translation-dictionary-status").textContent = `${saved.length}개 저장됨`;
+    } catch { $("translation-dictionary-status").textContent = "사전 저장 실패"; }
   };
   void translationSettings().catch(() => { $("translation-status").textContent = "번역 설정을 불러오지 못했습니다"; });
 })();
