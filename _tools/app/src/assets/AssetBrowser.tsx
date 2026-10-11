@@ -38,9 +38,11 @@ import { SelectionBar } from "./SelectionBar";
 import { thumbnailUrl } from "./mediaUrl";
 import { folderPreviewCache, rememberFolderPreview } from "./folderPreviewCache";
 import { AssetStableImage as StableImage } from "../privacy/AssetImage";
+import { characterPickerSeriesId } from "./characterPickerScope";
+import { characterExtrasApi } from "../characters/extrasApi";
 import { CharacterAssignPicker } from "../characters/CharacterAssignPicker";
 import { moveAssetsToCharacters, type CharacterTarget } from "../characters/api";
-import { characterHubApi, type CharacterGroup, type CharacterHubApi } from "../characters/hubApi";
+import { characterHubApi, type CharacterGroup, type CharacterHubApi, type CharacterSeries } from "../characters/hubApi";
 import { applySelectionGesture, emptySelection, focusAsset, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 import { FolderFilterHelp, FolderShelf } from "./FolderShelf";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
@@ -57,7 +59,7 @@ export function assetQueryBase(view: AssetView, { directOnly, mediaFilter, aspec
 }
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; characterTargets?: CharacterTarget[]; characterGroups?: CharacterGroup[]; onCharactersChanged?: () => void; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders">; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void; /** 내용 검색 검색 해제: back to the view the search was opened from. */ onExitDescriptionSearch?: () => void };
+type Props = { navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; characterTargets?: CharacterTarget[]; characterGroups?: CharacterGroup[]; characterSeries?: CharacterSeries[]; characterExtras?: CharacterTarget[]; onCharactersChanged?: () => void; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders">; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void; /** 내용 검색 검색 해제: back to the view the search was opened from. */ onExitDescriptionSearch?: () => void };
 /** `noMatchQuery`: a 내용 검색 page whose query the "no match" gate turned away (not forced). */
 type PageState = { sort: AssetSort; queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null; totalCount: number | null; noMatchQuery?: string };
 export type AssetNavigationMemory = Map<string, PageState>;
@@ -106,7 +108,7 @@ function useStyleSuggestionAssetIds(enabled: boolean) {
 }
 
 
-export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel, onExitDescriptionSearch }: Props) {
+export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], characterSeries = [], characterExtras = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel, onExitDescriptionSearch }: Props) {
   const { gateway, library } = useLibrary();
   const previewCache = folderPreviewCache(gateway, library?.root);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -154,6 +156,8 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   if (sort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
   useEffect(() => { if (sort !== "random") randomPivotRef.current = null; }, [sort]);
   const plainFolderId = view.kind === "classification" && view.classificationId && !view.characterId && !view.characterGroupId ? view.classificationId : null;
+  const scopeSeriesId = characterPickerSeriesId(view, classifications, characterSeries);
+  const seriesExtras = useMemo(() => scopeSeriesId ? characterExtras.filter(target => target.seriesClassificationId === scopeSeriesId) : undefined, [characterExtras, scopeSeriesId]);
   const folderChildren = useMemo(() => plainFolderId
     ? classifications.filter(entry => entry.parentId === plainFolderId).sort((a, b) => a.name.localeCompare(b.name, "ko"))
     : [], [classifications, plainFolderId]);
@@ -500,7 +504,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     setBatchPending(true); setUndoAssetIds(null); setMessage(null);
     try {
       const moved = await moveAssetsToCharacters(targets.map(target => ({ targetId: target.id, expectedFingerprint: target.fingerprint })), assetIds);
-      const first = targets[0]!;
+      const first = targets[0]!.role === "extras" ? { ...targets[0]!, displayName: "기타" } : targets[0]!;
       markAssignedTiles(assetIds, first.displayName);
       setCharacterNotice({ id: ++characterNoticeIdRef.current, count: moved, target: first });
       if (clearCurrentSelection) {
@@ -703,7 +707,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       <div className="asset-browser__gallery">
         {assetResults}
         {artistScope?.panel}
-        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onFavorite={setSelectionFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
+        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onFavorite={setSelectionFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>
@@ -728,7 +732,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       folders={viewerFolders}
       onMoveToFolder={moveViewerAssetToFolder}
       onSetVideoThumbnail={gateway.setVideoThumbnailFromFrame ? (asset, timeMs) => void setVideoThumbnailFromFrame(asset, timeMs) : undefined}
-      renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={characterTargets} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={(targets) => assignCharactersToAssets([asset.id], targets)} onClose={close} />}
+      renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={(targets) => assignCharactersToAssets([asset.id], targets)} onClose={close} />}
       renderInfo={(asset) => <AssetInfoPanel preview={false} assets={[asset]} classifications={classifications} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />}
       onNearEnd={activePage && tailCursor !== null ? loadNextPage : undefined}
     />

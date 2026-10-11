@@ -1,11 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { StrictMode, useState, type ReactNode } from "react";
+import { StrictMode, useState, type ReactNode, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WindowControls } from "../layout/WindowControls";
 import type { AssetPage, AssetSort, AssetSummary, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
+import * as characterApi from "../characters/api";
+import { characterExtrasApi } from "../characters/extrasApi";
+import { fixtureTarget } from "../characters/characterFixtures";
 import type { CharacterHubApi } from "../characters/hubApi";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "./AssetBrowser";
 import { planFolderPrefetch } from "../app/folderPrefetchPlan";
@@ -1270,9 +1273,9 @@ function withWorkspaceChrome(child: ReactNode) {
   );
 }
 
-type BrowserOptions = { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void; classifications?: ClassificationEntry[]; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders"> };
-function browserElement(gateway: LibraryGateway, { navigationMemory, view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn(), classifications: viewClassifications = classifications, folderShelfApi }: BrowserOptions = {}) {
-  return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser navigationMemory={navigationMemory} galleryLayout="justified" view={view} classifications={viewClassifications} folderShelfApi={folderShelfApi} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
+type BrowserOptions = Pick<ComponentProps<typeof AssetBrowser>, "characterSeries" | "characterExtras" | "characterTargets" | "characterGroups" | "onCharactersChanged"> & { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void; classifications?: ClassificationEntry[]; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders"> };
+function browserElement(gateway: LibraryGateway, { navigationMemory, view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn(), classifications: viewClassifications = classifications, folderShelfApi, ...characterProps }: BrowserOptions = {}) {
+  return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser {...characterProps} navigationMemory={navigationMemory} galleryLayout="justified" view={view} classifications={viewClassifications} folderShelfApi={folderShelfApi} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
 }
 
 function asset(index: number) {
@@ -1742,5 +1745,79 @@ describe("hover prefetch of a plain folder", () => {
     expect(screen.queryByRole("option", { name: "asset-7.png" })).not.toBeInTheDocument();
     expect(pageReads()).toBe(1);
     expect(planFolderPrefetch(to, { current: to, gateway, series: [], classifications: folders, sort: "newest" })).toBeNull();
+  });
+});
+
+
+describe("plain-folder character picker", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const folder = (id: string, parentId: string | null, name = id): ClassificationEntry => ({ id, parentId, name, kind: parentId ? "tag" : "root", iconKey: null, colorKey: null });
+  const folders = [folder("root", null), folder("outer", "root"), folder("series", "outer", "기타 만화"), folder("plain", "series", "야니네코"), folder("outside", "root"), folder("other", "root")];
+  const groupExtras = { ...fixtureTarget("group-extras", "야니네코 기타"), role: "extras" as const, extrasGroupId: "group", references: [] };
+  const seriesExtras = { ...groupExtras, id: "series-extras", extrasGroupId: null };
+  const otherTarget = { ...fixtureTarget("other-character", "다른 캐릭터"), seriesClassificationId: "other" };
+  const characterProps = {
+    characterSeries: ["outer", "series", "other"].map(classificationId => ({ classificationId, heroAssetId: null, autoClassify: true })),
+    characterTargets: [fixtureTarget(), otherTarget],
+    characterExtras: [groupExtras, seriesExtras, { ...groupExtras, id: "other-extras", seriesClassificationId: "other" }],
+    characterGroups: [{ id: "group", name: "야니네코", seriesId: "series", revision: 1, targetIds: [], extrasTargetId: groupExtras.id }],
+  };
+
+  async function openPicker(source: "selection" | "viewer") {
+    const tile = await screen.findByRole("option", { name: "asset-0.png" });
+    if (source === "selection") {
+      fireEvent.click(tile, { ctrlKey: true });
+      fireEvent.click(screen.getByRole("button", { name: "캐릭터 지정" }));
+    } else {
+      fireEvent.doubleClick(tile);
+      const viewer = await screen.findByRole("dialog", { name: "asset-0.png" });
+      fireEvent.click(within(viewer).getByRole("button", { name: "캐릭터" }));
+    }
+    return screen.findByRole("listbox", { name: "캐릭터에 넣기" });
+  }
+
+  it.each(["selection", "viewer"] as const)("scopes the %s picker to the nearest series and assigns the extras-only group's 기타", async source => {
+    vi.spyOn(characterApi, "characterAssignSuggestions").mockResolvedValue([]);
+    const move = vi.spyOn(characterApi, "moveAssetsToCharacters").mockResolvedValue(1);
+    const ensure = vi.spyOn(characterExtrasApi, "ensure");
+    const changed = vi.fn();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    renderBrowser(gateway, { ...characterProps, classifications: folders, view: { kind: "classification", classificationId: "plain" }, onCharactersChanged: changed });
+    const picker = await openPicker(source);
+    expect(within(picker).getByRole("button", { name: "기타 만화 범위 빼기" })).toBeInTheDocument();
+    expect(within(picker).queryByRole("option", { name: /다른 캐릭터/ })).not.toBeInTheDocument();
+    expect(within(picker).getAllByRole("option", { name: /^기타 ·/ })).toHaveLength(2);
+    const group = within(picker).getByRole("group", { name: "야니네코" });
+    fireEvent.click(within(group).getByRole("option", { name: /^기타 ·/ }));
+    await waitFor(() => expect(move).toHaveBeenCalledExactlyOnceWith([{ targetId: groupExtras.id, expectedFingerprint: groupExtras.fingerprint }], ["asset-0"]));
+    expect(ensure).not.toHaveBeenCalled();
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+  });
+
+  it("creates a missing group 기타 through the existing extras API before assigning", async () => {
+    vi.spyOn(characterApi, "characterAssignSuggestions").mockResolvedValue([]);
+    const move = vi.spyOn(characterApi, "moveAssetsToCharacters").mockResolvedValue(1);
+    const ensure = vi.spyOn(characterExtrasApi, "ensure").mockResolvedValue(groupExtras);
+    renderBrowser(createGateway({ items: [asset(0)], nextCursor: null }), { ...characterProps, characterExtras: [], classifications: folders, view: { kind: "classification", classificationId: "plain" } });
+    const picker = await openPicker("selection");
+    fireEvent.click(within(within(picker).getByRole("group", { name: "야니네코" })).getByRole("option", { name: /^기타 ·/ }));
+    await waitFor(() => expect(ensure).toHaveBeenCalledExactlyOnceWith("series", "group"));
+    await waitFor(() => expect(move).toHaveBeenCalledExactlyOnceWith([{ targetId: groupExtras.id, expectedFingerprint: groupExtras.fingerprint }], ["asset-0"]));
+  });
+
+  it.each([
+    ["outside folder", { kind: "classification", classificationId: "outside" } as AssetView, folders],
+    ["non-folder view", { kind: "unsorted" } as AssetView, folders],
+    ["originals ID", { kind: "classification", classificationId: "plain" } as AssetView, [folder("lakomics-originals", null), folder("series", "lakomics-originals"), folder("plain", "series")]],
+    ["originals name", { kind: "classification", classificationId: "plain" } as AssetView, [folder("original-root", null, "오리지널"), folder("series", "original-root"), folder("plain", "series")]],
+  ])("keeps the %s picker global without 기타 rows", async (_name, view, classifications) => {
+    vi.spyOn(characterApi, "characterAssignSuggestions").mockResolvedValue([]);
+    renderBrowser(createGateway({ items: [asset(0)], nextCursor: null }), { ...characterProps, classifications, view });
+    const picker = await openPicker("selection");
+    expect(within(picker).queryByRole("button", { name: /범위 빼기/ })).not.toBeInTheDocument();
+    expect(within(picker).queryByRole("option", { name: /^기타 ·/ })).not.toBeInTheDocument();
+    expect(within(picker).getByRole("option", { name: /다른 캐릭터/ })).toBeInTheDocument();
+    expect(within(picker).getByRole("option", { name: /히나/ })).toBeInTheDocument();
   });
 });

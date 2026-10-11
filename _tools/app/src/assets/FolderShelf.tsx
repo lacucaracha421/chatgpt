@@ -8,6 +8,8 @@ import { ShelfScroller } from "../shared/ui/ShelfScroller";
 
 type FolderShelfProps = {
   appearanceKey?: string;
+  /** False: the cards show at once, without the first-visit rise. */
+  entrance?: boolean;
   label: string;
   cards: ReactNode[];
   accessory?: ReactNode;
@@ -16,9 +18,9 @@ type FolderShelfProps = {
   labelClassName?: string;
 };
 
-export function FolderShelf({ label, cards, accessory, ariaLabel, className, labelClassName, appearanceKey = "classification-folder-shelf" }: FolderShelfProps) {
+export function FolderShelf({ label, cards, accessory, ariaLabel, className, labelClassName, appearanceKey = "classification-folder-shelf", entrance = true }: FolderShelfProps) {
   const host = useRef<HTMLElement>(null);
-  useFirstAppearance(host, cards.length, true, appearanceKey, ".folder-shelf__card");
+  useFirstAppearance(host, cards.length, entrance, appearanceKey, ".folder-shelf__card");
   const shelfClassName = ["folder-shelf", className].filter(Boolean).join(" ");
   const sectionLabelClassName = ["ui-section-label", "folder-shelf__label", labelClassName].filter(Boolean).join(" ");
   const labelRowClassName = ["folder-shelf__label-row", labelClassName].filter(Boolean).join(" ");

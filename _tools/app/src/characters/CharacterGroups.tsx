@@ -143,6 +143,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     {(labelParts.length > 0 || headerAccessory) && <FolderShelf
       label={labelParts.map(([kind, count]) => count > 0 ? `${kind} ${count.toLocaleString()}` : kind).join(" · ")}
       appearanceKey="classification-characters"
+      entrance={false}
       cards={cards}
       accessory={headerAccessory}
       className="series-characters"

@@ -901,6 +901,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     classifications={entries}
                     characterTargets={characterHub.targets}
                     characterGroups={characterHub.groups}
+                    characterSeries={characterHub.series}
+                    characterExtras={characterHub.extras}
                     onCharactersChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}
                     albums={albums}
                     collections={collections}
