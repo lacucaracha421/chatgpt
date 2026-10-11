@@ -1258,6 +1258,61 @@ function renderBrowser(gateway: LibraryGateway, options: BrowserOptions = {}) {
   return render(browserElement(gateway, options));
 }
 
+it.each([false, true])("names view-only empty results and restores assets (ratio only: %s)", async ratioOnly => {
+  const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+  gateway.listAssets = vi.fn(async query => ({ items: query.mediaKind || query.aspectRatio ? [] : [asset(0)], nextCursor: null }));
+  renderBrowser(gateway);
+  await screen.findByRole("option", { name: "asset-0.png" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  if (ratioOnly) {
+    await user.click(within(screen.getByRole("radiogroup", { name: "비율" })).getByRole("radio", { name: "세로형" }));
+  } else {
+    await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
+  }
+  await user.keyboard("{Escape}");
+  const empty = (await screen.findByRole("heading", { name: ratioOnly ? "세로형 항목 없음" : "영상 없음" })).closest("section")!;
+  expect(within(empty).getByText(ratioOnly ? "세로형만 보는 중" : "영상만 보는 중")).toBeVisible();
+  await user.click(within(empty).getByRole("button", { name: "필터 초기화" }));
+  expect(await screen.findByRole("option", { name: "asset-0.png" })).toBeVisible();
+  expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ mediaKind: null, aspectRatio: null }));
+  expect(screen.queryByRole("group", { name: "보기 필터" })).not.toBeInTheDocument();
+});
+
+it("names mixed style-suggestion and view filters with the generic empty title", async () => {
+  renderBrowser(createGateway({ items: [], nextCursor: null }), { view: { kind: "creator", creatorKey: "unknown:none", styleSuggestionsOnly: true } });
+  await screen.findByRole("heading", { name: "추천 있는 자산 없음" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
+  await user.keyboard("{Escape}");
+  const empty = (await screen.findByRole("heading", { name: "조건에 맞는 자산 없음" })).closest("section")!;
+  expect(within(empty).queryByText("영상만 보는 중")).not.toBeInTheDocument();
+  expect(within(empty).getByRole("button", { name: "필터 초기화" })).toBeVisible();
+});
+
+it("keeps the generic empty state and all-reset when a view filter is mixed with auto tags", async () => {
+  const { applyAutoTagFilter, clearAutoTagFilter } = await import("../autotags/autoTagFilter");
+  const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+  gateway.listAssets = vi.fn(async query => ({ items: query.mediaKind || query.autoTags ? [] : [asset(0)], nextCursor: null }));
+  renderBrowser(gateway);
+  await screen.findByRole("option", { name: "asset-0.png" });
+  const user = userEvent.setup();
+  try {
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
+    await user.keyboard("{Escape}");
+    await screen.findByRole("heading", { name: "영상 없음" });
+    act(() => applyAutoTagFilter("cat"));
+    const empty = (await screen.findByRole("heading", { name: "조건에 맞는 자산 없음" })).closest("section")!;
+    expect(within(empty).queryByText("영상만 보는 중")).not.toBeInTheDocument();
+    await user.click(within(empty).getByRole("button", { name: "필터 초기화" }));
+    expect(await screen.findByRole("option", { name: "asset-0.png" })).toBeVisible();
+    expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ mediaKind: null, aspectRatio: null }));
+    expect(vi.mocked(gateway.listAssets).mock.lastCall![0]).not.toHaveProperty("autoTags");
+  } finally { act(() => clearAutoTagFilter()); }
+});
+
 function withWorkspaceChrome(child: ReactNode) {
   return (
     <WorkspaceChromeProvider scope="asset-test">

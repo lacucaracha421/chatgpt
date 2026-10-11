@@ -1,4 +1,5 @@
 import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog";
+import { viewFilterEmptyTitle, viewFilterLabel } from "../shared/viewFilterLabel";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { SeriesShelf } from "./SeriesShelf";
 import { AssetImage } from "../privacy/AssetImage";
@@ -12,7 +13,7 @@ import { cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef,
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
 import { READY_CAP_MS } from "../shared/motion/AreaSwitch";
-import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, PencilIcon, UserGroupIcon, UserIcon, UserMinusIcon } from "@heroicons/react/24/outline";
+import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, FunnelIcon, PencilIcon, UserGroupIcon, UserIcon, UserMinusIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetSummary, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -872,7 +873,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           : picking && <div className="series-gallery-heading"><h3>{picking.kind === "hero" ? "히어로 이미지 선택" : all ? "선택 가능한 전체" : "미분류"}<small>{page.totalCount}</small></h3>{picking.kind !== "hero" && <Button size="sm" variant="ghost" aria-pressed={all} onClick={() => setAll(v => !v)}>{all ? "미분류만 보기" : "전체 보기"}</Button>}</div>}
         {picking && picking.kind !== "hero" && Boolean(page.unavailableReferenceIds?.length) && <p className="character-message" role="status">원본이 없는 이미지는 선택할 수 없습니다. 썸네일은 남아 있을 수 있습니다.</p>}
         {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => { pickerPages.current.clear(); setReload(v => v + 1); }}>다시 시도</Button></p>}
-        {!loading && !error && !page.items.length && filtered && <EmptyState className="series-gallery__empty" title="조건에 맞는 이미지가 없습니다" action={<Button size="sm" variant="ghost" onClick={() => { setMediaFilter("all"); setAspectFilter("all"); }}>필터 초기화</Button>} />}
+        {!loading && !error && !page.items.length && filtered && <EmptyState className="series-gallery__empty" icon={FunnelIcon} title={viewFilterEmptyTitle(mediaFilter, aspectFilter)} hint={`${viewFilterLabel(mediaFilter, aspectFilter)} 보는 중`} action={<Button size="sm" variant="ghost" onClick={() => { setMediaFilter("all"); setAspectFilter("all"); }}>필터 초기화</Button>} />}
         {!loading && !error && !page.items.length && !filtered && <EmptyState className="series-gallery__empty" title={picking ? "선택할 수 있는 이미지가 없습니다" : currentExtras ? "기타에 이미지가 없습니다" : current ? "이 캐릭터의 이미지가 없습니다" : currentGroup ? "이 그룹에 연결된 이미지가 없습니다" : seriesGalleryView === "all" ? "이 시리즈에 이미지가 없습니다" : excludedOnly ? "제외한 이미지가 없습니다" : "미분류 이미지가 없습니다"} />}
       </>} layout={galleryLayout} groupDates={!shelfShown && (sorted === "newest" || sorted === "oldest")} favoritesView={sorted === "favorites"} infoOpen={inspectorOpen} scrubberHidden={viewer !== null} items={page.items} scopeKey={pageScope ?? undefined} navigationScopeKey={pageScope?.replace(/:series-(unclassified|all|excluded):/, ':series:')} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
         captionLabel={picking && picking.kind !== "hero" ? asset => page.unavailableReferenceIds?.includes(asset.id) ? "원본 없음 · 선택 불가" : null : undefined}

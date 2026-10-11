@@ -2,7 +2,7 @@ import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { libraryContextItems } from "./libraryContextItems";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderIcon } from "@heroicons/react/24/outline";
+import { FolderIcon, FunnelIcon } from "@heroicons/react/24/outline";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -10,6 +10,7 @@ import type { AlbumEntry, AssetAspectFilter, AssetCursor, AssetDateBucket, Asset
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
+import { viewFilterEmptyTitle, viewFilterLabel } from "../shared/viewFilterLabel";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
@@ -679,7 +680,9 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       : visibleItems.length === 0 && descriptionQuery !== null
         ? <EmptyState title="검색 결과 없음">{noMatchQuery !== undefined && <Button onClick={() => onViewChange?.({ kind: "description_search", query: noMatchQuery, force: true })}>그래도 가장 비슷한 그림 보기</Button>}</EmptyState>
       : visibleItems.length === 0 && (hasActiveFilters || autoTagFiltered || styleSuggestionsOnly)
-        ? <>{folderHead}<EmptyState title={styleSuggestionsOnly ? "추천 있는 자산 없음" : "조건에 맞는 자산 없음"}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState></>
+        ? hasActiveFilters && !autoTagFiltered && !styleSuggestionsOnly
+          ? <>{folderHead}<EmptyState icon={FunnelIcon} title={viewFilterEmptyTitle(mediaFilter, aspectFilter)} hint={`${viewFilterLabel(mediaFilter, aspectFilter)} 보는 중`} action={<Button onClick={resetFilters}>필터 초기화</Button>} /></>
+          : <>{folderHead}<EmptyState title={styleSuggestionsOnly && !hasActiveFilters && !autoTagFiltered ? "추천 있는 자산 없음" : "조건에 맞는 자산 없음"}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState></>
       : visibleItems.length === 0
         ? directOnlyEmpty
           ? <>{folderHead}<EmptyState title="이 폴더에 바로 들어 있는 이미지가 없습니다">하위 폴더와 캐릭터의 이미지는 전체에서 볼 수 있어요.<Button onClick={() => setDirectOnlyState({ folderId: plainFolderId, value: false })}>전체 보기</Button></EmptyState></>

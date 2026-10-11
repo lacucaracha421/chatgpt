@@ -150,8 +150,48 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   const content = withChrome ? <WorkspaceChromeProvider scope="series"><div className="workspace-navigation"><aside className="workspace-index"><ChromeSettingsDock /></aside>{browser}</div></WorkspaceChromeProvider> : browser;
   const rendered = render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
   const navigateToCharacter = (id?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId: id })}</LibraryProvider>);
-  return {api,browse,confirmSource,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter};
+  const navigateToGroup = (id: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { groupId: id })}</LibraryProvider>);
+  return {api,browse,confirmSource,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter,navigateToGroup};
 }
+
+it.each(["group", "character"])("keeps the active kind chip when opening a %s and resets the empty gallery", async destination => {
+  const mounted = await mount(undefined, false, destination === "group" ? [{ id: "duo", seriesId: "series", name: "선도부", revision: 1, targetIds: ["hina", "kisaki"] }] : []);
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  mounted.browse.mockImplementation(async query => ({ items: query.view?.mediaKind === "videos" ? [] : fixtureAssets.slice(5), nextCursor: null, totalCount: query.view?.mediaKind === "videos" ? 0 : 13 }));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
+  await user.keyboard("{Escape}");
+  await screen.findByRole("heading", { name: "영상 없음" });
+  mounted.navigate.mockImplementation(view => {
+    if (view.characterGroupId) mounted.navigateToGroup(view.characterGroupId);
+    if (view.characterId) mounted.navigateToCharacter(view.characterId);
+  });
+  await user.click(screen.getByRole("button", { name: destination === "group" ? "선도부 그룹 열기" : "히나 열기" }));
+  await waitFor(() => expect(mounted.browse).toHaveBeenLastCalledWith(expect.objectContaining({
+    ...(destination === "group" ? { groupId: "duo" } : { targetId: "hina" }),
+    view: expect.objectContaining({ mediaKind: "videos" }),
+  })));
+  expect(screen.getByRole("group", { name: "보기 필터" })).toHaveTextContent("영상만");
+  const empty = (await screen.findByRole("heading", { name: "영상 없음" })).closest("section")!;
+  expect(within(empty).getByText("영상만 보는 중")).toBeVisible();
+  await user.click(within(empty).getByRole("button", { name: "필터 초기화" }));
+  expect(await screen.findByRole("option", { name: "이미지 5.webp" })).toBeVisible();
+  expect(mounted.browse.mock.lastCall![0]).not.toHaveProperty("view");
+  expect(screen.queryByRole("group", { name: "보기 필터" })).not.toBeInTheDocument();
+});
+
+it("hides the retained view filter chip while picking references", async () => {
+  await mount("hina");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "보기" }));
+  await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("group", { name: "보기 필터" })).toHaveTextContent("영상만");
+  await openReferencePicker(user);
+  await screen.findByRole("button", { name: "완료" });
+  expect(screen.queryByRole("group", { name: "보기 필터" })).not.toBeInTheDocument();
+});
 
 it("shows an inner series after characters and before ordinary folders without an exclusion menu", async () => {
   const {navigate}=await mount(undefined, false, [], undefined, false, { folders: [

@@ -2,7 +2,9 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
-import { useContext, type ReactNode } from "react";
+import { useContext, type MouseEvent, type ReactNode } from "react";
+import { ActiveFilterChip } from "../shared/ui/ActiveFilterChip";
+import { viewFilterLabel } from "../shared/viewFilterLabel";
 import { FolderRegistrationContext } from "../characters/FolderRegistrationContext";
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -66,10 +68,17 @@ export function AssetToolbar({
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const filterable = (rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator") && Boolean(onMediaFilterChange || onAspectFilterChange);
+  const filterLabel = filterable && onMediaFilterChange ? viewFilterLabel(mediaFilter, aspectFilter) : null;
+  const clearViewFilters = (event: MouseEvent<HTMLButtonElement>) => {
+    onMediaFilterChange?.("all");
+    onAspectFilterChange?.("all");
+    event.currentTarget.closest('[role="toolbar"]')?.querySelector<HTMLElement>('.asset-toolbar__quiet-menu')?.focus();
+  };
   // 내용 검색 results keep their relevance order: no sort choice.
   const ranked = rawView.kind === "description_search";
   const location = title ?? (view.kind === "description_search" ? view.query : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : view.kind === "albums" ? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체");
   const sortLabel = ranked ? "관련도순" : ({ newest: "최신순", oldest: "오래된순", favorites: "좋아요순", random: "랜덤" } as const)[sort];
+  const summary = [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterLabel, privacyMode ? "비공개" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · ");
   const viewControls = <GalleryViewMenu scopeControl={scopeControl} scopeHelp={scopeHelp} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} sort={sort} onSortChange={ranked ? undefined : onSortChange} onReshuffle={onReshuffle}
       mediaFilter={filterable ? mediaFilter : undefined} onMediaFilterChange={filterable ? onMediaFilterChange : undefined}
       thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange}
@@ -77,8 +86,8 @@ export function AssetToolbar({
       inspectorOpen={inspectorOpen} inspectorAvailable={inspectorAvailable} onInspectorOpenChange={onInspectorOpenChange} />;
 
   return <>
-    <ViewToolbar title={location} titleContent={titleContent} actions={actions} ariaLabel={ariaLabel} leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}</>} trailingAction={<div className="asset-toolbar__controls">{trailingAccessory}{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
-      summary: [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all") ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all")}` : "", privacyMode ? "비공개" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · "),
+    <ViewToolbar title={location} titleContent={titleContent} actions={actions} ariaLabel={ariaLabel} leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}{filterLabel && <ActiveFilterChip label={filterLabel} onClear={clearViewFilters} />}</>} trailingAction={<div className="asset-toolbar__controls" ref={element => { element?.querySelector(".asset-toolbar__quiet-menu")?.setAttribute("aria-description", summary); }}>{trailingAccessory}{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
+      summary,
       status: privacyMode || nsfwFilter || status ? <>{status}{(privacyMode || nsfwFilter) && <span>{[privacyMode ? "비공개 모드" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · ")}</span>}</> : undefined,
     }} />
   </>;

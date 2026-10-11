@@ -19,6 +19,39 @@ const baseProps = {
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 
+it("names the active filter and clears both choices, returning focus to 보기", async () => {
+  const onMediaFilterChange = vi.fn(), onAspectFilterChange = vi.fn();
+  renderChrome(<AssetToolbar {...baseProps} mediaFilter="videos" onMediaFilterChange={onMediaFilterChange} onAspectFilterChange={onAspectFilterChange} />);
+  const chip = screen.getByRole("group", { name: "보기 필터" });
+  expect(within(chip).getByText("영상만")).toBeVisible();
+  const view = screen.getByRole("button", { name: "보기" });
+  expect(view).toHaveAccessibleDescription("최신순 · 폭포수 · 영상만");
+  await userEvent.click(within(chip).getByRole("button", { name: "필터 초기화" }));
+  expect(onMediaFilterChange).toHaveBeenCalledExactlyOnceWith("all");
+  expect(onAspectFilterChange).toHaveBeenCalledExactlyOnceWith("all");
+  expect(view).toHaveFocus();
+});
+
+it("has no filter chip for all kinds and ratios", () => {
+  renderChrome(<AssetToolbar {...baseProps} />);
+  expect(screen.queryByRole("group", { name: "보기 필터" })).not.toBeInTheDocument();
+});
+
+it.each<AssetView>([
+  { kind: "description_search", query: "snow" },
+  { kind: "collection", collectionId: "work" },
+  { kind: "trash" },
+])("has no active filter chip in $kind", view => {
+  renderChrome(<AssetToolbar {...baseProps} view={view} mediaFilter="videos" aspectFilter="portrait" />);
+  expect(screen.queryByRole("group", { name: "보기 필터" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "보기" })).not.toHaveAccessibleDescription(expect.stringContaining("영상만"));
+});
+
+it("has no chip where browsing handlers are absent", () => {
+  renderChrome(<AssetToolbar {...baseProps} mediaFilter="videos" onMediaFilterChange={undefined} onAspectFilterChange={undefined} />);
+  expect(screen.queryByRole("group", { name: "보기 필터" })).not.toBeInTheDocument();
+});
+
 function renderChrome(ui: React.ReactElement) {
   return render(<WorkspaceChromeProvider scope="assets-test"><aside aria-label="index"><ChromeTarget name="header" /><ChromeTarget name="actions" /><ChromeSettingsDock /></aside>{ui}</WorkspaceChromeProvider>);
 }
