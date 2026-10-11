@@ -73,7 +73,7 @@ it("filters by kind and falls back to all when the chosen kind runs out", async 
   const panel = screen.getByLabelText("확인 정보");
   expect(within(panel).getByText("태그 추천")).toBeInTheDocument();
   expect(within(panel).getByText("자동 태그 확실")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: /맞음/ }));
+  await user.click(screen.getByRole("button", { name: /^맞음/ }));
   await waitFor(() => expect(screen.getByRole("tab", { name: /전체\s*1/ })).toHaveAttribute("aria-selected", "true"));
   expect(screen.queryByRole("tab", { name: /태그 추천/ })).not.toBeInTheDocument();
   expect(within(screen.getByLabelText("확인 정보")).getByText("인식 추천")).toBeInTheDocument();
@@ -119,7 +119,7 @@ it("keeps 맞음 · 위치 틀림 for tag items that carry a person box, and sto
 it("moves a tag-listed image outside the series in when judged 맞음, and cannot undo that", async () => {
   const { decisions } = fixture({ tags: [tagItem("o1")], folders: { o1: ["other"] } });
   expect(await screen.findByText(/폴더 밖/)).toBeInTheDocument();
-  await userEvent.setup().click(screen.getByRole("button", { name: /맞음/ }));
+  await userEvent.setup().click(screen.getByRole("button", { name: /^맞음/ }));
   await waitFor(() => expect(decisions.move).toHaveBeenCalledWith("hina", "fp-hina", ["o1"], true));
   expect(decisions.decide).not.toHaveBeenCalled();
   expect(await screen.findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
@@ -139,7 +139,7 @@ it("skips, offers the skipped items again, and undoes the last judgment", async 
   await user.click(await screen.findByRole("button", { name: /건너뛰기/ }));
   expect(decisions.decide).not.toHaveBeenCalled();
   expect(screen.getByText("c2.png")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: /맞음/ }));
+  await user.click(screen.getByRole("button", { name: /^맞음/ }));
   expect(await screen.findByRole("heading", { name: "건너뛴 항목만 남았습니다" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /되돌리기: 히나 맞음/ }));
   await waitFor(() => expect(decisions.decide).toHaveBeenLastCalledWith(request("hina", "c2", "cleared")));
@@ -149,7 +149,7 @@ it("skips, offers the skipped items again, and undoes the last judgment", async 
 it("keeps the item and shows the native error when a judgment is refused", async () => {
   const { decisions } = fixture({ candidates: [shadowItem("c1", "hina", "히나")] });
   vi.mocked(decisions.decide).mockRejectedValueOnce({ code: "invalid_character_request", message: "시리즈 폴더 안의 지원되는 자산을 선택해 주세요." });
-  await userEvent.setup().click(await screen.findByRole("button", { name: /맞음/ }));
+  await userEvent.setup().click(await screen.findByRole("button", { name: /^맞음/ }));
   expect(await screen.findByRole("alert")).toHaveTextContent("시리즈 폴더 안의 지원되는 자산을 선택해 주세요.");
   expect(screen.getByText("c1.png")).toBeInTheDocument();
 });
@@ -176,4 +176,68 @@ it("lists what could be read and says which list could not", async () => {
 it("shows the empty state when nothing waits", async () => {
   fixture();
   expect(await screen.findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
+});
+
+it("accepts every shown item for its own character only after the in-app confirmation", async () => {
+  const { decisions, onChanged } = fixture({
+    candidates: [shadowItem("c1", "hina", "히나"), shadowItem("c2", "kisaki", "키사키")],
+    tags: [tagItem("t1")],
+  });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "모두 맞음" }));
+  const ask = await screen.findByRole("dialog", { name: "모두 맞음" });
+  expect(within(ask).getByText("3장을 모두 맞음으로 처리할까요?")).toBeInTheDocument();
+  expect(decisions.decideBatch).not.toHaveBeenCalled();
+  await user.click(within(ask).getByRole("button", { name: "취소" }));
+  expect(decisions.decideBatch).not.toHaveBeenCalled();
+  expect(screen.getByRole("tab", { name: /전체\s*3/ })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "모두 맞음" }));
+  await user.click(within(await screen.findByRole("dialog", { name: "모두 맞음" })).getByRole("button", { name: "모두 맞음" }));
+  await waitFor(() => expect(decisions.decideBatch).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(decisions.decideBatch).mock.calls[0]![0]).toEqual(expect.arrayContaining([
+    request("hina", "c1", "accepted"), request("kisaki", "c2", "accepted"), request("hina", "t1", "accepted"),
+  ]));
+  expect(decisions.decide).not.toHaveBeenCalled();
+  expect(await screen.findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
+  expect(screen.getByText(/3장을 맞음으로 처리했습니다\. 한 번에 되돌릴 수는 없습니다/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /되돌리기/ })).not.toBeInTheDocument();
+  expect(onChanged).toHaveBeenCalledTimes(1);
+});
+
+it("accepts only the active kind tab, moving a tag item that sits outside the series", async () => {
+  const { decisions } = fixture({ tags: [tagItem("o1"), tagItem("t2")], candidates: [shadowItem("c1", "hina", "히나")], folders: { o1: ["other"] } });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("tab", { name: /태그 추천\s*2/ }));
+  await user.click(screen.getByRole("button", { name: "모두 맞음" }));
+  await user.click(within(await screen.findByRole("dialog", { name: "모두 맞음" })).getByRole("button", { name: "모두 맞음" }));
+  await waitFor(() => expect(decisions.move).toHaveBeenCalledWith("hina", "fp-hina", ["o1"], true));
+  await waitFor(() => expect(decisions.decideBatch).toHaveBeenCalledWith([request("hina", "t2", "accepted")]));
+  expect(await screen.findByText("c1.png")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: /전체\s*1/ })).toBeInTheDocument();
+});
+
+it("reports the items that failed, keeps them in the list and updates the counts", async () => {
+  const { decisions } = fixture({ candidates: [shadowItem("c1", "hina", "히나"), shadowItem("c2", "kisaki", "키사키"), shadowItem("c3", "hina", "히나")] });
+  vi.mocked(decisions.decideBatch).mockRejectedValueOnce(new Error("batch down"));
+  vi.mocked(decisions.decide).mockImplementation(async request => {
+    if (request.assetIds[0] === "c2") throw { code: "invalid_character_request", message: "시리즈 폴더 안의 지원되는 자산을 선택해 주세요." };
+    return 1;
+  });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "모두 맞음" }));
+  await user.click(within(await screen.findByRole("dialog", { name: "모두 맞음" })).getByRole("button", { name: "모두 맞음" }));
+  const notice = await screen.findByText(/2장을 맞음으로 처리했습니다/);
+  expect(notice).toHaveTextContent("1장은 저장하지 못해 목록에 남겼습니다: 키사키 · c2.png");
+  expect(notice).toHaveTextContent("시리즈 폴더 안의 지원되는 자산을 선택해 주세요.");
+  expect(decisions.decide).toHaveBeenCalledTimes(3);
+  expect(screen.getByRole("heading", { level: 3, name: "키사키?" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: /전체\s*1/ })).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "확인" })).toHaveTextContent(/남은 항목\s*1/);
+});
+
+it("disables 모두 맞음 when nothing is shown", async () => {
+  fixture();
+  await screen.findByRole("heading", { name: "확인할 항목이 없습니다" });
+  expect(screen.getByRole("button", { name: "모두 맞음" })).toBeDisabled();
 });

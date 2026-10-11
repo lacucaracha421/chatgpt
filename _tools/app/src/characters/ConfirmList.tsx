@@ -40,6 +40,10 @@ type Folder = { key: string; state: "inside" | "outside" };
 const decisionRequest = (item: ConfirmItem, decision: DecisionRequestKind): DecisionRequest => ({
   targetId: item.targetId, expectedFingerprint: item.targetFingerprint, assetIds: [item.assetId], decision, baselineFingerprint: null, scanId: null,
 });
+/** One 모두 맞음 run: how many were stored, and which ones could not be (they stay in the list). */
+type BulkResult = { done: number; failed: { item: ConfirmItem; message: string }[] };
+const BATCH_MAX = 200;
+const LOOKUP_AT_ONCE = 8;
 const decisionText = (decision: Decision) => decision === "rejected" ? "아님" : decision === "accepted" ? "맞음" : "맞음 · 위치 틀림";
 
 /**
@@ -57,6 +61,9 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const [kind, setKind] = useState<ConfirmKind | "all">("all");
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(() => new Set());
   const [reload, setReload] = useState(0);
+  const [bulkAsk, setBulkAsk] = useState<ConfirmItem[] | null>(null);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [folder, setFolder] = useState<Folder | null>(null);
   const judged = useRef(new Map<string, Judgment>());
   const pending = useRef(false);
@@ -145,7 +152,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
     if (decision === "accepted_wrong_region" && !current.crop) return;
     const item = current;
     pending.current = true;
-    setBusy(true); setDecisionError(null);
+    setBusy(true); setDecisionError(null); setBulkResult(null);
     try {
       let moved = false;
       if (decision !== "rejected" && item.fromTags) {
@@ -186,6 +193,62 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
       setBusy(false);
     }
   }
+  /** 모두 맞음: every asked item gets what 맞음 gives it. Moves go one by one; the rest are stored in batches, and a refused batch is retried item by item to find which ones failed. */
+  async function acceptAll(batch: readonly ConfirmItem[]) {
+    if (batch.length === 0 || pending.current) return;
+    pending.current = true;
+    setBusy(true); setBulkRunning(true); setDecisionError(null); setBulkResult(null);
+    const done: Judgment[] = [];
+    const failed: BulkResult["failed"] = [];
+    const fail = (item: ConfirmItem, e: unknown) => failed.push({ item, message: commandErrorMessage(e, "판단을 저장하지 못했습니다.") });
+    try {
+      const plain: ConfirmItem[] = [];
+      const lookups = batch.filter(item => item.fromTags);
+      const outside = new Set<string>();
+      for (let start = 0; start < lookups.length; start += LOOKUP_AT_ONCE) {
+        await Promise.all(lookups.slice(start, start + LOOKUP_AT_ONCE).map(async item => {
+          try {
+            const ids = await decisions.classifications(item.assetId);
+            if (!classificationIsInSeries(ids, item.fromTags!.seriesId, classificationsRef.current)) outside.add(item.key);
+          } catch (e) { fail(item, e); }
+        }));
+      }
+      const lookedUpFailed = new Set(failed.map(row => row.item.key));
+      for (const item of batch) {
+        if (lookedUpFailed.has(item.key)) continue;
+        if (!outside.has(item.key)) { plain.push(item); continue; }
+        try {
+          await decisions.move(item.targetId, item.targetFingerprint, [item.assetId], true);
+          done.push({ item, decision: "accepted", moved: true });
+        } catch (e) { fail(item, e); }
+      }
+      for (let start = 0; start < plain.length; start += BATCH_MAX) {
+        const chunk = plain.slice(start, start + BATCH_MAX);
+        try {
+          await decisions.decideBatch(chunk.map(item => decisionRequest(item, "accepted")));
+          done.push(...chunk.map(item => ({ item, decision: "accepted" as const, moved: false })));
+        } catch {
+          for (const item of chunk) {
+            try { await decisions.decide(decisionRequest(item, "accepted")); done.push({ item, decision: "accepted", moved: false }); }
+            catch (e) { fail(item, e); }
+          }
+        }
+      }
+    } finally {
+      for (const judgment of done) judged.current.set(judgment.item.key, judgment);
+      const gone = new Set(done.map(judgment => judgment.item.key));
+      if (gone.size > 0) {
+        setItems(previous => previous.filter(row => !gone.has(row.key)));
+        setLast(null);
+        onChanged?.();
+      }
+      setBulkResult({ done: done.length, failed });
+      setBulkAsk(null);
+      pending.current = false;
+      setBulkRunning(false);
+      setBusy(false);
+    }
+  }
   function skip() {
     if (!current || busy) return;
     setDecisionError(null);
@@ -205,6 +268,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
 
   return <Dialog open variant="fullscreen" title="확인" onClose={onClose}
     onKeyDown={event => {
+      if (bulkAsk) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
       const key = event.key.toLowerCase();
       if (key === "arrowright" || key === "d") { event.preventDefault(); void judge("accepted"); }
@@ -223,11 +287,16 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
           </button>)}
         </div>
         <span className="confirm-list__remaining" aria-live="polite">남은 항목 <b className="numeric">{(activeKind === "all" ? counts.total : counts[activeKind]).toLocaleString()}</b></span>
+        <Button size="sm" variant="quiet" disabled={busy || shown.length === 0} onClick={() => setBulkAsk(shown)}>모두 맞음</Button>
         <Button size="icon" variant="ghost" aria-label="확인 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </header>
       <BusyLabel busy={loading && !loaded}><p className="character-message confirm-list__notice" role="status">불러오는 중…</p></BusyLabel>
       {loaded && failed.length > 0 && !allFailed && <p className="character-message confirm-list__notice" role="status">
         {failed.map(item => confirmKindLabel[item]).join(" · ")} 목록을 읽지 못했습니다. <Button size="sm" onClick={retry}>다시 시도</Button>
+      </p>}
+      {bulkResult && <p className="character-message confirm-list__notice" role="status">
+        {bulkResult.done > 0 && `${bulkResult.done.toLocaleString()}장을 맞음으로 처리했습니다. 한 번에 되돌릴 수는 없습니다.`}
+        {bulkResult.failed.length > 0 && ` ${bulkResult.failed.length.toLocaleString()}장은 저장하지 못해 목록에 남겼습니다: ${failedNames(bulkResult.failed)}. ${bulkResult.failed[0]!.message}`}
       </p>}
       {allFailed
         ? <p className="character-message confirm-list__notice" role="alert">확인 목록을 불러오지 못했습니다. <Button size="sm" onClick={retry}>다시 시도</Button></p>
@@ -278,7 +347,23 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
                 <Button size="sm" onClick={retry}>새로고침</Button>
               </EmptyState>}
     </section>
+    {bulkAsk && <Dialog open title="모두 맞음" onClose={() => { if (!bulkRunning) setBulkAsk(null); }}>
+      <div className="confirm-list__bulk">
+        <p>{bulkAsk.length.toLocaleString()}장을 모두 맞음으로 처리할까요?</p>
+        <div className="ui-dialog__actions">
+          <Button disabled={bulkRunning} onClick={() => setBulkAsk(null)}>취소</Button>
+          <Button variant="primary" disabled={bulkRunning} onClick={() => void acceptAll(bulkAsk)}>
+            <BusyLabel busy={bulkRunning} idle="모두 맞음" delay={400}>처리 중…</BusyLabel>
+          </Button>
+        </div>
+      </div>
+    </Dialog>}
   </Dialog>;
+}
+
+function failedNames(failed: BulkResult["failed"]): string {
+  const names = failed.slice(0, 3).map(({ item }) => `${item.targetName} · ${item.originalName}`).join(", ");
+  return failed.length > 3 ? `${names} 외 ${(failed.length - 3).toLocaleString()}장` : names;
 }
 
 /** Why the image is listed, in plain words: its kind, any other source that brought it up, and 확실/불확실. */
