@@ -411,11 +411,15 @@ fn the_plan_describes_folders_characters_and_proposals_without_writing() {
             .collect::<BTreeSet<_>>(),
         BTreeSet::from([env.folders["Plain"].clone(), env.folders["Solo"].clone()])
     );
-    // Mostly directly in the series: no group.
+    // Images directly in the series do not compete (decision C): its one team-folder image decides.
     let direct = character("Direct");
     assert_eq!(
-        (direct.direct_count, direct.proposed_group_folder_id.clone()),
-        (3, None)
+        (
+            direct.direct_count,
+            direct.proposed_group_folder_id.as_deref(),
+            direct.weak
+        ),
+        (3, Some(env.folders["Plain"].as_str()), true)
     );
     assert!(direct.tie.is_none());
     // Already in a group: it stays there.
@@ -494,7 +498,7 @@ fn apply_groups_lifts_fills_extras_and_removes_the_emptied_folders() {
         ["Alpha", "Mark"]
     );
     assert_eq!(result.characters_moved, 3);
-    assert_eq!(result.characters_grouped, 5);
+    assert_eq!(result.characters_grouped, 6);
     // 8 + 3 + 10 + 4 images left their team folders.
     assert_eq!(result.images_lifted, 25);
     assert_eq!(result.series_extras_count, 1);
@@ -524,7 +528,10 @@ fn apply_groups_lifts_fills_extras_and_removes_the_emptied_folders() {
     );
     assert_eq!(
         groups["Plain"],
-        (names(&["Sia", "Tie", "Weak"]), names(&["p-8", "p-9"]))
+        (
+            names(&["Direct", "Sia", "Tie", "Weak"]),
+            names(&["p-8", "p-9"])
+        )
     );
     // A group with only a 기타, under the name the person gave.
     assert_eq!(
@@ -543,8 +550,8 @@ fn apply_groups_lifts_fills_extras_and_removes_the_emptied_folders() {
         marc.series_classification_id.as_deref(),
         Some(env.series.as_str())
     );
-    // The character without a majority folder is not grouped.
-    assert!(!groups
+    // Mostly directly in the series, yet grouped by its team-folder image.
+    assert!(groups
         .values()
         .any(|(members, _)| members.contains("Direct")));
 

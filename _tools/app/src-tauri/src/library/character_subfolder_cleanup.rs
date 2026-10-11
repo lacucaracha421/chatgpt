@@ -609,7 +609,10 @@ fn counts_for(a: &Analysis, c: &Char) -> (Vec<(usize, usize)>, usize) {
     (counts, direct)
 }
 
-fn choose(counts: &[(usize, usize)], actions: &[CleanupAction], direct: usize) -> Choice {
+/// The team folder holding most of the character's images (user decision C, 2026-10-11): images
+/// directly in the series do not compete, so only a character with no image in any group folder
+/// stays outside a group.
+fn choose(counts: &[(usize, usize)], actions: &[CleanupAction]) -> Choice {
     let candidates = counts
         .iter()
         .filter(|(top, _)| actions[*top] == CleanupAction::Group)
@@ -619,7 +622,7 @@ fn choose(counts: &[(usize, usize)], actions: &[CleanupAction], direct: usize) -
         .map(|(_, count)| *count)
         .max()
         .unwrap_or(0);
-    if best == 0 || direct > best {
+    if best == 0 {
         return Choice::NoGroup;
     }
     let top = candidates
@@ -627,7 +630,7 @@ fn choose(counts: &[(usize, usize)], actions: &[CleanupAction], direct: usize) -
         .filter(|(_, count)| *count == best)
         .map(|(top, _)| *top)
         .collect::<Vec<_>>();
-    if top.len() > 1 || direct == best {
+    if top.len() > 1 {
         return Choice::Tie(top);
     }
     Choice::Folder {
@@ -714,8 +717,8 @@ fn assignments(
             // A character already in a group keeps it unless a choice says otherwise.
             continue;
         }
-        let (counts, direct) = counts_for(a, c);
-        match choose(&counts, actions, direct) {
+        let (counts, _) = counts_for(a, c);
+        match choose(&counts, actions) {
             Choice::NoGroup => {}
             Choice::Folder { top, .. } => {
                 assigned.insert(index, Some(top));
@@ -887,7 +890,7 @@ fn build_plan(a: &Analysis) -> CleanupPlan {
             let (proposed, tie, weak) = if c.group.is_some() {
                 (None, None, false)
             } else {
-                match choose(&counts, &actions, direct) {
+                match choose(&counts, &actions) {
                     Choice::NoGroup => (None, None, false),
                     Choice::Folder { top, weak } => (Some(a.tops[top].id.clone()), None, weak),
                     Choice::Tie(tops) => (
