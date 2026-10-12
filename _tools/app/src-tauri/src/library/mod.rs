@@ -56,6 +56,7 @@ pub(crate) mod catalog_update;
 mod catalog_visibility;
 mod character_augmentation;
 pub mod character_autotag;
+pub mod character_claude;
 pub(crate) mod character_changes;
 pub mod character_conversion;
 pub mod character_extras;
@@ -321,6 +322,7 @@ pub struct Library {
     character_wake: Arc<character_incremental::Wake>,
     character_worker_pool: Arc<character_worker::Pool>,
     character_shadow_backfill: Arc<Mutex<character_shadow_backfill::State>>,
+    character_claude: Arc<Mutex<character_claude::State>>,
     video_similarity_scan: Arc<Mutex<video_similarity::ScanState>>,
     igdb_token_cache: igdb::IgdbTokenCache,
     igdb_request_limiter: igdb::IgdbRequestLimiter,
@@ -452,6 +454,7 @@ impl Library {
             character_incremental: Arc::default(),
             character_wake: Arc::default(),
             character_shadow_backfill: Arc::default(),
+            character_claude: Arc::default(),
             character_worker_pool: Arc::default(),
             video_similarity_scan: Arc::default(),
             igdb_token_cache: igdb::IgdbTokenCache::default(),

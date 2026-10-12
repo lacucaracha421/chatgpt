@@ -530,7 +530,15 @@ impl Library {
                     if crate::workload::is_restricted() {
                         return Ok(false);
                     }
-                    return Ok(self.advance_character_shadow_backfill(&config, stop.clone()));
+                    if self.advance_character_shadow_backfill(&config, stop.clone()) {
+                        return Ok(true);
+                    }
+                    if crate::workload::is_restricted() {
+                        return Ok(false);
+                    }
+                    // Claude's automatic judgment of the open 확인 pairs: last, so it only
+                    // runs when everything else is idle (and never in saver mode).
+                    return Ok(self.advance_character_claude(&stop));
                 };
                 if self.supersede_invalid_reference_refresh_job(&job)? {
                     return Ok(true);

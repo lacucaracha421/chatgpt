@@ -6,7 +6,7 @@ import { displayDate, displayDateTime } from "../shared/displayDate";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { StarIcon, ComputerDesktopIcon, FolderIcon, LinkIcon, GlobeAltIcon, LockClosedIcon, WrenchIcon } from "@heroicons/react/24/outline";
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
@@ -46,6 +46,8 @@ import { updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfi
 import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
 import { useCaseSounds } from "../preferences/caseSoundPreference";
 import { SettingsGroup, SettingsRow } from "../shared/ui/SettingsRow";
+import { ConfirmLine, CredentialRow, InlineEdit } from "./CredentialRow";
+import { ClaudeSettings } from "./ClaudeSettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -533,6 +535,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <SettingsGroup title="캐릭터" help="캐릭터 자동 분류는 새 이미지와 대기 중인 이미지를 처리합니다. 넓은 폴더 인식은 상위 폴더에 바로 저장된 이미지도 비교합니다.">
             {library ? <CharacterAutomationSettings disabled={pending} onBusyChange={() => undefined} /> : <p className="settings-view__status">라이브러리 없음</p>}
           </SettingsGroup>
+          <SettingsGroup title="Claude" help="Claude가 확인 목록의 추천을 레퍼런스와 비교해 확실한 것은 자동으로 넣거나 빼고, 애매한 것만 남깁니다. 이미지와 레퍼런스가 Anthropic으로 전송됩니다.">
+            {library ? <ClaudeSettings disabled={pending} /> : <p className="settings-view__status">라이브러리 없음</p>}
+          </SettingsGroup>
           <SettingsGroup title="자동 태그" help="자동 태그 파일을 가져오면 기존 직접 태그를 건드리지 않고 자동 태그만 갱신합니다.">
             {library ? <AutoTagSettings disabled={pending} /> : <p className="settings-view__status">라이브러리 없음</p>}
           </SettingsGroup>
@@ -652,21 +657,6 @@ function authorityResultText(report: import("../library/types").CollectionAuthor
   // sampled total as an exact count when any list may have been truncated.
   const sampled = [report.works.missing, report.works.unknown, report.works.typeMismatch].some(ids => ids.length >= 20);
   return `차이 ${count.toLocaleString()}건${sampled ? " 이상" : ""}`;
-}
-
-function InlineEdit({ children }: { children: ReactNode }) { return <div className="settings-view__inline-edit">{children}</div>; }
-
-function ConfirmLine({ text, onCancel, onConfirm, busy, confirmLabel = "확인" }: { text: string; onCancel: () => void; onConfirm: () => void; busy: boolean; confirmLabel?: string }) {
-  return <div className="settings-view__confirm-line"><span>{text}</span><span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={busy} onClick={onCancel}>취소</Button><Button size="sm" variant="danger" disabled={busy} onClick={onConfirm}>{confirmLabel}</Button></span></div>;
-}
-
-function CredentialRow({ name, placeholder, help, configured, editing, value, secondValue, busy, onEdit, onChange, onSecondChange, onSave, onCancel, confirmDelete, onDelete, onCancelDelete, onConfirmDelete }: { name: string; placeholder?: string; help?: string; configured: boolean | null; editing: boolean; value: string; secondValue?: string; busy: boolean; onEdit: () => void; onChange: (value: string) => void; onSecondChange?: (value: string) => void; onSave: () => void; onCancel: () => void; confirmDelete: boolean; onDelete: () => void; onCancelDelete: () => void; onConfirmDelete: () => void }) {
-  return <>
-    <SimpleRow name={name} control={!editing ? <span className="settings-view__control-pair"><Badge>{configured ? "설정됨" : "없음"}</Badge><Button size="sm" variant="quiet" aria-label={`${name} ${configured ? "바꾸기" : "입력"}`} onClick={onEdit}>{configured ? "바꾸기" : "입력"}</Button>{configured && <Button size="sm" variant="quiet" aria-label={`${name} 삭제`} className="settings-view__danger-action" onClick={onDelete}>삭제</Button>}</span> : undefined} />
-    {help && <p className="settings-view__status">{help}</p>}
-    {editing && <InlineEdit><TextInput aria-label={`${name} 입력`} placeholder={placeholder} type="password" autoComplete="off" value={value} onChange={event => onChange(event.target.value)} />{secondValue !== undefined && onSecondChange && <TextInput aria-label={`${name} Secret`} type="password" autoComplete="off" value={secondValue} onChange={event => onSecondChange(event.target.value)} />}<Button size="sm" variant="quiet" disabled={busy || !value.trim() || (secondValue !== undefined && !secondValue.trim())} onClick={onSave}>저장</Button><Button size="sm" variant="quiet" onClick={onCancel}>취소</Button></InlineEdit>}
-    {confirmDelete && <ConfirmLine text={`${name} 설정을 삭제할까요?`} onCancel={onCancelDelete} onConfirm={onConfirmDelete} busy={busy} confirmLabel="삭제 확인" />}
-  </>;
 }
 
 function MobilePublishRow({ name, job, action, disabled, onClick }: { name: string; job: PublicationJob | null | undefined; action: string; disabled: boolean; onClick: () => void }) {

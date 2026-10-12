@@ -10,6 +10,8 @@ Updated 2026-10-12 with the user (evening: the collector pass, drag/options and 
 
 Done on 2026-10-12 (details in their sections): `VIEW-FILTER-001` (PC `876210bb`, tablet 0.9.83), `COLLECTOR-IMAGETEXT-001` (all slices, user-confirmed), `UI-REVIEW-20261011` tablet leftovers T10/T12/T13/T17/T18/T19 (`dd843b09`, `6114dad6`; T8/T11/T14 were already fixed), `YT-MOBILE-001` (`ff53b943`, device-confirmed), GPU character scan (`653bd05e`).
 
+0. **`CHAR-CLAUDE-001`** — Claude (Haiku, then Sonnet) decides easy character recommendations automatically on the PC; slice 1 in progress (see [section](#char-claude-001)).
+0b. **`CHAR-REF-OTHER-001`** — "<name> 아님" on a reference person held by another character (see [section](#char-ref-other-001)).
 1. **`CHAR-FOLDER-PERF-001`** — done 2026-10-12 (series opens 0.47–1.79 s → 0.10–0.26 s; entry flicker fixed; user-confirmed).
 2. **`YT-SUB-TIMING-001` round 2** — in progress (uncommitted extension 3.5.18–3.5.22): human-track tails, digit/predicate split guards, word-aligned fragment splits, one display-timing policy with a replay metric, two-line rolling display (default on), profanity kept at original strength and a 말투 setting (default 원문 말투 따라가기). Needs the user's real-video check on the tablet.
 3. **`COLLECTOR-TABLET-001`** — tablet collector (Helium) slices.
@@ -26,6 +28,42 @@ Done on 2026-10-12 (details in their sections): `VIEW-FILTER-001` (PC `876210bb`
 User rule (2026-10-12): a device/native check the user does not mention afterwards counts as passed. The checks listed here on 2026-10-12 (AV interactions, 더보기/휴지통, tablet Collections header and live Kakao, tablet similarity apply, Windows natural-language search, tablet content search after nightly captioning, character candidate-group output) are therefore treated as accepted; reopen one only when the user reports a problem.
 
 - Nothing open (the user confirmed the 2026-10-12 collector features and the character/video work on 2026-10-12).
+
+<a id="char-claude-001"></a>
+## CHAR-CLAUDE-001 — Claude Haiku as a fifth character supervisor (2026-10-12)
+
+Status: `IN PROGRESS` (slice 1). User decisions (2026-10-12): the user has a monthly $100 Claude API credit and chose Claude Haiku 5.5 (`claude-haiku-5-5`) as an extra supervisor next to the two name taggers and the two recognizers. Haiku casts **yes votes only**: its "no" and "unsure" count as abstentions and never remove, block or demote a recommendation. Opinions are also attached to the recommendations open today.
+
+Evidence (offline experiment, `V:\tmp-charjudge`, 200 past manual decisions, 100 accepted / 100 rejected, 2–4 base references + the original candidate, effort `low`, JSON-schema output):
+
+| Model | yes → truly yes | no → truly no | unsure | cost / 200 | refusals |
+|---|---|---|---|---|---|
+| Sonnet 5.5 | 79% (92/116) | 95% (62/65) | 10% | $6.28 | 0 |
+| Haiku 5.5 | **96% (43/45)** | 78% (71/91) | 32% | $0.31 | 0 |
+| Haiku 5.5 + "tiny = absent" prompt rule | 90% | 62% | 10% | $0.31 | 0 |
+
+No refusals on any run, including 7 `rating:e` and 17 `rating:q` candidates (small sample). The user's rule "a character that appears only tiny counts as absent" must not go into the prompt (it made Haiku broadly stricter); enforce it with person crops/size in code instead (slice 2).
+
+Open recommendations on 2026-10-12 (read-only count): unified 확인 list 35 pairs / 29 images; S36 candidates 140 incl. 110 folded; tagger 3 + 1 doubtful; stored B36 recommendations 7,386 (no current UI — out of scope).
+
+Revised the same evening (user): minimise the user's work — only genuinely uncertain items should need them; PC only (character recognition needs the PC anyway). The yes-only marker design (`docs/prototypes/claude-opinion-20261012/`, artifact https://claude.ai/artifact/MrwRjH8SG3vNbztiQwBGHe) is superseded except its settings section. Cascade, approved by the user with its ~5% error: Haiku yes → automatic accept; otherwise Sonnet 5.5: no → automatic reject, yes with confidence ≥ 0.9 → automatic accept, else left for the user. Replayed on the same 200 decisions: 120 auto-decided (6 wrong), 80 left; about $0.026 per pair.
+
+Slices:
+1. **Automatic Claude decisions (PC).** API key in the OS credential store; settings 라이브러리 › Claude (key, 자동 판정 on/off, monthly cap default $10, status line); opinions table; background run when idle (not in saver mode) over every open 확인-list pair incl. folded S36 candidates; decisions recorded as `origin='automatic'` (engine `claude`), never learning examples, never counted as user judgments in S36 readiness; a later manual decision overrides.
+2. **Crops and the tiny rule.** Send the candidate person crop where a detector box exists; treat people below a size threshold as absent (the user's rule), so tiny cameos are not auto-accepted.
+
+First live run (2026-10-13 00:19–00:45, dev build, schema 131): 148 open pairs judged — 38 auto-accepted, 43 auto-rejected, 47 left for the user, ~20 judged but not written (mostly the character's own references sitting in the 확인 list), 0 refusals, $2.28 (Haiku $0.16 for 148 calls, Sonnet $2.12 for 97 calls; ~10k input tokens per call). Last 30 days for scale: 1,402 images saved (~47/day) produced ~100–130 open pairs, i.e. about $1.5–2 a month; the user's ~900 manual decisions a month are the larger workload.
+1b. **Cost trims (approved 2026-10-13):** never ask about a pair whose image is one of the character's base or learned references; group the queue by character and mark the last reference image with `cache_control` so consecutive pairs of one character read the references from the prompt cache (cache writes/reads stored and priced).
+3. **Series member identification (idea, user 2026-10-13):** images filed in a series folder but with no character yet — ask Claude "which of this series' registered characters is this (or none)?" to take over much of the ~900 manual character decisions a month. Needs its own experiment on past manual decisions first (accuracy per series size, cost ~$10–15/month at that volume).
+
+Related cleanup (low priority, user and controller agree it has little value): retire the tablet 캐릭터 확인 screen and its review-feed publication when the tablet is next touched; needs a server deploy.
+
+<a id="char-ref-other-001"></a>
+## CHAR-REF-OTHER-001 — Free a reference person held by another character from the reference panel (2026-10-13)
+
+Status: `OPEN` (user request). Case: 블루 아카이브 아카네, reference slot 4 (asset `b92a5dff…`) is a group image; 카린 and 토키 are manual accepts, but the third person (actually 아카네) still carries a 2026-09-13 automatic acceptance for 이치노세 아스나 from the old native pass. The 캐릭터 정보 reference picker therefore shows "이미지의 인물이 모두 다른 캐릭터(이치노세 아스나)로 등록돼 있어 사용할 수 없음" with no way to fix it in place. Today's workaround: open 이치노세 아스나's folder, open the image, 이 캐릭터에서 빼기.
+
+Wanted: under each greyed-out person tile ("<name> 인물") in the picker, a "<name> 아님" action that records a manual rejection of that other character for the image (same path as 이 캐릭터에서 빼기), then re-evaluates the picker in place so the person can be chosen immediately — no flash, the panel keeps its content while it refreshes. PC first; the tablet has no reference picker work planned (character classification is PC-only, see CHAR-CLAUDE-001).
 
 <a id="char-folder-perf-001"></a>
 ## CHAR-FOLDER-PERF-001 — Character folder screens performance (2026-10-12)

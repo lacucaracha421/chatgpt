@@ -27,6 +27,7 @@ const EXCHANGE_TARGET: &str = "Lakomics/FileExchange";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
 const STASHDB_TARGET: &str = "Lakomics/StashDb";
+const CLAUDE_TARGET: &str = "Lakomics/Claude";
 
 #[derive(Debug, serde::Serialize)]
 pub struct StashdbCredentialStatus {
@@ -116,6 +117,97 @@ pub(crate) fn delete_stashdb_credentials_os() -> Result<StashdbCredentialStatus,
 }
 #[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn delete_stashdb_credentials_os() -> Result<StashdbCredentialStatus, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ClaudeCredentialStatus {
+    pub configured: bool,
+}
+
+// The Anthropic API key cannot be serialized or returned by a command.
+pub(crate) struct ClaudeCredentials {
+    pub api_key: String,
+}
+impl fmt::Debug for ClaudeCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ClaudeCredentials(<redacted>)")
+    }
+}
+impl Drop for ClaudeCredentials {
+    fn drop(&mut self) {
+        self.api_key.zeroize();
+    }
+}
+fn validate_claude_key(value: &str) -> Result<ClaudeCredentials, LibraryError> {
+    let key = value.trim();
+    if key.is_empty() || key.len() > 2048 || !key.bytes().all(|b| (33..=126).contains(&b)) {
+        return Err(LibraryError::InvalidClaudeCredentialValue);
+    }
+    Ok(ClaudeCredentials {
+        api_key: key.to_owned(),
+    })
+}
+fn read_claude_key<B: CredentialBackend>(
+    backend: &B,
+) -> Result<Option<ClaudeCredentials>, LibraryError> {
+    backend
+        .read(CLAUDE_TARGET)
+        .map_err(map_backend_error)?
+        .map(|bytes| {
+            let value = String::from_utf8(bytes)
+                .map_err(|_| LibraryError::InvalidClaudeCredentialValue)?;
+            validate_claude_key(&value)
+        })
+        .transpose()
+}
+fn set_claude_key<B: CredentialBackend>(
+    backend: &B,
+    key: &str,
+) -> Result<ClaudeCredentialStatus, LibraryError> {
+    let key = validate_claude_key(key)?;
+    backend
+        .write(CLAUDE_TARGET, key.api_key.as_bytes())
+        .map_err(map_backend_error)?;
+    Ok(ClaudeCredentialStatus { configured: true })
+}
+fn delete_claude_key<B: CredentialBackend>(
+    backend: &B,
+) -> Result<ClaudeCredentialStatus, LibraryError> {
+    backend.delete(CLAUDE_TARGET).map_err(map_backend_error)?;
+    Ok(ClaudeCredentialStatus { configured: false })
+}
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn read_claude_key_os() -> Result<Option<ClaudeCredentials>, LibraryError> {
+    read_claude_key(&OsCredentialBackend)
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn read_claude_key_os() -> Result<Option<ClaudeCredentials>, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+pub(crate) fn claude_credential_status() -> Result<ClaudeCredentialStatus, LibraryError> {
+    Ok(ClaudeCredentialStatus {
+        configured: read_claude_key_os()?.is_some(),
+    })
+}
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn set_claude_credentials_os(
+    key: &str,
+) -> Result<ClaudeCredentialStatus, LibraryError> {
+    set_claude_key(&OsCredentialBackend, key)
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn set_claude_credentials_os(
+    _key: &str,
+) -> Result<ClaudeCredentialStatus, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn delete_claude_credentials_os() -> Result<ClaudeCredentialStatus, LibraryError> {
+    delete_claude_key(&OsCredentialBackend)
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn delete_claude_credentials_os() -> Result<ClaudeCredentialStatus, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
@@ -688,6 +780,32 @@ mod tests {
             "other-token"
         );
         assert!(super::read_stashdb_key_os().unwrap().is_none());
+    }
+
+    #[test]
+    fn claude_credential_isolated_redacted_and_deleted() {
+        let backend = FakeBackend::default();
+        assert!(super::read_claude_key(&backend).unwrap().is_none());
+        super::set_stashdb_key(&backend, "other-token").unwrap();
+        let status = super::set_claude_key(&backend, "  sk-ant-secret  ").unwrap();
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({"configured":true})
+        );
+        let secret = super::read_claude_key(&backend).unwrap().unwrap();
+        assert_eq!(secret.api_key, "sk-ant-secret");
+        assert!(!format!("{secret:?}").contains("sk-ant-secret"));
+        for key in ["", " ", "secret\r\nHeader"] {
+            let err = super::set_claude_key(&backend, key).unwrap_err();
+            assert!(!format!("{err:?} {err}").contains("secret"));
+        }
+        assert!(!super::delete_claude_key(&backend).unwrap().configured);
+        assert!(super::read_claude_key(&backend).unwrap().is_none());
+        assert_eq!(
+            super::read_stashdb_key(&backend).unwrap().unwrap().api_key,
+            "other-token"
+        );
+        assert!(super::read_claude_key_os().unwrap().is_none());
     }
 
     #[derive(Default)]

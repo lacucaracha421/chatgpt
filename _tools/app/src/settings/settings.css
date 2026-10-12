@@ -405,3 +405,13 @@
   .settings-view__property > .ui-button { grid-column: 2; justify-self: start; }
 }
 
+
+/* The cap select repeats the row name: keep its label for screen readers only. */
+.claude-settings .ui-select > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

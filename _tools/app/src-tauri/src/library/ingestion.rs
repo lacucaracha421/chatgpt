@@ -796,6 +796,13 @@ fn staging_image_reader(mut staging: File) -> Result<ImageReader<BufReader<File>
         .map_err(|_| LibraryError::UnsupportedImage)
 }
 
+/// An image file of the library decoded with its EXIF orientation applied, within the same
+/// pixel bound ingestion enforces. For model inputs (the Claude judgment encodes from it).
+pub(super) fn decode_oriented_image(file: File) -> Result<DynamicImage, LibraryError> {
+    inspect_image(file.try_clone().map_err(|_| LibraryError::UnsupportedImage)?)?;
+    decode_staging_image(staging_image_reader(file)?)
+}
+
 fn decode_staging_image(reader: ImageReader<BufReader<File>>) -> Result<DynamicImage, LibraryError> {
     if reader.format() == Some(ImageFormat::WebP) {
         return thumbnail_decode::decode_webp(reader.into_inner());

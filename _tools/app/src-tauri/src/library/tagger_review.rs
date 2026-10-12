@@ -241,7 +241,8 @@ SELECT s.id,s.display_name,s.series_classification_id,s.name,s.asset_id,s.conten
    THEN 'skipped_reference' ELSE 'veto' END
  ELSE 'recommendation' END
  FROM scored s LEFT JOIN character_decisions d ON d.sequence=s.seq
- WHERE (s.pixai<0.3 AND s.canary<0.3 AND d.decision='accepted' AND d.origin='automatic' AND d.asset_hash=s.content_hash)
+ WHERE (s.pixai<0.3 AND s.canary<0.3 AND d.decision='accepted' AND d.origin='automatic' AND d.asset_hash=s.content_hash
+     AND NOT (json_valid(d.reference_snapshot) AND COALESCE(json_extract(d.reference_snapshot,'$.prediction.engine'),'')='claude'))
  OR (s.pixai>=0.85 AND s.canary>=0.85 AND s.seq IS NULL
      AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=s.id AND r.asset_id=s.asset_id)
      AND NOT EXISTS(SELECT 1 FROM character_learned_references r WHERE r.target_id=s.id AND r.asset_id=s.asset_id))

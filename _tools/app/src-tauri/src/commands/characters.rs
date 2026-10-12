@@ -1368,3 +1368,95 @@ pub async fn apply_character_subfolder_cleanup(
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
 }
+
+// -- Claude judges the easy 확인 recommendations (CHAR-CLAUDE-001) -------------------------
+
+/// Whether an Anthropic API key is stored. The key itself is never returned.
+#[tauri::command]
+pub async fn claude_credential_status(
+) -> Result<crate::library::credential::ClaudeCredentialStatus, CommandError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::library::credential::claude_credential_status().map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+/// Stores the key (trimmed; empty or malformed is refused) and lets the run look again.
+#[tauri::command]
+pub async fn set_claude_credential(
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::credential::ClaudeCredentialStatus, CommandError> {
+    let library = state.current_library();
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = crate::library::credential::set_claude_credentials_os(&key)
+            .map_err(CommandError::from)?;
+        if let Some(library) = library {
+            library.claude_poke();
+        }
+        Ok(status)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
+pub async fn delete_claude_credential(
+    state: State<'_, AppState>,
+) -> Result<crate::library::credential::ClaudeCredentialStatus, CommandError> {
+    let library = state.current_library();
+    tauri::async_runtime::spawn_blocking(move || {
+        let status =
+            crate::library::credential::delete_claude_credentials_os().map_err(CommandError::from)?;
+        if let Some(library) = library {
+            library.claude_poke();
+        }
+        Ok(status)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
+pub async fn claude_settings(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_claude::ClaudeSettings, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.claude_settings())
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn set_claude_settings(
+    enabled: bool,
+    monthly_cap_usd: f64,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_claude::ClaudeSettings, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.set_claude_settings(enabled, monthly_cap_usd)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+/// The run's state and this month's figures, for the settings screen.
+#[tauri::command]
+pub async fn claude_status(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_claude::ClaudeStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key_present = crate::library::credential::claude_credential_status()
+            .map(|status| status.configured)
+            .unwrap_or(false);
+        library.claude_status(key_present)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}

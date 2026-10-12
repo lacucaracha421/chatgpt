@@ -633,6 +633,11 @@ fn prepare_read(
     // With the broad-folder rule off, scores of images filed outside every registered
     // series stay in the cache but are not offered (turning the rule on shows them again).
     c.read(|c| retain_in_character_scope(c, &mut rows))?;
+    // A pair Claude already decided automatically needs no person (a later manual decision
+    // replaces it as the newest decision, and the pair is judged like any other).
+    let settled =
+        c.read(|c| super::character_claude::settled_pairs(c, &row_pairs_json(&rows)?))?;
+    rows.retain(|row| !settled.contains(&(row.target_id.clone(), row.asset_id.clone())));
     // Pairs the native pass already accepted automatically come after new findings
     // and are labelled as such; each group keeps the stable pseudo-random order.
     // (Backfill rows recorded "none" as the native outcome for them.)
@@ -1007,6 +1012,9 @@ impl Library {
         let connection = self.connection()?;
         retain_in_character_scope(&connection, &mut rows)?;
         let manual = latest_decisions(&connection, &rows, true)?;
+        let settled =
+            super::character_claude::settled_pairs(&connection, &row_pairs_json(&rows)?)?;
+        rows.retain(|row| !settled.contains(&(row.target_id.clone(), row.asset_id.clone())));
         let assets = eligible_assets(&connection, &rows)?;
         let targets = enabled_target_names(&connection, &rows)?;
         drop(connection);
@@ -1072,6 +1080,12 @@ impl Library {
                 series_id,
             )
         })
+    }
+
+    /// Moves when anything a review list is computed from moves; the Claude run compares it to
+    /// know its queue of open pairs is out of date.
+    pub(super) fn review_marker(&self) -> Result<String> {
+        Ok(format!("{:?}", self.summary_key()?))
     }
 
     fn summary_key(&self) -> Result<SummaryKey> {

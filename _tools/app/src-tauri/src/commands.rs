@@ -498,6 +498,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidIgdbIdentity => "invalid_igdb_identity",
             LibraryError::TmdbCredentialNotConfigured => "tmdb_credential_not_configured",
             LibraryError::InvalidStashdbCredentialValue => "invalid_stashdb_credential_value",
+            LibraryError::InvalidClaudeCredentialValue => "invalid_claude_credential_value",
             LibraryError::InvalidTmdbCredentialValue => "invalid_tmdb_credential_value",
             LibraryError::TmdbUnauthorized => "tmdb_unauthorized",
             LibraryError::TmdbRateLimited => "tmdb_rate_limited",
