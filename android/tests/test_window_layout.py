@@ -72,5 +72,19 @@ class WindowLayoutTest(unittest.TestCase):
         self.assertIn(f'd="{mark}"', (ROOT / '_tools/app/mobile-client/index.html').read_text())
 
 
+    def test_resize_and_multi_window_do_not_recreate_the_activity(self):
+        manifest = ET.parse(ROOT / 'android/AndroidManifest.xml').getroot()
+        activity = next(a for a in manifest.find('application').findall('activity') if a.get(ATTR + 'name') == '.MainActivity')
+        handled = set(activity.get(ATTR + 'configChanges').split('|'))
+        # A floating pop-up resize changes the size classes and density as well as the screen size.
+        self.assertTrue({'orientation', 'screenSize', 'smallestScreenSize', 'screenLayout', 'density', 'uiMode', 'keyboard', 'keyboardHidden', 'navigation'} <= handled)
+
+    def test_a_recreated_activity_or_renderer_asks_the_page_to_restore_its_place(self):
+        source = self.source
+        self.assertIn('restoreRoute=b!=null;', source)
+        self.assertIn('web.loadUrl(restoreRoute?INDEX_URL+"?restore=1":INDEX_URL);restoreRoute=false;', source)
+        self.assertRegex(source, r'restoreRoute=true;\s*if\(!destroyed&&foreground\)createWebView\(\);')
+
+
 if __name__ == '__main__':
     unittest.main()

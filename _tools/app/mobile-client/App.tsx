@@ -100,6 +100,7 @@ import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
 import {readyFirstScreen} from './firstScreen';
 import {useMotionSurface} from '../src/shared/ui/useMotionSurface';
 import {setOutboxConnection} from './outboxConnection';
+import {forgetRoute,recallRoute,rememberRoute,restoreRequested,type RememberedRoute} from './routeMemory';
 import {useNsfwFilter,usePrivacyMode} from './privacyMode';
 /** The durable outboxes follow the connection before any screen re-renders against it. */
 const adoptConnection=(next:Status)=>{setOutboxConnection(next.configured?next.endpoint:null);return next;};
@@ -138,13 +139,16 @@ const RANKED_SCRUBBER={kind:'fallback'} as const;
 
 export function App() {
   startupMark('firstReactRenderMs');
-  const [area,setArea] = useState<'assets'|'collections'|'catalog'|'notes'>('assets');
+  // Only a recreated activity or a restarted renderer reopens the place the user was in; a normal launch starts on Home.
+  const [restoredRoute] = useState<RememberedRoute|null>(()=>restoreRequested()?recallRoute():null);
+  const restorePosition = useRef(restoredRoute?.tab==='library'?restoredRoute.position:undefined);
+  const [area,setArea] = useState<'assets'|'collections'|'catalog'|'notes'>(restoredRoute?.area??'assets');
   const [focusedCharacter,setFocusedCharacter]=useState<string|null>(null);
   const [characterEntry,setCharacterEntry]=useState(0);
-  const [collectionsVisited,setCollectionsVisited] = useState(false);
-  const [catalogVisited,setCatalogVisited] = useState(false);
+  const [collectionsVisited,setCollectionsVisited] = useState(restoredRoute?.area==='collections');
+  const [catalogVisited,setCatalogVisited] = useState(restoredRoute?.area==='catalog');
   const [charactersVisited,setCharactersVisited] = useState(false);
-  const [notesVisited,setNotesVisited]=useState(false);
+  const [notesVisited,setNotesVisited]=useState(restoredRoute?.area==='notes');
   const notesBack=useRef<(()=>boolean)|null>(null);
   const characterBack = useRef<(()=>boolean)|null>(null);
   const collectionBack = useRef<(()=>boolean)|null>(null);
@@ -512,7 +516,11 @@ export function App() {
           // This device's own trash/restore moves the generation too; the viewer already
           // shows the result, so it stays open instead of closing under the user.
           const closeViewer = !trash.recent() && Date.now() - viewerEditAt.current > VIEWER_EDIT_GRACE_MS;
-          const committed = await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true,state.page.filters,generation);
+          // A tap that is still loading its page is the user's destination: refresh that one, never the page it is leaving.
+          const pending = loadInFlight.current ? lastIntent.current : null;
+          const committed = pending
+            ? await load(pending.view,pending.cursor,pending.previous,0,true,pending.filters,generation)
+            : await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true,state.page.filters,generation);
           // Keep the viewer while the replacement list waits or fails, then swap together.
           if (active && committed && closeViewer) setViewer(current=>current===state.viewer?null:current);
           setIndexRevision(value=>value+1);
@@ -624,7 +632,9 @@ export function App() {
     // A root card can be tapped before this passive startup effect runs.
     // Do not overwrite that newer navigation with the initial root read.
     const interrupted = loadInterrupted.current; loadInterrupted.current = false;
-    if(lastIntent.current.view.root && !startedWithLocalConnection.current) void load(LIBRARY);
+    const restore = restorePosition.current; restorePosition.current = undefined;
+    if(restore) void load(restore.view,restore.cursor,restore.previous,restore.scroll,false,{...EMPTY_FILTERS,...restore.filters});
+    else if(lastIntent.current.view.root && !startedWithLocalConnection.current) void load(LIBRARY);
     else if(interrupted) {const intent = lastIntent.current; void load(intent.view, intent.cursor, intent.previous, 0, false, intent.filters);}
     return () => {loadInterrupted.current = loadInFlight.current; gate.current.cancel(); secondaryGate.current.cancel(); secondaryPending.current = false; moreGate.current.cancel(); prefetched.current?.controller.abort();};
   }, [status.configured, status.endpoint, connectionRevision, load]);
@@ -639,7 +649,9 @@ export function App() {
     secondaryAt.current = 0;
     void refreshSecondary(true);
     setIndexRevision(value=>value+1);
-    void load(state.page.view, state.page.cursor, state.page.previous, 0, true, state.page.filters);
+    const pending = loadInFlight.current ? lastIntent.current : null;
+    if (pending) void load(pending.view, pending.cursor, pending.previous, 0, true, pending.filters);
+    else void load(state.page.view, state.page.cursor, state.page.previous, 0, true, state.page.filters);
   }, [load, refreshSecondary]);
   // Leaves the character boundary for the actual context it was opened from, falling back to
   // the Library root when nothing was committed beforehand. Deliberately not routed through the global
@@ -832,6 +844,23 @@ export function App() {
   };
   // Resetting the filters leaves the sort, the shuffle's seed and the folder's subtree mode alone.
   const clearFilters = () => applyFilters({...EMPTY_FILTERS, ...queryExtras(filters)} as AssetFiltersValue);
+  // A tab tap that must load another assets page first (Library from a Home page, Home from a Library page)
+  // enters the assets area only once that page has committed. Switching first would show the old page,
+  // with its tab highlighted, for as long as the load takes.
+  const tabIntent = useRef(0);
+  const assetsEntry = useRef<{intent:number;tab:'home'|'library'}|null>(null);
+  const deferAssetsEntry = (tab:'home'|'library') => {
+    if(latest.current.area==='assets'){assetsEntry.current=null;return;}
+    assetsEntry.current={intent:++tabIntent.current,tab};
+  };
+  useEffect(()=>{
+    const entry=assetsEntry.current;
+    if(!entry)return;
+    // Another tab was chosen meanwhile.
+    if(entry.intent!==tabIntent.current||area==='assets'){assetsEntry.current=null;return;}
+    // Committed, or the load ended without the page (failure): show the assets area either way.
+    if(page.view.tab===entry.tab||!busy){assetsEntry.current=null;setArea('assets');}
+  },[area,busy,page.view.tab,page.version]);
   const openRoot=()=>{setSearchChips([]);setArea('assets');void load(LIBRARY,null,[],0,false,EMPTY_FILTERS);};
   const retainAssets = () => {
     const state = latest.current, current = state.page, intent = lastIntent.current;
@@ -844,13 +873,25 @@ export function App() {
     if (state.area !== 'assets' && current.generation === null)
       void load(current.view,current.cursor,current.previous,scroll.current,true,current.filters);
   };
+  // Kept for a recreated activity or restarted renderer (see routeMemory.ts). Nothing is written before the first page commits.
+  const persistRoute = useCallback(()=>{
+    const state = latest.current, shown = state.page;
+    if(!state.status.configured || !shown.version) return;
+    const synthetic = !!shown.view.characters;
+    rememberRoute({area:state.area,tab:shown.view.tab,...(shown.view.tab==='library'
+      ? {position:{view:synthetic?LIBRARY:shown.view,cursor:synthetic?null:shown.cursor,previous:synthetic?[]:shown.previous,scroll:scroll.current,filters:synthetic?{...EMPTY_FILTERS}:shown.filters}}
+      : {})});
+  },[]);
+  useEffect(()=>{persistRoute();},[area,page.version,page.view,persistRoute]);
+  useEffect(()=>{window.addEventListener('lakomics-pause',persistRoute);return()=>window.removeEventListener('lakomics-pause',persistRoute);},[persistRoute]);
   // Reselecting Library goes to its root; returning from another tab keeps its position.
   const openLibrary = () => {
-    setArea('assets');
-    if(latest.current.page.view.tab === 'library') {if(latest.current.area==='assets')openRoot();else retainAssets();return;}
+    if(latest.current.page.view.tab === 'library') {setArea('assets');if(latest.current.area==='assets')openRoot();else retainAssets();return;}
     const saved=lastLibrary.current;
+    // The retained assets page is Home: coming from another tab, that tab stays on screen until Library's page commits.
+    deferAssetsEntry('library');
     if(saved) void load(saved.view,saved.cursor,saved.previous,saved.scroll,false,saved.filters);
-    else openRoot();
+    else {setSearchChips([]);void load(LIBRARY,null,[],0,false,EMPTY_FILTERS);}
   };
   const openCollections = (place:CollectionsPlace) => {
     if(place.kind==='work')beginScreenTiming('collection.work','open');
@@ -861,15 +902,17 @@ export function App() {
   const closeCalendar = useCallback(() => { const state=latest.current;beginScreenTiming(state.area==='assets'?(state.page.view.tab==='home'?'home':'assets'):state.area,'back');setCalendarKind(undefined); setCalendarOpen(false); }, []);
   const openHome = () => {
     setHomeOrigin(null); homeRestore.current = null;
-    setArea('assets');
-    if (latest.current.page.view.tab === 'home') retainAssets();
-    else {
-      const cached = viewCache.current.get(HOME_PAGE_KEY);
-      if (cached && Date.now() - homePageAt.current < 60_000) {
-        gate.current.cancel(); cancelMore(); setBusy(false); loadInFlight.current=false; setError(''); setFilterNotice(''); setFilters(cached.filters);
-        lastIntent.current = {view:cached.view,cursor:cached.cursor,previous:cached.previous,filters:cached.filters};
-        setPage({...cached, restoreScroll:cached.restoreScroll});
-      } else select(HOME);
+    if (latest.current.page.view.tab === 'home') {setArea('assets');retainAssets();return;}
+    const cached = viewCache.current.get(HOME_PAGE_KEY);
+    if (cached && Date.now() - homePageAt.current < 60_000) {
+      setArea('assets');
+      gate.current.cancel(); cancelMore(); setBusy(false); loadInFlight.current=false; setError(''); setFilterNotice(''); setFilters(cached.filters);
+      lastIntent.current = {view:cached.view,cursor:cached.cursor,previous:cached.previous,filters:cached.filters};
+      setPage({...cached, restoreScroll:cached.restoreScroll});
+    } else {
+      // Likewise the tab being left stays on screen until Home's page commits, so Library never shows in between.
+      deferAssetsEntry('home');
+      setSearchChips([]);void load(HOME, null, [], 0, false, EMPTY_FILTERS);
     }
   };
   // Records a Library entry opened from Home, with Home's scroll offset (Home unmounts there).
@@ -894,6 +937,7 @@ export function App() {
     lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
+    forgetRoute();
     setPage({generation:null,items:[],has_more:false,next_cursor:null,view:LIBRARY,cursor:null,previous:[],version:0,restoreScroll:0,filters:{...EMPTY_FILTERS}});
     setHomeOrigin(null); homeRestore.current = null;
     setArea('assets'); setNotesVisited(false); setCollectionsVisited(false); setCatalogVisited(false); setCharactersVisited(false);
@@ -1151,7 +1195,7 @@ export function App() {
       {calendarOpen && <div className="release-calendar-layer" ref={calendarLayer}><ReleaseCalendar onClose={closeCalendar} initialKind={calendarKind} backRef={calendarBack}/></div>}
       {artistsOpen && <div className="artists-layer" ref={artistsLayer}><Artists endpoint={status.endpoint} backRef={artistsBack} initialArtist={artistSelection ?? undefined} onClose={closeArtists} paused={settings||!!viewer} onOpenViewer={(items,index) => {markViewerOpen();setViewer({items,index});}}/></div>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}><BusyLabel busy={!!(checking)} idle={'라이브러리 연결'}>연결 확인 중</BusyLabel><ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
-    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{beginScreenTiming('home','tab');closeArtists();openHome();}}><AREA_ICONS.home aria-hidden="true"/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{beginScreenTiming('assets','tab');closeArtists();setHomeOrigin(null);openLibrary();}}><AREA_ICONS.assets aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{beginScreenTiming('collections','tab');closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><AREA_ICONS.collections aria-hidden="true"/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{beginScreenTiming('catalog','tab');closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><AREA_ICONS.manga aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{beginScreenTiming('notes','tab');closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><AREA_ICONS.notes aria-hidden="true"/><span>메모</span></button></nav>}
+    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('home','tab');closeArtists();openHome();}}><AREA_ICONS.home aria-hidden="true"/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{beginScreenTiming('assets','tab');closeArtists();setHomeOrigin(null);openLibrary();}}><AREA_ICONS.assets aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('collections','tab');closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><AREA_ICONS.collections aria-hidden="true"/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('catalog','tab');closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><AREA_ICONS.manga aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('notes','tab');closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><AREA_ICONS.notes aria-hidden="true"/><span>메모</span></button></nav>}
     {status.configured&&<FindSheet search={findSearch} open={findOpen} onClose={()=>setFindOpen(false)} entries={findEntries} onDescription={query=>openDescription(query)} endpoint={status.endpoint} privacy={privacyMode} loading={findWorks.loading||findNotes.loading||albumLoading||searchArtists.state==='loading'} error={findWorks.error||findNotes.error||albumError||searchArtists.error} onRetry={()=>{setFindRetry(value=>value+1);findWorks.retry();searchArtists.retry();void findStore.load();}}/>}
     {moreOpen&&<MoreSheet {...moreOptions} screenTitle={screenMenu?.title} screenEntries={screenMenu?.entries} onClose={()=>setMoreOpen(false)}/>}
     {viewSettings&&<BottomSheet title="보기" onClose={()=>setViewSettings(false)}><div className="ui-view-options__content">

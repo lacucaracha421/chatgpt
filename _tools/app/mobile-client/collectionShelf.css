@@ -20,7 +20,8 @@
    Both poses use the same hinge, so picking changes only the rotation, not its anchor. */
 .mobile-collections .collection-cover-cell .collection-light-case { --face-height:min(var(--case-height), calc((var(--cell-width) - 4.8px) / var(--case-ratio)), calc(var(--cell-width) / (var(--case-ratio) + .048))); }
 .mobile-collections .collection-cover-cell .collection-light-case .cs-box { transform-origin:0 100%; transition:transform 360ms var(--ease-sheet); }
-.mobile-collections .collection-cover-cell:active { transform:none; background:var(--color-surface-pressed); }
+/* No pressed fill: the case itself turning is the feedback (a grey cell block read as a stray box). */
+.mobile-collections .collection-cover-cell:active { transform:none; background:none; }
 .mobile-collections .collection-cover-cell .collection-light-case[data-front] .cs-box { transform:rotateX(0deg) rotateY(0deg); }
 .mobile-collections .collection-cover-cell .collection-light-case[data-front]::after { transform:none; }
 @media (prefers-reduced-motion:reduce) {

@@ -102,7 +102,7 @@ public final class MainActivity extends Activity {
   try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",false).put("cancelled",true));}catch(JSONException ignored){}
  }
  private void stopNonEssential(){stopped=true;for(Map.Entry<String,CancellationSignal> entry:nonEssential.entrySet())cancelOptional(entry.getKey(),entry.getValue());}
- @Override public void onCreate(Bundle b){StartupPerf.begin();long step=StartupPerf.clock();super.onCreate(b);settings=new SecureSettings(this);refreshLocalStatusHint();client=new CloudClient(settings);StartupPerf.step("settings",step);
+ @Override public void onCreate(Bundle b){StartupPerf.begin();long step=StartupPerf.clock();super.onCreate(b);restoreRoute=b!=null;settings=new SecureSettings(this);refreshLocalStatusHint();client=new CloudClient(settings);StartupPerf.step("settings",step);
   step=StartupPerf.clock();notes=new NotesRepository(this,settings);StartupPerf.step("notesDb",step);
   step=StartupPerf.clock();vault=new PrivateVault(this,state->emit("lakomics-vault",state),this::setVaultSnapshotSensitive);StartupPerf.step("vaultInit",step);
   step=StartupPerf.clock();
@@ -116,6 +116,9 @@ public final class MainActivity extends Activity {
   step=StartupPerf.clock();ExchangeService.get(this).addListener(exchangeListener);StartupPerf.step("exchangeInit",step);
   hideStatusBar();StartupPerf.phase("onCreateEnd");
  }
+ // True when the system recreated this activity (or the renderer died): the page then reopens the tab the user was on instead of Home.
+ private boolean restoreRoute;
+ private static final String INDEX_URL=ORIGIN+"/index.html";
  private void createWebView(){
   long step=StartupPerf.clock();web=new WebView(this);StartupPerf.step("webViewInit",step);StartupPerf.phase("webViewCreated");web.setBackgroundColor(PAGE_BACKGROUND);
   frame.addView(web,0,new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));
@@ -129,8 +132,8 @@ public final class MainActivity extends Activity {
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(PerfLog.enabled());
   web.addJavascriptInterface(new Bridge(),"LakomicsNative");
   web.setWebViewClient(new WebViewClient(){
-   @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){if((ORIGIN+"/index.html").equals(url))StartupPerf.phase("pageStarted");}
-   @Override public void onPageFinished(WebView v,String url){if((ORIGIN+"/index.html").equals(url))StartupPerf.phase("pageFinished");}
+   @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){if(url!=null&&url.startsWith(INDEX_URL))StartupPerf.phase("pageStarted");}
+   @Override public void onPageFinished(WebView v,String url){if(url!=null&&url.startsWith(INDEX_URL))StartupPerf.phase("pageFinished");}
    @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest r){return !bundled(r.getUrl());}
    @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u)){if(u.getPath()!=null && u.getPath().startsWith("/vault/"))return vault.serve(r);if(u.getPath()!=null && u.getPath().startsWith(MediaStreamProxy.PREFIX))return mediaStream(r);return asset(u);}if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
    @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){h.cancel();}
@@ -143,10 +146,11 @@ public final class MainActivity extends Activity {
     // Lock events must not evaluate JavaScript on the dead instance.
     vault.setVisible(false);notes.lockSecrets();stopRequests();noteSnapshotSensitive=false;
     updateSecureWindow();
+    restoreRoute=true;
     if(!destroyed&&foreground)createWebView();
     return true;
    }
-  });StartupPerf.phase("loadUrl");web.loadUrl(ORIGIN+"/index.html");
+  });StartupPerf.phase("loadUrl");web.loadUrl(restoreRoute?INDEX_URL+"?restore=1":INDEX_URL);restoreRoute=false;
  }
  // The bundled FAULT game (single self-contained file: inline scripts, data: font) runs only as a same-origin
  // frame of the app. It gets no network access beyond this origin and blob: photos handed over by the app.
