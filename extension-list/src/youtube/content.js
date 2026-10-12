@@ -127,11 +127,12 @@
   const MAX_TEXT = 5 * 1024 * 1024;
   const replyTypes = { getTracks: "tracks", getMeta: "meta", fetchText: "fetchResult", getRecent: "recent" };
   const boundedString = (value, max) => typeof value === "string" && value.length <= max;
+  const YOUTUBE_ORIGINS = ["https://www.youtube.com", "https://m.youtube.com"];
   function allowedUrl(value) {
     if (!boundedString(value, 8192)) return false;
     try {
       const url = new URL(value);
-      return url.origin === "https://www.youtube.com" && !url.username && !url.password && !url.hash && url.pathname === "/api/timedtext";
+      return YOUTUBE_ORIGINS.includes(url.origin) && !url.username && !url.password && !url.hash && url.pathname === "/api/timedtext";
     } catch { return false; }
   }
   function validReply(type, data) {
@@ -370,10 +371,19 @@
     await Promise.all(((reply && reply.items) || []).map((item) => onCaptured(item.url, item.text)));
   }
 
+  // Desktop CC button, or the inner button of the mobile one (only if it reports its pressed state,
+  // so the original state can always be restored).
+  function captionToggle() {
+    const desktop = document.querySelector(".ytp-subtitles-button");
+    if (desktop) return desktop;
+    const mobile = document.querySelector("ytm-closed-captioning-button button[aria-pressed]");
+    return mobile || null;
+  }
+
   // Fallback 2: make the player request captions (switch them on, or off and on again if they
   // were already on), then restore the original state.
   async function captureViaButton(videoId) {
-    const toggle = document.querySelector(".ytp-subtitles-button");
+    const toggle = captionToggle();
     if (!toggle) {
       console.info("[Lakomics YouTube] no subtitles button");
       return null;
@@ -666,15 +676,28 @@
 
   // ---------------------------------------------------------------- button and toast
 
+  // Desktop player: the right-hand control bar. Mobile (m.youtube.com): the top-right icon row.
+  function findControls() {
+    const desktop = document.querySelector(".ytp-right-controls");
+    if (desktop) return { controls: desktop, mobile: false };
+    const mobile = document.querySelector("player-top-controls .player-controls-top") ||
+      document.querySelector(".player-controls-top");
+    return mobile ? { controls: mobile, mobile: true } : null;
+  }
+
+  // The tap must not reach the player's own handlers (they toggle the controls).
+  const TOUCH_EVENTS = ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "mouseup"];
+
   function ensureButton() {
     if (!settingsReady || !available()) return;
     if (button && button.isConnected) return;
-    const controls = document.querySelector(".ytp-right-controls");
-    if (!controls) return;
+    const found = findControls();
+    if (!found) return;
+    const { controls, mobile } = found;
 
     button = document.createElement("button");
     button.id = "lakomics-yt-button";
-    button.className = "ytp-button";
+    button.className = mobile ? "lakomics-yt-mobile" : "ytp-button";
     button.type = "button";
     const icon = document.createElement("span");
     icon.className = "lakomics-yt-icon";
@@ -682,9 +705,18 @@
     button.appendChild(icon);
     button.addEventListener("click", onButtonClick);
 
-    const settings = controls.querySelector(".ytp-settings-button");
-    if (settings && settings.parentNode) settings.parentNode.insertBefore(button, settings);
-    else controls.appendChild(button);
+    if (mobile) {
+      for (const name of TOUCH_EVENTS) button.addEventListener(name, (event) => event.stopPropagation());
+      const settings = controls.querySelector(".player-settings-icon");
+      const captions = controls.querySelector("ytm-closed-captioning-button");
+      if (settings && settings.parentNode === controls) controls.insertBefore(button, settings);
+      else if (captions && captions.parentNode === controls) captions.after(button);
+      else controls.appendChild(button);
+    } else {
+      const settings = controls.querySelector(".ytp-settings-button");
+      if (settings && settings.parentNode) settings.parentNode.insertBefore(button, settings);
+      else controls.appendChild(button);
+    }
     renderButton();
   }
 

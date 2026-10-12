@@ -50,11 +50,11 @@ function setup(t, { paired = true } = {}) {
 test('manifest registers only YouTube MAIN/start hook and isolated/idle UI without changing version', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('unlimitedStorage'));
-  assert.equal(manifest.version, '3.5.16');
+  assert.equal(manifest.version, '3.5.17');
   assert.equal(manifest.background.type, undefined);
   const hook = manifest.content_scripts.find(item => item.js?.includes('src/youtube/page-hook.js'));
   const ui = manifest.content_scripts.find(item => item.js?.includes('src/youtube/content.js'));
-  assert.deepEqual(hook.matches, ['https://www.youtube.com/*']);
+  assert.deepEqual(hook.matches, ['https://www.youtube.com/*', 'https://m.youtube.com/*']);
   assert.deepEqual(ui.matches, hook.matches);
   assert.equal(hook.world, 'MAIN'); assert.equal(hook.run_at, 'document_start');
   assert.notEqual(ui.world, 'MAIN'); assert.equal(ui.run_at, 'document_idle');

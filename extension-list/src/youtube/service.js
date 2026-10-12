@@ -419,7 +419,7 @@ async function getCached(videoId) {
    if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)) return false;
    try {
      const url = new URL(sender.url);
-     return url.origin === "https://www.youtube.com" && !url.username && !url.password;
+     return (url.origin === "https://www.youtube.com" || url.origin === "https://m.youtube.com") && !url.username && !url.password;
    } catch { return false; }
  }
  function validProcess(message) {

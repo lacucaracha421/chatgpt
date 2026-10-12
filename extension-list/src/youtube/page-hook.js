@@ -32,12 +32,12 @@
     return typeof url === "string" && isAllowedFetchUrl(url);
   }
 
-  // Only plain youtube.com timedtext URLs may be fetched on request of the content script.
+  // Only plain timedtext URLs on the desktop or mobile YouTube host may be fetched on request of the content script.
   function isAllowedFetchUrl(url) {
     if (typeof url !== "string" || url.length > 8192) return false;
     try {
       const u = new URL(url, window.location.href);
-      return u.origin === "https://www.youtube.com" && !u.username && !u.password && !u.hash && u.pathname === "/api/timedtext";
+      return (u.origin === "https://www.youtube.com" || u.origin === "https://m.youtube.com") && !u.username && !u.password && !u.hash && u.pathname === "/api/timedtext";
     } catch {
       return false;
     }

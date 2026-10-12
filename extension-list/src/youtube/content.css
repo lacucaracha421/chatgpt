@@ -12,6 +12,15 @@
   cursor: pointer;
 }
 
+/* m.youtube.com: a 48 px icon button inside the top-right control row, which hides and shows with the controls */
+#lakomics-yt-button.lakomics-yt-mobile {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
 #lakomics-yt-button .lakomics-yt-icon {
   display: inline-block;
   padding: 1px 5px;
