@@ -172,7 +172,9 @@ test('Anthropic request carries a base64 image block, the structured schema, Kor
   assert.match(call.body.system, /"source":"Jeff"/);
   const schema = call.body.output_config.format.schema;
   assert.deepEqual(Object.keys(schema.properties), ['lines']);
-  assert.deepEqual(schema.properties.lines.items.required, ['original', 'korean']);
+  assert.deepEqual(schema.properties.lines.items.required, ['original', 'korean', 'box']);
+  assertBoxSchema(schema);
+  for (const rule of ['speech', 'thoughts', 'narration/captions', 'labels characters react to', 'large, prominent sound effects', 'watermarks', 'artist signatures', 'credits', 'URLs', 'social handles', 'site/patreon notices', 'small or repeated', 'clothes/props', '0–1000', 'top-left']) assert.ok(call.body.system.includes(rule), rule);
   assert.equal(JSON.stringify(result).includes('ant-key'), false);
   assert.equal(Object.keys(f.memory).some(key => key.startsWith('lakomics:translation-cache:v4:')), false, 'the X cache is not used');
 });
@@ -192,7 +194,42 @@ test('Gemini through OpenRouter takes an image_url data part and a strict JSON s
   assert.equal(user.content[1].type, 'text');
   assert.equal(call.body.response_format.type, 'json_schema');
   assert.equal(call.body.response_format.json_schema.strict, true);
+  assertBoxSchema(call.body.response_format.json_schema.schema);
   assert.equal(call.body.provider.require_parameters, true);
+});
+
+function assertBoxSchema(schema) {
+  const line = schema.properties.lines.items, box = line.properties.box;
+  assert.equal(schema.additionalProperties, false);
+  assert.equal(line.additionalProperties, false);
+  assert.deepEqual(line.required, Object.keys(line.properties));
+  assert.equal(box.type, 'object'); assert.equal(box.additionalProperties, false);
+  assert.deepEqual(box.required, ['x0', 'y0', 'x1', 'y1']);
+  assert.deepEqual(box.required, Object.keys(box.properties));
+  assert.ok(Object.values(box.properties).every(value => value.type === 'integer'));
+}
+
+test('boxes clamp and swap finite numbers; unusable boxes drop without losing their lines', () => {
+  const ctx = vm.createContext({});
+  for (const script of core) vm.runInContext(script, ctx);
+  const boxes = [{x0: 1100, y0: 900, x1: -20, y1: 100}, {x0: 1.5, y0: 2.5, x1: 10, y1: 20},
+    {x0: 10, y0: 0, x1: 10, y1: 20}, {x0: 1001, y0: 0, x1: 1200, y1: 20},
+    {x0: 0, y0: 5, x1: 20, y1: 5}, {x0: NaN, y0: 0, x1: 10, y1: 20},
+    {x0: 0, y0: 0, x1: Infinity, y1: 20}, {x0: '0', y0: 0, x1: 10, y1: 20}, {}, null, undefined];
+  const lines = plain(ctx.LakomicsTranslationCore.image.parseLines({lines: boxes.map(box => ({original: 'a', korean: '가', box}))}));
+  assert.equal(lines.length, boxes.length);
+  assert.deepEqual(lines[0].box, {x0: 0, y0: 100, x1: 1000, y1: 900});
+  assert.deepEqual(lines[1].box, boxes[1]);
+  assert.ok(lines.slice(2).every(line => !('box' in line)));
+});
+
+test('lines that are only a handle, URL or site credit drop; story text with them stays', () => {
+  const ctx = vm.createContext({});
+  for (const script of core) vm.runInContext(script, ctx);
+  const originals = ['@viora_draw', '＠ name.jp', 'https://x.com/a', 'www.example.com', 'patreon.com/qiandaiyiyu', 'pixiv: 12345',
+    '89,900', 'Is that a love letter?', 'こんにちは', 'xylophone', 'mail me at the office'];
+  const lines = plain(ctx.LakomicsTranslationCore.image.parseLines({lines: originals.map(original => ({original, korean: '가'}))}));
+  assert.deepEqual(lines.map(line => line.original), ['89,900', 'Is that a love letter?', 'こんにちは', 'xylophone', 'mail me at the office']);
 });
 
 test('answers are read as lines: empty means no text, junk entries drop, malformed or cut-off answers fail', async () => {
@@ -270,6 +307,81 @@ function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch
 }
 const gesture = {isTrusted: true, type: 'click'};
 const origin = {x: 10, y: 10};
+
+const locatedLines = [
+  {original: 'a', korean: '가', box: {x0: 0, y0: 0, x1: 10, y1: 10}},
+  {original: 'b', korean: '나'},
+  {original: 'c', korean: '다', box: {x0: 990, y0: 990, x1: 1000, y1: 1000}},
+];
+const markerView = f => {
+  const host = f.doc.querySelector('lakomics-image-markers');
+  return {host, buttons: host ? [...f.roots.get(host).querySelectorAll('button')] : []};
+};
+
+for (const touch of [false, true]) test(`numbered markers clamp, link both ways, follow and survive the cache (touch=${touch})`, async () => {
+  const f = page(undefined, {touch, send: async () => ({ok: true, lines: locatedLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const items = [...f.popover().querySelectorAll('li')], body = f.popover().querySelector('.pb');
+  assert.deepEqual(items.map(item => item.querySelector('.line-number').textContent), ['1', '2', '3']);
+  const {host, buttons} = markerView(f), inset = touch ? 6.5 : 5;
+  assert.deepEqual(buttons.map(button => button.textContent), ['1', '3']);
+  assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), ['1번 대사', '3번 대사']);
+  assert.equal(host.style.pointerEvents, 'none'); assert.equal(host.dataset.touch, String(touch));
+  assert.equal(buttons[0].style.left, inset + '%'); assert.equal(buttons[1].style.top, (100 - inset) + '%');
+  assert.equal(buttons[0].style.width, (touch ? 26 : 20) + 'px');
+  let leaked = 0;
+  f.doc.addEventListener('click', () => leaked++);
+  f.doc.addEventListener('pointerdown', () => leaked++);
+  buttons[0].click(); assert.equal(items[0].classList.contains('selected'), false, 'synthetic selection is ignored');
+  f.user(() => buttons[0].dispatchEvent(new f.w.Event('pointerdown', {bubbles: true, composed: true})));
+  Object.defineProperty(body, 'getBoundingClientRect', {value: () => ({top: 0, bottom: 100})});
+  Object.defineProperty(items[2], 'getBoundingClientRect', {value: () => ({top: 150, bottom: 180})});
+  f.user(() => buttons[1].click());
+  assert.equal(leaked, 0); assert.equal(body.scrollTop, 80);
+  assert.equal(items[2].classList.contains('selected'), true); assert.equal(buttons[1].getAttribute('aria-pressed'), 'true');
+  f.user(() => items[0].click());
+  assert.equal(buttons[0].getAttribute('aria-pressed'), 'true'); assert.equal(buttons[1].getAttribute('aria-pressed'), 'false');
+  assert.equal(items.filter(item => item.classList.contains('selected')).length, 1);
+  f.user(() => items[0].click()); assert.equal(buttons[0].getAttribute('aria-pressed'), 'false');
+  f.user(() => items[1].dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Enter', bubbles: true})));
+  assert.equal(items[1].classList.contains('selected'), true, 'a line without a box stays selectable');
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 120, right: 420, top: 70, bottom: 170, width: 300, height: 100})});
+  f.doc.dispatchEvent(new f.w.Event('scroll'));
+  assert.deepEqual([host.style.left, host.style.top, host.style.width, host.style.height], ['120px', '70px', '300px', '100px']);
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 120, right: 130, top: 70, bottom: 80, width: 10, height: 10})});
+  f.w.dispatchEvent(new f.w.Event('resize'));
+  assert.equal(buttons[0].style.width, '10px'); assert.equal(buttons[0].style.left, '50%', 'tiny images still contain the entire badge');
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  assert.equal(host.isConnected, false); assert.equal(f.sent.length, 1);
+  assert.equal(markerView(f).buttons.length, 2, 'cached boxes render markers again');
+  f.user(() => f.w.dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Escape'})));
+  await f.timer.advance(100); assert.equal(markerView(f).host, null);
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  f.watchers.at(-1).callback(); assert.equal(markerView(f).host, null, 'navigation closes the overlay immediately');
+  f.actions.destroy(); f.close();
+});
+
+test('picker hides and restores markers, and closing during the picker cannot resurrect them', async () => {
+  let lifecycle;
+  const collector = {findCandidate: image => ({element: image, type: 'image'}), open(candidate, origin, input, callbacks) { lifecycle = callbacks; callbacks.onOpen(); }};
+  const f = page(undefined, {touch: true, collector, send: async () => ({ok: true, lines: locatedLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const {host} = markerView(f);
+  f.user(() => f.popover().querySelector('[data-action="image.lakomics"]').click());
+  assert.equal(host.inert, true); assert.equal(host.style.visibility, 'hidden'); assert.equal(host.getAttribute('aria-hidden'), 'true');
+  lifecycle.onClose(); assert.equal(host.inert, false); assert.equal(host.style.visibility, 'visible');
+  f.user(() => f.popover().querySelector('[data-action="image.lakomics"]').click());
+  f.actions.destroy(); lifecycle.onClose(); assert.equal(host.isConnected, false); assert.equal(markerView(f).host, null);
+  f.close();
+});
+
+test('markers use square badges, the shared accent and a reduced-motion-aware fade', () => {
+  assert.match(css, /\.image-marker\{[^}]*border:1px solid #fff;[^}]*border-radius:0;[^}]*background:#1d1d1f/);
+  assert.match(css, /\.image-marker\[aria-pressed="true"\]\{background:var\(--m-focus\)\}/);
+  assert.match(css, /\.image-line.selected\{background:color-mix\(in srgb,var\(--m-focus\) 12%,transparent\)\}/);
+  assert.match(css, /\.image-markers\{[^}]*pointer-events:none;animation:menuIn 120ms/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.image-markers,\.image-markers.exit\{animation:none\}\}/);
+});
 
 test('desktop image translation exposes 저장 only with an available collector candidate and keeps the popover open', async () => {
   for (const available of [false, true]) {
@@ -845,7 +957,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.11');
+  assert.equal(manifest.version, '3.5.12');
 });
 
 

@@ -26,6 +26,59 @@
     let current = null, sequence = 0;
     const reduced = () => Boolean(win.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 
+    function placeMarkers(session) {
+      const popover = session.popover, overlay = popover?.overlay, image = session.context.image;
+      if (!overlay || overlay.surface.closed) return;
+      const rect = image?.isConnected ? image.getBoundingClientRect() : null;
+      overlay.surface.node.style.visibility = popover.pickerOpen || !rect || rect.width <= 0 || rect.height <= 0 ? "hidden" : "visible";
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      const size = Math.min(popover.surface.node.dataset.touch === "true" ? 26 : 20, rect.width, rect.height);
+      Object.assign(overlay.surface.node.style, { left: rect.left + "px", top: rect.top + "px", width: rect.width + "px", height: rect.height + "px" });
+      for (const { button, box } of overlay.markers) {
+        const x = Math.max(size / 2, Math.min((box.x0 + box.x1) / 2000 * rect.width, rect.width - size / 2));
+        const y = Math.max(size / 2, Math.min((box.y0 + box.y1) / 2000 * rect.height, rect.height - size / 2));
+        Object.assign(button.style, { left: x / rect.width * 100 + "%", top: y / rect.height * 100 + "%", width: size + "px", height: size + "px" });
+      }
+    }
+    function selectLine(session, index, scroll = false) {
+      const popover = session.popover;
+      if (current !== session || popover.pickerOpen) return;
+      popover.selected = popover.selected === index ? null : index;
+      popover.items.forEach((item, i) => item.classList.toggle("selected", i === popover.selected));
+      for (const { button, index: i } of popover.overlay?.markers || []) button.setAttribute("aria-pressed", String(i === popover.selected));
+      if (scroll && popover.selected !== null) {
+        const item = popover.items[index], body = item.closest(".pb"), rect = item.getBoundingClientRect(), view = body.getBoundingClientRect();
+        // Scroll only this body, never the underlying page or image.
+        if (rect.top < view.top) body.scrollTop += rect.top - view.top;
+        else if (rect.bottom > view.bottom) body.scrollTop += rect.bottom - view.bottom;
+      }
+    }
+    function showMarkers(session, lines) {
+      const popover = session.popover;
+      if (!session.context.image || !lines.some(line => line.box)) return;
+      const surface = surfaces.host("lakomics-image-markers", session.context.image), box = doc.createElement("div");
+      surface.node.dataset.touch = popover.surface.node.dataset.touch;
+      box.className = "image-markers"; surface.root.append(box);
+      popover.overlay = { surface, box, markers: [] };
+      lines.forEach((line, index) => {
+        if (!line.box) return;
+        const button = doc.createElement("button"); button.type = "button"; button.className = "image-marker";
+        button.textContent = String(index + 1); button.setAttribute("aria-label", `${index + 1}번 대사`); button.setAttribute("aria-pressed", "false");
+        // Keep touch/long-press and compatibility mouse events inside our surface.
+        for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "contextmenu", "dragstart"]) {
+          button.addEventListener(type, event => { event.stopPropagation(); if (type === "contextmenu" || type === "dragstart") event.preventDefault(); });
+        }
+        button.addEventListener("click", event => {
+          event.preventDefault(); event.stopPropagation();
+          if (event.isTrusted !== true) return;
+          if (event.pointerType === "touch" || (surface.node.dataset.touch === "true" && event.detail > 0)) button.blur();
+          selectLine(session, index, true);
+        });
+        box.append(button); popover.overlay.markers.push({ button, box: line.box, index });
+      });
+      placeMarkers(session); surfaces.reveal(surface);
+    }
+
     async function load(session) {
       const { imageUrl: url, image } = session.context;
       if (/^https:/i.test(url)) {
@@ -71,6 +124,11 @@
         box.style.pointerEvents = hidden ? "none" : "auto";
         box.classList.toggle("picker-hidden", hidden);
         box.classList.toggle("picker-restored", !hidden);
+        if (popover.overlay) {
+          popover.overlay.surface.node.inert = hidden;
+          popover.overlay.surface.node.setAttribute("aria-hidden", String(hidden));
+          placeMarkers(session);
+        }
       };
       popover.clamp = (x = parseFloat(surface.node.style.left) || 0, y = parseFloat(surface.node.style.top) || 0) => {
         if (surface.closed) return;
@@ -103,11 +161,12 @@
         popover.positioned = true;
         popover.scrollability();
       };
-      popover.follow = () => { if (!touch() && !popover.detached) popover.place(); };
-      popover.resize = () => popover.detached ? popover.clamp() : popover.place();
+      popover.follow = () => { if (!touch() && !popover.detached) popover.place(); placeMarkers(session); };
+      popover.resize = () => { if (popover.detached) popover.clamp(); else popover.place(); placeMarkers(session); };
       doc.addEventListener("scroll", popover.follow, true); win.addEventListener("resize", popover.resize);
       win.addEventListener("orientationchange", popover.resize);
       win.visualViewport?.addEventListener("resize", popover.resize);
+      win.visualViewport?.addEventListener("scroll", popover.follow);
       let press = null;
       popover.finishHeight = () => {
         win.clearTimeout(popover.heightTimer); popover.heightTimer = 0;
@@ -156,7 +215,7 @@
       box.addEventListener("pointerdown", popover.down);
       win.addEventListener("pointermove", popover.move, {passive: false});
       win.addEventListener("pointerup", popover.up); win.addEventListener("pointercancel", popover.up);
-      if (win.ResizeObserver) { popover.observer = new win.ResizeObserver(popover.scrollability); popover.observer.observe(box); }
+      if (win.ResizeObserver) { popover.observer = new win.ResizeObserver(() => { popover.scrollability(); placeMarkers(session); }); popover.observer.observe(box); if (session.context.image) popover.observer.observe(session.context.image); }
       popover.onKey = event => { if (event.isTrusted === true && event.key === "Escape" && !popover.pickerOpen) close(); };
       win.addEventListener("keydown", popover.onKey, true);
       surfaces.reveal(surface);
@@ -167,6 +226,8 @@
     function fill(session, build) {
       const popover = open(session), box = popover.box;
       if (popover.pressed) { popover.pendingFill = build; return; }
+      if (popover.overlay) { surfaces.remove(popover.overlay.surface, popover.overlay.box, 0); popover.overlay = null; }
+      popover.selected = null; popover.items = [];
       if (popover.heightTimer) popover.finishHeight();
       const before = box.getBoundingClientRect().height;
       win.clearTimeout(popover.copyTimer); box.replaceChildren(); build(box);
@@ -203,16 +264,23 @@
         const body = doc.createElement("div"); body.className = "pb";
         if (!lines.length) { const none = doc.createElement("p"); none.className = "none"; none.textContent = "글자 없음"; body.append(none); box.append(body); return; }
         const list = doc.createElement("ol");
-        for (const line of lines) {
-          const item = doc.createElement("li"), korean = doc.createElement("b"); korean.lang = "ko"; korean.textContent = line.korean; item.append(korean);
+        for (const [index, line] of lines.entries()) {
+          const item = doc.createElement("li"), number = doc.createElement("span"), korean = doc.createElement("b");
+          item.className = "image-line"; item.tabIndex = 0;
+          number.className = "line-number"; number.textContent = String(index + 1);
+          korean.lang = "ko"; korean.textContent = line.korean; item.append(number, korean);
           if (line.original && normalized(line.original) !== normalized(line.korean)) { const original = doc.createElement("small"); original.lang = model.sourceLanguage(line.original); original.textContent = line.original; item.append(original); }
           list.append(item);
+          session.popover.items.push(item);
+          item.addEventListener("click", event => { if (event.isTrusted === true) selectLine(session, index); });
+          item.addEventListener("keydown", event => { if (event.isTrusted === true && ["Enter", " "].includes(event.key)) { event.preventDefault(); event.stopPropagation(); selectLine(session, index); } });
         }
         body.append(list); box.append(body);
         const footer = doc.createElement("div"), button = doc.createElement("button"); footer.className = "f"; button.type = "button";
         const label = doc.createElement("span"); label.textContent = "모두 복사"; label.setAttribute("aria-live", "polite"); button.append(surfaces.icon("copy"), label);
         button.addEventListener("click", event => { if (event.isTrusted === true) copyAll(session, lines, label); });
         footer.append(button); box.append(footer);
+        showMarkers(session, lines);
       });
       focusIfKeyboard(session);
     }
@@ -270,9 +338,15 @@
       const session = current; if (!session) return; current = null; session.watcher?.stop();
       const popover = session.popover; if (!popover) return;
       doc.removeEventListener("scroll", popover.follow, true); win.removeEventListener("resize", popover.resize); win.removeEventListener("orientationchange", popover.resize); win.visualViewport?.removeEventListener("resize", popover.resize);
+      win.visualViewport?.removeEventListener("scroll", popover.follow);
       win.removeEventListener("pointermove", popover.move); win.removeEventListener("pointerup", popover.up); win.removeEventListener("pointercancel", popover.up);
       popover.observer?.disconnect(); win.removeEventListener("keydown", popover.onKey, true); win.clearTimeout(popover.copyTimer); win.clearTimeout(popover.heightTimer);
       surfaces.remove(popover.surface, popover.box, ms);
+      if (popover.overlay) {
+        popover.overlay.surface.node.inert = true;
+        popover.overlay.box.querySelectorAll("button").forEach(button => { button.disabled = true; });
+        surfaces.remove(popover.overlay.surface, popover.overlay.box, ms);
+      }
     }
     function translate(context, event) {
       if (!context.imageUrl) return;
