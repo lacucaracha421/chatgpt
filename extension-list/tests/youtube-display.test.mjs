@@ -38,18 +38,35 @@ test("display limits apply to model lines, repaired lines and long single-unit f
   safe(applyResult(words, [{ from: 2, to: 19, text: "나누어 보여줘요. ".repeat(12) }], { mode: "translate-ko" }), 44);
 });
 
-test("orig is split too, short original stays only on first part; orig alone can trigger splitting", () => {
+test("orig follows Korean splits, short original stays on first part; orig never triggers splitting", () => {
   const text = "긴 번역 문장을 나누어 보여줘요. ".repeat(5);
   for (const orig of ["a", "source words in original language. ".repeat(6)]) {
     const cues = splitDisplayCues([{ startMs: 0, endMs: 6000, text, orig }]);
     safe(cues, 44);
     assert.equal(cues.map((c) => c.orig || "").join("").replace(/\s/g, ""), orig.replace(/\s/g, ""));
     if (orig === "a") assert.ok(cues.slice(1).every((c) => !("orig" in c)));
-    else assert.ok(cues.every((c) => c.orig.length <= 84));
+    else assert.ok(cues.every((c) => c.orig));
   }
   const cues = splitDisplayCues([{ startMs: 0, endMs: 6000, text: "네", orig: "source ".repeat(50) }]);
-  assert.ok(cues.length > 1);
-  assert.ok(cues.every((c) => c.orig.length <= 84));
+  assert.equal(cues.length, 1);
+  assert.equal(cues[0].orig, "source ".repeat(50));
+});
+
+test("a fitting Korean sentence never becomes three cues ending in 않아요", () => {
+  const text = "저는 이 방법을 사용하면 문제가 다시 생길 거라고 생각하지 않아요.";
+  const input = { startMs: 0, endMs: 6000, text, orig: "a very long original sentence ".repeat(8) };
+  assert.deepEqual(splitDisplayCues([input]), [input]);
+});
+
+test("long Korean translations keep predicates and avoid single-word or tiny fragments", () => {
+  for (const ending of ["생각하지 않아요.", "할 수 없어요.", "하고 있어요.", "좋아질 거예요.", "좋아질 것 같아요."]) {
+    const text = "우선 지금까지 살펴본 내용을 충분히 설명할게요. 저는 이 방법을 사용하면 문제가 다시 생길 거라고 " + ending;
+    const cues = splitDisplayCues([{ startMs: 0, endMs: 6500, text, orig: "source words ".repeat(20) }]);
+    assert.ok(cues.length > 1);
+    assert.ok(cues.some((c) => c.text.includes(ending)));
+    assert.ok(cues.every((c) => c.text.split(/\s+/).length > 1 && (c.text.match(/\p{Script=Hangul}/gu) || []).length >= 6));
+    assert.equal(cues.map((c) => c.text).join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+  }
 });
 
 test("duration-only splitting and post-polish safety preserve endpoints without overlaps", () => {

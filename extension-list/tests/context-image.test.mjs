@@ -957,7 +957,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.12');
+  assert.equal(manifest.version, '3.5.13');
 });
 
 

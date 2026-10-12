@@ -117,7 +117,7 @@ test("applyResult happy path keeps the model text", () => {
   ]);
 });
 
-test("applyResult end-time rule: a gap over 2000 ms uses last word start + 1500", () => {
+test("applyResult clean end-time rule is unchanged: a gap over 2000 ms uses last word start + 1500", () => {
   const chunk = makeUnits(["안녕", "하세요", "여러분", "반가워요"], [0, 400, 900, 3000]);
   const cues = applyResult(chunk, [
     { from: 0, to: 2, text: "안녕하세요 여러분" },
@@ -125,6 +125,17 @@ test("applyResult end-time rule: a gap over 2000 ms uses last word start + 1500"
   ]);
   assert.equal(cues[0].endMs, 900 + 1500);
   assert.equal(cues[1].startMs, 3000);
+});
+
+test("translate tail cap uses the same reading floor for missing and long source ends", () => {
+  const text = "저는 이 방법을 사용하면 문제가 다시 생길 거라고 생각하지 않아요.";
+  const expected = Math.max(1500, Math.min(3000, Math.max(1000, 55 * Array.from(text.replace(/\s/g, "")).length)));
+  for (const endMs of [undefined, 0, 6000]) {
+    const result = applyResult([{ text: "Manual source caption", startMs: 0, endMs }],
+      [{ from: 0, to: 0, text }], { mode: "translate-ko" });
+    assert.equal(result.length, 1);
+    assert.equal(result[0].endMs, expected);
+  }
 });
 
 test("applyResult uses the last word's own end for the final line when known", () => {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { polishTimings } from "./helpers/youtube-classic.mjs";
 import { applyResult, fallbackSegment } from "./helpers/youtube-classic.mjs";
 import { chunkSignature, createResumeRecord, matchesResumeRecord } from "./helpers/youtube-classic.mjs";
+import { splitDisplayCues } from "./helpers/youtube-classic.mjs";
 
 const cue = (startMs, endMs, text = "가") => ({ startMs, endMs, text });
 
@@ -55,6 +56,58 @@ test("cue construction prevents a short source gap from causing overlapping fall
   const units = [{ text: "a", startMs: 0, endMs: 0 }, { text: "b", startMs: 500, endMs: 600 }];
   const cues = applyResult(units, [{ from: 0, to: 0, text: "a" }, { from: 1, to: 1, text: "b" }]);
   assert.ok(cues[0].endMs <= cues[1].startMs);
+});
+
+test("timing merges only fragments of the same translated line and display does not undo it", () => {
+  const text = "이 문장은 자막을 읽을 시간이 부족할 때 같은 번역문 조각들을 합쳐서 보여주는지 확인합니다. ".repeat(2);
+  const parts = splitDisplayCues([{ startMs: 0, endMs: 900, text, orig: "source words ".repeat(20) }]);
+  assert.ok(parts.length > 1);
+  const result = polishTimings(structuredClone(parts));
+  assert.equal(result.length, 1);
+  assert.ok(result[0].endMs >= 1000);
+  assert.deepEqual(splitDisplayCues(result), result);
+  assert.equal(result[0].text.replace(/\s/g, ""), text.replace(/\s/g, ""));
+});
+
+test("a final short fragment merges backwards but never across a translated line", () => {
+  const input = [{ ...cue(0, 1800, "처음 문장을 충분히 읽을 수 있어요"), splitLine: "one", orig: "first" },
+    { ...cue(1800, 2000, "마지막 부분도 읽어요"), splitLine: "one", orig: "last" },
+    { ...cue(2000, 2400, "아니요, 안 해요."), orig: "No, I do not." }];
+  const result = polishTimings(input);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].endMs, 2000);
+  assert.equal(result[1].startMs, 2000);
+  assert.equal(result[1].text, "아니요, 안 해요.");
+  assert.equal(input.length, 3);
+});
+
+test("merging preserves deliberate repeated clauses", () => {
+  const text = "이 문장은 아주 길게 설명하고 있는 내용입니다. ".repeat(2).trim();
+  const parts = splitDisplayCues([{ startMs: 0, endMs: 900, text, orig: "source words ".repeat(10) }]);
+  assert.ok(parts.length > 1);
+  assert.equal(polishTimings(parts)[0].text.replace(/\s/g, ""), text.replace(/\s/g, ""));
+});
+
+test("manual translated captions get their reading time; short auto-caption tails stay bounded", () => {
+  const text = "저는 이 방법을 사용하면 문제가 다시 생길 거라고 생각하지 않아요.";
+  const units = [{ text: "This is a manual caption.", startMs: 0, endMs: 6000 }];
+  const result = applyResult(units, [{ from: 0, to: 0, text }], { mode: "translate-ko" });
+  const reading = Math.min(3000, Math.max(1000, 55 * Array.from(text.replace(/\s/g, "")).length));
+  assert.equal(result.length, 1);
+  assert.equal(result[0].endMs, Math.max(1500, reading));
+  assert.ok(result[0].endMs > 1500);
+  assert.equal(applyResult(units, [{ from: 0, to: 0, text: "네" }], { mode: "translate-ko" })[0].endMs, 1500);
+  assert.equal(applyResult(units, [{ from: 0, to: 0, text: units[0].text }])[0].endMs, 1500);
+});
+
+test("standalone negative answers retain separate source cues and speech sync", () => {
+  const units = [{ text: "Question", startMs: 0, endMs: 600 }, { text: "No", startMs: 600, endMs: 1800 }];
+  const result = polishTimings(applyResult(units, [{ from: 0, to: 0, text: "이 방법으로 할까요?" },
+    { from: 1, to: 1, text: "아니요, 안 해요." }], { mode: "translate-ko" }));
+  assert.equal(result.length, 2);
+  assert.equal(result[0].endMs, 600);
+  assert.equal(result[1].startMs, 600);
+  assert.equal(result[1].text, "아니요, 안 해요.");
 });
 
 test("resume records keep successful chunks only and match transcript, chunking and track", () => {

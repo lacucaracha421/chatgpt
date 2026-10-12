@@ -31,7 +31,10 @@ function buildCues(units, lines, mode = "clean") {
     // Following line start, or (for the last line of a chunk) the last word's own end.
     let end = next ? units[next.from].startMs : units[line.to].endMs;
     if (!Number.isFinite(end) || end <= lastStart || end - lastStart > MAX_GAP_MS) {
-      end = lastStart + TAIL_MS;
+      // Keep the silence cap, but never use it to shorten translated reading time.
+      const tailEnd = lastStart + TAIL_MS;
+      const readingEnd = mode === "translate-ko" ? startMs + globalThis.LakomicsYouTube.timing.readingTime(line.text) : tailEnd;
+      end = Math.max(tailEnd, readingEnd);
     }
     if (next) end = Math.min(end, units[next.from].startMs);
     cues.push({ startMs, endMs: end, text: line.text,
