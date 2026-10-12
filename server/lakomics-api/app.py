@@ -1028,7 +1028,7 @@ from album_authority import register_album_authority
 
 startup_album_authority = register_album_authority(
     app, get_db, require_client, require_publisher, asset_item=mobile_asset_item,
-    list_generation=list_generation)
+    list_generation=list_generation, image_text_flags=library_assets.image_text_flags)
 
 # Classification authority substrate (2A). Startup only creates empty tables, and
 # the module deliberately ships no activation route: the domain stays PC-owned until

@@ -336,7 +336,8 @@ def store_image_text(db, capture_id, lines, now):
     payload = json.dumps([line.model_dump(exclude_none=True) for line in lines],
                          ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     db.execute("INSERT INTO capture_image_text VALUES(?,?,?) ON CONFLICT(capture_id) "
-               "DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",
+               "DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at "
+               "WHERE capture_image_text.payload IS NOT excluded.payload",
                [capture_id, payload, now])
     mapped = db.execute("SELECT asset_id FROM asset_authority_capture_map WHERE capture_id=?",
                         [capture_id]).fetchall() if db.execute(
@@ -362,10 +363,9 @@ def pending_capture_payload(row: sqlite3.Row) -> dict:
         "created_at": row["created_at"],
     }
 
-    with api.get_db() as db:
-        text = db.execute("SELECT payload FROM capture_image_text WHERE capture_id=?", [row["id"]]).fetchone()
-    if text:
-        payload["image_text"] = json.loads(text[0])
+    text = row["image_text_payload"]
+    if text is not None:
+        payload["image_text"] = json.loads(text)
     return payload
 
 
@@ -380,10 +380,10 @@ def list_pending_captures(
     with api.get_db() as db:
         rows = db.execute(
             """
-            SELECT *
-            FROM captures
-            WHERE status = 'pending' AND (? IS NULL OR id > ?)
-            ORDER BY id ASC
+            SELECT captures.*, text.payload AS image_text_payload
+            FROM captures LEFT JOIN capture_image_text AS text ON text.capture_id = captures.id
+            WHERE captures.status = 'pending' AND (? IS NULL OR captures.id > ?)
+            ORDER BY captures.id ASC
             LIMIT ?
             """,
             (after_id, after_id, limit),

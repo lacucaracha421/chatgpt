@@ -316,7 +316,8 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
         found = {}
         for offset in range(0, len(ids), 500):
             chunk = ids[offset:offset + 500]
-            rows = db.execute("SELECT * FROM visible_assets WHERE committed=1 AND id IN (" +
+            rows = db.execute("SELECT *, EXISTS(SELECT 1 FROM asset_image_text WHERE asset_id=visible_assets.id) "
+                              "AS has_image_text FROM visible_assets WHERE committed=1 AND id IN (" +
                               ",".join("?" for _ in chunk) + ")", chunk).fetchall()
             memberships = asset_memberships(db, rows)
             for row in rows:

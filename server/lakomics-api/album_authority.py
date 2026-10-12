@@ -1326,7 +1326,7 @@ def parse_baseline_request(params, epoch):
 
 
 def register_album_authority(app, get_db, require_client, require_publisher, asset_item=None,
-                             list_generation=None):
+                             list_generation=None, image_text_flags=None):
     # The mobile Asset projection is injected so this module never grows a second
     # definition of the display shape the app already publishes.
     asset_item = asset_item or default_asset_item
@@ -1505,6 +1505,8 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                 rows = query.page(db, limit + 1, after)
                 has_more = len(rows) > limit
                 page_rows = rows[:limit]
+                if image_text_flags is not None:
+                    page_rows = image_text_flags(db, page_rows)
                 memberships = asset_classification_ids(db, page_rows)
                 items = [asset_item(item, memberships.get(item["id"], []))
                          for item in page_rows]

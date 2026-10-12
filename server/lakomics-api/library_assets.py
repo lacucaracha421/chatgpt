@@ -647,12 +647,10 @@ def asset_image_text(asset_id: str, authorization: str | None = Header(default=N
 
 
 def mobile_asset_item(row, classification_ids: list[str] | None = None) -> dict:
-    if "has_image_text" not in row.keys():
-        with api.get_db() as db:
-            row = image_text_flags(db, [row])[0]
     return {
         "id": row["id"],
-        "has_image_text": bool(row["has_image_text"]),
+        # Rows from serialisers that do not attach the flag simply have no text.
+        "has_image_text": bool(row["has_image_text"]) if "has_image_text" in row.keys() else False,
         "contentRating": library_search.content_rating(row),
         "kind": row["kind"],
         "content_type": row["content_type"],
@@ -737,7 +735,8 @@ def list_mobile_library_trash(
                 placeholders = ",".join("?" for _ in ids)
                 ratings = {row["asset_id"]: row["content_rating"] for row in db.execute(
                     f"SELECT asset_id, content_rating FROM library_asset_ratings WHERE asset_id IN ({placeholders})", ids)}
-            rows = [{**dict(row), "content_rating": ratings.get(row["id"])} for row in rows]
+            rows = image_text_flags(db, [
+                {**dict(row), "content_rating": ratings.get(row["id"])} for row in rows])
         finally:
             db.rollback()
     items = []

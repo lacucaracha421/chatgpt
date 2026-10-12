@@ -285,6 +285,7 @@ def register(app, get_db, require_client, require_publisher):
             # Bound to the Asset list generation so the tablet's page loader treats it like any other page.
             generation = library_assets.api.list_generation(db)
             result = search(db, q, force, limit)
+            result['items'] = library_assets.image_text_flags(db, result['items'])
             result['listGeneration'] = generation
             memberships = library_assets._mobile_memberships(db, result['items'])
             result['items'] = [library_assets.mobile_asset_item(row, memberships[row['id']]) for row in result['items']]

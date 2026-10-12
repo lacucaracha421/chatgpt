@@ -142,6 +142,8 @@ CREATE TABLE IF NOT EXISTS asset_authority_capture_map(
  PRIMARY KEY(library_id,capture_id));
 CREATE INDEX IF NOT EXISTS asset_authority_capture_map_by_asset
  ON asset_authority_capture_map(library_id,asset_id);
+CREATE INDEX IF NOT EXISTS asset_authority_capture_map_by_capture
+ ON asset_authority_capture_map(capture_id,asset_id);
 CREATE TABLE IF NOT EXISTS asset_authority_receipts(
  library_id TEXT NOT NULL,
  epoch INTEGER NOT NULL,
@@ -259,17 +261,17 @@ def state_row(db, library_id, asset_id):
     return db.execute(
         "SELECT lifecycle,entity_revision,kind,object_key,content_type,size_bytes,sha256,"
         "source_url,creator_name,creator_handle,collected_at,source_published_at,"
-        "import_source,created_at,updated_at"
+        "import_source,created_at,updated_at,"
+        "EXISTS(SELECT 1 FROM asset_image_text WHERE asset_id=asset_authority_state.asset_id)"
         " FROM asset_authority_state WHERE library_id=? AND asset_id=?",
         [library_id, asset_id]).fetchone()
 
 
-def state_projection(row, asset_id, db):
+def state_projection(row, asset_id):
     """The canonical delta a replica applies. Never contains media or secrets."""
     return {
         "assetId": asset_id,
-        "hasImageText": bool(db.execute(
-            "SELECT 1 FROM asset_image_text WHERE asset_id=?", [asset_id]).fetchone()),
+        "hasImageText": bool(row[15]),
         "lifecycle": row[0],
         "entityRevision": row[1],
         "kind": row[2],
@@ -465,11 +467,12 @@ def asset_page(db, library_id, after, limit):
     rows = db.execute(
         "SELECT asset_id,lifecycle,entity_revision,kind,object_key,content_type,size_bytes,"
         "sha256,source_url,creator_name,creator_handle,collected_at,source_published_at,"
-        "import_source,created_at,updated_at"
+        "import_source,created_at,updated_at,"
+        "EXISTS(SELECT 1 FROM asset_image_text WHERE asset_id=asset_authority_state.asset_id)"
         " FROM asset_authority_state WHERE library_id=?"
         " AND (? IS NULL OR asset_id>?) ORDER BY asset_id LIMIT ?",
         [library_id, after, after, limit]).fetchall()
-    return [state_projection(row[1:], row[0], db) for row in rows]
+    return [state_projection(row[1:], row[0]) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +485,9 @@ def copy_capture_image_text(db, capture_id, asset_id, now):
         return
     digest = hashlib.sha256(text[0].encode("utf-8")).hexdigest()
     db.execute("INSERT INTO asset_image_text VALUES(?,?,?,?) ON CONFLICT(asset_id) "
-               "DO UPDATE SET payload=excluded.payload,digest=excluded.digest,updated_at=excluded.updated_at",
+               "DO UPDATE SET payload=excluded.payload,digest=excluded.digest,updated_at=excluded.updated_at "
+               "WHERE asset_image_text.payload IS NOT excluded.payload "
+               "OR asset_image_text.digest IS NOT excluded.digest",
                [asset_id, text[0], digest, now])
 
 
@@ -573,7 +578,7 @@ def promote_capture(db, *, library_id, capture_id, kind, object_key, content_typ
     row = state_row(db, library_id, asset_id)
     _record_change(db, library_id=library_id, command_type="promoteCapture",
                    asset_id=asset_id, revision=1, operation_id=f"promote:{capture_id}",
-                   delta={"asset": state_projection(row, asset_id, db)}, now=timestamp)
+                   delta={"asset": state_projection(row, asset_id)}, now=timestamp)
     return asset_id, True
 
 
@@ -627,7 +632,7 @@ def register_replication(db, library_id, asset_id, now):
         [library_id, asset_id, NORMAL, revision, *values, asset["created_at"], now, now])
     if quiet_trash_update:
         return
-    _record_change(db, library_id=library_id, command_type="replicateAsset", asset_id=asset_id, revision=revision, operation_id=str(uuid.uuid4()), delta={"asset":state_projection(state_row(db,library_id,asset_id),asset_id,db)}, now=now)
+    _record_change(db, library_id=library_id, command_type="replicateAsset", asset_id=asset_id, revision=revision, operation_id=str(uuid.uuid4()), delta={"asset":state_projection(state_row(db,library_id,asset_id),asset_id)}, now=now)
 
 
 # ---------------------------------------------------------------------------
@@ -728,7 +733,7 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
         "ELSE lifecycle_changed_at END WHERE library_id=? AND asset_id=?",
         [target, next_revision, now, target, now, library_id, asset_id])
     updated = state_row(db, library_id, asset_id)
-    projection = state_projection(updated, asset_id, db)
+    projection = state_projection(updated, asset_id)
     sequence = _record_change(
         db, library_id=library_id, command_type=command_type, asset_id=asset_id,
         revision=next_revision, operation_id=operation_id,

@@ -15,6 +15,7 @@ from fastapi import HTTPException, Header, Query
 
 import authority
 import classification_authority
+import library_assets
 
 
 api: ModuleType
@@ -48,6 +49,7 @@ def list_home_revisit(authorization: str | None = Header(default=None), day: str
     with api.get_db() as db:
         db.execute("BEGIN")
         rows, distance = home_revisit_rows(db, day)
+        rows = library_assets.image_text_flags(db, rows)
         memberships = api._mobile_memberships(db, rows)
     title = "1년 전 오늘" if distance == 0 else "1년 전 이맘때"
     return {"day": day, "bundles": [{"kind": "date", "title": title,
@@ -234,8 +236,12 @@ def list_mobile_revisit(
         return list_home_revisit(authorization, day)
     api.require_auth(authorization)
     with api.get_db() as db:
+        db.execute("BEGIN")
         date_bundle = api._revisit_date_bundle(db, limit)
         creator_groups = api._revisit_creator_groups(db, limit)
+        date_bundle = library_assets.image_text_flags(db, date_bundle)
+        for group in creator_groups:
+            group["rows"] = library_assets.image_text_flags(db, group["rows"])
 
         ids = [row["id"] for row in date_bundle]
         for group in creator_groups:
@@ -356,7 +362,7 @@ def list_mobile_revisit_date(
             params,
         ).fetchall()
         has_more = len(rows) > limit
-        page_rows = rows[:limit]
+        page_rows = library_assets.image_text_flags(db, rows[:limit])
         memberships = api._mobile_memberships(db, page_rows)
     items = [api.mobile_asset_item(row, memberships.get(row["id"], [])) for row in page_rows]
     next_cursor = None
@@ -411,7 +417,7 @@ def list_mobile_revisit_creator_assets(
             params,
         ).fetchall()
         has_more = len(rows) > limit
-        page_rows = rows[:limit]
+        page_rows = library_assets.image_text_flags(db, rows[:limit])
         memberships = api._mobile_memberships(db, page_rows)
     items = [api.mobile_asset_item(row, memberships.get(row["id"], [])) for row in page_rows]
     next_cursor = None
