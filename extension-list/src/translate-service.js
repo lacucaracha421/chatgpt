@@ -1,6 +1,26 @@
 (() => {
   "use strict";
   const core = globalThis.LakomicsTranslationCore;
+  // Stable IDs belong to this table; replace them on every worker wake since
+  // session rules survive worker suspension, but not a browser restart.
+  const IMAGE_REFERERS = [{ id: 1001, host: "i.pximg.net", referer: "https://www.pixiv.net/" }];
+  async function registerImageReferers() {
+    const dnr = globalThis.chrome?.declarativeNetRequest;
+    if (!dnr?.updateSessionRules) return;
+    await dnr.updateSessionRules({
+      removeRuleIds: IMAGE_REFERERS.map(item => item.id),
+      addRules: IMAGE_REFERERS.map(item => ({
+        id: item.id,
+        priority: 1,
+        action: { type: "modifyHeaders", requestHeaders: [{ header: "Referer", operation: "set", value: item.referer }] },
+        // Chromium classifies fetch() as xmlhttprequest. -1 excludes page tabs.
+        condition: { requestDomains: [item.host], tabIds: [-1], resourceTypes: ["xmlhttprequest"] },
+      })),
+    });
+  }
+  const imageReferersReady = registerImageReferers().catch(() => {
+    console.warn("Lakomics: image referer session rules could not be registered.");
+  });
   const SETTINGS = "lakomics:translation:v1";
   // The cache lives in shards so a write (delivered, old and new value, to every open X tab)
   // carries one shard, and a waking worker reads only the shards a request touches.
@@ -609,6 +629,7 @@
     if (hasUrl === hasData) return { ok: false, code: "invalid_image" };
     const model = settings.imageModel;
     if (!keyFor(model)) return { ok: false, code: "api_key_missing" };
+    if (hasUrl) await imageReferersReady;
     const budget = core.requestBudget(IMAGE_BUDGET_MS);
     let prepared;
     try {

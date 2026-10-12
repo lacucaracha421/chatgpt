@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Companion",
-  "version": "3.5.13",
+  "version": "3.5.16",
   "description": "Collect images and videos into Lakomics, translate X posts, YouTube subtitles and web pages, and use the Lakomics right-click menu.",
   "permissions": [
     "storage",
@@ -11,7 +11,8 @@
     "clipboardRead",
     "clipboardWrite",
     "pageCapture",
-    "offscreen"
+    "offscreen",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://*/*",

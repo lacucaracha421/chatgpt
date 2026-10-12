@@ -14,7 +14,7 @@ test('collection uses the arc menu and keeps the list editor out of content page
   }
   assert.equal(scripts.some(path=>/gesture|radial/i.test(path)), false);
   assert.equal(manifest.name, 'Lakomics Companion');
-  assert.equal(manifest.version, '3.5.13');
+  assert.equal(manifest.version, '3.5.16');
   assert.equal('version_name' in manifest, false);
   assert.match(manifest.description, /right-click menu/);
   assert.match(manifest.description, /YouTube/);
@@ -33,6 +33,14 @@ test('X page video observation starts early without exposing other extension scr
   assert.equal(client.run_at, 'document_start');
   assert.equal(manifest.permissions.includes('cookies'), false);
   assert.equal(manifest.permissions.includes('webRequest'), false);
+});
+
+test('hotlink image headers use existing host access without cookie or broad DNR permission', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
+  assert.ok(manifest.permissions.includes('declarativeNetRequestWithHostAccess'));
+  assert.ok(manifest.host_permissions.includes('https://*/*'));
+  assert.equal(manifest.permissions.includes('declarativeNetRequest'), false);
+  assert.equal(manifest.permissions.includes('cookies'), false);
 });
 
 test('permanent saves remain server-only while temporary PC saves allow downloads', async () => {
