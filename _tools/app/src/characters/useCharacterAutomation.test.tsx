@@ -74,7 +74,7 @@ it("publishes current character and durable refresh totals for the work center",
       activeAssetId: "image",
       pending: 12,
       activeSeriesName: "젠레스",
-      activeWork: { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12 },
+      activeWork: { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12, reconsiderationRemaining: 0 },
       historyRefreshes: [{ targetId: "a", targetName: "레미엘", seriesName: "젠레스", state: "running", total: 700, processed: 32, remaining: 668, failed: 0 }],
     }),
     pause: vi.fn(),
@@ -225,7 +225,7 @@ it("refreshes promptly on visibility and reports whether membership changed", as
 
 it("keeps the same work objects while status polls return equal values, and replaces them when progress moves", async () => {
   vi.useFakeTimers();
-  const activeWork = { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12 };
+  const activeWork = { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12, reconsiderationRemaining: 0 };
   const refresh = { targetId: "a", targetName: "레미엘", seriesName: "젠레스", state: "running" as const, total: 700, processed: 32, remaining: 668, failed: 0 };
   let processed = 32;
   // Fresh objects and arrays on every read, like a real IPC round-trip.

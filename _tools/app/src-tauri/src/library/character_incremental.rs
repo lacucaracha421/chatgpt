@@ -225,6 +225,7 @@ pub struct ActiveWork {
     target_name: Option<String>,
     cause: Option<String>,
     fresh_remaining: usize,
+    reconsideration_remaining: usize,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -363,6 +364,7 @@ impl Library {
                     target_name: e.active_target_name.clone(),
                     cause: e.active_cause.clone(),
                     fresh_remaining: 0,
+                    reconsideration_remaining: 0,
                 },
             )
         };
@@ -381,6 +383,17 @@ impl Library {
                 &format!(
                     "SELECT COUNT(*) FROM character_autotag_jobs j
             WHERE state IN ('pending','processing') AND cause<>'reconsideration' AND {}",
+                    super::character_scope::JOB_SCOPE_ALLOWED_SQL
+                ),
+                [],
+                |r| r.get::<_, i64>(0),
+            )?
+            .max(0) as usize;
+        active_work.reconsideration_remaining = c
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM character_autotag_jobs j
+            WHERE state IN ('pending','processing') AND cause='reconsideration' AND {}",
                     super::character_scope::JOB_SCOPE_ALLOWED_SQL
                 ),
                 [],

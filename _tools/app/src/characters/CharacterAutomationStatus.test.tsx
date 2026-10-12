@@ -29,7 +29,7 @@ it("renders nothing when no active work is reported", () => {
 
 it("shows the active character and request-wide remaining images rather than the current comparison count", () => {
   render(<CharacterAutomationStatus state={{ ...quietState, historyRefreshActive: true,
-    activeWork: { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "reconsideration", freshRemaining: 3 },
+    activeWork: { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "reconsideration", freshRemaining: 3, reconsiderationRemaining: 0 },
     historyRefreshes: [{ targetId: "remiel", targetName: "레미엘", seriesName: "젠레스", state: "running", total: 700, processed: 125, remaining: 575, failed: 2 }],
   }} />);
   expect(screen.getByText("현재 작업 · 젠레스 / 레미엘 비교 중")).toBeVisible();

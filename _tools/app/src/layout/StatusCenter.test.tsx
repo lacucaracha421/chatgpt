@@ -162,6 +162,44 @@ it("shows fresh character work and a persistent character failure with its recov
   expect(screen.getByRole("button", { name: "분석 환경 설정" })).toBeVisible();
 });
 
+it("keeps reconsideration quiet in the chip and visible between comparisons, with shared pause controls", async () => {
+  const user = userEvent.setup();
+  const activeWork = { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "reconsideration", freshRemaining: 0, reconsiderationRemaining: 3151 };
+  const characterAutomation = { ...idleCharacterAutomation, activeWork };
+  const onNavigate = vi.fn();
+  const { rerender } = render(<StatusCenter characterAutomation={characterAutomation} progress={null} onNavigate={onNavigate} />);
+  const trigger = screen.getByRole("button", { name: "상태" });
+  expect(trigger).toHaveTextContent(/^상태$/);
+  expect(trigger).toHaveAttribute("data-state-tone", "idle");
+  await user.click(trigger);
+  const work = screen.getByRole("region", { name: "작업" });
+  expect(work).toHaveTextContent("캐릭터 재검토 · 3,151개 남음");
+  expect(work).toHaveTextContent("현재 작업 · 젠레스 / 레미엘 비교 중");
+  expect(work).not.toHaveTextContent("진행 중인 작업 없음");
+  await user.click(within(work).getByRole("button", { name: "일시 정지" }));
+  expect(characterAutomation.pauseHistoryRefresh).toHaveBeenCalledTimes(1);
+
+  rerender(<StatusCenter characterAutomation={{ ...characterAutomation, paused: true,
+    activeWork: { ...activeWork, active: false, seriesName: null, targetName: null, cause: null },
+  }} progress={null} onNavigate={onNavigate} />);
+  expect(trigger).toHaveTextContent(/^상태$/);
+  expect(work).toHaveTextContent("캐릭터 재검토 일시 정지 · 3,151개 남음");
+  expect(work).not.toHaveTextContent("진행 중인 작업 없음");
+  await user.click(within(work).getByRole("button", { name: "재개" }));
+  expect(characterAutomation.resumeHistoryRefresh).toHaveBeenCalledTimes(1);
+
+  rerender(<StatusCenter characterAutomation={{ ...characterAutomation, historyRefreshActive: true }} progress={null} onNavigate={onNavigate} />);
+  expect(within(work).getAllByRole("button", { name: "일시 정지" })).toHaveLength(1);
+  expect(trigger).toHaveTextContent("작업 1");
+
+  rerender(<StatusCenter characterAutomation={{ ...characterAutomation,
+    activeWork: { ...activeWork, active: false, reconsiderationRemaining: 0 },
+  }} progress={null} onNavigate={onNavigate} />);
+  expect(work).toHaveTextContent("진행 중인 작업 없음");
+  expect(within(work).queryByText(/캐릭터 재검토/)).not.toBeInTheDocument();
+  expect(trigger).toHaveTextContent(/^상태$/);
+});
+
 it("carries the former work tray: import progress once, then results with their actions", async () => {
   const user = userEvent.setup();
   const retryWork = vi.fn();

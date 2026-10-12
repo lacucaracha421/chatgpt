@@ -10,6 +10,7 @@ export type CharacterActiveWork = {
   targetName: string | null;
   cause: string | null;
   freshRemaining: number;
+  reconsiderationRemaining: number;
 };
 export type CharacterRefreshProgress = {
   targetId: string;

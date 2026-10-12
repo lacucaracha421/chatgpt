@@ -84,9 +84,10 @@ export function StatusCenter({
   const freshCharacterWork = Boolean(characterAutomation.activeWork && (characterAutomation.activeWork.freshRemaining > 0
     || (characterAutomation.activeWork.active && characterAutomation.activeWork.cause !== "reconsideration")));
   const characterFailures = (characterAutomation.historyRefreshes ?? []).filter(refresh => refresh.state === "failed").length;
-  const characterVisible = Boolean(
+  const characterCounted = Boolean(
     characterAutomation.persistentError || characterAutomation.historyRefreshActive || freshCharacterWork || characterFailures,
   );
+  const characterVisible = characterCounted || (characterAutomation.activeWork?.reconsiderationRemaining ?? 0) > 0;
   const visibleWorks = works.filter((work) => work.kind !== "drag_out" || work.status !== "completed");
   const runningIngestion = visibleWorks.some((work) => work.kind === "ingestion" && work.status === "running");
   // A running file import is described once, by its work row, not also by the drop progress line.
@@ -113,7 +114,7 @@ export function StatusCenter({
     + cloudProblems
     + authority.problemCount;
   const workCount = Number(Boolean(inbox.status)) + publicationJobs.length + Number(Boolean(vaultImport)) + Number(Boolean(vaultExport))
-    + Number(characterVisible) + Number(libraryVisible) + visibleWorks.length;
+    + Number(characterCounted) + Number(libraryVisible) + visibleWorks.length;
 
   const state = problemCount > 0 ? "attention" : activeCount > 0 ? "active" : workCount > 0 ? "available" : reviewCount > 0 ? "queue" : "idle";
   const text = { attention: `문제 ${problemCount}`, active: `작업 ${activeCount}`, available: `결과 ${workCount}`, queue: `확인 ${reviewCount}`, idle: "상태" }[state];
@@ -155,7 +156,7 @@ export function StatusCenter({
           {connections?.(go)}
           <StatusBlock title="작업">
             <div className="status-center__list">
-              {workCount === 0
+              {workCount === 0 && !characterVisible
                 ? <EmptyState inline className="status-center__empty" title="진행 중인 작업 없음" />
                 : <>
                   <WorkTray works={works} retryFailed={retryWork} dismissWork={dismissWork}

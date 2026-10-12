@@ -5,6 +5,7 @@ export function CharacterAutomationStatus({ state }: { state: QuietCharacterAuto
   const work = state.activeWork;
   const refreshes = state.historyRefreshes ?? [];
   const fresh = Boolean(work && (work.freshRemaining > 0 || (work.active && work.cause !== "reconsideration")));
+  const reconsideration = (work?.reconsiderationRemaining ?? 0) > 0;
   const errorPanel = state.persistentError ? <div className="character-actions series-automation" role="alert">
       <strong>캐릭터 분석 오류</strong>
       <small className="character-message">{state.persistentError}</small>
@@ -13,11 +14,12 @@ export function CharacterAutomationStatus({ state }: { state: QuietCharacterAuto
         <Button size="sm" variant="ghost" onClick={state.dismissError}>닫기</Button>
       </div>
     </div> : null;
-  if (!state.historyRefreshActive && !refreshes.length && !fresh) return errorPanel;
+  if (!state.historyRefreshActive && !refreshes.length && !fresh && !reconsideration) return errorPanel;
 
   return <>{errorPanel}<div className="character-actions series-automation" role="status" aria-atomic="true">
     {work?.active && <p>현재 작업 · {[work.seriesName, work.targetName].filter(Boolean).join(" / ") || "이미지 준비 중"}{work.targetName ? " 비교 중" : ""}</p>}
     {fresh && <p>{work?.cause === "manual_scan" ? "수동 분석" : "새 이미지 분석"} · {work!.freshRemaining.toLocaleString()}개 남음</p>}
+    {reconsideration && <p>{state.paused ? "캐릭터 재검토 일시 정지" : "캐릭터 재검토"} · {work!.reconsiderationRemaining.toLocaleString()}개 남음</p>}
     {state.historyRefreshActive && <span>{state.paused ? "과거 미분류 이미지 갱신 일시 정지" : "과거 미분류 이미지 갱신 중"}</span>}
     {refreshes.map(refresh => <div className="character-refresh-progress" key={refresh.targetId}>
       <strong>{refresh.seriesName} / {refresh.targetName}</strong>
@@ -28,7 +30,7 @@ export function CharacterAutomationStatus({ state }: { state: QuietCharacterAuto
         {refresh.state === "failed" && " · 갱신 중단 · 캐릭터에서 다시 갱신해 주세요"}
       </p>
     </div>)}
-    {state.historyRefreshActive && <Button
+    {(state.historyRefreshActive || reconsideration) && <Button
       size="sm"
       onClick={state.paused ? state.resumeHistoryRefresh : state.pauseHistoryRefresh}
     >

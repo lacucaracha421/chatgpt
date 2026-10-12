@@ -689,6 +689,28 @@ fn status_exposes_only_quiet_control_state_for_explicit_history_refresh() {
     ] {
         assert!(status.get(hidden).is_none(), "{hidden} leaked into status");
     }
+    assert_eq!(status["activeWork"]["reconsiderationRemaining"], 0);
+    let c = f.library.connection().unwrap();
+    character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Reconsideration).unwrap();
+    drop(c);
+    for state in ["pending", "processing", "completed"] {
+        let c = f.library.connection().unwrap();
+        c.execute(
+            "UPDATE character_autotag_jobs SET state=?1,
+             claim_id=CASE WHEN ?1='processing' THEN 'status-test' ELSE NULL END
+             WHERE asset_id='asset-5'",
+            [state],
+        )
+        .unwrap();
+        drop(c);
+        let status =
+            serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
+        assert_eq!(
+            status["activeWork"]["reconsiderationRemaining"],
+            if state == "completed" { 0 } else { 1 }
+        );
+        assert_eq!(status["activeWork"]["freshRemaining"], 0);
+    }
 }
 
 #[test]
