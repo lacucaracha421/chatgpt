@@ -10,6 +10,7 @@
 .tablet-more .workspace-index-link:disabled { opacity:.5; }
 .tablet-more .workspace-index-link.is-danger { color:var(--color-danger); }
 .tablet-more .more-panel__count { color:var(--color-muted); font-size:var(--type-meta); font-variant-numeric:tabular-nums; }
+.tablet-more .more-panel__count--trash { flex:none; width:10ch; text-align:right; }
 .tablet-more .more-panel__activity { width:var(--space-1); height:var(--space-1); background:var(--color-accent); }
 /* Landscape: the sheet stays a readable column so counts sit near their names. */
 [role="dialog"]:has(>.library-sheet>.tablet-more) { width:min(560px,100%); }

@@ -152,7 +152,9 @@ describe('shared Home attention on tablet', () => {
     server.upcoming = {version:1, entries:[upcomingEntry], wishlist:[upcomingEntry]};
     render(<Home {...props({captures:[item('pending')]})}/>);
     const today = await screen.findByRole('region', {name:'오늘 할 것'});
-    await waitFor(()=>expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋7', '□유사 이미지 검토6쌍', '□처리 대기1', '□중복 판본2', '○Todo남은 항목 1개1']));
+    await waitFor(()=>expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['미분류 에셋7장', '유사 이미지 검토6쌍', '처리 대기1건', '중복 판본2건', 'Todo남은 항목 1개1개']));
+    expect(today.querySelectorAll('.ui-badge--icon')).toHaveLength(5);
+    expect(today.querySelector('.home-attention-mark')).toBeNull();
     expect(document.querySelector('.home-tablet-layout')).toBeTruthy();
     expect(document.querySelector('.home-tablet-day-column')?.querySelectorAll('section')).toHaveLength(2);
     expect(document.querySelector('.home-tablet-media-column')?.querySelectorAll('section')).toHaveLength(1);

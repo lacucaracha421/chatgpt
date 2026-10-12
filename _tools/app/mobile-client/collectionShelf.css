@@ -13,6 +13,15 @@
 .mobile-collections .collection-card__meta { display: flex; flex-direction: column; min-width: 0; }
 .mobile-collections .collection-list--grid .collection-card__meta { padding-top: var(--space-1); }
 .mobile-collections .collection-card__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); font-weight: 500; }
+/* A tablet pick turns the case inside its cell instead of lifting beyond the column. */
+.mobile-collections .collection-list__cell:has(.collection-cover-cell) { overflow:clip; }
+.mobile-collections .collection-cover-cell .collection-card__light { overflow:hidden; }
+.mobile-collections .collection-cover-cell:active { transform:none; background:var(--color-surface-pressed); }
+.mobile-collections .collection-cover-cell .collection-light-case[data-front] .cs-box { transform-origin:center; transform:scale(.98); transition:transform var(--motion-small) var(--ease-standard); }
+.mobile-collections .collection-cover-cell .collection-light-case[data-front]::after { transform:none; }
+@media (prefers-reduced-motion:reduce) {
+  .mobile-collections .collection-cover-cell .collection-light-case[data-front] .cs-box { transition:none; }
+}
 /* 만화 · 책장: the shared bookcase rows (mangaShelf.css) run to the screen edge like the planks; titles keep the gutter. */
 .mobile-collections .manga-shelf-list { margin: 0 calc(var(--mobile-gutter) * -1); padding: var(--space-4) 0 var(--space-6); }
 .mobile-collections .manga-shelf-row__label { align-items: center; padding: 0 var(--mobile-gutter); }

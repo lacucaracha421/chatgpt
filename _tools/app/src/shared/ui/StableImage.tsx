@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ImgHTMLAttributes, type Ref, type SyntheticEvent } from "react";
 
 import { beginNativePhase } from "../nativePerf";
-import { contentCross, EASE_STANDARD } from "../motion/curves";
+import { contentCross, EASE_STANDARD, reducedMotion } from "../motion/curves";
 import { REVEAL_HOLD_ATTRIBUTE, viewportImageDecoded } from "../motion/viewportImages";
 
 type StableImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt"> & {
@@ -19,6 +19,8 @@ type StableImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt">
    * decode in the spare slot.
    */
   decodeFirst?: boolean;
+  /** Tablet folder covers can opt out of the late first-load fade under reduced motion. */
+  respectReducedMotion?: boolean;
 };
 
 type Slot = { src: string; alt: string; ready?: boolean; decoded?: boolean; failed?: boolean };
@@ -30,7 +32,7 @@ type Slot = { src: string; alt: string; ready?: boolean; decoded?: boolean; fail
  * once ready. Showing the element that did the loading matters on the PC (WebKitGTK), which does not
  * reliably reuse a preloaded `lakomics://` image for a fresh <img>, so swapping `src` flashed blank.
  */
-export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, decodeFirst = true, ...props }: StableImageProps) {
+export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, decodeFirst = true, respectReducedMotion = false, ...props }: StableImageProps) {
   const [slots, setSlots] = useState<[Slot | null, Slot | null]>([{ src, alt }, null]);
   const [active, setActive] = useState<0 | 1>(0);
   const appeared = useRef(false);
@@ -99,7 +101,7 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
         // The area owns prepared images; only late first loads get their own fade. A late tile held
         // for a shared reveal (revealTogether) appears with its batch, not on a fade of its own.
         const preparing = element.closest('[data-folder-move="pending"], [data-motion-view][style*="opacity: 0"]') || element.hasAttribute(REVEAL_HOLD_ATTRIBUTE);
-        if (held && !preparing && typeof element.animate === "function") {
+        if (held && !preparing && !(respectReducedMotion && reducedMotion()) && typeof element.animate === "function") {
           fade.current = element.animate([{opacity: 0}, {opacity: props.style?.opacity ?? 1}], {duration: contentCross.image, easing: EASE_STANDARD});
         }
       } else if (loadedSrc === wanted.current && index !== active) {

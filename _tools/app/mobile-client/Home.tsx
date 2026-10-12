@@ -18,7 +18,8 @@ import {KIND_LABEL} from '../src/collections/collectionFormat';
 import {ddayLabel, displayDate} from '../src/shared/displayDate';
 import {Badge, EmptyState, Skeleton} from './ui';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
-import {HomeSection, HomeToday, type HomeReleaseCard} from '../src/home/HomeAttention';
+import {HomeSection, type HomeReleaseCard} from '../src/home/HomeAttention';
+import {HomeToday} from './HomeToday';
 import {HomeReleaseGrid} from '../src/home/HomeReleaseGrid';
 import {HomePlayingShelf} from '../src/home/HomePlayingShelf';
 import {HomeDay} from '../src/home/HomeRevisit';
@@ -209,11 +210,11 @@ export function Home(props: HomeProps) {
   }
   future.sort((a,b) => (a.date ?? '').localeCompare(b.date ?? '') || a.name.localeCompare(b.name, 'ko'));
   const reviewRows = [
-    { key: 'unsorted', label: '미분류 에셋', count: d.summary?.unclassified ?? null },
+    { key: 'unsorted', label: '미분류 에셋', count: d.summary?.unclassified ?? null, unit: '장' },
     { key: 'similar', label: '유사 이미지 검토', count: d.todos.similar, unit: '쌍' },
-    { key: 'pending', label: '처리 대기', count: d.todos.pending },
-    ...(props.review.enabled ? [{ key: 'confirm', label: '확인', count: d.characterSettled ? d.todos.character ?? 0 : null }] : []),
-    { key: 'duplicates', label: '중복 판본', count: d.todos.duplicates },
+    { key: 'pending', label: '처리 대기', count: d.todos.pending, unit: '건' },
+    ...(props.review.enabled ? [{ key: 'confirm', label: '확인', count: d.characterSettled ? d.todos.character ?? 0 : null, unit: '건' }] : []),
+    { key: 'duplicates', label: '중복 판본', count: d.todos.duplicates, unit: '건' },
   ];
   const connections = [
     ...(d.offline || d.serverProblem ? [{ key: 'server', label: '서버', value: d.offline ? '연결 안 됨' : '요청을 처리할 수 없음', tone: 'off' }] : []),
@@ -265,7 +266,7 @@ export function Home(props: HomeProps) {
     {pull}
     {firstLoad ? <div className="home-media-waiting" aria-busy="true"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <div className="home-tablet-layout">
     <div className="home-tablet-day-column">
-    {rows.length > 0 && <div className="home-tablet-today"><HomeToday rows={rows} animate={false} onOpen={row => {
+    {rows.length > 0 && <div className="home-tablet-today"><HomeToday rows={rows} onOpen={row => {
       if (row.noteId) props.onNotes(row.noteId);
       else if (row.key === 'unsorted') props.onUnclassified();
       else if (row.key === 'similar') props.onSimilarity();

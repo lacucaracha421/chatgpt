@@ -72,6 +72,14 @@ describe('artist model', () => {
 });
 
 describe('Artists', () => {
+  it('uses shared quiet sort and filter chips in the detail toolbar',async()=>{
+    renderArtists();fireEvent.click(await screen.findByRole('button',{name:/하늘빛, 74장/}));
+    const sort=await screen.findByRole('button',{name:'최근 저장 순'});
+    expect(sort.classList.contains('ui-button--quiet')).toBe(true);
+    expect(screen.getByRole('button',{name:/^이미지 /}).classList.contains('ui-filter-chip')).toBe(true);
+    expect(screen.getByRole('button',{name:/^영상 /}).classList.contains('ui-filter-chip')).toBe(true);
+    expect(document.querySelector('.artist-filter')).toBeNull();
+  });
   it('opens the shared hidden artist sheet from the actual Library root list', async () => {
     const original = mocks.api.getMockImplementation()!;
     mocks.api.mockImplementation((path: string, ...args: unknown[]) => {

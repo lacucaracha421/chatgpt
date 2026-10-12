@@ -30,7 +30,7 @@ import {useCharacterReviewBackgroundFlush} from './useCharacterReview';
 import {SimilarityReview} from './SimilarityReview';
 import {TrashLayer} from './TrashLayer';
 import {MoreContext,MoreSheet,type ScreenMenu} from './MoreSheet';
-import {useTabletTrashCount} from './trashCounts';
+import {readTabletTrashCount} from './trashCounts';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useLibraryTrash} from './useLibraryTrash';
 import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
@@ -953,7 +953,6 @@ export function App() {
   const seriesNode=characterIndex?.nodes.find(node=>node.id===focusedCharacter);
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
-  const totalTrashCount=useTabletTrashCount(status.endpoint,findStore);
   const reviewCount=useSimilarityReviewCount(status.configured&&!similarity,similarityClosed,status.endpoint)??0;
   const reviewLibrary=characterReviewLibrary(characterIndex);
   const closeReview=()=>{setReview(null);setReviewClosed(n=>n+1);};
@@ -1088,7 +1087,7 @@ export function App() {
   const [screenMenu,setScreenMenu]=useState<ScreenMenu>();
   const [findSearch,setFindSearch]=useState<ScreenFind>();
   const [assetSearchDraft,setAssetSearchDraft]=useState('');
-  const moreOptions={reviewCount,unsortedCount,unseen:exchangeUnseen,trashCount:totalTrashCount,vaultPresent,exchangeActivity:exchangeSending?'보내는 중':undefined,
+  const moreOptions={reviewCount,unsortedCount,unseen:exchangeUnseen,trashCount:null,readTrashCount:(signal:AbortSignal)=>readTabletTrashCount(status.endpoint,findStore,signal),vaultPresent,exchangeActivity:exchangeSending?'보내는 중':undefined,
     onReview:()=>setSimilarity(true),onUnsorted:()=>{const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);},
     onExchange:()=>setExchangeOpen(true),onVault:()=>setVaultOpen(true),onArtists:()=>{closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();},
     onTrash:()=>trash.setOpen(true),onSettings:()=>setSettings(true)};

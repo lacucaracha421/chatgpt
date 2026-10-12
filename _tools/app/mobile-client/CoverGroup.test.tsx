@@ -24,6 +24,31 @@ it('shows a cover that failed once without a pause or asset change', async () =>
   await advance(60_000); expect(mocks.loadThumbnail).toHaveBeenCalledTimes(2);
 });
 
+it('retries a rejected thumbnail request and fades the decoded late cover',async()=>{
+  const animate=vi.fn(()=>({cancel:vi.fn()}));
+  mocks.loadThumbnail.mockRejectedValueOnce(new Error('offline')).mockImplementation(ready);
+  render(<Cover asset={asset} paused={false}/>);await advance(1000);
+  expect(mocks.loadThumbnail).toHaveBeenCalledTimes(2);
+  const img=image() as HTMLImageElement;
+  Object.defineProperty(img,'animate',{value:animate});
+  Object.defineProperty(img,'decode',{value:()=>Promise.resolve()});
+  await act(async()=>fireEvent.load(img));
+  expect(animate).toHaveBeenCalledWith([{opacity:0},{opacity:1}],expect.objectContaining({duration:150}));
+});
+
+it('keeps decode readiness but skips the late-cover fade under reduced motion',async()=>{
+  const original=window.matchMedia;
+  window.matchMedia=vi.fn(()=>({matches:true})) as unknown as typeof window.matchMedia;
+  try{
+    render(<Cover asset={{...asset,preview:'https://example.invalid/reduced'}} paused={false}/>);
+    const img=image() as HTMLImageElement,animate=vi.fn();
+    Object.defineProperty(img,'animate',{value:animate});
+    Object.defineProperty(img,'decode',{value:()=>Promise.resolve()});
+    await act(async()=>fireEvent.load(img));
+    expect(animate).not.toHaveBeenCalled();expect(img.style.opacity).toBe('');
+  }finally{window.matchMedia=original;}
+});
+
 it('bounds the retries, then waits until the cover is paused and resumed', async () => {
   mocks.loadThumbnail.mockImplementation(failed);
   const view = render(<Cover asset={asset} paused={false}/>); await advance();

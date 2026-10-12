@@ -21,20 +21,23 @@ export function Cover({asset, paused, ready}: {asset:Asset; paused:boolean;
     if (preview) return;
     const controller = new AbortController();
     let timer = 0;
+    const retry=()=>{
+      if(controller.signal.aborted||asset.pending||asset.thumbnail_available===false)return;
+      if(retries.current.source!==source)retries.current={source,count:0};
+      const delay=COVER_RETRY_MS[retries.current.count];
+      if(delay===undefined)return;
+      retries.current.count++;
+      timer=window.setTimeout(()=>setAttempt(value=>value+1),delay);
+    };
     void loadThumbnail(asset,controller.signal).then(ready => {
       if (controller.signal.aborted) return;
       setLoaded({source,preview:ready.preview});
       // A failed thumbnail resolves without a preview; pending and thumbnail-less assets never have one.
-      if (ready.preview || asset.pending || asset.thumbnail_available === false) return;
-      if (retries.current.source !== source) retries.current = {source,count:0};
-      const delay = COVER_RETRY_MS[retries.current.count];
-      if (delay === undefined) return;
-      retries.current.count++;
-      timer = window.setTimeout(() => setAttempt(value => value + 1),delay);
-    },() => {});
+      if (!ready.preview) retry();
+    },retry);
     return () => { controller.abort(); window.clearTimeout(timer); };
   },[source,preview,paused,privacy,attempt]);
-  return <span data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!preview&&!asset.pending&&asset.thumbnail_available!==false?"true":undefined} className="home-cover">{privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : preview ? <StableImage src={preview} alt="" loading="lazy" draggable={false}/> : <PhotoIcon className="missing-media"/>}{!privacy && asset.kind === 'video' && <span className="video-mark"><PlayIcon/></span>}</span>;
+  return <span data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!preview&&!asset.pending&&asset.thumbnail_available!==false?"true":undefined} className="home-cover">{privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : preview ? <StableImage src={preview} alt="" loading="lazy" draggable={false} respectReducedMotion/> : <PhotoIcon className="missing-media"/>}{!privacy && asset.kind === 'video' && <span className="video-mark"><PlayIcon/></span>}</span>;
 }
 export function CoverGroup({items,paused}: {items:Asset[];paused:boolean}) {
   return <span className={`home-cover-group ${items.length < 2 ? 'single' : ''}`}>{items.slice(0,3).map(asset => <Cover key={asset.id} asset={asset} paused={paused}/>)}{!items.length && <span className="home-cover"><PhotoIcon className="missing-media"/></span>}</span>;

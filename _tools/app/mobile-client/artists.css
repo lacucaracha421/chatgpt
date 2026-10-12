@@ -89,10 +89,7 @@
 .artist-detail-stats { display:flex; flex-wrap:wrap; gap:16px 22px; padding-bottom:2px; }
 .artist-pc-note { display:flex; align-items:center; gap:7px; min-height:44px; padding:0 12px; border:1px dashed var(--color-border-strong); color:var(--color-muted); font-size:12px; }
 .artist-pc-note svg { width:18px; height:18px; flex:none; }
-.artist-filter-row { display:flex; flex-wrap:wrap; gap:8px; }
-.artist-filter { display:inline-flex; align-items:center; gap:5px; min-height:36px; padding:0 10px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-control); color:var(--color-muted); font-size:12px; }
-.artist-filter[aria-pressed=true] { background:var(--color-selected); color:var(--color-text); }
-.artist-filter svg { width:16px; height:16px; }
+.artist-filter-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
 .artist-detail-empty { padding:20px 0 8px; color:var(--color-muted); font-size:13px; }
 .artist-detail-scroll > .gallery-scroll { flex:1; min-height:0; }
 .artist-detail-scroll .gallery-scroll { padding-top:12px; }

@@ -86,7 +86,7 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
   // is ready too (or the readiness cap admits a neutral missing face).
   const spineId = item.type === 'manga' ? null : item.spineArtworkId;
   const spine = useCoverUrl(item, spineId, revision, active && !privacy && !!spineId && (front !== null || (!cover && !item.coverAssetId)), host);
-  return <button ref={host} type="button" className="collection-card" data-collection-id={item.id} aria-selected={picked} aria-label={item.name} onClick={() => onTap(item.id)}>
+  return <button ref={host} type="button" className="collection-card collection-cover-cell" data-collection-id={item.id} aria-selected={picked} aria-label={item.name} onClick={() => onTap(item.id)}>
     <span className="collection-card__light"><ShelfObject data={workCaseData(item, {front, spine: spineId ? spine : null}, privacy)} selected={picked}
       frontPending={!privacy && !!(cover || item.coverAssetId) && !front} spinePending={!privacy && !!spineId && !spine}/></span>
     <span className="collection-card__meta"><span className="collection-card__name">{item.name}</span>{extra && <span className="collection-card__extra">{extra}</span>}</span>

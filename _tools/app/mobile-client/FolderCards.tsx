@@ -99,26 +99,36 @@ async function folderCoverPage(id:string,signal:AbortSignal,subtree=false):Promi
 export function useFolderCovers(items:Entry[],paused:boolean,revision:number,entries:Entry[]=[],subtree=false){
   const [visible,setVisible]=useState<Set<string>>(new Set()),[covers,setCovers]=useState<Record<string,Asset[]>>({});
   const completed=useRef({key:'',ids:new Set<string>()});
+  const retryBudget=useRef({key:'',count:0});
+  const [retry,setRetry]=useState(0);
   const onVisible=useRef((id:string,show:boolean)=>setVisible(old=>{if(old.has(id)===show)return old;const next=new Set(old);if(show)next.add(id);else next.delete(id);return next;})).current;
   const key=JSON.stringify([revision,subtree,items.map(item=>item.id)]),visibleKey=[...visible].sort().join(',');
   useEffect(()=>{
-    if(paused||!revision)return;
+    if(paused||!revision){retryBudget.current={key,count:0};return;}
     if(completed.current.key!==key)completed.current={key,ids:new Set()};
+    if(retryBudget.current.key!==key)retryBudget.current={key,count:0};
     const pending=items.filter(item=>visible.has(item.id)&&!item.characterNode&&!completed.current.ids.has(item.id));
     const controller=new AbortController();
+    let failed=false,timer=0;
     void mapBounded(pending,2,async item=>{
-      try{let found=await folderCoverPage(item.id,controller.signal,subtree);
+      try{let found=await folderCoverPage(item.id,controller.signal,subtree),incomplete=false;
         // A folder that keeps its assets in subfolders (e.g. 기타) borrows their newest ones; a
         // server with subtree listings already answered with the newest anywhere below it.
         if(!subtree&&found.length<3){
-          const more=await mapBounded(coverDescendants(entries,item.id),2,child=>folderCoverPage(child.id,controller.signal).catch(()=>[] as Asset[]),controller.signal);
+          const more=await mapBounded(coverDescendants(entries,item.id),2,child=>folderCoverPage(child.id,controller.signal).catch(()=>{incomplete=true;return [] as Asset[];}),controller.signal);
           const seen=new Set(found.map(asset=>asset.id));
           found=[...found,...more.flat().filter(asset=>!seen.has(asset.id)&&seen.add(asset.id)).sort((a,b)=>coverDate(b).localeCompare(coverDate(a)))].slice(0,3);
         }
-        if(!controller.signal.aborted){completed.current.ids.add(item.id);setCovers(old=>({...old,[item.id]:found}));}
-      }catch{/* A missing cover must not block navigation. */}
-    },controller.signal).catch(()=>{});
-    return()=>controller.abort();
-  },[key,visibleKey,paused,revision]);
+        if(!controller.signal.aborted){if(incomplete)failed=true;else completed.current.ids.add(item.id);setCovers(old=>({...old,[item.id]:found}));}
+      }catch{failed=true;/* A missing cover must not block navigation. */}
+    },controller.signal).then(()=>{
+      if(controller.signal.aborted||!failed)return;
+      const delay=[1000,3000,10_000][retryBudget.current.count];
+      if(delay===undefined)return;
+      retryBudget.current.count++;
+      timer=window.setTimeout(()=>setRetry(value=>value+1),delay);
+    }).catch(()=>{});
+    return()=>{controller.abort();window.clearTimeout(timer);};
+  },[key,visibleKey,paused,revision,retry]);
   return {covers,onVisible};
 }

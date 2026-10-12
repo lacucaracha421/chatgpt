@@ -6,6 +6,7 @@ import {BottomSheet} from './BottomSheet';
 import {useLibraryArtists} from './useLibraryArtists';
 import {commitArtistEdit, resolveArtist, type ArtistEditAction} from './artistEditOutbox';
 import {TopBar, TopBarSearch} from './TopBar';
+import {FilterChip} from '../src/shared/ui/FilterChip';
 import {MoreSheet} from './MoreSheet';
 import {api, errorText, native} from './transport';
 import {Cover} from './CoverGroup';
@@ -178,7 +179,7 @@ function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, asset
     <div className="artist-detail-identity"><span className="artist-avatar"><ArtistImage asset={avatar} privateMode={privateMode} /></span><span className="artist-detail-identity-text"><h2>{artistName(artist)}</h2><Handles artist={artist} /></span></div>
     <ArtistStats artist={artist} detail />
     <div className="artist-pc-note"><ComputerDesktopIcon aria-hidden="true" />합치기는 PC 앱에서</div>
-    <div className="artist-filter-row"><button className="artist-filter" aria-pressed={sort === 'newest'} onClick={onSort}><ArrowsUpDownIcon aria-hidden="true" />{sort === 'newest' ? '최근 저장 순' : '처음 저장 순'}<ChevronDownIcon aria-hidden="true" /></button><button className="artist-filter" aria-pressed={filter === 'image'} onClick={() => onFilter(filter === 'image' ? 'all' : 'image')}>이미지 {imageCount.toLocaleString('ko-KR')}</button><button className="artist-filter" aria-pressed={filter === 'video'} onClick={() => onFilter(filter === 'video' ? 'all' : 'video')}>영상 {videoCount.toLocaleString('ko-KR')}</button></div>
+    <div className="artist-filter-row"><Button size="sm" variant="quiet" aria-pressed={sort === 'newest'} onClick={onSort}><ArrowsUpDownIcon aria-hidden="true" />{sort === 'newest' ? '최근 저장 순' : '처음 저장 순'}<ChevronDownIcon aria-hidden="true" /></Button><FilterChip aria-pressed={filter === 'image'} onClick={() => onFilter(filter === 'image' ? 'all' : 'image')}>이미지 {imageCount.toLocaleString('ko-KR')}</FilterChip><FilterChip aria-pressed={filter === 'video'} onClick={() => onFilter(filter === 'video' ? 'all' : 'video')}>영상 {videoCount.toLocaleString('ko-KR')}</FilterChip></div>
   </div>;
 }
 

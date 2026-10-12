@@ -1,10 +1,26 @@
-import {cleanup, fireEvent, render, screen, within} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
 import {MoreButton, MoreSheet, type MoreOptions} from './MoreSheet';
 import {beginScreenTiming, cancelScreenTiming} from './perf';
 import {resetPerfEnabledForTests} from './perfEnabled';
 
 afterEach(cleanup);
+it('reserves the trash count slot and shows only the fresh complete read on each opening',async()=>{
+  let finish!:(count:number|null)=>void;
+  const readTrashCount=vi.fn((_signal:AbortSignal)=>new Promise<number|null>(resolve=>{finish=resolve;}));
+  const props=options({trashCount:8,readTrashCount});
+  const view=render(<MoreSheet {...props} onClose={vi.fn()}/>);
+  const row=screen.getByRole('button',{name:'휴지통'}),slot=row.querySelector('.more-panel__count--trash');
+  expect(slot?.textContent).toBe('');expect(row.textContent).toBe('휴지통');
+  await act(async()=>finish(12));
+  expect(screen.getByRole('button',{name:'휴지통 12개'})).toBe(row);
+  expect(row.querySelector('.more-panel__count--trash')).toBe(slot);
+  view.unmount();render(<MoreSheet {...props} onClose={vi.fn()}/>);
+  expect(screen.getByRole('button',{name:'휴지통'}).textContent).toBe('휴지통');
+  await act(async()=>finish(null));expect(screen.getByRole('button',{name:'휴지통'}).textContent).toBe('휴지통');
+  expect(readTrashCount).toHaveBeenCalledTimes(2);
+  expect(readTrashCount.mock.calls[0]![0].aborted).toBe(true);
+});
 it('puts the screen rows before the existing More groups and runs their actions',()=>{
  const run=vi.fn(),close=vi.fn();
  render(<MoreSheet {...options()} screenTitle="폴더" screenEntries={[{id:'folder',group:'action',label:'폴더 관리',icon:<span/>,run}]} onClose={close}/>);
