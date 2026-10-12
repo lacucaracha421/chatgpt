@@ -21,3 +21,14 @@ it.each(cases)("names %s / %s in the chip and empty state", (media, aspect, labe
   expect(viewFilterLabel(media, aspect)).toBe(label);
   expect(viewFilterEmptyTitle(media, aspect)).toBe(title);
 });
+
+
+it.each([
+  ['under_30s', '30초 미만'], ['30s_1m', '30초–1분'], ['1m_5m', '1–5분'], ['over_5m', '5분 이상'],
+] as const)('names the tablet duration %s without changing PC labels', (duration, label) => {
+  expect(viewFilterLabel('all', 'all', duration)).toBe(`${label}만`);
+  expect(viewFilterEmptyTitle('all', 'all', duration)).toBe(`${label} 항목 없음`);
+  expect(viewFilterLabel('videos', 'portrait', duration)).toBe(`${label} 세로형 영상만`);
+  expect(viewFilterEmptyTitle('videos', 'portrait', duration)).toBe(`${label} 세로형 영상 없음`);
+  expect(viewFilterLabel('videos', 'portrait', 'all')).toBe(viewFilterLabel('videos', 'portrait'));
+});

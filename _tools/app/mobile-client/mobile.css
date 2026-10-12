@@ -466,3 +466,12 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .tablet-performer__band { position:relative; }
 .tablet-performer__manage { position:absolute; top:0; right:0; }
 .tablet-performer__manage-items { display:grid; gap:var(--space-1); }
+
+/* Compact shared chip face, with a full tablet touch target for clearing. */
+.asset-topbar .top-bar__titles:has(.ui-active-filter) { overflow:visible; }
+.top-bar__title:has(.ui-active-filter) { align-items:center; min-height:var(--touch-target); flex:1; }
+.top-bar__title .ui-active-filter { flex:0 1 auto; min-width:0; }
+.top-bar__title .ui-active-filter__label { overflow:hidden; text-overflow:ellipsis; }
+.ui-active-filter__clear { position:relative; width:var(--touch-target); height:var(--badge-height); flex:none; }
+.ui-active-filter__clear::before { content:''; position:absolute; width:var(--touch-target); height:var(--touch-target); inset:50% auto auto 50%; transform:translate(-50%,-50%); }
+.ui-active-filter__clear:active { background:var(--color-control-pressed); color:var(--color-filter-text); }

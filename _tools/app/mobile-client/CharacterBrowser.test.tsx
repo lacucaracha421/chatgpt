@@ -690,3 +690,58 @@ it('lists a series groups in the order the PC published, and in the server order
   await screen.findByRole('button',{name:/Interns/});
   expect(cards().map(text=>text?.replace(/\d.*$/,''))).toEqual(['Interns','Group','Hares']);
 });
+
+
+it.each(['series:s','group:g','character:c'])('shows and clears the committed filter chip in %s without flashing',async(initialNode)=>{
+  let finish!:(value:unknown)=>void, holdClear=false;
+  mocks.api.mockImplementation((path:string)=>{
+    if(path==='/v1/library/characters')return Promise.resolve(structuredClone(index));
+    if(path.includes('toc=1'))return Promise.resolve({});
+    if(path.includes('media_kind=videos')||holdClear)return new Promise(resolve=>{finish=resolve;});
+    return Promise.resolve({...page(['old']),filterVersion:1});
+  });
+  render(<CharacterBrowser {...props} initialNode={initialNode}/>);
+  await screen.findByText('old');
+  expect(screen.queryByRole('group',{name:'보기 필터'})).toBeNull();
+  fireEvent.click(screen.getByRole('radio',{name:'영상'}));
+  await waitFor(()=>expect(finish).toBeDefined());
+  expect(screen.getByText('old')).toBeTruthy();
+  expect(screen.queryByRole('group',{name:'보기 필터'})).toBeNull();
+  await act(async()=>finish({...page(['video']),filterVersion:1}));
+  const chip=await screen.findByRole('group',{name:'보기 필터'});
+  expect(chip.textContent).toBe('영상만');
+  expect(chip.closest('.top-bar__title')?.querySelector('h1')).toBeTruthy();
+  holdClear=true;fireEvent.click(within(chip).getByRole('button',{name:'필터 초기화'}));
+  await waitFor(()=>expect(String(mocks.api.mock.calls.at(-1)?.[0])).not.toContain('media_kind'));
+  expect(screen.getByText('video')).toBeTruthy();
+  expect(screen.getByRole('group',{name:'보기 필터'})).toBeTruthy();
+  await act(async()=>finish({...page(['old']),filterVersion:1}));
+  await waitFor(()=>expect(screen.queryByRole('group',{name:'보기 필터'})).toBeNull());
+  expect(screen.getByText('old')).toBeTruthy();
+});
+
+it('names the applied filter in an empty character scope and preserves sort on clear',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path==='/v1/library/characters')return structuredClone(index);
+    if(path.includes('toc=1'))return {};
+    return {...page(path.includes('duration_ms_min')?[]:['old']),filterVersion:1};
+  });
+  const host=document.createElement('div');document.body.append(host);
+  try{
+    render(<CharacterBrowser {...props} initialNode="character:c" optionsHost={host}/>);
+    await screen.findByText('old');
+    fireEvent.click(screen.getByRole('radio',{name:'영상'}));
+    await screen.findByRole('group',{name:'보기 필터'});
+    fireEvent.click(screen.getByRole('radio',{name:'오래된순'}));
+    fireEvent.click(screen.getByRole('radio',{name:'세로형'}));
+    fireEvent.click(screen.getByRole('radio',{name:'1–5분'}));
+    await screen.findByText('1–5분 세로형 영상 없음');
+    expect(screen.getByText('1–5분 세로형 영상만 보는 중')).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('group',{name:'보기 필터'})).getByRole('button',{name:'필터 초기화'}));
+    await screen.findByText('old');
+    await waitFor(()=>expect(screen.queryByRole('group',{name:'보기 필터'})).toBeNull());
+    const url=new URL(String(mocks.api.mock.calls.findLast(([path])=>!path.includes('toc=1'))?.[0]),'https://test');
+    expect(url.searchParams.get('sort')).toBe('oldest');
+    for(const key of ['media_kind','aspect_ratio','duration_ms_min','duration_ms_max'])expect(url.searchParams.has(key)).toBe(false);
+  }finally{host.remove();}
+});

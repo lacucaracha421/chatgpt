@@ -1,3 +1,5 @@
+import {ActiveFilterChip} from '../src/shared/ui/ActiveFilterChip';
+import {viewFilterEmptyTitle,viewFilterLabel} from '../src/shared/viewFilterLabel';
 import {createPortal} from 'react-dom';
 import {AssetViewSections} from './AssetViewSections';
 import {SectionTool} from './SectionTool';
@@ -23,7 +25,7 @@ import {Gallery} from './Gallery';
 import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc} from './scopedAssetToc';
 import {pagePath,RequestGate} from './model';
 import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
-import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters} from './assetFilters';
+import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters,queryExtras} from './assetFilters';
 import {characterParent,characterChildren,characterExclusion,characterExclusionTarget,characterNodeName,characterPath,characterScopeNode,isExtrasNode,soloExtrasNode,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import {FolderShelf} from './FolderCards';
 import {useLevelMotion} from './motion';
@@ -471,6 +473,9 @@ export function CharacterBrowser({review,classifications=[],onOpenFolder,search,
     <IconButton label="미분류와 전체 설명" icon={InformationCircleIcon} onClick={()=>setFilterHelpOpen(true)}/>
   </div>;
   const shelf=shelfChildren.length>0&&<FolderShelf hidden={shelfHidden} label={shelfLabel} cards={shelfChildren.map(child=><Card key={child.id} node={child} ratings={cardRatings(index,child)} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||shelfHidden||foldersCollapsed} lazy={shelfPlace!==null} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>child.kind==='folder'?onOpenFolder?.(child.sourceId):enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearanceEnabled={active&&!paused&&!navigating&&!shelfHidden} appearanceSelector=".character-card"/>;
+  const visibleFilters=entering?EMPTY_FILTERS:(shown??(navigating?lastPlace.current:null))?.filters??EMPTY_FILTERS;
+  const activeFilterLabel=viewFilterLabel(visibleFilters.media,visibleFilters.aspect,visibleFilters.duration);
+  const clearFilters=()=>applyFilters({...EMPTY_FILTERS,...queryExtras(latest.current.where.filters)});
   const overview=<>
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>다시 시도</Button></div>}
     {index&&!index.ready&&<EmptyState title="캐릭터 보기가 아직 공유되지 않았습니다" hint="PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다."/>}
@@ -481,13 +486,13 @@ export function CharacterBrowser({review,classifications=[],onOpenFolder,search,
     {review&&node?.kind==='character'&&<CharacterReviewChip key={node.id} enabled={review.enabled&&active&&!paused} targetId={node.sourceId} refreshKey={review.refreshKey} onOpen={()=>review.onOpen({target:{id:node.sourceId,name:node.name}})}/>}
     {node?.description&&<p className="character-description">{node.description}</p>}
     {scope&&scope.sourceCount>scope.totalCount&&<p className="character-description">서버에 보관된 {scope.totalCount}개를 표시합니다. 아직 공유되지 않은 자산 {scope.sourceCount-scope.totalCount}개가 있습니다.</p>}
-    {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<EmptyState title={where.node?(filterPending?'조건에 맞는 자산이 없습니다':node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}/>}
+    {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<EmptyState title={where.node?(activeFilterLabel?viewFilterEmptyTitle(visibleFilters.media,visibleFilters.aspect,visibleFilters.duration):node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'} hint={activeFilterLabel?`${activeFilterLabel} 보는 중`:undefined} action={activeFilterLabel?<Button variant="ghost" onClick={clearFilters}>필터 초기화</Button>:undefined}/>}
   </>;
   // 종류 is the gallery's first row; scrolled away, the current crumb names it and the bar pulls down.
   const characterTools=<SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>onOptions(page?.items??[])}/>;
   const kindShade=useSectionShade<AssetMediaFilter>({label:'종류',options:MEDIA_SECTIONS,value:where.filters.media,onChange:applyMedia,trailing:characterTools},{active:active&&!paused&&!!where.node});
   const breadcrumbNodes=node?[...ancestors,node]:[];
-  const characterHeader=<TopBar barRef={where.node?kindShade.barRef:undefined} className="library-header asset-topbar character-header" back={{label:'뒤로',onClick:goUp}} crumbs={breadcrumbNodes.length>1?<nav className="library-breadcrumb" aria-label="현재 위치">{breadcrumbNodes.slice(0,-1).map(item=><span key={item.id}><button onClick={()=>enterInside({node:item.id,filter:defaultCharacterFilter(item.id,index)})}>{characterNodeName(item)}</button></span>)}</nav>:undefined} title={node?kindShade.title(characterNodeName(node)):'시리즈'} search={onSearch?{scope:'에셋',run:query=>onSearch(query)}:undefined} loading={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'}/>;
+  const characterHeader=<TopBar barRef={where.node?kindShade.barRef:undefined} className="library-header asset-topbar character-header" back={{label:'뒤로',onClick:goUp}} crumbs={breadcrumbNodes.length>1?<nav className="library-breadcrumb" aria-label="현재 위치">{breadcrumbNodes.slice(0,-1).map(item=><span key={item.id}><button onClick={()=>enterInside({node:item.id,filter:defaultCharacterFilter(item.id,index)})}>{characterNodeName(item)}</button></span>)}</nav>:undefined} title={node?kindShade.title(characterNodeName(node)):'시리즈'} titleAccessory={node&&activeFilterLabel&&<ActiveFilterChip label={activeFilterLabel} onClear={clearFilters}/>} search={onSearch?{scope:'에셋',run:query=>onSearch(query)}:undefined} loading={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'}/>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
