@@ -512,6 +512,176 @@ fn manual(e: &Env, asset: &str, decision: DecisionKind) {
 
 // -- the cascade on real pairs -------------------------------------------------------------
 
+fn person_evidence(e: &Env, asset: &str, generation: i64, hash: &str, evidence: Value) {
+    let c = e.f.library.connection().unwrap();
+    c.execute(
+        "UPDATE assets SET width=1000,height=1000 WHERE id=?1",
+        [asset],
+    )
+    .unwrap();
+    let id = format!("person-{asset}-{generation}");
+    c.execute(
+        "INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+         VALUES(?1,?2,?3,1,?4,'c','r','{}','[]',?5)",
+        params![id,asset,generation,hash,OLD],
+    ).unwrap();
+    c.execute(
+        "INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json) VALUES(?1,?2,?3,?4,?5)",
+        params![id,e.target.id,e.f.series,e.target.fingerprint,json!({"evidence":evidence}).to_string()],
+    ).unwrap();
+}
+
+fn person_box(height: u32) -> Value {
+    // The matched box is the second box; the first is deliberately large.
+    json!({"passed":true,"bestQueryCrop":1,"queryBoxes":[[0,0,900,900],[20,30,80,30+height]]})
+}
+
+#[test]
+fn tiny_person_haiku_yes_stays_on_both_pages_and_is_not_asked_again() {
+    let e = env();
+    s36(&e, "tiny-s36", "recommended");
+    tag_pair(&e, "tiny-tag");
+    for asset in ["tiny-s36", "tiny-tag"] {
+        person_evidence(&e, asset, 1, &content_hash(asset), person_box(119));
+    }
+    let fake = Fake::new(|_, _| answer("yes", 0.99));
+    run(&e, &fake);
+    assert_eq!(fake.count(HAIKU), 2);
+    assert_eq!(fake.count(SONNET), 0);
+    assert_eq!(page_assets(&e, None), ["tiny-s36"]);
+    assert_eq!(tag_assets(&e), ["tiny-tag"]);
+    for asset in ["tiny-s36", "tiny-tag"] {
+        assert_eq!(newest(&e, asset), None);
+        assert_eq!(opinions(&e, asset).len(), 1);
+    }
+    assert_eq!(e.f.library.claude_status(true).unwrap().left_for_user, 2);
+    e.f.library.claude_poke();
+    assert!(e.f.library.claude_build_queue().unwrap().is_empty());
+    run(&e, &fake);
+    assert_eq!(fake.total(), 2);
+    // The candidate is still encoded as the full 8x6 image, not the matched crop.
+    let encoded = e.f.library.claude_encode("assets/tiny-s36.png").unwrap();
+    assert!(fake
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|call| call["messages"][0]["content"][9]["source"]["data"] == encoded));
+    // A changed reference set permits a new opinion.
+    e.f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "DELETE FROM character_references WHERE target_id=?1 AND asset_id='asset-0'",
+            [&e.target.id],
+        )
+        .unwrap();
+    e.f.library.claude_poke();
+    run(&e, &fake);
+    assert_eq!(fake.total(), 4);
+    assert_eq!(e.f.library.claude_status(true).unwrap().left_for_user, 2);
+}
+
+#[test]
+fn tiny_person_sonnet_no_is_rejected_with_the_height_in_the_snapshot() {
+    let e = env();
+    s36(&e, "tiny", "recommended");
+    person_evidence(&e, "tiny", 1, &content_hash("tiny"), person_box(100));
+    let fake = Fake::new(|model, _| answer(if model == HAIKU { "unsure" } else { "no" }, 0.95));
+    run(&e, &fake);
+    assert_eq!(newest(&e, "tiny").unwrap().0, "rejected");
+    assert!(page_assets(&e, None).is_empty());
+    assert_eq!(e.f.library.claude_status(true).unwrap().left_for_user, 0);
+    let snapshot: String =
+        e.f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT reference_snapshot FROM character_decisions WHERE source_asset_id='tiny'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+    let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+    assert_eq!(snapshot["prediction"]["tinyPerson"], true);
+    assert_eq!(snapshot["prediction"]["personHeightRatio"], 0.1);
+}
+
+#[test]
+fn tiny_person_sonnet_sure_yes_is_also_left_for_the_user() {
+    let e = env();
+    s36(&e, "tiny", "recommended");
+    person_evidence(&e, "tiny", 1, &content_hash("tiny"), person_box(100));
+    let fake = Fake::new(|model, _| answer(if model == HAIKU { "no" } else { "yes" }, 0.99));
+    run(&e, &fake);
+    assert_eq!(newest(&e, "tiny"), None);
+    assert_eq!(opinions(&e, "tiny").len(), 2);
+    assert_eq!(e.f.library.claude_status(true).unwrap().left_for_user, 1);
+    e.f.library.claude_poke();
+    run(&e, &fake);
+    assert_eq!(fake.total(), 2);
+}
+
+#[test]
+fn ordinary_person_or_missing_matched_evidence_keeps_accepting() {
+    for (asset, evidence) in [
+        ("at-threshold", Some(person_box(120))),
+        ("above-threshold", Some(person_box(121))),
+        ("no-evidence", None),
+        (
+            "no-box",
+            Some(json!({"passed":true,"bestQueryCrop":0,"queryBoxes":[]})),
+        ),
+    ] {
+        for haiku_yes in [true, false] {
+            let e = env();
+            s36(&e, asset, "recommended");
+            if let Some(evidence) = evidence.clone() {
+                person_evidence(&e, asset, 1, &content_hash(asset), evidence);
+            }
+            let fake = Fake::new(move |model, _| {
+                answer(
+                    if haiku_yes || model == SONNET {
+                        "yes"
+                    } else {
+                        "no"
+                    },
+                    0.99,
+                )
+            });
+            run(&e, &fake);
+            assert_eq!(newest(&e, asset).unwrap().0, "accepted", "{asset}");
+            assert_eq!(e.f.library.claude_status(true).unwrap().left_for_user, 0);
+            let snapshot: String = e
+                .f
+                .library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT reference_snapshot FROM character_decisions WHERE source_asset_id=?1",
+                    [asset],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+            assert!(snapshot["prediction"].get("tinyPerson").is_none());
+            assert!(snapshot["prediction"].get("personHeightRatio").is_none());
+        }
+    }
+}
+
+#[test]
+fn tiny_person_uses_the_newest_matching_content_evidence_only() {
+    let e = env();
+    s36(&e, "latest", "recommended");
+    person_evidence(&e, "latest", 1, &content_hash("latest"), person_box(100));
+    person_evidence(&e, "latest", 2, &content_hash("latest"), person_box(120));
+    person_evidence(&e, "latest", 3, &"f".repeat(64), person_box(100));
+    let fake = Fake::new(|_, _| answer("yes", 0.99));
+    run(&e, &fake);
+    assert_eq!(newest(&e, "latest").unwrap().0, "accepted");
+}
+
 #[test]
 fn haiku_yes_accepts_and_the_pair_leaves_every_list() {
     let e = env();

@@ -32,7 +32,7 @@ User rule (2026-10-12): a device/native check the user does not mention afterwar
 <a id="char-claude-001"></a>
 ## CHAR-CLAUDE-001 — Claude Haiku as a fifth character supervisor (2026-10-12)
 
-Status: slice 1 + cost trims `DONE` (310b37b4, live since 2026-10-13); slice 2 next. User decisions (2026-10-12): the user has a monthly $100 Claude API credit and chose Claude Haiku 5.5 (`claude-haiku-5-5`) as an extra supervisor next to the two name taggers and the two recognizers. Haiku casts **yes votes only**: its "no" and "unsure" count as abstentions and never remove, block or demote a recommendation. Opinions are also attached to the recommendations open today.
+Status: slices 1–2 + cost trims `DONE` (live since 2026-10-13); series member identification is the next idea. User decisions (2026-10-12): the user has a monthly $100 Claude API credit and chose Claude Haiku 5.5 (`claude-haiku-5-5`) as an extra supervisor next to the two name taggers and the two recognizers. Haiku casts **yes votes only**: its "no" and "unsure" count as abstentions and never remove, block or demote a recommendation. Opinions are also attached to the recommendations open today.
 
 Evidence (offline experiment, `V:\tmp-charjudge`, 200 past manual decisions, 100 accepted / 100 rejected, 2–4 base references + the original candidate, effort `low`, JSON-schema output):
 
@@ -50,7 +50,7 @@ Revised the same evening (user): minimise the user's work — only genuinely unc
 
 Slices:
 1. **Automatic Claude decisions (PC).** API key in the OS credential store; settings 라이브러리 › Claude (key, 자동 판정 on/off, monthly cap default $10, status line); opinions table; background run when idle (not in saver mode) over every open 확인-list pair incl. folded S36 candidates; decisions recorded as `origin='automatic'` (engine `claude`), never learning examples, never counted as user judgments in S36 readiness; a later manual decision overrides.
-2. **Crops and the tiny rule.** Send the candidate person crop where a detector box exists; treat people below a size threshold as absent (the user's rule), so tiny cameos are not auto-accepted.
+2. **Tiny rule — done 2026-10-13.** Calibrated with the user on 48 group images: a matched person below 12% of the image height counts as absent, but a small character alone in a scene must still count and box sizes cannot tell the two apart (the detector also boxes non-people). Shipped rule: below 12% Claude may still reject, but an accept is left for the user. Sending a person crop instead of the full image was tested and rejected (200 decisions: 13/139 wrong vs 6/120 with the full image; only 13% cheaper; experiment cost $5.42).
 
 First live run (2026-10-13 00:19–00:45, dev build, schema 131): 148 open pairs judged — 38 auto-accepted, 43 auto-rejected, 47 left for the user, ~20 judged but not written (mostly the character's own references sitting in the 확인 list), 0 refusals, $2.28 (Haiku $0.16 for 148 calls, Sonnet $2.12 for 97 calls; ~10k input tokens per call). Last 30 days for scale: 1,402 images saved (~47/day) produced ~100–130 open pairs, i.e. about $1.5–2 a month; the user's ~900 manual decisions a month are the larger workload.
 1b. **Cost trims (approved 2026-10-13):** never ask about a pair whose image is one of the character's base or learned references; group the queue by character and mark the last reference image with `cache_control` so consecutive pairs of one character read the references from the prompt cache (cache writes/reads stored and priced).

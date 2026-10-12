@@ -50,6 +50,9 @@ const DEFAULT_RETRY_WAIT: Duration = Duration::from_secs(10);
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(60);
 /// Sonnet's yes must be this sure to place an image without a person.
 pub const SONNET_ACCEPT_CONFIDENCE: f64 = 0.9;
+/// User rule: a matched person shorter than 12% of the image height may be rejected,
+/// but an acceptance must be left for the user, including a small person alone in a scene.
+const TINY_PERSON_HEIGHT: f64 = 0.12;
 /// Pairs that fail on the network in a row before the run ends and waits for a later retry.
 const MAX_TRANSIENT_STREAK: u32 = 3;
 const RETRY_LATER: Duration = Duration::from_secs(600);
@@ -541,6 +544,17 @@ pub(super) struct QueuedPair {
     series_name: Option<String>,
     reference_key: String,
     references: Vec<SentReference>,
+    tiny: bool,
+    person_height_ratio: Option<f64>,
+}
+
+impl QueuedPair {
+    fn cascade(&self, haiku: Option<&Opinion>, sonnet: Option<&Opinion>) -> Step {
+        match cascade(haiku, sonnet) {
+            Step::Done(Outcome::Accept) if self.tiny => Step::Done(Outcome::Leave),
+            step => step,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -785,20 +799,44 @@ impl Library {
         };
         let (auto_accepted, auto_rejected) =
             (claude_decisions("accepted")?, claude_decisions("rejected")?);
-        // Pairs Sonnet looked at last and could not settle, still without a newer decision.
-        let left_for_user: i64 = c.query_row(
-            "SELECT COUNT(*) FROM character_claude_opinions o
-             WHERE o.model=?1
+        // Unsettled Sonnet opinions, plus acceptances held for the user by the tiny rule.
+        let left_candidates = c.prepare(
+            "SELECT o.target_id,o.asset_hash,a.id,
+                    (o.model=?1 AND (o.verdict IN ('unsure','refused')
+                     OR (o.verdict='yes' AND COALESCE(o.confidence,0)<?2)))
+             FROM character_claude_opinions o
+             LEFT JOIN assets a ON a.content_hash=o.asset_hash
+             WHERE o.model IN (?1,?3)
                AND o.created_at=(SELECT MAX(x.created_at) FROM character_claude_opinions x
-                                 WHERE x.target_id=o.target_id AND x.asset_hash=o.asset_hash AND x.model=?1)
-               AND (o.verdict IN ('unsure','refused')
-                    OR (o.verdict='yes' AND COALESCE(o.confidence,0)<?2))
+                                 WHERE x.target_id=o.target_id AND x.asset_hash=o.asset_hash AND x.model=o.model)
+               AND (o.verdict='yes' OR (o.model=?1 AND o.verdict IN ('unsure','refused')))
                AND NOT EXISTS(SELECT 1 FROM character_decisions d
                               WHERE d.target_id=o.target_id AND d.asset_hash=o.asset_hash
                                 AND d.decision IN ('accepted','rejected') AND d.created_at>=o.created_at)",
-            params![SONNET, SONNET_ACCEPT_CONFIDENCE],
-            |row| row.get(0),
+        )?.query_map(params![SONNET, SONNET_ACCEPT_CONFIDENCE, HAIKU], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?, row.get::<_, bool>(3)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let pairs = left_candidates
+            .iter()
+            .filter_map(|(target, _, asset, _)| Some((target, asset.as_ref()?)))
+            .collect::<BTreeSet<_>>();
+        let person_heights = super::character_reference_regions::matched_person_height_ratios(
+            &c,
+            &serde_json::to_string(&pairs)?,
         )?;
+        let left_for_user = left_candidates
+            .into_iter()
+            .filter_map(|(target, hash, asset, unresolved)| {
+                let tiny = asset.is_some_and(|asset| {
+                    person_heights
+                        .get(&(target.clone(), asset))
+                        .is_some_and(|ratio| *ratio < TINY_PERSON_HEIGHT)
+                });
+                (unresolved || tiny).then_some((target, hash))
+            })
+            .collect::<BTreeSet<_>>()
+            .len() as i64;
         let last_run_db: Option<String> = c.query_row(
             "SELECT MAX(created_at) FROM character_claude_opinions",
             [],
@@ -905,6 +943,10 @@ impl Library {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
             .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+        let person_heights = super::character_reference_regions::matched_person_height_ratios(
+            &c,
+            &serde_json::to_string(&pairs)?,
+        )?;
         let mut target_order = BTreeMap::new();
         for (target, _) in &pairs {
             let next = target_order.len();
@@ -977,10 +1019,10 @@ impl Library {
             let key = reference_key(sent.iter().map(|r| r.reference.asset_hash.as_str()));
             let haiku = load_opinion(&c, &target_id, asset_hash, &key, HAIKU)?;
             let sonnet = load_opinion(&c, &target_id, asset_hash, &key, SONNET)?;
-            if cascade(haiku.as_ref(), sonnet.as_ref()) == Step::Done(Outcome::Leave) {
-                continue;
-            }
-            queue.push(QueuedPair {
+            let person_height_ratio = person_heights
+                .get(&(target_id.clone(), asset_id.clone()))
+                .copied();
+            let pair = QueuedPair {
                 display_name: target.display_name.clone(),
                 series_name: target
                     .series_classification_id
@@ -992,7 +1034,12 @@ impl Library {
                 relative_path: relative_path.clone(),
                 reference_key: key,
                 references: sent,
-            });
+                tiny: person_height_ratio.is_some_and(|ratio| ratio < TINY_PERSON_HEIGHT),
+                person_height_ratio,
+            };
+            if pair.cascade(haiku.as_ref(), sonnet.as_ref()) != Step::Done(Outcome::Leave) {
+                queue.push(pair);
+            }
         }
         queue.sort_by_key(|pair| target_order[&pair.target_id]);
         Ok(queue)
@@ -1062,7 +1109,7 @@ impl Library {
             return Ok(false);
         }
         let summary = |opinion: &Opinion| json!({"verdict": opinion.verdict.stored(), "confidence": opinion.confidence});
-        let snapshot = json!({
+        let mut snapshot = json!({
             "scanId": null,
             "prediction": {
                 "engine": "claude",
@@ -1072,6 +1119,10 @@ impl Library {
             },
             "references": pair.references.iter().map(|r| &r.reference).collect::<Vec<_>>(),
         });
+        if pair.tiny && outcome == Outcome::Reject {
+            snapshot["prediction"]["tinyPerson"] = json!(true);
+            snapshot["prediction"]["personHeightRatio"] = json!(pair.person_height_ratio);
+        }
         match outcome {
             Outcome::Accept => {
                 self.accept_s36_in(&tx, &target, &pair.asset_id, &pair.asset_hash, &snapshot)?
@@ -1146,7 +1197,7 @@ impl Library {
         // Images are encoded once per pair, only when a request is needed.
         let mut content: Option<Vec<Value>> = None;
         loop {
-            let model = match cascade(haiku.as_ref(), sonnet.as_ref()) {
+            let model = match pair.cascade(haiku.as_ref(), sonnet.as_ref()) {
                 Step::Done(Outcome::Leave) => return Ok(Flow::Done(PairResult::Left)),
                 Step::Done(outcome) => {
                     let Some(haiku) = haiku.as_ref() else {

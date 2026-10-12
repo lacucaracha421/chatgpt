@@ -105,6 +105,47 @@ fn crop_of(evidence: &Value) -> Option<Crop> {
     super::character_scan::box_region(evidence["queryBoxes"].as_array()?.get(index)?).map(Crop::Box)
 }
 
+/// Matched person heights for `[target_id, asset_id]` pairs, from each pair's newest
+/// recognition evidence for the image's current content. Missing crops stay unknown.
+pub(super) fn matched_person_height_ratios(
+    connection: &Connection,
+    pairs: &str,
+) -> Result<BTreeMap<(String, String), f64>> {
+    let mut statement = connection.prepare(
+        "WITH ranked AS (
+            SELECT p.target_id,a.id AS asset_id,a.height,p.result_json,
+                   ROW_NUMBER() OVER (PARTITION BY p.target_id,a.id ORDER BY e.generation DESC,e.id DESC) AS rank
+            FROM json_each(?1) requested
+            JOIN assets a ON a.id=json_extract(requested.value,'$[1]')
+            JOIN character_autotag_evidence e ON e.asset_id=a.id AND e.content_hash=a.content_hash
+            JOIN character_autotag_predictions p ON p.evidence_id=e.id
+                AND p.target_id=json_extract(requested.value,'$[0]'))
+         SELECT target_id,asset_id,height,result_json FROM ranked WHERE rank=1",
+    )?;
+    let rows = statement.query_map([pairs], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<f64>>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    let mut ratios = BTreeMap::new();
+    for row in rows {
+        let (target, asset, height, result) = row?;
+        let Some(height) = height.filter(|height| height.is_finite() && *height > 0.0) else {
+            continue;
+        };
+        let Ok(result) = serde_json::from_str::<Value>(&result) else {
+            continue;
+        };
+        if let Some(Crop::Box(bounds)) = crop_of(&result["evidence"]) {
+            ratios.insert((target, asset), (bounds[3] - bounds[1]) / height);
+        }
+    }
+    Ok(ratios)
+}
+
 /// The people of `asset` that characters other than `target` are registered on, read from
 /// data that is already stored (no migration, no backfill):
 ///
