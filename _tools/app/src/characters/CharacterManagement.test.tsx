@@ -161,7 +161,7 @@ it("offers reference suggestions after curated-folder conversion and keeps conve
 it("offers no classification-exclusion item in the plain folder menu", async () => {
   const classifications = [...fixtureClassifications, { id: "nested", name: "바리에이션", kind: "tag" as const, parentId: "child", iconKey: null, colorKey: null }];
   const hub = { targets: [], series: [{ classificationId: "series", heroAssetId: null, autoClassify: true }], groups: [], error: null, refresh: vi.fn(), revision: 0 } as any;
-  vi.mocked(invoke).mockResolvedValue(undefined);
+  vi.mocked(invoke).mockImplementation(async command => command === "character_folder_exclusions" ? [] : undefined);
   const show = (id: string) => <CharacterFolderContent view={{ kind: "classification", classificationId: id }} hub={hub} classifications={classifications} galleryLayout="masonry" onGalleryLayoutChange={() => {}} privacyMode={false} onPrivacyModeChange={() => {}} metadataVisible onMetadataVisibleChange={() => {}} thumbnailRowHeight={180} onThumbnailRowHeightChange={() => {}} refreshVersion={0} onNavigate={() => {}} onAssetsChanged={() => {}}>
     <FolderRegistrationContext.Consumer>{tools => <div>{tools}</div>}</FolderRegistrationContext.Consumer>
   </CharacterFolderContent>;

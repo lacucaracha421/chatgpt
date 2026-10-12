@@ -621,8 +621,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/artists.css": {
-      "offScaleSpacing": 23,
-      "offRoleFontSize": 19,
+      "offScaleSpacing": 21,
+      "offRoleFontSize": 18,
       "pillRadius": 0,
       "legacyToken": 0
     },

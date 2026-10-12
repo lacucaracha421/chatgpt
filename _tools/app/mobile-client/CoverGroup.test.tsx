@@ -32,6 +32,8 @@ it('retries a rejected thumbnail request and fades the decoded late cover',async
   const img=image() as HTMLImageElement;
   Object.defineProperty(img,'animate',{value:animate});
   Object.defineProperty(img,'decode',{value:()=>Promise.resolve()});
+  // Only a cover whose pixels arrive after the first frame is "late"; an earlier load belongs to the page.
+  await advance(20);
   await act(async()=>fireEvent.load(img));
   expect(animate).toHaveBeenCalledWith([{opacity:0},{opacity:1}],expect.objectContaining({duration:150}));
 });
@@ -44,6 +46,7 @@ it('keeps decode readiness but skips the late-cover fade under reduced motion',a
     const img=image() as HTMLImageElement,animate=vi.fn();
     Object.defineProperty(img,'animate',{value:animate});
     Object.defineProperty(img,'decode',{value:()=>Promise.resolve()});
+    await advance(20);
     await act(async()=>fireEvent.load(img));
     expect(animate).not.toHaveBeenCalled();expect(img.style.opacity).toBe('');
   }finally{window.matchMedia=original;}

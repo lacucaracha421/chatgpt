@@ -19,7 +19,7 @@ import {ddayLabel, displayDate} from '../src/shared/displayDate';
 import {Badge, EmptyState, Skeleton} from './ui';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {HomeSection, type HomeReleaseCard} from '../src/home/HomeAttention';
-import {HomeToday} from './HomeToday';
+import {TabletHomeToday} from './HomeToday';
 import {HomeReleaseGrid} from '../src/home/HomeReleaseGrid';
 import {HomePlayingShelf} from '../src/home/HomePlayingShelf';
 import {HomeDay} from '../src/home/HomeRevisit';
@@ -266,7 +266,7 @@ export function Home(props: HomeProps) {
     {pull}
     {firstLoad ? <div className="home-media-waiting" aria-busy="true"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <div className="home-tablet-layout">
     <div className="home-tablet-day-column">
-    {rows.length > 0 && <div className="home-tablet-today"><HomeToday rows={rows} onOpen={row => {
+    {rows.length > 0 && <div className="home-tablet-today"><TabletHomeToday rows={rows} onOpen={row => {
       if (row.noteId) props.onNotes(row.noteId);
       else if (row.key === 'unsorted') props.onUnclassified();
       else if (row.key === 'similar') props.onSimilarity();

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetGallery } from "./AssetGallery";
+import { mockVideoFrames } from "../video/videoFrameTestUtils";
 
 // URL selection is tested here; the in-memory vault thumbnail cache has its own tests.
 vi.mock("./vaultThumbnailCache", () => ({ useVaultThumbnailSrc: (url: string | null) => url }));
@@ -531,14 +532,21 @@ describe("AssetGallery", () => {
     expect(document.querySelector('img[src*="/vault-thumbnail/asset-1/"]')).toBeNull();
   });
 
-  it("versions video posters and hover scrub frames with the content revision", () => {
+  it("versions video posters and scrub frames with the content revision", () => {
     vi.useFakeTimers();
     render(<AssetGallery items={[{ ...videoAsset(0), thumbnailRevision: "42" }]} />);
     const tile = screen.getByRole("option", { name: "video-0.webm" }).querySelector(".video-tile")!;
     expect(tile.querySelector("img")).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-0/v42");
     fireEvent.pointerEnter(tile);
     act(() => vi.advanceTimersByTime(200));
-    expect(tile.querySelector("img")?.getAttribute("src")).toMatch(/^http:\/\/lakomics\.localhost\/scrub-frame\/video-0\/\d+\/v42$/);
+    // Starting playback holds the poster; frames are cycled no more underneath the video.
+    expect(tile.querySelector("img")).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-0/v42");
+    const slider = tile.querySelector(".video-tile__scrub")!;
+    vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, right: 100, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.pointerDown(slider, { pointerId: 1, clientX: 50 });
+    const pending = tile.querySelector<HTMLImageElement>("[data-stable-image-pending]");
+    if (pending) fireEvent.load(pending);
+    expect(screen.getByRole("img", { name: "video-0.webm" })).toHaveAttribute("src", "http://lakomics.localhost/scrub-frame/video-0/5/v42");
   });
 
   it("keeps only one video hover preview active", async () => {
@@ -548,15 +556,17 @@ describe("AssetGallery", () => {
     const second = screen.getByRole("option", { name: "video-1.webm" }).querySelector(".video-tile")!;
     fireEvent.pointerEnter(first);
     act(() => vi.advanceTimersByTime(200));
-    expect(first.querySelector("img")).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-0/"));
+    expect(first.querySelector("video")).not.toBeNull();
     fireEvent.pointerEnter(second);
     act(() => vi.advanceTimersByTime(200));
+    expect(first.querySelector("video")).toBeNull();
     expect(first.querySelector("img")).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-0");
-    expect(second.querySelector("img")).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/"));
+    expect(second.querySelector("video")).not.toBeNull();
   });
 
   it.each(["justified", "masonry"] as const)("preserves visible hover playback across %s gallery refreshes and scroll measurement", (layout) => {
     vi.useFakeTimers();
+    const presentFrame = mockVideoFrames();
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
     const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
@@ -568,6 +578,8 @@ describe("AssetGallery", () => {
     const removeAttribute = vi.spyOn(media, "removeAttribute");
     const setAttribute = vi.spyOn(media, "setAttribute");
     fireEvent.playing(media);
+    // The video replaces the still only once a frame has reached the compositor.
+    presentFrame(media, 0);
 
     for (let second = 1; second <= 20; second++) {
       media.currentTime = second % 10;

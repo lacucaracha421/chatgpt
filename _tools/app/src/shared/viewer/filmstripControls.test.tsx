@@ -24,8 +24,9 @@ it.each([
     expect(controls.style.getPropertyValue('transform')).toBe('translateY(calc(-1 * var(--viewer-controls-offset, 0px)))');
     expect(controls.style.getPropertyValue('transition')).toContain('transform 200ms var(--ease-sheet)');
     expect(Number(controls.style.getPropertyValue('z-index'))).toBeGreaterThan(4);
-    const reduced = rules.find(rule => (rule as CSSMediaRule).conditionText === '(prefers-reduced-motion: reduce)') as CSSMediaRule;
-    expect(Array.from(reduced.cssRules).some(rule => {
+    // A stylesheet may carry several reduced-motion blocks; any of them may switch the transition off.
+    const reduced = rules.filter(rule => (rule as CSSMediaRule).conditionText === '(prefers-reduced-motion: reduce)') as CSSMediaRule[];
+    expect(reduced.flatMap(block => Array.from(block.cssRules)).some(rule => {
       const reducedRule = rule as CSSStyleRule;
       return reducedRule.selectorText.includes(selector) && reducedRule.style.getPropertyValue('transition') === 'none';
     })).toBe(true);
