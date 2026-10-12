@@ -1429,9 +1429,9 @@ public final class ClassificationAssignmentTest {
      * Album rows and a pending Album outbox row.
      */
     private static void v4ReplicaUpgradesInPlaceToV5(Path directory) throws Exception {
-        equal(7, ReplicaSchema.VERSION, "v7 is the current schema; v5 added the assignment outbox");
-        equal(0, ReplicaSchema.upgradeStatements(4).length,
-                "The v4 upgrade is additive DDL alone, so it needs no ALTER statements");
+        equal(8, ReplicaSchema.VERSION, "v8 adds optional Album counts beside the assignment outbox");
+        equal(2, ReplicaSchema.upgradeStatements(4).length,
+                "The v4 upgrade adds two nullable Album count columns");
         check(ReplicaSchema.canUpgradeFrom(4), "The v4 replica upgrades in place");
         check(!ReplicaSchema.canUpgradeFrom(ReplicaSchema.VERSION), "The current schema needs no migration");
 
@@ -1441,7 +1441,7 @@ public final class ClassificationAssignmentTest {
         // reconstructed from the same source of truth rather than hand-copied.
         for (String statement : ReplicaSchema.DDL) {
             if (statement.contains(OUTBOX_TABLE)) continue;
-            legacy.exec(statement);
+            legacy.exec(statement.replace(",asset_count INTEGER,total_asset_count INTEGER", ""));
         }
         legacy.exec("PRAGMA user_version=4");
         legacy.exec(ReplicaSchema.WRITE_CLASSIFICATION_AUTHORITY, "scope-a", LIBRARY, 1L, 1L, 2L,
@@ -1457,7 +1457,8 @@ public final class ClassificationAssignmentTest {
         legacy.exec(ReplicaSchema.WRITE_CLASSIFICATION_ROLE, "originals", "originals");
         legacy.exec(ReplicaSchema.WRITE_AUTHORITY, "scope-a", LIBRARY, 1L, 1L, 9L, CLOCK.now(),
                 CLOCK.now());
-        legacy.exec(ReplicaSchema.WRITE_ALBUM, "album-1", "Album", null, null, null, 0L, 2L,
+        legacy.exec(ReplicaSchema.WRITE_ALBUM.replace(",asset_count,total_asset_count", "")
+                .replace("VALUES(?,?,?,?,?,?,?,?,?,?)", "VALUES(?,?,?,?,?,?,?,?)"), "album-1", "Album", null, null, null, 0L, 2L,
                 CLOCK.now());
         legacy.exec(ReplicaSchema.WRITE_MEMBER, "album-1", "asset_1", 1L, 1L, CLOCK.now());
         legacy.exec(ReplicaSchema.WRITE_OUTBOX, 1L,
@@ -1895,7 +1896,9 @@ public final class ClassificationAssignmentTest {
                     + (liveOnly ? " WHERE deleted=0" : "") + " ORDER BY album_id")) {
                 result.add(new AlbumReplica.Album((String) row.get(0), (String) row.get(1),
                         (String) row.get(2), (String) row.get(3), (String) row.get(4),
-                        asLong(row.get(5)) != 0, asLong(row.get(6))));
+                        asLong(row.get(5)) != 0, asLong(row.get(6)),
+                        row.get(7) == null ? null : asLong(row.get(7)),
+                        row.get(8) == null ? null : asLong(row.get(8))));
             }
             return result;
         }
@@ -1943,7 +1946,8 @@ public final class ClassificationAssignmentTest {
         @Override
         public void writeAlbum(AlbumReplica.Album album, String now) {
             exec(ReplicaSchema.WRITE_ALBUM, album.id, album.name, album.parentId, album.iconKey,
-                    album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now);
+                    album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now,
+                    album.assetCount, album.totalAssetCount);
         }
 
         @Override

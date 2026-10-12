@@ -399,15 +399,15 @@ public final class AssetLifecycleOutboxTest {
 
     /** v6 device database -> v7 through the shipped migration, on a real SQLite engine. */
     static void schemaUpgradesInPlace() throws Exception {
-        equal(7, ReplicaSchema.VERSION, "v7 adds the Asset lifecycle outbox");
+        equal(8, ReplicaSchema.VERSION, "v8 adds optional Album counts beside the lifecycle outbox");
         check(ReplicaSchema.canUpgradeFrom(6), "v6 upgrades in place");
-        equal(0, ReplicaSchema.upgradeStatements(6).length, "additive DDL only");
+        equal(2, ReplicaSchema.upgradeStatements(6).length, "two nullable Album count columns");
         Path file = Files.createTempFile("lifecycle-v6", ".sqlite");
         try {
             StringBuilder v6 = new StringBuilder();
             for (String statement : ReplicaSchema.DDL) {
                 if (statement.contains("asset_lifecycle_outbox")) continue;
-                v6.append(statement).append(";\n");
+                v6.append(statement.replace(",asset_count INTEGER,total_asset_count INTEGER", "")).append(";\n");
             }
             v6.append("INSERT INTO asset_authority VALUES(1,'account','").append(LIB).append("',1,4);\n");
             v6.append("INSERT INTO asset_state VALUES('asset-a','trash',2,'{}');\n");
@@ -420,14 +420,14 @@ public final class AssetLifecycleOutboxTest {
                 public void execute(String statement) { executed.add(statement); }
                 public void setVersion(int v) { version[0] = v; }
             });
-            equal(7, version[0], "stamped v7");
+            equal(8, version[0], "stamped v8");
             StringBuilder upgrade = new StringBuilder("BEGIN;\n");
             for (String statement : executed) upgrade.append(statement).append(";\n");
             upgrade.append("PRAGMA user_version=").append(version[0]).append(";\nCOMMIT;\n");
             sqlite(file, upgrade.toString());
             String out = sqlite(file, "SELECT count(*) FROM asset_state; SELECT cursor FROM asset_authority;"
                     + " SELECT count(*) FROM asset_lifecycle_outbox; PRAGMA user_version;");
-            equal("1\n4\n0\n7", out.trim(), "existing replica rows survive; the outbox starts empty");
+            equal("1\n4\n0\n8", out.trim(), "existing replica rows survive; the outbox starts empty");
             // The shipped write statement fits the table.
             String insert = ReplicaSchema.WRITE_LIFECYCLE_OUTBOX.replace("VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     "VALUES(1,'op','trashAsset','asset-a','" + LIB + "',1,1,'normal',2,'{}','pending',0,NULL,NULL,'" + NOW + "')");

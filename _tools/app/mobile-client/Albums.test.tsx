@@ -41,6 +41,30 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 describe('album Library scopes',()=>{
+ it.each([5,0,undefined])('shows only the PC direct album count %s even when a subtree total exists',assetCount=>{
+  render(<Albums tree={{...tree,albums:[{...albums[0],assetCount,totalAssetCount:1284}]}} paused revision={1} onSelect={()=>{}}/>);
+  const card=screen.getByRole('button',{name:assetCount===undefined?'업로드용':`업로드용, ${assetCount}개`});
+  expect(card.querySelector('.folder-thumbnail__count')?.textContent).toBe(assetCount===undefined?undefined:String(assetCount));
+  expect(mocks.api).not.toHaveBeenCalled();
+ });
+ it.each([1284,0,undefined])('renders the optional album count %s with the classification badge before covers load',async assetCount=>{
+  let release:(value:unknown)=>void=()=>{};
+  mocks.api.mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
+  const countTree={...tree,albums:[{...albums[0],assetCount}]};
+  render(<Albums tree={countTree} paused={false} revision={1} onSelect={()=>{}}/>);
+  const card=screen.getByRole('button',{name:assetCount===undefined?'업로드용':`업로드용, ${assetCount}개`});
+  const badge=card.querySelector('.folder-thumbnail > .folder-thumbnail__count');
+  if(assetCount===undefined)expect(badge).toBeNull();
+  else {
+   expect(badge?.classList.contains('ui-badge--scrim')).toBe(true);
+   expect(badge?.textContent).toBe(assetCount===1284?'1,284':'0');
+  }
+  expect(card.querySelector('img')).toBeNull();
+  await waitFor(()=>expect(mocks.api).toHaveBeenCalledOnce());
+  await act(async()=>release(page()));
+  await waitFor(()=>expect(card.querySelector('img')).not.toBeNull());
+  expect(card.querySelector('.folder-thumbnail__count')).toBe(badge);
+ });
  it('renders only top-level cover cards with optional counts and child labels',async()=>{
   render(<Albums tree={tree} paused={false} revision={1} onSelect={()=>{}}/>);
   expect(screen.queryByText('임시')).toBeNull();expect(screen.getByText('하위 앨범 1')).toBeTruthy();

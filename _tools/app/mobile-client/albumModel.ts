@@ -2,7 +2,7 @@ import {normalizePage} from './model';
 import type {Asset, Page, View} from './types';
 import {breadcrumbPath} from '../src/shared/breadcrumb';
 
-export interface NativeAlbum { id:string; name:string; parentId:string|null; iconKey:string|null; colorKey:string|null; assetCount?:number }
+export interface NativeAlbum { id:string; name:string; parentId:string|null; iconKey:string|null; colorKey:string|null; assetCount?:number; totalAssetCount?:number }
 export interface AlbumTree { adopted:boolean; libraryId:string|null; epoch:number|null; code:string; albums:NativeAlbum[] }
 export interface AlbumAssetPage { items:Asset[]; hasMore:boolean; nextCursor:string|null; filterVersion?:unknown }
 /** Preserve the Album route's camelCase envelope and the agreed filterVersion wire field. */

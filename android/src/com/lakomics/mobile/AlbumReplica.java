@@ -226,8 +226,17 @@ final class AlbumReplica {
         final boolean deleted;
         final long entityRevision;
 
+        /** Null means the server has not supplied a count, never an empty Album. */
+        final Long assetCount;
+        final Long totalAssetCount;
+
         Album(String id, String name, String parentId, String iconKey, String colorKey,
               boolean deleted, long entityRevision) {
+            this(id, name, parentId, iconKey, colorKey, deleted, entityRevision, null, null);
+        }
+
+        Album(String id, String name, String parentId, String iconKey, String colorKey,
+              boolean deleted, long entityRevision, Long assetCount, Long totalAssetCount) {
             this.id = id;
             this.name = name;
             this.parentId = parentId;
@@ -235,6 +244,8 @@ final class AlbumReplica {
             this.colorKey = colorKey;
             this.deleted = deleted;
             this.entityRevision = entityRevision;
+            this.assetCount = assetCount;
+            this.totalAssetCount = totalAssetCount;
         }
     }
 
@@ -552,7 +563,15 @@ final class AlbumReplica {
             if (!(flag instanceof Boolean)) throw malformed();
             deleted = (Boolean) flag;
         }
-        return new Album(id, name, parentId, iconKey, colorKey, deleted, revision);
+        return new Album(id, name, parentId, iconKey, colorKey, deleted, revision,
+                optionalCount(value, "assetCount"), optionalCount(value, "totalAssetCount"));
+    }
+
+    private static Long optionalCount(Map<String, Object> value, String key) throws Failure {
+        if (value.get(key) == null) return null;
+        long count = number(value, key);
+        if (count < 0) throw malformed();
+        return count;
     }
 
     private static Member member(Map<String, Object> value) throws Failure {

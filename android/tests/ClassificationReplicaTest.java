@@ -1594,7 +1594,9 @@ public final class ClassificationReplicaTest {
                     + (liveOnly ? " WHERE deleted=0" : "") + " ORDER BY album_id")) {
                 result.add(new AlbumReplica.Album((String) row.get(0), (String) row.get(1),
                         (String) row.get(2), (String) row.get(3), (String) row.get(4),
-                        asLong(row.get(5)) != 0, asLong(row.get(6))));
+                        asLong(row.get(5)) != 0, asLong(row.get(6)),
+                        row.get(7) == null ? null : asLong(row.get(7)),
+                        row.get(8) == null ? null : asLong(row.get(8))));
             }
             return result;
         }
@@ -1632,7 +1634,8 @@ public final class ClassificationReplicaTest {
         @Override
         public void writeAlbum(AlbumReplica.Album album, String now) {
             exec(ReplicaSchema.WRITE_ALBUM, album.id, album.name, album.parentId, album.iconKey,
-                    album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now);
+                    album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now,
+                    album.assetCount, album.totalAssetCount);
         }
 
         @Override

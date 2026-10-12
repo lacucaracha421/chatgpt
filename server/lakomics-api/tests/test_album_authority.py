@@ -18,6 +18,7 @@ import copy
 import json
 import sqlite3
 import sys
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -308,6 +309,97 @@ class AlbumAuthorityFixture(unittest.TestCase):
             row = db.execute("SELECT change_cursor FROM authority_domains WHERE domain=?",
                              [domain]).fetchone()
             return row[0] if row else None
+
+
+class AlbumBaselineCountTests(AlbumAuthorityFixture):
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.publish().status_code, 200)
+        self.assertEqual(self.activate().status_code, 200)
+
+    def counts(self):
+        response = self.client.get(BASELINE, params={"libraryId": LIBRARY, "epoch": 1,
+                                                   "section": "albums"}, headers=self.client_auth)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertNotIn("etag", response.headers)
+        return response, {item["id"]: (item["assetCount"], item["totalAssetCount"])
+                          for item in response.json()["items"]}
+
+    def test_nested_members_are_distinct_and_direct_count_matches_pc(self):
+        with self.get_db() as db:
+            db.execute("INSERT INTO album_authority_state VALUES(?,?,?, ?,NULL,NULL,0,1,?,?)",
+                       [LIBRARY, "grandchild", "Grandchild", "child", "now", "now"])
+            db.executemany("INSERT INTO album_authority_members VALUES(?,?,?,1,1,?,?)",
+                           [(LIBRARY, "grandchild", ASSET, "now", "now"),
+                            (LIBRARY, "grandchild", ASSET2, "now", "now")])
+            db.commit()
+        _, counts = self.counts()
+        self.assertEqual(counts["root"], (1, 2))
+        self.assertEqual(counts["child"], (1, 2))
+        self.assertEqual(counts["grandchild"], (2, 2))
+        self.assertEqual(counts["other"], (0, 0))
+
+    def test_gallery_visibility_excludes_trash_missing_uncommitted_and_removed(self):
+        activate_asset_lifecycle(self.get_db, LIBRARY, {ASSET: "trash", ASSET2: "normal"})
+        with self.get_db() as db:
+            db.executemany("INSERT INTO album_authority_members VALUES(?,?,?,1,1,?,?)",
+                           [(LIBRARY, "child", asset, "now", "now")
+                            for asset in (ASSET2, ASSET3, "missing")])
+            db.execute("UPDATE assets SET committed=0 WHERE id=?", [ASSET2])
+            db.commit()
+        _, counts = self.counts()
+        self.assertEqual(counts["root"], (0, 0))
+        with self.get_db() as db:
+            db.execute("UPDATE assets SET committed=1 WHERE id=?", [ASSET2])
+            db.commit()
+        _, counts = self.counts()
+        self.assertEqual(counts["root"], (0, 1))
+        with self.get_db() as db:
+            db.execute("UPDATE album_authority_members SET desired_state=0 WHERE asset_id=?", [ASSET2])
+            db.commit()
+        self.assertEqual(self.counts()[1]["root"], (0, 0))
+
+    def test_membership_and_lifecycle_changes_refresh_without_album_revision_cache(self):
+        activate_asset_lifecycle(self.get_db, LIBRARY, {ASSET: "normal", ASSET2: "normal"})
+        first, _ = self.counts()
+        result = self.command(album_authority.MEMBERSHIP, assetId=ASSET2,
+                              desiredState=True, expectedRevision=0)
+        self.assertEqual(result.status_code, 200)
+        second, counts = self.counts()
+        self.assertEqual(counts["root"], (2, 2))
+        self.assertGreater(second.json()["snapshotCursor"], first.json()["snapshotCursor"])
+        with self.get_db() as db:
+            db.execute("UPDATE asset_authority_state SET lifecycle='trash' WHERE asset_id=?", [ASSET])
+            db.commit()
+        third, counts = self.counts()
+        self.assertEqual(counts["root"], (1, 1))
+        self.assertEqual(third.json()["snapshotCursor"], second.json()["snapshotCursor"])
+        self.assertNotEqual(third.json()["items"], second.json()["items"])
+
+    def test_count_query_scales_as_one_statement_for_500_albums_50000_memberships(self):
+        with self.get_db() as db:
+            db.executemany("INSERT INTO album_authority_state VALUES(?,?,?,?,NULL,NULL,0,1,?,?)",
+                           [(LIBRARY, f"perf-{i}", f"Perf {i}",
+                             None if i == 0 else f"perf-{(i-1)//4}", "now", "now")
+                            for i in range(500)])
+            db.executemany("INSERT INTO assets VALUES(?,1)",
+                           [(f"perf-asset-{i}",) for i in range(10000)])
+            db.executemany("INSERT INTO album_authority_members VALUES(?,?,?,1,1,?,?)",
+                           [(LIBRARY, f"perf-{i//100}", f"perf-asset-{i%10000}", "now", "now")
+                            for i in range(50000)])
+            import asset_visibility
+            asset_visibility.install(db)
+            statements = []
+            db.set_trace_callback(statements.append)
+            started = time.perf_counter()
+            counts = album_authority.album_counts(db, LIBRARY)
+            elapsed = time.perf_counter() - started
+            db.set_trace_callback(None)
+            self.assertEqual(counts["perf-0"]["total_asset_count"], 10000)
+            self.assertEqual(counts["perf-0"]["asset_count"], 100)
+            self.assertEqual(sum(sql.lstrip().startswith("WITH RECURSIVE") for sql in statements), 1)
+            print(f"Album count query: 500 albums / 50000 memberships: {elapsed*1000:.2f} ms")
 
 
 class LikesAlbumTests(AlbumAuthorityFixture):

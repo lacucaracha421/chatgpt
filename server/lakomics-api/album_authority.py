@@ -68,7 +68,7 @@ import re
 import sqlite3
 
 from app_lifecycle import lifecycle
-from fastapi import Header, HTTPException, Request
+from fastapi import Header, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 import authority
@@ -499,6 +499,39 @@ def membership_row(db, library_id, album_id, asset_id):
 def membership_projection(album_id, asset_id, desired_state, entity_revision):
     return {"albumId": album_id, "assetId": asset_id,
             "desiredState": bool(desired_state), "entityRevision": entity_revision}
+
+
+def album_counts(db, library_id):
+    """Count committed, ordinary-visible members once for the whole live tree.
+
+    Direct counts match the PC Album card's normal-member count. Totals additionally
+    include descendants, deduplicating an Asset linked to more than one Album.
+    Use the same visibility projection as the unfiltered tablet Album gallery;
+    privacy mode changes presentation, not membership or counts.
+    """
+    asset_visibility.install(db)
+    return {row["album_id"]: row for row in db.execute("""
+        WITH RECURSIVE live AS (
+            SELECT album_id,parent_id FROM album_authority_state
+            WHERE library_id=? AND deleted=0
+        ), tree(ancestor,descendant) AS (
+            SELECT album_id,album_id FROM live
+            UNION
+            SELECT tree.ancestor,child.album_id FROM tree
+            JOIN live AS child ON child.parent_id=tree.descendant
+        )
+        SELECT tree.ancestor AS album_id,
+               COUNT(DISTINCT asset.id) AS total_asset_count,
+               COUNT(DISTINCT CASE WHEN tree.ancestor=tree.descendant
+                                   THEN asset.id END) AS asset_count
+        FROM tree
+        LEFT JOIN album_authority_members AS member
+          ON member.library_id=? AND member.album_id=tree.descendant
+         AND member.desired_state=1
+        LEFT JOIN visible_assets AS asset
+          ON asset.id=member.asset_id AND asset.committed=1
+        GROUP BY tree.ancestor
+    """, [library_id, library_id])}
 
 
 def album_page(db, library_id, after, limit):
@@ -1292,11 +1325,11 @@ def parse_baseline_request(params, epoch):
     snapshot = params.get("snapshot")
     section = params.get("section")
     if snapshot is None:
-        # First request: only the library and epoch are meaningful. A section or
-        # cursor here would describe a page of an unfrozen baseline.
-        if section is not None or params.get("after") is not None:
+        # The first page may explicitly name albums, but cannot start part-way
+        # through either section without a frozen authority cursor.
+        if section not in (None, ALBUMS_SECTION) or params.get("after") is not None:
             fail(422, "invalidAlbumBaseline",
-                 "기준선 첫 요청에는 snapshot/section/after를 지정할 수 없습니다.")
+                 "기준선 첫 요청에는 albums section만 지정할 수 있습니다.")
         section = ALBUMS_SECTION
         after = ""
     else:
@@ -1381,9 +1414,13 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
         return await run_in_threadpool(run)
 
     @app.get(PREFIX + "/baseline")
-    async def album_baseline(request: Request, libraryId: str, epoch: int,
+    async def album_baseline(request: Request, response: Response, libraryId: str, epoch: int,
                              authorization: str | None = Header(default=None)):
         require_client(authorization)
+        # This authority baseline has never emitted ETags or handled conditional reads
+        # (unlike the separate legacy /v1/library/album-media endpoint). Counts are a live
+        # Asset projection, so prevent caching by the Album snapshot cursor alone.
+        response.headers["Cache-Control"] = "no-store"
         params = dict(request.query_params)
         if set(params) - {"libraryId", "epoch", "snapshot", "section", "after", "limit"}:
             fail(422, "invalidAlbumBaseline", "앨범 기준선 요청이 올바르지 않습니다.")
@@ -1393,6 +1430,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
 
         def run():
             with get_db() as db:
+                db.execute("BEGIN")
                 row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
                 cursor = row["cursor"]
                 if snapshot is None:
@@ -1408,10 +1446,14 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     snapshot_cursor = snapshot
                 if section == ALBUMS_SECTION:
                     fetched = album_page(db, libraryId, after, limit + 1)
+                    counts = album_counts(db, libraryId)
                     items = [{"id": item["album_id"], "name": item["name"],
                               "parentId": item["parent_id"], "iconKey": item["icon_key"],
                               "colorKey": item["color_key"], "deleted": bool(item["deleted"]),
-                              "entityRevision": item["entity_revision"]} for item in fetched[:limit]]
+                              "entityRevision": item["entity_revision"],
+                              "assetCount": counts[item["album_id"]]["asset_count"],
+                              "totalAssetCount": counts[item["album_id"]]["total_asset_count"]}
+                             for item in fetched[:limit]]
                     has_more = len(fetched) > limit
                     next_after = items[-1]["id"] if has_more and items else None
                 else:
@@ -1426,8 +1468,11 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     has_more = len(fetched) > limit
                     next_after = (membership_key(items[-1]["albumId"], items[-1]["assetId"])
                                   if has_more and items else None)
-                return encode_page(row["libraryId"], row["epoch"], row["contractVersion"],
+                page = encode_page(row["libraryId"], row["epoch"], row["contractVersion"],
                                    snapshot_cursor, section, items, next_after, has_more, likes_album_id(db, libraryId, require_unique=False))
+                if list_generation is not None:
+                    page["listGeneration"] = list_generation(db)
+                return page
         return await run_in_threadpool(run)
 
     @app.get(PREFIX + "/assets")

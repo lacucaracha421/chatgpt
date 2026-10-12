@@ -275,6 +275,10 @@ public final class AlbumReplicaTest {
         private final BufferedReader output;
 
         SqliteDb(Path file) throws IOException {
+            this(file, true);
+        }
+
+        SqliteDb(Path file, boolean migrate) throws IOException {
             Path driver = Files.createTempFile("replica-driver", ".py");
             Files.write(driver, DRIVER.getBytes(StandardCharsets.UTF_8));
             driver.toFile().deleteOnExit();
@@ -285,7 +289,20 @@ public final class AlbumReplicaTest {
                     StandardCharsets.UTF_8));
             output = new BufferedReader(new InputStreamReader(process.getInputStream(),
                     StandardCharsets.UTF_8));
-            for (String statement : ReplicaSchema.DDL) exec(statement);
+            if (migrate) {
+                begin();
+                try {
+                    ReplicaSchema.migrate(new ReplicaSchema.Statements() {
+                        public int version() { return (int) asLong(select("PRAGMA user_version").get(0).get(0)); }
+                        public void execute(String statement) { exec(statement); }
+                        public void setVersion(int version) { exec("PRAGMA user_version=" + version); }
+                    });
+                    commit();
+                } catch (RuntimeException failure) {
+                    rollback();
+                    throw failure;
+                }
+            }
         }
 
         /** The interpreter to drive the engine with. */
@@ -356,7 +373,9 @@ public final class AlbumReplicaTest {
                     + (liveOnly ? " WHERE deleted=0" : "") + " ORDER BY album_id")) {
                 result.add(new AlbumReplica.Album((String) row.get(0), (String) row.get(1),
                         (String) row.get(2), (String) row.get(3), (String) row.get(4),
-                        asLong(row.get(5)) != 0, asLong(row.get(6))));
+                        asLong(row.get(5)) != 0, asLong(row.get(6)),
+                        row.get(7) == null ? null : asLong(row.get(7)),
+                        row.get(8) == null ? null : asLong(row.get(8))));
             }
             return result;
         }
@@ -405,7 +424,8 @@ public final class AlbumReplicaTest {
         @Override
         public void writeAlbum(AlbumReplica.Album album, String now) {
             exec(ReplicaSchema.WRITE_ALBUM, album.id, album.name, album.parentId, album.iconKey,
-                    album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now);
+                    album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now,
+                    album.assetCount, album.totalAssetCount);
         }
 
         @Override
@@ -1014,6 +1034,9 @@ public final class AlbumReplicaTest {
             storageSeamRollbackIsReal(directory);
             pageAndCursorCommitTogether(directory);
             processRestartPreservesIdentityCursorAndRows(directory);
+            albumCountsSurviveRestartAndMissingStaysUnknown(directory);
+            legacyAlbumCountsUpgradeInPlace(directory);
+            malformedAlbumCountsAreRejected();
             cursorExpiryAdoptsAFreshBaseline(directory);
             identityAndEpochChangeReAdopts(directory);
             unsupportedContractFailsClosed(directory);
@@ -1050,6 +1073,97 @@ public final class AlbumReplicaTest {
         }
         System.out.println("AlbumReplicaTest passed: " + checks + " checks"
                 + " (baseline adoption, ordered replay, cursor recovery, durability, isolation)");
+    }
+
+    private static void albumCountsSurviveRestartAndMissingStaysUnknown(Path directory) throws Exception {
+        String counted = album("counted", "Counted", null, null, null, 1)
+                .replace("}", ",\"assetCount\":5,\"totalAssetCount\":1284}");
+        String zero = album("zero", "Zero", null, null, null, 1)
+                .replace("}", ",\"assetCount\":0,\"totalAssetCount\":0}");
+        String unknown = album("unknown", "Unknown", null, null, null, 1);
+        Path file = directory.resolve("counts.sqlite");
+        LibraryReplicaStore store = new LibraryReplicaStore(new SqliteDb(file));
+        try (Fixture fixture = new Fixture(target -> {
+            if (target.startsWith("/v1/sync/status")) return Fixture.Response.ok(status(LIBRARY, 1, 1, 7));
+            if (albumsPageTarget(target)) return Fixture.Response.ok(albumsPage(7,
+                    counted + "," + zero + "," + unknown, null, false));
+            return Fixture.Response.ok(membersPage(7, "", null, false));
+        })) {
+            check(new AlbumAuthoritySync(transport(fixture), store, CLOCK).reconcile("scope-a").adopted,
+                    "The shipped receive engine adopts optional counts from the baseline");
+        }
+        equal(5L, store.albums("scope-a", true).get("counted").assetCount, "Direct count is saved");
+        store.close();
+        LibraryReplicaStore reopened = new LibraryReplicaStore(new SqliteDb(file));
+        Map<String, AlbumReplica.Album> rows = reopened.albums("scope-a", true);
+        equal(5L, rows.get("counted").assetCount, "Direct count survives process restart");
+        equal(1284L, rows.get("counted").totalAssetCount, "Subtree total is retained separately");
+        equal(0L, rows.get("zero").assetCount, "A known empty Album remains zero");
+        equal(null, rows.get("unknown").assetCount, "An absent direct count stays unknown");
+        equal(null, rows.get("unknown").totalAssetCount, "An absent total stays unknown");
+        reopened.applyChanges("scope-a", 7, Arrays.asList(new AlbumReplica.Change(8, "renameAlbum",
+                new AlbumReplica.Album("counted", "Renamed", null, null, null, false, 2), null)), CLOCK.now());
+        equal(null, reopened.albums("scope-a", true).get("counted").assetCount,
+                "A replacement projection without counts does not invent a zero or retain a stale value");
+        reopened.close();
+    }
+
+    private static void legacyAlbumCountsUpgradeInPlace(Path directory) throws Exception {
+        for (int version = 1; version <= 7; version++) {
+            Path file = directory.resolve("counts-v" + version + ".sqlite");
+            SqliteDb legacy = new SqliteDb(file, false);
+            for (String statement : ReplicaSchema.DDL) {
+                statement = statement.replace(",asset_count INTEGER,total_asset_count INTEGER", "");
+                if (version == 2 && statement.startsWith("CREATE TABLE IF NOT EXISTS album_authority_outbox")) {
+                    statement = statement.replace("library_id TEXT NOT NULL,", "")
+                            .replace("contract_version INTEGER NOT NULL,", "");
+                }
+                legacy.exec(statement);
+            }
+            legacy.exec("INSERT INTO album_state VALUES('legacy','Legacy',NULL,NULL,NULL,0,3,?)", CLOCK.now());
+            legacy.exec(ReplicaSchema.WRITE_AUTHORITY, "scope-a", LIBRARY, 1L, 1L, 7L, CLOCK.now(), CLOCK.now());
+            legacy.exec("INSERT INTO album_authority_outbox(seq,operation_id,command_type,album_id,asset_id,"
+                    + (version == 2 ? "" : "library_id,contract_version,")
+                    + "epoch,desired_state,expected_revision,payload,state,created_at) VALUES(1,'op','setMembership',"
+                    + "'legacy','asset_1'," + (version == 2 ? "" : "'" + LIBRARY + "',1,")
+                    + "1,1,0,'{}','pending',?)", CLOCK.now());
+            legacy.exec("PRAGMA user_version=" + version);
+            legacy.close();
+            SqliteDb upgraded = new SqliteDb(file);
+            LibraryReplicaStore store = new LibraryReplicaStore(upgraded);
+            equal(8L, SqliteDb.asLong(upgraded.select("PRAGMA user_version").get(0).get(0)),
+                    "The legacy replica reaches schema v8");
+            AlbumReplica.Album album = store.albums("scope-a", true).get("legacy");
+            equal(3L, album.entityRevision, "Upgrade preserves the Album revision");
+            equal(null, album.assetCount, "Upgrade leaves the direct count unknown");
+            equal(null, album.totalAssetCount, "Upgrade leaves the subtree total unknown");
+            equal(7L, store.adopted("scope-a").cursor, "Upgrade preserves the authority cursor");
+            equal(1, upgraded.outbox().size(), "Upgrade preserves pending local intent");
+            store.close();
+            SqliteDb again = new SqliteDb(file);
+            equal(null, again.albums(true).get(0).assetCount, "A second open does not repeat column migration");
+            again.close();
+        }
+    }
+
+    private static void malformedAlbumCountsAreRejected() throws Exception {
+        String row = album("root", "Root", null, null, null, 1);
+        AlbumReplica.Page nullable = AlbumReplica.parseBaselinePage(Json.parse(albumsPage(7,
+                row.replace("}", ",\"assetCount\":null,\"totalAssetCount\":null}"), null, false)),
+                LIBRARY, 1, "albums");
+        equal(null, nullable.albums.get(0).assetCount, "Explicit null also means unknown");
+        for (String key : new String[]{"assetCount", "totalAssetCount"}) {
+            for (String invalid : new String[]{"-1", "1.5", "\"5\"", "true"}) {
+                try {
+                    AlbumReplica.parseBaselinePage(Json.parse(albumsPage(7,
+                            row.replace("}", ",\"" + key + "\":" + invalid + "}"), null, false)),
+                            LIBRARY, 1, "albums");
+                    throw new AssertionError("Invalid count was accepted: " + invalid);
+                } catch (AlbumReplica.Failure expected) {
+                    equal(AlbumReplica.CODE_MALFORMED, expected.code, "Invalid counts fail closed");
+                }
+            }
+        }
     }
 
     private static void optimisticMembershipQueueIsAtomicAndSkipsNoOps(Path directory) throws Exception {
@@ -1661,22 +1775,20 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
         // v4 added the read-only Classification replica beside the Album domain, and v5 adds
         // the Classification assignment outbox. Both arrive through the same additive DDL,
         // so the v2 outbox upgrade below is unchanged and still what this check pins.
-        equal(7, ReplicaSchema.VERSION,
-                "Schema v7 (Asset lifecycle outbox) keeps the identity-bound v3 outbox upgrade");
+        equal(8, ReplicaSchema.VERSION,
+                "Schema v8 retains optional Album counts and the identity-bound outbox");
         String[] upgrade = ReplicaSchema.upgradeStatements(2);
-        equal(2, upgrade.length, "The intermediate v2 outbox needs two identity columns");
+        equal(4, upgrade.length, "The v2 upgrade needs identity and nullable Album count columns");
         check(upgrade[0].contains("library_id") && upgrade[0].contains("DEFAULT ''"),
                 "Unknown v2 library identity is preserved as a non-sendable sentinel");
         check(upgrade[1].contains("contract_version") && upgrade[1].contains("DEFAULT 0"),
                 "Unknown v2 contract identity is preserved as a non-sendable sentinel");
-        equal(0, ReplicaSchema.upgradeStatements(1).length,
-                "Read-only v1 creates the final schema directly rather than altering a missing outbox");
-        equal(0, ReplicaSchema.upgradeStatements(3).length,
-                "The v3 Album replica gains the Classification tables from the same DDL, with"
-                        + " no outbox to alter");
-        equal(0, ReplicaSchema.upgradeStatements(4).length,
-                "The v4 replica gains the Classification assignment outbox from the same DDL,"
-                        + " so its upgrade needs no ALTER either");
+        for (int version : new int[]{1, 3, 4, 5, 6, 7}) {
+            equal(2, ReplicaSchema.upgradeStatements(version).length,
+                    "Existing Album schemas add only the two nullable count columns");
+        }
+        equal(0, ReplicaSchema.upgradeStatements(0).length,
+                "A fresh database creates the final count columns directly");
     }
 
     private static void inactiveAuthorityLeavesAndroidUnadopted(Path directory) throws Exception {

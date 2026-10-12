@@ -306,6 +306,53 @@ class AlbumAssetsProjectionTests(unittest.TestCase):
                                    headers={"Authorization": "Bearer test-token"}).json()["generation"]
         self.assertEqual(body["listGeneration"], expected)
 
+    def test_baseline_counts_and_generation_follow_membership_trash_and_commit(self):
+        from tests.test_album_authority import activate_asset_lifecycle
+        self.activate()
+        activate_asset_lifecycle(api_app.get_db, LIBRARY,
+                                 {asset: "normal" for asset in (A1, A2, A3, A4, A5)})
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO album_authority_members VALUES(?,?,?,1,1,?,?)",
+                       [LIBRARY, CHILD, A5, "now", "now"])
+            db.commit()
+
+        def baseline():
+            response = self.client.get("/v1/albums/baseline", headers=self.client_auth,
+                                       params={"libraryId": LIBRARY, "epoch": 1, "section": "albums"})
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            expected = self.client.get("/v1/library/list-generation",
+                                       headers={"Authorization": "Bearer test-token"}).json()["generation"]
+            self.assertEqual(body["listGeneration"], expected)
+            root = next(album for album in body["items"] if album["id"] == ALBUM)
+            return body, root
+
+        first, root = baseline()
+        self.assertEqual((root["assetCount"], root["totalAssetCount"]), (3, 4))
+        response = self.client.put("/v1/albums/commands", headers=self.client_auth, json={
+            "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
+            "operationId": "11111111-1111-4111-8111-111111111111",
+            "commandType": "setAlbumMembership", "albumId": ALBUM, "assetId": A4,
+            "desiredState": True, "expectedRevision": 0})
+        self.assertEqual(response.status_code, 200, response.text)
+        second, _ = baseline()
+        self.assertNotEqual(first["listGeneration"], second["listGeneration"])
+        with api_app.get_db() as db:
+            db.execute("UPDATE assets SET committed=1 WHERE id=?", [A5])
+            db.commit()
+        third, root = baseline()
+        self.assertEqual(root["totalAssetCount"], 5)
+        self.assertNotEqual(second["listGeneration"], third["listGeneration"])
+        response = self.client.put("/v1/assets/authority/commands", headers=self.client_auth, json={
+            "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
+            "operationId": "22222222-2222-4222-8222-222222222222",
+            "commandType": "trashAsset", "assetId": A1, "expectedEntityRevision": 1})
+        self.assertEqual(response.status_code, 200, response.text)
+        fourth, root = baseline()
+        self.assertEqual((root["assetCount"], root["totalAssetCount"]), (3, 4))
+        self.assertNotEqual(third["listGeneration"], fourth["listGeneration"])
+        self.assertEqual(third["snapshotCursor"], fourth["snapshotCursor"])
+
     def test_unknown_query_parameters_are_refused_rather_than_ignored(self):
         self.activate()
         self.assertEqual(self.read(section="albums").status_code, 422)

@@ -147,7 +147,9 @@ final class AndroidReplicaDb implements ReplicaDb, AssetLifecycleOutbox.Storage 
                         cursor.isNull(2) ? null : cursor.getString(2),
                         cursor.isNull(3) ? null : cursor.getString(3),
                         cursor.isNull(4) ? null : cursor.getString(4),
-                        cursor.getInt(5) != 0, cursor.getLong(6)));
+                        cursor.getInt(5) != 0, cursor.getLong(6),
+                        cursor.isNull(7) ? null : cursor.getLong(7),
+                        cursor.isNull(8) ? null : cursor.getLong(8)));
             }
         }
         return rows;
@@ -202,7 +204,8 @@ final class AndroidReplicaDb implements ReplicaDb, AssetLifecycleOutbox.Storage 
     @Override
     public void writeAlbum(AlbumReplica.Album album, String now) {
         db.execSQL(ReplicaSchema.WRITE_ALBUM, new Object[]{album.id, album.name, album.parentId,
-                album.iconKey, album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now});
+                album.iconKey, album.colorKey, album.deleted ? 1 : 0, album.entityRevision, now,
+                album.assetCount, album.totalAssetCount});
     }
 
     @Override

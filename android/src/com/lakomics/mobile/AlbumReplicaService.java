@@ -857,7 +857,9 @@ final class AlbumReplicaService {
                         .put("name", album.name)
                         .put("parentId", album.parentId == null ? JSONObject.NULL : album.parentId)
                         .put("iconKey", album.iconKey == null ? JSONObject.NULL : album.iconKey)
-                        .put("colorKey", album.colorKey == null ? JSONObject.NULL : album.colorKey));
+                        .put("colorKey", album.colorKey == null ? JSONObject.NULL : album.colorKey)
+                        .put("assetCount", album.assetCount)
+                        .put("totalAssetCount", album.totalAssetCount));
             }
             return list;
         } catch (Exception unrepresentable) {

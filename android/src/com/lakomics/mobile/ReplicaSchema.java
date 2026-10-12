@@ -31,7 +31,8 @@ final class ReplicaSchema {
      * are additive `CREATE ... IF NOT EXISTS` DDL, so a v6 device database upgrades in place
      * with every existing row intact.
      */
-    static final int VERSION = 7;
+    // Version 8 retains optional server-projected Album counts. Existing rows stay unknown.
+    static final int VERSION = 8;
 
     /** v0 is fresh, v1-v3 are older replicas; all upgrade in place. */
     static boolean canUpgradeFrom(int version) {
@@ -82,11 +83,16 @@ final class ReplicaSchema {
      * them but block them before display or network delivery instead of guessing.
      */
     static String[] upgradeStatements(int version) {
-        if (version == 2) return new String[]{
-                "ALTER TABLE album_authority_outbox ADD COLUMN library_id TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE album_authority_outbox ADD COLUMN contract_version INTEGER NOT NULL DEFAULT 0",
-        };
-        return new String[0];
+        java.util.List<String> statements = new java.util.ArrayList<>();
+        if (version == 2) {
+            statements.add("ALTER TABLE album_authority_outbox ADD COLUMN library_id TEXT NOT NULL DEFAULT ''");
+            statements.add("ALTER TABLE album_authority_outbox ADD COLUMN contract_version INTEGER NOT NULL DEFAULT 0");
+        }
+        if (version >= 1 && version < 8) {
+            statements.add("ALTER TABLE album_state ADD COLUMN asset_count INTEGER");
+            statements.add("ALTER TABLE album_state ADD COLUMN total_asset_count INTEGER");
+        }
+        return statements.toArray(new String[0]);
     }
 
     static final String[] DDL = {
@@ -101,7 +107,8 @@ final class ReplicaSchema {
             "CREATE TABLE IF NOT EXISTS album_state("
                     + "album_id TEXT PRIMARY KEY,name TEXT NOT NULL,parent_id TEXT,"
                     + "icon_key TEXT,color_key TEXT,deleted INTEGER NOT NULL,"
-                    + "entity_revision INTEGER NOT NULL,updated_at TEXT NOT NULL)",
+                    + "entity_revision INTEGER NOT NULL,updated_at TEXT NOT NULL,"
+                    + "asset_count INTEGER,total_asset_count INTEGER)",
             "CREATE INDEX IF NOT EXISTS album_state_parent ON album_state(parent_id)",
             "CREATE TABLE IF NOT EXISTS album_membership_state("
                     + "album_id TEXT NOT NULL,asset_id TEXT NOT NULL,"
@@ -204,7 +211,7 @@ final class ReplicaSchema {
     /** One Album row, live or tombstoned. `deleted` is what keeps a tombstone readable. */
     static final String WRITE_ALBUM =
             "INSERT OR REPLACE INTO album_state(album_id,name,parent_id,icon_key,color_key,"
-                    + "deleted,entity_revision,updated_at) VALUES(?,?,?,?,?,?,?,?)";
+                    + "deleted,entity_revision,updated_at,asset_count,total_asset_count) VALUES(?,?,?,?,?,?,?,?,?,?)";
     /** One relation, live or tombstoned: removal keeps its revision rather than deleting. */
     static final String WRITE_MEMBER =
             "INSERT OR REPLACE INTO album_membership_state(album_id,asset_id,desired_state,"
@@ -326,7 +333,7 @@ final class ReplicaSchema {
             "SELECT scope,library_id,epoch,contract_version,cursor,adopted_at,reconciled_at"
                     + " FROM album_authority WHERE singleton=1";
     static final String READ_ALBUMS =
-            "SELECT album_id,name,parent_id,icon_key,color_key,deleted,entity_revision"
+            "SELECT album_id,name,parent_id,icon_key,color_key,deleted,entity_revision,asset_count,total_asset_count"
                     + " FROM album_state";
     static final String READ_MEMBERS =
             "SELECT album_id,asset_id,desired_state,entity_revision"
