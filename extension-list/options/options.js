@@ -429,12 +429,13 @@
     $("context-menu-enabled").checked = context.enabled; contextEditor.receive(context.excludedHosts.join("\n"));
     $("context-menu-count").textContent = `${context.excludedHosts.length}개`; relationships();
   }
-  const youtubeChecks = ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal"];
+  const youtubeChecks = ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal", "rolling"];
   const youtubeSelects = ["model", "register", "fontScale", "position"];
   function subtitlePreview() {
     const node = $("youtube-preview"); node.style.setProperty("--fs", $("youtube-fontScale").value);
     node.classList.toggle("raised", $("youtube-position").value === "raised");
     node.querySelector("small").hidden = !$("youtube-showOriginal").checked;
+    node.querySelector("em").hidden = !$("youtube-rolling").checked;
   }
   function renderYoutube(settings) {
     youtube = { ...youtube, ...settings };

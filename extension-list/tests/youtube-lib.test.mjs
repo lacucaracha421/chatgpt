@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { parseJson3 } from "./helpers/youtube-classic.mjs";
 import { chunkUnits, buildPrompt, chunkContexts, CONTEXT_HEADER } from "./helpers/youtube-classic.mjs";
 import { chunkOrder, chunkRange } from "./helpers/youtube-classic.mjs";
+import { finalizeTimings, readingTime } from "./helpers/youtube-classic.mjs";
 import { applyResult, fallbackSegment, repairLines, coverageProblem } from "./helpers/youtube-classic.mjs";
 import { modeForTrack, storageMode, normalizeRegisterSetting } from "./helpers/youtube-classic.mjs";
 
@@ -26,8 +27,9 @@ function makeUnits(words, starts) {
 test("applyResult clean mode preserves speaker hyphens and newline with the same letters", () => {
   const chunk = makeUnits(["그거", "진짜야", "응"], [0, 400, 900]);
   const text = "- 그거 진짜야?\n- 응.";
+  // Word units carry no end: the last word "응" is assumed to take 250 + 60 ms.
   assert.deepEqual(applyResult(chunk, [{ from: 0, to: 2, text }], { mode: "clean" }), [
-    { startMs: 0, endMs: 2400, text },
+    { startMs: 0, endMs: 900 + 310, text },
   ]);
 });
 
@@ -112,39 +114,47 @@ test("applyResult happy path keeps the model text", () => {
     { from: 3, to: 3, text: "반가워요!" },
   ]);
   assert.deepEqual(cues, [
-    { startMs: 0, endMs: 2000, text: "안녕하세요, 여러분." },
-    { startMs: 2000, endMs: 3500, text: "반가워요!" },
+    { startMs: 0, endMs: 900 + 250 + 60 * 3, text: "안녕하세요, 여러분." },
+    { startMs: 2000, endMs: 2000 + 250 + 60 * 4, text: "반가워요!" },
   ]);
 });
 
-test("applyResult clean end-time rule is unchanged: a gap over 2000 ms uses last word start + 1500", () => {
+test("an auto-caption line ends at its last word's estimated speech end, not in the following silence", () => {
+  // 250 ms + 60 ms per character, at most 1.2 s, and never past the next word's start.
   const chunk = makeUnits(["안녕", "하세요", "여러분", "반가워요"], [0, 400, 900, 3000]);
   const cues = applyResult(chunk, [
     { from: 0, to: 2, text: "안녕하세요 여러분" },
     { from: 3, to: 3, text: "반가워요" },
   ]);
-  assert.equal(cues[0].endMs, 900 + 1500);
+  assert.equal(cues[0].endMs, 900 + 250 + 60 * 3);
   assert.equal(cues[1].startMs, 3000);
+  const long = applyResult([{ text: "a".repeat(30), startMs: 0 }], [{ from: 0, to: 0, text: "가" }]);
+  assert.equal(long[0].endMs, 1200);
+  const crowded = applyResult([{ text: "abcdefghij", startMs: 0, endMs: 300 }, { text: "b", startMs: 300 }],
+    [{ from: 0, to: 0, text: "가" }, { from: 1, to: 1, text: "나" }]);
+  assert.equal(crowded[0].endMs, 300);
 });
 
-test("translate tail cap uses the same reading floor for missing and long source ends", () => {
+test("a translated line stays on screen for its reading time whatever the source end says", () => {
   const text = "저는 이 방법을 사용하면 문제가 다시 생길 거라고 생각하지 않아요.";
-  const expected = Math.max(1500, Math.min(3000, Math.max(1000, 55 * Array.from(text.replace(/\s/g, "")).length)));
+  const reading = readingTime(text);
+  assert.ok(reading > 1200 && reading < 6000);
   for (const endMs of [undefined, 0, 6000]) {
-    const result = applyResult([{ text: "Manual source caption", startMs: 0, endMs }],
+    const raw = applyResult([{ text: "Manual source caption", startMs: 0, endMs }],
       [{ from: 0, to: 0, text }], { mode: "translate-ko" });
-    assert.equal(result.length, 1);
-    assert.equal(result[0].endMs, expected);
+    assert.equal(raw.length, 1);
+    assert.equal(raw[0].endMs, 1200);
+    assert.equal(finalizeTimings(raw)[0].endMs, Math.round(reading));
   }
 });
 
-test("applyResult uses the last word's own end for the final line when known", () => {
+test("applyResult uses the last word's own end for the final line when it is shorter than the estimate", () => {
   const chunk = [
     { text: "a", startMs: 0, endMs: 500 },
-    { text: "b", startMs: 500, endMs: 1200 },
+    { text: "b", startMs: 500, endMs: 700 },
   ];
   const cues = applyResult(chunk, [{ from: 0, to: 1, text: "a b" }]);
-  assert.deepEqual(cues, [{ startMs: 0, endMs: 1200, text: "a b" }]);
+  assert.deepEqual(cues, [{ startMs: 0, endMs: 700, text: "a b" }]);
 });
 
 test("applyResult replaces a changed line with the original words", () => {
@@ -198,7 +208,7 @@ test("applyResult in translate-ko mode keeps translated text", () => {
   );
   assert.deepEqual(cues, [
     { startMs: 0, endMs: 900, text: "안녕하세요, 여러분.", orig: "Hello everyone" },
-    { startMs: 900, endMs: 2100 + 1500, text: "만나서 반가워요.", orig: "nice to see you" },
+    { startMs: 900, endMs: 2100 + 250 + 60 * 3, text: "만나서 반가워요.", orig: "nice to see you" },
   ]);
   // clean mode would have replaced the changed text with the original words
   const clean = applyResult(chunk, [{ from: 0, to: 5, text: "안녕하세요" }]);
@@ -360,4 +370,26 @@ test("chunkRange runs to the next chunk's first word, or to the last cue end for
   assert.deepEqual(chunkRange(chunks, 0), { startMs: 100, endMs: 1200 });
   assert.deepEqual(chunkRange(chunks, 1, [{ startMs: 1200, endMs: 1900, text: "x" }]), { startMs: 1200, endMs: 1900 });
   assert.deepEqual(chunkRange(chunks, 1), { startMs: 1200, endMs: 1800 });
+});
+
+test("register setting: defaults to following the speaker, accepts only known values, and update persists it", async () => {
+  const { DEFAULTS, normalize, update, read, PREFIX } = await import("./helpers/youtube-classic.mjs");
+  assert.equal(DEFAULTS.register, "auto");
+  assert.equal(normalize({}).register, "auto");
+  assert.equal(normalize({ register: "haeyo" }).register, "haeyo");
+  assert.equal(normalize({ register: "formal" }).register, "auto");
+  const stored = {};
+  const old = globalThis.chrome;
+  globalThis.chrome = { storage: { local: {
+    get: async (keys) => Object.fromEntries(keys.filter((key) => key in stored).map((key) => [key, stored[key]])),
+    set: async (values) => Object.assign(stored, values),
+  } } };
+  try {
+    assert.equal((await read()).register, "auto");
+    assert.equal((await update({ register: "haeyo" })).ok, true);
+    assert.equal(stored[PREFIX + "register"], "haeyo");
+    assert.equal((await read()).register, "haeyo");
+    assert.equal((await update({ register: "bogus" })).ok, false);
+    assert.equal((await read()).register, "haeyo");
+  } finally { globalThis.chrome = old; }
 });

@@ -61,7 +61,7 @@ test("a dangling ending joins its preceding translated line and extends time and
   source[1].endMs = 2000;
   for (const ending of ['않아요', '않아요.', '않아요.”', '않아요,', '않습니다', '있어요', '없어요', '거예요', '같아요', '이에요', '예요']) {
     assert.deepEqual(translated(source, '생각하지', ending), [{
-      startMs: 0, endMs: 2000, text: `생각하지 ${ending}`, orig: 'w0 w1',
+      startMs: 0, endMs: 300 + 250 + 60 * 2, text: `생각하지 ${ending}`, orig: 'w0 w1',
     }]);
   }
 });

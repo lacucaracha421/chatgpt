@@ -4,8 +4,11 @@
 // Turning model output (or a fallback segmentation) into timed cues.
 const { splitDisplayCues } = globalThis.LakomicsYouTube.display;
 
-const MAX_GAP_MS = 2000;
-const TAIL_MS = 1500;
+// Estimated time to say one auto-caption word: json3 gives only word starts, so a word is assumed to
+// last 250 ms plus 60 ms per character, at most 1.2 s, and never past the next word's start.
+const WORD_BASE_MS = 250;
+const WORD_CHAR_MS = 60;
+const WORD_MAX_MS = 1200;
 
 // Apply only within one translated chunk, before ranges become timed display cues.
 function mergeDanglingEndings(units, lines) {
@@ -38,32 +41,39 @@ function wordsText(units, from, to) {
     .join(" ");
 }
 
+// End of the real speech of one source unit. Human-made tracks hold whole caption events, so the event's
+// own end is the speech end; auto-caption units are single words and get the estimate above.
+function speechEnd(unit, human) {
+  const known = Number.isFinite(unit.endMs) && unit.endMs > unit.startMs ? unit.endMs : null;
+  if (human && known !== null) return known;
+  const chars = Array.from(String(unit.text).replace(/\s/gu, "")).length;
+  const estimate = unit.startMs + Math.min(WORD_MAX_MS, WORD_BASE_MS + WORD_CHAR_MS * chars);
+  return known === null ? estimate : Math.min(known, estimate);
+}
+
 // lines: [{ from, to, text }] with inclusive local indices, already validated as contiguous.
-function buildCues(units, lines, mode = "clean") {
+// human: the units are whole caption events of a human-made track (see speechEnd).
+// A cue spans exactly the speech of its words; how long it stays on screen beyond that (reading time,
+// bridging small gaps) is decided once for all cues by timing.finalizeTimings.
+function buildCues(units, lines, mode = "clean", human = false) {
   const cues = [];
   for (let k = 0; k < lines.length; k++) {
     const line = lines[k];
     const startMs = units[line.from].startMs;
-    const lastStart = units[line.to].startMs;
     const next = lines[k + 1];
-
-    // Following line start, or (for the last line of a chunk) the last word's own end.
-    let end = next ? units[next.from].startMs : units[line.to].endMs;
-    if (!Number.isFinite(end) || end <= lastStart || end - lastStart > MAX_GAP_MS) {
-      // Keep the silence cap, but never use it to shorten translated reading time.
-      const tailEnd = lastStart + TAIL_MS;
-      const readingEnd = mode === "translate-ko" ? startMs + globalThis.LakomicsYouTube.timing.readingTime(line.text) : tailEnd;
-      end = Math.max(tailEnd, readingEnd);
-    }
-    if (next) end = Math.min(end, units[next.from].startMs);
+    let end = Math.max(startMs, speechEnd(units[line.to], human));
+    if (next) end = Math.min(end, Math.max(startMs, units[next.from].startMs));
+    // Source word starts (and sizes) guide where splitDisplayCues cuts this line; it strips them again.
+    const covered = units.slice(line.from, line.to + 1);
     cues.push({ startMs, endMs: end, text: line.text,
+      wordStarts: covered.map((u) => u.startMs), wordChars: covered.map((u) => Array.from(u.text).length),
       ...(mode === "translate-ko" ? { orig: wordsText(units, line.from, line.to) } : {}) });
   }
   return splitDisplayCues(cues);
 }
 
 // Simple segmentation by pauses (> 700 ms between word starts) and a maximum line length.
-function fallbackSegment(units, { pauseMs = 700, maxChars = 40, mode = "clean" } = {}) {
+function fallbackSegment(units, { pauseMs = 700, maxChars = 40, mode = "clean", human = false } = {}) {
   if (!units.length) return [];
 
   const lines = [];
@@ -84,7 +94,7 @@ function fallbackSegment(units, { pauseMs = 700, maxChars = 40, mode = "clean" }
   }
   lines.push({ from, to: units.length - 1, text: wordsText(units, from, units.length - 1) });
 
-  return buildCues(units, lines, mode);
+  return buildCues(units, lines, mode, human);
 }
 
 // Describes the first reason lines do not cover 0..n-1 contiguously and in order, or null when they do.
@@ -150,14 +160,14 @@ function repairLines(n, lines, maxGapWords = 3) {
 
 // chunk: units of one chunk. modelLines: [{ from, to, text }] (inclusive local indices).
 // mode "translate-ko": the text is a translation, so the same-letters check is skipped.
-function applyResult(chunk, modelLines, { mode = "clean" } = {}) {
+function applyResult(chunk, modelLines, { mode = "clean", human = false } = {}) {
   if (!chunk.length) return [];
   const translate = mode === "translate-ko";
   let usable = modelLines;
   if (!coversChunk(chunk.length, modelLines)) {
     // Translations keep their text when the line ranges are only slightly off; cleaning must match exactly.
     usable = translate ? repairLines(chunk.length, modelLines) : null;
-    if (!usable) return fallbackSegment(chunk, { mode });
+    if (!usable) return fallbackSegment(chunk, { mode, human });
   }
 
   const lines = usable.map((line) => {
@@ -169,7 +179,7 @@ function applyResult(chunk, modelLines, { mode = "clean" } = {}) {
     const same = normalize(line.text) === normalize(original);
     return { from: line.from, to: line.to, text: same ? line.text.trim() : original };
   });
-  return buildCues(chunk, translate ? mergeDanglingEndings(chunk, lines) : lines, mode);
+  return buildCues(chunk, translate ? mergeDanglingEndings(chunk, lines) : lines, mode, human);
 }
 
 (globalThis.LakomicsYouTube ??= {}).cues = { fallbackSegment, coverageProblem, repairLines, applyResult };

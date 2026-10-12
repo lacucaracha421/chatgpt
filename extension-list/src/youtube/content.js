@@ -18,6 +18,7 @@
     cues: null, // sorted by startMs; while processing, only the finished parts
     ranges: [], // covered time ranges [{ startMs, endMs }], sorted and merged
     complete: false, // true once the full result is in: everything counts as covered
+    fromCache: false, // the shown result came from the cache, not from a job of this page visit
     partialFailure: false, // the last result had fallback chunks: the next press retries
     prefetch: null, // { videoId, promise, metaPromise }: caption and metadata acquisition
     prefetchTimer: 0,
@@ -66,8 +67,9 @@
     button = overlay = toast = null;
   }
 
-  const appearance = { fontScale: 1, position: "default", showOriginal: false };
-  const appearanceKeys = ["lakomics:youtube:settings:fontScale", "lakomics:youtube:settings:position", "lakomics:youtube:settings:showOriginal"];
+  const appearance = { fontScale: 1, position: "default", showOriginal: false, rolling: false };
+  const appearanceKeys = ["lakomics:youtube:settings:fontScale", "lakomics:youtube:settings:position",
+    "lakomics:youtube:settings:showOriginal", "lakomics:youtube:settings:rolling"];
   const changedAppearanceKeys = new Set();
 
   function setAppearance(key, value) {
@@ -77,15 +79,19 @@
       appearance.position = value === "raised" ? "raised" : "default";
     } else if (key === "lakomics:youtube:settings:showOriginal") {
       appearance.showOriginal = value === true;
+    } else if (key === "lakomics:youtube:settings:rolling") {
+      appearance.rolling = value === true; // off unless explicitly turned on (user, 2026-10-12)
     }
   }
 
-  function applyAppearance() {
+  function applyAppearance(instant = true) {
     if (!overlay) return;
     overlay.style.setProperty("--lakomics-yt-scale", String(appearance.fontScale));
     overlay.style.setProperty("--lakomics-yt-raise", appearance.position === "raised" ? "0.06" : "0");
     lastCueIndex = -2;
-    sync();
+    rolling = null; // lines are rebuilt, so font, position and original-text changes apply to them too
+    instantRender = instant; // a setting change redraws the line in place, without the entrance fade
+    try { sync(); } finally { instantRender = false; }
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -434,7 +440,9 @@
   // Started a moment after a video opens so the button press can use the result right away.
   function startPrefetch(token, videoId) {
     if (token !== state.token || state.status !== "idle" || state.cues) return;
-    state.prefetch = { videoId, metaPromise: fetchMeta(videoId), promise: acquireSilently(videoId) };
+    const metaPromise = fetchMeta(videoId);
+    state.prefetch = { videoId, metaPromise, promise: acquireSilently(videoId) };
+    void metaPromise.then((meta) => recheckCached(token, videoId, meta));
   }
 
   // Resolves to { trackKey, text } with json3 text for the current video.
@@ -529,7 +537,7 @@
       overlay.appendChild(document.createElement("span"));
       player.appendChild(overlay);
       lastCueIndex = -2;
-      applyAppearance();
+      applyAppearance(false);
     }
     attachPlayerListeners(player);
     updateFontSize();
@@ -570,6 +578,8 @@
       getComputedStyle(node).visibility !== "hidden" && getComputedStyle(node).opacity !== "0");
   }
 
+  const HOLD_GAP_MS = 300; // a gap this short between two cues never empties the overlay
+
   function findCue(ms) {
     const cues = state.cues;
     let lo = 0;
@@ -584,12 +594,150 @@
         hi = mid - 1;
       }
     }
-    return found >= 0 && ms < cues[found].endMs ? found : -1;
+    if (found < 0) return -1;
+    if (ms < cues[found].endMs) return found;
+    // Consecutive cues hand over without an empty frame: a cue stays through a gap of up to HOLD_GAP_MS
+    // (timing.js leaves 80 ms before the next cue, and older caches may hold other small gaps).
+    const next = cues[found + 1];
+    return next && next.startMs - cues[found].endMs <= HOLD_GAP_MS ? found : -1;
   }
 
   function isCovered(ms) {
     if (state.complete) return true;
     return state.ranges.some((r) => r.startMs <= ms && ms < r.endMs);
+  }
+
+  // ---- Rolling two-line display (roll-up): the current cue sits in the bottom slot and the previous cue stays
+  // above it until the next cue replaces it, so fast speech can still be read. Display only; cue times are untouched.
+  const ROLL_GAP_MS = 1200; // previous cue ended more than this before the current one: speech resumed after silence
+  const ROLL_MOVE_MS = 140;
+  const ROLL_FADE_OUT_MS = 160; // the overlay fades out when it empties into silence
+  let rolling = null; // { bottom, top }: lines { cue, el, role } on screen while the two-line display is active
+  let instantRender = false;
+
+  // Index of the cue to show above cue `index`, or -1. The previous cue stays for as long as the current one
+  // is on screen (there is no timer: the next push replaces it); it is not shown at all when the current cue
+  // starts after a silence (the previous cue ended more than 1.2 s earlier). When the current cue ends and
+  // no cue follows soon, the overlay clears and both lines leave together.
+  function previousLineIndex(cues, index) {
+    const previous = cues[index - 1];
+    const current = cues[index];
+    return isDrawable(previous) && current && current.startMs - previous.endMs <= ROLL_GAP_MS ? index - 1 : -1;
+  }
+
+  function reducedMotion() {
+    return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function rectOf(node) {
+    return typeof node.getBoundingClientRect === "function" ? node.getBoundingClientRect() : null;
+  }
+
+  function hasText(value) {
+    return typeof value === "string" && value.trim() !== "";
+  }
+
+  // A cue without any text is never drawn: an empty span would still paint its background and padding as a bar.
+  function isDrawable(cue) {
+    return Boolean(cue) && hasText(cue.text);
+  }
+
+  // One cue's text (and, for the current line, its original) inside `parent`.
+  function fillCue(parent, cue, withOriginal) {
+    const translation = document.createElement("span");
+    translation.textContent = cue.text;
+    if (withOriginal && hasText(cue.orig)) {
+      const originalLine = document.createElement("div");
+      originalLine.className = "lakomics-yt-orig-line";
+      const original = document.createElement("span");
+      original.className = "lakomics-yt-orig";
+      original.textContent = cue.orig;
+      originalLine.appendChild(original);
+      const translationLine = document.createElement("div");
+      translationLine.appendChild(translation);
+      parent.replaceChildren(originalLine, translationLine);
+    } else {
+      parent.replaceChildren(translation);
+    }
+  }
+
+  // Fades exist only at the edges of speech: a line appearing after silence fades in (lakomics-yt-in) and
+  // the overlay fades out when it empties into silence. Cue changes never touch opacity.
+  let fadeOut = null;
+
+  function cancelFadeOut() {
+    if (!fadeOut) return;
+    const animation = fadeOut;
+    fadeOut = null;
+    animation.onfinish = null;
+    if (typeof animation.cancel === "function") animation.cancel();
+  }
+
+  function clearOverlay(fade = false) {
+    cancelFadeOut();
+    rolling = null;
+    if (!overlay) return;
+    const finish = () => {
+      overlay.replaceChildren(document.createElement("span"));
+      overlay.style.display = "none";
+    };
+    if (fade && overlay.style.display === "block" && !instantRender && !reducedMotion() && typeof overlay.animate === "function") {
+      const animation = overlay.animate({ opacity: [1, 0] }, { duration: ROLL_FADE_OUT_MS, easing: "ease-in", fill: "forwards" });
+      fadeOut = animation;
+      animation.onfinish = () => {
+        if (fadeOut !== animation) return;
+        fadeOut = null;
+        finish();
+        if (typeof animation.cancel === "function") animation.cancel();
+      };
+      return;
+    }
+    finish();
+  }
+
+  // Puts `topCue` (or nothing) above `bottomCue`. Lines are matched by cue start, so a line that stays keeps its
+  // element: the old bottom line becomes the top line and slides up (a translate only, never an opacity change),
+  // the new line takes the bottom slot at once, and a replaced top line is removed at once. Only an empty
+  // overlay fades in. The bottom slot never moves: the overlay is anchored to the player by its bottom edge
+  // and grows upwards. CSS clamps the top slot to one visual line.
+  function renderRolling(bottomCue, topCue) {
+    const prior = rolling || { bottom: null, top: null };
+    const motion = !instantRender && !reducedMotion();
+    const shown = Boolean(rolling) && overlay.style.display === "block";
+    const before = motion && shown ? [prior.bottom, prior.top].filter(Boolean).map((line) => [line, rectOf(line.el)]) : [];
+    // A line is the same line while its cue starts at the same time: a re-sent cue keeps its element, and
+    // changed text is swapped in place instead of fading out and in.
+    const take = (cue) => {
+      const line = [prior.bottom, prior.top].find((item) => item && item.cue.startMs === cue.startMs);
+      if (!line) return { cue, el: document.createElement("div"), role: "" };
+      line.dirty = line.cue.text !== cue.text || line.cue.orig !== cue.orig;
+      line.cue = cue;
+      return line;
+    };
+    const next = { bottom: take(bottomCue), top: topCue ? take(topCue) : null };
+    for (const [line, role] of [[next.top, "prev"], [next.bottom, "cur"]]) {
+      if (!line) continue;
+      if (line.role === role && !line.dirty) continue;
+      // Only an empty overlay fades in: where a line is replaced, opacity must never dip, or every cue blinks.
+      const fresh = !line.role && !shown;
+      fillCue(line.el, line.cue, role === "cur" && appearance.showOriginal);
+      if (line.role !== role) {
+        line.el.className = `lakomics-yt-line lakomics-yt-${role}${fresh && motion ? " lakomics-yt-in" : ""}`;
+      }
+      line.role = role;
+      line.dirty = false;
+    }
+    const kept = [next.top, next.bottom].filter(Boolean);
+    overlay.replaceChildren(...kept.map((line) => line.el));
+    overlay.style.display = "block";
+    rolling = next;
+    for (const [line, rect] of before) {
+      const el = line.el;
+      if (!kept.includes(line) || !rect || typeof el.animate !== "function") continue;
+      const now = rectOf(el);
+      const dy = now ? rect.top - now.top : 0;
+      if (Math.abs(dy) > 0.5) el.animate({ transform: [`translateY(${dy}px)`, "none"] }, { duration: ROLL_MOVE_MS, easing: "ease-out" });
+    }
   }
 
   // Inside a covered range our cue replaces YouTube's captions; outside it YouTube's own show, so
@@ -605,39 +753,32 @@
     player.classList.toggle("lakomics-yt-active", covered);
 
     const ad = player.classList.contains("ad-showing");
-    const index = covered && !ad ? findCue(ms) : -1;
+    let index = covered && !ad ? findCue(ms) : -1;
+    if (index >= 0 && !isDrawable(state.cues[index])) index = -1;
     const waiting = !covered && !ad && state.status === "processing" && state.busyVisible && !youtubeHasText(player);
-    const displayKey = waiting ? "waiting" : index;
+    const topIndex = appearance.rolling && index >= 0 ? previousLineIndex(state.cues, index) : -1;
+    const displayKey = waiting ? "waiting" : appearance.rolling ? `${index}:${topIndex}` : index;
     if (displayKey === lastCueIndex) return;
     lastCueIndex = displayKey;
+    if (index >= 0 || waiting) cancelFadeOut();
     overlay.classList.toggle("lakomics-yt-waiting", waiting);
     if (waiting) {
       const note = document.createElement("span");
       note.textContent = "이 구간은 아직 처리 중이에요";
+      rolling = null;
       overlay.replaceChildren(note);
       overlay.style.display = "block";
       return;
     }
     if (index < 0) {
-      overlay.replaceChildren(document.createElement("span"));
-      overlay.style.display = "none";
+      clearOverlay(true);
+    } else if (appearance.rolling) {
+      renderRolling(state.cues[index], topIndex >= 0 ? state.cues[topIndex] : null);
     } else {
-      const cue = state.cues[index];
-      const translation = document.createElement("span");
-      translation.textContent = cue.text;
-      if (appearance.showOriginal && typeof cue.orig === "string" && cue.orig) {
-        const originalLine = document.createElement("div");
-        originalLine.className = "lakomics-yt-orig-line";
-        const original = document.createElement("span");
-        original.className = "lakomics-yt-orig";
-        original.textContent = cue.orig;
-        originalLine.appendChild(original);
-        const translationLine = document.createElement("div");
-        translationLine.appendChild(translation);
-        overlay.replaceChildren(originalLine, translationLine);
-      } else {
-        overlay.replaceChildren(translation);
-      }
+      const fadeIn = overlay.style.display !== "block" && !instantRender && !reducedMotion();
+      rolling = null;
+      fillCue(overlay, state.cues[index], appearance.showOriginal);
+      if (fadeIn) for (const child of overlay.children) child.classList.add("lakomics-yt-in");
       overlay.style.display = "block";
     }
   }
@@ -666,10 +807,7 @@
     } else {
       if (rafId) cancelAnimationFrame(rafId);
       rafId = 0;
-      if (overlay) {
-        overlay.replaceChildren(document.createElement("span"));
-        overlay.style.display = "none";
-      }
+      clearOverlay();
       lastCueIndex = -2;
     }
   }
@@ -838,6 +976,7 @@
     const videoId = state.videoId;
 
     state.status = "processing";
+    state.fromCache = false;
     state.error = "";
     state.progress = null;
     state.busyVisible = false;
@@ -875,6 +1014,7 @@
       if (!state.cues) state.showClean = true;
       state.cues = reply.cues;
       state.complete = true;
+      state.fromCache = false;
       state.partialFailure = Boolean(reply.partialFailure);
       lastCueIndex = -2;
       state.status = "ready";
@@ -907,11 +1047,42 @@
       state.cues = reply.cached.cues;
       state.complete = true;
       state.showClean = true;
+      state.fromCache = true;
       state.status = "ready";
       applyMode();
       renderButton();
     } catch {
       // no cache available: stay idle
+    }
+  }
+
+  // The first lookup runs before the page metadata exists. Once it is known, a video with a channel style rule
+  // gets its exact result: the one made for the rule, and an older result made without it is dropped (made again
+  // on the next press). Videos without a rule are left untouched.
+  async function recheckCached(token, videoId, meta) {
+    if (!meta || token !== state.token || state.status !== "ready" || !state.fromCache) return;
+    try {
+      const reply = await sendToBackground({ type: "youtube:getCached", videoId, meta });
+      if (token !== state.token || currentVideoId() !== videoId || !reply || !reply.ok || !reply.styled) return;
+      if (reply.cached) {
+        if (state.status !== "ready" || !state.fromCache) return;
+        state.cues = reply.cached.cues;
+        state.complete = true;
+        state.showClean = true;
+        state.fromCache = true;
+        state.status = "ready";
+      } else if (state.status === "ready" && state.fromCache) {
+        state.cues = null;
+        state.ranges = [];
+        state.complete = false;
+        state.showClean = false;
+        state.fromCache = false;
+        state.status = "idle";
+      } else return;
+      applyMode();
+      renderButton();
+    } catch {
+      // keep what is shown
     }
   }
 
@@ -926,6 +1097,7 @@
     state.ranges = [];
     state.complete = false;
     state.partialFailure = false;
+    state.fromCache = false;
     state.prefetch = null;
     clearTimeout(state.prefetchTimer);
     state.showClean = false;

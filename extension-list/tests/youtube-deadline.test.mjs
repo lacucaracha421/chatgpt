@@ -75,7 +75,7 @@ test("glossary transcript is limited to 8000 evenly sampled words with existing 
 });
 
 for (const provider of ["anthropic"]) {
-  test(`${provider} glossary deadline continues to chunks with user terms and haeyo`, async (t) => {
+  test(`${provider} glossary deadline continues to chunks with user terms and the follow-the-speaker register`, async (t) => {
     const original = { fetch: globalThis.fetch, chrome: globalThis.chrome, setTimeout: globalThis.setTimeout,
       clearTimeout: globalThis.clearTimeout, now: Date.now };
     t.after(() => {
@@ -109,7 +109,10 @@ for (const provider of ["anthropic"]) {
     assert.equal(clock.now(), 30000);
     assert.ok(glossarySignals.every((signal) => signal.aborted));
     const system = chunks[0].system || chunks[0].systemInstruction.parts[0].text;
-    assert.match(system, /exactly this Korean speech register.*haeyo/);
+    // The overview never answered: follow mode falls back to 해요체 as the video's default register.
+    assert.match(system, /default Korean speech register[^\n]*haeyo = 해요체/);
+    assert.match(system, /Return the default register \("haeyo"\)/);
+    assert.doesNotMatch(system, /exactly this Korean speech register/);
     assert.match(system, /"source":"Jeff","korean":"제프"/);
   });
 }

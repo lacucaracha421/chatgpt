@@ -57,3 +57,8 @@ test("storageMode isolates Sonnet glossaries for translated tracks and composes 
   assert.equal(storageMode("ko:asr", true, "auto", false, true), "clean");
   assert.equal(storageMode("ja:asr", false, "auto", true, true), "clean+spk");
 });
+
+test("casual and rough Korean (반말) is not an offending cue, so it is never retried", () => {
+  const cues = [{ text: "이 씨발 물건 진짜 좆같네." }, { text: "야, 그만해. 가자." }, { text: "그렇게 하시면 안 돼요." }];
+  assert.deepEqual(offendingKoreanCues(cues), []);
+});

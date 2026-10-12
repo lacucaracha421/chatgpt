@@ -8,14 +8,17 @@ async function harness() {
     constructor() {
       this.children = []; this.isConnected = true; this.textContent = "";
       const names = new Set();
-      this.classList = { contains: (name) => names.has(name), remove: (name) => names.delete(name),
+      this.classList = { contains: (name) => names.has(name), remove: (name) => names.delete(name), add: (name) => names.add(name),
         toggle(name, on) { if (on) names.add(name); else names.delete(name); } };
       this.style = { display: "", setProperty() {} };
     }
     appendChild(node) { node.parentNode = this; this.children.push(node); }
     replaceChildren(...nodes) { this.children = []; nodes.forEach((node) => this.appendChild(node)); }
     addEventListener(name, fn) { events[name] = fn; }
-    remove() { this.isConnected = false; }
+    remove() {
+      this.isConnected = false;
+      if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((node) => node !== this);
+    }
     querySelector() { return video; }
     querySelectorAll() { return captionVisible ? [{ textContent: "YouTube subtitle", getClientRects: () => [1] }] : []; }
   }

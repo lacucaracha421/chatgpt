@@ -15,7 +15,7 @@ const PAGE = { id: 'test', frameId: 0, url: 'https://www.youtube.com/watch?v=vid
 const OPTIONS = { id: 'test', frameId: 0, url: 'chrome-extension://test/options/options.html' };
 const request = { type: 'youtube:process', videoId: 'video12', trackKey: 'en:asr',
   json3: { events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'Jeff' }] }] } };
-const entry = () => ({ version: 1, video: 'video12', track: 'en:asr', mode: 'translate-ko-auto',
+const entry = () => ({ version: 1, video: 'video12', track: 'en:asr', mode: 'translate-ko-auto+t6',
   model: 'claude-haiku-5-5', createdAt: 123, register: 'haeyo', glossary: [],
   cues: [{ startMs: 0, endMs: 1000, text: '제프', orig: 'Jeff' }] });
 const response = (status, data) => ({ status, ok: status === 200, json: async () => data });
@@ -50,7 +50,7 @@ function setup(t, { paired = true } = {}) {
 test('manifest registers only YouTube MAIN/start hook and isolated/idle UI without changing version', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('unlimitedStorage'));
-  assert.equal(manifest.version, '3.5.17');
+  assert.equal(manifest.version, '3.5.27');
   assert.equal(manifest.background.type, undefined);
   const hook = manifest.content_scripts.find(item => item.js?.includes('src/youtube/page-hook.js'));
   const ui = manifest.content_scripts.find(item => item.js?.includes('src/youtube/content.js'));
@@ -77,7 +77,7 @@ test('local miss GET precedes Anthropic, complete local write precedes PUT, uplo
   h.serve(async (url, init) => {
     if (url.startsWith('https://api.anthropic.com/')) return apiResponse(JSON.parse(init.body));
     if (init.method === 'PUT') {
-      assert.ok(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto']);
+      assert.ok(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto+t6']);
       assert.equal(JSON.parse(init.body).version, undefined);
       return response(++puts === 1 ? 503 : 200, { ok: true });
     }
@@ -85,7 +85,7 @@ test('local miss GET precedes Anthropic, complete local write precedes PUT, uplo
   });
   const result = await h.send(request); await tick();
   assert.equal(result.ok, true);
-  assert.match(h.calls[0].url, /\/v1\/extension\/subtitles\?video=video12&track=en%3Aasr&mode=translate-ko-auto$/);
+  assert.match(h.calls[0].url, /\/v1\/extension\/subtitles\?video=video12&track=en%3Aasr&mode=translate-ko-auto%2Bt6$/);
   assert.equal(h.calls[0].init.headers.authorization, 'Bearer ' + TOKEN);
   assert.equal(puts, 2);
   assert.equal(h.calls.filter(call => call.url.startsWith('https://api.anthropic.com/')).length, 2);
@@ -103,7 +103,7 @@ test('valid server result is stored and shown before requiring an API key, extra
   assert.equal(result.cached, true); assert.equal(result.cues[0].text, '제프');
   assert.equal(h.calls.length, 1);
   assert.doesNotMatch(JSON.stringify([result, await h.send({ type: 'youtube:getCached', videoId: 'video12' })]), new RegExp(TOKEN + '|' + KEY));
-  assert.equal(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto'].token, undefined);
+  assert.equal(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto+t6'].token, undefined);
 });
 
 for (const failure of ['offline', 404, 401, 403, 500, 201, 'invalid']) {
@@ -263,7 +263,7 @@ test('options save/load every YouTube field, share dictionary, and show server c
   const doc = first.window.document;
   assert.equal(doc.getElementById('youtube-clear-server-row').hidden, true);
   const fields = { enabled: false, model: 'claude-sonnet-5-5', translate: false, register: 'banmal',
-    speakers: true, glossarySonnet: true, fontScale: 1.3, position: 'raised', showOriginal: true };
+    speakers: true, glossarySonnet: true, fontScale: 1.3, position: 'raised', showOriginal: true, rolling: false };
   for (const [key, value] of Object.entries(fields)) {
     const node = doc.getElementById('youtube-' + key);
     if (typeof value === 'boolean') node.checked = value; else node.value = String(value);
@@ -308,4 +308,27 @@ test('standalone button suppresses our UI and logs once; enabled switch removes 
   assert.match(contentSource, /if \(event\.isTrusted !== true/);
   // Page bridge only carries caption/metadata requests, never worker credentials.
   assert.doesNotMatch(contentSource, /anthropicApiKey|authorization|connection\.token/);
+});
+
+test('processing version t4: results stored under the old mode key are never matched', async t => {
+  const h = setup(t);
+  const oldKey = 'lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto';
+  const newKey = oldKey + '+t6';
+  h.stored[oldKey] = { ...entry(), cues: [{ startMs: 0, endMs: 1500, text: '옛 결과', orig: 'Jeff' }] };
+  h.stored['lakomics:youtube:subs:index'] = { video12: ['en:asr|translate-ko-auto'] };
+  assert.equal((await h.send({ type: 'youtube:getCached', videoId: 'video12' })).cached, null);
+  h.serve(async (url, init) => {
+    if (url.startsWith('https://api.anthropic.com/')) return apiResponse(JSON.parse(init.body));
+    if (init.method === 'PUT') return response(200, { ok: true });
+    const mode = new URL(url).searchParams.get('mode');
+    return mode === 'translate-ko-auto' ? response(200, entry()) : response(404, { code: 'not_found' });
+  });
+  const result = await h.send(request); await tick();
+  assert.equal(result.ok, true);
+  assert.notEqual(result.cached, true);
+  assert.ok(h.calls.some(call => call.url.startsWith('https://api.anthropic.com/')));
+  assert.ok(h.stored[newKey]);
+  assert.doesNotMatch(JSON.stringify(h.stored[newKey]), /wordStarts|wordChars/);
+  assert.equal(h.stored[oldKey].cues[0].text, '옛 결과');
+  assert.equal((await h.send({ type: 'youtube:getCached', videoId: 'video12' })).cached.cues[0].text, '제프');
 });

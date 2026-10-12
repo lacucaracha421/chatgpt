@@ -145,6 +145,7 @@ textarea.in{display:block;width:100%;height:auto;min-height:112px;padding:8px 12
 .ytprev .cue{position:absolute;left:50%;bottom:10%;transform:translateX(-50%);width:max-content;max-width:92%;text-align:center;transition:bottom 140ms var(--ease)}
 .ytprev .cue span{display:inline-block;padding:1px 6px;background:rgb(8 8 8 / 75%);color:#fff;font-size:calc(13px * var(--fs,1));line-height:1.35}
 .ytprev .cue small{display:block;margin-bottom:2px}
+.ytprev .cue em{display:block;margin-bottom:2px;font-style:normal;opacity:.72}
 .ytprev .cue small span{font-size:calc(10px * var(--fs,1));color:#cfcfcf}
 .ytprev.raised .cue{bottom:22%}
 /* Help popover (ⓘ) */

@@ -188,14 +188,34 @@ test("translate request states the given register explicitly", () => {
   }
 });
 
-test("translate request without a register asks the model to choose and report it", () => {
+test("translate request without a register follows the speaker's register and reports the dominant one", () => {
   const { system } = buildRequestBody({ model: "m", chunk, mode: "translate-ko", register: null });
-  assert.match(system, /Choose the Korean speech register that best matches the speaker/);
+  assert.match(system, /Follow the speaker's own register line by line/);
+  assert.match(system, /rough speech.*반말/);
   assert.match(system, /register field/);
+  assert.doesNotMatch(system, /Choose the Korean speech register/);
   assert.doesNotMatch(system, /exactly this Korean speech register/);
   // an unknown value behaves like null
   const other = buildRequestBody({ model: "m", chunk, mode: "translate-ko", register: "bogus" });
   assert.equal(other.system, system);
+});
+
+test("translate prompt carries the profanity rule in both register modes, and clean mode does not", () => {
+  for (const register of [null, "haeyo", "hapnida", "banmal"]) {
+    const { system } = buildRequestBody({ model: "m", chunk, mode: "translate-ko", register });
+    assert.match(system, /Translate profanity, swearing, slurs used in context, vulgarity and rough speech with the same strength and nuance as the original/);
+    assert.match(system, /never soften, censor, euphemise or drop it/);
+    assert.ok(system.includes('"fucking" -> 존나/씨발'));
+  }
+  assert.doesNotMatch(buildRequestBody({ model: "m", chunk, mode: "clean" }).system, /profanity/);
+});
+
+test("the register instruction switches with the setting", () => {
+  const follow = translateSystemPrompt(null), fixed = translateSystemPrompt("haeyo");
+  assert.match(follow, /Follow the speaker's own register/);
+  assert.doesNotMatch(follow, /exactly this Korean speech register/);
+  assert.match(fixed, /exactly this Korean speech register for every line: haeyo = 해요체, polite/);
+  assert.doesNotMatch(fixed, /Follow the speaker's own register/);
 });
 
 test("clean request ignores the register", () => {

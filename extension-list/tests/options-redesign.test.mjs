@@ -32,7 +32,7 @@ async function fixture(t, options = {}) {
   w.IntersectionObserver = class { constructor(fn, opts) { observers.push({fn, opts, nodes:[]}); } observe(node) { observers.at(-1).nodes.push(node); } };
   let trans = {ok:true, enabled:true, model:models[0].id, fallbackModel:'', contextModel:'', imageModel:models[1].id,
     models, imageModels:models, userTerms:[], hasOpenRouterKey:true, hasAnthropicKey:false, ...options.translation};
-  let yt = {enabled:true, model:'claude-haiku-5-5', translate:true, register:'auto', speakers:false, glossarySonnet:false, fontScale:1, position:'default', showOriginal:false};
+  let yt = {enabled:true, model:'claude-haiku-5-5', translate:true, register:'auto', speakers:false, glossarySonnet:false, fontScale:1, position:'default', showOriginal:false, rolling:true};
   let onChanged; const memory = {'lakomics:context-menu:v1':{enabled:true,excludedHosts:[]}}, calls = [];
   w.chrome = {storage:{onChanged:{addListener(fn) { onChanged = fn; }}, local:{
     async get() { return structuredClone(memory); }, async set(value) { writes.push(structuredClone(value)); Object.assign(memory, structuredClone(value)); },
@@ -70,7 +70,7 @@ async function fixture(t, options = {}) {
 test('seven section landmarks keep every mapped id, labels, status slots, fonts and responsive foundations', async t => {
   const f = await fixture(t); const sections = [...f.w.document.querySelectorAll('main > .sec')];
   assert.deepEqual(sections.map(s => s.querySelector('h2').textContent), ['연결','수집','번역 공통','X 번역','YouTube 자막','우클릭 메뉴','저장공간']);
-  const ids = 'state-label state-dot pair-section pair-status pair-help pair-form pairing origin refresh disconnect order-section sync-status order-editor hidden-count hidden-empty hidden-folders pin-section pins pin-candidate pin-add preference-section auto-like temporary-section context-menu-section context-menu-status context-menu-enabled context-menu-model context-menu-image-model context-menu-form context-menu-excluded context-menu-help translation-section translation-status translation-model translation-fallback translation-enabled translation-key-form translation-key translation-anthropic-key-form translation-anthropic-key translation-clear youtube-section youtube-status youtube-enabled youtube-model youtube-translate youtube-register youtube-speakers youtube-glossarySonnet youtube-fontScale youtube-position youtube-showOriginal youtube-clear youtube-clear-server translation-dictionary-section translation-dictionary-form translation-dictionary translation-dictionary-status'.split(' ');
+  const ids = 'state-label state-dot pair-section pair-status pair-help pair-form pairing origin refresh disconnect order-section sync-status order-editor hidden-count hidden-empty hidden-folders pin-section pins pin-candidate pin-add preference-section auto-like temporary-section context-menu-section context-menu-status context-menu-enabled context-menu-model context-menu-image-model context-menu-form context-menu-excluded context-menu-help translation-section translation-status translation-model translation-fallback translation-enabled translation-key-form translation-key translation-anthropic-key-form translation-anthropic-key translation-clear youtube-section youtube-status youtube-enabled youtube-model youtube-translate youtube-register youtube-speakers youtube-glossarySonnet youtube-fontScale youtube-position youtube-showOriginal youtube-rolling youtube-clear youtube-clear-server translation-dictionary-section translation-dictionary-form translation-dictionary translation-dictionary-status'.split(' ');
   for (const id of ids) assert.ok(f.$(id), id);
   assert.equal(new Set([...f.w.document.querySelectorAll('[id]')].map(n=>n.id)).size, f.w.document.querySelectorAll('[id]').length);
   for (const s of sections) { assert.equal(s.querySelectorAll('.sec-head output').length,1); assert.equal(s.getAttribute('aria-labelledby'),s.querySelector('h2').id); }
@@ -191,6 +191,8 @@ test('download settings uses Chrome tab API and quietly hides unsupported action
   await f.change('youtube-fontScale','1.3'); await f.change('youtube-position','raised'); await f.change('youtube-showOriginal',true);
   assert.equal(f.$('youtube-preview').style.getPropertyValue('--fs'),'1.3'); assert.equal(f.$('youtube-preview').classList.contains('raised'),true);
   assert.equal(f.$('youtube-preview').querySelector('small').hidden,false);
+  assert.equal(f.$('youtube-rolling').checked,true); assert.equal(f.$('youtube-preview').querySelector('em').hidden,false);
+  await f.change('youtube-rolling',false); assert.equal(f.$('youtube-preview').querySelector('em').hidden,true); assert.deepEqual(f.messages.filter(m => m.type === 'youtube:update').at(-1).patch,{rolling:false});
   const g = await fixture(t,{downloadFailure:true}); g.$('download-settings').click(); await drain(); assert.equal(g.$('download-settings').hidden,true);
 });
 

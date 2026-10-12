@@ -90,12 +90,42 @@
 }
 
 #lakomics-yt-overlay > span,
-#lakomics-yt-overlay > div > span {
+#lakomics-yt-overlay > div > span,
+#lakomics-yt-overlay .lakomics-yt-line > span,
+#lakomics-yt-overlay .lakomics-yt-line > div > span {
   background: rgba(0, 0, 0, 0.78);
   padding: 0.04em 0.42em;
   border-radius: 0.12em;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+}
+
+/* Rolling two-line display: the previous line sits above the current one, dimmer. The overlay is anchored
+   by its bottom edge, so the bottom line never moves. Cue changes never animate opacity (no blinking); fades exist
+   only where speech starts after silence (.lakomics-yt-in) and where it ends into silence (script-driven). */
+#lakomics-yt-overlay .lakomics-yt-prev {
+  opacity: 0.72;
+  /* The top slot is one visual line: a long previous cue ends in an ellipsis instead of adding lines. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An empty span or line would still paint its background and padding (a thin bar): never draw one. */
+#lakomics-yt-overlay span:empty,
+#lakomics-yt-overlay .lakomics-yt-line:empty,
+#lakomics-yt-overlay .lakomics-yt-orig-line:empty {
+  display: none;
+}
+
+#lakomics-yt-overlay .lakomics-yt-in {
+  animation: lakomics-yt-in 0.12s ease-out;
+}
+
+@keyframes lakomics-yt-in {
+  from {
+    opacity: 0;
+  }
 }
 
 #lakomics-yt-overlay .lakomics-yt-orig-line {
@@ -108,7 +138,7 @@
   opacity: 0.75;
 }
 
-#lakomics-yt-overlay .lakomics-yt-orig {
+#lakomics-yt-overlay .lakomics-yt-orig-line .lakomics-yt-orig {
   font-weight: 500;
   color: rgba(255, 255, 255, 0.86);
   background: rgba(0, 0, 0, 0.72);
@@ -147,4 +177,5 @@
   #lakomics-yt-overlay,
   #lakomics-yt-toast { transition: none; }
   #lakomics-yt-button.lakomics-yt-busy .lakomics-yt-icon { animation: none; }
+  #lakomics-yt-overlay .lakomics-yt-in { animation: none; }
 }

@@ -11,7 +11,8 @@ const { splitDisplayCues } = globalThis.LakomicsYouTube.display;
 const { callChunk, callGlossaryFor } = globalThis.LakomicsYouTube.provider;
 const { modeForTrack, storageMode } = globalThis.LakomicsYouTube.mode;
 const { offendingKoreanCues } = globalThis.LakomicsYouTube.korean;
-const { polishTimings } = globalThis.LakomicsYouTube.timing;
+const { finalizeTimings } = globalThis.LakomicsYouTube.timing;
+const { FALLBACK_REGISTER, STYLE_RULES, matchStyleRule } = globalThis.LakomicsYouTube.prompts;
 const { createResumeRecord, matchesResumeRecord } = globalThis.LakomicsYouTube.resume;
 const { mergeTerms, normalizeUserTerms, termsForTranscript } = globalThis.LakomicsYouTube.terms;
 
@@ -41,10 +42,36 @@ async function readSettings() {
   };
 }
 
-function storedModeFor(trackKey, settings) {
-  return storageMode(trackKey, settings.translate, settings.registerSetting, settings.speakers, settings.glossarySonnet) +
+// Cached results are final timed cues, so a change to cue timing or splitting needs a new version:
+// entries stored without it (or with an older one) are never matched again and are re-made on next view.
+// t2 (3.5.18): human-made tracks keep their real caption end; no split inside numbers or before a predicate tail.
+// t3 (3.5.19): fragments of a split line are cut at source word starts instead of by character count.
+// t4 (3.5.20): one display-timing policy (timing.finalizeTimings): cues end at their speech end or reading
+// time, whichever is later, and small gaps between cues are bridged; the 1.5 s tail cap is gone.
+// t5 (3.5.22): the prompt no longer softens profanity, and the default register setting follows the speaker
+// instead of forcing the one register chosen for the whole video.
+// t6 (3.5.23): follow mode picks the main speaker's register once per video (overview, else 해요체)
+// and gives it to every chunk, so results made with per-chunk registers are made once more.
+// A video matching a channel style rule (prompts.STYLE_RULES) also carries that rule's id (+avgn1), so only
+// its results are re-made when the rule is added or changed; other videos keep their +t6 keys.
+const PROCESSING_VERSION = "+t6";
+
+// Human-made caption tracks (`en:std`) hold whole caption events; `:asr` tracks hold single words.
+const isHumanTrack = (trackKey) => !String(trackKey).endsWith(":asr");
+
+// The style rule applies to translations only; `ruleId` is the id of the matching rule (see styleRuleFor).
+function storedModeFor(trackKey, settings, ruleId = null) {
+  const base = storageMode(trackKey, settings.translate, settings.registerSetting, settings.speakers, settings.glossarySonnet);
+  return base +
     (settings.model === "claude-sonnet-5-5" ? "+sonnet" : "") +
-    (settings.dictionaryRevision ? `+d${settings.dictionaryRevision}` : "");
+    (settings.dictionaryRevision ? `+d${settings.dictionaryRevision}` : "") +
+    (ruleId && base.startsWith("translate-ko") ? `+${ruleId}` : "") + PROCESSING_VERSION;
+}
+
+// The matching channel style rule of a translated video, from the page metadata sent with the request.
+function styleRuleFor(trackKey, settings, meta, videoId) {
+  if (modeForTrack(trackKey, settings.translate) !== "translate-ko") return null;
+  return meta && typeof meta === "object" && meta.videoId === videoId ? matchStyleRule(meta) : null;
 }
 
 // Serialized writes to the usage total so two videos finishing together do not lose counts.
@@ -170,7 +197,9 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
   const { provider, apiKey, model, translate, registerSetting, speakers, glossarySonnet } = settings;
   const meta = pageMeta?.videoId === videoId ? pageMeta : null;
   const mode = modeForTrack(trackKey, translate);
-  const storedMode = storedModeFor(trackKey, settings);
+  const human = isHumanTrack(trackKey);
+  const styleRule = styleRuleFor(trackKey, settings, meta, videoId);
+  const storedMode = storedModeFor(trackKey, settings, styleRule?.id);
   const key = subsKey(videoId, trackKey, storedMode);
 
   const cached = (await storageGet(key))[key];
@@ -210,22 +239,24 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
   if (savedResume && !resume) await writeForGeneration(generation, () => chrome.storage.local.remove(resumeKey));
   const outcomes = new Array(chunks.length);
   let glossary = mode === "translate-ko" ? mergeTerms(resume?.glossary || [], userTerms) : [];
-  let register = mode === "translate-ko" ? (registerSetting === "auto" ? resume?.register || "haeyo" : registerSetting) : null;
+  // A channel style rule decides the follow-mode register itself; fixed settings are never overridden.
+  let register = mode === "translate-ko" ? (registerSetting === "auto" ? styleRule?.register || resume?.register || null : registerSetting) : null;
+  // "auto" (follow mode) picks the main speaker's register once per video: the saved one on resume, else the overview's,
+  // else 해요체. Chunks get it as the default ({ follow }) and may leave it only for other speakers or quotes.
+  // Fixed settings pass their register as is.
+  const chunkRegisterFor = () => registerSetting !== "auto" ? registerSetting
+    : mode === "translate-ko" ? { follow: register } : null;
   let done = 0;
 
-  // The next chunk's source start bounds partial timings, even before it finishes.
-  const polishChunk = (index, cues) => {
-    const nextStart = chunks[index + 1]?.[0].startMs;
-    if (nextStart == null) return splitDisplayCues(polishTimings(cues));
-    const bounded = cues.map((cue) => ({ ...cue, endMs: Math.min(cue.endMs, nextStart) }));
-    return splitDisplayCues(polishTimings([...bounded, { startMs: nextStart, endMs: nextStart, text: "" }]).slice(0, -1));
-  };
+  // Outcomes keep the cues as built (ending at their speech end); display timing is decided on the way out.
+  // The next chunk's first word bounds the partial timings, even before that chunk finishes.
+  const displayChunk = (index, cues) => finalizeTimings(cues, { nextStartMs: chunks[index + 1]?.[0].startMs });
 
   if (resume) {
     for (const [indexText, savedCues] of Object.entries(resume.successful)) {
       const index = Number(indexText);
-      const cues = polishChunk(index, savedCues);
-      outcomes[index] = { cues, failed: false };
+      outcomes[index] = { cues: savedCues, failed: false };
+      const cues = displayChunk(index, savedCues);
       sendPartial(sender, videoId, index, chunkRange(chunks, index, cues), cues);
       done += 1;
     }
@@ -252,7 +283,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
       let result = await callChunk(provider, { budget, apiKey, model, chunk, mode, register, context, speakers, glossary, meta });
       addUsageOf(result);
 
-      let applied = applyResult(chunk, result.lines, { mode });
+      let applied = applyResult(chunk, result.lines, { mode, human });
       if (mode === "translate-ko") {
         const problem = coverageProblem(chunk.length, result.lines);
         const offending = offendingKoreanCues(applied);
@@ -269,7 +300,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
           try {
             const retry = await callChunk(provider, { budget, apiKey, model, chunk, mode, register, context, speakers, glossary, meta, retryNote });
             addUsageOf(retry);
-            const retryCues = applyResult(chunk, retry.lines, { mode });
+            const retryCues = applyResult(chunk, retry.lines, { mode, human });
             const retryOffending = offendingKoreanCues(retryCues);
             const retryProblem = coverageProblem(chunk.length, retry.lines);
             if (retryProblem) console.warn(`[Lakomics YouTube] chunk ${index}: ${retryProblem} (attempt 2)`);
@@ -289,15 +320,16 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
         }
       }
 
-      const cues = polishChunk(index, applied);
-      outcome = { cues, register: result.register, failed: false };
+      outcome = { cues: applied, register: result.register, failed: false };
+      const cues = displayChunk(index, applied);
       sendPartial(sender, videoId, index, chunkRange(chunks, index, cues), cues);
     } catch (err) {
       if (err.usage) addUsageOf(err);
       if (isFatal(err)) { console.info("[Lakomics YouTube] chunk end", videoId, index, true); throw err; }
       console.warn(`[Lakomics YouTube] chunk ${index} failed (${err.message}); using the original words`);
-      outcome = { cues: polishChunk(index, fallbackSegment(chunk, { mode })), register: null, failed: true, error: err };
-      sendPartial(sender, videoId, index, chunkRange(chunks, index, outcome.cues), outcome.cues);
+      outcome = { cues: fallbackSegment(chunk, { mode, human }), register: null, failed: true, error: err };
+      const cues = displayChunk(index, outcome.cues);
+      sendPartial(sender, videoId, index, chunkRange(chunks, index, cues), cues);
     }
     console.info("[Lakomics YouTube] chunk end", videoId, index, outcome.failed);
     outcomes[index] = outcome;
@@ -318,7 +350,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
         const result = await callGlossaryFor(provider, { apiKey, model: glossaryModel, transcript, meta, userTerms });
         addUsageOf(result, glossaryModel);
         glossary = mergeTerms(result.terms, userTerms);
-        if (registerSetting === "auto") register = result.register;
+        if (registerSetting === "auto" && !styleRule) register = result.register;
       } catch (err) {
         if (err.usage) addUsageOf(err, glossaryModel);
         console.warn("[Lakomics YouTube] glossary failed; continuing with user terms");
@@ -326,7 +358,8 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
         console.info("[Lakomics YouTube] glossary end", videoId, Date.now() - glossaryStarted);
       }
     }
-    await runPool(order, CONCURRENCY, (index) => processChunk(index, register));
+    if (mode === "translate-ko" && registerSetting === "auto" && !register) register = FALLBACK_REGISTER;
+    await runPool(order, CONCURRENCY, (index) => processChunk(index, chunkRegisterFor()));
   } catch (err) {
     // Fatal API errors stop scheduling new work; already completed chunks can still be reused.
     await writeForGeneration(generation, () => chrome.storage.local.set({ [resumeKey]: createResumeRecord(chunks, outcomes, glossary, register, trackKey) }));
@@ -339,8 +372,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
   const failures = outcomes.filter((o) => o.failed);
   const partialFailure = failures.length > 0;
 
-  const cues = splitDisplayCues(polishTimings(outcomes.flatMap((o) => o.cues)))
-    .map(cue => ({ ...cue, startMs: Math.round(cue.startMs), endMs: Math.round(cue.endMs) }));
+  const cues = finalizeTimings(outcomes.flatMap((o) => o.cues));
   if (partialFailure) {
     await writeForGeneration(generation, () => chrome.storage.local.set({ [resumeKey]: createResumeRecord(chunks, outcomes, glossary, register, trackKey) }));
   }
@@ -372,7 +404,8 @@ async function runProcess(message, sender) {
   const generation = await cacheOperation(getGeneration);
   const settings = await readSettings();
   if (!settings.enabled) return { ok: false, error: "YouTube 자막 기능이 꺼져 있어요" };
-  const key = `${generation}:${subsKey(message.videoId, message.trackKey, storedModeFor(message.trackKey, settings))}`;
+  const rule = styleRuleFor(message.trackKey, settings, message.meta, message.videoId);
+  const key = `${generation}:${subsKey(message.videoId, message.trackKey, storedModeFor(message.trackKey, settings, rule?.id))}`;
   let job = inFlight.get(key);
   if (!job) {
     job = processTrack(message, sender, settings, generation).finally(() => { if (inFlight.get(key) === job) inFlight.delete(key); });
@@ -381,7 +414,10 @@ async function runProcess(message, sender) {
   return job;
 }
 
-async function getCached(videoId) {
+// `meta` (the page's video metadata) makes the lookup exact: only the result made for the video's style rule, or
+// the plain one when no rule matches, is accepted, and `styled` tells whether a rule matched. Without it, a result
+// made for any style rule is preferred over the plain one (rule ids appear only on videos that matched).
+async function getCached(videoId, meta = null) {
   const index = (await storageGet(INDEX_KEY))[INDEX_KEY] || {};
   // Index entries are `${trackKey}|${mode}`; older entries without a mode are ignored.
   const entries = (Object.hasOwn(index, videoId) && Array.isArray(index[videoId]) ? index[videoId] : [])
@@ -395,14 +431,20 @@ async function getCached(videoId) {
   const settings = await readSettings();
   if (!settings.enabled) return { ok: true, cached: null };
   const isAsr = (e) => e.trackKey.endsWith(":asr");
-  const wanted = (e) => e.mode === storedModeFor(e.trackKey, settings);
-  const pick = entries.find((e) => isAsr(e) && wanted(e)) || entries.find(wanted);
-  if (!pick) return { ok: true, cached: null };
-
+  const exact = Boolean(meta && typeof meta === "object" && meta.videoId === videoId);
+  const matched = exact ? matchStyleRule(meta) : null;
+  const rules = exact ? (matched ? [matched] : []) : STYLE_RULES;
+  const modesFor = (trackKey) => [...rules.map((rule) => storedModeFor(trackKey, settings, rule.id)),
+    ...(matched ? [] : [storedModeFor(trackKey, settings)])];
+  const rank = (e) => modesFor(e.trackKey).indexOf(e.mode);
+  const pick = entries.filter((e) => rank(e) >= 0)
+    .sort((x, y) => rank(x) - rank(y) || Number(isAsr(y)) - Number(isAsr(x)))[0];
+  const flag = exact ? { styled: Boolean(matched) } : {};
+  if (!pick) return { ok: true, cached: null, ...flag };
   const key = subsKey(videoId, pick.trackKey, pick.mode);
   const entry = (await storageGet(key))[key];
-  if (!entry) return { ok: true, cached: null };
-  return { ok: true, cached: { trackKey: pick.trackKey, cues: splitDisplayCues(entry.cues), model: entry.model, createdAt: entry.createdAt } };
+  if (!entry) return { ok: true, cached: null, ...flag };
+  return { ok: true, cached: { trackKey: pick.trackKey, cues: splitDisplayCues(entry.cues), model: entry.model, createdAt: entry.createdAt }, ...flag };
 }
 
 
@@ -457,7 +499,7 @@ async function getCached(videoId) {
        return await globalThis.LakomicsYouTube.serverCache.clear();
      }
      if (message.type === "youtube:process" && page && validProcess(message)) return await runProcess(message, sender);
-     if (message.type === "youtube:getCached" && page && /^[A-Za-z0-9_-]{6,20}$/.test(message.videoId)) return await getCached(message.videoId);
+     if (message.type === "youtube:getCached" && page && /^[A-Za-z0-9_-]{6,20}$/.test(message.videoId)) return await getCached(message.videoId, message.meta);
      return { ok: false, code: "invalid_request" };
    } catch (error) { return { ok: false, error: publicError(error) }; }
  }

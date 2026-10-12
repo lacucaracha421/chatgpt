@@ -2,11 +2,11 @@
   "use strict";
   const PREFIX = "lakomics:youtube:settings:";
   const DEFAULTS = Object.freeze({ enabled: true, model: "claude-haiku-5-5", translate: true,
-    register: "auto", speakers: false, glossarySonnet: false, fontScale: 1, position: "default", showOriginal: false });
+    register: "auto", speakers: false, glossarySonnet: false, fontScale: 1, position: "default", showOriginal: false, rolling: false });
   const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5"];
   function normalize(value = {}) {
     const settings = { ...DEFAULTS };
-    for (const key of ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal"]) {
+    for (const key of ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal", "rolling"]) {
       if (typeof value[key] === "boolean") settings[key] = value[key];
     }
     if (MODELS.includes(value.model)) settings.model = value.model;
