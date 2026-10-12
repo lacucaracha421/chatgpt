@@ -435,7 +435,7 @@
     $("context-menu-enabled").checked = context.enabled; $("context-menu-page-mode").value = context.pageMode || "replace"; contextEditor.receive(context.excludedHosts.join("\n"));
     $("context-menu-count").textContent = `${context.excludedHosts.length}개`; relationships();
   }
-  const youtubeChecks = ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal", "rolling"];
+  const youtubeChecks = ["enabled", "translate", "localAsr", "speakerColors", "speakers", "glossarySonnet", "showOriginal", "rolling"];
   const youtubeSelects = ["model", "register", "fontScale", "position"];
   function subtitlePreview() {
     const node = $("youtube-preview"); node.style.setProperty("--fs", $("youtube-fontScale").value);

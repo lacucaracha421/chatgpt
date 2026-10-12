@@ -50,7 +50,7 @@ function setup(t, { paired = true } = {}) {
 test('manifest registers only YouTube MAIN/start hook and isolated/idle UI without changing version', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('unlimitedStorage'));
-  assert.equal(manifest.version, '3.5.29');
+  assert.equal(manifest.version, '3.5.34');
   assert.equal(manifest.background.type, undefined);
   const hook = manifest.content_scripts.find(item => item.js?.includes('src/youtube/page-hook.js'));
   const ui = manifest.content_scripts.find(item => item.js?.includes('src/youtube/content.js'));
@@ -263,7 +263,7 @@ test('options save/load every YouTube field, share dictionary, and show server c
   const doc = first.window.document;
   assert.equal(doc.getElementById('youtube-clear-server-row').hidden, true);
   const fields = { enabled: false, model: 'claude-sonnet-5-5', translate: false, register: 'banmal',
-    speakers: true, glossarySonnet: true, fontScale: 1.3, position: 'raised', showOriginal: true, rolling: false };
+    speakers: true, glossarySonnet: true, fontScale: 1.3, position: 'raised', showOriginal: true, rolling: false, localAsr: false, speakerColors: false };
   for (const [key, value] of Object.entries(fields)) {
     const node = doc.getElementById('youtube-' + key);
     if (typeof value === 'boolean') node.checked = value; else node.value = String(value);

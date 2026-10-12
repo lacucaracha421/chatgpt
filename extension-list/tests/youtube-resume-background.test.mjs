@@ -504,3 +504,28 @@ test("follow mode resume keeps a stored register without asking the overview aga
   assert.equal(glossaries, 0);
   for (const system of systems) assert.match(system, /default Korean speech register[^\n]*haeyo = 해요체/);
 });
+
+test("each translate chunk request carries the previous and the following words as read-only context", async (t) => {
+  const { send } = await setup(t, { "lakomics:youtube:settings:register": "banmal" });
+  const bodies = [];
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isGlossary(body)) return response({ register: "banmal", terms: [] });
+    bodies.push(body);
+    return response(translated(body));
+  };
+  const request = message();
+  const chunks = chunkUnits(parseJson3(request.json3).units, 200);
+  assert.equal((await send(request)).ok, true);
+  assert.equal(bodies.length, chunks.length);
+  const users = chunks.map((chunk) => bodies.find((body) => body.messages[0].content.includes(`0\t${chunk[0].text}\n`)).messages[0].content);
+  const following = (user) => user.split("Following context (do not translate, not numbered):\n")[1];
+  const nextWords = (index, count) => chunks.slice(index + 1).flat().slice(0, count).map((unit) => unit.text).join(" ");
+  assert.doesNotMatch(users[0], /Previous context/);
+  assert.equal(following(users[0]), nextWords(0, 80));
+  assert.match(users[1], /Previous context/);
+  assert.equal(following(users[1]), nextWords(1, 80));
+  assert.match(users[2], /Previous context/);
+  assert.doesNotMatch(users[2], /Following context/);
+  for (const body of bodies) assert.match(body.system, /Following context \(do not translate, not numbered\)/);
+});

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Companion",
-  "version": "3.5.29",
+  "version": "3.5.34",
   "description": "Collect images and videos into Lakomics, translate X posts, YouTube subtitles and web pages, and use the Lakomics right-click menu.",
   "permissions": [
     "storage",
@@ -17,6 +17,7 @@
   "host_permissions": [
     "https://*/*",
     "http://127.0.0.1/*",
+    "http://127.0.0.1:39125/*",
     "http://100.76.119.29/*"
   ],
   "action": {
@@ -135,6 +136,8 @@
         "https://m.youtube.com/*"
       ],
       "js": [
+        "src/youtube/asr-choice.js",
+        "src/youtube/source-pref.js",
         "src/youtube/content.js"
       ],
       "css": [

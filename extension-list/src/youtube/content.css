@@ -17,6 +17,9 @@
   flex: 0 0 auto;
   width: 48px;
   height: 48px;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none; /* a long press asks to re-translate; no text selection or callout */
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
@@ -111,6 +114,16 @@
   text-overflow: ellipsis;
 }
 
+/* Speaker colours (setting "화자별 색", cues with an audio-based speaker): text colour only, set with the text itself so
+   nothing flashes. Speaker 0 and anyone after the third voice keep the default white; the dark box stays. */
+#lakomics-yt-overlay .lakomics-yt-spk1 {
+  color: #ffe58a;
+}
+
+#lakomics-yt-overlay .lakomics-yt-spk2 {
+  color: #a8e4ff;
+}
+
 /* An empty span or line would still paint its background and padding (a thin bar): never draw one. */
 #lakomics-yt-overlay span:empty,
 #lakomics-yt-overlay .lakomics-yt-line:empty,
@@ -172,10 +185,94 @@
   opacity: 1;
 }
 
+/* "Which caption source" choice of the retranslate prompt: the toast look with two buttons. It stays in the
+   layout but invisible and unfocusable (visibility) until shown, and fades like the toast. */
+#lakomics-yt-choice {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  max-width: 80%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  border-radius: 4px;
+  background: rgba(8, 8, 8, 0.9);
+  color: #fff;
+  font: 400 14px/1.4 "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", Roboto, Arial, sans-serif;
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease, visibility 0s linear 0.2s;
+  z-index: 71;
+}
+
+#lakomics-yt-choice.lakomics-yt-show {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.2s ease, visibility 0s;
+}
+
+#lakomics-yt-choice .lakomics-yt-choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+#lakomics-yt-choice .lakomics-yt-choice-button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: opacity 0.2s ease, background-color 0.15s ease;
+}
+
+#lakomics-yt-choice .lakomics-yt-choice-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+#lakomics-yt-choice .lakomics-yt-choice-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* The source of the subtitles now on screen: heavier text, no coloured mark. */
+#lakomics-yt-choice .lakomics-yt-choice-button[aria-pressed="true"] {
+  font-weight: 700;
+}
+
+/* The PC button waits for the server's answer: dimmed in place, then fades to full strength. */
+#lakomics-yt-choice .lakomics-yt-choice-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Touch: a full-height target, and lower than the toast so the top icon row stays reachable. */
+#lakomics-yt-choice.lakomics-yt-choice-mobile { top: 56px; }
+#lakomics-yt-choice.lakomics-yt-choice-mobile .lakomics-yt-choice-button {
+  min-height: 40px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   #lakomics-yt-button .lakomics-yt-icon,
   #lakomics-yt-overlay,
-  #lakomics-yt-toast { transition: none; }
+  #lakomics-yt-toast,
+  #lakomics-yt-choice,
+  #lakomics-yt-choice .lakomics-yt-choice-button { transition: none; }
   #lakomics-yt-button.lakomics-yt-busy .lakomics-yt-icon { animation: none; }
   #lakomics-yt-overlay .lakomics-yt-in { animation: none; }
 }

@@ -10,6 +10,21 @@
   const NO_CAPTIONS = "이 영상에는 자막이 없어요";
   const PREFETCH_DELAY_MS = 2000;
   const PARTIAL_FAILURE_TEXT = "일부 구간은 정리하지 못했어요 — 다시 누르면 재시도해요";
+  const RETRANSLATE_PROMPT = "이 영상 다시 번역 — 한 번 더 누르면 시작";
+  const RETRANSLATE_PARTIAL_TEXT = "일부 구간을 다시 번역하지 못해서 이전 자막을 그대로 두었어요";
+  const RETRANSLATE_MS = 4000; // how long the prompt waits for the second press
+  const RETRANSLATE_GUARD_MS = 500; // a click right behind the long press that raised the prompt belongs to that gesture
+  const RETRANSLATE_CHOICE_MS = 6000; // the source choice is a decision, so it waits longer than the single prompt
+  const RETRANSLATE_HOLD_MIN_MS = 1500; // least time left once the pointer or focus leaves the choice
+  const CHOICE_TITLE = "이 영상 다시 번역";
+  const CHOICE_KOTOBA = "PC 받아쓰기(Kotoba)";
+  const CHOICE_YOUTUBE = "YouTube 자막";
+  const CHOICE_CURRENT = " · 지금"; // marks the source of the subtitles on screen
+  const ASR_POLL_MS = 1500; // how often the PC's recognition progress is asked for
+  const ASR_POLL_LIMIT = 8000; // polls before giving up (about 3 hours)
+  const ASR_FAIL_LIMIT = 3; // failed status calls in a row that end the PC run
+  const ASR_FALLBACK_TEXT = "PC 받아쓰기에 실패해서 YouTube 자막으로 번역해요";
+  const ASR_FALLBACK_NO_CAPTIONS = "PC 받아쓰기에 실패했고 YouTube 자막도 없어요";
 
   const state = {
     token: 0, // bumped on every video change; stale async work checks it
@@ -27,21 +42,30 @@
     progress: null,
     busyVisible: false,
     busyTimer: 0,
-    stage: "track", // track | claude
+    stage: "track", // track | asr (the PC writes the captions down) | claude
+    asrPercent: 0, // progress of the PC's recognition while stage is "asr"
+    trackKey: null, // track the shown subtitles were made from (kotoba:ja, ja:asr, ...), once known
   };
 
   let button = null;
   let overlay = null;
   let toast = null;
   let toastTimer = 0;
+  let choiceEl = null; // the "which source" prompt (see openRetranslatePrompt)
+  let choiceKeys = false; // the Escape listener of the open choice is installed
+  let lastTrackInfo = null; // { videoId, spoken, tracks } from the latest player track list
   let listenedPlayer = null;
   let resizeObserver = null;
   let lastCueIndex = -2;
   let rafId = 0;
+  let retranslate = null; // the open "retranslate this video" prompt, see openRetranslatePrompt
   let enabled = true;
+  let localAsrEnabled = true; // use the PC's Japanese recognition when it is running (default on)
+  let stageNoticeUntil = 0; // a notice toast owns the stage line until then
   let settingsReady = false;
   let standaloneLogged = false;
   const enabledKey = "lakomics:youtube:settings:enabled";
+  const localAsrKey = "lakomics:youtube:settings:localAsr";
 
   function standalonePresent() {
     if (!document.getElementById("ytsf-button")) return false;
@@ -57,19 +81,20 @@
     clearTimeout(state.busyTimer);
     clearTimeout(state.prefetchTimer);
     clearTimeout(toastTimer);
+    clearRetranslate();
     state.status = "idle";
     state.cues = null;
     state.showClean = false;
     if (rafId) cancelAnimationFrame(rafId);
     rafId = 0;
     getPlayer()?.classList.remove("lakomics-yt-active");
-    button?.remove(); overlay?.remove(); toast?.remove();
-    button = overlay = toast = null;
+    button?.remove(); overlay?.remove(); toast?.remove(); choiceEl?.remove();
+    button = overlay = toast = choiceEl = null;
   }
 
-  const appearance = { fontScale: 1, position: "default", showOriginal: false, rolling: false };
+  const appearance = { fontScale: 1, position: "default", showOriginal: false, rolling: false, speakerColors: true };
   const appearanceKeys = ["lakomics:youtube:settings:fontScale", "lakomics:youtube:settings:position",
-    "lakomics:youtube:settings:showOriginal", "lakomics:youtube:settings:rolling"];
+    "lakomics:youtube:settings:showOriginal", "lakomics:youtube:settings:rolling", "lakomics:youtube:settings:speakerColors"];
   const changedAppearanceKeys = new Set();
 
   function setAppearance(key, value) {
@@ -81,6 +106,8 @@
       appearance.showOriginal = value === true;
     } else if (key === "lakomics:youtube:settings:rolling") {
       appearance.rolling = value === true; // off unless explicitly turned on (user, 2026-10-12)
+    } else if (key === "lakomics:youtube:settings:speakerColors") {
+      appearance.speakerColors = value !== false; // on unless explicitly turned off
     }
   }
 
@@ -102,6 +129,10 @@
       if (!available()) removeUi();
       else if (settingsReady) { resetForVideo(currentVideoId()); ensureUi(); }
     }
+    if (Object.hasOwn(changes, localAsrKey)) {
+      changedAppearanceKeys.add(localAsrKey);
+      localAsrEnabled = changes[localAsrKey].newValue !== false;
+    }
     if (Object.hasOwn(changes, "lakomics:youtube:cache:clearGeneration")) {
       if (available() && settingsReady) resetForVideo(currentVideoId());
     }
@@ -115,8 +146,9 @@
     if (changed) applyAppearance();
   });
 
-  const initialSettings = chrome.storage.local.get([...appearanceKeys, enabledKey]).then((stored) => {
+  const initialSettings = chrome.storage.local.get([...appearanceKeys, enabledKey, localAsrKey]).then((stored) => {
     if (!changedAppearanceKeys.has(enabledKey)) enabled = stored[enabledKey] !== false;
+    if (!changedAppearanceKeys.has(localAsrKey)) localAsrEnabled = stored[localAsrKey] !== false;
     for (const key of appearanceKeys) {
       // A live change received during the initial read takes precedence.
       if (!changedAppearanceKeys.has(key)) setAppearance(key, stored[key]);
@@ -326,8 +358,9 @@
   async function getTrackChoice(videoId) {
     console.info("[Lakomics YouTube] track list start", videoId);
     const reply = await askPage("getTracks", {});
-    if (!reply || reply.videoId !== videoId) return { spoken: null, track: null };
+    if (!reply || reply.videoId !== videoId) return { spoken: null, track: null, tracks: null };
     const tracks = reply.tracks.filter((t) => new URL(t.baseUrl).searchParams.get("v") === videoId);
+    lastTrackInfo = { videoId, spoken: tracks.find((t) => t.kind === "asr")?.languageCode || null, tracks };
     const asr = tracks.find((t) => t.kind === "asr");
     const uploader = (t) => !t.kind || t.kind === "std" || t.kind === "standard";
     const baseLanguage = (lang) => lang.toLowerCase().split("-")[0];
@@ -335,7 +368,7 @@
     const track = asr
       ? tracks.find((t) => uploader(t) && baseLanguage(t.languageCode) === baseLanguage(spoken)) || asr
       : tracks.find((t) => uploader(t) && t.isDefault) || tracks.find(uploader) || tracks[0];
-    return { spoken, track: track || null };
+    return { spoken, track: track || null, tracks };
   }
 
   function trackResult(choice, trackKey, text, source) {
@@ -445,8 +478,8 @@
     void metaPromise.then((meta) => recheckCached(token, videoId, meta));
   }
 
-  // Resolves to { trackKey, text } with json3 text for the current video.
-  async function acquireTrack(videoId) {
+  // Resolves to { trackKey, text } with json3 text for the current video, from YouTube's caption tracks.
+  async function acquireCaptionTrack(videoId) {
     const silent = state.prefetch?.videoId === videoId
       ? await state.prefetch.promise : await acquireSilently(videoId);
     if (silent) return silent;
@@ -462,6 +495,122 @@
     if (fallback) return fallback;
     if (!found) throw new UserError(NO_CAPTIONS);
     throw new UserError("자막을 불러오지 못했어요");
+  }
+
+  // ---------------------------------------------------------------- the PC's Japanese recognition (Kotoba)
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // One call to the PC server through the worker. Null on any failure; only a stale extension is an error.
+  async function askLocalAsr(message) {
+    try {
+      return await sendToBackground({ type: "youtube:asr", ...message });
+    } catch (err) {
+      if (err instanceof UserError) throw err;
+      return null;
+    }
+  }
+
+  function setAsrPercent(progress) {
+    const percent = Math.min(99, Math.max(0, Math.round((Number(progress) || 0) * 100)));
+    if (percent === state.asrPercent) return;
+    state.asrPercent = percent;
+    renderButton();
+    showStage();
+  }
+
+  // Starts (or joins) the PC's job for this video, follows its progress and returns the finished json3 text.
+  // A failed job, an unreachable server or a missing result throws a plain Error; a changed video throws UserError.
+  async function runLocalAsr(videoId, token) {
+    const stale = () => token !== state.token || currentVideoId() !== videoId || state.videoId !== videoId;
+    const changed = () => new UserError("영상이 변경됐어요");
+    state.stage = "asr";
+    state.asrPercent = 0;
+    renderButton();
+    showStage();
+    let job = await askLocalAsr({ op: "start", videoId });
+    if (!job?.ok) throw new Error("PC recognition did not start");
+    let failures = 0;
+    for (let polls = 0; job.state !== "done"; polls++) {
+      if (stale()) throw changed();
+      if (job.state === "error") throw new Error(job.error || "PC recognition failed");
+      if (polls >= ASR_POLL_LIMIT) throw new Error("PC recognition took too long");
+      setAsrPercent(job.progress);
+      await sleep(ASR_POLL_MS);
+      if (stale()) throw changed();
+      const next = await askLocalAsr({ op: "status", videoId });
+      if (next?.ok) { job = next; failures = 0; }
+      else if (++failures >= ASR_FAIL_LIMIT) throw new Error("PC recognition server unreachable");
+    }
+    const result = await askLocalAsr({ op: "json3", videoId });
+    if (stale()) throw changed();
+    if (!result?.ok || typeof result.text !== "string" || !isJson3(result.text)) throw new Error("PC recognition result missing");
+    return result.text;
+  }
+
+  // Does this video's own caption situation call for the PC's recognition (Japanese, no human Japanese track)?
+  async function wantsKotoba(videoId) {
+    const choice = globalThis.LakomicsYouTube?.asrChoice;
+    if (!localAsrEnabled || !choice) return false;
+    const found = await getTrackChoice(videoId);
+    // Without any caption track only the page metadata can tell the language.
+    const meta = found.tracks && !found.tracks.length
+      ? await (state.prefetch?.videoId === videoId ? state.prefetch.metaPromise : fetchMeta(videoId)) : null;
+    return choice.wantsLocalAsr({ tracks: found.tracks, spoken: found.spoken, meta });
+  }
+
+  async function kotobaRunning() {
+    const health = await askLocalAsr({ op: "health" });
+    return Boolean(health?.ok && health.available === true);
+  }
+
+  // The user's per-video choice ("kotoba" | "youtube" | null), see source-pref.js.
+  async function savedSource(videoId) {
+    return (await globalThis.LakomicsYouTube?.sourcePref?.get(videoId)) || null;
+  }
+
+  // null: the PC's recognition is not wanted or not running (nothing changes for the user).
+  // { track }: its result. { failed: true }: it started and then failed.
+  // `source` is the source picked for this run ("kotoba" | "youtube"); without it the saved choice for the video
+  // applies, and without that the automatic one.
+  async function acquireLocalAsr(videoId, token, source = null) {
+    const choice = globalThis.LakomicsYouTube?.asrChoice;
+    if (!localAsrEnabled || !choice) return null;
+    if ((source || await savedSource(videoId)) === "youtube") return null;
+    if (!(await wantsKotoba(videoId))) return null;
+    if (!(await kotobaRunning())) return null;
+    console.info("[Lakomics YouTube] PC recognition", videoId);
+    try {
+      return { track: { trackKey: choice.TRACK_KEY, text: await runLocalAsr(videoId, token) } };
+    } catch (err) {
+      if (err instanceof UserError) throw err;
+      console.warn("[Lakomics YouTube] PC recognition failed", err);
+      return { failed: true };
+    }
+  }
+
+  // The PC's recognition when it applies, otherwise (or when it fails) YouTube's caption track.
+  function acquireTrack(videoId, source = null) {
+    // Switched off (or not loaded): exactly the caption-track path, with no extra step before it.
+    if (!localAsrEnabled || !globalThis.LakomicsYouTube?.asrChoice) return acquireCaptionTrack(videoId);
+    return acquireTrackWithLocalAsr(videoId, source);
+  }
+
+  async function acquireTrackWithLocalAsr(videoId, source) {
+    const token = state.token;
+    const local = await acquireLocalAsr(videoId, token, source);
+    if (local?.track) return local.track;
+    if (!local?.failed) return acquireCaptionTrack(videoId);
+    state.stage = "track";
+    stageNoticeUntil = Date.now() + TOAST_MS;
+    showToast(ASR_FALLBACK_TEXT, TOAST_MS);
+    setTimeout(showStage, TOAST_MS + 50);
+    try {
+      return await acquireCaptionTrack(videoId);
+    } catch (err) {
+      if (err instanceof UserError && err.message === NO_CAPTIONS) throw new UserError(ASR_FALLBACK_NO_CAPTIONS);
+      throw err;
+    }
   }
 
   // ---------------------------------------------------------------- background messaging
@@ -642,10 +791,21 @@
     return Boolean(cue) && hasText(cue.text);
   }
 
+  // Speaker colours (text colour only; speaker 0 keeps the default white): see content.css.
+  const SPEAKER_CLASSES = ["", "lakomics-yt-spk1", "lakomics-yt-spk2"];
+
+  // True when this cue is shown in its speaker's colour: the setting is on and the cue knows its speaker
+  // (audio-based, from the PC's recognition). Such a cue never shows the "- " speaker marks.
+  function speakerColored(cue) {
+    return appearance.speakerColors && Number.isInteger(cue.speaker);
+  }
+
   // One cue's text (and, for the current line, its original) inside `parent`.
   function fillCue(parent, cue, withOriginal) {
     const translation = document.createElement("span");
-    translation.textContent = cue.text;
+    const colored = speakerColored(cue);
+    translation.textContent = colored ? cue.text.replace(/(^|\n)- /g, "$1") : cue.text;
+    if (colored && SPEAKER_CLASSES[cue.speaker]) translation.className = SPEAKER_CLASSES[cue.speaker];
     if (withOriginal && hasText(cue.orig)) {
       const originalLine = document.createElement("div");
       originalLine.className = "lakomics-yt-orig-line";
@@ -710,7 +870,7 @@
     const take = (cue) => {
       const line = [prior.bottom, prior.top].find((item) => item && item.cue.startMs === cue.startMs);
       if (!line) return { cue, el: document.createElement("div"), role: "" };
-      line.dirty = line.cue.text !== cue.text || line.cue.orig !== cue.orig;
+      line.dirty = line.cue.text !== cue.text || line.cue.orig !== cue.orig || line.cue.speaker !== cue.speaker;
       line.cue = cue;
       return line;
     };
@@ -842,6 +1002,7 @@
     icon.textContent = "AI";
     button.appendChild(icon);
     button.addEventListener("click", onButtonClick);
+    button.addEventListener("contextmenu", onButtonContextMenu);
 
     if (mobile) {
       for (const name of TOUCH_EVENTS) button.addEventListener(name, (event) => event.stopPropagation());
@@ -867,7 +1028,9 @@
 
     let tip = "AI 자막 만들기";
     if (state.status === "processing") {
-      if (busy) {
+      if (busy && state.stage === "asr") {
+        tip = `PC 받아쓰는 중… ${state.asrPercent}%`;
+      } else if (busy) {
         const p = state.progress;
         const verb = p && p.mode && p.mode.startsWith("translate") ? "번역" : "정리";
         tip = p ? `AI ${verb} 중…${p.total ? ` ${p.done}/${p.total}` : ""}` : "AI 자막 만드는 중…";
@@ -875,7 +1038,8 @@
     } else if (state.status === "error") {
       tip = state.error;
     } else if (state.cues) {
-      tip = state.showClean ? "원래 자막으로 보기 (Shift+A)" : "AI 자막 보기 (Shift+A)";
+      tip = (state.showClean ? "원래 자막으로 보기 (Shift+A)" : "AI 자막 보기 (Shift+A)") +
+        (button.classList.contains("lakomics-yt-mobile") ? " · 길게 누르기: 다시 번역" : " · 우클릭: 다시 번역");
     }
     button.title = tip;
     button.setAttribute("aria-label", tip);
@@ -907,11 +1071,13 @@
   function stageText() {
     const p = state.progress;
     if (state.stage === "track") return "자막을 가져오는 중…";
+    if (state.stage === "asr") return `PC에서 받아쓰는 중… ${state.asrPercent}%`;
     const verb = p && p.mode && p.mode.startsWith("translate") ? "번역" : "정리";
     return p && p.total > 1 ? `${verb} 중… (${p.done}/${p.total})` : `${verb} 중…`;
   }
 
   function showStage() {
+    if (Date.now() < stageNoticeUntil) return;
     if (state.status === "processing" && state.busyVisible) showToast(stageText(), 0);
   }
 
@@ -925,6 +1091,7 @@
     if (urlVideoId !== state.videoId) resetForVideo(urlVideoId);
     console.info("[Lakomics YouTube] click", state.videoId, state.status);
     if (!state.videoId) return;
+    if (retranslate) return confirmRetranslate(event); // the prompt is up: this press answers it
 
     if (state.status === "processing") {
       // Once the first chunk is in, the user may switch between clean and original while the rest runs.
@@ -944,6 +1111,188 @@
       return;
     }
     await startProcessing(event);
+  }
+
+  // Right click (desktop) or long press (mobile) on the button only asks; nothing starts without a further
+  // answer, otherwise the prompt fades away and costs nothing. The player's and the browser's own menus never open
+  // over the button. The prompt is one of two kinds:
+  //  - single: "press again to start" (a second press on the button starts the re-translation);
+  //  - choice: when the PC's recognition (Kotoba) is a real option for this video, two buttons pick the caption
+  //    source of the new run. The PC button waits (disabled) until the server answers, and the prompt turns into
+  //    the single kind if it turns out not to be an option.
+  function onButtonContextMenu(event) {
+    if (event.isTrusted !== true || !available()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const urlVideoId = currentVideoId();
+    if (urlVideoId !== state.videoId) resetForVideo(urlVideoId);
+    if (retranslate) return confirmRetranslate(event);
+    if (!state.videoId || !state.cues || state.status === "processing") return;
+    openRetranslatePrompt(state.videoId);
+  }
+
+  // true: the video's tracks already say the PC's recognition applies; false: it cannot be an option; null: not
+  // known yet (no track list has been read for this video).
+  function kotobaHint(videoId) {
+    const choice = globalThis.LakomicsYouTube?.asrChoice;
+    if (!localAsrEnabled || !choice) return false;
+    const info = lastTrackInfo;
+    if (!info || info.videoId !== videoId || !Array.isArray(info.tracks) || !info.tracks.length) return null;
+    return choice.wantsLocalAsr({ tracks: info.tracks, spoken: info.spoken });
+  }
+
+  function openRetranslatePrompt(videoId) {
+    const prompt = { armedAt: Date.now(), shownAt: 0, mode: "single", kotoba: null, timer: 0, deadline: 0, remaining: 0,
+      hover: false, focus: false, paused: false, token: state.token, kotobaButton: null };
+    retranslate = prompt;
+    const hint = kotobaHint(videoId);
+    if (hint === true) showChoice(prompt);
+    else showSinglePrompt(prompt);
+    if (hint !== false) void resolveKotoba(prompt, videoId);
+  }
+
+  function startPromptTimer(prompt, ms) {
+    clearTimeout(prompt.timer);
+    prompt.remaining = ms;
+    prompt.deadline = Date.now() + ms;
+    prompt.timer = setTimeout(clearRetranslate, ms);
+  }
+
+  function showSinglePrompt(prompt) {
+    prompt.mode = "single";
+    prompt.paused = false;
+    clearTimeout(prompt.timer);
+    prompt.timer = setTimeout(clearRetranslate, RETRANSLATE_MS);
+    showToast(RETRANSLATE_PROMPT, RETRANSLATE_MS);
+  }
+
+  // Is the PC's recognition a real option for this video right now? Never throws.
+  async function kotobaAvailable(videoId) {
+    try { return (await wantsKotoba(videoId)) && (await kotobaRunning()); } catch { return false; }
+  }
+
+  async function resolveKotoba(prompt, videoId) {
+    const available = await kotobaAvailable(videoId);
+    if (retranslate !== prompt || prompt.token !== state.token) return;
+    prompt.kotoba = available;
+    if (available) {
+      if (prompt.mode === "choice") { if (prompt.kotobaButton) prompt.kotobaButton.disabled = false; }
+      else { clearTimeout(prompt.timer); hideToast(); showChoice(prompt); }
+    } else if (prompt.mode === "choice") {
+      hideChoice();
+      showSinglePrompt(prompt);
+    }
+  }
+
+  // "kotoba" | "youtube" | null: the source of the subtitles on screen.
+  function shownSource() {
+    if (!state.trackKey) return null;
+    return state.trackKey === globalThis.LakomicsYouTube?.asrChoice?.TRACK_KEY ? "kotoba" : "youtube";
+  }
+
+  function showChoice(prompt) {
+    const player = getPlayer();
+    if (!player) return;
+    if (!choiceEl || !choiceEl.isConnected) {
+      choiceEl = document.createElement("div");
+      choiceEl.id = "lakomics-yt-choice";
+      choiceEl.setAttribute("role", "group");
+      choiceEl.setAttribute("aria-label", CHOICE_TITLE);
+      // Nothing inside the prompt may reach the player's own handlers (play/pause, controls, shortcuts, menu).
+      for (const name of [...TOUCH_EVENTS, "click", "dblclick", "contextmenu", "keydown", "keyup"]) {
+        choiceEl.addEventListener(name, (event) => event.stopPropagation());
+      }
+      choiceEl.addEventListener("pointerenter", () => holdPrompt("hover", true));
+      choiceEl.addEventListener("pointerleave", () => holdPrompt("hover", false));
+      choiceEl.addEventListener("focusin", () => holdPrompt("focus", true));
+      choiceEl.addEventListener("focusout", () => holdPrompt("focus", false));
+      player.appendChild(choiceEl);
+    }
+    choiceEl.classList.toggle("lakomics-yt-choice-mobile", Boolean(button?.classList.contains("lakomics-yt-mobile")));
+    const title = document.createElement("div");
+    title.textContent = CHOICE_TITLE;
+    const actions = document.createElement("div");
+    actions.className = "lakomics-yt-choice-actions";
+    const current = shownSource();
+    for (const [source, label] of [["kotoba", CHOICE_KOTOBA], ["youtube", CHOICE_YOUTUBE]]) {
+      const choice = document.createElement("button");
+      choice.type = "button";
+      choice.className = "lakomics-yt-choice-button";
+      choice.textContent = label + (current === source ? CHOICE_CURRENT : "");
+      choice.setAttribute("aria-pressed", String(current === source));
+      choice.addEventListener("click", (event) => { void chooseSource(source, event); });
+      if (source === "kotoba") {
+        choice.disabled = prompt.kotoba !== true; // the server has not answered yet
+        prompt.kotobaButton = choice;
+      }
+      actions.appendChild(choice);
+    }
+    choiceEl.replaceChildren(title, actions);
+    prompt.mode = "choice";
+    prompt.shownAt = Date.now();
+    prompt.hover = prompt.focus = prompt.paused = false;
+    // Force a style flush so the fade-in transition runs on first show.
+    void choiceEl.offsetWidth;
+    choiceEl.classList.add("lakomics-yt-show");
+    if (!choiceKeys) { window.addEventListener("keydown", onChoiceKeydown, true); choiceKeys = true; }
+    startPromptTimer(prompt, RETRANSLATE_CHOICE_MS);
+  }
+
+  function hideChoice() {
+    if (choiceEl) choiceEl.classList.remove("lakomics-yt-show");
+    if (choiceKeys) { window.removeEventListener("keydown", onChoiceKeydown, true); choiceKeys = false; }
+  }
+
+  // While the pointer is over the choice or focus is inside it, the timeout waits.
+  function holdPrompt(kind, on) {
+    const prompt = retranslate;
+    if (!prompt || prompt.mode !== "choice") return;
+    prompt[kind] = on;
+    const hold = prompt.hover || prompt.focus;
+    if (hold && !prompt.paused) {
+      clearTimeout(prompt.timer);
+      prompt.remaining = Math.max(RETRANSLATE_HOLD_MIN_MS, prompt.deadline - Date.now());
+      prompt.paused = true;
+    } else if (!hold && prompt.paused) {
+      prompt.paused = false;
+      startPromptTimer(prompt, prompt.remaining);
+    }
+  }
+
+  function onChoiceKeydown(event) {
+    if (event.key !== "Escape" || retranslate?.mode !== "choice") return;
+    if (choiceEl && event.target instanceof Node && choiceEl.contains(event.target)) { event.preventDefault(); event.stopPropagation(); }
+    clearRetranslate();
+  }
+
+  function clearRetranslate() {
+    hideChoice();
+    if (!retranslate) return;
+    clearTimeout(retranslate.timer);
+    retranslate = null;
+  }
+
+  // A button of the choice: starts the re-translation with that caption source and remembers it for the video.
+  async function chooseSource(source, event) {
+    const prompt = retranslate;
+    if (event.isTrusted !== true || !prompt || prompt.mode !== "choice" || !available()) return;
+    if (Date.now() - prompt.shownAt < RETRANSLATE_GUARD_MS) return;
+    if (source === "kotoba" && prompt.kotoba !== true) return;
+    const videoId = state.videoId;
+    const wanted = Boolean(videoId && videoId === currentVideoId() && state.cues && state.status !== "processing");
+    clearRetranslate();
+    if (!wanted) return;
+    void globalThis.LakomicsYouTube?.sourcePref?.set(videoId, source);
+    await startProcessing(event, true, source);
+  }
+
+  async function confirmRetranslate(event) {
+    if (Date.now() - retranslate.armedAt < RETRANSLATE_GUARD_MS) return;
+    if (retranslate.mode === "choice") { clearRetranslate(); return; } // the choice is answered with its own buttons
+    const wanted = Boolean(state.videoId && state.cues && state.status !== "processing");
+    clearRetranslate();
+    hideToast();
+    if (wanted) await startProcessing(event, true);
   }
 
   function toggleClean() {
@@ -970,10 +1319,17 @@
     return video && Number.isFinite(video.currentTime) ? Math.round(video.currentTime * 1000) : 0;
   }
 
-  async function startProcessing(event) {
+  // `fresh` makes the worker translate again instead of reusing any stored result. The old subtitles stay on
+  // screen (finished chunks replace theirs one range at a time) and come back untouched if the run fails.
+  // `source` ("kotoba" | "youtube") is the caption source picked in the retranslate choice for this run.
+  async function startProcessing(event, fresh = false, source = null) {
     if (event?.isTrusted !== true || !available()) return;
     const token = state.token;
     const videoId = state.videoId;
+    clearRetranslate();
+    const before = fresh ? { cues: state.cues, ranges: state.ranges, complete: state.complete, showClean: state.showClean,
+      fromCache: state.fromCache, partialFailure: state.partialFailure, status: state.status, error: state.error,
+      trackKey: state.trackKey } : null;
 
     state.status = "processing";
     state.fromCache = false;
@@ -981,6 +1337,8 @@
     state.progress = null;
     state.busyVisible = false;
     state.stage = "track";
+    state.asrPercent = 0;
+    stageNoticeUntil = 0;
     applyMode();
     renderButton();
     // The busy look appears only after a delay so quick results never blink it.
@@ -995,8 +1353,9 @@
 
     try {
       const metaPromise = state.prefetch?.videoId === videoId ? state.prefetch.metaPromise : fetchMeta(videoId);
-      const [track, meta] = await Promise.all([acquireTrack(videoId), metaPromise]);
+      const [track, meta] = await Promise.all([acquireTrack(videoId, source), metaPromise]);
       if (token !== state.token || currentVideoId() !== videoId) return;
+      state.trackKey = track.trackKey;
       console.info("[Lakomics YouTube] track", track.trackKey, track.text.length);
       state.stage = "claude";
       showStage();
@@ -1007,9 +1366,12 @@
         json3: track.text,
         meta,
         positionMs: currentPositionMs(),
+        ...(fresh ? { fresh: true } : {}),
       });
       if (token !== state.token || currentVideoId() !== videoId) return;
       if (!reply || !reply.ok) throw new UserError((reply && reply.error) || "자막 정리에 실패했어요");
+      // Nothing was stored for a result with fallback chunks, so the old subtitles are the better ones.
+      if (fresh && reply.partialFailure) throw new UserError(RETRANSLATE_PARTIAL_TEXT);
       // Partials may already have turned the view on (and the user may have turned it off again).
       if (!state.cues) state.showClean = true;
       state.cues = reply.cues;
@@ -1019,16 +1381,23 @@
       lastCueIndex = -2;
       state.status = "ready";
       if (state.partialFailure) showToast(PARTIAL_FAILURE_TEXT, 6000);
+      else if (fresh) showToast("다시 번역했어요", 2000);
       else if (state.busyVisible) showToast("AI 자막 완료", 2000);
       else hideToast();
     } catch (err) {
       if (token !== state.token || currentVideoId() !== videoId) return;
       console.warn("[Lakomics YouTube]", err);
-      state.status = "error";
-      // Chunks that did finish stay on screen; pressing again retries the rest.
-      if (state.cues && !state.complete) state.partialFailure = true;
-      state.error = err instanceof UserError ? err.message : "자막 정리에 실패했어요. 잠시 후 다시 시도해 주세요.";
-      showToast(state.error, 8000);
+      const text = err instanceof UserError ? err.message : "자막 정리에 실패했어요. 잠시 후 다시 시도해 주세요.";
+      if (before) {
+        Object.assign(state, before);
+        lastCueIndex = -2;
+      } else {
+        state.status = "error";
+        // Chunks that did finish stay on screen; pressing again retries the rest.
+        if (state.cues && !state.complete) state.partialFailure = true;
+        state.error = text;
+      }
+      showToast(text, 8000);
     } finally {
       if (token === state.token) {
         clearTimeout(state.busyTimer);
@@ -1045,6 +1414,7 @@
       const reply = await sendToBackground({ type: "youtube:getCached", videoId });
       if (token !== state.token || currentVideoId() !== videoId || state.status !== "idle" || !reply || !reply.ok || !reply.cached) return;
       state.cues = reply.cached.cues;
+      state.trackKey = reply.cached.trackKey || null;
       state.complete = true;
       state.showClean = true;
       state.fromCache = true;
@@ -1067,12 +1437,14 @@
       if (reply.cached) {
         if (state.status !== "ready" || !state.fromCache) return;
         state.cues = reply.cached.cues;
+        state.trackKey = reply.cached.trackKey || null;
         state.complete = true;
         state.showClean = true;
         state.fromCache = true;
         state.status = "ready";
       } else if (state.status === "ready" && state.fromCache) {
         state.cues = null;
+        state.trackKey = null;
         state.ranges = [];
         state.complete = false;
         state.showClean = false;
@@ -1090,10 +1462,12 @@
     state.token += 1;
     clearTimeout(state.busyTimer);
     clearTimeout(toastTimer);
+    clearRetranslate();
     if (toast) toast.classList.remove("lakomics-yt-show");
     state.videoId = videoId;
     state.status = "idle";
     state.cues = null;
+    state.trackKey = null;
     state.ranges = [];
     state.complete = false;
     state.partialFailure = false;

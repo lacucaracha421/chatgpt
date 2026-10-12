@@ -2,7 +2,7 @@ import { loadWorker } from "./helpers/youtube-classic.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { callChunk, callGlossaryFor } from "./helpers/youtube-classic.mjs";
-import { buildGlossaryPrompt } from "./helpers/youtube-classic.mjs";
+import { buildGlossaryPrompt, sampleTranscript, EXCERPT_SEPARATOR } from "./helpers/youtube-classic.mjs";
 
 function fakeClock() {
   let time = 0, id = 0;
@@ -63,15 +63,51 @@ for (const provider of ["anthropic"]) {
   });
 }
 
-test("glossary transcript is limited to 8000 evenly sampled words with existing metadata caps", () => {
+test("glossary transcript is limited to about 8000 words in evenly spread excerpts with existing metadata caps", () => {
   const words = Array.from({ length: 24000 }, (_, i) => `word${i}`);
   const prompt = buildGlossaryPrompt({ transcript: words.join(" "), meta: { title: "x".repeat(2000) } });
-  const sampled = prompt.userText.split(" ");
-  assert.equal(sampled.length, 8000);
-  assert.equal(sampled[0], "word0");
-  assert.equal(sampled.at(-1), "word23999");
-  assert.equal(sampled[4000], words[Math.floor(4000 * 23999 / 7999)]);
+  const excerpts = prompt.userText.split(EXCERPT_SEPARATOR);
+  assert.ok(excerpts.length > 1);
+  assert.equal(excerpts.flatMap((excerpt) => excerpt.split(" ")).length, 8000);
+  assert.equal(excerpts[0].split(" ")[0], "word0");
+  assert.equal(excerpts.at(-1).split(" ").at(-1), "word23999");
+  assert.match(prompt.system, /several excerpts/);
   assert.ok(!prompt.system.includes("x".repeat(501)));
+});
+
+test("sampleTranscript returns a short transcript unchanged", () => {
+  const short = Array.from({ length: 8000 }, (_, i) => `w${i}`).join(" ");
+  assert.equal(sampleTranscript(short), short);
+  assert.equal(sampleTranscript("  two  words \n"), "  two  words \n");
+  assert.doesNotMatch(buildGlossaryPrompt({ transcript: short }).system, /several excerpts/);
+});
+
+test("sampleTranscript takes contiguous excerpts spread over the whole video, deterministically", () => {
+  for (const length of [8001, 10000, 24000, 100000]) {
+    const words = Array.from({ length }, (_, i) => `w${i}`);
+    const transcript = words.join(" ");
+    const sampled = sampleTranscript(transcript);
+    assert.equal(sampled, sampleTranscript(transcript));
+    const excerpts = sampled.split(EXCERPT_SEPARATOR).map((excerpt) => excerpt.split(" "));
+    const total = excerpts.reduce((sum, excerpt) => sum + excerpt.length, 0);
+    assert.ok(total <= 8000 && total >= 7900, `total ${total}`);
+    assert.ok(excerpts.length >= 10);
+    assert.equal(excerpts[0][0], "w0");
+    assert.equal(excerpts.at(-1).at(-1), `w${length - 1}`);
+    let previousEnd = -1;
+    for (const excerpt of excerpts) {
+      assert.ok(excerpt.length >= 300 && excerpt.length <= 500);
+      const start = Number(excerpt[0].slice(1));
+      // a contiguous run of the original, in order and without overlap
+      excerpt.forEach((word, i) => assert.equal(word, words[start + i]));
+      assert.ok(start > previousEnd);
+      previousEnd = start + excerpt.length - 1;
+    }
+    // evenly spread: the starts are one stride apart, give or take rounding
+    const starts = excerpts.map((excerpt) => Number(excerpt[0].slice(1)));
+    const gaps = starts.slice(1).map((start, i) => start - starts[i]);
+    assert.ok(Math.max(...gaps) - Math.min(...gaps) <= 1);
+  }
 });
 
 for (const provider of ["anthropic"]) {

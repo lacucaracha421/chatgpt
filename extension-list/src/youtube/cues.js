@@ -51,6 +51,22 @@ function speechEnd(unit, human) {
   return known === null ? estimate : Math.min(known, estimate);
 }
 
+// The speaker of a stretch of units: whoever speaks longest in it (a word without an end counts as one
+// millisecond), or undefined when the units carry no speaker (YouTube tracks, older results).
+function majoritySpeaker(units, human) {
+  const time = new Map();
+  for (const unit of units) {
+    if (!Number.isInteger(unit.speaker)) continue;
+    time.set(unit.speaker, (time.get(unit.speaker) || 0) + Math.max(1, speechEnd(unit, human) - unit.startMs));
+  }
+  let best;
+  for (const [speaker, ms] of time) if (best === undefined || ms > time.get(best)) best = speaker;
+  return best;
+}
+
+// A speaker label the model echoed ("[S2] ...") never belongs in a subtitle.
+const ECHOED_LABEL = /\[S\d{1,2}\]\s*/gu;
+
 // lines: [{ from, to, text }] with inclusive local indices, already validated as contiguous.
 // human: the units are whole caption events of a human-made track (see speechEnd).
 // A cue spans exactly the speech of its words; how long it stays on screen beyond that (reading time,
@@ -65,7 +81,8 @@ function buildCues(units, lines, mode = "clean", human = false) {
     if (next) end = Math.min(end, Math.max(startMs, units[next.from].startMs));
     // Source word starts (and sizes) guide where splitDisplayCues cuts this line; it strips them again.
     const covered = units.slice(line.from, line.to + 1);
-    cues.push({ startMs, endMs: end, text: line.text,
+    const speaker = majoritySpeaker(covered, human);
+    cues.push({ startMs, endMs: end, text: line.text, ...(speaker === undefined ? {} : { speaker }),
       wordStarts: covered.map((u) => u.startMs), wordChars: covered.map((u) => Array.from(u.text).length),
       ...(mode === "translate-ko" ? { orig: wordsText(units, line.from, line.to) } : {}) });
   }
@@ -85,7 +102,9 @@ function fallbackSegment(units, { pauseMs = 700, maxChars = 40, mode = "clean", 
     if (i > from) {
       const pause = units[i].startMs - units[i - 1].startMs > pauseMs;
       const tooLong = length + 1 + word.length > maxChars;
-      if (pause || tooLong) {
+      const speakerChange = Number.isInteger(units[i].speaker) && Number.isInteger(units[i - 1].speaker) &&
+        units[i].speaker !== units[i - 1].speaker;
+      if (pause || tooLong || speakerChange) {
         lines.push({ from, to: i - 1, text: wordsText(units, from, i - 1) });
         from = i;
       }
@@ -163,6 +182,7 @@ function repairLines(n, lines, maxGapWords = 3) {
 function applyResult(chunk, modelLines, { mode = "clean", human = false } = {}) {
   if (!chunk.length) return [];
   const translate = mode === "translate-ko";
+  const labelled = translate && chunk.some((unit) => Number.isInteger(unit.speaker));
   let usable = modelLines;
   if (!coversChunk(chunk.length, modelLines)) {
     // Translations keep their text when the line ranges are only slightly off; cleaning must match exactly.
@@ -173,7 +193,7 @@ function applyResult(chunk, modelLines, { mode = "clean", human = false } = {}) 
   const lines = usable.map((line) => {
     const original = wordsText(chunk, line.from, line.to);
     if (translate) {
-      const translated = line.text.trim();
+      const translated = (labelled ? line.text.replace(ECHOED_LABEL, "") : line.text).trim();
       return { from: line.from, to: line.to, text: translated || original };
     }
     const same = normalize(line.text) === normalize(original);

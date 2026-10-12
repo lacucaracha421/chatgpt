@@ -326,10 +326,28 @@ test("translate request puts the previous-context block before the numbered list
   assert.match(body.system, /Previous context \(do not translate, not numbered\)/);
 });
 
+test("translate request puts the following-context block after the numbered list, with both blocks named in the system prompt", async () => {
+  const calls = stubFetch([jsonResponse(okBody())]);
+  await callClaude({ apiKey: "k", model: "m", chunk, mode: "translate-ko", context: ["so"], following: ["and", "then"] });
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(
+    body.messages[0].content,
+    "Previous context (do not translate, not numbered):\nso\n\nNumbered words to process:\n0\t안녕\n1\t하세요\n\nFollowing context (do not translate, not numbered):\nand then",
+  );
+  assert.match(body.system, /Following context \(do not translate, not numbered\)/);
+  assert.match(body.system, /output only the numbered words/);
+  // the retry note stays at the very end of the message
+  const retry = buildRequestBody({ model: "m", chunk, mode: "translate-ko", following: ["and"], retryNote: "Fix it." });
+  assert.equal(retry.messages[0].content, "0\t안녕\n1\t하세요\n\nFollowing context (do not translate, not numbered):\nand\n\nFix it.");
+});
+
 test("translate request without context, and clean requests with context, send only the numbered list", () => {
   const plain = "0\t안녕\n1\t하세요";
   assert.equal(buildRequestBody({ model: "m", chunk, mode: "translate-ko" }).messages[0].content, plain);
   assert.equal(buildRequestBody({ model: "m", chunk, mode: "translate-ko", context: [] }).messages[0].content, plain);
   assert.equal(buildRequestBody({ model: "m", chunk, mode: "clean", context: ["so", "what"] }).messages[0].content, plain);
   assert.equal(buildRequestBody({ model: "m", chunk, context: ["so"] }).messages[0].content, plain);
+  assert.equal(buildRequestBody({ model: "m", chunk, mode: "clean", context: ["so"], following: ["and"] }).messages[0].content, plain);
+  assert.equal(buildRequestBody({ model: "m", chunk, following: ["and"] }).messages[0].content, plain);
+  assert.equal(buildRequestBody({ model: "m", chunk, mode: "translate-ko", following: [] }).messages[0].content, plain);
 });

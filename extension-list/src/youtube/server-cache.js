@@ -18,11 +18,13 @@
         !Array.isArray(value.cues) || value.cues.length < 1 || value.cues.length > 20000 ||
         !value.cues.every(cue => cue && Number.isSafeInteger(cue.startMs) && Number.isSafeInteger(cue.endMs) &&
           cue.startMs >= 0 && cue.endMs >= cue.startMs && string(cue.text, 500) &&
-          (!Object.hasOwn(cue, "orig") || string(cue.orig, 500)))) return null;
+          (!Object.hasOwn(cue, "orig") || string(cue.orig, 500)) &&
+          (!Object.hasOwn(cue, "speaker") || (Number.isSafeInteger(cue.speaker) && cue.speaker >= 0 && cue.speaker <= 99)))) return null;
     const result = { video: value.video, track: value.track, mode: value.mode, model: value.model,
       createdAt: value.createdAt, register: value.register,
       glossary: value.glossary.map(({ source, korean }) => ({ source, korean })),
-      cues: value.cues.map(({ startMs, endMs, text, orig }) => ({ startMs, endMs, text, ...(orig === undefined ? {} : { orig }) }))
+      cues: value.cues.map(({ startMs, endMs, text, orig, speaker }) => ({ startMs, endMs, text,
+        ...(orig === undefined ? {} : { orig }), ...(speaker === undefined ? {} : { speaker }) }))
         .sort((a, b) => a.startMs - b.startMs) };
     if (new TextEncoder().encode(JSON.stringify(result)).length > 4 * 1024 * 1024) return null;
     return result;

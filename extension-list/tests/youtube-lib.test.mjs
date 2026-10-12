@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseJson3 } from "./helpers/youtube-classic.mjs";
-import { chunkUnits, buildPrompt, chunkContexts, CONTEXT_HEADER } from "./helpers/youtube-classic.mjs";
+import { chunkUnits, buildPrompt, chunkContexts, chunkFollowing, CONTEXT_HEADER, FOLLOWING_HEADER, FOLLOWING_WORDS } from "./helpers/youtube-classic.mjs";
 import { chunkOrder, chunkRange } from "./helpers/youtube-classic.mjs";
 import { finalizeTimings, readingTime } from "./helpers/youtube-classic.mjs";
 import { applyResult, fallbackSegment, repairLines, coverageProblem } from "./helpers/youtube-classic.mjs";
@@ -345,6 +345,36 @@ test("chunkContexts gives each chunk the last words before it, capped", () => {
   assert.deepEqual(chunkContexts(chunks, 60)[2], ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]);
   assert.deepEqual(chunkContexts(chunks, 0), [[], [], []]);
   assert.deepEqual(chunkContexts([]), []);
+});
+
+test("buildPrompt puts following words in a separate block after the numbered list", () => {
+  const units = makeUnits(["안녕하세요", "여러분"], [0, 500]);
+  assert.equal(
+    buildPrompt(units, [], ["다음", "말이야"]),
+    `0\t안녕하세요\n1\t여러분\n\n${FOLLOWING_HEADER}\n다음 말이야`,
+  );
+  assert.equal(
+    buildPrompt(units, ["그래서"], ["다음"]),
+    `${CONTEXT_HEADER}\n그래서\n\nNumbered words to process:\n0\t안녕하세요\n1\t여러분\n\n${FOLLOWING_HEADER}\n다음`,
+  );
+  assert.equal(buildPrompt(units, ["그래서"], []), buildPrompt(units, ["그래서"]));
+  assert.equal(buildPrompt(units, [], undefined), "0\t안녕하세요\n1\t여러분");
+});
+
+test("chunkFollowing gives each chunk the first words after it, across chunks and capped; the last chunk has none", () => {
+  const units = Array.from({ length: 10 }, (_, i) => ({ text: `w${i}`, startMs: i * 100 }));
+  const chunks = [units.slice(0, 4), units.slice(4, 6), units.slice(6, 8), units.slice(8)];
+  assert.deepEqual(chunkFollowing(chunks, 3), [["w4", "w5", "w6"], ["w6", "w7", "w8"], ["w8", "w9"], []]);
+  assert.deepEqual(chunkFollowing(chunks)[0], ["w4", "w5", "w6", "w7", "w8", "w9"]);
+  assert.deepEqual(chunkFollowing(chunks, 0), [[], [], [], []]);
+  assert.deepEqual(chunkFollowing([units]), [[]]);
+  assert.deepEqual(chunkFollowing([]), []);
+  assert.equal(FOLLOWING_WORDS, 80);
+  const long = Array.from({ length: 3 }, (_, c) => Array.from({ length: 200 }, (_, i) => ({ text: `c${c}w${i}`, startMs: 0 })));
+  const following = chunkFollowing(long);
+  assert.equal(following[0].length, 80);
+  assert.deepEqual([following[0][0], following[0][79]], ["c1w0", "c1w79"]);
+  assert.equal(following[2].length, 0);
 });
 
 test("chunkOrder starts at the chunk containing the position, then later chunks, then earlier ones", () => {

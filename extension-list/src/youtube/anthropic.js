@@ -120,9 +120,9 @@ async function requestJson({ apiKey, requestBody, sleep = defaultSleep, kind = "
 }
 
 // Returns lines, the reported register (null if invalid), and token usage.
-async function callClaude({ apiKey, model, chunk, mode = "clean", register = null, context = [], speakers = false, glossary = [], meta = null, retryNote = "", sleep = defaultSleep, clock, budget }) {
+async function callClaude({ apiKey, model, chunk, mode = "clean", register = null, context = [], following = [], speakers = false, glossary = [], meta = null, retryNote = "", sleep = defaultSleep, clock, budget }) {
   const { parsed, usage } = await requestJson({ apiKey, sleep, clock, budget,
-    requestBody: buildRequestBody({ model, chunk, mode, register, context, speakers, glossary, meta, retryNote }) });
+    requestBody: buildRequestBody({ model, chunk, mode, register, context, following, speakers, glossary, meta, retryNote }) });
   return validateChunk(parsed, usage);
 }
 

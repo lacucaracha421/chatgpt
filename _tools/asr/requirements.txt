@@ -1,0 +1,9 @@
+# What the PC venv (C:\laku\asr\venv, Python 3.14) holds. The server uses the standard library for HTTP.
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+yt-dlp==2026.8.19
+imageio-ffmpeg==0.6.0
+numpy==2.5.4
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.27.0.42
+nvidia-cuda-nvrtc-cu12==12.9.86

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-const sources = ["translation/korean-rules","translation/korean","translation/terms","translation/deadline","youtube/settings","youtube/terms","youtube/korean","youtube/deadline","youtube/parse","youtube/chunk","youtube/order","youtube/display","youtube/cues","youtube/timing","youtube/resume","youtube/mode","youtube/prompts","youtube/results","youtube/anthropic","youtube/provider","youtube/server-cache"];
+const sources = ["translation/korean-rules","translation/korean","translation/terms","translation/deadline","youtube/settings","youtube/terms","youtube/korean","youtube/deadline","youtube/parse","youtube/chunk","youtube/order","youtube/display","youtube/cues","youtube/timing","youtube/resume","youtube/mode","youtube/prompts","youtube/results","youtube/anthropic","youtube/provider","youtube/server-cache","youtube/asr-choice","youtube/local-asr","youtube/source-pref"];
 for (const name of sources) vm.runInThisContext(readFileSync(new URL('../../src/'+name+'.js', import.meta.url), 'utf8'), {filename:name+'.js'});
 const serviceSource = readFileSync(new URL('../../src/youtube/service.js', import.meta.url), 'utf8');
 export function loadWorker() {
@@ -29,6 +29,10 @@ export const CONTEXT_WORDS = globalThis.LakomicsYouTube.chunk.CONTEXT_WORDS;
 export const CONTEXT_HEADER = globalThis.LakomicsYouTube.chunk.CONTEXT_HEADER;
 export const LIST_HEADER = globalThis.LakomicsYouTube.chunk.LIST_HEADER;
 export const chunkContexts = globalThis.LakomicsYouTube.chunk.chunkContexts;
+export const chunkFollowing = globalThis.LakomicsYouTube.chunk.chunkFollowing;
+export const FOLLOWING_HEADER = globalThis.LakomicsYouTube.chunk.FOLLOWING_HEADER;
+export const FOLLOWING_WORDS = globalThis.LakomicsYouTube.chunk.FOLLOWING_WORDS;
+export const EXCERPT_SEPARATOR = globalThis.LakomicsYouTube.prompts.EXCERPT_SEPARATOR;
 export const chunkOrder = globalThis.LakomicsYouTube.order.chunkOrder;
 export const chunkRange = globalThis.LakomicsYouTube.order.chunkRange;
 export const splitDisplayCues = globalThis.LakomicsYouTube.display.splitDisplayCues;
