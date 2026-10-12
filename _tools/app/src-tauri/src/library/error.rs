@@ -86,6 +86,8 @@ pub enum LibraryError {
     CloudAssetRegistrationRejected(u16),
     #[error("다른 클라우드 자산이 같은 object key를 사용하고 있습니다")]
     CloudObjectKeyConflict,
+    #[error("클라우드 정보가 방금 바뀌었습니다. 잠시 후 다시 시도해 주세요.")]
+    CloudSnapshotChanged,
     #[error("동기화할 로컬 파일을 열 수 없습니다")]
     CloudSourceUnavailable,
     #[error("동기화할 로컬 파일이 수집 당시 내용과 다릅니다")]

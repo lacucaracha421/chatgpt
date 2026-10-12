@@ -225,8 +225,12 @@ impl Library {
         let asset_ids: Vec<String> = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
-                "SELECT id FROM assets WHERE status = 'normal'
-                 ORDER BY collected_at DESC, id",
+                "SELECT asset.id FROM assets asset WHERE asset.status = 'normal'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM asset_authority_state canonical
+                     WHERE canonical.asset_id = asset.id AND canonical.server_created = 1
+                 )
+                 ORDER BY asset.collected_at DESC, asset.id",
             )?;
             let rows = statement
                 .query_map([], |row| row.get(0))?

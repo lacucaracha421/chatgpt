@@ -263,6 +263,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudUploadRejected(_) => "cloud_upload_rejected",
             LibraryError::CloudAssetRegistrationRejected(_) => "cloud_asset_registration_rejected",
             LibraryError::CloudObjectKeyConflict => "cloud_object_key_conflict",
+            LibraryError::CloudSnapshotChanged => "cloud_snapshot_changed",
             LibraryError::CloudSourceUnavailable => "cloud_source_unavailable",
             LibraryError::CloudSourceChanged => "cloud_source_changed",
             LibraryError::CloudThumbnailUnavailable => "cloud_thumbnail_unavailable",

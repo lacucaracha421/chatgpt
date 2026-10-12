@@ -2090,14 +2090,14 @@ impl CloudClient {
             200 => {}
             409 => {
                 #[derive(serde::Deserialize)]
-                struct Coded { detail: serde_json::Value }
-                let code = read_json_bounded::<Coded>(&mut response, 16 * 1024).ok()
-                    .and_then(|body| body.detail.get("code").and_then(|code| code.as_str()).map(str::to_owned));
-                return Err(match code.as_deref() {
-                    Some("collectionPersonalEditUnsupported") => LibraryError::CollectionPersonalEditUnsupported,
-                    Some("collectionPersonalEditCursorRejected" | "libraryMismatch") => LibraryError::CollectionPersonalEditCursorRejected,
-                    _ => LibraryError::CloudObjectKeyConflict,
-                });
+                struct Coded {
+                    detail: serde_json::Value,
+                }
+                let detail = read_json_bounded::<Coded>(&mut response, 16 * 1024)
+                    .ok()
+                    .map(|body| body.detail)
+                    .unwrap_or(serde_json::Value::Null);
+                return Err(map_collection_publication_conflict(&detail));
             }
             // A rejected snapshot (e.g. a 422 validation failure) is not an asset registration.
             status => return Err(map_api_error(ureq::Error::StatusCode(status), LibraryError::CloudCollectionsPublishRejected)),
@@ -3526,6 +3526,56 @@ fn map_registration_error(error: ureq::Error) -> LibraryError {
         return LibraryError::CloudObjectKeyConflict;
     }
     map_api_error(error, LibraryError::CloudAssetRegistrationRejected)
+}
+
+fn map_collection_publication_conflict(detail: &serde_json::Value) -> LibraryError {
+    if detail.as_str() == Some("Collection snapshot changed; refresh before publishing") {
+        // The next publication tick re-reads the revision and rebuilds the snapshot.
+        return LibraryError::CloudSnapshotChanged;
+    }
+    match detail.get("code").and_then(|code| code.as_str()) {
+        Some("collectionPersonalEditUnsupported") => LibraryError::CollectionPersonalEditUnsupported,
+        Some("collectionPersonalEditCursorRejected" | "libraryMismatch") => {
+            LibraryError::CollectionPersonalEditCursorRejected
+        }
+        _ => LibraryError::CloudObjectKeyConflict,
+    }
+}
+
+#[cfg(test)]
+mod collection_publication_conflict_tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_changed_is_a_refresh_outcome_and_preserves_real_collision_errors() {
+        let error = map_collection_publication_conflict(&serde_json::json!(
+            "Collection snapshot changed; refresh before publishing"
+        ));
+        assert!(matches!(error, LibraryError::CloudSnapshotChanged));
+        assert_eq!(
+            error.to_string(),
+            "클라우드 정보가 방금 바뀌었습니다. 잠시 후 다시 시도해 주세요."
+        );
+        for detail in [
+            serde_json::json!("Object key conflict"),
+            serde_json::Value::Null,
+        ] {
+            assert!(matches!(
+                map_collection_publication_conflict(&detail),
+                LibraryError::CloudObjectKeyConflict
+            ));
+        }
+        assert!(matches!(
+            map_collection_publication_conflict(&serde_json::json!({"code":"libraryMismatch"})),
+            LibraryError::CollectionPersonalEditCursorRejected
+        ));
+        assert!(matches!(
+            map_collection_publication_conflict(
+                &serde_json::json!({"code":"collectionPersonalEditUnsupported"})
+            ),
+            LibraryError::CollectionPersonalEditUnsupported
+        ));
+    }
 }
 
 /// Bookmark reads distinguish *authority state* from transient transport failure.

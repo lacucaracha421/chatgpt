@@ -720,6 +720,49 @@ fn full_backfill_progress_excludes_non_normal_queue_rows_without_deleting_them()
 // ---------------------------------------------------------------------------
 
 #[test]
+fn preflight_excludes_server_born_captures_but_keeps_pc_born_captures() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let mut ids = Vec::new();
+    for seed in [31, 32] {
+        let source = temp.path().join(format!("capture-{seed}.png"));
+        fs::write(&source, png_bytes(seed)).unwrap();
+        ids.push(ingest_png(&library, &source, "2026-10-06T00:00:00Z"));
+    }
+    {
+        let db = library.connection().unwrap();
+        // Import source alone cannot distinguish a PC capture from a downloaded one.
+        db.execute("UPDATE assets SET import_source='browser_extension'", [])
+            .unwrap();
+        for (id, server_created) in [(&ids[0], 0), (&ids[1], 1)] {
+            db.execute(
+                "INSERT INTO asset_authority_state
+                 (asset_id,lifecycle,entity_revision,projection,materialization,server_created)
+                 VALUES (?1,'normal',1,'{}','complete',?2)",
+                rusqlite::params![id, server_created],
+            )
+            .unwrap();
+        }
+        // A server-born capture must not contribute to missing-file or upload counts.
+        db.execute(
+            "UPDATE assets SET relative_path='missing-server-capture.png',
+             thumbnail_relative_path='missing-server-thumbnail.png' WHERE id=?1",
+            [&ids[1]],
+        )
+        .unwrap();
+    }
+    let report = library.preflight_full_library().unwrap();
+    assert_eq!(report.assets.len(), 1);
+    assert_eq!(report.assets[0].asset_id, ids[0]);
+    assert_eq!(report.total_assets, 1);
+    assert_eq!(report.ready_assets, 1);
+    assert_eq!(report.already_replicated, 0);
+    assert_eq!(report.missing_originals, 0);
+    assert_eq!(report.thumbnail_work_required, 0);
+    assert_eq!(report.problem_assets, 0);
+}
+
+#[test]
 fn preflight_reports_missing_original_without_failing_others() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

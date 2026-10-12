@@ -10,7 +10,7 @@ Updated 2026-10-12 with the user (evening: the collector pass, drag/options and 
 
 Done on 2026-10-12 (details in their sections): `VIEW-FILTER-001` (PC `876210bb`, tablet 0.9.83), `COLLECTOR-IMAGETEXT-001` (all slices, user-confirmed), `UI-REVIEW-20261011` tablet leftovers T10/T12/T13/T17/T18/T19 (`dd843b09`, `6114dad6`; T8/T11/T14 were already fixed), `YT-MOBILE-001` (`ff53b943`, device-confirmed), GPU character scan (`653bd05e`).
 
-0. **`CHAR-CLAUDE-001`** — Claude (Haiku, then Sonnet) decides easy character recommendations automatically on the PC; slice 1 in progress (see [section](#char-claude-001)).
+0. **`CHAR-CLAUDE-001`** — Claude (Haiku, then Sonnet) decides easy character recommendations automatically on the PC; slices 1–2 done 2026-10-13, next: the series member identification idea and retiring the tablet 캐릭터 확인 (see [section](#char-claude-001)).
 0b. **`CHAR-REF-OTHER-001`** — done 2026-10-13: "<name> 아님" on a reference person held by another character's acceptance (see [section](#char-ref-other-001)).
 1. **`CHAR-FOLDER-PERF-001`** — done 2026-10-12 (series opens 0.47–1.79 s → 0.10–0.26 s; entry flicker fixed; user-confirmed).
 2. **`YT-SUB-TIMING-001` round 2** — in progress (uncommitted extension 3.5.18–3.5.22): human-track tails, digit/predicate split guards, word-aligned fragment splits, one display-timing policy with a replay metric, two-line rolling display (default on), profanity kept at original strength and a 말투 setting (default 원문 말투 따라가기). Needs the user's real-video check on the tablet.
@@ -64,6 +64,11 @@ Related cleanup (low priority, user and controller agree it has little value): r
 Status: `DONE` 2026-10-13 (native check pending: the button in the running app). Case: 블루 아카이브 아카네, reference slot 4 (asset `b92a5dff…`) is a group image; 카린 and 토키 are manual accepts, but the third person (actually 아카네) still carries a 2026-09-13 automatic acceptance for 이치노세 아스나 from the old native pass. The 캐릭터 정보 reference picker therefore shows "이미지의 인물이 모두 다른 캐릭터(이치노세 아스나)로 등록돼 있어 사용할 수 없음" with no way to fix it in place. Today's workaround: open 이치노세 아스나's folder, open the image, 이 캐릭터에서 빼기.
 
 Wanted: under each greyed-out person tile ("<name> 인물") in the picker, a "<name> 아님" action that records a manual rejection of that other character for the image (same path as 이 캐릭터에서 빼기), then re-evaluates the picker in place so the person can be chosen immediately — no flash, the panel keeps its content while it refreshes. PC first; the tablet has no reference picker work planned (character classification is PC-only, see CHAR-CLAUDE-001).
+
+<a id="tablet-case-lift-001"></a>
+## TABLET-CASE-LIFT-001 — Lifted 3D case overlaps neighbouring cases on the tablet (2026-10-13)
+
+Status: `OPEN` (user report, details pending). In the tablet Collections, the "lift" effect on a 3D case (model) draws over or collides with neighbouring cases. Start from `_tools/app/mobile-client/collectionShelf.css` (line ~16: "A tablet pick turns the case inside its cell instead of lifting beyond the column") and the shared PC case rules; likely a stacking/z-index or transform-origin issue between siblings. Needs the exact screen and gesture from the user and a device capture before and after the fix.
 
 <a id="char-folder-perf-001"></a>
 ## CHAR-FOLDER-PERF-001 — Character folder screens performance (2026-10-12)
@@ -130,15 +135,15 @@ Delivered folder/idle/startup/thumbnail-priority changes and their dated measure
 <a id="cloud-post-001--서버-원천화-이후-클라이언트-구조-정리"></a>
 ## CLOUD-POST-001 — Remaining publication and client cleanup
 
-Status: `PARTIAL` — Collections ownership is settled and activated (2026-10-06, `8d368991`); its legacy publication is retired (`59461c1c`). Read-only inventory 2026-10-10 (12 native publication lanes in `cloud/auto_publication.rs`; `useMobilePublications` only forwards the character navigation order) and user decisions the same day: **character data stays PC-owned** (structure, references and inference on the PC; the server keeps the read projection plus the tablet exclusion/review intent logs) — closed; keep PC-made lanes for characters, auto tags, similarity candidates, catalog duplicates, catalog visibility and the captions; artists intent application deferred; Saved-X media keys stay PC-published (server derivation unverified). Remaining cleanup order: (2) unblocked 2026-10-11 (calendar refresh passed) — retire the `upcoming` lane's local calendar/wishlist PUT fallback; (3) with `SEC-TOKEN-001` — retire the dormant `releases`/`bindings` lanes, the unused `avPick` lane, legacy collection/classification/album snapshot publishers and their fenced server routes, after amending the 1C runbook sentence in `docs/research/collection-authority-1b-plan-20261006.md` that relies on legacy paths; move release/binding/personal-edit state out of `notes_state` in a planned migration. The tablet still sends personal edits through the compatibility route `/v1/collections/personal-edits` — keep it.
+Status: `PARTIAL` — Collections ownership is settled and activated (2026-10-06, `8d368991`); its legacy publication is retired (`59461c1c`). Read-only inventory 2026-10-10 (12 native publication lanes in `cloud/auto_publication.rs`; `useMobilePublications` only forwards the character navigation order) and user decisions the same day: **character data stays PC-owned** (structure, references and inference on the PC; the server keeps the read projection plus the tablet exclusion/review intent logs) — closed; keep PC-made lanes for characters, auto tags, similarity candidates, catalog duplicates, catalog visibility and the captions; artists intent application deferred; Saved-X media keys stay PC-published (server derivation unverified). Remaining cleanup order: (2) closed 2026-10-13 — the user keeps the `upcoming` lane's local calendar/wishlist PUT fallback (`home_publications.rs:241`) because it still serves a library with the server calendar off or not yet migrated; (3) with `SEC-TOKEN-001` — retire the dormant `releases`/`bindings` lanes, the unused `avPick` lane, legacy collection/classification/album snapshot publishers and their fenced server routes, after amending the 1C runbook sentence in `docs/research/collection-authority-1b-plan-20261006.md` that relies on legacy paths; move release/binding/personal-edit state out of `notes_state` in a planned migration. The tablet still sends personal edits through the compatibility route `/v1/collections/personal-edits` — keep it.
 Preserve SQLite replica, workstation compute/filesystem state, durable intent and per-domain cursors/preferences. Completed authority cutovers and the user-closed `CLOUD-WORK-001`, `MOBILE-WRITE-002`, `MOBILE-003` are not new work.
 
 <a id="user-req-20260924--user-requests-2026-09-24-evening"></a>
 ## USER-REQ-20260924 — Collections authority slice 1
 
 Status: `PARTIAL` — slices 1A/1B/1C are delivered; production activation and tablet create/edit canary are recorded in [plan §7](../research/collection-authority-1b-plan-20261006.md#7-1c-activation-runbook-and-rollback) and [ADR index](../adr/README.md). See the [archive](lakomics-completed.md#closure-checkpoint--2026-10-10--backlog-reconciliation). Performance requests remain in `PERF-ALL-001`.
-- **Residual preflight:** exclude ~670 server-born extension captures from upload preparation; `22810e58` fixes completion progress, not this preflight scope (unverified 2026-10-10).
-- **Residual legacy-path diagnostic:** verify/publication race can report 409 "snapshot changed" as "다른 클라우드 자산이 같은 object key를 사용하고 있습니다"; map to retry/refresh if that legacy path is still reachable. Active Collections publication is off (`59461c1c`), so do not reopen activation for this race (unverified 2026-10-10).
+- **Residual preflight:** done 2026-10-13 — upload preparation and its counts skip assets with `asset_authority_state.server_created=1`.
+- **Residual legacy-path diagnostic:** done 2026-10-13 — the path is still reachable for libraries not yet on Collections authority; a 409 "Collection snapshot changed" now reads "클라우드 정보가 방금 바뀌었습니다. 잠시 후 다시 시도해 주세요." while real object-key collisions keep their message.
 - **Retained decisions:** no type change under authority; provider-candidate covers on tablet; unsupported operations stay fenced until their replacement ships ([design §8](../research/collection-authority-design-20260924.md#8-user-decisions-2026-10-04-before-slice-1b)). TMDB/IGDB and AV replacements shipped; book import was retired (`69805f82`). LaunchBox, legacy package migration and cover-focus recomputation remain fenced; no new implementation priority is inferred.
 
 <a id="user-req-20260926b--user-requests-2026-09-26-second-batch"></a>
@@ -150,10 +155,10 @@ Delivered tablet Collection creation is in the [2026-10-10 checkpoint](lakomics-
 ## TABLET-PARITY-001 — Remaining tablet parity
 
 Status: `PARTIAL` — the user-selected parity round of 2026-10-10 is delivered (see the last section; device look unverified): album management, multi-select actions, folder subtree scope and create/rename, 좋아요순/랜덤 sort, content search (awaits first captions, `NL-SEARCH-001`) and the per-volume manga back. Artist rename/hide/pin and 숨긴 작가 shipped earlier (`02656706`, `ebb5f59b`); see the [archive](lakomics-completed.md#closure-checkpoint--2026-10-10--backlog-reconciliation). Merge/detach stay PC-only unless the user asks. Server ownership of artist-intent application remains in `SERVER-INDEP-001`.
-- **Remaining:** true batch album/folder server operations (multi-select uses the individual album commands, `c60e57f9`, `f027836c`; unverified whether a batch route is still wanted). Keep cursor/cache identity bound to subtree mode; do not repurpose direct `asset_count`. User 2026-09-29 approved server deployment for this scope.
+- **Remaining:** true batch album/folder server operations (multi-select uses the individual album commands, `c60e57f9`, `f027836c`) — the user confirmed on 2026-10-13 that batch routes are wanted; design in progress. Keep cursor/cache identity bound to subtree mode; do not repurpose direct `asset_count`. User 2026-09-29 approved server deployment for this scope.
 - **Decisions:** folder move/delete stay PC-only (the character-series move rule needs PC-only data). Not wanted (user 2026-10-10): tablet volume-range editing, manga reader layout options, notes backup on the tablet, single-asset character assignment, asset artist/creator editing, trash emptying/retention on the tablet. Deep character classification remains PC-only; viewer single-asset editors remain, multi-select character assignment stays dropped (user 2026-09-29).
 - Next IGDB refetch, one-off TMDB 400 and leftover diagnostics are (unverified 2026-10-10). TMDB/IGDB authority lookup returned (`00c4fddc`, `28b0b494`, `905e7de5`); release-calendar ownership moved to the server (`6c366ff5`, `d7d16d48`; `SERVER-INDEP-001`).
-- **Manga-spine touch target (from `COLLECTION-VIEW-20261001`):** manga spines are 30 px against the 44 px touch-target rule (unverified 2026-10-10); a source-level size gap, kept when the acceptance list was closed.
+- **Manga-spine touch target:** closed 2026-10-13 — the user finds the 30 px spines fine to touch; no change.
 
 ## TRANSFER-001 — LocalSend-style direct transfer first, server as fallback
 
@@ -215,9 +220,7 @@ Status: `PARTIAL` — 2026-10-10 (`431e7721`): shuffled-order vitest failures tr
 <a id="pc-review-001--fix-findings-of-the-2026-09-25-pc-app-review"></a>
 ## PC-REVIEW-001 — Residual 2026-09-25 review findings
 
-Status: `PARTIAL` — [review report](../research/pc-app-review-2026-09-25.md); the user's 2026-10-10 fix-now list and most findings are fixed (see the last section). Remaining, both low priority and (unverified 2026-10-10):
-- S36 rollback blocked after trashing an auto-accepted asset (medium, low relevance after `CHAR-AUTO-007` was dropped).
-- Runtime check of long HEVC/ProRes limits (30-minute and Windows 1 GiB caps exist in code; needs a runtime run).
+Status: `PARTIAL` — [review report](../research/pc-app-review-2026-09-25.md); the user's 2026-10-10 fix-now list and most findings are fixed (see the last section). Both remaining findings were closed by the user on 2026-10-13 without work: the S36 rollback after trashing an auto-accepted asset (feature not in use) and the runtime check of long HEVC/ProRes limits (revisit only if a real file misbehaves).
 Read-only verification 2026-10-10 (Sol, current code, no runtime; controller scratchpad): the authority-path purge guard is not a defect; asset restore/error-recovery/relation re-baseline were already fixed; the in-flight artwork cleanup race is fixed (`af2fd1a4`). This does not prove every purge/recovery edge accepted.
 
 ## VAULT-ENC-001 — Residual audit claims
