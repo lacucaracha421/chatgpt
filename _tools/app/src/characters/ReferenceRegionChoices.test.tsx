@@ -1,9 +1,10 @@
 import { act, cleanup, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ReferenceRegionChoices, AUTOMATIC_CHARACTER_REFERENCE_COUNT, usableReferenceCount, automaticReferenceCount, useReferenceRegionInspection, withDraftChoices } from "./ReferenceRegionChoices";
-import type { ReferenceInspection, ReferenceRegions } from "./api";
+import type { CharacterApi, ReferenceInspection, ReferenceRegions } from "./api";
+import { fixtureTarget } from "./characterFixtures";
 
 afterEach(cleanup);
 
@@ -16,14 +17,20 @@ const inspection = (assetId: string, state: string, boxes: [number, number, numb
 const box = (assetId: string, bounds: [number, number, number, number]) => ({ contentHash: `hash-${assetId}`, baselineFingerprint: "baseline", bounds });
 
 /** Renders the section and exposes the draft it owns. */
-function Harness({ initial = {}, assetIds, respond }: {
+function Harness({ initial = {}, assetIds, respond, decisionApi, shared = false }: {
   initial?: ReferenceRegions; assetIds: string[];
   respond: (ids: string[], regions: ReferenceRegions) => Promise<ReferenceInspection[]>;
+  decisionApi?: Pick<CharacterApi, "targets" | "decide">;
+  shared?: boolean;
 }) {
   const [draft, setDraft] = useState<ReferenceRegions>(initial);
+  const inspect = useCallback<NonNullable<CharacterApi["inspectReferenceRegions"]>>(
+    (_series, _target, ids, regions) => respond(ids, regions ?? {}), [respond]);
+  const inspection = useReferenceRegionInspection({ seriesId: "series", targetId: "hina", assetIds,
+    draftRegions: draft, api: shared ? inspect : undefined });
   return <>
     <ReferenceRegionChoices seriesId="series" targetId="hina" assetIds={assetIds} draftRegions={draft} privacyMode={false} busy={false}
-      api={(_series, _target, ids, regions) => respond(ids, regions ?? {})} onChange={setDraft} />
+      api={inspect} inspection={shared ? inspection : undefined} decisionApi={decisionApi} onChange={setDraft} />
     <output aria-label="초안">{JSON.stringify(draft)}</output>
   </>;
 }
@@ -510,7 +517,7 @@ it("keeps asking for a person on a shared image when its only offered choice was
 
 /** 다이아린 · 자오: 자오 is already registered on the first person of this image. */
 const taken = (state: string, extra: Partial<ReferenceInspection> = {}): ReferenceInspection =>
-  ({ ...inspection("g", state, multi), otherCharacters: ["자오"], takenBoxes: [{ index: 0, character: "자오" }], ...extra });
+  ({ ...inspection("g", state, multi), otherCharacters: ["자오"], takenBoxes: [{ index: 0, character: "자오", targetId: "zhao", source: "reference" }], ...extra });
 
 it("shows a person another character is registered on dimmed with that name, and cannot select it", async () => {
   const api = vi.fn(async () => [...six.map(id => inspection(id, "single")), taken("needs_region")]);
@@ -521,6 +528,7 @@ it("shows a person another character is registered on dimmed with that name, and
   expect(owned).toBeDisabled();
   expect(within(owned).getByText("자오 인물")).toBeVisible();
   expect(owned).not.toHaveAttribute("aria-pressed");
+  expect(screen.queryByRole("button", { name: "자오 아님" })).not.toBeInTheDocument();
   await user.click(owned);
   expect(draft()).toEqual({});
   // The free person is still chosen as before.
@@ -538,11 +546,75 @@ it("never offers a taken box as the suggestion and never counts it as a chosen p
 });
 
 it("says so when every person of a shared image is already registered", async () => {
-  const all = taken("needs_region", { takenBoxes: [{ index: 0, character: "자오" }, { index: 1, character: "자오" }] });
+  const all = taken("needs_region", { takenBoxes: [0, 1].map(index => ({ index, character: "자오", targetId: "zhao", source: "reference" })) });
   const api = vi.fn(async () => [...six.map(id => inspection(id, "single")), all]);
   const user = userEvent.setup();
   render(<Harness assetIds={[...six, "g"]} respond={api} />);
   await user.click(await screen.findByRole("button", { name: "필요한 인물만 확인" }));
   expect(screen.getByText("이미지의 인물이 모두 다른 캐릭터(자오)로 등록돼 있어 사용할 수 없음")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "추천 영역 사용" })).not.toBeInTheDocument();
+});
+
+const acceptedHolder = () => taken("needs_region", {
+  takenBoxes: [
+    { index: 0, character: "자오", targetId: "zhao", source: "accepted" },
+    { index: 1, character: "모모카", targetId: "momoka", source: "reference" },
+  ],
+});
+
+it.each([false, true])("rejects an accepted holder and keeps the chooser while refreshing (shared inspection: %s)", async shared => {
+  let finishDecision!: (count: number) => void;
+  let finishInspection!: (rows: ReferenceInspection[]) => void;
+  const api = vi.fn().mockResolvedValueOnce([acceptedHolder()])
+    .mockImplementationOnce(() => new Promise<ReferenceInspection[]>(resolve => { finishInspection = resolve; }))
+    .mockResolvedValue([taken("needs_region", { takenBoxes: [] })]);
+  const decisionApi = {
+    targets: vi.fn(async () => [fixtureTarget("zhao", "자오")]),
+    decide: vi.fn(() => new Promise<number>(resolve => { finishDecision = resolve; })),
+  };
+  const user = userEvent.setup();
+  render(<Harness assetIds={["g"]} respond={api} decisionApi={decisionApi} shared={shared} />);
+  await user.click(await screen.findByRole("button", { name: "필요한 인물만 확인" }));
+  expect(screen.queryByRole("button", { name: "모모카 아님" })).not.toBeInTheDocument();
+  expect(screen.getByText("이미지의 인물이 모두 다른 캐릭터(자오, 모모카)로 등록돼 있어 사용할 수 없음")).toBeVisible();
+  const reject = screen.getByRole("button", { name: "자오 아님" });
+  const crop = screen.getByRole("button", { name: "인물 영역 1 · 자오 인물" });
+  await user.click(reject);
+  expect(reject).toBeDisabled();
+  expect(reject).toHaveTextContent("자오 아님");
+  await waitFor(() => expect(decisionApi.decide).toHaveBeenCalledWith({
+    targetId: "zhao", expectedFingerprint: "fingerprint-zhao", assetIds: ["g"],
+    decision: "rejected", baselineFingerprint: null, scanId: null,
+  }));
+  expect(api).toHaveBeenCalledTimes(1);
+  await act(async () => finishDecision(1));
+  await waitFor(() => expect(api).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("button", { name: "인물 영역 1 · 자오 인물" })).toBe(crop);
+  expect(screen.getByText("사용할 인물을 한 명 선택하세요")).toBeVisible();
+  expect(reject).toBeDisabled();
+  await act(async () => finishInspection([taken("needs_region", { takenBoxes: [
+    { index: 1, character: "모모카", targetId: "momoka", source: "reference" },
+  ] })]));
+  await user.click(await screen.findByRole("button", { name: "인물 영역 1 선택" }));
+  expect(draft()).toEqual({ g: box("g", multi[0]) });
+  expect(decisionApi.decide).toHaveBeenCalledTimes(1);
+});
+
+it.each(["targets", "decision", "inspection"])("keeps the taken person and shows an inline error on %s failure", async failure => {
+  const api = vi.fn().mockResolvedValueOnce([acceptedHolder()]).mockRejectedValue(new Error("재검사 실패"));
+  const decisionApi = {
+    targets: failure === "targets" ? vi.fn().mockRejectedValue(new Error("정보 조회 실패")) : vi.fn(async () => [fixtureTarget("zhao", "자오")]),
+    decide: failure === "decision" ? vi.fn().mockRejectedValue(new Error("거절 실패")) : vi.fn().mockResolvedValue(1),
+  };
+  const user = userEvent.setup();
+  render(<Harness assetIds={["g"]} respond={api} decisionApi={decisionApi} />);
+  await user.click(await screen.findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(screen.getByRole("button", { name: "자오 아님" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(failure === "targets" ? "정보 조회 실패" : failure === "decision" ? "거절 실패" : "재검사 실패");
+  expect(screen.getByRole("button", { name: "인물 영역 1 · 자오 인물" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "자오 아님" })).toBeEnabled();
+  expect(screen.getByText("사용할 인물을 한 명 선택하세요")).toBeVisible();
+  expect(draft()).toEqual({});
+  expect(api).toHaveBeenCalledTimes(failure === "inspection" ? 2 : 1);
+  if (failure === "targets") expect(decisionApi.decide).not.toHaveBeenCalled();
 });

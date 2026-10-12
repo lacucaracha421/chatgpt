@@ -27,6 +27,8 @@
 .character-reference-regions { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
 .character-reference-regions > p { margin: 0; }
 .character-region-options { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.character-region-option { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); flex: 1 1 92px; max-width: 168px; min-width: 72px; }
+.character-region-option .character-region-frame { flex: none; width: 100%; }
 .character-region-frame { position: relative; flex: 1 1 92px; max-width: 168px; min-width: 72px; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-tile); background-color: var(--color-surface); background-repeat: no-repeat; cursor: pointer; overflow: hidden; }
 .character-region-frame:hover:not(:disabled), .character-region-frame:focus-visible { border-color: var(--color-accent); }
 .character-region-frame:disabled { cursor: default; opacity: .6; }

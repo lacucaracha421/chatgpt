@@ -46,12 +46,16 @@ pub struct ReferenceInspection {
 pub struct TakenBox {
     pub index: usize,
     pub character: String,
+    pub target_id: String,
+    pub source: String,
 }
 
 /// A person of an image that another character is already registered on.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct KnownPerson {
     pub character: String,
+    pub target_id: String,
+    pub source: String,
     pub bounds: [f64; 4],
 }
 
@@ -127,24 +131,31 @@ pub(super) fn known_people_of_others(
         return Ok(Vec::new());
     };
     let mut people: Vec<KnownPerson> = Vec::new();
-    let mut add = |character: &str, bounds: [f64; 4]| {
-        let person = KnownPerson { character: character.to_string(), bounds };
+    let mut add = |target_id: &str, character: &str, source: &str, bounds: [f64; 4]| {
+        let person = KnownPerson {
+            character: character.to_string(),
+            target_id: target_id.to_string(),
+            source: source.to_string(),
+            bounds,
+        };
         if !whole_frame_f(&bounds, width, height) && !people.contains(&person) {
             people.push(person);
         }
     };
     let regions = connection
         .prepare_cached(
-            "SELECT t.display_name,g.bounds_json FROM character_reference_regions g
+            "SELECT t.id,t.display_name,g.bounds_json FROM character_reference_regions g
              JOIN character_targets t ON t.id=g.target_id
              WHERE g.asset_id=?1 AND g.asset_hash=?3 AND t.role='character' AND (?2 IS NULL OR t.id<>?2)
              ORDER BY t.display_name",
         )?
-        .query_map(params![asset, target, hash], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .query_map(params![asset, target, hash], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    for (name, bounds) in regions {
+    for (id, name, bounds) in regions {
         if let Ok(b) = serde_json::from_str::<[u32; 4]>(&bounds) {
-            add(&name, b.map(f64::from));
+            add(&id, &name, "reference", b.map(f64::from));
         }
     }
     let accepted = connection
@@ -191,7 +202,7 @@ pub(super) fn known_people_of_others(
             None => None,
         };
         if let Some(bounds) = bounds {
-            add(&name, bounds);
+            add(&id, &name, "accepted", bounds);
         }
     }
     Ok(people)
@@ -206,7 +217,12 @@ fn mark_taken_boxes(row: &mut ReferenceInspection, people: &[KnownPerson]) {
         .iter()
         .enumerate()
         .filter_map(|(index, b)| {
-            known_owner(people, *b).map(|owner| TakenBox { index, character: owner.character.clone() })
+            known_owner(people, *b).map(|owner| TakenBox {
+                index,
+                character: owner.character.clone(),
+                target_id: owner.target_id.clone(),
+                source: owner.source.clone(),
+            })
         })
         .collect();
     if row.taken_boxes.is_empty() {

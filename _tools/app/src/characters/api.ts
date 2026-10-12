@@ -21,7 +21,7 @@ export type ReferenceInspection = {
   otherCharacters?: string[];
   /** Boxes (indexes into `boxes`) already registered as another character's person. Such a box
    * cannot be chosen; the save refuses it too. Absent when no person is known for the image. */
-  takenBoxes?: { index: number; character: string }[];
+  takenBoxes?: { index: number; character: string; targetId: string; source: "reference" | "accepted" }[];
 };
 
 /** The character a box is already registered to, or null when it is free to choose. */

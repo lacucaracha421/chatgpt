@@ -54,7 +54,7 @@ function ReferenceThumb({ assetId, region, privacyMode }: { assetId: string; reg
  */
 export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, error, api, inspection, automationStatus, management, onChange, onPick, onOpenReference, onRecommendReferences }: {
   draft: CharacterEditorDraft; target: CharacterTarget | null; seriesId?: string; privacyMode: boolean; busy: boolean; error: string | null;
-  api?: Pick<CharacterApi, "inspectReferenceRegions">;
+  api?: Pick<CharacterApi, "inspectReferenceRegions"> & Partial<Pick<CharacterApi, "targets" | "decide">>;
   inspection?: ReferenceRegionInspection;
   /** S36 state for this character, appended to the automation line. */
   automationStatus?: string | null;
@@ -115,6 +115,7 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
       })}</section> : !shortfall && <p className="character-message">레퍼런스가 없습니다.</p>}
       {inspectable && inspect && seriesId && <ReferenceRegionChoices seriesId={seriesId} targetId={target?.id ?? null} assetIds={draft.references}
         draftRegions={draft.referenceRegions} savedRegions={characterDraft(target).referenceRegions} privacyMode={privacyMode} busy={busy} api={inspect} inspection={shared}
+        decisionApi={api?.targets && api.decide ? { targets: api.targets, decide: api.decide } : undefined}
         focusRequest={focusRequest} onOpenOriginal={onOpenReference}
         onChange={referenceRegions => onChange({ ...draft, referenceRegions })} />}
     </section>

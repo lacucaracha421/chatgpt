@@ -3,6 +3,8 @@ import { AssetSvgImage } from "../privacy/AssetImage";
 import { useEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
+import { BusyLabel } from "../shared/ui/BusyLabel";
+import { characterApi, type CharacterApi } from "./api";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { draftReferenceRegions, refusedAsWholeFrame, regionBox, takenBoxOwner, referenceRegionBinding, referenceRegionIndex, staleReferenceRegion, usableReferenceRegionStates, needsReferenceRegionChoice, type ReferenceInspection, type ReferenceRegions } from "./api";
 
@@ -28,7 +30,7 @@ export const needsReferenceConfirmation = (inspections: ReferenceInspection[]) =
   (usableReferenceCount(inspections) < AUTOMATIC_CHARACTER_REFERENCE_COUNT && inspections.some(needsReferenceRegionChoice))
   || inspections.some(sharedNeedsChoice);
 
-export type ReferenceRegionInspection = { inspections: ReferenceInspection[] | null; error: string | null; retry?: () => void };
+export type ReferenceRegionInspection = { inspections: ReferenceInspection[] | null; error: string | null; retry?: () => void; refresh?: () => Promise<void> };
 type InspectionRequest = {
   seriesId: string; targetId: string | null; assetIds: string[]; draftRegions: ReferenceRegions;
   api?: (import("./api").CharacterApi)["inspectReferenceRegions"]; revision?: string;
@@ -64,23 +66,36 @@ export function useReferenceRegionInspection({ seriesId, targetId, assetIds, dra
   const [attempt, setAttempt] = useState(0);
   const key = JSON.stringify([seriesId, targetId, assetIds, draftRegions, revision, attempt]);
   const scope = JSON.stringify([seriesId, targetId, [...assetIds].sort(), revision, attempt]);
+  const request = useRef(0);
+  const latest = useRef({ key, api });
+  latest.current = { key, api };
   const [result, setResult] = useState<(ReferenceRegionInspection & { key: string; scope: string; api: InspectionRequest["api"] }) | null>(null);
   useEffect(() => {
     if (!api || !seriesId || !assetIds.length) return;
     let active = true;
+    const generation = ++request.current;
     api(seriesId, targetId, assetIds, draftRegions)
-      .then(inspections => { if (active) setResult({ key, scope, api, inspections, error: null }); })
+      .then(inspections => { if (active && generation === request.current) setResult({ key, scope, api, inspections, error: null }); })
       .catch(reason => {
-        if (active) setResult({ key, scope, api, inspections: null, error: commandErrorMessage(reason, "인물 영역을 확인하지 못했습니다.") });
+        if (active && generation === request.current) setResult({ key, scope, api, inspections: null, error: commandErrorMessage(reason, "인물 영역을 확인하지 못했습니다.") });
       });
-    return () => { active = false; };
+    return () => { active = false; ++request.current; };
   }, [key, api]);
   const none = { inspections: null, error: null };
   const current = !api || !result ? none
     : result.key === key && result.api === api ? result
     : result.scope === scope && result.inspections ? { inspections: withDraftChoices(result.inspections, draftRegions), error: null }
     : none;
-  return { ...current, retry: () => setAttempt(value => value + 1) };
+  // Refresh ownership in place: preserve the last result until its replacement arrives.
+  const refresh = async () => {
+    if (!api) return;
+    const generation = ++request.current;
+    const inspections = await api(seriesId, targetId, assetIds, draftRegions);
+    if (generation === request.current && latest.current.key === key && latest.current.api === api) {
+      setResult({ key, scope, api, inspections, error: null });
+    }
+  };
+  return { ...current, retry: () => setAttempt(value => value + 1), refresh };
 }
 
 /** Short state label shared by the reference strip and the correction list. */
@@ -137,10 +152,11 @@ function RegionImage({ assetId, box, width, height, label, selectionLabel, taken
  * enough usable references there is no prompt at all, and the chooser opens on
  * request rather than on render.
  */
-export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegions, savedRegions = {}, privacyMode, busy, api, inspection, focusRequest, onOpenOriginal, onChange }: {
+export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegions, savedRegions = {}, privacyMode, busy: parentBusy, api, decisionApi = characterApi, inspection, focusRequest, onOpenOriginal, onChange }: {
   seriesId: string; targetId: string | null; assetIds: string[]; draftRegions: ReferenceRegions; savedRegions?: ReferenceRegions;
   privacyMode: boolean; busy: boolean; api: NonNullable<(import("./api").CharacterApi)["inspectReferenceRegions"]>;
   inspection?: ReferenceRegionInspection;
+  decisionApi?: Pick<CharacterApi, "targets" | "decide">;
   /** Opens one reference's crop directly (e.g. from a tapped strip tile); `key` repeats the same request. */
   focusRequest?: { assetId: string; key: number } | null;
   onOpenOriginal?: (assetId: string) => void;
@@ -153,8 +169,12 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
   // "focus" checks one reference the user tapped and closes after a choice.
   const [mode, setMode] = useState<"required" | "correction" | "focus" | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const rejectingRef = useRef(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const busy = parentBusy || rejecting !== null;
   const sectionRef = useRef<HTMLElement>(null);
-  const { inspections: current, error, retry } = inspection ?? localInspection;
+  const { inspections: current, error, retry, refresh } = inspection ?? localInspection;
   const inspections = current ?? [];
   const changedRegions = draftReferenceRegions(draftRegions, assetIds, savedRegions);
   const regionStatus = (region: ReferenceInspection) => referenceRegionStatus(region, draftRegions, changedRegions);
@@ -226,6 +246,25 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     setChosen(mode === "required" ? unresolved.find(region => region.assetId !== active.assetId)?.assetId ?? null : null);
   }
 
+  async function rejectHolder(region: ReferenceInspection, holder: NonNullable<ReferenceInspection["takenBoxes"]>[number]) {
+    if (busy || rejectingRef.current || holder.source !== "accepted" || !refresh) return;
+    rejectingRef.current = true;
+    setRejecting(holder.targetId);
+    setDecisionError(null);
+    try {
+      const target = (await decisionApi.targets()).find(target => target.id === holder.targetId);
+      if (!target) throw new Error("캐릭터 정보를 찾지 못했습니다. 다시 확인해 주세요.");
+      await decisionApi.decide({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: [region.assetId],
+        decision: "rejected", baselineFingerprint: null, scanId: null });
+      await refresh();
+    } catch (reason) {
+      setDecisionError(commandErrorMessage(reason, "캐릭터에서 빼지 못했습니다."));
+    } finally {
+      rejectingRef.current = false;
+      setRejecting(null);
+    }
+  }
+
   // Skip advances through every unresolved reference and wraps once, so all of N are reachable.
   function skip() {
     if (!active || unresolved.length < 2) return;
@@ -248,7 +287,7 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     .sort((a, b) => assetIds.indexOf(a.assetId) - assetIds.indexOf(b.assetId));
   const canCorrect = Boolean(current) && corrections.length > 0;
   // With enough usable references the section stays quiet unless the user opened it.
-  const showSection = Boolean(error) || Boolean(open) || askRequired || mode === "correction" || canCorrect;
+  const showSection = Boolean(error || decisionError) || Boolean(open) || askRequired || mode === "correction" || canCorrect;
   if (!showSection) return null;
   // Progress counts the references still needing a decision. A correction may target a
   // reference that is not in that list, so it reports its position in the draft instead.
@@ -258,6 +297,7 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
       : { current: assetIds.indexOf(open.region.assetId) + 1, total: assetIds.length }
     : null;
   return <section ref={sectionRef} className="character-reference-regions" aria-label="인물 영역 확인">
+    {decisionError && <p role="alert">{decisionError}</p>}
     {error && <><p role="alert">{error}</p>{retry && <Button size="sm" variant="ghost" disabled={busy} onClick={retry}>인물 확인 다시 시도</Button>}</>}
     {!error && mode === null && <div className="character-actions">
       {askRequired && <Button size="sm" disabled={busy} onClick={openRequired}>필요한 인물만 확인</Button>}
@@ -293,13 +333,20 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     {open && progress && <>
       <p className="character-registry__label"><small>{progress.current}/{progress.total}</small><span>사용할 인물을 한 명 선택하세요</span></p>
       <p className="character-message">{regionStatus(open.region)}</p>
-      <div className="character-region-options">{open.region.boxes.map((box, index) =>
-        <RegionImage key={`${open.region.assetId}-${index}`} assetId={open.region.assetId} box={box} width={open.region.width} height={open.region.height}
-          label={takenBoxOwner(open.region, index) ? `인물 영역 ${index + 1} · ${takenBoxOwner(open.region, index)} 인물` : `인물 영역 ${index + 1} 선택`}
-          takenBy={takenBoxOwner(open.region, index) ?? undefined}
-          selectionLabel={usableRegion(open.region) && referenceRegionIndex(open.region) === index ? open.region.state === "selected" ? "직접 지정한 인물" : "자동 선택된 인물" : undefined}
-          privacyMode={privacyMode} disabled={busy}
-          onSelect={() => pick(index)} />)}</div>
+      <div className="character-region-options">{open.region.boxes.map((box, index) => {
+        const holder = open.region.takenBoxes?.find(taken => taken.index === index);
+        return <div className="character-region-option" key={`${open.region.assetId}-${index}`}>
+          <RegionImage assetId={open.region.assetId} box={box} width={open.region.width} height={open.region.height}
+            label={holder ? `인물 영역 ${index + 1} · ${holder.character} 인물` : `인물 영역 ${index + 1} 선택`}
+            takenBy={holder?.character}
+            selectionLabel={usableRegion(open.region) && referenceRegionIndex(open.region) === index ? open.region.state === "selected" ? "직접 지정한 인물" : "자동 선택된 인물" : undefined}
+            privacyMode={privacyMode} disabled={busy}
+            onSelect={() => pick(index)} />
+          {holder?.source === "accepted" && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void rejectHolder(open.region, holder)}>
+            <BusyLabel busy={rejecting === holder.targetId} idle={`${holder.character} 아님`}>빼는 중</BusyLabel>
+          </Button>}
+        </div>;
+      })}</div>
       <div className="character-actions">
         {open.mode === "required" && unresolved.length > 1 && <Button size="sm" variant="ghost" disabled={busy} onClick={skip}>다음 이미지</Button>}
         {suggested !== null && <Button size="sm" disabled={busy} onClick={() => pick(suggested)}>추천 영역 사용</Button>}

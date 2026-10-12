@@ -938,23 +938,47 @@ fn clear_recommendations(f: &crate::library::characters::tests::Fixture) {
 fn a_person_another_character_is_registered_on_cannot_be_chosen_but_the_others_can() {
     let (f, momoka, midori, hash) = shared_image_fixture();
     // No box is known for 모모카 on this image: today's behaviour, any person is allowed.
-    assert!(known_people_of_others(&f.library.connection().unwrap(), Some(&midori.id), "asset-5")
-        .unwrap()
-        .is_empty());
+    assert!(known_people_of_others(
+        &f.library.connection().unwrap(),
+        Some(&midori.id),
+        "asset-5"
+    )
+    .unwrap()
+    .is_empty());
     assert!(choose(&f, &midori, &hash, [10, 10, 50, 70]).is_ok());
     assert!(choose(&f, &midori, &hash, [50, 10, 90, 70]).is_ok());
     // The review showed 모모카 her first person and she was accepted.
     recommend(&f, &momoka, "asset-5", two_people(0));
-    let people = known_people_of_others(&f.library.connection().unwrap(), Some(&midori.id), "asset-5").unwrap();
-    assert_eq!(people, vec![KnownPerson { character: "모모카".into(), bounds: [10.0, 10.0, 50.0, 70.0] }]);
+    let people = known_people_of_others(
+        &f.library.connection().unwrap(),
+        Some(&midori.id),
+        "asset-5",
+    )
+    .unwrap();
+    assert_eq!(
+        people,
+        vec![KnownPerson {
+            character: "모모카".into(),
+            target_id: momoka.id.clone(),
+            source: "accepted".into(),
+            bounds: [10.0, 10.0, 50.0, 70.0]
+        }]
+    );
     // The owner herself is never blocked by her own person.
-    assert!(known_people_of_others(&f.library.connection().unwrap(), Some(&momoka.id), "asset-5")
-        .unwrap()
-        .is_empty());
+    assert!(known_people_of_others(
+        &f.library.connection().unwrap(),
+        Some(&momoka.id),
+        "asset-5"
+    )
+    .unwrap()
+    .is_empty());
     // The same person, or one that overlaps it enough, is refused with the owner name.
     for bounds in [[10, 10, 50, 70], [12, 10, 50, 70]] {
         let error = choose(&f, &midori, &hash, bounds).unwrap_err();
-        assert_eq!(error.to_string(), "이 인물은 모모카로 등록돼 있어요. 다른 인물을 골라 주세요.");
+        assert_eq!(
+            error.to_string(),
+            "이 인물은 모모카로 등록돼 있어요. 다른 인물을 골라 주세요."
+        );
     }
     // The other person, and a box that only touches the first one, pass.
     assert!(choose(&f, &midori, &hash, [50, 10, 90, 70]).is_ok());
@@ -975,7 +999,9 @@ fn a_person_another_character_is_registered_on_cannot_be_chosen_but_the_others_c
         error.to_string(),
         "1번째 레퍼런스: 이 인물은 모모카로 등록돼 있어요. 다른 인물을 골라 주세요."
     );
-    assert!(read_regions(&f.library.connection().unwrap(), &midori.id).unwrap().is_empty());
+    assert!(read_regions(&f.library.connection().unwrap(), &midori.id)
+        .unwrap()
+        .is_empty());
     f.library
         .save_character_settings(
             shared_settings(
@@ -1038,7 +1064,14 @@ fn a_recorded_decision_crop_an_s36_crop_index_and_an_own_reference_region_each_n
             )
             .unwrap();
     };
-    let people = || known_people_of_others(&f.library.connection().unwrap(), Some(&midori.id), "asset-5").unwrap();
+    let people = || {
+        known_people_of_others(
+            &f.library.connection().unwrap(),
+            Some(&midori.id),
+            "asset-5",
+        )
+        .unwrap()
+    };
     // A B36 acceptance stores the crop it was made on.
     set_snapshot(json!({"prediction": two_people(1), "references": []}));
     assert_eq!(people()[0].bounds, [50.0, 10.0, 90.0, 70.0]);
@@ -1056,35 +1089,90 @@ fn a_recorded_decision_crop_an_s36_crop_index_and_an_own_reference_region_each_n
             params![momoka.id, hash, BASELINE, "[50,10,90,70]"],
         )
         .unwrap();
-    let bounds: Vec<_> = people().into_iter().map(|p| p.bounds).collect();
-    assert_eq!(bounds, vec![[50.0, 10.0, 90.0, 70.0], [10.0, 10.0, 50.0, 70.0]]);
+    let people = people();
+    assert_eq!(
+        people,
+        vec![
+            KnownPerson {
+                character: "모모카".into(),
+                target_id: momoka.id.clone(),
+                source: "reference".into(),
+                bounds: [50.0, 10.0, 90.0, 70.0]
+            },
+            KnownPerson {
+                character: "모모카".into(),
+                target_id: momoka.id.clone(),
+                source: "accepted".into(),
+                bounds: [10.0, 10.0, 50.0, 70.0]
+            },
+        ]
+    );
+    let mut row = row_in_state("asset-5", &hash, "needs_region");
+    row.boxes = vec![[50, 10, 90, 70], [10, 10, 50, 70]];
+    mark_taken_boxes(&mut row, &people);
+    let serialized = serde_json::to_value(&row).unwrap();
+    assert_eq!(
+        serialized["takenBoxes"],
+        json!([
+            {"index": 0, "character": "모모카", "targetId": momoka.id, "source": "reference"},
+            {"index": 1, "character": "모모카", "targetId": momoka.id, "source": "accepted"},
+        ])
+    );
 }
 
 #[test]
 fn the_inspection_marks_a_taken_box_and_never_suggests_or_keeps_it_chosen() {
-    let people = [KnownPerson { character: "자오".into(), bounds: [10.0, 10.0, 50.0, 70.0] }];
+    let people = [KnownPerson {
+        character: "자오".into(),
+        target_id: "zhao".into(),
+        source: "accepted".into(),
+        bounds: [10.0, 10.0, 50.0, 70.0],
+    }];
     let mut row = row_in_state("asset-0", "hash-0", "needs_region");
     row.boxes = vec![[10, 10, 50, 70], [50, 10, 90, 70]];
     row.suggested_index = Some(0);
     mark_taken_boxes(&mut row, &people);
-    assert_eq!(row.taken_boxes, vec![TakenBox { index: 0, character: "자오".into() }]);
-    assert_eq!((row.suggested_index, row.state.as_str()), (None, "needs_region"));
+    assert_eq!(
+        row.taken_boxes,
+        vec![TakenBox {
+            index: 0,
+            character: "자오".into(),
+            target_id: "zhao".into(),
+            source: "accepted".into()
+        }]
+    );
+    assert_eq!(
+        (row.suggested_index, row.state.as_str()),
+        (None, "needs_region")
+    );
     // A chosen person that turns out to be taken is no choice any more.
     let mut chosen = row_in_state("asset-0", "hash-0", "selected");
     chosen.boxes = vec![[11, 10, 50, 70], [50, 10, 90, 70]];
     chosen.selected_index = Some(0);
     mark_taken_boxes(&mut chosen, &people);
-    assert_eq!((chosen.selected_index, chosen.state.as_str()), (None, "needs_region"));
+    assert_eq!(
+        (chosen.selected_index, chosen.state.as_str()),
+        (None, "needs_region")
+    );
     // Someone else person is left alone.
     let mut other = row_in_state("asset-0", "hash-0", "selected");
     other.boxes = vec![[10, 10, 50, 70], [50, 10, 90, 70]];
     other.selected_index = Some(1);
     mark_taken_boxes(&mut other, &people);
-    assert_eq!((other.selected_index, other.state.as_str()), (Some(1), "selected"));
-    assert_eq!(serde_json::to_value(&other).unwrap()["takenBoxes"][0]["character"], json!("자오"));
+    assert_eq!(
+        (other.selected_index, other.state.as_str()),
+        (Some(1), "selected")
+    );
+    assert_eq!(
+        serde_json::to_value(&other).unwrap()["takenBoxes"][0]["character"],
+        json!("자오")
+    );
     let mut none = row_in_state("asset-0", "hash-0", "single");
     mark_taken_boxes(&mut none, &[]);
-    assert!(serde_json::to_value(&none).unwrap().get("takenBoxes").is_none());
+    assert!(serde_json::to_value(&none)
+        .unwrap()
+        .get("takenBoxes")
+        .is_none());
 }
 
 #[test]
