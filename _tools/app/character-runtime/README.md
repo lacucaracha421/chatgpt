@@ -525,6 +525,32 @@ from the former per-series switch; they are ignored. The read-only readiness lin
 character (judged, wrong, allowed, examples, `learning` / `collecting` / `hold`) is
 shown on the character cards and in 설정 › 고급.
 
+## Optional Windows GPU extraction
+
+The native worker requests `--gpu` only on Windows with the active `main`
+performance profile and unrestricted workload. Linux, the laptop profile, and
+restricted/light mode keep CPU sessions and the existing thread budgets. A
+workload-mode change recreates the resident worker on its next use through the
+existing configuration comparison; changing the performance profile still requires
+the application's normal restart. DirectML is used only when the selected Python
+environment exposes `DmlExecutionProvider`. Session initialization failures fall
+back to the original CPU constructors, with one diagnostic line on stderr.
+
+GPU constructors live in `gpu_providers.py`; the frozen CPU extraction source and
+CPU feature identities are unchanged. Pick the existing GPU environment's Python
+through character runtime setup (the `python` setting in `character-runtime.json`
+under the application config directory; `LAKOMICS_CHARACTER_PYTHON` overrides it).
+A different ONNX Runtime version still produces a different feature namespace.
+Before reusing CPU caches in that environment, run `feature_equivalence.py` with
+the GPU Python and `--gpu --kind both --write`, supplying the configured `--library`
+and `--models` paths. It uses the same GPU constructors as the live worker and
+writes only machine-local `cache-compatibility.json` and `s36-compatibility.json`
+receipts when every requested check passes. The existing exact feature comparison
+is preserved: even small vector differences refuse a receipt. Neither cache files
+nor the library database are rewritten by this check.
+The `--gpu` equivalence check also refuses a receipt if any session fell back to
+CPU, since that would not verify GPU-produced features.
+
 ## S36 review screen (stage 4, early)
 
 Series view → `S36 확인` opens a fullscreen review of shadow rows scored

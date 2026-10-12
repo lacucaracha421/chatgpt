@@ -24,6 +24,10 @@ from holdout_rules import is_hash
 from runtime import Runtime, sha256
 
 MIN_SAMPLE = 20
+# A DirectML pass may differ from the saved CPU features only by float rounding (measured
+# 2026-10-09/12: max 7.3e-4 B36, 1.1e-5 S36, identical boxes, no flipped decisions).
+GPU_MAX_DIFF = 2e-3
+GPU_MIN_COSINE = 0.99999
 
 
 def cache_entries(root):
@@ -67,7 +71,7 @@ def source_path(db, library, content_hash):
     raise ValueError("Source file missing")
 
 
-def compare(saved, current, content_hash):
+def compare(saved, current, content_hash, tolerant=False):
     reasons = []
     if current.content_hash != content_hash:
         reasons.append("content_hash")
@@ -82,13 +86,22 @@ def compare(saved, current, content_hash):
     elif not np.isfinite(a).all() or not np.isfinite(b).all():
         reasons.append("nonfinite_vectors")
     else:
-        difference = float(np.max(np.abs(a.astype(np.float64) - b.astype(np.float64))))
-        if difference != 0:
-            reasons.append("vectors")
+        a64, b64 = a.astype(np.float64), b.astype(np.float64)
+        difference = float(np.max(np.abs(a64 - b64))) if a.size or not tolerant else 0.0
+        if not tolerant:
+            if difference != 0:
+                reasons.append("vectors")
+        elif a.size:
+            a2, b2 = a64.reshape(len(a64), -1), b64.reshape(len(b64), -1)
+            norms = np.linalg.norm(a2, axis=1) * np.linalg.norm(b2, axis=1)
+            cosine = np.sum(a2 * b2, axis=1) / np.where(norms > 0, norms, 1)
+            if difference > GPU_MAX_DIFF or float(np.min(cosine)) < GPU_MIN_COSINE:
+                reasons.append("vectors")
     return reasons, difference
 
 
-def verify_kind(db, library, models, kind, sample, from_id, encoder_factory, runtime_factory):
+def verify_kind(db, library, models, kind, sample, from_id, encoder_factory, runtime_factory,
+                require_gpu=False):
     report = {"computed_id": feature_id() if kind == "s36" else extraction_fingerprint(),
               "old_id": None, "sample_size": 0, "mismatches": [], "max_diff": 0.0,
               "resolvable_entries": 0, "skipped_unresolvable": 0,
@@ -107,6 +120,13 @@ def verify_kind(db, library, models, kind, sample, from_id, encoder_factory, run
         selected = random.sample(resolvable, min(sample, len(resolvable)))
         engine = (encoder_factory(models / "augmentation/model_feat.onnx", models / "character-detector.onnx")
                   if kind == "s36" else runtime_factory(models))
+        if require_gpu:
+            sessions = [engine.feature, engine.detector]
+            if kind == "b36":
+                sessions.append(engine.metric)
+            if any(session is None or "DmlExecutionProvider" not in session.get_providers()
+                   for session in sessions):
+                raise ValueError("--gpu verification requires active DirectML sessions; refusing a CPU fallback receipt")
         reader = FeatureCache.__new__(FeatureCache)  # Pure reader, no mkdir/cleanup.
         for entry in selected:
             h = entry.stem
@@ -123,7 +143,7 @@ def verify_kind(db, library, models, kind, sample, from_id, encoder_factory, run
                 current = engine.extract(path, h) if kind == "s36" else engine.extract(path)
                 if sha256(path) != h:
                     raise ValueError("Source changed during extraction")
-                reasons, difference = compare(saved, current, h)
+                reasons, difference = compare(saved, current, h, tolerant=require_gpu)
                 if difference is not None:
                     report["max_diff"] = max(report["max_diff"], difference)
                 if reasons:
@@ -185,7 +205,7 @@ def write_receipts(models, library, results):
 
 
 def verify(library, models, *, sample=60, kind="both", from_id=None, write=False,
-           encoder_factory=SmallEncoder, runtime_factory=Runtime):
+           encoder_factory=SmallEncoder, runtime_factory=Runtime, require_gpu=False):
     report = {"requested_sample": sample, "dry_run": not write, "results": {},
               "equivalent": False, "written": False, "errors": []}
     try:
@@ -197,7 +217,8 @@ def verify(library, models, *, sample=60, kind="both", from_id=None, write=False
         with open_readonly(library / "library.sqlite") as db:
             for selected_kind in (("s36", "b36") if kind == "both" else (kind,)):
                 report["results"][selected_kind] = verify_kind(
-                    db, library, models, selected_kind, sample, from_id, encoder_factory, runtime_factory)
+                    db, library, models, selected_kind, sample, from_id, encoder_factory, runtime_factory,
+                    require_gpu=require_gpu)
         report["equivalent"] = all(result["equivalent"] for result in report["results"].values())
         if write and report["equivalent"]:
             write_receipts(models, library, report["results"])
@@ -216,7 +237,14 @@ def main(argv=None):
     parser.add_argument("--kind", choices=("s36", "b36", "both"), default="both")
     parser.add_argument("--from", dest="from_id", help="Explicit old B36 namespace (full id)")
     parser.add_argument("--write", action="store_true", help="Write receipts only if every requested check passes")
-    report = verify(**vars(parser.parse_args(argv)))
+    parser.add_argument("--gpu", action="store_true", help="Extract through the worker's DirectML path")
+    arguments = vars(parser.parse_args(argv))
+    if arguments.pop("gpu"):
+        from functools import partial
+        from gpu_providers import create_encoder, create_runtime
+        arguments.update(encoder_factory=partial(create_encoder, gpu=True),
+                         runtime_factory=partial(create_runtime, gpu=True), require_gpu=True)
+    report = verify(**arguments)
     print(json.dumps(report, sort_keys=True, allow_nan=False))
     return 0 if report["equivalent"] and not report["errors"] else 1
 

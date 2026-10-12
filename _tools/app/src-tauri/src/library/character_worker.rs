@@ -76,12 +76,23 @@ impl SavedRuntime {
 }
 
 impl RuntimeConfig {
-    fn performance_args(&self) -> [String; 6] {
-        [
+    fn performance_args(&self) -> Vec<String> {
+        self.performance_args_for(crate::workload::is_restricted())
+    }
+
+    fn performance_args_for(&self, restricted: bool) -> Vec<String> {
+        let mut args = vec![
             "--s36-intra-threads".into(), self.performance.s36_intra_threads.to_string(),
             "--s36-inter-threads".into(), self.performance.s36_inter_threads.to_string(),
             "--reference-cache-bytes".into(), self.performance.reference_cache_bytes.to_string(),
-        ]
+        ];
+        if cfg!(windows)
+            && !restricted
+            && self.performance == crate::performance::Profile::Main.budgets()
+        {
+            args.push("--gpu".into());
+        }
+        args
     }
 
     fn load(script: PathBuf, settings: &Path) -> Result<SavedRuntime> {
@@ -488,7 +499,7 @@ pub(super) struct Worker {
 /// is borrowed for one query/asset, not for an entire historical inventory.
 #[derive(Default)]
 pub(super) struct Pool {
-    session: std::sync::Mutex<Option<(RuntimeConfig, Worker, Value)>>,
+    session: std::sync::Mutex<Option<(RuntimeConfig, Vec<String>, Worker, Value)>>,
     manual_waiters: std::sync::atomic::AtomicUsize,
 }
 impl std::fmt::Debug for Pool {
@@ -537,21 +548,22 @@ impl Pool {
         if manual {
             self.manual_waiters.fetch_sub(1, Ordering::AcqRel);
         }
+        let performance_args = config.performance_args();
         if guard
             .as_ref()
-            .is_some_and(|(previous, _, _)| previous != config)
+            .is_some_and(|(previous, args, _, _)| previous != config || *args != performance_args)
         {
             *guard = None;
         }
         if guard.is_none() {
-            let mut worker = Worker::start(config, cache, cancel.clone())?;
+            let mut worker = Worker::start_with_args(config, &performance_args, cache, cancel.clone())?;
             let ready = worker.receive()?;
             if ready["type"] != "ready" || ready["baselineFingerprint"] != BASELINE {
                 return Err(Error::Worker("캐릭터 런타임 검증 실패".into()));
             }
-            *guard = Some((config.clone(), worker, ready));
+            *guard = Some((config.clone(), performance_args, worker, ready));
         }
-        let (_, worker, ready) = guard.as_mut().unwrap();
+        let (_, _, worker, ready) = guard.as_mut().unwrap();
         worker.cancel = cancel;
         let result = work(worker, ready);
         if result.is_err() {
@@ -567,13 +579,22 @@ impl Worker {
         cache: &Path,
         cancel: Arc<AtomicBool>,
     ) -> Result<Self> {
+        Self::start_with_args(config, &config.performance_args(), cache, cancel)
+    }
+
+    fn start_with_args(
+        config: &RuntimeConfig,
+        performance_args: &[String],
+        cache: &Path,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<Self> {
         let mut command = Command::new(&config.python);
         command
             .arg("-B")
             .arg(&config.script)
             .arg("--models")
             .arg(&config.models)
-            .args(config.performance_args())
+            .args(performance_args)
             .arg("--cache")
             .arg(cache)
             .stdin(Stdio::piped())

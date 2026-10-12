@@ -17,10 +17,12 @@ def emit(value):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--models", type=Path, required=True)
+    parser.add_argument("--gpu", action="store_true", help="Use DirectML when available")
     args = parser.parse_args()
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
-    engine = Runtime(args.models)
+    from gpu_providers import create_runtime
+    engine = create_runtime(args.models, gpu=args.gpu)
     emit({"type": "ready", "baselineFingerprint": FINGERPRINT})
     for line in sys.stdin:
         request_id = None

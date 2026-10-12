@@ -301,11 +301,17 @@ fn performance_budgets_reach_worker_arguments_but_not_saved_runtime_settings() {
             models: "models".into(), augmentation_model: None, s36_shadow_disabled: false,
             shadow_model: None,
         };
-        assert_eq!(config.performance_args(), [
+        let cpu_args = vec![
             "--s36-intra-threads".to_string(), profile.budgets().s36_intra_threads.to_string(),
             "--s36-inter-threads".to_string(), "1".to_string(),
             "--reference-cache-bytes".to_string(), profile.budgets().reference_cache_bytes.to_string(),
-        ]);
+        ];
+        assert_eq!(config.performance_args_for(true), cpu_args);
+        let mut normal_args = cpu_args;
+        if cfg!(windows) && profile == crate::performance::Profile::Main {
+            normal_args.push("--gpu".into());
+        }
+        assert_eq!(config.performance_args_for(false), normal_args);
         let saved = serde_json::to_value(&config).unwrap();
         assert!(saved.get("performance").is_none());
         assert!(saved.get("s36_intra_threads").is_none());

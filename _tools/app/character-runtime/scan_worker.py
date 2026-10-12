@@ -45,6 +45,7 @@ def runtime_arguments(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--models", type=Path, required=True)
     parser.add_argument("--cache", type=Path, required=True)
+    parser.add_argument("--gpu", action="store_true", help="Use DirectML when available")
     # Optional native-ready augmentation. No flag means no import at all.
     parser.add_argument("--augmentation-model", type=Path)
     parser.add_argument("--s36-intra-threads", type=int, choices=(2, 4), default=2)
@@ -56,7 +57,12 @@ def runtime_arguments(argv=None):
 
 def configured_encoder(args):
     from character_encoder import SmallEncoder
-    return SmallEncoder(args.augmentation_model, args.models / "character-detector.onnx",
+    factory = SmallEncoder
+    if args.gpu:
+        from gpu_providers import create_encoder
+        from functools import partial
+        factory = partial(create_encoder, gpu=True)
+    return factory(args.augmentation_model, args.models / "character-detector.onnx",
                         intra_threads=args.s36_intra_threads, inter_threads=args.s36_inter_threads)
 
 
@@ -68,7 +74,11 @@ def main():
     shadow_cancel = threading.Event()
     threading.Thread(target=read_requests, args=(inbox, shadow_cancel), daemon=True).start()
     try:
-        engine = Runtime(args.models)
+        if args.gpu:
+            from gpu_providers import create_runtime
+            engine = create_runtime(args.models, gpu=True)
+        else:
+            engine = Runtime(args.models)
         fingerprint = runtime_fingerprint()
         feature_fingerprint = extraction_fingerprint()
         cache = FeatureCache(args.cache, engine, feature_fingerprint, compatible_feature_caches(args.models, feature_fingerprint))
