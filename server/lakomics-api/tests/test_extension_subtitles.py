@@ -75,7 +75,7 @@ class ExtensionSubtitlesTests(unittest.IsolatedAsyncioTestCase):
         return {"video": "abcDEF_123-", "track": "en:manual", "mode": "translated-haeyo-v1",
                 "model": "translator", "createdAt": 1720000000000, "register": "haeyo",
                 "glossary": [{"source": "hello", "korean": "안녕"}],
-                "cues": [{"startMs": 0, "endMs": 1000, "text": "안녕하세요", "orig": "Hello"},
+                "cues": [{"startMs": 0, "endMs": 1000, "text": "안녕하세요", "orig": "Hello", "speaker": 1},
                          {"startMs": 1000, "endMs": 1000, "text": ""}], **updates}
 
     async def put(self, body=None, token="paired-a"):
@@ -109,6 +109,7 @@ class ExtensionSubtitlesTests(unittest.IsolatedAsyncioTestCase):
         restored = await self.get()
         self.assertEqual((restored.status_code, restored.json()), (200, {"version": 1, **self.body()}))
         self.assertNotIn("orig", restored.json()["cues"][1])
+        self.assertNotIn("speaker", restored.json()["cues"][1])
 
     async def test_upsert_compressed_payload_and_server_timestamps(self):
         with patch.object(subtitles.time, "time_ns", return_value=1_000_000_000):
@@ -186,7 +187,9 @@ class ExtensionSubtitlesTests(unittest.IsolatedAsyncioTestCase):
         for field, value in (("startMs", -1), ("startMs", True), ("startMs", 0.5), ("startMs", "0"),
                              ("endMs", -1), ("endMs", False), ("endMs", 0.5), ("endMs", "1"),
                              ("text", "t" * 501), ("text", None), ("orig", "o" * 501),
-                             ("orig", None), ("orig", 1), ("extra", "x")):
+                             ("orig", None), ("orig", 1), ("speaker", -1), ("speaker", 100),
+                             ("speaker", None), ("speaker", True), ("speaker", 1.5), ("speaker", "1"),
+                             ("extra", "x")):
             patches.append({"cues": [{**cue, field: value}]})
         patches.append({"cues": [{**cue, "startMs": 2}]})
         for index, updates in enumerate(patches):

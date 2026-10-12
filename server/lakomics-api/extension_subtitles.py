@@ -43,6 +43,8 @@ class Cue(BaseModel):
     endMs: int = Field(ge=0)
     text: str = Field(max_length=500)
     orig: str | None = Field(default=None, max_length=500)
+    # Audio-based speaker number from the PC's local speech recognition; absent for YouTube caption tracks.
+    speaker: int | None = Field(default=None, ge=0, le=99)
 
     @field_validator("endMs")
     @classmethod
@@ -56,6 +58,13 @@ class Cue(BaseModel):
     def original_text(cls, value):
         if value is None:
             raise ValueError("orig must be a string when supplied")
+        return value
+
+    @field_validator("speaker")
+    @classmethod
+    def speaker_number(cls, value):
+        if value is None:
+            raise ValueError("speaker must be an integer when supplied")
         return value
 
 
