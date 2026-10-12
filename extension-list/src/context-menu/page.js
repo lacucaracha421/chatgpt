@@ -489,7 +489,7 @@
         if (event.pointerType !== "touch") return;
         const target = event.composedPath?.()[0] || event.target, unit = unitFor(target);
         // Pictures belong to the collector's own long press; leave them alone.
-        if (!unit || collector.findCandidate?.(target)) return;
+        if (!unit || collector.findCandidate?.(target) || target.closest?.("a[href]") || win.getSelection?.().toString().trim()) return;
         start = { x: event.clientX || 0, y: event.clientY || 0 };
         pressTimer = win.setTimeout(() => {
           pressTimer = 0;
@@ -503,7 +503,7 @@
       listen(doc, "scroll", () => { hideNote(); cancel(); }, { capture: true, passive: true });
       listen(doc, "wheel", () => { hideNote(); cancel(); }, { capture: true, passive: true });
       listen(doc, "keydown", () => { hideNote(); cancel(); }, { capture: true, passive: true });
-      listen(doc, "contextmenu", event => { if (Date.now() < quiet) event.preventDefault(); }, { capture: true });
+      listen(doc, "contextmenu", event => { if (!event.shiftKey && Date.now() < quiet) event.preventDefault(); }, { capture: true });
       listen(win, "blur", () => { hideNote(); cancel(); });
       j.dismiss = () => { hideNote(); cancel(); };
     }

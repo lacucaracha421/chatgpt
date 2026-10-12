@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Companion",
-  "version": "3.5.34",
+  "version": "3.5.35",
   "description": "Collect images and videos into Lakomics, translate X posts, YouTube subtitles and web pages, and use the Lakomics right-click menu.",
   "permissions": [
     "storage",
@@ -16,6 +16,7 @@
   ],
   "host_permissions": [
     "https://*/*",
+    "http://*/*",
     "http://127.0.0.1/*",
     "http://127.0.0.1:39125/*",
     "http://100.76.119.29/*"
@@ -65,13 +66,16 @@
     {
       "matches": [
         "https://x.com/*",
-        "https://twitter.com/*"
+        "https://twitter.com/*",
+        "http://x.com/*",
+        "http://twitter.com/*"
       ],
       "js": [
         "src/av-lookup.js",
         "src/av-send.js",
         "src/av-lookup-chip.js",
         "src/classification-tree.js",
+        "src/forum-source.js",
         "src/x-source.js",
         "src/x-gallery.js",
         "src/x-home-refresh.js",
@@ -87,17 +91,24 @@
       "css": [
         "src/content.css"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
     },
     {
       "matches": [
-        "https://*/*"
+        "https://*/*",
+        "http://*/*"
       ],
       "exclude_matches": [
         "https://x.com/*",
         "https://twitter.com/*",
         "https://lacucaracha421.github.io/chatgpt/*",
-        "https://*/extension-pair*"
+        "https://*/extension-pair*",
+        "http://x.com/*",
+        "http://twitter.com/*",
+        "http://lacucaracha421.github.io/chatgpt/*",
+        "http://*/extension-pair*"
       ],
       "js": [
         "src/av-lookup.js",
@@ -117,7 +128,9 @@
       "css": [
         "src/content.css"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
     },
     {
       "matches": [
@@ -146,7 +159,17 @@
       "run_at": "document_idle"
     }
   ],
-  "web_accessible_resources": [{ "resources": ["src/context-menu/menu.css"], "matches": ["https://*/*"] }],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/context-menu/menu.css"
+      ],
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ]
+    }
+  ],
   "options_page": "options/options.html",
   "icons": {
     "16": "icons/icon16.png",

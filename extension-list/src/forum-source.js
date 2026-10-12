@@ -14,8 +14,8 @@
   function directUrl(value) {
     if (!value) return null;
     try {
-      const url = new URL(value, globalThis.location?.href);
-      if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
+      const url = new URL(value, globalThis.document?.baseURI || globalThis.location?.href);
+      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port) return null;
       if (/\.(m3u8|mpd)(?:$|[?#])/i.test(url.href)) return null;
       return url.href;
     } catch { return null; }
@@ -38,10 +38,10 @@
   }
 
   function findCandidate(target, allowGeneric = false) {
-    const sourceUrl = globalThis.location?.href;
+    const sourceUrl = /^https?:/.test(globalThis.location?.href || "") ? globalThis.location.href : globalThis.document?.baseURI;
     const source = siteFor(sourceUrl) ?? (allowGeneric && directUrl(sourceUrl) ? "web" : null);
     if (!source) return null;
-    if (source === "web" && ["x.com", "twitter.com"].includes(new URL(sourceUrl).hostname)) return null;
+    if (source === "web" && ["x.com", "twitter.com"].includes(globalThis.location?.hostname)) return null;
     const media = target?.closest?.("img, video, audio")
       ?? target?.closest?.(".video-js")?.querySelector?.("video");
     const link = target?.closest?.("a[href]");

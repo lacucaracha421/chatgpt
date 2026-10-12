@@ -13,6 +13,21 @@ function fixture(html='<textarea>Hello world</textarea>') {
   return {w,doc,actions,toasts,calls,clipboard,context,close:()=>w.close()};
 }
 const gesture={isTrusted:true};const origin={x:20,y:30};
+test('frame download captures PNG; tainted, DRM and unloaded frames show Korean reasons',async()=>{
+  const f=fixture(), video={videoWidth:640,videoHeight:360,readyState:2};
+  const original=f.doc.createElement.bind(f.doc);let drawn;
+  f.doc.createElement=tag=>tag==='canvas'?{getContext:()=>({drawImage(media){drawn=media;}}),toDataURL:()=> 'data:image/png;base64,AA=='}:original(tag);
+  const context={target:f.doc.body,media:video};
+  await f.actions.activate('media.frame.save',context,origin,gesture);
+  assert.equal(drawn,video);assert.equal(f.calls[0].url,'data:image/png;base64,AA==');
+  await f.actions.activate('media.frame.lakomics',context,origin,gesture);
+  assert.match(f.toasts.at(-1).label,/업로드 지원/);assert.equal(f.calls.length,1);
+  f.doc.createElement=()=>({getContext:()=>({drawImage(){}}),toDataURL(){throw new f.w.DOMException('tainted','SecurityError');}});
+  await f.actions.activate('media.frame.save',context,origin,gesture);assert.match(f.toasts.at(-1).label,/보안 제한\(CORS\)/);
+  context.media={...video,mediaKeys:{}};await f.actions.activate('media.frame.save',context,origin,gesture);assert.match(f.toasts.at(-1).label,/DRM/);
+  context.media={...video,readyState:1};await f.actions.activate('media.frame.save',context,origin,gesture);assert.match(f.toasts.at(-1).label,/준비/);
+  f.close();
+});
 test('trusted selection copy invokes navigator clipboard immediately; untrusted actions do nothing',async()=>{
   const f=fixture(),c=f.context();const work=f.actions.activate('edit.copy',c,origin,gesture);assert.deepEqual(f.clipboard,['Hello']);await work;assert.equal(f.toasts[0].label,'복사됨');
   await f.actions.activate('translate.ja.copy',c,origin,{isTrusted:false});assert.equal(f.calls.length,0);f.close();

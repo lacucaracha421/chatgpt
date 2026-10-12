@@ -9,10 +9,59 @@ const css = await readFile(new URL('../src/context-menu/menu.css', import.meta.u
 function fixture(html = '<p id="p">Hello world</p>') {
   const dom = new JSDOM(html, { url:'https://example.test/', runScripts:'outside-only', pretendToBeVisual:true });
   const w = dom.window; w.matchMedia = () => ({matches:false});
-  w.__LAKOMICS_TEST__ = true; w.eval(lookup); for (const source of sources) w.eval(source);
+  w.navigator.clipboard = {writeText: async () => {}}; w.__LAKOMICS_TEST__ = true; w.eval(lookup); for (const source of sources) w.eval(source);
   return {w,doc:w.document,model:w.LakomicsContextModel,close:()=>w.close()};
 }
 const plain = value => JSON.parse(JSON.stringify(value));
+test('media contexts resolve nearby players and hide blob addresses', () => {
+  const f = fixture('<div class="player"><video src="https://media.test/video.mp4" poster="https://media.test/poster.png"></video><span id="overlay"></span></div><audio src="https://media.test/audio.mp3"></audio>');
+  const c = f.model.snapshot(f.doc.getElementById('overlay'), f.doc, f.w);
+  assert.equal(c.mediaType, 'video'); assert.equal(c.imageUrl, '');
+  assert.deepEqual(list(f,c).map(row => row.id), ['media.copyUrl','media.poster','media.frame.save','media.frame.lakomics']);
+  assert.equal(list(f,f.model.snapshot(f.doc.querySelector('audio'),f.doc,f.w))[0].label,'오디오 주소 복사');
+  Object.defineProperty(c.media,'currentSrc',{value:'blob:https://example.test/stream'});
+  assert.equal(list(f,f.model.snapshot(c.media,f.doc,f.w)).some(row => row.id === 'media.copyUrl'),false);
+  const elsewhere = f.doc.createElement('span'); f.doc.body.append(elsewhere);
+  assert.equal(f.model.mediaAt(elsewhere),null); f.close();
+});
+test('overlay media lookup chooses the nearest media and stays within its depth/count bounds', () => {
+  const f=fixture('<div class="player"><video id="far"></video><video id="near"></video><span id="overlay"></span></div>');
+  const target=f.doc.getElementById('overlay');
+  target.getBoundingClientRect=()=>({left:90,top:0,width:10,height:10});
+  f.doc.getElementById('far').getBoundingClientRect=()=>({left:0,right:10,top:0,bottom:10});
+  f.doc.getElementById('near').getBoundingClientRect=()=>({left:80,right:100,top:0,bottom:20});
+  assert.equal(f.model.mediaAt(target).id,'near');
+  for(let i=0;i<7;i++) target.parentElement.append(f.doc.createElement('video'));
+  assert.equal(f.model.mediaAt(target),null);f.close();
+});
+test('frames use the outermost ancestor host and hide whole-tab page save', () => {
+  const f=fixture();
+  const win={location:{hostname:'frame.test',ancestorOrigins:['https://middle.test','http://excluded.test']},get top(){throw Error('cross origin');}};
+  assert.equal(f.model.topHostname(win),'excluded.test');
+  assert.equal(Boolean(f.model.bypass({isTrusted:true},{hostname:f.model.topHostname(win),excludedHosts:['excluded.test']})),true);
+  assert.equal(f.model.items({}, {inFrame:true}).some(row=>row.id==='page.saveAs'),false);
+  assert.equal(f.model.items({linkUrl:'http://example.test'}, {clipboard:false}).some(row=>row.id==='link.copy'),false); f.close();
+});
+test('trusted touch entry opens one menu and respects exclusions', () => {
+  const f=fixture('<a href="https://example.test/link">Link</a>'), target=f.doc.querySelector('a');
+  const controller=f.w.LakomicsContextMenu.createController({doc:f.doc,win:f.w,css,send:async()=>({ok:true})});
+  assert.equal(controller.openTouch(trusted(target,{pointerType:'touch',button:0})),true);
+  assert.equal(controller.current.surface.node.dataset.touch,'true');
+  controller.openTouch(trusted(target,{pointerType:'touch',button:0}));
+  assert.equal(f.doc.querySelectorAll('lakomics-menu').length,1);
+  controller.update({excludedHosts:['example.test']});
+  assert.equal(controller.openTouch(trusted(target,{pointerType:'touch',button:0})),false);
+  controller.destroy();f.close();
+});
+test('frame controller mounts within its document, hides page save, and uses top-host exclusions', () => {
+  const f=fixture('<iframe></iframe>'),win=f.doc.querySelector('iframe').contentWindow,doc=win.document;
+  const controller=f.w.LakomicsContextMenu.createController({doc,win,css,send:async()=>({ok:true})});
+  assert.equal(controller.open(trusted(doc.body)),true);
+  assert.equal(doc.querySelectorAll('lakomics-menu').length,1);assert.equal(f.doc.querySelectorAll('lakomics-menu').length,0);
+  assert.equal(controller.current.items.some(item=>item.id==='page.saveAs'),false);
+  controller.update({excludedHosts:['example.test']});assert.equal(controller.open(trusted(doc.body)),false);
+  controller.destroy();f.close();
+});
 const trusted = (target, extra = {}) => ({target,isTrusted:true,button:2,clientX:20,clientY:30,preventDefault(){this.defaultPrevented=true;},stopPropagation(){},composedPath(){return [target];},...extra});
 function selected(f, element, start = 0, end = element.textContent.length) {
   const range = f.doc.createRange(); range.setStart(element.firstChild,start); range.setEnd(element.firstChild,end); f.w.getSelection().removeAllRanges(); f.w.getSelection().addRange(range); return range;
@@ -46,7 +95,7 @@ test('selection/image/link combinations group correctly; picture, poster, and em
   let c=f.model.snapshot(image,f.doc,f.w,()=>({mediaUrl:image.src}));
   assert.deepEqual(list(f,c).map(item=>item.id),['translate.ko.inline','translate.ja.copy','translate.en.copy','edit.copy','image.translate','image.lakomics','link.openTab','link.copy','link.saveAs','image.save','image.saveAs','image.copyUrl','image.openTab']);
   f.w.getSelection().removeAllRanges(); assert.equal(f.model.snapshot(f.doc.querySelector('picture'),f.doc,f.w).imageUrl,image.src);
-  assert.equal(f.model.snapshot(f.doc.querySelector('video'),f.doc,f.w).imageUrl,'https://site.test/poster.png');
+  assert.equal(f.model.snapshot(f.doc.querySelector('video'),f.doc,f.w).posterUrl,'https://site.test/poster.png');
   const empty=list(f,f.model.snapshot(f.doc.body,f.doc,f.w));assert.deepEqual(empty.map(item=>item.id),['page.translate','page.saveAs','nav.back','nav.forward','nav.reload']);assert.equal(empty.find(item=>item.id==='nav.forward').disabled,true);f.close();
 });
 test('bypass is strict for untrusted/defaultPrevented/Shift/gesture/picker/disabled/excluded sites and own UI',()=>{

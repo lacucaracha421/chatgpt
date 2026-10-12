@@ -9,6 +9,36 @@
   }
   function settings(value) { return { enabled: value?.enabled !== false, excludedHosts: hosts(value?.excludedHosts), pageMode: value?.pageMode === "below" ? "below" : "replace" }; }
   function excluded(host, list) { host = host.toLowerCase().replace(/\.$/, ""); return list.some(item => host === item || host.endsWith("." + item)); }
+  function topHostname(win) {
+    try { return win.top.location.hostname; } catch {}
+    const origins = win.location.ancestorOrigins;
+    try { return new URL(origins?.[origins.length - 1]).hostname; } catch { return win.location.hostname; }
+  }
+  function mediaAt(target) {
+    const direct = target?.closest?.("video, audio");
+    if (direct) return direct;
+    // Only a nearby player container, never a document-wide media search.
+    for (let node = target, depth = 0; node && depth < 4; node = node.parentElement, depth++) {
+      if (node.matches?.('.video-js, .plyr, [class*="player" i], [data-testid="videoPlayer"]')) {
+        const media = node.querySelectorAll("video, audio");
+        if (media.length <= 8) {
+          const origin = target.getBoundingClientRect();
+          const x = origin.left + origin.width / 2, y = origin.top + origin.height / 2;
+          const distance = element => { const rect = element.getBoundingClientRect(); return Math.max(rect.left - x, 0, x - rect.right) ** 2 + Math.max(rect.top - y, 0, y - rect.bottom) ** 2; };
+          return [...media].sort((a, b) => distance(a) - distance(b))[0] || null;
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+  function mediaUrl(media) {
+    // currentSrc is authoritative: a MediaSource/blob player may still carry an
+    // unrelated <source> fallback that does not describe the playing stream.
+    if (media?.srcObject) return "";
+    const value = media?.currentSrc || media?.src || media?.querySelector?.("source[src]")?.src || "";
+    try { const url = new URL(value); return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : ""; } catch { return ""; }
+  }
   function bypass(event, { enabled = true, excludedHosts = [], hostname = "", phase = "idle", picker = false } = {}) {
     return event.isTrusted !== true || event.defaultPrevented || (event.shiftKey && event.key !== "F10") || !enabled || excluded(hostname, excludedHosts)
       || phase !== "idle" || picker || event.composedPath?.().some(node => node?.matches?.(ownSelector)) || Boolean(event.target?.closest?.(ownSelector));
@@ -60,15 +90,17 @@
       // cut/paste target. With no field caret, paste at the end of that field.
       range = doc.createRange(); range.selectNodeContents(field); range.collapse(false); text = "";
     }
-    const media = target?.closest?.("img, picture, video");
-    const image = media?.matches("picture") ? media.querySelector("img") : media;
-    const imageUrl = image?.matches("video") ? image.poster : image?.currentSrc || image?.src || "";
+    const media = mediaAt(target);
+    const picture = target?.closest?.("img, picture");
+    const image = picture?.matches("picture") ? picture.querySelector("img") : picture;
+    const imageUrl = image?.currentSrc || image?.src || "";
     const link = target?.closest?.("a[href]");
     return { target, field, readonly: Boolean(field?.readOnly || field?.disabled), password: field?.type === "password", input,
       start, end, direction: input ? field.selectionDirection : null, fieldValue: input ? field.value : null,
       fieldContent: !input && field ? field.innerHTML : null,
       text, range, activeElement: doc.activeElement,
       block: blockAt(selectionEnd(range) || target), image: imageUrl ? image : null, imageUrl,
+      media, mediaType: media?.tagName?.toLowerCase() || "", mediaUrl: mediaUrl(media), posterUrl: media?.poster || "",
       linkUrl: link?.href || "", candidate: imageUrl ? candidateFor(target) : null };
   }
   function restore(context, doc = document, win = window, focus = true) {
@@ -81,7 +113,7 @@
     } catch {}
   }
   function items(context, availability = {}, lookup = globalThis.LakomicsAvLookup) {
-    const groups = [], selection = [], translation = [], av = [], edit = [], imageActions = [], links = [], imageBrowser = [], page = [];
+    const groups = [], selection = [], translation = [], av = [], edit = [], imageActions = [], mediaActions = [], links = [], imageBrowser = [], page = [];
     const add = (group, id, label, icon, extra = {}) => group.push({ id, label, icon, ...extra });
     const translate = (id, label, glyph) => add(translation, id, label, glyph, { setup: !(availability.hasContextApiKey ?? availability.hasApiKey) });
     if (context.text) {
@@ -106,8 +138,8 @@
       add(edit, "edit.selectAll", "모두 선택", "select", { hint: "Ctrl+A" });
     }
     if (context.imageUrl) {
-      add(imageActions, "image.translate", "이미지 글자 번역", "translate", { setup: !(availability.hasImageApiKey ?? availability.hasApiKey) });
-      if (context.candidate) add(imageActions, "image.lakomics", "Lakomics에 저장…", "archive");
+      add(imageActions, "image.translate", "이미지 글자 번역", "translate", { setup: !(availability.hasImageApiKey ?? availability.hasApiKey), disabled: context.imageUrl.startsWith("http:"), hint: context.imageUrl.startsWith("http:") ? "HTTPS 이미지 필요" : undefined });
+      if (context.candidate) add(imageActions, "image.lakomics", "Lakomics에 저장…", "archive", { disabled: context.candidate.mediaUrl?.startsWith("http:"), hint: context.candidate.mediaUrl?.startsWith("http:") ? "HTTPS 원본 필요" : undefined });
       add(imageBrowser, "image.save", "이미지 저장", "download");
       add(imageBrowser, "image.saveAs", "다른 이름으로 저장", "download");
       add(imageBrowser, "image.copyUrl", "이미지 주소 복사", "image");
@@ -118,19 +150,29 @@
       add(links, "link.copy", "링크 주소 복사", "link");
       add(links, "link.saveAs", "링크를 다른 이름으로 저장", "download");
     }
-    if (!context.text && !context.field && !context.imageUrl && !context.linkUrl) {
+    if (context.mediaType) {
+      if (context.mediaUrl) add(mediaActions, "media.copyUrl", context.mediaType === "video" ? "영상 주소 복사" : "오디오 주소 복사", "link");
+      if (context.mediaType === "video") {
+        if (context.posterUrl) add(mediaActions, "media.poster", "포스터 저장", "download");
+        add(mediaActions, "media.frame.save", "현재 장면을 이미지로 저장", "download");
+        add(mediaActions, "media.frame.lakomics", "현재 장면을 Lakomics에 저장…", "archive");
+      }
+    }
+    if (!context.text && !context.field && !context.imageUrl && !context.linkUrl && !context.mediaType) {
       // While a page translation exists the item toggles it: hide, then show again.
       const pageLabel = { on: "번역 숨기기", hidden: "번역 보기" }[availability.pageState] || "페이지 본문 번역";
       add(page, "page.translate", pageLabel, "translate", { setup: !availability.pageState && !(availability.hasContextApiKey ?? availability.hasApiKey) });
       groups.push(page);
       const browser = [];
-      add(browser, "page.saveAs", "다른 이름으로 페이지 저장", "download");
+      if (!availability.inFrame) add(browser, "page.saveAs", "다른 이름으로 페이지 저장", "download");
       add(browser, "nav.back", "뒤로", "back", { hint: "Alt+←", disabled: !availability.canGoBack });
       add(browser, "nav.forward", "앞으로", "forward", { hint: "Alt+→", disabled: !availability.canGoForward });
       add(browser, "nav.reload", "새로고침", "reload", { hint: "Ctrl+R" });
       groups.push(browser);
-    } else groups.push(translation, av, selection, edit, imageActions, links, imageBrowser);
-    return groups.filter(group => group.length).flatMap((group, index) => index ? [{ separator: true }, ...group] : group);
+    } else groups.push(translation, av, selection, edit, imageActions, mediaActions, links, imageBrowser);
+    const clipboard = availability.clipboard !== false;
+    return groups.map(group => group.filter(item => clipboard || !["edit.copy", "edit.cut", "edit.paste", "image.copyUrl", "link.copy", "media.copyUrl"].includes(item.id)))
+      .filter(group => group.length).flatMap((group, index) => index ? [{ separator: true }, ...group] : group);
   }
   function placement(x, y, width, height, viewport, offset = 2) {
     const left = viewport.offsetLeft || 0, top = viewport.offsetTop || 0;
@@ -166,5 +208,5 @@
     if (key === "ArrowUp") return current < 0 ? count - 1 : (current + count - 1) % count;
     return current;
   }
-  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, bypass, sourceLanguage, quote, editable, snapshot, restore, items, placement, imagePlacement, nextIndex };
+  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, topHostname, mediaAt, mediaUrl, bypass, sourceLanguage, quote, editable, snapshot, restore, items, placement, imagePlacement, nextIndex };
 })();

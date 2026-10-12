@@ -52,12 +52,30 @@ installing this extension alone does not activate the endpoint.
 
 ## Right-click menu (Lakomics Companion 3.5)
 
-The extension is named Lakomics Companion. A plain right click on an HTTPS page
+The extension is named Lakomics Companion. A plain right click on an HTTP(S) page
 opens the Lakomics menu (a closed Shadow DOM host in the top layer; ContextMenu or
 Shift+F10 opens it from the keyboard). Shift+right click always opens Chrome's
 own menu, as do pages with their own menu, an armed or open collector gesture,
 excluded sites and the disabled switch. Options has a "우클릭 메뉴" section with
 an enable switch (default on), one excluded host per line and the Shift hint.
+
+Version 3.5.35 also installs the menu in child frames, including inherited
+about:blank/srcdoc documents. Exclusions follow the top page host; page save is
+available only in the top frame and captures the whole tab. Each frame owns its
+menu, translation, and picker surfaces, positioned within its viewport.
+
+Videos and audio offer usable HTTP(S) addresses; blob/MediaSource addresses are
+hidden. Videos also offer poster and current-frame PNG downloads. CORS/DRM
+restrictions show a Korean explanation. Saving a canvas frame to Lakomics still
+needs an image-byte upload API: the existing capture API accepts remote HTTPS
+URLs only. The menu explains this limitation instead of sending unusable data.
+HTTP image translation and Lakomics collection explain the HTTPS-original
+requirement; direct clipboard actions are hidden without the Clipboard API.
+
+On touch devices, a 500 ms hold on links or an already existing selection opens
+the menu; images keep the save picker and two-finger translation stays unchanged.
+The first text-selection gesture and selection handles stay native. Movement,
+scrolling, pointer cancellation, focus loss, or a second finger cancels the hold.
 
 Order: Lakomics actions first (translation, 표지 찾기), then the browser group
 (복사, 잘라내기/붙여넣기/모두 선택 in fields, link and image actions, 다른 이름으로

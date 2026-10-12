@@ -4,6 +4,62 @@ import { readFile } from 'node:fs/promises';
 import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
 const source = await readFile(new URL('../src/content.js', import.meta.url), 'utf8');
+const forumSource = await readFile(new URL('../src/forum-source.js', import.meta.url), 'utf8');
+test('HTTP and inherited frame image candidates retain the local image picker context', () => {
+  for(const url of ['http://example.test/page','about:blank']) {
+    const dom=new JSDOM('<base href="https://example.test/page"><img src="https://media.test/image.png">',{url,runScripts:'outside-only'});
+    dom.window.eval(forumSource);const image=dom.window.document.querySelector('img');
+    const candidate=dom.window.LakomicsForumSource.findGenericCandidate(image);
+    assert.equal(candidate.type,'image');assert.equal(candidate.element,image);
+    assert.equal(candidate.sourceUrl,url==='about:blank'?'https://example.test/page':url);dom.window.close();
+  }
+});
+
+test('non-image touch holds open a menu, cancel on movement/scroll/multitouch and consume duplicate events', async () => {
+  const opens=[], f=fixture({canTranslateTouch:()=>true,openTouch:event=>{opens.push(event);return true;}});
+  await f.advance(0);
+  const link=f.w.document.createElement('a');link.href='https://example.test/link';link.textContent='Link';f.w.document.body.append(link);
+  function pointer(type,x=40,id=11) {
+    const event=new f.w.MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:40});
+    Object.defineProperties(event,{pointerType:{value:'touch'},pointerId:{value:id}});link.dispatchEvent(event);return event;
+  }
+  pointer('pointerdown');await f.advance(499);assert.equal(opens.length,0);
+  await f.advance(1);assert.equal(opens.length,1);assert.equal(opens[0].clientX,40);
+  pointer('pointerup');
+  const own=f.w.document.createElement('lakomics-menu');f.w.document.body.append(own);
+  const releaseClick=new f.w.MouseEvent('click',{bubbles:true,cancelable:true});own.dispatchEvent(releaseClick);assert.equal(releaseClick.defaultPrevented,true);
+  for(const type of ['click','contextmenu']) { const event=new f.w.MouseEvent(type,{bubbles:true,cancelable:true});link.dispatchEvent(event);assert.equal(event.defaultPrevented,true); }
+  assert.equal(opens.length,1);assert.equal(f.mounts.length,0);
+  pointer('pointerdown');pointer('pointermove',60);await f.advance(501);pointer('pointerup',60);assert.equal(opens.length,1);
+  pointer('pointerdown');f.w.document.dispatchEvent(new f.w.Event('scroll'));await f.advance(501);pointer('pointerup');assert.equal(opens.length,1);
+  pointer('pointerdown');pointer('pointerdown',40,12);await f.advance(501);pointer('pointerup');pointer('pointerup',40,12);assert.equal(opens.length,1);
+  f.close();
+});
+test('two-finger translation cancels a pending link menu without a duplicate menu', async()=>{
+  let menus=0,translations=0;
+  const f=fixture({canTranslateTouch:()=>true,openTouch:()=>{menus++;return true;},translateTouch:()=>{translations++;return true;}});
+  await f.advance(0);const link=f.w.document.createElement('a');link.href='https://example.test/link';f.w.document.body.append(link);f.w.document.elementFromPoint=()=>link;
+  for(const id of [11,12]) {const event=new f.w.MouseEvent('pointerdown',{bubbles:true,clientX:40,clientY:40});Object.defineProperties(event,{pointerType:{value:'touch'},pointerId:{value:id}});link.dispatchEvent(event);}
+  await f.advance(501);assert.equal(translations,1);assert.equal(menus,0);
+  const escaped=new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true,shiftKey:true});link.dispatchEvent(escaped);assert.equal(escaped.defaultPrevented,false);f.close();
+});
+test('existing selected text opens a touch menu while image hold still opens the save picker', async () => {
+  const opens=[], f=fixture({canTranslateTouch:()=>true,openTouch:event=>{opens.push(event);return true;}});
+  await f.advance(0);
+  const p=f.w.document.createElement('p');p.textContent='Selected text';f.w.document.body.append(p);
+  const range=f.w.document.createRange();range.selectNodeContents(p);f.w.getSelection().addRange(range);
+  function pointer(type) { const event=new f.w.MouseEvent(type,{bubbles:true,cancelable:true,clientX:40,clientY:40});Object.defineProperties(event,{pointerType:{value:'touch'},pointerId:{value:12}});p.dispatchEvent(event); }
+  pointer('pointerdown');await f.advance(500);assert.equal(opens.length,1);assert.equal(f.w.getSelection().toString(),'Selected text');pointer('pointerup');
+  f.pointer('pointerdown','touch');await f.advance(501);assert.equal(f.mounts.length,1);assert.equal(opens.length,1);f.pointer('pointerup','touch');f.close();
+});
+test('Shift right-click bypasses capture suppression while the collector is active',async()=>{
+  const f=fixture();f.pointer('pointerdown','touch');await f.advance(501);
+  for(const shiftKey of [false,true]) { const event=new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,shiftKey});f.w.document.querySelector('img').dispatchEvent(event);assert.equal(event.defaultPrevented,!shiftKey); }
+  f.pointer('pointerup','touch');f.close();
+});
+test('repeated bundle injection installs only one picker gesture handler', async()=>{
+  const f=fixture();f.w.eval(source);f.pointer('pointerdown','touch');await f.advance(501);assert.equal(f.mounts.length,1);f.pointer('pointerup','touch');f.close();
+});
 
 test('YouTube subtitle buttons and overlay bypass collector capture handlers, even under its click guard', async () => {
   const f = fixture();
@@ -28,13 +84,14 @@ test('YouTube subtitle buttons and overlay bypass collector capture handlers, ev
   assert.equal(event.defaultPrevented, false, 'collector release click guard leaves AI button alone');
   f.close();
 });
-function fixture() {
+function fixture(menuController = {}) {
   const dom = new JSDOM('<img id="image">', { url: 'https://example.test/', runScripts: 'outside-only' });
   const w = dom.window, timers = new Map(), mounts = [], requests = [];
   let now = 0, counter = 0;
   w.setTimeout = (callback, delay = 0) => { const id = ++counter; timers.set(id, { callback, at: now + delay }); return id; };
   w.clearTimeout = id => timers.delete(id);
-  w.LakomicsForumSource = { findCandidate: target => target.id === 'image' ? { element: target, type: 'image', mediaUrl: 'https://example.test/image.jpg' } : null };
+  w.LakomicsForumSource = { findGenericCandidate:()=>null, findCandidate: target => target.id === 'image' ? { element: target, type: 'image', mediaUrl: 'https://example.test/image.jpg' } : null };
+  w.document.elementFromPoint = () => null;
   w.chrome = { runtime: { sendMessage(message, callback) {
     requests.push(message);
     // The real worker answers across an async boundary; resolve on a macrotask so
@@ -56,7 +113,7 @@ function fixture() {
   } };
   let contextCollector;
   w.LakomicsContextModel = {SETTINGS: 'context'};
-  w.LakomicsContextMenu = {createController(options) { contextCollector = options.collector; return {}; }};
+  w.LakomicsContextMenu = {createController(options) { contextCollector = options.collector; return menuController; }};
   w.fetch = async () => ({ok: true, text: async () => ''});
   w.chrome.storage = {local: {get: async () => ({})}, onChanged: {addListener() {}}};
   w.chrome.runtime.getURL = path => path;

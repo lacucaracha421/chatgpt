@@ -456,6 +456,20 @@ test('original on demand by touch: a 450 ms press shows the note without the bro
   f.close();
 });
 
+test('original-note touch holds leave links and existing selections to the custom menu, and Shift escapes', async () => {
+  const f=fixture('<p id="p">Read the full story and subscribe today for more.</p><p><a href="https://example.test/link">Read all the linked stories today.</a></p>');
+  await f.toggle();await f.timer.advance(1000);
+  const p=f.doc.getElementById('p');
+  f.fire(p,'pointerdown',{pointerType:'touch',x:60,y:120});await f.timer.advance(450);
+  const escaped=new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true,shiftKey:true});p.dispatchEvent(escaped);assert.equal(escaped.defaultPrevented,false);
+  f.fire(p,'pointerup',{pointerType:'touch'});
+  f.fire(f.doc.querySelector('a'),'pointerdown',{pointerType:'touch',x:60,y:120});await f.timer.advance(500);assert.equal(f.note(),null);
+  f.fire(f.doc.querySelector('a'),'pointerup',{pointerType:'touch'});
+  const range=f.doc.createRange();range.selectNodeContents(p);f.w.getSelection().addRange(range);
+  const selected=f.w.getSelection().toString();
+  f.fire(p,'pointerdown',{pointerType:'touch',x:60,y:120});await f.timer.advance(500);
+  assert.equal(f.note(),null);assert.equal(f.w.getSelection().toString(),selected);f.close();
+});
 test('each block fades in once, briefly, and never with reduced motion or when the originals come back', async () => {
   const f = fixture('<p>First paragraph with some words.</p><p>Second paragraph with some words.</p>');
   await f.toggle(); await f.timer.advance(1000);

@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
+test('menu bundles support HTTP and inherited frames without file access', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
+  assert.ok(manifest.host_permissions.includes('http://*/*'));
+  for (const entry of manifest.content_scripts.filter(entry => entry.js?.includes('src/content.js'))) {
+    assert.equal(entry.all_frames, true); assert.equal(entry.match_about_blank, true);
+    assert.ok(entry.matches.some(pattern => pattern.startsWith('http://')));
+    assert.equal(entry.matches.some(pattern => pattern.startsWith('file://')), false);
+  }
+  assert.ok(manifest.web_accessible_resources[0].matches.includes('http://*/*'));
+});
+
 test('collection uses the arc menu and keeps the list editor out of content pages', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   const scripts = manifest.content_scripts.flatMap(entry=>entry.js || []);
@@ -14,7 +25,7 @@ test('collection uses the arc menu and keeps the list editor out of content page
   }
   assert.equal(scripts.some(path=>/gesture|radial/i.test(path)), false);
   assert.equal(manifest.name, 'Lakomics Companion');
-  assert.equal(manifest.version, '3.5.34');
+  assert.equal(manifest.version, '3.5.35');
   assert.equal('version_name' in manifest, false);
   assert.match(manifest.description, /right-click menu/);
   assert.match(manifest.description, /YouTube/);

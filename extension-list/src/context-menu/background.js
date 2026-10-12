@@ -4,7 +4,11 @@
   let creating = null, offscreenJobs = Promise.resolve();
   const pageUrls = new Map();
   function contentSender(sender) {
-    try { return sender.id === chrome.runtime.id && Number.isInteger(sender.tab?.id) && new URL(sender.url).protocol === "https:"; }
+    try {
+      if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id)) return false;
+      if (["https:", "http:"].includes(new URL(sender.url).protocol)) return true;
+      return ["about:blank", "about:srcdoc"].includes(sender.url) && sender.frameId > 0 && Boolean(safeUrl(sender.tab.url)) && Boolean(safeUrl(sender.origin));
+    }
     catch { return false; }
   }
   function callbackCall(invoke) {
@@ -39,7 +43,8 @@
     const remote = safeUrl(value); if (remote) return remote;
     try {
       const url = new URL(value);
-      if (url.protocol === "blob:" && url.origin === new URL(sender.url).origin) return url.href;
+      const origin = ["about:blank", "about:srcdoc"].includes(sender.url) ? sender.origin : new URL(sender.url).origin;
+      if (url.protocol === "blob:" && url.origin === origin) return url.href;
       if (url.protocol === "data:" && /^data:image\/(?:png|jpeg|gif|webp|avif|bmp|svg\+xml)(?:;|,)/i.test(value)) return url.href;
     } catch {}
     return null;
@@ -73,7 +78,7 @@
         return await offscreen("clipboard", { text: message.text });
       }
       if (message.type !== "context:action") return { ok: false, code: "unknown_message" };
-      if (message.action === "page.saveAs") return await savePage(sender, message.title);
+      if (message.action === "page.saveAs") return sender.frameId > 0 ? { ok: false, code: "top_frame_only" } : await savePage(sender, message.title);
       const url = message.action?.startsWith("image.") ? imageUrl(message.url, sender) : safeUrl(message.url);
       if (!url) return { ok: false, code: "invalid_url" };
       if (["link.openTab", "image.openTab"].includes(message.action)) {
