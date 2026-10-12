@@ -1,4 +1,4 @@
-importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translation/korean-rules.js", "translation/korean.js", "translation/terms.js", "translation/deadline.js", "translation/image.js", "translate-service.js", "av-lookup.js", "youtube/settings.js", "youtube/terms.js", "youtube/korean.js", "youtube/deadline.js", "youtube/parse.js", "youtube/chunk.js", "youtube/order.js", "youtube/display.js", "youtube/cues.js", "youtube/timing.js", "youtube/resume.js", "youtube/mode.js", "youtube/prompts.js", "youtube/results.js", "youtube/anthropic.js", "youtube/provider.js", "youtube/server-cache.js", "youtube/service.js");
+importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translation/korean-rules.js", "translation/korean.js", "translation/terms.js", "translation/deadline.js", "translation/image.js", "usage.js", "translate-service.js", "av-lookup.js", "youtube/settings.js", "youtube/terms.js", "youtube/korean.js", "youtube/deadline.js", "youtube/parse.js", "youtube/chunk.js", "youtube/order.js", "youtube/display.js", "youtube/cues.js", "youtube/timing.js", "youtube/resume.js", "youtube/mode.js", "youtube/prompts.js", "youtube/results.js", "youtube/anthropic.js", "youtube/provider.js", "youtube/server-cache.js", "youtube/service.js");
 
 importScripts("context-menu/background.js");
 
@@ -55,6 +55,12 @@ importScripts("context-menu/background.js");
     if (message?.type?.startsWith("context:")) return globalThis.LakomicsContextBackground.handle(message, sender);
     if (message?.type?.startsWith("youtube:")) return globalThis.LakomicsYouTubeService.handle(message, sender);
     if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message, sender);
+    if (message?.type === "usage:clear") {
+      // Only the options page empties the usage log.
+      if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || sender.url?.split("#")[0] !== chrome.runtime.getURL("options/options.html")) return { ok: false, code: "forbidden_sender" };
+      await globalThis.LakomicsUsage.clear();
+      return { ok: true };
+    }
     switch (message?.type) {
       case "pair:review": {
         if (!globalThis.LakomicsListApi.parsePairing(message.value)) return { ok: false, code: "invalid_pairing" };

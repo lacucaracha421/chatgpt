@@ -1,13 +1,13 @@
 (() => {
   "use strict";
   const SETTINGS = "lakomics:context-menu:v1";
-  const ownSelector = "lakomics-menu, lakomics-toast, lakomics-translation-block, lakomics-image-popover, lakomics-page-status, #lakomics-arc-collector, #lakomics-yt-button, #lakomics-yt-overlay, #lakomics-yt-toast, #ytsf-button";
+  const ownSelector = "lakomics-menu, lakomics-toast, lakomics-translation-block, lakomics-translation-note, lakomics-image-popover, lakomics-page-status, #lakomics-arc-collector, #lakomics-yt-button, #lakomics-yt-overlay, #lakomics-yt-toast, #ytsf-button";
   function hosts(value) {
     return [...new Set((Array.isArray(value) ? value : String(value || "").split(/\r?\n/))
       .map(host => String(host).trim().toLowerCase().replace(/\.$/, ""))
       .filter(host => /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(host)))];
   }
-  function settings(value) { return { enabled: value?.enabled !== false, excludedHosts: hosts(value?.excludedHosts) }; }
+  function settings(value) { return { enabled: value?.enabled !== false, excludedHosts: hosts(value?.excludedHosts), pageMode: value?.pageMode === "below" ? "below" : "replace" }; }
   function excluded(host, list) { host = host.toLowerCase().replace(/\.$/, ""); return list.some(item => host === item || host.endsWith("." + item)); }
   function bypass(event, { enabled = true, excludedHosts = [], hostname = "", phase = "idle", picker = false } = {}) {
     return event.isTrusted !== true || event.defaultPrevented || (event.shiftKey && event.key !== "F10") || !enabled || excluded(hostname, excludedHosts)

@@ -114,6 +114,19 @@
       };
       blocks.set(block, api); return api;
     }
+    // The original text of a translated block: a small floating note that never moves the page.
+    // `origin` is the pointer (mouse) or finger (touch) position; a finger's note sits above it.
+    function note(text, origin, target, { touch = false } = {}) {
+      const surface = host("lakomics-translation-note", target), box = doc.createElement("div"); box.className = "noteA"; box.setAttribute("role", "tooltip");
+      surface.node.dataset.touch = String(touch);
+      const label = doc.createElement("span"); label.className = "nh"; label.textContent = "원문";
+      const body = doc.createElement("div"); body.className = "nb"; body.textContent = text;
+      box.append(label, body); surface.root.append(box);
+      reveal(surface);
+      const size = box.getBoundingClientRect();
+      place(surface, box, touch ? { x: origin.x - size.width / 2, y: origin.y - size.height - 28 } : origin, touch ? 8 : 16);
+      return { get closed() { return surface.closed === true; }, close(ms = 90) { remove(surface, box, ms); } };
+    }
     // The page translation status: top right of the viewport, stays until closed.
     function status(target) {
       const surface = host("lakomics-page-status", target), box = doc.createElement("div"); box.className = "toastA status"; box.style.pointerEvents = "auto"; surface.root.append(box);
@@ -141,7 +154,7 @@
       win.addEventListener("resize", reposition);
       return api;
     }
-    return { host, reveal, place, remove, toast, inline, status, viewport, icon: name => icon(doc, name), destroy() { currentToast?.close(0); } };
+    return { host, reveal, place, remove, toast, inline, note, status, viewport, icon: name => icon(doc, name), destroy() { currentToast?.close(0); } };
   }
   // Pending text appears after 400 ms and, once visible, lasts at least 600 ms.
   async function delayed(work, pending, { win = window, now = () => Date.now() } = {}) {

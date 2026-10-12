@@ -22,3 +22,14 @@ test('X card has text tint, square-free 4px block radius, header/close control, 
 test('options page carries the Lakomics Companion name in title and heading',()=>{
   assert.match(html,/<title>Lakomics Companion<\/title>/);assert.match(html,/<h1>Lakomics Companion<\/h1>/);assert.equal(html.includes('Collector List'),false);
 });
+test('page translation mode: replace by default, the old "원문 아래에 보기" is saved with the other settings and survives edits',async()=>{
+  const f=await fixture();const select=f.doc.getElementById('context-menu-page-mode');
+  assert.equal(select.value,'replace');assert.deepEqual([...select.options].map(option=>option.textContent),['바꿔치기','원문 아래에 보기']);
+  select.value='below';select.dispatchEvent(new f.w.Event('change'));await tick();
+  assert.deepEqual(f.memory['lakomics:context-menu:v1'],{enabled:true,excludedHosts:[],pageMode:'below'});
+  const g=await fixture(f.memory['lakomics:context-menu:v1']);assert.equal(g.doc.getElementById('context-menu-page-mode').value,'below');
+  g.doc.getElementById('context-menu-excluded').value='a.test';g.doc.getElementById('context-menu-form').dispatchEvent(new g.w.Event('submit',{cancelable:true}));await tick();
+  assert.deepEqual(g.memory['lakomics:context-menu:v1'],{enabled:true,excludedHosts:['a.test'],pageMode:'below'});
+  const switchBack=g.doc.getElementById('context-menu-page-mode');switchBack.value='replace';switchBack.dispatchEvent(new g.w.Event('change'));await tick();
+  assert.equal(g.memory['lakomics:context-menu:v1'].pageMode,'replace');f.close();g.close();
+});

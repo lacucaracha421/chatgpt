@@ -67,9 +67,9 @@ async function fixture(t, options = {}) {
     trans:change => { trans = {...trans,...change}; }, yt:change => { yt = {...yt,...change}; }};
 }
 
-test('seven section landmarks keep every mapped id, labels, status slots, fonts and responsive foundations', async t => {
+test('eight section landmarks keep every mapped id, labels, status slots, fonts and responsive foundations', async t => {
   const f = await fixture(t); const sections = [...f.w.document.querySelectorAll('main > .sec')];
-  assert.deepEqual(sections.map(s => s.querySelector('h2').textContent), ['연결','수집','번역 공통','X 번역','YouTube 자막','우클릭 메뉴','저장공간']);
+  assert.deepEqual(sections.map(s => s.querySelector('h2').textContent), ['연결','수집','번역 공통','X 번역','YouTube 자막','우클릭 메뉴','사용량','저장공간']);
   const ids = 'state-label state-dot pair-section pair-status pair-help pair-form pairing origin refresh disconnect order-section sync-status order-editor hidden-count hidden-empty hidden-folders pin-section pins pin-candidate pin-add preference-section auto-like temporary-section context-menu-section context-menu-status context-menu-enabled context-menu-model context-menu-image-model context-menu-form context-menu-excluded context-menu-help translation-section translation-status translation-model translation-fallback translation-enabled translation-key-form translation-key translation-anthropic-key-form translation-anthropic-key translation-clear youtube-section youtube-status youtube-enabled youtube-model youtube-translate youtube-register youtube-speakers youtube-glossarySonnet youtube-fontScale youtube-position youtube-showOriginal youtube-rolling youtube-clear youtube-clear-server translation-dictionary-section translation-dictionary-form translation-dictionary translation-dictionary-status'.split(' ');
   for (const id of ids) assert.ok(f.$(id), id);
   assert.equal(new Set([...f.w.document.querySelectorAll('[id]')].map(n=>n.id)).size, f.w.document.querySelectorAll('[id]').length);
@@ -183,7 +183,7 @@ test('jump list scrolls/focuses without hash writes, deep link focuses missing k
   const f = await fixture(t,{hash:'#translation-section',reduce:true}); assert.equal(f.w.location.hash,''); assert.equal(f.w.document.activeElement.id,'translation-anthropic-key');
   const link = f.w.document.querySelector('a[href="#youtube-section"]'); link.click();
   assert.equal(f.w.location.hash,''); assert.equal(f.w.document.activeElement.id,'youtube-section-heading'); assert.equal(f.scrolls.at(-1).behavior,'auto');
-  assert.equal(link.getAttribute('aria-current'),'location'); assert.equal(f.observers[0].nodes.length,7); assert.equal(f.observers[0].opts.rootMargin,'-16px 0px -70% 0px');
+  assert.equal(link.getAttribute('aria-current'),'location'); assert.equal(f.observers[0].nodes.length,8); assert.equal(f.observers[0].opts.rootMargin,'-16px 0px -70% 0px');
 });
 
 test('download settings uses Chrome tab API and quietly hides unsupported action; preview reflects all display settings', async t => {

@@ -34,11 +34,11 @@
     if (context.input) { context.field.select(); return; }
     const range = doc.createRange(); range.selectNodeContents(context.field); const selection = win.getSelection(); selection.removeAllRanges(); selection.addRange(range);
   }
-  function createActions({ doc = document, win = window, send = runtime, surfaces, collector = {}, alive = () => true, watchSession } = {}) {
+  function createActions({ doc = document, win = window, send = runtime, surfaces, collector = {}, alive = () => true, watchSession, settings = () => ({}) } = {}) {
     const model = globalThis.LakomicsContextModel;
     // Both own long-lived surfaces (the image popover, the page translation) and their own navigation watchers.
     const image = globalThis.LakomicsContextImage?.create({ doc, win, send, surfaces, collector, alive, watchSession });
-    const page = globalThis.LakomicsContextPage?.create({ doc, win, send, surfaces, watchSession });
+    const page = globalThis.LakomicsContextPage?.create({ doc, win, send, surfaces, collector, settings, watchSession });
     function notice(label, context, origin, options) { const toast = surfaces.toast(origin, context.target); toast.show(label, options); return toast; }
     function copy(text, context, origin) {
       // Invoke synchronously in the trusted click/key handler, before any await.

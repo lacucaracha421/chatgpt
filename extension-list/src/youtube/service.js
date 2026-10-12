@@ -232,6 +232,11 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
   const chunks = chunkUnits(parsed.units, CHUNK_WORDS);
   const contexts = chunkContexts(chunks);
   const usage = { input_tokens: 0, output_tokens: 0, byModel: {} };
+  // The usage log (src/usage.js) takes every call of this video as one job; its migration must
+  // see the running total before this video adds to it.
+  const usageLog = globalThis.LakomicsUsage;
+  const usageJob = { id: `youtube:${videoId}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, label: String(meta?.title || videoId) };
+  await usageLog?.ensureMigrated().catch(() => {});
   const glossaryModel = provider === "anthropic" && glossarySonnet ? "claude-sonnet-5-5" : model;
   const resumeKey = `lakomics:youtube:resume:v1:${videoId}:${storedMode}`;
   const savedResume = (await storageGet(resumeKey))[resumeKey];
@@ -269,6 +274,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
     const tokens = usage.byModel[usedModel] ||= { input_tokens: 0, output_tokens: 0 };
     tokens.input_tokens += result.usage.input_tokens;
     tokens.output_tokens += result.usage.output_tokens;
+    usageLog?.record("youtube", usageLog.measure("anthropic", usedModel, result.usage), usageJob);
   };
 
   // Runs one chunk. A chunk that still fails after the provider's own retries falls back to the original

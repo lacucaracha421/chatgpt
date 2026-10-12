@@ -178,3 +178,22 @@ body:not(.options-page) main{max-width:680px;margin:32px auto;padding:0 16px}bod
 .status .ok{color:var(--ok);font-size:14px}body:not(.options-page) button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 
 .hidden-folder .path{color:var(--faint)}
+
+/* Usage section: a per-feature table and the recent jobs. */
+.usage-wrap{overflow-x:auto;margin-top:8px}
+.usage{width:100%;min-width:480px;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.usage caption{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.usage th,.usage td{padding:8px 12px 8px 0;border-bottom:1px solid var(--line-soft);text-align:left;vertical-align:top;font-weight:400}
+.usage thead th{font-size:12px;color:var(--faint)}
+.usage tbody th{white-space:nowrap}
+.usage td{min-width:104px}
+.usage .uc{display:block}.usage .ut{display:block;font-size:12px;line-height:16px;color:var(--faint)}
+.usage td.none{color:var(--faint)}
+.usage tr.legacy th,.usage tr.legacy td,.usage tr.sum th,.usage tr.sum td{border-bottom:0}
+.usage tr.sum{border-top:1px solid var(--line)}.usage tr.sum th,.usage tr.sum td{font-weight:600}
+.ujobs{margin:0;padding:0;list-style:none}
+.ujobs li{display:grid;grid-template-columns:84px 88px minmax(0,1fr) auto;align-items:baseline;gap:4px 12px;padding:8px 0;border-bottom:1px solid var(--line-soft)}
+.ujobs .jt{font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums}.ujobs .jk{font-size:12px;color:var(--muted)}
+.ujobs .jl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ujobs .ja{font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+@media(max-width:479px){.ujobs li{grid-template-columns:minmax(0,1fr) auto}.ujobs .jl{grid-column:1/-1;grid-row:2}.ujobs .ja{grid-column:1/-1;grid-row:3;text-align:left}}

@@ -113,14 +113,39 @@ long lists scroll while the header and footer remain visible. On desktop,
 before dragging it follows the image and closes when the image leaves view.
 Results are cached in memory per image URL and model for the tab session.
 
-페이지 본문 번역 (`translation:page`): the main text (article/main/role=main, else the
-densest container; navigation, side notes, footers, forms, code, editable fields and
-ad-like containers are skipped) is translated block by block through the
-right-click model chain, what is on screen first and what scrolls into view next,
-three requests at a time, each result under its block. A status chip at the top
-right shows the progress and toggles 원문만 보기 / 번역 보기 without new requests;
-the menu item switches to 번역 숨기기 / 번역 보기 while a translation exists. A
-navigation stops the job.
+페이지 번역 (`translation:page`, 3.5.28): Google-Translate-style in-place translation of
+the whole visible page (navigation, buttons, captions and comments included; code,
+fields, scripts, hidden text, Korean text, `translate="no"` and our own UI are left
+alone). Each block is sent as one sentence, and a block with several text nodes
+carries `⟦1⟧…⟦/1⟧` markers so the answer is written back node by node and links and
+inline formatting stay. The worker checks that every marker comes back once and in
+order (one corrective request); the page checks again and otherwise asks for the
+block as plain text and puts it into its longest text node. Turning the translation
+off restores the exact original text (kept per text node); the stored translation
+returns without the model. A MutationObserver (300 ms debounce, own writes ignored)
+translates later additions and changes; routes inside a single-page app keep the job
+going. Work is lazy: in or near the viewport first, the rest as the user scrolls,
+three requests at a time, identical texts once, a soft limit of 800 blocks before
+"계속 번역", and the shared translation cache plus an in-page memory avoid asking
+twice. Hovering a translated block for 400 ms (or a 450 ms touch press) shows its
+original in a small floating note. A short per-block fade (110 ms, none with reduced
+motion) marks new text. The options page (우클릭 메뉴 → 페이지 번역 방식) can switch back
+to the earlier "원문 아래에 보기" cards (body text only). A status chip at the top right
+shows the progress and toggles 원문만 보기 / 번역 보기; the menu item switches to
+번역 숨기기 / 번역 보기 while a translation exists. Leaving the page ends the job.
+
+사용량 (`src/usage.js`, 3.5.29): every paid AI call is logged in `chrome.storage.local`
+(`lakomics:usage:v1`) by feature (X 번역, 우클릭 번역, 페이지 번역, 이미지 글자, 유튜브 자막),
+with model, input and output tokens and cost in USD. Anthropic cost comes from a built-in
+list-price table (Haiku 5.5, Sonnet 5.5; other models count tokens only), OpenRouter cost from
+`usage.cost` in its answer (requested with `usage: { include: true }`); a call whose cost is
+unknown shows as "비용 모름". Calls that were billed but rejected and retried are counted too.
+The log keeps per-day totals for 400 days and the last 50 jobs (one page translation run, one
+image, one right-click translation, one YouTube video, X auto translation per day). Writes
+are serialized and coalesced (1.5 s). The earlier YouTube running total
+(`lakomics:youtube:usage:total`) is folded in once as "기록 시작 전 유튜브". The options page
+has a 사용량 section (오늘 / 이번 달 / 전체 per feature, recent jobs, 사용량 기록 지우기); the
+page translation status chip shows what the run cost so far.
 
 New permissions: `clipboardRead`, `clipboardWrite`, `pageCapture`, `offscreen`.
 The Chrome context-menu entry "표지 찾기" (Shift+right click) now sends the code

@@ -4,7 +4,7 @@
     const model = globalThis.LakomicsContextModel, surfaces = globalThis.LakomicsContextSurfaces.createSurfaces({ doc, win, css });
     const actionWatchers = new Set();
     let config = model.settings(initialSettings), current = null, departing = false;
-    const actions = globalThis.LakomicsContextActions.createActions({ doc, win, send, surfaces, collector, watchSession, alive: context => !departing && context?.departed !== true && (!context?.href || win.location.href === context.href) });
+    const actions = globalThis.LakomicsContextActions.createActions({ doc, win, send, surfaces, collector, watchSession, settings: () => config, alive: context => !departing && context?.departed !== true && (!context?.href || win.location.href === context.href) });
     function close({ restore = true } = {}) {
       const session = current; if (!session) return; current = null; session.watcher.stop();
       // Chrome-like: the menu fades in over 80 ms and disappears instantly.

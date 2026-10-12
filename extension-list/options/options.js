@@ -422,11 +422,17 @@
       await chrome.storage.local.set({ [contextKey]: { ...context, enabled } }); return { ok: true };
     }));
   };
+  $("context-menu-page-mode").onchange = () => {
+    const pageMode = $("context-menu-page-mode").value === "below" ? "below" : "replace"; context.pageMode = pageMode;
+    return delayedBusy($("context-menu-status"), () => queued("context", async () => {
+      await chrome.storage.local.set({ [contextKey]: { ...context, pageMode } }); return { ok: true };
+    }));
+  };
   async function contextSettings() {
     if (!chrome.storage?.local) return;
     const stored = await chrome.storage.local.get([contextKey]), value = stored[contextKey];
-    context = { enabled: value?.enabled !== false, excludedHosts: Array.isArray(value?.excludedHosts) ? value.excludedHosts : [] };
-    $("context-menu-enabled").checked = context.enabled; contextEditor.receive(context.excludedHosts.join("\n"));
+    context = { enabled: value?.enabled !== false, excludedHosts: Array.isArray(value?.excludedHosts) ? value.excludedHosts : [], ...(value?.pageMode ? { pageMode: value.pageMode === "below" ? "below" : "replace" } : {}) };
+    $("context-menu-enabled").checked = context.enabled; $("context-menu-page-mode").value = context.pageMode || "replace"; contextEditor.receive(context.excludedHosts.join("\n"));
     $("context-menu-count").textContent = `${context.excludedHosts.length}개`; relationships();
   }
   const youtubeChecks = ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal", "rolling"];
@@ -466,6 +472,46 @@
       }));
     };
   }
+  // ---------------------------------------------------------------- usage
+  const usageApi = globalThis.LakomicsUsage;
+  const usageTime = ms => {
+    const date = new Date(ms), pad = value => String(value).padStart(2, "0");
+    return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+  function usageCell(cell) {
+    const td = document.createElement("td");
+    if (!cell || !cell.requests) { td.textContent = "-"; td.className = "none"; return td; }
+    const cost = document.createElement("span"), tokens = document.createElement("span");
+    cost.className = "uc"; cost.textContent = usageApi.describeCost(cell);
+    tokens.className = "ut"; tokens.textContent = usageApi.describeTokens(cell);
+    td.append(cost, tokens); return td;
+  }
+  function usageRow(name, cells, className = "") {
+    const tr = document.createElement("tr"), head = document.createElement("th");
+    head.scope = "row"; head.textContent = name; tr.className = className; tr.append(head, ...cells.map(usageCell)); return tr;
+  }
+  async function renderUsage() {
+    if (!usageApi || !chrome.storage?.local) return;
+    const stored = await chrome.storage.local.get([usageApi.KEY]), data = usageApi.summarize(stored[usageApi.KEY]);
+    const rows = usageApi.FEATURES.map(feature => usageRow(usageApi.FEATURE_LABELS[feature], [data.rows[feature].today, data.rows[feature].month, data.rows[feature].total]));
+    if (data.legacy) rows.push(usageRow("기록 시작 전 유튜브", [null, null, data.legacy], "legacy"));
+    rows.push(usageRow("합계", [data.all.today, data.all.month, data.all.total], "sum"));
+    $("usage-rows").replaceChildren(...rows);
+    const jobs = data.jobs.map(job => {
+      const item = document.createElement("li"), time = document.createElement("span"), kind = document.createElement("span"), label = document.createElement("span"), amount = document.createElement("span");
+      time.className = "jt"; time.textContent = usageTime(job.at);
+      kind.className = "jk"; kind.textContent = usageApi.FEATURE_LABELS[job.feature];
+      label.className = "jl"; label.textContent = job.label || usageApi.FEATURE_LABELS[job.feature]; label.title = job.models.join(", ");
+      const cell = { requests: job.requests, input: job.input, output: job.output, costUsd: job.costUsd, unknownCostRequests: job.unknown };
+      amount.className = "ja"; amount.textContent = `${usageApi.describeCost(cell)} · ${usageApi.describeTokens(cell)}`;
+      item.append(time, kind, label, amount); return item;
+    });
+    $("usage-jobs").replaceChildren(...jobs);
+    $("usage-jobs-count").textContent = `${jobs.length}개`; $("usage-jobs-empty").hidden = jobs.length > 0;
+  }
+  confirm("usage-clear", "사용량 기록을 지울까요?", "오늘·이번 달·전체 합계와 최근 작업이 모두 사라집니다. 되돌릴 수 없어요.", "지우기", $("usage-status"), async () => {
+    const result = await send({ type: "usage:clear" }); if (result?.ok) await renderUsage(); return result;
+  }, "사용량 기록 지움");
   confirm("translation-clear", "X 번역 캐시를 비울까요?", "열린 X 탭의 번역도 사라지고 다시 번역합니다. 키와 사전은 그대로.", "비우기", $("storage-status"), () => send({ type: "translation:clear" }), "X 번역 캐시 비움");
   confirm("youtube-clear", "이 브라우저의 자막을 지울까요?", "다음에 볼 때 다시 만듭니다(서버에 있으면 서버에서 받아 옵니다).", "지우기", $("storage-status"), () => send({ type: "youtube:clearCache" }), "이 브라우저 자막 지움");
   confirm("youtube-clear-server", "서버의 자막을 모두 지울까요?", "다른 브라우저와 기기도 다시 만들어야 합니다. 되돌릴 수 없습니다.", "모두 지우기", $("storage-status"), () => send({ type: "youtube:clearServerCache" }), "서버 자막 지움");
@@ -520,6 +566,7 @@
     // Never use raw key-bearing storage documents to render the page.
     if (changes["lakomics:translation:v1"]) void queued("translation", translationSettings).catch(() => {});
     if (changes[contextKey]) void queued("context", contextSettings).catch(() => {});
+    if (usageApi && changes[usageApi.KEY]) void renderUsage().catch(() => {});
     if (Object.keys(changes).some(key => key.startsWith("lakomics:youtube:settings:"))) void queued("youtube", youtubeSettings).catch(() => {});
   });
   const reveal = () => document.body.classList.add("ready"), cap = setTimeout(reveal, 300);
@@ -533,7 +580,8 @@
   const initial = [load().catch(() => status($("pair-status"), "연결 설정을 불러오지 못했습니다", true)),
     initialTranslation,
     contextSettings().catch(() => status($("context-menu-status"), "설정을 불러오지 못했습니다", true)),
-    youtubeSettings().catch(() => status($("youtube-status"), "자막 설정을 불러오지 못했습니다", true))];
+    youtubeSettings().catch(() => status($("youtube-status"), "자막 설정을 불러오지 못했습니다", true)),
+    renderUsage().catch(() => status($("usage-status"), "사용량을 불러오지 못했습니다", true))];
   void Promise.all(initial).then(() => {
     clearTimeout(cap); reveal();
   });
