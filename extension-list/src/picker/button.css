@@ -1,0 +1,10 @@
+/* Page-side pieces of the Arca Live picker: the toolbar button and the "push the page" class.
+   The panel itself lives in a closed shadow root (panel-css.js). */
+.lakomics-arca-pick{--lk-icon:#2f6fdb;--lk-ring:#2f6fdb;box-sizing:border-box;position:relative;display:inline-grid;place-items:center;width:36px;height:36px;margin:0;padding:0;border:0;border-radius:2px;background:transparent;color:var(--lk-icon);cursor:pointer;font:inherit;vertical-align:middle;-webkit-tap-highlight-color:transparent}
+.lakomics-arca-pick[data-lk-theme="dark"]{--lk-icon:#7db1ff;--lk-ring:#7db1ff}
+.lakomics-arca-pick svg{display:block;pointer-events:none}
+.lakomics-arca-pick:hover{background:color-mix(in srgb,currentColor 10%,transparent)}
+.lakomics-arca-pick[aria-pressed="true"]{background:color-mix(in srgb,currentColor 18%,transparent)}
+.lakomics-arca-pick:focus-visible{outline:2px solid var(--lk-ring);outline-offset:-2px}
+@media (forced-colors:active){.lakomics-arca-pick{color:ButtonText}.lakomics-arca-pick[aria-pressed="true"]{background:Highlight;color:HighlightText}}
+html.lakomics-arca-picker-push{margin-right:360px!important}

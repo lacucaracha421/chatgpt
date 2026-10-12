@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Companion",
-  "version": "3.5.35",
+  "version": "3.5.36",
   "description": "Collect images and videos into Lakomics, translate X posts, YouTube subtitles and web pages, and use the Lakomics right-click menu.",
   "permissions": [
     "storage",
@@ -19,6 +19,7 @@
     "http://*/*",
     "http://127.0.0.1/*",
     "http://127.0.0.1:39125/*",
+    "http://127.0.0.1:32145/*",
     "http://100.76.119.29/*"
   ],
   "action": {
@@ -134,6 +135,33 @@
     },
     {
       "matches": [
+        "https://arca.live/b/*/write*"
+      ],
+      "js": [
+        "src/picker/page-bridge.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://arca.live/b/*/write*"
+      ],
+      "js": [
+        "src/picker/model.js",
+        "src/picker/insert.js",
+        "src/picker/toolbar.js",
+        "src/picker/panel-css.js",
+        "src/picker/panel.js",
+        "src/picker/content.js"
+      ],
+      "css": [
+        "src/picker/button.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://www.youtube.com/*",
         "https://m.youtube.com/*"
       ],
@@ -170,6 +198,14 @@
       ]
     }
   ],
+  "commands": {
+    "toggle-arca-picker": {
+      "suggested_key": {
+        "default": "Alt+Shift+L"
+      },
+      "description": "Arca Live 글쓰기: Lakomics 그림 넣기 패널 열기/닫기"
+    }
+  },
   "options_page": "options/options.html",
   "icons": {
     "16": "icons/icon16.png",

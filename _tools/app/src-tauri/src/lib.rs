@@ -260,6 +260,7 @@ pub fn run() {
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
             workload::workload_launch_settled,
+            extension_api::report_picker_privacy,
             perf_log::perf_log_enabled,
             perf_log::perf_log_append,
             media_protocol_queue::media_view_changed,

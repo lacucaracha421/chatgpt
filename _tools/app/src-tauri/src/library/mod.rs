@@ -975,7 +975,18 @@ impl Library {
         }
     }
 
-    pub(super) fn library_media_path(&self, relative_path: &str) -> Result<PathBuf, LibraryError> {
+    /// One read on a reused `query_only` connection that does not take `database_lock`, so a
+    /// long read for the extension never stalls the app's own database work (WAL readers
+    /// see the last committed state).
+    pub(crate) fn read_without_lock<T>(
+        &self,
+        read: impl FnOnce(&Connection) -> Result<T, LibraryError>,
+    ) -> Result<T, LibraryError> {
+        self.media_reads
+            .read(&self.root.join("library.sqlite"), read)
+    }
+
+    pub(crate) fn library_media_path(&self, relative_path: &str) -> Result<PathBuf, LibraryError> {
         let requested_path = self.canonical_root.join(relative_path);
         let canonical_path = fs::canonicalize(&requested_path).map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {

@@ -72,6 +72,12 @@ URLs only. The menu explains this limitation instead of sending unusable data.
 HTTP image translation and Lakomics collection explain the HTTPS-original
 requirement; direct clipboard actions are hidden without the Clipboard API.
 
+Arca Live picker (3.5.36, desktop Chrome, `arca.live/b/*/write*` only): the toolbar
+button next to "이미지 업로드" or Alt+Shift+L opens a side panel that lists random
+pictures from a chosen PC library folder and inserts the selected ones into the post
+body through Arca's own paste/upload handling. It needs PC Lakomics running a build with
+the picker API and the PC 연결 키 (options › 연결). The post is never submitted.
+
 On touch devices, a 500 ms hold on links or an already existing selection opens
 the menu; images keep the save picker and two-finger translation stays unchanged.
 The first text-selection gesture and selection handles stay native. Movement,

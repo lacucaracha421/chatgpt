@@ -151,6 +151,7 @@ pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPla
 #[derive(Clone, Default)]
 pub struct AppState {
     library: Arc<RwLock<Option<Library>>>,
+    picker_privacy: Arc<crate::extension_api::PickerPrivacyGate>,
 }
 
 #[derive(Debug, Serialize)]
@@ -560,6 +561,11 @@ impl From<LibraryError> for CommandError {
 }
 
 impl AppState {
+    /// How the extension service learns the PC window's privacy mode and NSFW filter.
+    pub(crate) fn picker_privacy_gate(&self) -> &crate::extension_api::PickerPrivacyGate {
+        &self.picker_privacy
+    }
+
     pub(crate) fn current_library(&self) -> Option<Library> {
         self.library
             .read()

@@ -13,7 +13,10 @@ use thiserror::Error;
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 use uuid::Uuid;
 
+mod picker;
 mod public_media;
+
+pub(crate) use picker::{Privacy as PickerPrivacy, PrivacyGate as PickerPrivacyGate};
 
 use crate::{
     commands::AppState,
@@ -29,6 +32,19 @@ pub const API_ADDRESS: &str = "127.0.0.1:32145";
 pub const API_BASE_URL: &str = "http://127.0.0.1:32145";
 pub const EXTENSION_ID: &str = "nclkmjmmlcdaeomgadndeangccfidfbk";
 pub const EXTENSION_ORIGIN: &str = "chrome-extension://nclkmjmmlcdaeomgadndeangccfidfbk";
+/// The unpacked extension's id follows its folder, so each install location has its own id.
+/// `mcllko…` is the Windows checkout `V:\chatgpt\extension-list` (2026-10-13).
+const OTHER_EXTENSION_IDS: [&str; 1] = ["mcllkoakndnolmdppkopcmnghineoipk"];
+
+fn allowed_extension_id(id: &str) -> bool {
+    id == EXTENSION_ID || OTHER_EXTENSION_IDS.contains(&id)
+}
+
+fn allowed_origin(origin: &str) -> bool {
+    origin
+        .strip_prefix("chrome-extension://")
+        .is_some_and(allowed_extension_id)
+}
 const MAX_JSON_BYTES: usize = 32 * 1024;
 const MAX_REMOTE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const TOKEN_FILE_NAME: &str = "extension-token.txt";
@@ -76,6 +92,16 @@ enum ApiError {
     DownloadFailed,
     #[error("downloaded file is not a supported image")]
     UnsupportedImage,
+    #[error("picker request is invalid")]
+    PickerInvalidRequest,
+    #[error("PC privacy state is unavailable")]
+    PickerPrivacyUnavailable,
+    #[error("PC library is hidden by privacy mode")]
+    PickerLibraryLocked,
+    #[error("picker asset is unavailable or excluded")]
+    PickerAssetNotFound,
+    #[error("picker original exceeds 20 MiB")]
+    PickerOriginalTooLarge,
 }
 
 #[derive(Clone, Default)]
@@ -243,7 +269,12 @@ fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token:
     let authorization = request_header(&request, "Authorization");
     let extension_id = request_header(&request, "X-Lakomics-Extension-Id");
     let body = if method == "POST" {
-        match read_json_limited(request.as_reader()) {
+        let maximum = if path == "/v1/picker/batch" {
+            picker::MAX_BATCH_JSON_BYTES
+        } else {
+            MAX_JSON_BYTES
+        };
+        match read_json_with_limit(request.as_reader(), maximum) {
             Ok(body) => body,
             Err(error) => {
                 let _ = request.respond(api_error_response(error).into_tiny_http());
@@ -262,11 +293,31 @@ fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token:
         body,
     };
     let library = state.current_library();
-    let (response, outcome) = dispatch(api_request, library.as_ref(), token);
+    let (response, outcome) = dispatch_with_picker(api_request, library.as_ref(), token, || {
+        picker::read_privacy(&app, state.picker_privacy_gate())
+    });
     if let Some(outcome) = outcome {
         let _ = app.emit("extension://ingestion", &outcome);
     }
     let _ = request.respond(response.into_tiny_http());
+}
+
+/// The main window answers the extension service's privacy question with this command (see
+/// `picker::PrivacyGate`); an answer to any question that is not pending is ignored.
+#[tauri::command]
+pub fn report_picker_privacy(
+    nonce: String,
+    privacy_mode: bool,
+    nsfw_filter: bool,
+    state: tauri::State<'_, AppState>,
+) {
+    state.picker_privacy_gate().report(
+        &nonce,
+        PickerPrivacy {
+            privacy_mode,
+            nsfw_filter,
+        },
+    );
 }
 
 fn request_header(request: &Request, name: &'static str) -> Option<String> {
@@ -470,6 +521,14 @@ impl ApiRequest {
         }
     }
 
+    fn post(path: &str, origin: &str, authorization: Option<&str>, body: &[u8]) -> Self {
+        Self {
+            method: "POST".into(),
+            body: body.to_vec(),
+            ..Self::get(path, origin, authorization)
+        }
+    }
+
     fn options(path: &str, origin: &str) -> Self {
         Self {
             method: "OPTIONS".into(),
@@ -634,10 +693,27 @@ impl ImageDownloader for UreqImageDownloader {
     }
 }
 
+#[cfg(test)]
 fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (ApiResponse, Option<IngestOutcome>) {
-    let error_to_pair = |error: ApiError| (api_error_response(error), None);
+    dispatch_with_picker(request, library, token, || Ok(picker::Privacy::default()))
+}
+
+fn dispatch_with_picker(
+    request: ApiRequest,
+    library: Option<&Library>,
+    token: &str,
+    privacy: impl FnOnce() -> Result<picker::Privacy, ApiError>,
+) -> (ApiResponse, Option<IngestOutcome>) {
+    let is_picker = request.path.starts_with("/v1/picker/");
+    let error_to_pair = |error: ApiError| {
+        let mut response = api_error_response(error);
+        if is_picker {
+            picker::cache_headers(&mut response);
+        }
+        (response, None)
+    };
     if request.method == "OPTIONS" {
-        if request.origin.as_deref() != Some(EXTENSION_ORIGIN) {
+        if !request.origin.as_deref().is_some_and(allowed_origin) {
             return error_to_pair(ApiError::ForbiddenOrigin);
         }
         let mut response = ApiResponse::empty(204);
@@ -658,6 +734,16 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (Api
         token,
     ) {
         return error_to_pair(error);
+    }
+
+    if is_picker {
+        let Some(library) = library else {
+            return error_to_pair(ApiError::LibraryNotOpen);
+        };
+        return match privacy().and_then(|privacy| picker::dispatch(&request, library, privacy)) {
+            Ok(response) => (response, None),
+            Err(error) => error_to_pair(error),
+        };
     }
 
     match (request.method.as_str(), request.path.as_str()) {
@@ -986,6 +1072,11 @@ fn api_error_response(error: ApiError) -> ApiResponse {
             "unsupported_image",
             "Downloaded file is not a supported image.",
         ),
+        ApiError::PickerInvalidRequest => (400, "pickerInvalidRequest", "Picker request is invalid."),
+        ApiError::PickerPrivacyUnavailable => (423, "pickerPrivacyUnavailable", "PC privacy state could not be checked. Retry with the PC window open."),
+        ApiError::PickerLibraryLocked => (423, "pickerLibraryLocked", "Disable PC privacy mode before using the picker."),
+        ApiError::PickerAssetNotFound => (404, "pickerAssetNotFound", "Image is missing or excluded from the picker, including private vault media."),
+        ApiError::PickerOriginalTooLarge => (413, "pickerOriginalTooLarge", "Original image exceeds 20 MiB."),
     };
     ApiResponse::json(status, &ErrorResponse { code, message })
 }
@@ -1034,7 +1125,7 @@ fn authorize(
     extension_id: Option<&str>,
     token: &str,
 ) -> Result<(), ApiError> {
-    if extension_id != Some(EXTENSION_ID) || origin.is_some_and(|value| value != EXTENSION_ORIGIN) {
+    if !extension_id.is_some_and(allowed_extension_id) || origin.is_some_and(|value| !allowed_origin(value)) {
         return Err(ApiError::ForbiddenOrigin);
     }
     let supplied = authorization
@@ -1047,12 +1138,16 @@ fn authorize(
 }
 
 fn read_json_limited<R: Read>(reader: R) -> Result<Vec<u8>, ApiError> {
-    let mut limited = reader.take((MAX_JSON_BYTES + 1) as u64);
+    read_json_with_limit(reader, MAX_JSON_BYTES)
+}
+
+fn read_json_with_limit<R: Read>(reader: R, maximum: usize) -> Result<Vec<u8>, ApiError> {
+    let mut limited = reader.take((maximum + 1) as u64);
     let mut bytes = Vec::new();
     limited
         .read_to_end(&mut bytes)
         .map_err(|_| ApiError::BodyRead)?;
-    if bytes.len() > MAX_JSON_BYTES {
+    if bytes.len() > maximum {
         return Err(ApiError::BodyTooLarge);
     }
     Ok(bytes)
@@ -1374,6 +1469,15 @@ mod tests {
         )
         .is_ok());
         assert!(authorize(None, Some("Bearer abc"), Some(EXTENSION_ID), "abc").is_ok());
+        // The Windows checkout's unpacked id is accepted too; an unknown id is not.
+        assert!(authorize(
+            Some("chrome-extension://mcllkoakndnolmdppkopcmnghineoipk"),
+            Some("Bearer abc"),
+            Some("mcllkoakndnolmdppkopcmnghineoipk"),
+            "abc"
+        )
+        .is_ok());
+        assert!(authorize(None, Some("Bearer abc"), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "abc").is_err());
         assert_eq!(
             authorize(
                 Some("https://x.com"),
