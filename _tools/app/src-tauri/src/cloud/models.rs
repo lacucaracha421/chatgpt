@@ -66,6 +66,7 @@ pub(crate) struct RegisterAssetRequest<'a> {
 /// `CloudSyncQueueItem`(로컬 자산 → 클라우드 복제)과 개념이 다르다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RemoteCapture {
+    pub image_text: Option<serde_json::Value>,
     pub id: String,
     pub media_kind: RemoteCaptureKind,
     pub object_key: String,
@@ -109,6 +110,7 @@ impl TryFrom<RemoteCapturePayload> for RemoteCapture {
             _ => return Err(LibraryError::InvalidCloudCaptureRecord),
         };
         Ok(Self {
+            image_text: payload.image_text,
             id: payload.id,
             media_kind,
             object_key: payload.object_key,
@@ -136,6 +138,7 @@ pub(crate) struct RemoteCapturePage {
 /// 유효성은 `TryFrom<RemoteCapturePayload>`에서 타입별로 확인한다.
 #[derive(Debug, Deserialize)]
 pub(crate) struct RemoteCapturePayload {
+    pub image_text: Option<serde_json::Value>,
     #[serde(default)]
     pub id: String,
     #[serde(default)]
@@ -278,6 +281,7 @@ mod extension_capture_kind_tests {
     #[test]
     fn animated_gif_capture_is_a_distinct_remote_kind() {
         let capture = RemoteCapture::try_from(RemoteCapturePayload {
+            image_text: None,
             id: "capture-gif".into(),
             kind: "animated_gif".into(),
             object_key: "images/inbox/capture-gif/original".into(),

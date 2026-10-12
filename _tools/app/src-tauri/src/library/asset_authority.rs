@@ -13,6 +13,8 @@ use std::{collections::HashSet, fs};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AssetProjection {
+    #[serde(default)]
+    pub has_image_text: bool,
     pub asset_id: String,
     pub lifecycle: String,
     pub entity_revision: i64,
@@ -1220,6 +1222,41 @@ impl Library {
                 }
             }
         }
+        self.fetch_missing_asset_image_text(client, token, restricted)?;
+        Ok(())
+    }
+
+    fn fetch_missing_asset_image_text(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        restricted: bool,
+    ) -> Result<(), LibraryError> {
+        // Bound work per pass. Random order keeps stale flags returning 404 from
+        // permanently blocking other missing rows behind a fixed first page.
+        let projections: Vec<String> = {
+            let db = self.connection()?;
+            let mut query = db.prepare(
+                "SELECT s.projection FROM asset_authority_state s
+                 JOIN assets a ON a.id=s.asset_id
+                 LEFT JOIN asset_image_text t ON t.asset_id=s.asset_id
+                 WHERE s.lifecycle='normal' AND t.asset_id IS NULL
+                   AND json_extract(s.projection,'$.hasImageText')=1
+                 ORDER BY random() LIMIT ?1",
+            )?;
+            let rows = query.query_map([if restricted { 5 } else { 25 }], |row| row.get(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        for raw in projections {
+            let projection: AssetProjection =
+                serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+            if let Err(error) =
+                self.refresh_asset_image_text_with(&projection.asset_id, client, token)
+            {
+                // One request per candidate per sync pass; leave the cache intact on failure.
+                eprintln!("asset image text {}: {error}", projection.asset_id);
+            }
+        }
         Ok(())
     }
     fn materialize_asset(
@@ -1316,6 +1353,132 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::io::Cursor;
     const ID: &str = "80000000-0000-4000-8000-000000000001";
+
+    #[test]
+    fn image_text_projection_defaults_false_and_accepts_future_fields() {
+        let mut raw = serde_json::to_value(asset(&media())).unwrap();
+        raw.as_object_mut().unwrap().remove("hasImageText");
+        raw["future"] = json!(1);
+        assert!(
+            !serde_json::from_value::<AssetProjection>(raw.clone())
+                .unwrap()
+                .has_image_text
+        );
+        raw["hasImageText"] = json!(true);
+        assert!(
+            serde_json::from_value::<AssetProjection>(raw)
+                .unwrap()
+                .has_image_text
+        );
+    }
+
+    #[test]
+    fn image_text_projection_fetches_missing_cache_and_retries_next_pass() {
+        let (_temp, library, mut p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        p.has_image_text = true;
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE asset_authority_state SET projection=?1",
+                [serde_json::to_string(&p).unwrap()],
+            )
+            .unwrap();
+        let text =
+            super::super::image_text::validate(&json!([{"original":"hello","korean":"안녕"}]))
+                .unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}/v1", server.server_addr())).unwrap();
+        let expected = text.clone();
+        let worker = std::thread::spawn(move || {
+            for status in [500, 200] {
+                let request = server
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(request.url(), format!("/v1/library/assets/{ID}/image-text"));
+                assert_eq!(request.method().as_str(), "GET");
+                request
+                    .respond(
+                        tiny_http::Response::from_string(serde_json::to_string(&expected).unwrap())
+                            .with_status_code(status),
+                    )
+                    .unwrap();
+            }
+            // A populated cache must not be fetched on every idle authority pass.
+            assert!(server
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .unwrap()
+                .is_none());
+        });
+        library
+            .materialize_candidates(&client, "test", &mut AssetSyncResult::default(), false)
+            .unwrap();
+        assert!(library.asset_image_text(ID).unwrap().is_none());
+        library
+            .materialize_candidates(&client, "test", &mut AssetSyncResult::default(), false)
+            .unwrap();
+        assert_eq!(library.asset_image_text(ID).unwrap(), Some(text));
+        library
+            .materialize_candidates(&client, "test", &mut AssetSyncResult::default(), false)
+            .unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn image_text_new_materialization_fetches_after_media_ingest() {
+        let (_temp, library, mut p) = setup();
+        p.has_image_text = true;
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE asset_authority_state SET projection=?1",
+                [serde_json::to_string(&p).unwrap()],
+            )
+            .unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr());
+        let client = CloudClient::new(&base).unwrap();
+        let text =
+            super::super::image_text::validate(&json!([{"original":"hello","korean":"안녕"}]))
+                .unwrap();
+        let expected = text.clone();
+        let worker = std::thread::spawn(move || {
+            for path in [
+                format!("/v1/library/assets/{ID}/media-ticket"),
+                "/original".into(),
+                format!("/v1/library/assets/{ID}/image-text"),
+            ] {
+                let request = server
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(request.url(), path);
+                let body = if path.ends_with("media-ticket") {
+                    json!({"url":format!("{base}/original")})
+                        .to_string()
+                        .into_bytes()
+                } else if path == "/original" {
+                    media()
+                } else {
+                    serde_json::to_vec(&expected).unwrap()
+                };
+                request
+                    .respond(tiny_http::Response::from_data(body))
+                    .unwrap();
+            }
+        });
+        let mut result = AssetSyncResult::default();
+        library
+            .materialize_candidates(&client, "test", &mut result, false)
+            .unwrap();
+        assert_eq!(result.materialized, 1);
+        assert_eq!(result.materialization_failures, 0);
+        assert_eq!(library.asset_image_text(ID).unwrap(), Some(text));
+        worker.join().unwrap();
+    }
     #[test]
     fn workload_materialization_cap_preserves_pending_rows() {
         let temp = tempfile::tempdir().unwrap();
@@ -1483,6 +1646,7 @@ mod tests {
     }
     fn asset(bytes: &[u8]) -> AssetProjection {
         AssetProjection {
+            has_image_text: false,
             asset_id: ID.into(),
             lifecycle: "normal".into(),
             entity_revision: 1,

@@ -71,6 +71,76 @@ pub(crate) mod home_media;
 pub(crate) mod launchbox;
 
 #[tauri::command]
+pub async fn asset_image_text(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::image_text::AssetImageText>, CommandError> {
+    image_text_command(current_required(state)?, asset_id, false).await
+}
+
+#[tauri::command]
+pub async fn refresh_asset_image_text(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::image_text::AssetImageText>, CommandError> {
+    image_text_command(current_required(state)?, asset_id, true).await
+}
+
+async fn image_text_command(
+    library: Library,
+    asset_id: String,
+    refresh: bool,
+) -> Result<Option<crate::library::image_text::AssetImageText>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if refresh {
+            library.refresh_asset_image_text(&asset_id)
+        } else {
+            library.asset_image_text(&asset_id)
+        }
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[cfg(test)]
+mod image_text_command_tests {
+    use super::*;
+
+    #[test]
+    fn image_text_commands_return_local_and_refresh_without_cloud() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library.connection().unwrap().execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at) VALUES('a','a','image','a','a','a',1,1,1,'t')", []).unwrap();
+        let text = crate::library::image_text::validate(
+            &serde_json::json!([{"original":"hello", "korean":"안녕"}]),
+        )
+        .unwrap();
+        library.store_asset_image_text("a", &text).unwrap();
+        for refresh in [false, true] {
+            assert_eq!(
+                tauri::async_runtime::block_on(image_text_command(
+                    library.clone(),
+                    "a".into(),
+                    refresh
+                ))
+                .unwrap(),
+                Some(text.clone())
+            );
+            assert_eq!(
+                tauri::async_runtime::block_on(image_text_command(
+                    library.clone(),
+                    "missing".into(),
+                    refresh
+                ))
+                .unwrap(),
+                None
+            );
+        }
+    }
+}
+
+#[tauri::command]
 pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {
     tauri::async_runtime::spawn_blocking(move || metadata_import::inspect(folder.as_ref()))
         .await

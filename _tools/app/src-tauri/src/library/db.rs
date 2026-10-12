@@ -4,13 +4,14 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 128;
+pub(crate) const SCHEMA_VERSION: i64 = 129;
 
-/// Test helper: undoes migrations 0103 through 0128 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0129 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE asset_image_text;
     ALTER TABLE character_groups DROP COLUMN position;
     DROP TRIGGER character_extras_insert_valid;
     DROP TRIGGER character_extras_update_valid;
@@ -786,6 +787,10 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0128_character_group_position.sql"
             ))?;
         }
+        if version <= 128 {
+            transaction
+                .execute_batch(include_str!("../../migrations/0129_asset_image_text.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -860,6 +865,48 @@ mod release_calendar_migration_tests;
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+
+    #[test]
+    fn image_text_migration_129_applies_to_fresh_and_128() {
+        for version in [0, 128] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut db = open_database(&temp.path().join("library.sqlite")).unwrap();
+            if version > 0 {
+                historical_schema(&mut db, version);
+            }
+            migrate_to_latest(&mut db, version as i64).unwrap();
+            assert_eq!(
+                db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                129
+            );
+            db.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at) VALUES('a','a','image','a','a','a',1,1,1,'t')", []).unwrap();
+            db.execute(
+                "INSERT INTO asset_image_text VALUES('a','[]','digest','t')",
+                [],
+            )
+            .unwrap();
+            assert!(db
+                .execute(
+                    "INSERT INTO asset_image_text VALUES('missing','[]','digest','t')",
+                    []
+                )
+                .is_err());
+            assert!(db
+                .execute(
+                    "INSERT INTO asset_image_text VALUES('a','[]','other','t')",
+                    []
+                )
+                .is_err());
+            db.execute("DELETE FROM assets WHERE id='a'", []).unwrap();
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM asset_image_text", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+    }
 
     #[test]
     fn artist_exclusions_v111_upgrade_and_fresh_schema() {

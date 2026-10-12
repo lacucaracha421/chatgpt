@@ -53,6 +53,153 @@ fn pending_capture_json(id: &str) -> Value {
     })
 }
 
+#[test]
+fn image_text_legacy_payload_stores_and_duplicate_replaces() {
+    let mut first = pending_capture_json("text-first");
+    first["image_text"] =
+        json!([{"original":"hello", "korean":"처음", "box":{"x0":1,"y0":2,"x1":100,"y1":200}}]);
+    let mut second = pending_capture_json("text-second");
+    second["image_text"] = json!([{"original":"hello", "korean":"교체"}]);
+    let (base, handle) = serve_multi_capture_list(vec![first, second], &[], &[]);
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let result = library
+        .sync_next_cloud_capture_with(&CloudClient::new(&base).unwrap(), "test-token")
+        .unwrap();
+    assert_eq!(result.failed, 0);
+    assert_eq!(result.added, 1);
+    assert_eq!(result.acknowledged, 2);
+    let id: String = library
+        .connection()
+        .unwrap()
+        .query_row("SELECT id FROM assets", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        library.asset_image_text(&id).unwrap().unwrap().lines[0].korean,
+        "교체"
+    );
+    handle.join().unwrap();
+}
+
+#[test]
+fn image_text_legacy_fixture_keeps_box_and_tolerates_unknown_fields() {
+    let mut capture = pending_capture_json("text-box");
+    capture["future"] = json!(true);
+    capture["image_text"] = json!([{"original":"hello", "korean":"안녕", "box":{"x0":1,"y0":2,"x1":100,"y1":200}, "future":42}]);
+    let (base, handle) = serve_multi_capture_list(vec![capture], &[], &[]);
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let result = library
+        .sync_next_cloud_capture_with(&CloudClient::new(&base).unwrap(), "test-token")
+        .unwrap();
+    assert_eq!(result.added, 1);
+    assert_eq!(result.failed, 0);
+    let id: String = library
+        .connection()
+        .unwrap()
+        .query_row("SELECT id FROM assets", [], |r| r.get(0))
+        .unwrap();
+    let text = library.asset_image_text(&id).unwrap().unwrap();
+    assert_eq!(text.lines[0].r#box.as_ref().unwrap().x0, 1);
+    handle.join().unwrap();
+}
+
+#[test]
+fn image_text_bad_legacy_text_never_fails_import_or_erases_duplicate() {
+    let mut captures = Vec::new();
+    for (index, raw) in [
+        json!(false),
+        json!([{"original":"a", "korean":"보존"}]),
+        json!([{"original":"a", "korean":""}]),
+        json!({"wrong":"shape"}),
+        json!([{"original":"a".repeat(801), "korean":"too long"}]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut capture = pending_capture_json(&format!("text-{index}"));
+        capture["image_text"] = raw;
+        captures.push(capture);
+    }
+    let (base, handle) = serve_multi_capture_list(captures, &[], &[]);
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let result = library
+        .sync_next_cloud_capture_with(&CloudClient::new(&base).unwrap(), "test-token")
+        .unwrap();
+    assert_eq!(result.failed, 0);
+    assert_eq!(result.added, 1);
+    assert_eq!(result.acknowledged, 5);
+    let id: String = library
+        .connection()
+        .unwrap()
+        .query_row("SELECT id FROM assets", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        library.asset_image_text(&id).unwrap().unwrap().lines[0].korean,
+        "보존"
+    );
+    handle.join().unwrap();
+}
+
+#[test]
+fn image_text_ack_retry_updates_existing_import_without_downloading() {
+    let mut capture = pending_capture_json("text-ack");
+    capture["image_text"] = json!([{"original":"hello", "korean":"최신"}]);
+    let (base, handle) = serve_multi_capture_list(vec![capture], &[], &[]);
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    library.connection().unwrap().execute_batch("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at) VALUES('a','a','image','a','a','a',1,1,1,'t');
+        INSERT INTO cloud_capture_imports(capture_id,status,asset_id,imported_at) VALUES('text-ack','imported','a','t');").unwrap();
+    let result = library
+        .sync_next_cloud_capture_with(&CloudClient::new(&base).unwrap(), "test-token")
+        .unwrap();
+    assert_eq!(result.added, 0);
+    assert_eq!(result.acknowledged, 1);
+    assert_eq!(
+        library.asset_image_text("a").unwrap().unwrap().lines[0].korean,
+        "최신"
+    );
+    let seen = handle.join().unwrap();
+    assert!(!seen.iter().any(|url| url.ends_with("/download")));
+}
+
 /// 서로 다른 내용의 PNG. 배치 테스트에서 캡처별로 별개 자산이 생기도록
 /// 콘텐츠를 변형한다.
 fn distinct_png_bytes(seed: u32) -> Vec<u8> {

@@ -4340,6 +4340,49 @@ impl CloudClient {
         }
         Err(LibraryError::CloudRequestUnavailable)
     }
+
+    pub(crate) fn get_asset_image_text(
+        &self,
+        asset_id: &str,
+        token: &str,
+    ) -> Result<Option<crate::library::image_text::AssetImageText>, LibraryError> {
+        if asset_id.is_empty()
+            || asset_id.len() > 128
+            || !asset_id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let agent = self.agent_with_config(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
+        let endpoint = self.endpoint(&format!("/v1/library/assets/{asset_id}/image-text"))?;
+        let mut response = agent
+            .get(endpoint)
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        match response.status().as_u16() {
+            404 => return Ok(None),
+            401 | 403 => return Err(LibraryError::CloudUnauthorized),
+            200 => {}
+            _ => return Err(LibraryError::CloudRequestUnavailable),
+        }
+        let value: serde_json::Value = read_json_bounded(&mut response, 1024 * 1024)?;
+        let text = crate::library::image_text::validate(&value["lines"])
+            .ok_or(LibraryError::InvalidCloudResponse)?;
+        // Canonical serialization matches Python's sorted, compact UTF-8 payload.
+        // Reject damaged responses rather than caching text under a different digest.
+        if value["digest"].as_str() != Some(text.digest.as_str()) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(Some(text))
+    }
 }
 
 #[path = "home_publications.rs"]

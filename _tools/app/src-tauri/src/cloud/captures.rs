@@ -457,6 +457,9 @@ impl Library {
                 if status != "resolved" { result.attempted += 1; result.review_pending += 1; continue; }
                 // An explicit review disposition is terminal, including Keep existing.
                 // Retrying the download would recreate the rejected candidate forever.
+                if let Some(id) = &asset_id {
+                    self.store_capture_image_text(id, capture.image_text.as_ref());
+                }
                 self.mark_cloud_capture_imported(&capture.id,"imported",asset_id.as_deref(),&chrono::Utc::now().to_rfc3339())?;
             }
             let now = chrono::Utc::now().timestamp();
@@ -469,6 +472,20 @@ impl Library {
             result.attempted += 1;
             if self.cloud_capture_imported(&capture.id)? {
                 // 이전 실행에서 로컬 수집은 끝났지만 acknowledge가 유실된 케이스.
+                if capture.image_text.is_some() {
+                    let asset_id: Option<String> = self
+                        .connection()?
+                        .query_row(
+                            "SELECT asset_id FROM cloud_capture_imports WHERE capture_id=?1",
+                            [&capture.id],
+                            |row| row.get(0),
+                        )
+                        .optional()?
+                        .flatten();
+                    if let Some(id) = asset_id {
+                        self.store_capture_image_text(&id, capture.image_text.as_ref());
+                    }
+                }
                 let imported_at = chrono::Utc::now().to_rfc3339();
                 match client.acknowledge_capture_imported(&capture.id, token, &imported_at)
                     .and_then(|_| self.mark_cloud_capture_acknowledged(&capture.id)) {
@@ -575,7 +592,18 @@ impl Library {
         source_path: &Path,
     ) -> Result<IngestOutcome, LibraryError> {
         let request = self.capture_ingest_request(capture, source_path)?;
-        self.ingest_media(request)
+        let outcome = self.ingest_media(request)?;
+        let asset_id = match &outcome {
+            IngestOutcome::Added { asset } => Some(asset.id.as_str()),
+            IngestOutcome::ExactDuplicate {
+                existing_asset_id, ..
+            } => Some(existing_asset_id.as_str()),
+            IngestOutcome::ReviewPending { .. } => None,
+        };
+        if let Some(id) = asset_id {
+            self.store_capture_image_text(id, capture.image_text.as_ref());
+        }
+        Ok(outcome)
     }
 
     fn capture_ingest_request(

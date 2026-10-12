@@ -453,6 +453,8 @@ pub fn run() {
             commands::video_similarity::decide_video_similarity_review,
             commands::get_asset,
             commands::update_asset_metadata,
+            commands::asset_image_text,
+            commands::refresh_asset_image_text,
             commands::trash_assets,
             commands::restore_asset,
             commands::restore_assets,

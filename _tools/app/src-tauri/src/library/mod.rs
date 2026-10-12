@@ -15,6 +15,7 @@ pub(crate) mod album_reconciliation;
 #[path = "album_reconciliation_tests.rs"]
 mod album_reconciliation_tests;
 pub(crate) mod asset_authority;
+pub(crate) mod image_text;
 mod asset_metadata;
 pub(crate) mod authority_pass;
 pub(crate) mod av_artwork;
