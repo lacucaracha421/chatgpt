@@ -216,6 +216,12 @@ function catalogWorks() {
 
 export function dispatchPreviewCommand(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
+    case "asset_image_text":
+    case "refresh_asset_image_text": return args.assetId === "asset-001" ? { digest: "preview-image-text-001", lines: [
+      { original: "ねえ、今日の放課後ひま？", korean: "있잖아, 오늘 방과 후에 시간 있어?", box: { x0: 690, y0: 50, x1: 910, y1: 179 } },
+      { original: "急にどうしたの", korean: "갑자기 왜?", box: { x0: 100, y0: 186, x1: 260, y1: 286 } },
+      { original: "…また漫画ばっかり買うんでしょ", korean: "…또 만화만 잔뜩 사겠지." },
+    ] } : null;
     case "open_library": return { root: "/preview/library" };
     case "workload_profile": return { lightweight: false, autoEnterMinutes: null, closeToTray: false, restricted: false, hidden: false, trayAvailable: false };
     case "list_classifications": return previewClassifications;

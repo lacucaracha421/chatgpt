@@ -308,6 +308,9 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.providerImage("/v1/providers/image?provider=tmdb&path=%2Fa.jpg&size=w342"));
  pass(()->NetworkPolicy.providerImage("/v1/providers/image?provider=igdb&path=a&size=t_cover_big"));
  for(String path:new String[]{"https://evil.example/v1/providers/image?x=1","//evil.example/v1/providers/image?x=1","/v1/providers/status?x=1","/v1/providers/image","/v1/providers/image/?x=1","/v1/providers/image%3fx=1","/v1/providers/image?x=1#fragment","/v1/providers/image?x=1\\extra"})reject(()->NetworkPolicy.providerImage(path));
+ pass(()->NetworkPolicy.api("/v1/library/assets/asset_A-1/image-text","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/library/assets/asset_A-1/image-text",method));
+ for(String path:new String[]{"/v1/library/assets//image-text","/v1/library/assets/../image-text","/v1/library/assets/a%2fb/image-text","/v1/library/assets/a/image-text/extra"})reject(()->NetworkPolicy.api(path,"GET"));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

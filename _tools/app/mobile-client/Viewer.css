@@ -340,3 +340,15 @@
 .viewer { background: transparent; }
 
 [role="dialog"]:has(> .viewer) { background: transparent; }
+
+/* Reading is part of the viewer: no modal backdrop or pointer shield above the image. */
+.viewer.is-reading .viewer-surface { bottom: 46%; }
+.viewer-reading-sheet { position: absolute; z-index: 7; inset: auto 0 0; height: 46%; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; padding: 0 var(--space-6) env(safe-area-inset-bottom); border-radius: 8px 8px 0 0; background: var(--color-sidebar); animation: viewer-reading-enter 140ms var(--ease-standard); }
+.viewer-reading-sheet > .viewer-info { flex: 1; min-height: 0; }
+.viewer-reading-sheet__header { display: flex; align-items: center; justify-content: space-between; min-height: var(--control-height); margin-bottom: var(--space-2); font-size: var(--type-title); }
+.viewer-reading-sheet .bottom-sheet-drag-area { position: static; flex: none; height: var(--touch-target); touch-action: none; display: flex; align-items: center; justify-content: center; }
+.viewer-reading-sheet .bottom-sheet-drag-area > span { width: var(--control-height-compact); height: var(--space-1); background: var(--color-border); border-radius: var(--radius-mark); }
+.viewer-info-body > .image-text-section { margin-bottom: var(--space-4); }
+.viewer-surface:has(.image-text-markers[data-panning="true"]) > img { transition: transform 200ms var(--ease-standard); }
+@keyframes viewer-reading-enter { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .viewer-reading-sheet { animation: none; } .viewer-surface:has(.image-text-markers[data-panning="true"]) > img { transition: none; } }

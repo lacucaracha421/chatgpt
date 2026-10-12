@@ -34,6 +34,7 @@ final class NetworkPolicy {
   if(path.length()>(path.startsWith("/v1/mobile-catalog/")?16384:8192) || path.contains("\\") || path.contains("#") || path.contains("\r") || path.contains("\n"))throw new IllegalArgumentException("Unsupported API path");
   String p=path.split("\\?",2)[0];
   boolean get=p.equals("/v1/library/list-generation") || p.equals("/v1/library/classifications") || p.equals("/v1/library/assets") || p.equals("/v1/library/revisit") || p.equals("/v1/library/revisit/date") || p.matches("/v1/library/revisit/creator/[A-Za-z0-9_%.-]+/assets") || p.equals("/v1/captures/pending") || p.matches("/v1/captures/[A-Za-z0-9_-]+/download");
+  get=get || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/image-text");
   get=get || p.equals("/v1/library/characters") || p.equals("/v1/library/characters/assets") || p.equals("/v1/library/characters/status");
   get=get || p.equals("/v1/library/search/suggestions");
   // NL-SEARCH-001 option A: read-only content search. The caption PUT (`/v1/library/captions`) is publisher-only and stays unreachable.

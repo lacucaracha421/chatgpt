@@ -1,3 +1,5 @@
+import {ImageTextSection} from '../src/shared/viewer/ImageTextSection';
+import {useViewerImageText} from '../src/shared/viewer/ImageTextContext';
 import {useTabletAssetMask} from './assetMask';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon} from '@heroicons/react/24/outline';
@@ -128,6 +130,7 @@ export async function writeClipboard(text: string): Promise<void> {
 /** `image`: lead with the large image (the gallery sheet); the viewer already shows the asset itself. */
 export function ViewerInfo({asset, mediaError = '', image = false}: {asset: Asset; mediaError?: string; image?: boolean; onClose?(): void}) {
   const privacy = useTabletAssetMask(asset);
+  const imageText = useViewerImageText();
   const artistIndex = useLibraryArtists(true, 0);
   const assignment = artistIndex.assignments.find(row => row.assetId === asset.id);
   const artist = assignment
@@ -192,7 +195,8 @@ export function ViewerInfo({asset, mediaError = '', image = false}: {asset: Asse
   // Same order as the PC 정보 panel: the image alone on top (only where it is not already the
   // screen, i.e. the gallery sheet), then the artist, then the labelled record rows.
   return <section className="viewer-info" aria-label="미디어 정보">
-    <div className="viewer-info-body">
+    <div className="viewer-info-body" data-image-text-scroll>
+      {!image && !privacy && asset.kind === 'image' && imageText && <ImageTextSection {...imageText}/>}
       {image && <div className="viewer-info-image" data-info-section="preview" style={ratio ? {aspectRatio: ratio} : undefined}>
         {privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : asset.preview ? <img src={asset.preview} alt="" draggable={false}/> : null}
         {duration && <Badge variant="scrim">▶ {duration}</Badge>}

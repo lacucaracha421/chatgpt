@@ -1,5 +1,6 @@
 export interface Asset {
   contentRating?: import("../src/shared/privacy/contentMask").ContentRating | null;
+  has_image_text?: boolean;
   id: string; kind: string; content_type?: string; size_bytes?: number;
   width?: number | null; height?: number | null; collected_at?: string;
   created_at?: string; source_url?: string; creator_name?: string; creator_handle?: string;

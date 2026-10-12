@@ -22,6 +22,7 @@ import type {
   AssetPage,
   AssetQuery,
   AssetSummary,
+  AssetImageText,
   ClassificationEntry,
   CollectionSummary,
   CollectionWorkRecord,
@@ -207,6 +208,8 @@ type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
 >>;
 
 export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
+  assetImageText: (assetId) => invoke<AssetImageText | null>("asset_image_text", { assetId }),
+  refreshAssetImageText: (assetId) => invoke<AssetImageText | null>("refresh_asset_image_text", { assetId }),
   descriptionSearchStatus: () => invoke<import("./types").DescriptionSearchStatus>("description_search_status"),
   prewarmDescriptionSearch: () => invoke<void>("prewarm_description_search"),
   searchByDescription: (query, limit, force) => invoke<import("./types").DescriptionSearchResult>("search_by_description", { query, limit, force }),

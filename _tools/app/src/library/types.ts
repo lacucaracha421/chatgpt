@@ -1441,7 +1441,18 @@ export interface DescriptionSearchResult {
   precise: boolean;
 }
 
+export type ImageTextLine = {
+  original: string;
+  korean: string;
+  /** Normalized image coordinates, 0–1000. */
+  box?: { x0: number; y0: number; x1: number; y1: number } | null;
+};
+
+export type AssetImageText = { lines: ImageTextLine[]; digest: string };
+
 export interface LibraryGateway {
+  assetImageText?(assetId: string): Promise<AssetImageText | null>;
+  refreshAssetImageText?(assetId: string): Promise<AssetImageText | null>;
   descriptionSearchStatus?: () => Promise<DescriptionSearchStatus>;
   prewarmDescriptionSearch?: () => Promise<void>;
   /** `force` skips the "no match" gate and ranks the nearest images anyway. */

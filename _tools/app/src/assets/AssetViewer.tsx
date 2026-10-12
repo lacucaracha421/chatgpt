@@ -7,6 +7,7 @@ import {
   ChevronRightIcon,
   FolderArrowDownIcon,
   InformationCircleIcon,
+  LanguageIcon,
   RectangleStackIcon,
   HeartIcon,
   TrashIcon,
@@ -18,6 +19,11 @@ import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
+import { ImageTextMarkers, imageTextMarkerPositions } from "../shared/viewer/ImageTextMarkers";
+import { ImageTextContext } from "../shared/viewer/ImageTextContext";
+import { useDisplayedImage } from "../shared/viewer/useDisplayedImage";
+import { useImageText } from "../shared/viewer/useImageText";
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { artistHandle } from "../artists/format";
 import { useAssetArtist } from "../artists/artistStore";
 import type { ArtistSummary } from "../artists/types";
@@ -127,10 +133,15 @@ export function AssetViewer({
   const [folderPath, setFolderPath] = useState("");
   const [characterOpen, setCharacterOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [textOpen, setTextOpen] = useState(false);
+  const [textSelection, setTextSelection] = useState<{ assetId: string; index: number } | null>(null);
+  const [textPanning, setTextPanning] = useState(false);
+  const textPanTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const openedAssetIds = useRef(new Set<string>());
   const nearEndLengthRef = useRef<number | null>(null);
   const wheelRef = useRef({ accumulated: 0, lastStepAt: 0 });
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageElement, setStageElement] = useState<HTMLDivElement | null>(null);
   const detachWheelRef = useRef<(() => void) | null>(null);
   // A native, non-passive listener so Ctrl+wheel can stop the WebView's own page zoom. Attached when the
   // stage mounts (the dialog content mounts after this component's effects run).
@@ -138,6 +149,7 @@ export function AssetViewer({
     detachWheelRef.current?.();
     detachWheelRef.current = null;
     stageRef.current = stage;
+    setStageElement(stage);
     if (!stage) return;
     const listener = (event: globalThis.WheelEvent) => wheelHandlerRef.current(event);
     stage.addEventListener("wheel", listener, { passive: false });
@@ -157,6 +169,41 @@ export function AssetViewer({
   const viewerOpen = Boolean(asset);
   const total = totalCount != null && Number.isFinite(totalCount) && totalCount >= items.length ? totalCount : items.length;
   const showFilmstrip = Boolean(asset && items.length > 1);
+  const textEligible = Boolean(asset?.media.kind === "image" && !privacyMode && mediaSource === "library" && !imageFailed);
+  const displayed = useDisplayedImage(stageElement);
+  const displayedAsset = items.find(item => assetUrl(item.id) === displayed?.src);
+  const { entries: textEntries, pending: textPending } = useImageText(textEligible ? asset.id : null, library?.gateway);
+  const textEntry = displayedAsset ? textEntries[displayedAsset.id] : undefined;
+  const textBusy = textEligible && Boolean(textEntry?.busy || (displayedAsset?.id === asset.id && textPending));
+  const textBusyVisible = useDelayedBusy(textBusy, { delay: 400 });
+  const lines = textEligible ? textEntry?.text?.lines ?? [] : [];
+  const hasText = lines.length > 0;
+  const textCurrent = Boolean(asset && displayedAsset?.id === asset.id);
+  const selectedLine = textSelection && textSelection.assetId === asset?.id && textCurrent ? textSelection.index : null;
+  const selectText = (line: number) => {
+    if (!textCurrent || !asset) return;
+    setTextSelection(current => current?.assetId === asset.id && current.index === line ? null : { assetId: asset.id, index: line });
+  };
+  const selectTextRow = (line: number) => {
+    selectText(line);
+    if (!textCurrent || !displayed || zoom.scale <= 1 || !stageRef.current || selectedLine === line) return;
+    const marker = imageTextMarkerPositions(lines, displayed.rect.width, displayed.rect.height, zoom.scale).find(position => position.index === line);
+    if (!marker) return;
+    const stage = stageRef.current;
+    const x = stage.clientWidth / 2 + zoom.x + (marker.x - displayed.rect.width / 2) * zoom.scale;
+    const y = stage.clientHeight / 2 + zoom.y + (marker.y - displayed.rect.height / 2) * zoom.scale;
+    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+    // Keep the badge clear of the top bar and the visible filmstrip.
+    const dx = clamp(x, 14, stage.clientWidth - 14) - x;
+    const dy = clamp(y, 70, stage.clientHeight - (showFilmstrip ? 154 : 14)) - y;
+    if (!dx && !dy) return;
+    setTextPanning(true);
+    setZoom(current => ({ ...current, x: current.x + dx, y: current.y + dy }));
+    clearTimeout(textPanTimer.current);
+    textPanTimer.current = setTimeout(() => setTextPanning(false), 200);
+  };
+  const openText = () => { setInfoOpen(true); setTextOpen(true); };
+  const toggleText = () => { if (infoOpen && textOpen) setTextOpen(false); else openText(); };
 
   const revealChrome = useCallback(() => {
     setChromeVisible(true);
@@ -171,6 +218,7 @@ export function AssetViewer({
   }, []);
 
   useEffect(() => () => clearTimeout(stripGrowTimer.current), []);
+  useEffect(() => () => clearTimeout(textPanTimer.current), []);
   // Opt-in PC timing log: open intent to first picture and to the decoded full image. No-ops when off.
   useLayoutEffect(() => {
     if (!viewerOpen) return;
@@ -180,6 +228,7 @@ export function AssetViewer({
 
   useEffect(() => {
     if (!viewerOpen) {
+      setTextOpen(false);
       setInfoOpen(false);
       setCharacterOpen(false);
       openedAssetIds.current.clear();
@@ -194,6 +243,9 @@ export function AssetViewer({
   }, [revealChrome, viewerOpen]);
 
   useEffect(() => {
+    setTextSelection(null);
+    setTextPanning(false);
+    clearTimeout(textPanTimer.current);
     setImageFailed(false);
     setReplacementFailed(false);
     setVideoPlaying(false);
@@ -315,6 +367,9 @@ export function AssetViewer({
       }
       // Typing in a field inside the viewer (the character picker search) must not trigger viewer shortcuts.
       if (typesText(event.target)) return;
+      if (event.key.toLowerCase() === "t" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && !event.defaultPrevented && hasText && textCurrent && renderInfo) {
+        event.preventDefault(); toggleText(); revealChrome(); return;
+      }
       const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
       // A video owns Left/Right for seeking; previous/next stays on the on-screen arrows.
       if (arrow && seekable && !event.altKey && !event.ctrlKey && !event.metaKey) {
@@ -378,6 +433,7 @@ export function AssetViewer({
               {metaLabel && <small>{metaLabel}</small>}
             </span>
             <span className="asset-viewer__spacer" />
+            {hasText && textCurrent && renderInfo && <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${infoOpen && textOpen ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="번역" aria-expanded={infoOpen && textOpen} onClick={openText}><LanguageIcon aria-hidden="true" /><span>번역</span></Button>}
             {renderCharacterPicker && <span className="asset-viewer__action-anchor">
               <Button className="asset-viewer__vbtn asset-viewer__vbtn--text" variant="ghost" aria-label="캐릭터" aria-expanded={characterOpen} aria-haspopup="dialog" onClick={() => setCharacterOpen((open) => !open)}><UserIcon aria-hidden="true" /><span>캐릭터</span></Button>
               {characterOpen && <div className="asset-viewer__character-popover" onPointerDown={(event) => event.stopPropagation()}>{renderCharacterPicker(asset, closeCharacterPicker)}</div>}
@@ -405,14 +461,19 @@ export function AssetViewer({
             ? <VideoPlayer ref={videoPlayerRef} key={asset.id} source={mediaSource} poster={mediaSource === "vault" ? vaultThumbnailUrl(asset.id, asset.thumbnailRevision ?? undefined) : assetThumbnailUrl(asset)} loop mediaEvents={{onDurationChange: (event) => { const seconds = event.currentTarget.duration; if (Number.isFinite(seconds) && seconds > 0) onVideoDurationKnown?.(asset, Math.round(seconds * 1_000)); }, onPlay: () => setVideoPlaying(true), onPause: () => { setVideoPlaying(false); revealChrome(); }, onEnded: () => { setVideoPlaying(false); revealChrome(); }}} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
             : imageFailed
               ? <EmptyState title="이미지를 불러오지 못했습니다">다른 자산으로 이동하면 자동으로 다시 시도합니다.</EmptyState>
-              : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} className="asset-viewer__media" style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
+              : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} className={`asset-viewer__media${textPanning ? " asset-viewer__media--panning" : ""}`} style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
         </div>
         </ViewerMediaContextMenu>
+        {hasText && displayed && <ImageTextMarkers lines={lines} selected={selectedLine} open={infoOpen && textOpen} interactive={textCurrent} onSelect={selectText} rect={displayed.rect} zoom={zoom} panning={textPanning} />}
         {replacementFailed && <div className="asset-viewer__load-error" role="status">이미지를 불러오지 못했습니다. 다른 자산으로 이동하면 다시 시도합니다.</div>}
       </div>
       {infoOpen && renderInfo && <aside className="asset-viewer__dock" role="complementary" aria-label="자산 정보">
         <header className="asset-viewer__dock-header"><span>정보</span><Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정보 닫기" onClick={() => setInfoOpen(false)}><XMarkIcon aria-hidden="true" /></Button></header>
-        <div className="asset-viewer__dock-body">{renderInfo(asset)}</div>
+        <div className="asset-viewer__dock-body" data-image-text-scroll>
+          <ImageTextContext value={textEligible && displayedAsset && (hasText || textBusyVisible) ? { assetId: displayedAsset.id, lines, selected: selectedLine, open: textOpen, onToggle: () => setTextOpen(open => !open), onSelect: selectTextRow, busy: textBusyVisible } : null}>
+            <div inert={!textCurrent && textEligible}>{renderInfo(asset)}</div>
+          </ImageTextContext>
+        </div>
       </aside>}
     </div>
   </Dialog>;

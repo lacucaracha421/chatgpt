@@ -2,9 +2,9 @@ import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {assetMasked} from '../src/shared/privacy/contentMask';
 import {mediaMasked} from './assetMask';
 import {useNsfwFilter} from './privacyMode';
-import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SyntheticEvent} from 'react';
 import {displayCount,displayDateTime} from '../src/shared/displayDate';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, RectangleStackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
+import {LanguageIcon, ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, RectangleStackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import {HeartIcon as HeartSolidIcon} from '@heroicons/react/24/solid';
 import type {ComponentType, CSSProperties, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
@@ -28,6 +28,12 @@ import {useLikesAlbum} from './useLikesAlbum';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 import {contentCross, EASE_STANDARD, motionDefaults, motionTime, prefersReducedMotion} from '../src/shared/motion/curves';
 
+import {ImageTextContext} from '../src/shared/viewer/ImageTextContext';
+import {ImageTextMarkers, imageTextMarkerPositions} from '../src/shared/viewer/ImageTextMarkers';
+import {useDisplayedImage} from '../src/shared/viewer/useDisplayedImage';
+import {useImageText} from '../src/shared/viewer/useImageText';
+import {useDelayedBusy} from '../src/shared/useDelayedBusy';
+import {createImageTextGateway} from './imageText';
 import './Viewer.css';
 
 /**
@@ -63,7 +69,9 @@ function viewerDateLabel(value?: string): string {
 function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
   return <Button type="button" size="icon" variant="ghost" className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/></Button>;
 }
-export function Viewer(props: Omit<Parameters<typeof ViewerContent>[0], 'openedOn'>) {
+export function Viewer(props: Omit<Parameters<typeof ViewerContent>[0], 'openedOn' | 'textOpen' | 'setTextOpen' | 'textGateway'>) {
+  const [textOpen, setTextOpen] = useState(false);
+  const textGateway = useMemo(createImageTextGateway, []);
   const [privacy] = usePrivacyMode();
   const [filter]=useNsfwFilter();
   const masked=assetMasked(false,filter,props.items[props.index]);
@@ -73,12 +81,15 @@ export function Viewer(props: Omit<Parameters<typeof ViewerContent>[0], 'openedO
   const openedOn = useRef<string | undefined>(props.items[props.index]?.id);
   if (openedOn.current !== props.items[props.index]?.id) openedOn.current = undefined;
   useEffect(() => { if (hidden) props.onClose(); }, [hidden, props.onClose]);
-  return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : masked ? <MaskedViewer {...props}/> : <ViewerContent key={String(filter)} {...props} openedOn={openedOn.current}/>;
+  return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : masked ? <MaskedViewer {...props}/> : <ViewerContent key={String(filter)} {...props} openedOn={openedOn.current} textOpen={textOpen} setTextOpen={setTextOpen} textGateway={textGateway}/>;
 }
 
-function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault,openedOn}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault,openedOn,textOpen,setTextOpen,textGateway}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
   /** The asset id the viewer was opened on while it is still shown; only that video autoplays. */
   openedOn?: string;
+  textOpen?: boolean;
+  setTextOpen?(open: boolean): void;
+  textGateway: ReturnType<typeof createImageTextGateway>;
   /** Move the Asset on screen to the Library Trash (no confirmation: it is reversible). */
   onTrash?(asset:Asset):void;
   /** The host's "휴지통으로 이동함 · 실행 취소" snackbar, rendered inside the modal viewer. */
@@ -153,7 +164,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       if (exclusionOpen.current) { setExclusion(null); return true; }
       if (pickersOpen.current.classificationOpen) { setClassificationOpen(false); return true; }
       if (pickersOpen.current.albumOpen) { setAlbumOpen(false); return true; }
-      if (infoOpen.current) { setInfo(false); return true; }
+      if (infoOpen.current) { setInfo(false); setTextOpen?.(false); return true; }
       return motion.back();
     };
     return () => { backRef.current = null; };
@@ -168,6 +179,63 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const [landscape, setLandscape] = useState(() => window.innerWidth > window.innerHeight);
   const [transform, setTransform] = useState({scale: 1, x: 0, y: 0});
   const surface = useRef<HTMLDivElement>(null);
+  const [surfaceElement, setSurfaceElement] = useState<HTMLDivElement | null>(null);
+  const bindSurface = useCallback((element: HTMLDivElement | null) => {surface.current = element; setSurfaceElement(element);}, []);
+  const displayed = useDisplayedImage(surfaceElement, 'img.viewer-image:not([data-stable-image-loading])');
+  const imageSources = useRef(new Map<string, string>());
+  if (asset.preview) imageSources.current.set(asset.preview, asset.id);
+  if (original) imageSources.current.set(original, asset.id);
+  if (decoded) imageSources.current.set(decoded.url, decoded.id);
+  const displayedId = displayed ? imageSources.current.get(displayed.src) : undefined;
+  const displayedAsset = items.find(item => item.id === displayedId);
+  const textEligible = !vault && !privacy && asset.kind === 'image' && !!asset.has_image_text;
+  const {entries: textEntries, pending: textPending} = useImageText(textEligible ? asset.id : null, textGateway);
+  const textEntry = displayedId ? textEntries[displayedId] : undefined;
+  const lines = textEntry?.text?.lines ?? [];
+  const hasText = !vault && !privacy && asset.kind === 'image' && !!displayedAsset?.has_image_text && lines.length > 0;
+  const textCurrent = displayedId === asset.id;
+  const textBusy = useDelayedBusy(textEligible && textCurrent && textPending, {delay: 400});
+  const textAvailable = textEligible && (!textEntries[asset.id] || !!textEntries[asset.id].text?.lines.length);
+  const [selection, setSelection] = useState<{assetId: string; line: number} | null>(null);
+  const selectedLine = selection?.assetId === asset.id && textCurrent ? selection.line : null;
+  useEffect(() => setSelection(null), [asset.id]);
+  const reading = !vault && info && !!textOpen;
+  const halfSheet = reading && !landscape;
+  const closeInfo = () => {setInfo(false); setTextOpen?.(false);};
+  const markerSize = surfaceElement ? parseFloat(getComputedStyle(surfaceElement).getPropertyValue('--badge-height')) || 24 : 24;
+  const markerHitSize = surfaceElement ? parseFloat(getComputedStyle(surfaceElement).getPropertyValue('--touch-target')) || 44 : 44;
+  const [textPanning, setTextPanning] = useState(false);
+  useEffect(() => {
+    if (!textPanning) return;
+    const timer = setTimeout(() => setTextPanning(false), 200);
+    return () => clearTimeout(timer);
+  }, [textPanning, transform]);
+  const selectText = (line: number, fromRow = false) => {
+    if (!textCurrent) return;
+    setSelection(selectedLine === line ? null : {assetId: asset.id, line});
+    if (!fromRow || selectedLine === line || !displayed || transform.scale <= 1 || !surface.current) return;
+    const marker = imageTextMarkerPositions(lines, displayed.rect.width, displayed.rect.height, transform.scale, markerSize).find(position => position.index === line);
+    if (!marker) return;
+    const stage = surface.current;
+    const x = stage.clientWidth / 2 + transform.x + (marker.x - displayed.rect.width / 2) * transform.scale;
+    const y = stage.clientHeight / 2 + transform.y + (marker.y - displayed.rect.height / 2) * transform.scale;
+    if (x >= markerSize / 2 && x <= stage.clientWidth - markerSize / 2 && y >= 56 + markerSize / 2 && y <= stage.clientHeight - markerSize / 2) return;
+    setTextPanning(true);
+    setTransform(clamp(transform.scale, (displayed.rect.width / 2 - marker.x) * transform.scale, (displayed.rect.height / 2 - marker.y) * transform.scale));
+  };
+  const markerAt = (clientX: number, clientY: number) => {
+    if (!reading || !hasText || !textCurrent || !displayed || !surface.current) return undefined;
+    const stage = surface.current.getBoundingClientRect();
+    return imageTextMarkerPositions(lines, displayed.rect.width, displayed.rect.height, transform.scale, markerSize).find(marker => {
+      const x = stage.left + displayed.rect.left + displayed.rect.width / 2 + transform.x + (marker.x - displayed.rect.width / 2) * transform.scale;
+      const y = stage.top + displayed.rect.top + displayed.rect.height / 2 + transform.y + (marker.y - displayed.rect.height / 2) * transform.scale;
+      return Math.abs(clientX - x) <= markerHitSize / 2 && Math.abs(clientY - y) <= markerHitSize / 2;
+    })?.index;
+  };
+  const imageText = displayedId && (hasText || (textEligible && textCurrent && textBusy)) ? {
+    assetId: displayedId, lines, selected: selectedLine, open: !!textOpen,
+    onToggle: () => setTextOpen?.(!textOpen), onSelect: (line: number) => selectText(line, true), busy: textCurrent && textBusy,
+  } : null;
   useEffect(() => setVideoPlaying(false), [asset.id]);
   const video = useRef<HTMLVideoElement>(null);
   const videoResume = useRef({id:'',time:0,playing:false});
@@ -232,7 +300,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     const observe = () => {
       const observation = timing.current;
       if (!observation || observation.id !== asset.id || observation.span.done || !observation.url) return;
-      const element = asset.kind === 'video' ? video.current : surface.current?.querySelector('img:not([data-stable-image-loading])');
+      const element = asset.kind === 'video' ? video.current : surface.current?.querySelector<HTMLImageElement>('img:not([data-stable-image-loading])');
       if (element?.getAttribute('src') === observation.url) observation.span.log('commit');
     };
     observe();
@@ -309,7 +377,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const playing = () => {clearTimeout(stallTimer.current);setError('');};
   const distance = () => { const [a, b] = [...gesture.current.points.values()]; return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0; };
   const clamp = (scale: number, x: number, y: number) => {
-    const rect = surface.current!.getBoundingClientRect(), image = surface.current!.querySelector('img');
+    const rect = surface.current!.getBoundingClientRect(), image = surface.current!.querySelector<HTMLImageElement>('img:not([data-stable-image-loading])');
     const aspect = image && image.naturalHeight ? image.naturalWidth/image.naturalHeight : 1;
     return fitTransform(scale,x,y,rect.width,rect.height,aspect);
   };
@@ -319,7 +387,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const canExclude=!!exclusionKey&&!(character?.protectedAssetIds??[]).includes(asset.id);
   const openExclusion = () => {
     if(!exclusionKey||!character) return;
-    setInfo(false); setAlbumOpen(false); setClassificationOpen(false); revealChrome();
+    setInfo(false); setTextOpen?.(false); setAlbumOpen(false); setClassificationOpen(false); revealChrome();
     setExclusion({
       version:1,
       libraryId:character.libraryId,
@@ -333,9 +401,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   };
   const imageSrc = original || (!vault ? decoded?.url : undefined) || asset.preview;
   const playerAsset = {id:asset.id,title:vault?vault.label(asset):artistLabel,originalName:vault?vault.label(asset):artistLabel,thumbnailRevision:asset.thumbnail_revision,media:{durationMs:asset.duration_ms ?? 0,scrubFrameCount:0}};
-  const filmstripVisible = !vault && items.length > 1 && !videoPlaying && (chrome || asset.kind === 'video');
-  return <Dialog open title="미디어 감상" variant="fullscreen" onClose={motion.close} onKeyDown={event => {
-    if (event.key === 'Escape' && info) { event.preventDefault(); setInfo(false); return; }
+  const filmstripVisible = !halfSheet && !vault && items.length > 1 && !videoPlaying && (chrome || asset.kind === 'video');
+  return <ImageTextContext value={imageText}><Dialog open title="미디어 감상" variant="fullscreen" onClose={motion.close} onKeyDown={event => {
+    if (event.key === 'Escape' && info) { event.preventDefault(); setInfo(false); setTextOpen?.(false); return; }
     if (event.target instanceof HTMLVideoElement || (event.target instanceof HTMLElement && event.target.closest('.video-player'))) return;
     // Panels own their own keyboard input, so arrows inside one never change the asset.
     revealChrome();
@@ -344,7 +412,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
-    <div ref={motion.bind} className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}${videoPlaying ? ' is-playing' : ''}${vault ? ' is-vault' : ''}${info && landscape && !vault ? ' has-info-panel' : ''}`} data-filmstrip-visible={filmstripVisible} style={{'--viewer-controls-offset': `${filmstripControlsOffset(132, stripGrown, filmstripVisible)}px`} as CSSProperties}>
+    <div ref={motion.bind} className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}${videoPlaying ? ' is-playing' : ''}${vault ? ' is-vault' : ''}${info && landscape && !vault ? ' has-info-panel' : ''}${halfSheet ? ' is-reading' : ''}`} data-filmstrip-visible={filmstripVisible} style={{'--viewer-controls-offset': `${filmstripControlsOffset(132, stripGrown, filmstripVisible)}px`} as CSSProperties}>
       <div data-viewer-backdrop className="viewer-backdrop"/>
       <div className="viewer-main">
       <header className="viewer-bar">
@@ -354,32 +422,33 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         {!vault&&<span className="viewer-spacer"/>}
         <div className="viewer-actions">
           {!vault&&<>
-            <ViewerAction label="앨범" icon={RectangleStackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
-            <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
+            {textAvailable&&<ViewerAction label="번역" icon={LanguageIcon} active={reading} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(true);setTextOpen?.(true);revealChrome();}}/>}
+            <ViewerAction label="앨범" icon={RectangleStackIcon} active={albumOpen} onClick={() => {setInfo(false); setTextOpen?.(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
+            <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false); setTextOpen?.(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
             {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 빼기`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
             {likes.available&&<IconButton className="viewer-action viewer-action--like" tone="heart" pop label="좋아요" icon={HeartIcon} activeIcon={HeartSolidIcon} active={likes.liked.has(asset.id)} data-toggle-key={asset.id} disabled={likes.pending.has(asset.id)} onClick={() => {revealChrome();void likes.toggle(asset.id);}}/>}
-            <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); revealChrome();}}/>
-            {onTrash&&!asset.pending&&<ViewerAction label="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
+            <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); if (info) setTextOpen?.(false); revealChrome();}}/>
+            {onTrash&&!asset.pending&&<ViewerAction label="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false); setTextOpen?.(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
           </>}
         </div>
       </header>
-      <div data-viewer-media ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
-        if (event.button > 0 || info || albumOpen || classificationOpen || exclusion) return;
+      <div data-viewer-media ref={bindSurface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
+        if (event.button > 0 || (info && !reading) || albumOpen || classificationOpen || exclusion) return;
         if (chrome) revealChrome();
         event.currentTarget.setPointerCapture?.(event.pointerId);
         const g = gesture.current; g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
         if (g.points.size === 1) Object.assign(g, {startX:event.clientX, startY:event.clientY, lastX:event.clientX, lastY:event.clientY, moved:false, pinched:false});
-        if (g.points.size === 2) { g.pinched=true; if(asset.kind==='video')return; g.distance = distance(); g.scale = transform.scale; g.pinched = true; }
+        if (g.points.size >= 2) { g.pinched=true; if(asset.kind==='video')return; g.distance = distance(); g.scale = transform.scale; g.pinched = true; }
       }} onPointerMove={event => {
         const g = gesture.current; if (!g.points.has(event.pointerId)) return;
         g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
-        if (Math.hypot(event.clientX - g.startX, event.clientY - g.startY) > 8) g.moved = true;
+        if (Math.hypot(event.clientX - g.startX, event.clientY - g.startY) >= 8) g.moved = true;
         if (asset.kind!=='video' && g.points.size === 2 && g.distance > 0) {
           const scale = Math.min(5, Math.max(1, g.scale * distance() / g.distance));
           setTransform(current => clamp(scale,current.x,current.y));
         } else if (transform.scale > 1) {
           const rect = surface.current!.getBoundingClientRect();
-          const image = surface.current!.querySelector('img');
+          const image = surface.current!.querySelector<HTMLImageElement>('img:not([data-stable-image-loading])');
           const aspect = image && image.naturalHeight ? image.naturalWidth / image.naturalHeight : 1;
           const fitW = Math.min(rect.width, rect.height * aspect), fitH = Math.min(rect.height, rect.width / aspect);
           const boundX = Math.max(0,(fitW * transform.scale - rect.width) / 2), boundY = Math.max(0,(fitH * transform.scale - rect.height) / 2);
@@ -392,11 +461,13 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         g.points.delete(event.pointerId);
         if (g.points.size === 1) { const remaining = [...g.points.values()][0]; g.lastX = remaining.x; g.lastY = remaining.y; }
         const dx = event.clientX - g.startX, dy = event.clientY - g.startY;
-        if (g.points.size === 0 && !g.pinched && transform.scale === 1 && g.startY > event.currentTarget.getBoundingClientRect().bottom - 160 && dy < -40 && Math.abs(dy) > Math.abs(dx)) { setStripGrown(true); revealChrome(); }
+        const marker = g.points.size === 0 && !g.moved && !g.pinched && Math.hypot(dx, dy) < 8 ? markerAt(event.clientX, event.clientY) : undefined;
+        if (marker !== undefined) {selectText(marker); return;}
+        if (g.points.size === 0 && !g.pinched && transform.scale === 1 && !halfSheet && g.startY > event.currentTarget.getBoundingClientRect().bottom - 160 && dy < -40 && Math.abs(dy) > Math.abs(dx)) { setStripGrown(true); revealChrome(); }
         else if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
         else if (g.points.size === 0 && !g.moved && !g.pinched && asset.kind === 'video') videoTap(event.clientX, event.clientY);
         else if (g.points.size === 0 && !g.moved && !g.pinched) { setStripGrown(false); if (stripGrown) revealChrome(); else setChrome(value => !value); }
-      }} onPointerCancel={() => gesture.current.points.clear()}>
+      }} onPointerCancel={() => {gesture.current.pinched = true; gesture.current.points.clear();}}>
         {asset.kind === 'video' ? <VideoPlayerSurface
           key={retry}
           asset={playerAsset}
@@ -437,6 +508,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
             {asset.preview && !placeholderGone && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
             <StableImage decodeFirst={false} className="viewer-image" src={original!} alt={vault.label(asset)} draggable={false} onLoad={fullLoaded} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded ? 1 : 0}}/>
           </> : imageSrc ? <StableImage className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} onError={() => setError('이미지를 표시하지 못했습니다.')} onPreloadError={() => setError('이미지를 표시하지 못했습니다.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline"><BusyLabel busy={!error} idle={error ? '미리보기를 표시할 수 없습니다.' : null}>이미지 불러오는 중</BusyLabel></div>}
+        {hasText && displayed && <ImageTextMarkers lines={lines} selected={selectedLine} open={reading} onSelect={selectText} rect={displayed.rect} zoom={transform} size={markerSize} interactive={textCurrent} surfaceTap panning={textPanning}/>}
       </div>
       {likes.error && <div className="viewer-error" role="alert"><span>{likes.error}</span></div>}
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}
@@ -444,16 +516,16 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       {vault&&<footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className="viewer-title">{vault.label(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>}
       {!vault&&<nav className="viewer-nav-a11y" aria-label="자산 이동"><button type="button" aria-label="이전 자산" disabled={index === 0} onClick={() => change(index - 1)}>이전 자산</button><button type="button" aria-label="다음 자산" disabled={index === items.length - 1} onClick={() => change(index + 1)}>다음 자산</button></nav>}
       </div>
-      {!vault&&info&&landscape&&<aside className="viewer-info-dock" aria-label="미디어 정보"><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></aside>}
+      {!vault&&info&&landscape&&<aside className="viewer-info-dock" aria-label="미디어 정보"><ViewerInfo asset={asset} mediaError={error} onClose={closeInfo}/></aside>}
       {!vault&&<>
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
       <CharacterExclusionEditor request={exclusion} target={exclusionKey} characterName={character?.name||'이 캐릭터'} assetLabel={asset.creator_name||asset.creator_handle||'이 자산'} onClose={()=>setExclusion(null)} onExcluded={receipt=>{setExclusion(null);onCharacterExcluded?.(receipt);}}/>
       {trashNotice}
-      {info&&!landscape&&<BottomSheet title="미디어 정보" onClose={() => setInfo(false)}><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></BottomSheet>}
+      {info&&!landscape&&<BottomSheet title="미디어 정보" reading={halfSheet} onClose={closeInfo}><ViewerInfo asset={asset} mediaError={error} onClose={closeInfo}/></BottomSheet>}
       </>}
     </div>
-  </Dialog>;
+  </Dialog></ImageTextContext>;
 }
 
 /** How long a library video may go from loadstart to loadedmetadata before it is renewed. */
@@ -474,7 +546,7 @@ function mediaErrorCode(error: MediaError | null) {
   return ` (오류 ${error.code}${name ? ` · ${name}` : ''})`;
 }
 
-function MaskedViewer({items,index,onIndex,onClose,onNearEnd,totalCount,backRef}:Parameters<typeof ViewerContent>[0]) {
+function MaskedViewer({items,index,onIndex,onClose,onNearEnd,totalCount,backRef}:Omit<Parameters<typeof ViewerContent>[0], 'textGateway'>) {
   useEffect(()=>{if(!backRef)return;backRef.current=()=>{onClose();return true;};return()=>{backRef.current=null;};},[backRef,onClose]);
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
   const gesture=useRef<{x:number;y:number}|null>(null);

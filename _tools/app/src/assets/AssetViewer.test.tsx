@@ -4,6 +4,8 @@ import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetSummary, ClassificationEntry, LibraryGateway } from "../library/types";
 import { AssetViewer, VIEWER_CHROME_IDLE_MS } from "./AssetViewer";
+import { AssetInfoPanel } from "./AssetInfoPanel";
+import type { AssetImageText } from "../library/types";
 
 afterEach(() => {
   cleanup();
@@ -427,6 +429,160 @@ function asset(id: string, originalName: string): AssetSummary {
 function videoAsset(id: string, originalName: string): AssetSummary {
   return { ...asset(id, originalName), media: { kind: "video", durationMs: 60_000, preparationState: "ready", scrubFrameCount: 6 } };
 }
+
+const imageTextFixture: AssetImageText = { digest: "first", lines: [
+  { original: "ねえ", korean: "있잖아", box: { x0: 100, y0: 200, x1: 300, y1: 400 } },
+  { original: "はい", korean: "응", box: { x0: 600, y0: 700, x1: 800, y1: 900 } },
+] };
+
+function textViewer(gateway: LibraryGateway, activeId: string | null = "a", extra = {}) {
+  return <LibraryProvider gateway={gateway}><AssetViewer items={[asset("a", "a.png"), asset("b", "b.png"), videoAsset("v", "v.mp4")]} activeId={activeId} onActiveIdChange={vi.fn()} onClose={vi.fn()} renderInfo={item => <AssetInfoPanel assets={[item]} preview={false} />} {...extra} /></LibraryProvider>;
+}
+
+it("no text means no translation button or section even in the open information dock", async () => {
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(null), refreshAssetImageText: vi.fn().mockResolvedValue(null) } as unknown as LibraryGateway;
+  render(textViewer(gateway));
+  await waitFor(() => expect(gateway.refreshAssetImageText).toHaveBeenCalledWith("a"));
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  expect(screen.queryByRole("button", { name: "번역" })).toBeNull();
+  expect(document.querySelector('[data-info-section="image-text"]')).toBeNull();
+});
+
+it("starts folded; button/T unfold; marker and row selection link both ways and clear on a second click", async () => {
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn().mockRejectedValue(new Error("offline")) } as unknown as LibraryGateway;
+  const { rerender } = render(textViewer(gateway));
+  await screen.findByRole("button", { name: "번역" });
+  expect(screen.queryByRole("button", { name: "1번 대사" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  expect(screen.getByRole("button", { name: /번역.*2줄/ })).toHaveAttribute("aria-expanded", "false");
+  expect(document.querySelector('.asset-info-panel')?.firstElementChild).toHaveAttribute("data-info-section", "image-text");
+  fireEvent.click(screen.getByRole("button", { name: "번역" }));
+  fireEvent.click(screen.getByRole("button", { name: "1번 대사" }));
+  expect(screen.getByRole("button", { name: /있잖아.*ねえ/ })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: /있잖아.*ねえ/ }));
+  expect(screen.getByRole("button", { name: "1번 대사" })).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(screen.getByRole("button", { name: /응.*はい/ }));
+  expect(screen.getByRole("button", { name: "2번 대사" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "2번 대사" }));
+  expect(screen.getByRole("button", { name: /응.*はい/ })).toHaveAttribute("aria-pressed", "false");
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "t" });
+  expect(screen.queryByRole("button", { name: "1번 대사" })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "T" });
+  expect(screen.getByRole("button", { name: "1번 대사" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "출처 정보 편집" }));
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "계정명" }), { key: "t" });
+  expect(screen.getByRole("button", { name: /번역.*2줄/ })).toHaveAttribute("aria-expanded", "true");
+  rerender(textViewer(gateway, null));
+  rerender(textViewer(gateway));
+  await screen.findByRole("button", { name: "번역" });
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  expect(screen.getByRole("button", { name: /번역.*2줄/ })).toHaveAttribute("aria-expanded", "false");
+});
+
+it("holds outgoing rows until the decoded slot swap, then swaps rows/markers and clears selection with fold state retained", async () => {
+  const second = { digest: "second", lines: [{ ...imageTextFixture.lines[0], korean: "다음 그림" }] };
+  const gateway = { assetImageText: vi.fn((id: string) => Promise.resolve(id === "a" ? imageTextFixture : second)) } as unknown as LibraryGateway;
+  const { rerender } = render(textViewer(gateway));
+  fireEvent.load(screen.getByRole("img", { name: "a.png" }));
+  fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  fireEvent.click(screen.getByRole("button", { name: "1번 대사" }));
+  let decode!: () => void;
+  const spare = document.querySelector<HTMLImageElement>('.asset-viewer__media[src$="/asset/b"]')!;
+  spare.decode = () => new Promise<void>(resolve => { decode = resolve; });
+  rerender(textViewer(gateway, "b"));
+  fireEvent.load(spare);
+  await waitFor(() => expect(gateway.assetImageText).toHaveBeenCalledWith("b"));
+  expect(screen.getByText("있잖아")).toBeInTheDocument();
+  expect(screen.queryByText("다음 그림")).toBeNull();
+  expect(document.querySelector('[data-line="0"]')).toHaveAttribute("aria-pressed", "false");
+  await act(async () => { decode(); });
+  await screen.findByText("다음 그림");
+  expect(screen.queryByText("있잖아")).toBeNull();
+  expect(screen.getByRole("button", { name: /번역.*1줄/ })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("button", { name: "1번 대사" })).toHaveAttribute("aria-pressed", "false");
+  expect(screen.queryByRole("button", { name: "2번 대사" })).toBeNull();
+});
+
+it("refreshes only changed digests and retains the local rows during refresh", async () => {
+  let resolve!: (value: AssetImageText | null) => void;
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn(() => new Promise<AssetImageText | null>(done => { resolve = done; })) } as unknown as LibraryGateway;
+  render(textViewer(gateway));
+  fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  expect(screen.getByText("있잖아")).toBeInTheDocument();
+  await act(async () => resolve({ digest: "changed", lines: [{ ...imageTextFixture.lines[0], korean: "갱신된 번역" }] }));
+  expect(screen.getByText("갱신된 번역")).toBeInTheDocument();
+  expect(screen.queryByText("있잖아")).toBeNull();
+});
+
+it("ignores changed lines under an unchanged digest", async () => {
+  let resolve!: (value: AssetImageText) => void;
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn(() => new Promise<AssetImageText>(done => { resolve = done; })) } as unknown as LibraryGateway;
+  render(textViewer(gateway));
+  fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  await act(async () => resolve({ ...imageTextFixture, lines: [{ ...imageTextFixture.lines[0], korean: "잘못 바뀐 내용" }] }));
+  expect(screen.queryByText("잘못 바뀐 내용")).toBeNull();
+  expect(screen.getByText("있잖아")).toBeInTheDocument();
+});
+
+it("shows a delayed busy label after 400ms when the current image text is still loading", async () => {
+  vi.useFakeTimers();
+  try {
+    let resolve!: (value: AssetImageText) => void;
+    const gateway = { assetImageText: vi.fn(() => new Promise<AssetImageText>(done => { resolve = done; })) } as unknown as LibraryGateway;
+    render(textViewer(gateway));
+    fireEvent.click(screen.getByRole("button", { name: "정보" }));
+    expect(screen.queryByText("불러오는 중")).toBeNull();
+    act(() => vi.advanceTimersByTime(399));
+    expect(document.querySelector(".image-text-section")).toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    fireEvent.click(screen.getByRole("button", { name: /번역.*0줄/ }));
+    act(() => vi.advanceTimersByTime(0));
+    expect(screen.getByText("불러오는 중")).toBeInTheDocument();
+    await act(async () => resolve(imageTextFixture));
+    expect(screen.getByText("있잖아")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(400));
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.queryByText("불러오는 중")).toBeNull();
+  } finally { vi.useRealTimers(); }
+});
+
+it("pans an off-screen row marker into view over 200ms without changing zoom", async () => {
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture) } as unknown as LibraryGateway;
+  render(textViewer(gateway));
+  const stage = document.querySelector<HTMLElement>(".asset-viewer__stage")!;
+  const image = screen.getByRole("img", { name: "a.png" });
+  Object.defineProperties(stage, { clientWidth: { configurable: true, value: 600 }, clientHeight: { configurable: true, value: 400 } });
+  Object.defineProperties(image, { offsetWidth: { configurable: true, value: 600 }, offsetHeight: { configurable: true, value: 300 }, naturalWidth: { configurable: true, value: 200 }, naturalHeight: { configurable: true, value: 100 } });
+  fireEvent.load(image);
+  fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  fireEvent.wheel(stage, { ctrlKey: true, deltaY: -600, clientX: 0, clientY: 0 });
+  const before = image.style.transform;
+  fireEvent.click(screen.getByRole("button", { name: /응.*はい/ }));
+  expect(image.style.transform).not.toBe(before);
+  expect(image.style.transform.match(/scale\(([^)]+)\)/)?.[1]).toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
+  expect(image).toHaveClass("asset-viewer__media--panning");
+  expect(document.querySelector(".image-text-markers")).toHaveAttribute("data-panning", "true");
+  await waitFor(() => expect(image).not.toHaveClass("asset-viewer__media--panning"));
+});
+
+it("does not expose translations on an NSFW cover", async () => {
+  const { PrivacyProvider } = await import("../privacy/PrivacyContext");
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture) } as unknown as LibraryGateway;
+  const explicit = { ...asset("e", "explicit.png"), contentRating: "e" as const };
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()} nsfwFilter><LibraryProvider gateway={gateway}><AssetViewer items={[explicit]} activeId="e" onActiveIdChange={vi.fn()} onClose={vi.fn()} renderInfo={item => <AssetInfoPanel assets={[item]} preview={false} />} /></LibraryProvider></PrivacyProvider>);
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  expect(gateway.assetImageText).not.toHaveBeenCalled();
+  expect(document.querySelector(".image-text-section, .image-text-markers")).toBeNull();
+});
+
+it.each([{ activeId: "v" }, { mediaSource: "vault" }, { privacyMode: true }])("videos/vault/privacy have no translation UI or requests (%j)", async props => {
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture) } as unknown as LibraryGateway;
+  render(textViewer(gateway, "a", props));
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  expect(gateway.assetImageText).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "번역" })).toBeNull();
+  expect(document.querySelector(".image-text-section, .image-text-markers")).toBeNull();
+});
 
 it("warms only the next library image, never vault, private or video media", () => {
   const items = [asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")];

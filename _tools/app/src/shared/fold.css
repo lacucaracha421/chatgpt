@@ -1,0 +1,6 @@
+/* Shared equivalent of tablet-fold. The tablet keeps its existing stylesheet until its viewer slice. */
+.ui-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 140ms var(--ease-standard), opacity 140ms var(--ease-standard); }
+.ui-fold[data-open="false"] { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.ui-fold > .ui-fold__inner { min-width: 0; min-height: 0; overflow: hidden; }
+@starting-style { .ui-fold[data-open="true"] { grid-template-rows: 0fr; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ui-fold { transition: none; } }

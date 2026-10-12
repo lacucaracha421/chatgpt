@@ -17,6 +17,8 @@ import { formatBytes } from "../shared/formatBytes";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { SectionLabel } from "../shared/ui/SectionLabel";
+import { ImageTextSection } from "../shared/viewer/ImageTextSection";
+import { useViewerImageText } from "../shared/viewer/ImageTextContext";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { StableImage } from "../shared/ui/StableImage";
 import { TextField } from "../shared/ui/TextField";
@@ -53,6 +55,7 @@ export function AssetInfoPanel({
   preview = true,
 }: Props) {
   const { gateway } = useLibrary();
+  const imageText = useViewerImageText();
   const rootRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<MetadataDraft | null>(null);
@@ -161,6 +164,7 @@ export function AssetInfoPanel({
   // A library Asset without a thumbnail revision has no still (a video without a poster).
   const hasStill = asset.thumbnailRevision !== null;
   return <div ref={rootRef} className="asset-info-panel" onKeyDown={handleEscape}>
+    {!preview && !privacyMode && asset.media.kind === "image" && imageText && <ImageTextSection {...imageText} />}
     {/* The image leads, whole and alone; then who made it and the record; then the tags. */}
     {preview && <button type="button" className="asset-info-panel__preview" data-info-section="preview" style={asset.width > 0 && asset.height > 0 ? { aspectRatio: `${asset.width} / ${asset.height}` } : undefined} aria-label={`${asset.title || asset.originalName} 감상 화면으로 열기`} onClick={() => onOpenAsset?.(asset)}>
       {privacyMode
