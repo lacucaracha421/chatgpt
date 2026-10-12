@@ -35,6 +35,7 @@ const TRANSLATE_KO_SYSTEM_PROMPT = [
   "Group consecutive words into subtitle lines at sentence or clause boundaries.",
   "A line should normally be one sentence or clause and must not exceed about 40 Korean characters. Split long sentences at clause boundaries; never combine many sentences into one line.",
   "For each line, output a natural, fluent Korean translation in spoken subtitle style.",
+  "Never output a line containing only a sentence ending, auxiliary verb or particle (e.g. 않아요, 있어요, 거예요); attach it to its sentence by extending that line's index range. If the sentence continues beyond this chunk's last index, end the line there as naturally as possible without inventing words.",
   ...KOREAN_RENDERING_RULES,
   "Keep proper nouns sensible and fix obvious speech-recognition errors using the context.",
   "Cover every index exactly once, in order: each line has an inclusive from and to index, and the next line starts at to + 1.",

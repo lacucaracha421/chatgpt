@@ -3,21 +3,27 @@
 "use strict";
 // Splitting units into model-sized chunks and building the numbered word list for the prompt.
 
-// Splits units into chunks of at most maxWords. Each cut is placed at the largest pause
-// (difference between consecutive word start times) within the window where the chunk is
-// between maxWords/2 and maxWords words long. On ties the later position wins.
+// Prefer sentence ends, then larger start-time gaps; ties go to the later cut.
+// Reserve a minimum tail by rebalancing the last cut, rather than growing a request.
 function chunkUnits(units, maxWords = 600) {
-  const limit = Math.max(1, Math.floor(maxWords));
+  const limit = Math.min(240, Math.max(1, Math.floor(maxWords) || 1));
   const minLen = Math.max(1, Math.floor(limit / 2));
+  const minTail = Math.min(30, minLen);
+  const sentenceEnd = /[.!?。！？…][\s"'\p{Pe}\p{Pf}]*$/u;
   const chunks = [];
   let start = 0;
 
   while (units.length - start > limit) {
-    let cut = start + limit;
+    const lastCut = Math.min(start + limit, units.length - minTail);
+    let cut = lastCut;
     let bestGap = -1;
-    for (let c = start + minLen; c <= start + limit; c++) {
+    let bestSentenceEnd = false;
+    for (let c = start + minLen; c <= lastCut; c++) {
       const gap = units[c].startMs - units[c - 1].startMs;
-      if (gap >= bestGap) {
+      const endsSentence = sentenceEnd.test(units[c - 1].text);
+      if ((endsSentence && !bestSentenceEnd) ||
+          (endsSentence === bestSentenceEnd && gap >= bestGap)) {
+        bestSentenceEnd = endsSentence;
         bestGap = gap;
         cut = c;
       }

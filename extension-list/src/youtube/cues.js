@@ -7,6 +7,25 @@ const { splitDisplayCues } = globalThis.LakomicsYouTube.display;
 const MAX_GAP_MS = 2000;
 const TAIL_MS = 1500;
 
+// Apply only within one translated chunk, before ranges become timed display cues.
+function mergeDanglingEndings(units, lines) {
+  const ending = /^(?:않아요|않습니다|있어요|없어요|거예요|같아요|이에요|예요)[\s\p{P}]*$/u;
+  const sentenceEnd = /[.!?。！？…][\s"'\p{Pe}\p{Pf}]*$/u;
+  const merged = [];
+  for (const line of lines) {
+    const previous = merged[merged.length - 1];
+    const gap = previous ? units[line.from].startMs - units[previous.to].startMs : Infinity;
+    if (previous && previous.to + 1 === line.from && ending.test(line.text) &&
+        !sentenceEnd.test(previous.text) && gap >= 0 && gap <= 1500) {
+      previous.text += ` ${line.text}`;
+      previous.to = line.to;
+    } else {
+      merged.push({ ...line });
+    }
+  }
+  return merged;
+}
+
 // Whitespace and punctuation/symbols never count when checking that the model kept the words.
 function normalize(text) {
   return String(text).normalize("NFC").replace(/[\s\p{P}\p{S}]/gu, "");
@@ -150,7 +169,7 @@ function applyResult(chunk, modelLines, { mode = "clean" } = {}) {
     const same = normalize(line.text) === normalize(original);
     return { from: line.from, to: line.to, text: same ? line.text.trim() : original };
   });
-  return buildCues(chunk, lines, mode);
+  return buildCues(chunk, translate ? mergeDanglingEndings(chunk, lines) : lines, mode);
 }
 
 (globalThis.LakomicsYouTube ??= {}).cues = { fallbackSegment, coverageProblem, repairLines, applyResult };
