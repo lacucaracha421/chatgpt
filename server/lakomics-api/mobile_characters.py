@@ -16,6 +16,8 @@ import asset_list_query
 import character_exclusions
 import character_review
 import similarity_review
+import conditional
+from projection_cache import ProjectionCache
 
 PREFIX = "/v1/library/characters"
 MAX_BYTES = 24 * 1024 * 1024
@@ -135,6 +137,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                         require_client=None, require_publisher=None, *, list_generation):
     reader = require_client or require_auth
     publisher = require_publisher or require_auth
+    index_cache = ProjectionCache()
+    visibility_cache = ProjectionCache()
     character_exclusions.register(app, get_db, reader, publisher)
     character_review.register(app, get_db, reader, publisher, asset_item, asset_memberships)
     # Similarity review shares the Asset hydration and token roles; it is not a character lane.
@@ -152,6 +156,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                   node_id TEXT NOT NULL, filter TEXT NOT NULL, position INTEGER NOT NULL,
                   asset_id TEXT NOT NULL,
                   PRIMARY KEY(node_id,filter,position), UNIQUE(node_id,filter,asset_id));
+                CREATE INDEX IF NOT EXISTS mobile_character_members_by_asset
+                  ON mobile_character_members(asset_id,node_id,filter,position);
             """)
             db.executescript(character_exclusions.DDL)
             db.executescript(character_review.DDL)
@@ -164,20 +170,49 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
     def state(db):
         return db.execute("SELECT * FROM mobile_character_state WHERE singleton=1").fetchone()
 
+    def has_retired_assets(db):
+        key = visibility_cache.key(db, list_generation(db))
+        cached = visibility_cache.get(key)
+        if cached is None:
+            retired = db.execute("SELECT 1 FROM assets a WHERE NOT EXISTS "
+                                 "(SELECT 1 FROM visible_assets v WHERE v.id=a.id) LIMIT 1").fetchone()
+            cached = visibility_cache.put(key, b'1' if retired else b'0')
+        return cached == b'1'
+
     def visible_index(db, current):
+        hidden_rows = tuple(tuple(r) for r in db.execute("SELECT node_id,filter,asset_id FROM mobile_character_hidden_members ORDER BY node_id,filter,asset_id"))
+        hidden = {(r[0], r[2]) for r in hidden_rows}
+        cache_key = index_cache.key(db, current['revision'], current['published_at'], list_generation(db), hidden_rows)
+        cached = index_cache.get(cache_key)
+        if cached is not None:
+            return json.loads(cached)
         index = json.loads(current["index_json"])
         ids = {node.get(key) for node in index["nodes"] for key in ("thumbnailAssetId", "heroAssetId") if node.get(key)}
         index["contentRatings"] = {row["id"]: library_search.content_rating(row) for row in db.execute(
             "SELECT id,content_rating FROM visible_assets WHERE id IN (SELECT value FROM json_each(?))", [json.dumps(sorted(ids))])}
-        retired = {r[0] for r in db.execute("SELECT a.id FROM assets a WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=a.id)")}
-        hidden = {(r[0], r[1]) for r in db.execute("SELECT node_id,asset_id FROM mobile_character_hidden_members")}
-        if not retired and not hidden:
+        # Only covers need an explicit retired set. Counts still probe every published
+        # member below, including missing Assets, exactly as the old correction did.
+        retired = {r[0] for r in db.execute("SELECT a.id FROM assets a WHERE a.id IN (SELECT value FROM json_each(?)) "
+                   "AND NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=a.id)", [json.dumps(sorted(ids))])}
+        if not has_retired_assets(db) and not hidden:
+            index_cache.put(cache_key, conditional.encode(index))
             return index
-        counts = {(r[0],r[1]):r[2] for r in db.execute(f"""
-            SELECT m.node_id,m.filter,COUNT(*) FROM mobile_character_members m
-            WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=m.asset_id)
-               OR NOT ({character_exclusions.VISIBLE_MEMBER})
-            GROUP BY m.node_id,m.filter""")}
+        # Probe visibility once per distinct Asset, then look up affected memberships
+        # by Asset id. UNION removes the overlap between retirement and exclusions.
+        counts = {(r[0],r[1]):r[2] for r in db.execute("""
+            WITH candidates AS MATERIALIZED (
+              SELECT DISTINCT asset_id FROM mobile_character_members
+            ), unavailable AS MATERIALIZED (
+              SELECT asset_id FROM candidates c WHERE NOT EXISTS
+                (SELECT 1 FROM visible_assets v WHERE v.id=c.asset_id)
+            ), removed AS (
+              SELECT m.node_id,m.filter,m.position FROM unavailable u
+              CROSS JOIN mobile_character_members m ON m.asset_id=u.asset_id
+              UNION
+              SELECT m.node_id,m.filter,m.position FROM mobile_character_hidden_members h
+              CROSS JOIN mobile_character_members m
+                ON m.node_id=h.node_id AND m.filter=h.filter AND m.asset_id=h.asset_id
+            ) SELECT node_id,filter,COUNT(*) FROM removed GROUP BY node_id,filter""")}
         for node in index["nodes"]:
             for key in ("thumbnailAssetId","heroAssetId"):
                 if node.get(key) in retired or (node['id'], node.get(key)) in hidden:
@@ -186,6 +221,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             removed = counts.get((scope["nodeId"],scope["filter"]),0)
             scope["totalCount"] = max(0,scope["totalCount"]-removed)
             scope["sourceCount"] = max(0,scope["sourceCount"]-removed)
+        index_cache.put(cache_key, conditional.encode(index))
         return index
 
     def publish(snapshot):
@@ -273,19 +309,21 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
         return await run_in_threadpool(publish, snapshot)
 
     @app.get(PREFIX)
-    def index(authorization: str | None = Header(default=None)):
+    def index(authorization: str | None = Header(default=None),
+              if_none_match: str | None = Header(default=None)):
         reader(authorization)
         with get_db() as db:
             db.execute('BEGIN')
             current = state(db)
             capability, exclusion_state = character_exclusions.advertisement(db)
             review_capability, review_state = character_review.advertisement(db)
-            return {"version": 1, "authority": "pc", "authorityEpoch": 0,
+            payload = {"version": 1, "authority": "pc", "authorityEpoch": 0,
                     "capabilities": {"read": True, "write": False, **capability, **review_capability},
                     **exclusion_state, **review_state, "ready": current is not None,
                     "revision": current["revision"] if current else None,
                     "publishedAt": current["published_at"] if current else None,
                     **(visible_index(db, current) if current else {"nodes": [], "scopes": []})}
+        return conditional.json_response(payload, if_none_match)
 
     @app.get(PREFIX + "/status")
     def publication_status(authorization: str | None = Header(default=None)):
@@ -382,10 +420,18 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             current = state(db)
             if not current or current["revision"] != revision:
                 raise HTTPException(409, "Character snapshot changed; refresh")
-            index = visible_index(db, current)
+            # A page only needs its scope's corrected source count. Rebuilding all
+            # nodes and all member counts here made opening one series a library walk.
+            index = json.loads(current['index_json'])
             scope = next((s for s in index["scopes"] if s["nodeId"] == node and s["filter"] == filter), None)
             if scope is None:
                 raise HTTPException(404, "Character scope not found")
+            correction = has_retired_assets(db) or db.execute('SELECT 1 FROM mobile_character_hidden_members LIMIT 1').fetchone()
+            removed = db.execute(f"""SELECT COUNT(*) FROM mobile_character_members m
+                WHERE m.node_id=? AND m.filter=? AND
+                (NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=m.asset_id)
+                 OR NOT ({character_exclusions.VISIBLE_MEMBER}))""", [node, filter]).fetchone()[0] if correction else 0
+            scope['sourceCount'] = max(0, scope['sourceCount'] - removed)
             if sort != "published":
                 hidden = [row[0] for row in db.execute(
                     "SELECT asset_id FROM mobile_character_hidden_members WHERE node_id=? AND filter=? ORDER BY asset_id",
@@ -393,7 +439,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                 generation = hashlib.sha256(encode([list_generation(db), revision, hidden]).encode()).hexdigest()
                 query = asset_list_query.AssetListQuery(
                     "mobile_character_members AS m JOIN mobile_character_assets AS a ON a.id=m.asset_id "
-                    "JOIN visible_assets AS asset ON asset.id=m.asset_id",
+                    "CROSS JOIN visible_assets AS asset ON asset.id=m.asset_id",
                     f"m.node_id=? AND m.filter=? AND asset.committed=1 AND {character_exclusions.VISIBLE_MEMBER} {filter_clause}",
                     [node, filter] + filter_params, sort, prefer_id_lookup=True)
                 encode_date_cursor = lambda previous: asset_filters.encode_cursor(
@@ -435,7 +481,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                                         asset.thumbnail_key, asset.thumbnail_revision, asset.content_rating
                                   FROM mobile_character_members AS m
                                   JOIN mobile_character_assets AS a ON a.id = m.asset_id
-                                  JOIN visible_assets AS asset ON asset.id = m.asset_id
+                                  CROSS JOIN visible_assets AS asset ON asset.id = m.asset_id
                                   WHERE m.node_id = ? AND m.filter = ? AND m.position > ?
                                   AND {character_exclusions.VISIBLE_MEMBER}
                                   {filter_clause}
@@ -449,7 +495,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             # the rest of the walk a cursor happens to have reached.
             total = db.execute(f"""SELECT COUNT(*)
                                    FROM mobile_character_members AS m
-                                   JOIN visible_assets AS asset ON asset.id = m.asset_id
+                                   CROSS JOIN visible_assets AS asset ON asset.id = m.asset_id
                                    WHERE m.node_id = ? AND m.filter = ?
                                    AND {character_exclusions.VISIBLE_MEMBER}
                                    {filter_clause}""",

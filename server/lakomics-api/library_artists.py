@@ -72,6 +72,7 @@ from pydantic import Field, StringConstraints, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 
 import conditional
+from projection_cache import ProjectionCache, heads
 import home_publications as common
 from home_publications import OperationId, Strict, Timestamp, fail, text
 
@@ -273,11 +274,12 @@ def _state(db):
 
 def status_signal(db):
     """``signals.artists``: the served revision, including pending edits."""
-    return _state(db)["revision"]
+    return db.execute("SELECT revision FROM library_artist_state WHERE singleton=1").fetchone()[0]
 
 
 def register(app, get_db, require_client, require_publisher):
     """Install the routes; returns the startup hook (creates empty tables only)."""
+    cache = ProjectionCache()
 
     def invalid():
         fail(422, "invalidArtistUpload", "작가 목록을 확인할 수 없습니다.")
@@ -342,9 +344,17 @@ def register(app, get_db, require_client, require_publisher):
         require_client(authorization)
         with get_db() as db:
             db.execute("BEGIN")
+            # Artist revision includes intents/acknowledgements. Cover ratings and
+            # visibility are live and therefore have their own revision inputs.
+            key = cache.key(db, status_signal(db), heads(db, (
+                'library_tag_state', 'asset_list_generation', 'authority_domains')))
+            body = cache.get(key)
+            if body is not None:
+                return conditional.encoded_response(body, conditional.etag_for(body), if_none_match)
             document = served_document(db)
             attach_cover_ratings(db, document.get("artists", []))
-        return conditional.json_response(document, if_none_match)
+            body = cache.put(key, conditional.encode(document))
+        return conditional.encoded_response(body, conditional.etag_for(body), if_none_match)
 
     def file_intent(intent):
         common.uuid_or_fail(intent.operationId, "invalidArtistIntent", "요청 식별자가 올바르지 않습니다.")

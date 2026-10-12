@@ -16,6 +16,10 @@ from fastapi import HTTPException, Header, Query
 import authority
 import classification_authority
 import library_assets
+import conditional
+from projection_cache import ProjectionCache
+
+home_cache = ProjectionCache()
 
 
 api: ModuleType
@@ -36,24 +40,31 @@ def home_revisit_rows(db, day: str):
         "WHERE committed = 1 AND kind IN ('image', 'gif', 'animated_gif'))\n" + HOME_REVISIT_SQL,
         {"day": day},
     ).fetchall()
-    rows = []
-    for entry in selected:
-        row = db.execute("SELECT * FROM visible_assets WHERE id = ?", (entry["id"],)).fetchone()
-        rows.append(row)
+    rows_by_id = {row['id']: row for row in db.execute(
+        "SELECT * FROM visible_assets WHERE id IN (SELECT value FROM json_each(?))",
+        [json.dumps([entry['id'] for entry in selected])])}
+    rows = [rows_by_id[entry['id']] for entry in selected]
     return rows, selected[0]["distance"] if selected else None
 
 
-def list_home_revisit(authorization: str | None = Header(default=None), day: str | None = None):
+def list_home_revisit(authorization: str | None = Header(default=None), day: str | None = None,
+                      if_none_match: str | None = None):
     api.require_auth(authorization)
     day = day or datetime.now(KST).date().isoformat()
     with api.get_db() as db:
         db.execute("BEGIN")
+        key = home_cache.key(db, api.list_generation(db), day)
+        cached = home_cache.get(key)
+        if cached is not None:
+            return conditional.encoded_response(cached, conditional.etag_for(cached), if_none_match)
         rows, distance = home_revisit_rows(db, day)
         rows = library_assets.image_text_flags(db, rows)
         memberships = api._mobile_memberships(db, rows)
     title = "1년 전 오늘" if distance == 0 else "1년 전 이맘때"
-    return {"day": day, "bundles": [{"kind": "date", "title": title,
+    payload = {"day": day, "bundles": [{"kind": "date", "title": title,
             "items": [api.mobile_asset_item(row, memberships.get(row["id"], [])) for row in rows]}]}
+    body = home_cache.put(key, conditional.encode(payload))
+    return conditional.encoded_response(body, conditional.etag_for(body), if_none_match)
 
 
 def encode_revisit_date_cursor(rank: int, sort_at: str, asset_id: str) -> str:
@@ -102,7 +113,16 @@ def _revisit_date_bundle(db, limit: int) -> list:
     """과거의 이날 후보: 30일 이전 자산 중 오늘의 월/일 ±7일 근처 수집 자산.
     부족하면 같은 달의 오래된 자산, 그래도 부족하면 결정론적 오래된 자산으로
     확장한다(항상 30일 이전만 포함)."""
-    creator_exclusion = api._revisit_creator_exclusion_sql("asset")
+    # The same eligible creator set is used by all three fallback queries. Compute
+    # it once, rather than expanding a visibility/grouping scan in each statement.
+    eligible = [row[0] for row in db.execute("""
+        SELECT creator_handle FROM visible_assets
+        WHERE committed=1 AND creator_handle IS NOT NULL AND creator_handle!=''
+        GROUP BY creator_handle HAVING COUNT(*)>=3
+        AND MIN(COALESCE(collected_at,created_at))<=datetime('now','-30 days')""")]
+    creator_exclusion = """AND (asset.creator_handle IS NULL OR asset.creator_handle='' OR
+        asset.creator_handle NOT IN (SELECT value FROM json_each(?)))"""
+    eligible_json = json.dumps(eligible)
     calendar_distance = api._revisit_calendar_distance_sql("COALESCE(asset.collected_at, asset.created_at)")
     rows = db.execute(
         f"""
@@ -115,7 +135,7 @@ def _revisit_date_bundle(db, limit: int) -> list:
         ORDER BY mobile_sort_at DESC, asset.id DESC
         LIMIT ?
         """,
-        (limit,),
+        (eligible_json, limit),
     ).fetchall()
     if len(rows) >= limit:
         return rows
@@ -131,7 +151,7 @@ def _revisit_date_bundle(db, limit: int) -> list:
         ORDER BY mobile_sort_at DESC, asset.id DESC
         LIMIT ?
         """,
-        (limit,),
+        (eligible_json, limit),
     ).fetchall()
     for row in month_rows:
         if row["id"] not in seen:
@@ -149,7 +169,7 @@ def _revisit_date_bundle(db, limit: int) -> list:
         ORDER BY mobile_sort_at ASC, asset.id ASC
         LIMIT ?
         """,
-        (limit,),
+        (eligible_json, limit),
     ).fetchall()
     for row in oldest_rows:
         if row["id"] not in seen:
@@ -218,6 +238,7 @@ def list_mobile_revisit(
     limit: int = Query(default=12, ge=1, le=50),
     home: bool = False,
     day: str | None = None,
+    if_none_match: str | None = Header(default=None),
 ):
     """Mobile Home 다시보기. PC revisit.rs의 묶음 유형 중 복제본에서 계산
     가능한 두 가지를 제공한다:
@@ -233,7 +254,7 @@ def list_mobile_revisit(
     id DESC)이며 랜덤 SQL 정렬은 없다. 읽기 전용 엔드포인트다.
     """
     if home:
-        return list_home_revisit(authorization, day)
+        return list_home_revisit(authorization, day, if_none_match)
     api.require_auth(authorization)
     with api.get_db() as db:
         db.execute("BEGIN")

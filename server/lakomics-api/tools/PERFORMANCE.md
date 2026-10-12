@@ -50,3 +50,17 @@ Run the command in a normal local shell before using its numbers as a baseline.
 `endpoint_perf.py` already extends this fixture with SQL/connection/R2 HEAD counters
 and whole-library walks. It remains a separate existing attribution tool; its extra
 instrumentation does not establish correlation with real device latency by itself.
+
+## Tablet library routes (characters, summary, classifications, artists, revisit)
+
+```sh
+python tools/library_route_benchmark.py --reference HEAD --json /tmp/library-before.json   # source at a git revision
+python tools/library_route_benchmark.py --json /tmp/library-after.json                     # working tree
+```
+
+Loads the route functions from source onto a disposable synthetic database (10k
+Assets, 300 character series with 1000 members each, 2k artists) with no app start,
+network or auth. Per route it reports cold and warm milliseconds, statements, JSON
+decode/encode counts, response bytes, a response SHA-256 (equal hashes mean
+byte-identical bodies) and query plans. It is attribution, not HTTP latency; keep
+the generated JSON out of the repository.

@@ -66,6 +66,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "extension_settings.register.<locals>.startup",
             "extension_subtitles.register.<locals>.startup",
             "app.startup_image_thumbnails",
+            "app.startup_library_projection_cache",
         ]
         expected_shutdown = [
             "capture_routes.InboxReclaimer.stop",

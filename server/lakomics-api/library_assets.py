@@ -25,6 +25,10 @@ import classification_subtree
 import collection_authority
 import conditional
 import mobile_collections
+from projection_cache import ProjectionCache, heads
+
+summary_cache = ProjectionCache()
+classification_cache = ProjectionCache()
 
 
 api: ModuleType
@@ -72,6 +76,7 @@ def list_mobile_classifications(
     authorization: str | None = Header(default=None),
     # Opt-in, so a request without it is answered byte-for-byte as before.
     subtree_counts: int = Query(default=0, ge=0, le=1),
+    if_none_match: str | None = Header(default=None),
 ):
     api.require_auth(authorization)
     with api.get_db() as db:
@@ -80,6 +85,10 @@ def list_mobile_classifications(
         # between two separate reads would ship a tree from one instant with counts from
         # another. `BEGIN` (deferred) takes the read snapshot at the first read below.
         db.execute("BEGIN")
+        key = classification_cache.key(db, api.list_generation(db), subtree_counts)
+        cached = classification_cache.get(key)
+        if cached is not None:
+            return conditional.encoded_response(cached, conditional.etag_for(cached), if_none_match)
         try:
             snapshot = db.execute(
                 "SELECT payload FROM classification_snapshots WHERE singleton = 1").fetchone()
@@ -111,7 +120,8 @@ def list_mobile_classifications(
                     response["authority"] = {
                         "libraryId": active["libraryId"], "epoch": active["epoch"],
                         "contractVersion": active["contractVersion"]}
-                return response
+                body = classification_cache.put(key, conditional.encode(response))
+                return conditional.encoded_response(body, conditional.etag_for(body), if_none_match)
 
             # Before cutover preserve the shipped snapshot projection exactly: the published
             # entries supply the tree and the replicated relations supply the counts.
@@ -176,7 +186,8 @@ def list_mobile_classifications(
     response = {"items": items, "published_at": payload.get("published_at")}
     if totals is not None:
         response["listVersion"] = LIST_VERSION
-    return response
+    body = classification_cache.put(key, conditional.encode(response))
+    return conditional.encoded_response(body, conditional.etag_for(body), if_none_match)
 
 
 def mobile_tree_membership(classification_id: str, asset_id: str, authorization: str | None = Header(default=None)):
@@ -568,6 +579,13 @@ def mobile_library_summary(
     with api.get_db() as db:
         db.execute("BEGIN")
         generation = api.list_generation(db)
+        collection_state = collection_authority.served_state(db)
+        collection_revision = (collection_state['revision'] if collection_state else
+                               heads(db, ('mobile_collection_replica',)))
+        key = summary_cache.key(db, generation, collection_revision, today_start, week_start, tz_offset_minutes)
+        cached = summary_cache.get(key)
+        if cached is not None:
+            return conditional.encoded_response(cached, conditional.etag_for(cached), if_none_match)
         active = authority.active_domain(db, classification_authority.DOMAIN)
         classified_sql, classified_params = api._classified_asset_sql(active)
         # One pass over the visible library: the dated counts read the indexed sort key and
@@ -586,7 +604,7 @@ def mobile_library_summary(
             [today_start, week_start, *classified_params],
         ).fetchone()
         collections = {kind: 0 for kind in ("game", "manga", "movie", "av")}
-        source = mobile_collections.read_table(collection_authority.served_state(db))
+        source = mobile_collections.read_table(collection_state)
         for collection_row in db.execute(
                 f"SELECT type, COUNT(*) AS total FROM {source} "
                 "WHERE type IN ('game','manga','movie','av') GROUP BY type"):
@@ -604,7 +622,8 @@ def mobile_library_summary(
         "tzOffsetMinutes": tz_offset_minutes,
         "listGeneration": generation,
     }
-    return conditional.json_response(payload, if_none_match)
+    body = summary_cache.put(key, conditional.encode(payload))
+    return conditional.encoded_response(body, conditional.etag_for(body), if_none_match)
 
 
 def _optional_dimension(row, column: str) -> int | None:

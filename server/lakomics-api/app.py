@@ -227,6 +227,10 @@ def startup_replication():
             ON assets(committed, COALESCE(collected_at, created_at) DESC, id DESC)
             """
         )
+        # Revisit rails select a handful of rows for one creator. The general date
+        # index otherwise scans the entire committed library for each rail.
+        db.execute("CREATE INDEX IF NOT EXISTS idx_assets_creator_mobile_order ON assets"
+                   "(committed,creator_handle,COALESCE(collected_at,created_at) DESC,id DESC)")
         db.commit()
 
 
@@ -1104,3 +1108,13 @@ def shutdown_image_thumbnails():
 
     if worker.stop(on_stopped=released):
         released()
+
+
+@lifecycle(app).on_startup
+def startup_library_projection_cache():
+    # All component tables now exist. This additive DDL does not backfill data,
+    # replace publications or change the current list generation.
+    from projection_cache import install_generation_triggers
+    with get_db() as db:
+        install_generation_triggers(db)
+        db.commit()
