@@ -259,9 +259,15 @@ def startup():
             )
             """
         )
+        db.execute("CREATE TABLE IF NOT EXISTS asset_image_text ("
+                   "asset_id TEXT PRIMARY KEY,payload TEXT NOT NULL,digest TEXT NOT NULL,updated_at TEXT NOT NULL)")
         db.executescript("""
             CREATE TABLE IF NOT EXISTS asset_list_generation(singleton INTEGER PRIMARY KEY CHECK(singleton=1),generation INTEGER NOT NULL);
             INSERT OR IGNORE INTO asset_list_generation VALUES(1,0);
+            CREATE TRIGGER IF NOT EXISTS asset_image_text_insert AFTER INSERT ON asset_image_text BEGIN
+              UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END;
+            CREATE TRIGGER IF NOT EXISTS asset_image_text_update AFTER UPDATE ON asset_image_text BEGIN
+              UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END;
             CREATE TRIGGER IF NOT EXISTS asset_list_insert AFTER INSERT ON assets BEGIN
               UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END;
             CREATE TRIGGER IF NOT EXISTS asset_list_update AFTER UPDATE ON assets BEGIN
@@ -568,6 +574,8 @@ def startup_captures():
             )
             """
         )
+        db.execute("CREATE TABLE IF NOT EXISTS capture_image_text ("
+                   "capture_id TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at TEXT NOT NULL)")
         columns = {
             row["name"] for row in db.execute("PRAGMA table_info(captures)")
         }

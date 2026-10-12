@@ -3,6 +3,7 @@
 The application module is supplied at registration so its shared services and
 compatibility hooks are resolved at call time, including test monkeypatches.
 """
+import json
 import logging
 import sqlite3
 import threading
@@ -13,7 +14,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Header
-from pydantic import AwareDatetime, BaseModel
+from pydantic import AwareDatetime, BaseModel, Field, StrictInt, StrictStr, ValidationError, field_validator, model_validator
 
 from app_lifecycle import join_worker, lifecycle
 
@@ -46,6 +47,30 @@ def _reserve_capture(identity):
             _capture_inflight.remove(identity)
 
 
+class ImageTextBox(BaseModel):
+    x0: StrictInt = Field(ge=0, le=1000)
+    y0: StrictInt = Field(ge=0, le=1000)
+    x1: StrictInt = Field(ge=0, le=1000)
+    y1: StrictInt = Field(ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.x0 >= self.x1 or self.y0 >= self.y1:
+            raise ValueError("Invalid image text box")
+        return self
+
+
+class ImageTextLine(BaseModel):
+    original: StrictStr = Field(max_length=800)
+    korean: StrictStr = Field(min_length=1, max_length=800)
+    box: ImageTextBox | None = None
+
+    @field_validator("original", "korean", mode="before")
+    @classmethod
+    def trim_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 class CaptureCreate(BaseModel):
     source_url: str
     media_url: str
@@ -53,6 +78,28 @@ class CaptureCreate(BaseModel):
     published_at: str | None = None
     media_type: Literal["image", "video", "animated_gif"] = "image"
     source: Literal["x", "arca", "dcinside", "web"] = "x"
+    image_text: list[ImageTextLine] | None = None
+
+    @field_validator("image_text", mode="before")
+    @classmethod
+    def valid_image_text(cls, value):
+        """Keep the capture: drop malformed lines and retain at most 60 valid lines.
+
+        Invalid/empty fields do not erase previous text on duplicate saves.
+        Overlong strings and invalid boxes reject the line, not the request.
+        """
+        if not isinstance(value, list):
+            return None
+        lines = []
+        for line in value:
+            try:
+                lines.append(ImageTextLine.model_validate(line))
+            except ValidationError:
+                continue
+            if len(lines) == 60:
+                break
+        return lines or None
+
 
 
 class CaptureAcknowledge(BaseModel):
@@ -129,6 +176,9 @@ def _create_capture_reserved(capture, classification_id):
         ).fetchone()
 
     if existing:
+        with api.get_db() as db:
+            store_image_text(db, existing["id"], capture.image_text, api.now_iso())
+            db.commit()
         return {
             "ok": True,
             "created": False,
@@ -194,6 +244,7 @@ def _create_capture_reserved(capture, classification_id):
                 ),
             )
             db.execute("UPDATE captures SET sha256=? WHERE id=?", [digest,capture_id])
+            store_image_text(db, capture_id, capture.image_text, ts)
             active = authority.active_domain(db, asset_authority.DOMAIN)
             promotion_state = None
             if active is not None:
@@ -240,6 +291,9 @@ def _create_capture_reserved(capture, classification_id):
             ).fetchone()
 
         if existing:
+            with api.get_db() as db:
+                store_image_text(db, existing["id"], capture.image_text, api.now_iso())
+                db.commit()
             return {
                 "ok": True,
                 "created": False,
@@ -276,11 +330,26 @@ def _create_capture_reserved(capture, classification_id):
     }
 
 
+def store_image_text(db, capture_id, lines, now):
+    if not lines:
+        return
+    payload = json.dumps([line.model_dump(exclude_none=True) for line in lines],
+                         ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    db.execute("INSERT INTO capture_image_text VALUES(?,?,?) ON CONFLICT(capture_id) "
+               "DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",
+               [capture_id, payload, now])
+    mapped = db.execute("SELECT asset_id FROM asset_authority_capture_map WHERE capture_id=?",
+                        [capture_id]).fetchall() if db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='asset_authority_capture_map'").fetchone() else []
+    for row in mapped:
+        asset_authority.copy_capture_image_text(db, capture_id, row[0], now)
+
+
 def pending_capture_payload(row: sqlite3.Row) -> dict:
     source = urlparse(row["source_url"])
     path_parts = [part for part in source.path.split("/") if part]
     creator_handle = path_parts[0] if source.hostname in {"x.com", "twitter.com"} and path_parts else None
-    return {
+    payload = {
         "id": row["id"],
         "kind": row["media_type"],
         "object_key": row["object_key"],
@@ -292,6 +361,12 @@ def pending_capture_payload(row: sqlite3.Row) -> dict:
         "source_published_at": row["published_at"],
         "created_at": row["created_at"],
     }
+
+    with api.get_db() as db:
+        text = db.execute("SELECT payload FROM capture_image_text WHERE capture_id=?", [row["id"]]).fetchone()
+    if text:
+        payload["image_text"] = json.loads(text[0])
+    return payload
 
 
 def list_pending_captures(

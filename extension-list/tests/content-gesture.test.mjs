@@ -54,6 +54,12 @@ function fixture() {
     options._view = view;
     return view;
   } };
+  let contextCollector;
+  w.LakomicsContextModel = {SETTINGS: 'context'};
+  w.LakomicsContextMenu = {createController(options) { contextCollector = options.collector; return {}; }};
+  w.fetch = async () => ({ok: true, text: async () => ''});
+  w.chrome.storage = {local: {get: async () => ({})}, onChanged: {addListener() {}}};
+  w.chrome.runtime.getURL = path => path;
   w.eval(source);
   function pointer(type, input = 'mouse', x = 40) {
     const event = new w.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 40, button: 0 });
@@ -89,7 +95,7 @@ function fixture() {
     now = Math.max(now, first[1].at); timers.delete(first[0]); first[1].callback();
     return true;
   }
-  return { w, pointer, advance, fireNextTimer, mounts, requests, close: () => w.close(), timers: () => timers.size };
+  return { w, contextCollector: () => contextCollector, pointer, advance, fireNextTimer, mounts, requests, close: () => w.close(), timers: () => timers.size };
 }
 
 test('short clicks and early drag releases never request or open a collector later', async () => {
@@ -553,5 +559,23 @@ test('unlabeled custom video controls (e.g. X volume) are caught by value attrib
   // Image carousels are often called "slider"; images inside them stay collectable.
   const { f, press } = playerFixture('<div class="image-slider"><img id="c"></div>');
   assert.equal(await press('#c'), 1);
+  f.close();
+});
+
+for (const translated of [false, true]) test(`collector bridge carries popover text only: ${translated}`, async () => {
+  const f = fixture();
+  await f.advance(0);
+  const lines = [{original: 'hello', korean: '안녕'}];
+  const candidate = f.w.LakomicsForumSource.findCandidate(f.w.document.querySelector('img'));
+  const opening = f.contextCollector().open(candidate, {x: 40, y: 40}, 'mouse', translated ? {imageText: lines} : {});
+  await f.advance(0); await opening;
+  assert.equal(f.mounts.length, 1);
+  await f.mounts[0].onSave('games');
+  await f.advance(0);
+  const saved = f.requests.find(message => message.type === 'collector:save');
+  assert.ok(saved);
+  if (translated) assert.deepEqual(JSON.parse(JSON.stringify(saved.payload.imageText)), lines);
+  else assert.equal('imageText' in saved.payload, false);
+  assert.equal('imageText' in saved.payload.candidate, false);
   f.close();
 });

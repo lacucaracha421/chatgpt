@@ -223,7 +223,26 @@
     return isProgressiveXVideoUrl(candidate?.mediaUrl) ? candidate.mediaUrl : null;
   }
 
-  async function save({ candidate, classificationId, classificationPath = [] }) {
+  function imageTextLines(value) {
+    if (!Array.isArray(value)) return [];
+    const lines = [];
+    for (const line of value) {
+      if (typeof line?.original !== "string" || typeof line?.korean !== "string") continue;
+      const original = Array.from(line.original.trim()).slice(0, 800).join("");
+      const korean = Array.from(line.korean.trim()).slice(0, 800).join("");
+      if (!korean) continue;
+      const clean = { original, korean }, box = line.box;
+      if (box && [box.x0, box.y0, box.x1, box.y1].every(n => Number.isInteger(n) && n >= 0 && n <= 1000)
+          && box.x0 < box.x1 && box.y0 < box.y1) {
+        clean.box = { x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y1 };
+      }
+      lines.push(clean);
+      if (lines.length === 60) break;
+    }
+    return lines;
+  }
+
+  async function save({ candidate, classificationId, classificationPath = [], imageText }) {
     const connection = await connectionIdentity();
     const resolved = await resolveXVideo(candidate);
     if (!resolved.ok) return resolved;
@@ -238,6 +257,8 @@
       media_type: type,
       source: source(candidate),
     };
+    const lines = imageTextLines(imageText);
+    if (lines.length) payload.image_text = lines;
     const response = await globalThis.LakomicsListApi.request("/v1/captures", { method: "POST", body: payload, expectedConnection: connection, timeoutMs: type === "video" ? 300_000 : 60_000 });
     if (connection !== await connectionIdentity()) return { ok: false, code: "connection_changed" };
     if (response.ok) {

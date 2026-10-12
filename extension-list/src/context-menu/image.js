@@ -259,6 +259,7 @@
     }
     function focusIfKeyboard(session) { if (session.keyboard && !session.focused && session.popover) { session.focused = true; session.popover.box.focus({ preventScroll: true }); } }
     function showLines(session, lines) {
+      session.imageText = lines;
       fill(session, box => {
         box.append(header("이미지 글자 번역"));
         const body = doc.createElement("div"); body.className = "pb";
@@ -299,6 +300,7 @@
         const rect = image.getBoundingClientRect();
         try { void Promise.resolve(collector.open(resolved,
           { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, touch ? "touch" : "mouse", {
+            imageText: session.imageText,
             onOpen: () => session.popover?.pickerVisibility(true),
             onClose: () => session.popover?.pickerVisibility(false),
           })).catch(() => {}); } catch {}

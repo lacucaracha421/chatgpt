@@ -461,7 +461,7 @@
               if (!candidate || gate.phase !== "idle" || picker) return;
               const id = Symbol("context-menu-save");
               if (!gate.arm(id)) return;
-              active = { id, input, candidate, origin, latest: origin, href: location.href, released: true, pickerLifecycle: lifecycle };
+              active = { id, input, candidate, origin, latest: origin, href: location.href, released: true, pickerLifecycle: lifecycle, imageText: lifecycle.imageText };
               const session = active;
               await open(session);
               if (active === session && picker) lifecycle.onOpen?.();
@@ -785,7 +785,7 @@
           // The server downloads and stores the original before it answers, so the
           // menu does not wait for it: the capture finishes in the background and
           // reports through the page-level save status, independent of this session.
-          submitSave({ payload: { candidate: resolvedCandidate, classificationId, classificationPath }, candidate, autoLike });
+          submitSave({ payload: { candidate: resolvedCandidate, classificationId, classificationPath, ...(session.imageText?.length ? { imageText: session.imageText } : {}) }, candidate, autoLike });
           return { ok: true, pending: true };
         },
         onClose: (result) => {

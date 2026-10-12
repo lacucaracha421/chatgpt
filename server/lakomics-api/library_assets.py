@@ -461,7 +461,7 @@ def list_mobile_classification_assets(
             return asset_filters.search_response(payload, filters, if_none_match, scope_identity if unclassified or subtree else list(classifications))
         rows = query.page(db, limit + 1, after)
         has_more = len(rows) > limit
-        page_rows = rows[:limit]
+        page_rows = image_text_flags(db, rows[:limit])
         memberships = {row["id"]: [] for row in page_rows}
         if page_rows:
             canonical = api._authority_memberships(db, active, page_rows)
@@ -483,6 +483,7 @@ def list_mobile_classification_assets(
     items = [
         {
             "id": row["id"],
+            "has_image_text": bool(row["has_image_text"]),
             "contentRating": library_search.content_rating(row),
             "kind": row["kind"],
             "content_type": row["content_type"],
@@ -624,9 +625,34 @@ def _optional_duration_ms(row, column: str = "duration_ms") -> int | None:
     return value if isinstance(value, int) and value >= 0 else None
 
 
+def image_text_flags(db, rows):
+    if not rows:
+        return []
+    ids = [row["id"] for row in rows]
+    present = {row[0] for row in db.execute(
+        "SELECT asset_id FROM asset_image_text WHERE asset_id IN (SELECT value FROM json_each(?))",
+        [json.dumps(ids)])}
+    return [{**dict(row), "has_image_text": row["id"] in present} for row in rows]
+
+
+def asset_image_text(asset_id: str, authorization: str | None = Header(default=None)):
+    api.require_auth(authorization)
+    with api.get_db() as db:
+        row = db.execute("SELECT text.payload,text.digest FROM asset_image_text AS text "
+                         "JOIN visible_assets AS asset ON asset.id=text.asset_id "
+                         "WHERE asset.id=? AND asset.committed=1", [asset_id]).fetchone()
+    if row is None:
+        raise HTTPException(404, "Image text not found")
+    return {"lines": json.loads(row["payload"]), "digest": row["digest"]}
+
+
 def mobile_asset_item(row, classification_ids: list[str] | None = None) -> dict:
+    if "has_image_text" not in row.keys():
+        with api.get_db() as db:
+            row = image_text_flags(db, [row])[0]
     return {
         "id": row["id"],
+        "has_image_text": bool(row["has_image_text"]),
         "contentRating": library_search.content_rating(row),
         "kind": row["kind"],
         "content_type": row["content_type"],
@@ -736,6 +762,7 @@ def register(app, services):
     app.get("/v1/library/classifications")(list_mobile_classifications)
     app.get("/v1/library/classifications/{classification_id}/contains/{asset_id}")(mobile_tree_membership)
     app.get("/v1/library/assets")(list_mobile_classification_assets)
+    app.get("/v1/library/assets/{asset_id}/image-text")(asset_image_text)
     app.get("/v1/library/summary")(mobile_library_summary)
 
 

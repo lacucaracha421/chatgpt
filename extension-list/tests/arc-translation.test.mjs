@@ -169,7 +169,7 @@ test('both translation paths use the menu setup action when keys are missing', a
   }
 });
 
-test('저장 opens the normal picker for the translated image, leaves the popover open and saves no translation text', async () => {
+test('저장 opens the normal picker for the translated image, leaves the popover open and saves its translation text', async () => {
   const f = await fixture(); await hold(f); release(f);
   const box = f.popover(), save = box.querySelector('[data-action="image.lakomics"]');
   assert.equal(save.textContent, '저장'); assert.equal(save.previousElementSibling.textContent, '모두 복사');
@@ -183,7 +183,8 @@ test('저장 opens the normal picker for the translated image, leaves the popove
   await f.mounts[0].onSave('one'); await f.advance(0);
   const payload = f.messages.find(message => message.type === 'collector:save').payload;
   assert.equal(payload.candidate.mediaUrl, f.image.src);
-  assert.deepEqual(Object.keys(payload).sort(), ['candidate', 'classificationId', 'classificationPath']);
+  assert.deepEqual(Object.keys(payload).sort(), ['candidate', 'classificationId', 'classificationPath', 'imageText']);
+  assert.ok(payload.imageText.length > 0);
   assert.equal('text' in payload.candidate, false);
   f.mounts[0].onClose({ok: true, pending: true}); await f.advance(0);
   assert.equal(host.inert, false); assert.equal(box.classList.contains('picker-restored'), true); f.close();

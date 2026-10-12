@@ -24,9 +24,9 @@ function image({status = 200, type = 'image/png', length, size = 2000, url, stre
   };
 }
 
-function worker({model = 'anthropic:claude-haiku-5-5', keys = {apiKey: 'or-key', anthropicApiKey: 'ant-key'}, stored = {}, pictures = {}, reply = answer([{original: 'またね！', korean: '또 봐!'}]), dims = {width: 800, height: 600}, finish} = {}) {
+function worker({model = 'anthropic:claude-haiku-5-5', keys = {apiKey: 'or-key', anthropicApiKey: 'ant-key'}, stored = {}, pictures = {}, reply = answer([{original: 'またね！', korean: '또 봐!'}]), dims = {width: 800, height: 600}, finish, dnr} = {}) {
   const memory = {'lakomics:translation:storage-v4': true, 'lakomics:translation:v1': {enabled: false, ...keys, model: 'google/gemini-3.1-flash-lite', fallbackModel: '', imageModel: model, ...stored}};
-  const calls = [], fetched = [], canvases = [], bitmaps = [];
+  const calls = [], fetched = [], canvases = [], bitmaps = [], warnings = [];
   const fetch = async (url, init) => {
     if (/anthropic\.com|openrouter\.ai/.test(url)) {
       calls.push({url, init, body: JSON.parse(init.body)});
@@ -45,11 +45,68 @@ function worker({model = 'anthropic:claude-haiku-5-5', keys = {apiKey: 'or-key',
   }
   const createImageBitmap = async blob => { const bitmap = {...dims, closed: false, close() { this.closed = true; }}; bitmaps.push({bitmap, type: blob.type}); return bitmap; };
   const ctx = vm.createContext({URL, AbortController, Blob, btoa, atob, setTimeout, clearTimeout, fetch, OffscreenCanvas, createImageBitmap,
-    chrome: {runtime: {id: 'test'}, storage: {local: {async get() { return memory; }, async set(value) { Object.assign(memory, value); }, async remove() {}}}}});
+    console: {warn: message => warnings.push(message)},
+    chrome: {declarativeNetRequest: dnr, runtime: {id: 'test'}, storage: {local: {async get() { return memory; }, async set(value) { Object.assign(memory, value); }, async remove() {}}}}});
   for (const script of [...core, service]) vm.runInContext(script, ctx);
-  return {handle: (message, who = sender) => ctx.LakomicsTranslation.handle(message, who), calls, fetched, canvases, bitmaps, memory, rules: ctx.LakomicsTranslationCore.koreanRules};
+  return {handle: (message, who = sender) => ctx.LakomicsTranslation.handle(message, who), calls, fetched, canvases, bitmaps, memory, warnings,
+    restart: () => vm.runInContext(service, ctx), rules: ctx.LakomicsTranslationCore.koreanRules};
 }
 const IMG = 'https://img.test/page1.png';
+
+test('worker start atomically replaces the pixiv session rule and repeated wakes are idempotent', async () => {
+  const updates = [], rules = new Map([[1001, {id: 1001, action: {type: 'block'}}], [999, {id: 999}]]);
+  const f = worker({dnr: {async updateSessionRules(value) {
+    const update = plain(value); updates.push(update);
+    for (const id of update.removeRuleIds) rules.delete(id);
+    for (const rule of update.addRules) {
+      assert.equal(rules.has(rule.id), false, 'existing rule must be removed before replacement');
+      rules.set(rule.id, rule);
+    }
+  }}});
+  const expected = {
+    removeRuleIds: [1001],
+    addRules: [{id: 1001, priority: 1,
+      action: {type: 'modifyHeaders', requestHeaders: [{header: 'Referer', operation: 'set', value: 'https://www.pixiv.net/'}]},
+      condition: {requestDomains: ['i.pximg.net'], tabIds: [-1], resourceTypes: ['xmlhttprequest']}}],
+  };
+  assert.deepEqual(updates, [expected], 'registered at evaluation, before any translation message');
+  f.restart();
+  assert.deepEqual(updates, [expected, expected]);
+  assert.deepEqual(rules.get(1001), expected.addRules[0]);
+  assert.deepEqual(rules.get(999), {id: 999}, 'unrelated rules are preserved');
+  assert.equal(rules.size, 2);
+  await f.handle({type: 'translation:settings'});
+  assert.deepEqual(f.warnings, []);
+});
+
+test('first pixiv image fetch waits for session rule registration and still omits cookies', async () => {
+  const url = 'https://i.pximg.net/img-original/page.png';
+  let registered;
+  const f = worker({pictures: {[url]: image()}, dnr: {updateSessionRules() {
+    return new Promise(resolve => { registered = resolve; });
+  }}});
+  const result = f.handle({type: 'translation:image', url});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(f.fetched.length, 0);
+  registered();
+  assert.equal((await result).ok, true);
+  assert.equal(f.fetched.length, 1);
+  assert.equal(f.fetched[0].init.credentials, 'omit');
+});
+
+test('missing DNR API or session method is silently tolerated', async () => {
+  for (const dnr of [undefined, {}]) {
+    const f = worker({dnr, pictures: {[IMG]: image()}});
+    assert.equal((await f.handle({type: 'translation:image', url: IMG})).ok, true);
+    assert.deepEqual(f.warnings, []);
+  }
+});
+
+test('session rule registration failure does not disable other image translation', async () => {
+  const f = worker({pictures: {[IMG]: image()}, dnr: {async updateSessionRules() { throw new Error('unsupported rule'); }}});
+  assert.equal((await f.handle({type: 'translation:image', url: IMG})).ok, true);
+  assert.equal(f.warnings.length, 1);
+});
 
 test('imageModel defaults to Haiku 5.5, is validated, and changes only from extension pages', async () => {
   const f = worker({stored: {imageModel: 'google/gemma-4-26b-a4b-it'}});
@@ -396,6 +453,7 @@ test('desktop image translation exposes 저장 only with an available collector 
       f.user(() => button.click());
       assert.equal(opened.length, 1); assert.equal(opened[0][0].element, f.img);
       assert.deepEqual(plain(opened[0][1]), { x: 200, y: 150 }); assert.equal(opened[0][2], 'mouse');
+      assert.deepEqual(plain(opened[0][3].imageText), [{original: 'またね！', korean: '또 봐!'}, {original: '明日も来るの？', korean: '내일도 와?'}]);
       assert.equal(f.popover(), box);
       assert.equal(f.sent.some(message => message.type.startsWith('collector:')), false);
     }
@@ -957,7 +1015,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.13');
+  assert.equal(manifest.version, '3.5.16');
 });
 
 

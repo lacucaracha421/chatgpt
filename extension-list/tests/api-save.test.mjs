@@ -134,3 +134,25 @@ test('server failure preserves a safe diagnostic without leaking URLs or bearer 
     assert.equal(result.serverDetail.includes('abcdefghijklmnopqrstuvwxyz'), false);
   } finally { globalThis.LakomicsListApi.request = originalRequest; }
 });
+
+for (const scenario of ['translated', 'ordinary', 'invalid', 'empty']) test(`image text save contract: ${scenario}`, async () => {
+  const api = globalThis.LakomicsListApi, originalRequest = api.request, originalChrome = globalThis.chrome;
+  globalThis.chrome = { storage: { local: { get: async () => ({}), set: async () => {} } } };
+  let body;
+  api.request = async (path, options) => { body = options.body; return {ok: true, data: {created: true}}; };
+  const line = {original: ' original ', korean: ' 번역 ', box: {x0: 0, y0: 1, x1: 1000, y1: 900}};
+  const imageText = scenario === 'translated' ? [line] : scenario === 'invalid'
+    ? [null, {original: 3, korean: 'bad'}, {original: '', korean: ' '},
+       {original: 'x'.repeat(900), korean: 'k'.repeat(900), box: {...line.box, x1: -1}}, ...Array(65).fill(line)]
+    : scenario === 'empty' ? [] : undefined;
+  try {
+    await globalThis.LakomicsSaveClient.save({candidate: {type: 'image', source: 'web', sourceUrl: 'https://example.test/post', mediaUrl: 'https://example.test/a.png'}, classificationId: 'games', imageText});
+    if (scenario === 'translated') assert.deepEqual(body.image_text, [{original: 'original', korean: '번역', box: line.box}]);
+    else if (scenario === 'invalid') {
+      assert.equal(body.image_text.length, 60);
+      assert.equal(body.image_text[0].original.length, 800);
+      assert.equal(body.image_text[0].korean.length, 800);
+      assert.equal('box' in body.image_text[0], false);
+    } else assert.equal('image_text' in body, false);
+  } finally { api.request = originalRequest; globalThis.chrome = originalChrome; }
+});
