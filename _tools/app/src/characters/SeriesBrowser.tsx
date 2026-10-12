@@ -6,13 +6,13 @@ import { AssetImage } from "../privacy/AssetImage";
 import { folderPreviewCache, rememberFolderPreview } from "../assets/folderPreviewCache";
 import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { CharacterSuggestionTile, prefetchCharacterSuggestions, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
-import { NO_SERIES_REVISIONS, readSeriesSidebarCounts, seriesDataScope, sidebarCountCache, type SeriesRevisions } from "./seriesMountCache";
+import { characterDefinitionRevision, subscribeCharacterDefinitionRevision, NO_SERIES_REVISIONS, readSeriesSidebarCounts, seriesDataScope, sidebarCountCache, type SeriesRevisions } from "./seriesMountCache";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
-import { cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactElement, type ReactNode } from "react";
+import { cloneElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
-import { READY_CAP_MS } from "../shared/motion/AreaSwitch";
+import { AreaRequested, READY_CAP_MS } from "../shared/motion/AreaSwitch";
 import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, FunnelIcon, PencilIcon, UserGroupIcon, UserIcon, UserMinusIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetSummary, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
@@ -129,18 +129,17 @@ export function seriesFolderBrowseView(sort: AssetSort) {
 const lastConfirmCounts = new Map<string, number>();
 /**
  * Hover prefetch of a series overview: the reads its switch makes (the first page in `load` and the
- * excluded-count, folder and 확인-count reads below), with the same arguments, so the switch takes them.
- * The switch gates on all but the 확인 count.
+ * excluded-count and folder reads below), with the same arguments, so the switch takes them.
+ * Auxiliary confirmation and readiness reads start after the swap.
  */
-export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, confirm: Pick<ConfirmSources, "counts"> = confirmSources, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number; seriesRevisions?: SeriesRevisions }): Promise<unknown>[] {
+export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterHubApi, "browse" | "excludedAssets" | "seriesFolders"> = characterHubApi, _confirm: Pick<ConfirmSources, "counts"> = confirmSources, options?: { view?: CharacterBrowseView; gateway: LibraryGateway; scope: string; version: number; seriesRevisions?: SeriesRevisions }): Promise<unknown>[] {
   const query = { seriesId, targetId: null, groupId: null, seriesFilter: "unclassified" as const, all: false, after: null, limit: 100, ...(options?.view ? { view: options.view } : {}) };
   return [
-    ...(options ? [prefetchCharacterSuggestions(options.version, options.scope), readSeriesSidebarCounts(options.gateway, options.scope, options.version, options.seriesRevisions && { id: seriesId, revisions: options.seriesRevisions })] : []),
+    ...(options ? [prefetchCharacterSuggestions(characterDefinitionRevision(options.gateway, options.scope, options.version), options.scope, undefined, options.seriesRevisions), readSeriesSidebarCounts(options.gateway, options.scope, characterDefinitionRevision(options.gateway, options.scope, options.version), options.seriesRevisions && { id: seriesId, revisions: options.seriesRevisions })] : []),
     // Tagged with the series: analysing it drops only these reads (invalidateFolderPrefetch(seriesId)).
     prefetchRead(hubApi, "browse", query, () => hubApi.browse(query), seriesId),
     prefetchRead(hubApi, "excludedAssets", [seriesId, null, 1], () => hubApi.excludedAssets(seriesId, null, 1), seriesId),
     prefetchRead(hubApi, "seriesFolders", seriesId, () => hubApi.seriesFolders(seriesId), seriesId),
-    prefetchRead(confirm, "counts", seriesId, () => confirm.counts(seriesId), seriesId),
   ];
 }
 /** Status that used to sit under each character card; tiles now show only a warning mark when something is wrong. */
@@ -156,10 +155,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
+  const requested = useContext(AreaRequested);
   const dataScope = seriesDataScope(gateway, library?.root);
   const previewCache = folderPreviewCache(gateway, library?.root);
   const folderIntent = useFolderPrefetchIntent();
-  const suggestions = useCharacterSuggestions(refreshVersion);
+  const suggestions = useCharacterSuggestions(refreshVersion, undefined, seriesRevisions);
   const [hiddenSuggestions, setHiddenSuggestions] = useState<string[]>([]);
   const seriesSuggestions = suggestions.rows.filter(row => row.seriesId === series.classificationId);
   const suggestionsHidden = hiddenSuggestions.includes(series.classificationId);
@@ -215,11 +215,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const viewFilters = useRef({ mediaFilter, aspectFilter, randomPivot });
   viewFilters.current = { mediaFilter, aspectFilter, randomPivot };
   useLayoutEffect(() => {
+    if (!requested) return;
     if (prefetchedRandomPivot === viewFilters.current.randomPivot) prefetchedRandomPivot = null;
     const read = () => viewFilters.current;
     activeViewFilters = read;
     return () => { if (activeViewFilters === read) activeViewFilters = null; };
-  }, []);
+  }, [requested]);
   const generation = useRef(0), pending = useRef(false), saving = useRef(false);
   const loadedScope = useRef<string | null>(null);
   // The scope the shown page belongs to. On a scope switch the previous images stay until the new
@@ -285,19 +286,20 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const filtered = Boolean(browseView?.mediaKind || browseView?.aspectRatio);
   // Per-character image counts come from the character index (character folders are hidden from the
   // folder tree, so their tree counts are missing); the folder tree is only a fallback.
-  const cachedCounts = sidebarCountCache.peek(gateway, dataScope, refreshVersion);
+  const globalRevision = useSyncExternalStore(subscribeCharacterDefinitionRevision, () => characterDefinitionRevision(gateway, dataScope, refreshVersion));
+  const cachedCounts = sidebarCountCache.peek(gateway, dataScope, globalRevision) ?? sidebarCountCache.peekKnown(gateway, dataScope);
   const countRevision = useSyncExternalStore(sidebarCountCache.subscribe, () => sidebarCountCache.generation(gateway, dataScope));
   const [sidebarCounts, setSidebarCounts] = useState<Record<string, number> | null>(cachedCounts?.targets ?? null);
   const [settledCounts, setSettledCounts] = useState<{ gateway: LibraryGateway; scope: string; version: number; revision: string } | null>(null);
-  const sidebarLoading = Boolean(gateway.characterSidebarCounts && !cachedCounts && (!settledCounts || settledCounts.gateway !== gateway || settledCounts.scope !== dataScope || settledCounts.version !== refreshVersion || settledCounts.revision !== countRevision));
+  const sidebarLoading = Boolean(gateway.characterSidebarCounts && !cachedCounts && (!settledCounts || settledCounts.gateway !== gateway || settledCounts.scope !== dataScope || settledCounts.version !== globalRevision || settledCounts.revision !== countRevision));
   useEffect(() => {
     if (!gateway.characterSidebarCounts) return;
     let active = true;
-    const request = { gateway, scope: dataScope, version: refreshVersion, revision: countRevision };
-    void readSeriesSidebarCounts(gateway, dataScope, refreshVersion, { id: series.classificationId, revisions: seriesRevisions }).then(result => { if (active && result) setSidebarCounts(result.targets); }, () => undefined)
+    const request = { gateway, scope: dataScope, version: globalRevision, revision: countRevision };
+    void readSeriesSidebarCounts(gateway, dataScope, globalRevision, { id: series.classificationId, revisions: seriesRevisions }).then(result => { if (active && result) setSidebarCounts(result.targets); }, () => undefined)
       .finally(() => { if (active) setSettledCounts(request); });
     return () => { active = false; };
-  }, [gateway, dataScope, refreshVersion, countRevision, reload, series.classificationId, analysisRevision]);
+  }, [gateway, dataScope, globalRevision, countRevision, reload, series.classificationId, analysisRevision]);
   const characterCounts: Record<string, number> = Object.fromEntries([...targets, ...seriesExtras].flatMap(target => {
     const folder = target.linkedClassificationId ? classifications.find(entry => entry.id === target.linkedClassificationId) : undefined;
     const count = (cachedCounts?.targets ?? sidebarCounts)?.[target.id] ?? folder?.totalAssetCount ?? folder?.assetCount;
@@ -307,10 +309,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const groupedIds = new Set(groups.flatMap(group => group.targetIds));
   const orderedMembers = members.filter(target => currentGroup
     ? currentGroup.targetIds.includes(target.id) : !groupedIds.has(target.id));
-  const readiness = useS36Readiness(series.classificationId, readinessVersion);
   const name = classifications.find(c => c.id === series.classificationId)?.name ?? "시리즈";
   const pickerScope = picking && picking.kind !== "hero" ? `${series.classificationId}:${editor?.target?.id ?? "new"}:${pickFromSeries ? "series" : "character"}:${all}` : null;
   const scope = `${series.classificationId}:${picking ? picking.kind === "hero" ? "pick-hero" : `pick-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ? `character-${targetId}` : currentGroup ? `group-${currentGroup.id}` : `series-${seriesGalleryView}`}:${all}${browseView ? `|${JSON.stringify(browseView)}` : ""}`;
+  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.firstLoad || excludedLoading)));
+  const auxiliaryReady = pageScope === scope && !loading && !shelfLoading;
+  const readiness = useS36Readiness(series.classificationId, readinessVersion, undefined, auxiliaryReady);
   const ids = page.items.map(a => a.id);
   const selectedIds = [...selection.ids];
   const currentReferenceIds = new Set(current ? [
@@ -403,7 +407,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     // Everything waiting for a judgment in this series (태그 추천, 인식 추천, 다시 확인) drives the quiet
     // "확인 N" action on the series count line. The gallery does not wait for it: the shown count stays
     // (this series' last known one, else the previous) until the read lands, then changes in place.
-    if (targetId || currentGroup || picking) return;
+    if (targetId || currentGroup || picking || !auxiliaryReady) return;
     let active = true;
     const seriesId = series.classificationId;
     const remembered = lastConfirmCounts.get(seriesId);
@@ -416,7 +420,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       })
       .catch(() => { if (active) setConfirmCount(0); });
     return () => { active = false; };
-  }, [confirmSource, series.classificationId, targetId, currentGroup?.id, Boolean(picking), readinessVersion]);
+  }, [confirmSource, series.classificationId, targetId, currentGroup?.id, Boolean(picking), readinessVersion, auxiliaryReady]);
   useEffect(() => setSelection(emptySelection()), [clearSelectionRequest]);
   useEffect(() => { setPromotionTag(null); setPromoting(false); }, [targetId]);
   // A card's suggestion opens its 기타 with those images already selected (the person adds or removes by selecting).
@@ -501,7 +505,16 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       ...(picking.kind === "thumbnail" ? { thumbnail: picking.ids[0] ?? null } : updateCharacterReferences(editor.draft, picking.ids)) } });
     ++generation.current; setAll(picking.previousAll); setPicking(null); setError(null);
   }
-  useBackHandler(() => finishPick(false), 85, Boolean(picking));
+  useBackHandler(() => finishPick(false), 85, requested && Boolean(picking));
+  useEffect(() => {
+    if (requested) return;
+    // Retain page/image state, but dismiss transient UI just as leaving an unmounted browser did.
+    finishPick(false);
+    setViewer(null); setExternalAsset(null); setEditor(null); setCharacterOpen(false);
+    setAssignArtistOpen(false); setConverting(false); setPromoting(false); setPromotionDone(null);
+    setUnregistering(false); setReferenceSuggestionTarget(null); setConfirmOpen(false);
+    setSelection(emptySelection());
+  }, [requested]);
   function choose(id: string) {
     if (!picking || busy) return;
     if (picking.kind !== "hero" && page.unavailableReferenceIds?.includes(id) && !picking.ids.includes(id)) {
@@ -733,7 +746,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const shelfShown = !picking && !excludedOnly && !current;
   // The first page alone is not ready: the shelf and its count/header reads also change layout.
   // The S36 candidate count is not waited for (it only relabels or shows one header button).
-  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && ((folderLoading && !cachedFolders) || suggestions.loading || excludedLoading)));
   useEffect(() => {
     if (!pcPerfEnabled() || loading || shelfLoading || pageScope !== scope || error) return;
     return pcFolderReady(pcFolderScope({ kind: "classification", classificationId: series.classificationId, characterId: targetId, characterGroupId: groupId }), host.current,

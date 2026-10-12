@@ -2,9 +2,9 @@ import type { CharacterSidebarCounts, LibraryGateway } from "../library/types";
 import { onFolderPrefetchInvalidated } from "../assets/folderPrefetch";
 
 type Entry<T> = { promise: Promise<T>; value?: T };
-type Scope<T> = { version: number; generation: number; entries: Map<string, Entry<T>> };
+type Scope<T> = { version: number; generation: number; entries: Map<string, Entry<T>>; known: Map<string, T>; epoch: number };
 
-/** Session reads shared by mounts. Keep only the current data revision; failed reads are retryable. */
+/** Session reads shared by mounts. Revisions replace requests while known values stay visible. */
 export class RevisionReadCache<T> {
   private sources = new WeakMap<object, Map<string, Scope<T>>>();
   private listeners = new Set<() => void>();
@@ -14,7 +14,8 @@ export class RevisionReadCache<T> {
     let scopes = this.sources.get(source);
     if (!scopes) this.sources.set(source, scopes = new Map());
     let scope = scopes.get(key);
-    if (!scope) scopes.set(key, scope = { version: -1, generation: 0, entries: new Map() });
+    if (!scope) scopes.set(key, scope = { version: -1, generation: 0, entries: new Map(), known: new Map(), epoch: this.epoch });
+    if (scope.epoch !== this.epoch) { scope.entries.clear(); scope.epoch = this.epoch; }
     return scope;
   }
   generation(source: object, key: string) { return `${this.epoch}:${this.scope(source, key).generation}`; }
@@ -22,6 +23,8 @@ export class RevisionReadCache<T> {
     const scope = this.scope(source, key);
     return scope.version === version ? scope.entries.get(args)?.value : undefined;
   }
+  /** Last successful value in this library scope, including during a background refresh. */
+  peekKnown(source: object, key: string, args = "") { return this.scope(source, key).known.get(args); }
   read(source: object, key: string, version: number, args: string, read: () => Promise<T>): Promise<T> {
     const scope = this.scope(source, key);
     if (scope.version !== version) { scope.version = version; scope.entries.clear(); }
@@ -29,7 +32,7 @@ export class RevisionReadCache<T> {
     if (existing) return existing.promise;
     const entry: Entry<T> = { promise: read() };
     scope.entries.set(args, entry);
-    void entry.promise.then(value => { entry.value = value; }, () => {
+    void entry.promise.then(value => { entry.value = value; if (scope.entries.get(args) === entry && scope.epoch === this.epoch) scope.known.set(args, value); }, () => {
       if (scope.entries.get(args) === entry) scope.entries.delete(args);
     });
     return entry.promise;
@@ -41,7 +44,7 @@ export class RevisionReadCache<T> {
     if (!previous || previous.value === undefined) return this.read(source, key, version, args, read);
     const entry: Entry<T> = { promise: read(), value: previous.value };
     scope.entries.set(args, entry);
-    void entry.promise.then(value => { entry.value = value; }, () => {
+    void entry.promise.then(value => { entry.value = value; if (scope.entries.get(args) === entry && scope.epoch === this.epoch) scope.known.set(args, value); }, () => {
       if (scope.entries.get(args) === entry) scope.entries.set(args, previous);
     });
     return entry.promise;
@@ -52,7 +55,7 @@ export class RevisionReadCache<T> {
     this.listeners.forEach(listener => listener());
   }
   clear() {
-    this.sources = new WeakMap(); this.epoch += 1;
+    this.epoch += 1;
     this.listeners.forEach(listener => listener());
   }
 }
@@ -99,4 +102,22 @@ export function readSeriesSidebarCounts(gateway: LibraryGateway, scope: string, 
   return stale
     ? sidebarCountCache.refresh(gateway, scope, version, "", read)
     : sidebarCountCache.read(gateway, scope, version, "", read);
+}
+
+// Native definition revisions survive a SeriesBrowser unmount; scopes separate libraries and gateways.
+const definitionRevisions = new WeakMap<object, Map<string, number>>();
+const definitionListeners = new Set<() => void>();
+export const subscribeCharacterDefinitionRevision = (listener: () => void) => {
+  definitionListeners.add(listener);
+  return () => { definitionListeners.delete(listener); };
+};
+export function publishCharacterDefinitionRevision(gateway: object, scope: string, revision: number) {
+  let scopes = definitionRevisions.get(gateway);
+  if (!scopes) definitionRevisions.set(gateway, scopes = new Map());
+  if (scopes.get(scope) === revision) return;
+  scopes.set(scope, revision);
+  definitionListeners.forEach(listener => listener());
+}
+export function characterDefinitionRevision(gateway: object | undefined, scope: string, fallback: number) {
+  return gateway ? definitionRevisions.get(gateway)?.get(scope) ?? fallback : fallback;
 }

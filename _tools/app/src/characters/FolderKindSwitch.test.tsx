@@ -80,13 +80,32 @@ it("keeps the series painted until the plain folder's data and first-screen imag
   expect(preparing("엔필")).not.toBeNull();
 
   await settle(["c"]);
-  await waitFor(() => expect(browser("닌텐도")).toBeNull());
+  await waitFor(() => expect(browser("닌텐도")).not.toBeVisible());
   const shown = screen.getByRole("region", { name: "엔필" });
   expect(shown.closest("[data-preparing], [inert]")).toBeNull();
   expect(screen.getAllByRole("img")).toHaveLength(3);
   // No tile faded in on its own, and the switched-in gallery starts no first-load entrance.
   expect(animate).not.toHaveBeenCalled();
   expect(shown).toHaveAttribute("data-entering", "true");
+});
+
+it("reuses separate cached series trees and drops them when the library scope changes", async () => {
+  const tree = (name: string, scope = "library-a") => <FolderKindSwitch kind="series" seriesKey={name} cacheScope={scope}>
+    <Browser name={name} images={[name]} />
+  </FolderKindSwitch>;
+  const view = render(tree("A"));
+  const a = browser("A"), aImage = image("A");
+  view.rerender(tree("B"));
+  await waitFor(() => expect(browser("A")).not.toBeVisible());
+  const b = browser("B"), bImage = image("B");
+  view.rerender(tree("A"));
+  await waitFor(() => expect(browser("A")).toBeVisible());
+  expect(browser("A")).toBe(a); expect(image("A")).toBe(aImage);
+  expect(browser("B")).toBe(b); expect(image("B")).toBe(bImage);
+  view.rerender(tree("A", "library-b"));
+  await waitFor(() => expect(a).not.toBeInTheDocument());
+  expect(b).not.toBeInTheDocument();
+  expect(browser("A")).not.toBe(a);
 });
 
 it("swaps at the cap and holds the still-loading first-screen images for one shared reveal", async () => {

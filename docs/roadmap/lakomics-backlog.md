@@ -8,15 +8,16 @@ Reconciled 2026-10-10 against committed `main` at `0be3353d`, using current sour
 
 Updated 2026-10-12 with the user (evening: the collector pass, drag/options and the 게임 folders are done; see the [2026-10-12 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-12--character-folders-video-and-worker-tooling)). PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; the 2026-10-10 server-independence slices are delivered (see the [evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-10-evening--server-ownership-of-wishlist-kakao-and-mangadex-binds)).
 
-1. **`VIEW-FILTER-001`** — done 2026-10-12: PC `876210bb`, tablet 0.9.83 (chip with 44 px clear target, named empty state, 길이 included).
-2. **`COLLECTOR-IMAGETEXT-001`** — done 2026-10-12 (extension 3.5.16, server redeployed 18:55 KST after a lock incident and fixes, PC release 17:18 build, tablet 0.9.83); user confirmed the translations show in the app. Next (user, 2026-10-12): small tablet UI fixes from `UI-REVIEW-20261011`, then `CHAR-FOLDER-PERF-001` measurement on a quiet PC.
-3. **`CHAR-FOLDER-PERF-001`** — next session (user 2026-10-12): optimize the character folder screens (series, groups, characters); measure first per `docs/agents/implementation.md`.
-4. **`UI-REVIEW-20261011`** — remaining UI sweep items.
-5. **`COLLECTOR-TABLET-001`** — tablet collector (Helium) slices.
-6. **`CLOUD-POST-001` step 2** — retire the calendar/wishlist PUT fallback.
-7. **`PERF-ALL-001`** — remaining measured performance scenarios.
-8. **`COLLECTOR-IMGTEXT-001`** — image-text translation for hotlink-protected images.
-9. **Small residual debt** — `TABLET-PARITY-001`, `PC-REVIEW-001`, `HOME-OPT-001` test debt and the residual `USER-REQ-20260924` diagnostics.
+Done on 2026-10-12 (details in their sections): `VIEW-FILTER-001` (PC `876210bb`, tablet 0.9.83), `COLLECTOR-IMAGETEXT-001` (all slices, user-confirmed), `UI-REVIEW-20261011` tablet leftovers T10/T12/T13/T17/T18/T19 (`dd843b09`, `6114dad6`; T8/T11/T14 were already fixed), `YT-MOBILE-001` (`ff53b943`, device-confirmed), GPU character scan (`653bd05e`).
+
+1. **`CHAR-FOLDER-PERF-001`** — done 2026-10-12 (series opens 0.47–1.79 s → 0.10–0.26 s; entry flicker fixed; user-confirmed).
+2. **`YT-SUB-TIMING-001` round 2** — in progress (uncommitted extension 3.5.18–3.5.22): human-track tails, digit/predicate split guards, word-aligned fragment splits, one display-timing policy with a replay metric, two-line rolling display (default on), profanity kept at original strength and a 말투 setting (default 원문 말투 따라가기). Needs the user's real-video check on the tablet.
+3. **`COLLECTOR-TABLET-001`** — tablet collector (Helium) slices.
+4. **`CLOUD-POST-001` step 2** — retire the calendar/wishlist PUT fallback.
+5. **`PERF-ALL-001`** — remaining measured performance scenarios (Windows: use `LAKOMICS_PERF_NATIVE_SECS` to keep native timing past startup; probe `series_open` now copies the S36 cache).
+6. **`COLLECTOR-IMGTEXT-001`** — other hotlink-protected hosts (pixiv done in 3.5.16).
+7. **`UI-REVIEW-20261011`** — only user decisions left (P14c copy rewrites, catalog detail layout).
+8. **Small residual debt** — `TABLET-PARITY-001`, `PC-REVIEW-001`, `HOME-OPT-001` test debt and the residual `USER-REQ-20260924` diagnostics.
 
 `LINUX-DESKTOP-001` stays (the user still uses Linux); other low-priority and held items keep their recorded order.
 
@@ -25,6 +26,11 @@ Updated 2026-10-12 with the user (evening: the collector pass, drag/options and 
 User rule (2026-10-12): a device/native check the user does not mention afterwards counts as passed. The checks listed here on 2026-10-12 (AV interactions, 더보기/휴지통, tablet Collections header and live Kakao, tablet similarity apply, Windows natural-language search, tablet content search after nightly captioning, character candidate-group output) are therefore treated as accepted; reopen one only when the user reports a problem.
 
 - Nothing open (the user confirmed the 2026-10-12 collector features and the character/video work on 2026-10-12).
+
+<a id="char-folder-perf-001"></a>
+## CHAR-FOLDER-PERF-001 — Character folder screens performance (2026-10-12)
+
+Status: `DONE` 2026-10-12 (user-confirmed: fast and no flicker). Baseline (real release app, LAKOMICS_PERF + WebView2 session): opening the large series 리버스/젠레스 took 0.47–1.79 s, other series 0.14–0.30 s. Probe on a read-only snapshot (`perf_probe --only series_open`, `LAKOMICS_PROBE_SERIES`) showed two global reads gating every series open: `character_suggestions_min5` 220 ms (3.28 M rows full-scanned) and `character_sidebar_counts` 181 ms (367 statements). Fix 1 (schema 130 indexes, one-statement sidebar counts, per-definition-revision cache): probe 523 → 310 ms, but the real app was unchanged because `character_confirm_counts` and `character_s36_readiness` held the library connection for 0.4–1.2 s while reading the S36 shadow cache (`db.wait` up to 2.6 s; native log extended with `LAKOMICS_PERF_NATIVE_SECS`). Fix 2 (no connection held during cache work, per-series result cache, reads after the swap): real app 0.14–0.26 s, 0 `db.wait`. First launch after schema 130 builds indexes (~20 s on the 4 GB library, once). Open: the cover/thumbnail flicker on every series entry (pre-existing): live DevTools capture shows ~45–105 gallery cells removed and re-added per entry and `StableImage` running its late-load fade on ~50–68 already-decoded thumbnails at once — fixed by keeping up to 16 visited series views mounted (offstage, inert — idle check: 6 status IPCs in 28 s) and skipping the per-image fade for already-decoded images; the user confirmed no flicker.
 
 ## UI-REVIEW-20261011 — Automated UI sweep findings
 
@@ -374,6 +380,8 @@ Status: `DONE` 2026-10-12 — extension 3.5.17 (Claude Sonnet worker); the user 
 Status: `DONE` 2026-10-12 — steps 1–2 in `482c6a3f` (extension 3.5.13), step 3 in `694ed853`; real-video check by the user pending (silent = passed). Cached translations made before the fix keep their old line grouping (no cache version bump; the display/timing fixes still apply to them). Original report: investigation queued (user, 2026-10-12). Symptoms: (1) some translated cues leave the screen much sooner than the speech they cover; (2) a sentence ending such as "않아요" sometimes appears alone as the next cue, cut off from the rest of its sentence. Find the cause first (cue chunking/merging, timing, or the model's line split) in `extension-list/src/youtube/` before changing anything.
 
 Diagnosis (Sol, 2026-10-12, reproduced in memory with the real functions; the user's own video/JSON3 not checked): (a) the display re-split in `display.js` cuts a translated sentence by a character budget derived from the *original* text length (the original is always attached in translate mode), so a ≤44-char Korean sentence became three cues with "않아요." alone at ~0.7 s; (b) `timing.js` gives min 1 s / 55 ms per char / max 3 s but never past the next cue's start, so dense or re-split cues stay under 1 s; (c) `cues.js` cuts a long last source unit's end to its start + 1.5 s, so a 6 s manual caption with a short translation ended at 1.5 s; (d) the model may itself emit a dangling ending (no completeness check) and 200-unit chunk boundaries ignore sentence ends. Recommended order: fix the display re-split first (don't split a short complete Korean sentence because the original is long; keep predicate endings like "생각하지 않아요" together; merge tiny remainders), then timing (merge/re-split neighbours instead of capping under 1 s; make the 1.5 s tail cap tell real speech from silence), then sentence-aware chunk boundaries. Not chosen: always gluing "않아요" to the previous cue (would merge standalone negative answers).
+
+Round 2 (2026-10-12 evening, user still saw cues leaving too early): 3.5.18 human (`std`) tracks use the caption event end instead of the 1.5 s tail cap, no split inside numbers, more predicate tails kept together, cache `+t2`; 3.5.19 fragment boundaries snap to source word starts (`+t3`); 3.5.20 one display policy `finalizeTimings` (end = max(speech end, start + reading time at 12 chars/s, 1.2–6 s), 80 ms before the next cue, gaps < 1.2 s bridged, 1.5 s tail and 3 s cap removed) with a replay test on a real 5-minute json3 slice (`+t4`). The controller's first "131 early ends" figure was wrong (it counted silence as speech and used proportional `orig` splits); the real remaining issue is fast speech, where most cues get less than their reading time — addressed by 3.5.21 two-line rolling display (previous line stays above at 72 %, default on, setting "이전 자막 한 줄 더 보기"). 3.5.22: profanity kept at original strength and a 말투 setting (default 원문 말투 따라가기, or 해요체 고정), cache `+t5`. Possible follow-up: split each fragment's `orig` by its real words instead of character proportion.
 
 ## COLLECTOR-TABLET-001 — Tablet "번역" selection chip and touch menu (2026-10-12)
 

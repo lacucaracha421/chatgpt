@@ -17,22 +17,24 @@ struct Launch {
     start: Instant,
     unix_ms: u128,
     id: String,
+    /// Native records stop after this many seconds (15; `LAKOMICS_PERF_NATIVE_SECS` up to 3600).
+    native_secs: u64,
 }
 static LAUNCH: OnceLock<Launch> = OnceLock::new();
 static WRITER: Mutex<()> = Mutex::new(());
 static NATIVE_LINES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 pub(crate) fn startup_enabled() -> bool {
-    LAUNCH
-        .get()
-        .is_some_and(|launch| launch.enabled && launch.start.elapsed().as_secs() < 15)
+    LAUNCH.get().is_some_and(|launch| {
+        launch.enabled && launch.start.elapsed().as_secs() < launch.native_secs
+    })
 }
 
 /// Startup diagnostics are buffered in memory: never do log I/O under a library lock.
 pub(crate) fn startup_record(name: &str, fields: serde_json::Value) {
     let Some(launch) = LAUNCH
         .get()
-        .filter(|launch| launch.enabled && launch.start.elapsed().as_secs() < 15)
+        .filter(|launch| launch.enabled && launch.start.elapsed().as_secs() < launch.native_secs)
     else {
         return;
     };
@@ -43,7 +45,7 @@ pub(crate) fn startup_record(name: &str, fields: serde_json::Value) {
     })
     .to_string();
     if let Ok(mut lines) = NATIVE_LINES.lock() {
-        if lines.len() < 2048 {
+        if lines.len() < 2048 * (launch.native_secs / 15).max(1) as usize {
             lines.push(line);
         }
     }
@@ -60,7 +62,7 @@ impl StartupSpan {
     pub(crate) fn start(name: &'static str) -> Option<Self> {
         let launch = LAUNCH.get()?;
         let caller = std::panic::Location::caller();
-        (launch.enabled && launch.start.elapsed().as_secs() < 15).then(|| Self {
+        (launch.enabled && launch.start.elapsed().as_secs() < launch.native_secs).then(|| Self {
             name,
             start: Instant::now(),
             caller,
@@ -124,6 +126,10 @@ pub fn init() {
             } else {
                 String::new()
             },
+            native_secs: std::env::var("LAKOMICS_PERF_NATIVE_SECS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .map_or(15, |secs| secs.clamp(15, 3600)),
         }
     });
 }
@@ -217,7 +223,7 @@ pub fn setup(app: &tauri::AppHandle) {
         let _ = std::thread::Builder::new()
             .name("startup-perf-log".into())
             .spawn(move || {
-                for _ in 0..16 {
+                for _ in 0..=launch.native_secs {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                     let lines = NATIVE_LINES
                         .lock()
@@ -239,6 +245,7 @@ mod tests {
             start: Instant::now(),
             unix_ms: 0,
             id: "test-launch".into(),
+            native_secs: 15,
         }
     }
     #[test]

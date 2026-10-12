@@ -69,13 +69,14 @@ export function S36ClearControl({ seriesId, seriesName, disabled, onChanged, api
 }
 
 /** Readiness of every character in one series, refreshed when judgments change. */
-export function useS36Readiness(seriesId: string, refreshKey: unknown, api: S36PublicationApi = s36PublicationApi) {
+export function useS36Readiness(seriesId: string, refreshKey: unknown, api: S36PublicationApi = s36PublicationApi, enabled = true) {
   const [readiness, setReadiness] = useState<Map<string, S36Readiness>>(new Map());
   useEffect(() => {
+    if (!enabled) return;
     let alive = true;
     void api.readiness(seriesId).then(rows => { if (alive) setReadiness(new Map(rows.map(row => [row.targetId, row]))); }).catch(() => { if (alive) setReadiness(new Map()); });
     return () => { alive = false; };
-  }, [api, seriesId, refreshKey]);
+  }, [api, seriesId, refreshKey, enabled]);
   return readiness;
 }
 

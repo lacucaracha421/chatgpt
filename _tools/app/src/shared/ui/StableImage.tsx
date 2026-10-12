@@ -36,6 +36,14 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
   const [slots, setSlots] = useState<[Slot | null, Slot | null]>([{ src, alt }, null]);
   const [active, setActive] = useState<0 | 1>(0);
   const appeared = useRef(false);
+  const firstFramePassed = useRef(false);
+  // A cached load can arrive just after attachment. If it decodes before the first frame,
+  // its first paint belongs to the page; only genuinely late first pixels need a fade.
+  useLayoutEffect(() => {
+    firstFramePassed.current = false;
+    const frame = window.requestAnimationFrame(() => { firstFramePassed.current = true; });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   const cached = useRef(new WeakMap<HTMLImageElement, string>());
   const imageRef = useCallback((element: HTMLImageElement | null) => {
     // Capture cache readiness at attachment, before a later load event can hide painted pixels.
@@ -87,6 +95,7 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
   const loaded = (index: 0 | 1, event: SyntheticEvent<HTMLImageElement>) => {
     const loadedSrc = slots[index]?.src;
     const element = event.currentTarget;
+    const preparingOnLoad = Boolean(element.closest('[data-folder-move="pending"], [data-motion-view][style*="opacity: 0"]') || element.hasAttribute(REVEAL_HOLD_ATTRIBUTE));
     // A first bitmap must not paint while its asynchronous decode is still pending.
     // decodeFirst={false} callers paint their first bitmap on load and own its arrival.
     const held = decodeFirst && !appeared.current && loadedSrc === wanted.current && !slots[index]?.decoded && cached.current.get(element) !== loadedSrc && !viewportImageDecoded(element);
@@ -100,8 +109,10 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
         appeared.current = true;
         // The area owns prepared images; only late first loads get their own fade. A late tile held
         // for a shared reveal (revealTogether) appears with its batch, not on a fade of its own.
-        const preparing = element.closest('[data-folder-move="pending"], [data-motion-view][style*="opacity: 0"]') || element.hasAttribute(REVEAL_HOLD_ATTRIBUTE);
-        if (held && !preparing && !(respectReducedMotion && reducedMotion()) && typeof element.animate === "function") {
+        // The page may release its marker before this decode callback gets its turn.
+        const preparing = preparingOnLoad || element.closest('[data-folder-move="pending"], [data-motion-view][style*="opacity: 0"]') || element.hasAttribute(REVEAL_HOLD_ATTRIBUTE);
+        const late = firstFramePassed.current || typeof element.decode !== "function";
+        if (held && late && !preparing && !(respectReducedMotion && reducedMotion()) && typeof element.animate === "function") {
           fade.current = element.animate([{opacity: 0}, {opacity: props.style?.opacity ?? 1}], {duration: contentCross.image, easing: EASE_STANDARD});
         }
       } else if (loadedSrc === wanted.current && index !== active) {

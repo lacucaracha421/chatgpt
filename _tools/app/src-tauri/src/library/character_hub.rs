@@ -203,34 +203,79 @@ pub(super) fn validate_art(connection: &Connection, id: &str) -> Result<()> {
     }
     Ok(())
 }
+// Share folder scopes and deduplicated memberships across every target and group.
+const SIDEBAR_COUNTS_SQL: &str = r#"
+WITH RECURSIVE roots(id) AS (
+ SELECT series_classification_id FROM character_targets WHERE series_classification_id IS NOT NULL
+ UNION SELECT series_id FROM character_groups
+), scope(series_id,id) AS (
+ SELECT id,id FROM roots
+ UNION SELECT s.series_id,c.id FROM scope s JOIN classification_entries c ON c.parent_id=s.id
+), ancestors(series_id,id,parent_id) AS (
+ SELECT r.id,c.id,c.parent_id FROM roots r JOIN classification_entries c ON c.id=r.id
+ UNION ALL SELECT p.series_id,c.id,c.parent_id FROM ancestors p JOIN classification_entries c ON c.id=p.parent_id
+), members(target_id,asset_id,accepted) AS (
+ SELECT target_id,asset_id,1 FROM character_relations
+ UNION ALL SELECT target_id,asset_id,0 FROM character_references WHERE asset_id IS NOT NULL
+ UNION ALL SELECT target_id,asset_id,0 FROM character_learned_references
+), dedup AS (
+ SELECT target_id,asset_id,MAX(accepted) AS accepted FROM members GROUP BY target_id,asset_id
+), target_counts AS (
+ SELECT d.target_id,COUNT(*) AS n FROM dedup d
+ CROSS JOIN character_targets t ON t.id=d.target_id
+ CROSS JOIN assets a ON a.id=d.asset_id
+ WHERE a.status='normal' AND (
+ EXISTS(SELECT 1 FROM asset_classifications ac JOIN scope s ON s.id=ac.classification_id
+   WHERE ac.asset_id=a.id AND s.series_id=t.series_classification_id)
+ OR (d.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac JOIN ancestors s ON s.id=ac.classification_id
+   WHERE ac.asset_id=a.id AND s.series_id=t.series_classification_id)))
+ GROUP BY d.target_id
+), group_assets AS (
+ SELECT gm.group_id,d.asset_id,MAX(d.accepted) AS accepted
+ FROM character_group_members gm JOIN dedup d ON d.target_id=gm.target_id
+ GROUP BY gm.group_id,d.asset_id
+), group_counts AS (
+ SELECT m.group_id,COUNT(*) AS n FROM group_assets m
+ CROSS JOIN character_groups g ON g.id=m.group_id
+ CROSS JOIN assets a ON a.id=m.asset_id
+ WHERE a.status='normal' AND (
+ EXISTS(SELECT 1 FROM asset_classifications ac JOIN scope s ON s.id=ac.classification_id
+   WHERE ac.asset_id=a.id AND s.series_id=g.series_id)
+ OR (m.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac JOIN ancestors s ON s.id=ac.classification_id
+   WHERE ac.asset_id=a.id AND s.series_id=g.series_id)))
+ GROUP BY m.group_id
+)
+SELECT 'target',t.id,COALESCE(c.n,0) FROM character_targets t
+ LEFT JOIN target_counts c ON c.target_id=t.id WHERE t.series_classification_id IS NOT NULL
+UNION ALL
+SELECT 'group',g.id,COALESCE(c.n,0) FROM character_groups g LEFT JOIN group_counts c ON c.group_id=g.id
+"#;
+
+fn sidebar_counts_in(connection: &Connection) -> Result<SidebarCounts> {
+    let mut counts = SidebarCounts::default();
+    let mut statement = connection.prepare(SIDEBAR_COUNTS_SQL)?;
+    let rows = statement.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            u64::try_from(r.get::<_, i64>(2)?).unwrap_or(0),
+        ))
+    })?;
+    for row in rows {
+        let (kind, id, total) = row?;
+        if kind == "target" {
+            counts.targets.insert(id, total);
+        } else {
+            counts.groups.insert(id, total);
+        }
+    }
+    Ok(counts)
+}
+
 impl Library {
     pub fn character_sidebar_counts(&self) -> Result<SidebarCounts> {
         let connection = self.connection()?;
-        let mut counts = SidebarCounts::default();
-        let targets = connection
-            .prepare("SELECT id,series_classification_id FROM character_targets WHERE series_classification_id IS NOT NULL")?
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut target_count = connection.prepare(TARGET_GALLERY_COUNT_SQL)?;
-        for (target_id, series_id) in targets {
-            let total: i64 = target_count.query_row(params![series_id, target_id], |r| r.get(0))?;
-            counts
-                .targets
-                .insert(target_id, u64::try_from(total).unwrap_or(0));
-        }
-        let groups = connection
-            .prepare("SELECT id,series_id FROM character_groups")?
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut group_count =
-            connection.prepare(&format!("SELECT COUNT(*) FROM ({GROUP_GALLERY_SCOPE})"))?;
-        for (group_id, series_id) in groups {
-            let total: i64 = group_count.query_row(params![series_id, group_id], |r| r.get(0))?;
-            counts
-                .groups
-                .insert(group_id, u64::try_from(total).unwrap_or(0));
-        }
-        Ok(counts)
+        sidebar_counts_in(&connection)
     }
     pub fn character_series(&self) -> Result<Vec<Series>> {
         let connection = self.connection()?;
@@ -1747,6 +1792,136 @@ mod tests {
             group.plain_steps > MAX_GROUP_VM_STEPS,
             "the pre-fix group count plan ({} VM steps) no longer exceeds the gate",
             group.plain_steps
+        );
+    }
+
+    #[test]
+    fn char_folder_perf_sidebar_golden_and_one_statement() {
+        let f = Fixture::new();
+        let mut targets = Vec::new();
+        for n in 0..12 {
+            targets.push(
+                f.ready_in_series(&format!("T{n}"), if n < 6 { &f.series } else { &f.child }),
+            );
+        }
+        for target in &targets {
+            f.library
+                .record_character_decisions(DecisionRequest {
+                    target_id: target.id.clone(),
+                    expected_fingerprint: target.fingerprint.clone(),
+                    asset_ids: vec!["asset-4".into()],
+                    decision: DecisionKind::Accepted,
+                    baseline_fingerprint: None,
+                    scan_id: None,
+                })
+                .unwrap();
+        }
+        let c = f.library.connection().unwrap();
+        for (n, series) in [&f.series, &f.child].iter().enumerate() {
+            super::super::character_groups::save_character_group_in(
+                &c,
+                super::super::character_groups::GroupDraft {
+                    id: None,
+                    series_id: (*series).clone(),
+                    expected_revision: None,
+                    name: format!("Group{n}"),
+                    target_ids: targets[n * 6..n * 6 + 6]
+                        .iter()
+                        .map(|t| t.id.clone())
+                        .collect(),
+                    delete: false,
+                },
+            )
+            .unwrap();
+        }
+        // References in an ancestor do not count without acceptance; duplicate references/members count once.
+        c.execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-0'",
+            [&f.series],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-4'",
+            [&f.series],
+        )
+        .unwrap();
+        let mut golden = SidebarCounts::default();
+        for t in &targets {
+            let total = c
+                .query_row(
+                    TARGET_GALLERY_COUNT_SQL,
+                    params![t.series_classification_id, t.id],
+                    |r| r.get::<_, i64>(0).map(|n| n as u64),
+                )
+                .unwrap();
+            golden.targets.insert(t.id.clone(), total);
+        }
+        let groups = c
+            .prepare("SELECT id,series_id FROM character_groups")
+            .unwrap()
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for (id, series) in &groups {
+            let total = c
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM ({GROUP_GALLERY_SCOPE})"),
+                    params![series, id],
+                    |r| r.get::<_, i64>(0).map(|n| n as u64),
+                )
+                .unwrap();
+            golden.groups.insert(id.clone(), total);
+        }
+        unsafe extern "C" fn count_statement(
+            event: std::ffi::c_uint,
+            context: *mut std::ffi::c_void,
+            _: *mut std::ffi::c_void,
+            _: *mut std::ffi::c_void,
+        ) -> std::ffi::c_int {
+            if event == rusqlite::ffi::SQLITE_TRACE_STMT as u32 {
+                *(context as *mut usize) += 1;
+            }
+            0
+        }
+        let mut statements = 0usize;
+        unsafe {
+            rusqlite::ffi::sqlite3_trace_v2(
+                c.handle(),
+                rusqlite::ffi::SQLITE_TRACE_STMT as u32,
+                Some(count_statement),
+                (&mut statements as *mut usize).cast(),
+            );
+        }
+        let result = sidebar_counts_in(&c);
+        unsafe {
+            rusqlite::ffi::sqlite3_trace_v2(c.handle(), 0, None, std::ptr::null_mut());
+        }
+        let counts = result.unwrap();
+        assert_eq!(counts.targets, golden.targets);
+        assert_eq!(counts.groups, golden.groups);
+        assert_eq!(
+            statements, 1,
+            "sidebar statement count must remain constant"
+        );
+        eprintln!(
+            "sidebar golden: {} targets, {} groups; old statements {}, new {statements}",
+            targets.len(),
+            groups.len(),
+            targets.len() + groups.len() + 2
+        );
+        let plan = c
+            .prepare(&format!("EXPLAIN QUERY PLAN {SIDEBAR_COUNTS_SQL}"))
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            !plan
+                .iter()
+                .any(|line| line.starts_with("SCAN a ") || line == "SCAN a"),
+            "{plan:?}"
         );
     }
 

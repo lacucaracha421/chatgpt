@@ -108,12 +108,12 @@ it.each(["newest", "oldest", "random", "favorites"] as const)("hover prefetch co
   const { tree, reads, browse } = entryHarness(sort);
   const view = render(tree(false));
   fireEvent.pointerEnter(screen.getByRole("button", { name: "hover series" }), { pointerType: "mouse" });
-  await waitFor(() => expect(reads()).toEqual({ suggestions: 1, ignored: 1, counts: 1, browse: 1, excluded: 1, folders: 1, candidates: 1 }));
+  await waitFor(() => expect(reads()).toEqual({ suggestions: 1, ignored: 1, counts: 1, browse: 1, excluded: 1, folders: 1, candidates: 0 }));
   if (sort !== "newest") expect(browse.mock.calls[0][0].view?.sort).toBe(sort);
   view.rerender(tree(true));
   await screen.findByRole("region", { name: "A 시리즈" });
   expect(screen.getByRole("option", { name: "series-a 0.webp" })).toBeInTheDocument();
-  expect(reads()).toEqual({ suggestions: 1, ignored: 1, counts: 1, browse: 1, excluded: 1, folders: 1, candidates: 1 });
+  await waitFor(() => expect(reads()).toEqual({ suggestions: 1, ignored: 1, counts: 1, browse: 1, excluded: 1, folders: 1, candidates: 1 }));
 });
 
 it("consumes a random-sort hover prefetch once through StrictMode mount replay", async () => {
@@ -124,7 +124,7 @@ it("consumes a random-sort hover prefetch once through StrictMode mount replay",
   const pivot = browse.mock.calls[0][0].view?.randomPivot;
   view.rerender(<StrictMode>{tree(true)}</StrictMode>);
   await screen.findByRole("region", { name: "A 시리즈" });
-  expect(reads()).toEqual({ suggestions: 1, ignored: 1, counts: 1, browse: 1, excluded: 1, folders: 1, candidates: 1 });
+  await waitFor(() => expect(reads()).toEqual({ suggestions: 1, ignored: 1, counts: 1, browse: 1, excluded: 1, folders: 1, candidates: 1 }));
   expect(seriesFolderBrowseView("random")?.randomPivot).toBe(pivot);
 });
 
@@ -176,11 +176,11 @@ it("switches to a prefetched series without reading its first page again", async
   const { view, tree, hubApi, confirmSource, reads } = mount();
   await screen.findByRole("option", { name: "series-a 0.webp" });
   await Promise.all(prefetchSeriesOverview("series-b", hubApi, confirmSource));
-  expect(reads("series-b")).toEqual({ browse: 1, excluded: 1, folders: 1, candidates: 1 });
+  expect(reads("series-b")).toEqual({ browse: 1, excluded: 1, folders: 1, candidates: 0 });
   view.rerender(tree("series-b"));
   expect(await screen.findByRole("option", { name: "series-b 0.webp" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "series-b 2.webp" })).toBeInTheDocument();
-  expect(reads("series-b")).toEqual({ browse: 1, excluded: 1, folders: 1, candidates: 1 });
+  await waitFor(() => expect(reads("series-b")).toEqual({ browse: 1, excluded: 1, folders: 1, candidates: 1 }));
 });
 
 it("enters a series with one 확인 count read and shows the gallery before the count lands", async () => {

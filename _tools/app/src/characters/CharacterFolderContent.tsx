@@ -4,7 +4,7 @@ import { FolderRegistrationContext } from "./FolderRegistrationContext";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CharacterFolderGroupDialog } from "./CharacterFolderGroupDialog";
 import { folderGroupApi } from "./folderGroupApi";
-import { AreaEntering, READY_CAP_MS, viewReady } from "../shared/motion/AreaSwitch";
+import { AreaEntering, AreaVisible, AreaRequested, READY_CAP_MS, viewReady } from "../shared/motion/AreaSwitch";
 import { revealTogether, waitForViewportImages } from "../shared/motion/viewportImages";
 import { ChromeContext, useWorkspaceChrome, type Targets } from "../layout/WorkspaceChromeContext";
 import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
@@ -13,6 +13,8 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { useCharacterHub } from "./useCharacterHub";
 import { characterHubApi, type CharacterSeries } from "./hubApi";
 import { SeriesBrowser, type CharacterGalleryDrag } from "./SeriesBrowser";
+import { useOptionalLibrary } from "../library/LibraryContext";
+import { seriesDataScope } from "./seriesMountCache";
 
 function inOriginals(id: string, classifications: ClassificationEntry[]) {
   let current = classifications.find(item => item.id === id);
@@ -46,6 +48,8 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
   groupEditRequest?: { groupId: string; token: number } | null; onGroupEditRequestHandled?: () => void;
 }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
+  const library = useOptionalLibrary();
+  const cacheScope = seriesDataScope(library?.gateway, library?.library?.root);
   const [organizeCharacter, setOrganizeCharacter] = useState(false);
   const [organizeGroup, setOrganizeGroup] = useState(false);
   const [exclusions, setExclusions] = useState<{ key: string; ids: string[] } | null>(null);
@@ -72,7 +76,7 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
   }, [groupEligible, exclusionKey]);
   const canOrganizeGroup = groupEligible && exclusions?.key === exclusionKey
     && !ancestors.some(ancestorId => exclusions.ids.includes(ancestorId));
-  if (series && !originalScope) return <><FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={onGroupEditRequestHandled} /></FolderKindSwitch></>;
+  if (series && !originalScope) return <><FolderKindSwitch kind="series" cacheScope={cacheScope} seriesKey={JSON.stringify([id, view.kind === "classification" ? view.characterId : null, view.kind === "classification" ? view.characterGroupId : null])}><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={onGroupEditRequestHandled} /></FolderKindSwitch></>;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);
@@ -80,7 +84,7 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
     catch (e) { setError(commandErrorMessage(e, "시리즈를 등록하지 못했습니다.")); }
     finally { setBusy(false); }
   }
-  return <><FolderKindSwitch kind="plain"><FolderRegistrationContext.Provider value={folder?.parentId && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+  return <><FolderKindSwitch kind="plain" cacheScope={cacheScope}><FolderRegistrationContext.Provider value={folder?.parentId && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
     { id: "register-series", label: "시리즈로 등록", onSelect: () => void register() },
     { id: "make-character", label: "캐릭터로 만들기", onSelect: () => setOrganizeCharacter(true) },
     ...(canOrganizeGroup ? [{ id: "organize-group", label: "그룹으로 정리", onSelect: () => setOrganizeGroup(true) }] : []),
@@ -99,24 +103,35 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
 }
 
 type FolderKind = "series" | "plain";
-const FOLDER_KINDS: readonly FolderKind[] = ["series", "plain"];
+const RETAINED_SERIES_LIMIT = 16;
 
 /**
- * A series folder and a plain folder open in different browsers, so moving between them mounts the
- * other one (no-flash rule, DESIGN.md). The painted browser stays, inert, while the new one prepares
+ * A series folder and a plain folder open in different browsers. Visited series views keep their
+ * real gallery and shelf trees mounted, within the cache limit. The painted browser stays, inert, while the new one prepares
  * out of sight: no chrome in the shell and no first-load entrance. Once its first screen is ready
  * (its data, shelf reads and the images in view decoded, within READY_CAP_MS) the two swap in one
  * step; first-screen images still loading at the cap then appear together, not one by one.
  */
-export function FolderKindSwitch({ kind, children }: { kind: FolderKind; children: ReactNode }) {
-  const [shown, setShown] = useState(kind);
-  const painted = useRef(children);
-  if (kind === shown) painted.current = children;
+export function FolderKindSwitch({ kind, children, seriesKey = "", cacheScope = "" }: { kind: FolderKind; children: ReactNode; seriesKey?: string; cacheScope?: string }) {
+  const active = JSON.stringify([cacheScope, kind, kind === "series" ? seriesKey : ""]);
+  const [shown, setShown] = useState(active);
+  const browsers = useRef(new Map<string, { kind: FolderKind; children: ReactNode; scope: string }>());
+  // Cache the real trees, not just their data: re-entry reuses decoded image DOM slots.
+  // Outgoing props stay frozen until publication; offstage browsers never own the shell.
+  browsers.current.set(active, { kind, children, scope: cacheScope });
+  for (const [key, browser] of browsers.current) {
+    if (key !== active && key !== shown && (browser.kind === "plain" || browser.scope !== cacheScope)) browsers.current.delete(key);
+  }
+  const seriesKeys = [...browsers.current].filter(([, browser]) => browser.kind === "series").map(([key]) => key);
+  const evictable = seriesKeys.filter(key => key !== active && key !== shown);
+  for (let excess = seriesKeys.length - RETAINED_SERIES_LIMIT; excess > 0 && evictable.length; excess--) browsers.current.delete(evictable.shift()!);
   const entering = useContext(AreaEntering);
+  const areaVisible = useContext(AreaVisible);
+  const areaRequested = useContext(AreaRequested);
   // A browser mounted by a switch never starts a first-load entrance of its own.
-  const switched = useRef(new Set<FolderKind>());
-  if (kind !== shown) switched.current.add(kind);
-  for (const key of FOLDER_KINDS) if (key !== kind && key !== shown) switched.current.delete(key);
+  const switched = useRef(new Set<string>());
+  if (active !== shown) switched.current.add(active);
+  for (const key of switched.current) if (!browsers.current.has(key)) switched.current.delete(key);
   const chrome = useWorkspaceChrome();
   // Shell slots for the preparing browser: detached, so its layout matches the final one without
   // reaching the shell, which keeps the painted browser's chrome until the swap.
@@ -124,11 +139,11 @@ export function FolderKindSwitch({ kind, children }: { kind: FolderKind; childre
     const slot = () => document.createElement("div");
     return { navigation: slot(), actions: slot(), search: slot(), settings: slot(), header: slot(), details: slot() };
   });
-  const hosts = useRef(new Map<FolderKind, HTMLDivElement>());
+  const hosts = useRef(new Map<string, HTMLDivElement>());
   const check = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
-    if (kind === shown) return;
-    const host = hosts.current.get(kind);
+    if (active === shown) return;
+    const host = hosts.current.get(active);
     if (!host) return;
     const started = performance.now();
     let done = false, frame = 0, stopImages: (() => void) | undefined;
@@ -136,7 +151,7 @@ export function FolderKindSwitch({ kind, children }: { kind: FolderKind; childre
       done = true; check.current = null;
       observer.disconnect(); window.clearTimeout(cap); window.cancelAnimationFrame(frame); stopImages?.();
     };
-    const commit = () => { if (!done) { stop(); setShown(kind); } };
+    const commit = () => { if (!done) { stop(); setShown(active); } };
     const ready = () => {
       if (done || frame || stopImages || !viewReady(host)) return;
       // The gallery measures its first viewport before the batch is chosen.
@@ -155,18 +170,23 @@ export function FolderKindSwitch({ kind, children }: { kind: FolderKind; childre
     check.current = ready;
     ready();
     return stop;
-  }, [kind, shown]);
+  }, [active, shown]);
   // Readiness may change without a DOM mutation (e.g. an empty first page).
   useLayoutEffect(() => { check.current?.(); });
-  return <>{FOLDER_KINDS.filter(key => key === kind || key === shown).map(key => {
-    const preparing = key === kind && key !== shown;
+  return <>{[...browsers.current].map(([key, browser]) => {
+    const preparing = key === active && key !== shown;
+    const hidden = key !== active && key !== shown;
     return <div key={key} className="folder-kind-switch" data-preparing={preparing || undefined}
       // Opacity hides the subtree even where a descendant sets visibility; images loading here take no fade.
-      data-motion-view={preparing ? "folder-kind" : undefined} style={preparing ? { opacity: 0, visibility: "hidden" } : undefined}
-      inert={key !== kind || preparing || undefined} aria-hidden={preparing || undefined}
+      data-motion-view={preparing ? "folder-kind" : undefined} style={hidden ? { display: "none" } : preparing ? { opacity: 0, visibility: "hidden" } : undefined}
+      inert={key !== active || preparing || undefined} aria-hidden={hidden || preparing || undefined}
       ref={element => { if (element) hosts.current.set(key, element); else hosts.current.delete(key); }}>
-      <ChromeContext.Provider value={preparing && chrome ? { ...chrome, scope: `${chrome.scope}:preparing`, targets: offstage } : chrome}>
-        <AreaEntering.Provider value={entering || switched.current.has(key)}>{key === kind ? children : painted.current}</AreaEntering.Provider>
+      <ChromeContext.Provider value={(preparing || hidden) && chrome ? { ...chrome, scope: `${chrome.scope}:preparing`, targets: offstage } : chrome}>
+        <AreaVisible.Provider value={areaVisible && !hidden}>
+          <AreaRequested.Provider value={areaRequested && key === active}>
+            <AreaEntering.Provider value={entering || switched.current.has(key)}>{browser.children}</AreaEntering.Provider>
+          </AreaRequested.Provider>
+        </AreaVisible.Provider>
       </ChromeContext.Provider>
     </div>;
   })}</>;

@@ -4,6 +4,38 @@ import { StableImage } from "./StableImage";
 
 afterEach(cleanup);
 
+it("does not fade a first image whose load and decode finish before the first frame", async () => {
+  render(<StableImage src="/immediate-cache-decode" alt="Cached" />);
+  const image = screen.getByRole<HTMLImageElement>("img");
+  image.decode = () => Promise.resolve();
+  image.animate = vi.fn();
+  fireEvent.load(image);
+  await act(async () => undefined);
+  expect(image.animate).not.toHaveBeenCalled();
+  expect(image.style.opacity).toBe("");
+});
+
+it.each([false, true])("keeps a genuinely slow first decode's fade, respecting the tablet reduced-motion opt-in (%s)", async respectReducedMotion => {
+  const media = Object.getOwnPropertyDescriptor(window, "matchMedia");
+  Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: true }) });
+  try {
+    render(<StableImage src="/slow" alt="Slow" respectReducedMotion={respectReducedMotion} />);
+    const image = screen.getByRole<HTMLImageElement>("img");
+    let finish!: () => void;
+    image.decode = () => new Promise<void>(resolve => { finish = resolve; });
+    image.animate = vi.fn(() => ({ cancel: vi.fn() } as unknown as Animation));
+    fireEvent.load(image);
+    expect(image.style.opacity).toBe("0");
+    await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
+    await act(async () => finish());
+    expect(image.style.opacity).toBe("");
+    expect(image.animate).toHaveBeenCalledTimes(respectReducedMotion ? 0 : 1);
+  } finally {
+    if (media) Object.defineProperty(window, "matchMedia", media);
+    else Reflect.deleteProperty(window, "matchMedia");
+  }
+});
+
 it("does not hold or fade a cached bitmap already complete when its DOM slot mounts", async () => {
   const complete = vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
   const width = vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(100);
@@ -26,6 +58,7 @@ it("fades a late first image for 150ms but swaps replacements only after decode 
   const {container, rerender} = render(<StableImage src="/first" alt="Cover"/>);
   const first = screen.getByRole<HTMLImageElement>("img");
   const cancel = vi.fn(); first.animate = vi.fn(() => ({cancel} as unknown as Animation));
+  await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
   fireEvent.load(first);
   expect(first.animate).toHaveBeenCalledWith([{opacity: 0}, {opacity: 1}], expect.objectContaining({duration: 150}));
   rerender(<StableImage src="/next" alt="Cover"/>);
@@ -67,10 +100,25 @@ it("never leaves a held first bitmap invisible when its source changes during de
   expect(third.style.opacity).toBe("");
 });
 
-it("lets the area entrance own an image decoded during preparation", () => {
+it("lets the area entrance own an image decoded during preparation", async () => {
   render(<div data-motion-view="assets" style={{opacity: 0}}><StableImage src="/first" alt="Cover"/></div>);
   const first = screen.getByRole<HTMLImageElement>("img"); first.animate = vi.fn();
+  await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
   fireEvent.load(first); expect(first.animate).not.toHaveBeenCalled();
+});
+
+it("does not start a second image fade when the page releases its reveal marker during decode", async () => {
+  const view = render(<div data-motion-view="series" style={{ opacity: 0 }}><StableImage src="/prepared" alt="Prepared" /></div>);
+  const image = screen.getByRole<HTMLImageElement>("img");
+  let finish!: () => void;
+  image.decode = () => new Promise<void>(resolve => { finish = resolve; });
+  image.animate = vi.fn();
+  fireEvent.load(image);
+  await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
+  view.rerender(<div data-motion-view="series"><StableImage src="/prepared" alt="Prepared" /></div>);
+  await act(async () => finish());
+  expect(image.animate).not.toHaveBeenCalled();
+  expect(image.style.opacity).toBe("");
 });
 
 it("loads a hidden lazy replacement without waiting for an intersection that cannot occur", async () => {

@@ -462,7 +462,7 @@ fn snapshot(options: &Options) -> Result<PathBuf, Box<dyn std::error::Error>> {
         || options
             .only
             .as_deref()
-            .is_some_and(|s| s.contains("series_switch")))
+            .is_some_and(|s| s.contains("series_switch") || s.contains("series_open")))
         && s36_cache.is_file()
     {
         fs::create_dir_all(snapshot_root.join(".cache/characters"))?;
@@ -504,6 +504,10 @@ fn prepared_snapshot(dir: &Path, library: &Path) -> Result<PathBuf, Box<dyn std:
         return Err("the prepared snapshot has no library.sqlite".into());
     }
     println!("snapshot_reused: {}", root.display());
+    println!(
+        "snapshot_s36_cache_present: {}",
+        root.join(".cache/characters/s36_shadow.sqlite").is_file()
+    );
     Ok(root)
 }
 
@@ -1329,7 +1333,18 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
 
     // The plain destination (series → plain): AssetBrowser's first page (directOnly, newest),
     // its folder-shelf covers and, for children without one, a 1-asset read each (up to 40).
-    let (plain_id, plain_is_series) = folder("엔필");
+    // 게임/엔필 when it exists; otherwise the first plain folder (the 게임 folders
+    // were reorganized on 2026-10-12). Labels keep "엔필" so results stay comparable by name.
+    let (plain_id, plain_is_series): (String, bool) = connection
+        .query_row(
+            "SELECT c.id, 0 FROM classification_entries c
+             LEFT JOIN classification_entries p ON p.id=c.parent_id
+             WHERE NOT EXISTS(SELECT 1 FROM character_series s WHERE s.classification_id=c.id)
+             ORDER BY (p.name='게임' AND c.name='엔필') DESC, c.name LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("a plain folder");
     assert!(
         !plain_is_series,
         "게임/엔필 is expected to be a plain folder"
@@ -1418,7 +1433,24 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
         ],
     );
 
-    for name in ["닌텐도", "명조", "니케", "블아"] {
+    // LAKOMICS_PROBE_SERIES="리버스,젠레스" measures other 게임 series instead of the fixed set.
+    let series_names: Vec<String> = env::var("LAKOMICS_PROBE_SERIES")
+        .ok()
+        .map(|names| {
+            names
+                .split(',')
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
+        .filter(|names: &Vec<String>| !names.is_empty())
+        .unwrap_or_else(|| {
+            ["닌텐도", "명조", "니케", "블아"]
+                .map(String::from)
+                .to_vec()
+        });
+    for name in &series_names {
+        let name = name.as_str();
         let (id, is_series) = folder(name);
         assert!(is_series, "게임/{name} is expected to be a series");
         let id = id.as_str();
@@ -1433,6 +1465,28 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
             )))
         };
         let readiness = || to_value(library.character_s36_readiness(id));
+        let confirm_counts = || to_value(library.character_confirm_counts(Some(id)));
+        // First reads include the shadow phase; report the actual query borrows separately
+        // from their wall time, before the ordinary repeated/warm measurements below.
+        for (label, read) in [
+            (
+                "confirm_counts",
+                &confirm_counts as &dyn Fn() -> Result<Value, String>,
+            ),
+            (
+                "s36_readiness",
+                &readiness as &dyn Fn() -> Result<Value, String>,
+            ),
+        ] {
+            let started = Instant::now();
+            let (result, total_hold, max_hold) = Library::measure_character_summary_hold(read);
+            println!("series_open_summary_first: name={name} read={label} wall_ms={:.2} query_hold_total_ms={total_hold:.2} query_hold_max_ms={max_hold:.2} ok={}", started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
+        }
+        bench.run(
+            "series_open",
+            format!("series_open/{name}/confirm_counts"),
+            confirm_counts,
+        );
         bench.run(
             "series_open",
             format!("series_open/{name}/browse_unclassified"),
@@ -1523,6 +1577,7 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
                     Box::new(|| to_value(library.character_sidebar_counts())),
                 ),
                 ("readiness", false, Box::new(readiness)),
+                ("confirm_counts", false, Box::new(confirm_counts)),
             ]
         };
         // plain → series, nothing prefetched.
@@ -1552,6 +1607,7 @@ fn series_open_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path)
         // series → series (SeriesBrowser stays mounted; readiness runs alongside, not gated).
         let mut reads = gating();
         reads.push(("readiness", false, Box::new(readiness)));
+        reads.push(("confirm_counts", false, Box::new(confirm_counts)));
         switch_model(bench, format!("series_open/sibling/{name}"), &reads);
         // Thumbnails: the gated first-screen set at today's media cost (pooled reads).
         let page: Vec<String> = browse_call()

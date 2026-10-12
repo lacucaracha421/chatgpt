@@ -7,8 +7,10 @@ import { viewReady } from "../shared/motion/AreaSwitch";
 import { createCharacterFixture, fixtureAssets, fixtureClassifications } from "./characterFixtures";
 import type { CharacterHubApi, SeriesFolder } from "./hubApi";
 import { SeriesBrowser } from "./SeriesBrowser";
+import { s36PublicationApi } from "./S36Publication";
 import { confirmSourceFor } from "./confirmTestKit";
 import { suggestionApi } from "./suggestions/client";
+import { publishCharacterDefinitionRevision, seriesDataScope } from "./seriesMountCache";
 
 vi.mock("./suggestions/client", async importOriginal => {
   const actual = await importOriginal<typeof import("./suggestions/client")>();
@@ -40,8 +42,48 @@ async function mount() {
     onThumbnailRowHeightChange={() => undefined} onNavigate={() => undefined} onChanged={() => undefined} api={api} hubApi={hubApi} confirmSource={confirmSource}
   /></LibraryProvider>);
   await screen.findByRole("option", { name: "이미지 5.webp" });
-  return { ...result, folders, counts, browse };
+  return { ...result, folders, counts, browse, gateway, confirmSource };
 }
+
+it("starts confirmation and readiness only after the page and shelf swap, without awaiting them", async () => {
+  const pendingReadiness = deferred<Awaited<ReturnType<typeof s36PublicationApi.readiness>>>();
+  const readiness = vi.spyOn(s36PublicationApi, "readiness").mockReturnValue(pendingReadiness.promise);
+  const { container, folders, counts, confirmSource } = await mount();
+  const confirmation = vi.spyOn(confirmSource, "counts");
+  const pendingConfirmation = deferred<Awaited<ReturnType<typeof confirmSource.counts>>>();
+  confirmation.mockReturnValue(pendingConfirmation.promise);
+  expect(confirmation).not.toHaveBeenCalled();
+  expect(readiness).not.toHaveBeenCalled();
+  await act(async () => { folders.resolve([]); });
+  expect(confirmation).not.toHaveBeenCalled();
+  expect(readiness).not.toHaveBeenCalled();
+  await act(async () => { counts.resolve({ targets: {} }); });
+  await waitFor(() => expect(viewReady(container)).toBe(true));
+  await waitFor(() => { expect(confirmation).toHaveBeenCalledTimes(1); expect(readiness).toHaveBeenCalledTimes(1); });
+  expect(viewReady(container)).toBe(true);
+  await act(async () => { pendingConfirmation.resolve({ recognition: 0, tag: 0, recheck: 0 }); pendingReadiness.resolve([]); });
+});
+
+it("updates known character counts in place while global reads refresh in the background", async () => {
+  const { container, folders, counts, gateway } = await mount();
+  await act(async () => { folders.resolve([]); counts.resolve({ targets: { hina: 27 } }); });
+  await waitFor(() => expect(viewReady(container)).toBe(true));
+  const card = screen.getByRole("button", { name: "히나 열기" });
+  const count = card.querySelector(".folder-shelf__meta");
+  expect(count).toHaveTextContent("27장");
+  const nextCounts = deferred<Awaited<ReturnType<NonNullable<LibraryGateway["characterSidebarCounts"]>>>>();
+  vi.spyOn(gateway, "characterSidebarCounts").mockReturnValue(nextCounts.promise);
+  const nextSuggestions = deferred<Awaited<ReturnType<typeof suggestionApi.list>>>();
+  vi.spyOn(suggestionApi, "list").mockReturnValue(nextSuggestions.promise);
+  await act(async () => { publishCharacterDefinitionRevision(gateway, seriesDataScope(gateway, undefined), 1); });
+  expect(viewReady(container)).toBe(true);
+  expect(card.querySelector(".folder-shelf__meta")).toBe(count);
+  expect(count).toHaveTextContent("27장");
+  await act(async () => { nextCounts.resolve({ targets: { hina: 28 }, groups: {} }); nextSuggestions.resolve([]); });
+  expect(screen.getByRole("button", { name: "히나 열기" })).toBe(card);
+  expect(card.querySelector(".folder-shelf__meta")).toBe(count);
+  expect(count).toHaveTextContent("28장");
+});
 
 it("waits for the folder shelf and character counts after the asset page arrives", async () => {
   const { container, folders, counts } = await mount();
@@ -128,8 +170,6 @@ it.each([false, true])("switches the real series shelf only after folders, sugge
     expect(visibleShelf().textContent).toBe(oldText);
     await act(async () => { pendingFolders.resolve([]); });
     expect(visibleShelf().textContent).toBe(oldText);
-    await act(async () => { vi.advanceTimersByTime(400); });
-    expect(visibleShelf()).toBe(oldShelf);
     await act(async () => { pendingSuggestions.resolve([{ tag: "new_suggestion", seriesId: "next", seriesName: "Next", imageCount: 7,
       bothCount: 7, canaryCount: 7, pixaiCount: 7, insideCount: 7, sampleAssetIds: ["sample-a", "sample-b"] }]); });
     expect(visibleShelf().textContent).toBe(oldText);

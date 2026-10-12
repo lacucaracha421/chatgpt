@@ -20,6 +20,44 @@ use std::{
     time::SystemTime,
 };
 
+// Read commands borrow the library only for owned query results. The connection-based
+// implementation remains available to callers already inside a write transaction.
+trait ReviewRead {
+    fn read<T>(&self, query: impl FnOnce(&Connection) -> Result<T>) -> Result<T>;
+}
+impl ReviewRead for Connection {
+    fn read<T>(&self, query: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        query(self)
+    }
+}
+impl ReviewRead for Library {
+    fn read<T>(&self, query: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        let connection = self.connection()?;
+        let started = SUMMARY_HOLD.with(|hold| hold.get().map(|_| std::time::Instant::now()));
+        let result = query(&connection);
+        if let Some(started) = started {
+            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+            SUMMARY_HOLD.with(|hold| {
+                if let Some((total, longest)) = hold.get() {
+                    hold.set(Some((total + elapsed, longest.max(elapsed))));
+                }
+            });
+        }
+        result
+    }
+}
+
+thread_local! {
+    static SUMMARY_HOLD: std::cell::Cell<Option<(f64, f64)>> = const { std::cell::Cell::new(None) };
+}
+
+struct SummaryHoldScope(Option<(f64, f64)>);
+impl Drop for SummaryHoldScope {
+    fn drop(&mut self) {
+        SUMMARY_HOLD.with(|hold| hold.set(self.0));
+    }
+}
+
 const MAX_PAGE: u32 = 200;
 
 #[derive(Debug, Deserialize)]
@@ -148,9 +186,23 @@ struct ShadowRow {
     origin: String,
 }
 
+#[cfg(test)]
+thread_local! {
+    static SHADOW_READ_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+}
+fn shadow_read_phase() {
+    #[cfg(test)]
+    SHADOW_READ_HOOK.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook();
+        }
+    });
+}
+
 /// The S36 shadow cache opened read-only, or `None` when it does not exist or has no
 /// `scores` table yet.
 fn open_shadow_cache(root: &Path) -> Result<Option<Connection>> {
+    shadow_read_phase();
     let mut path = root.to_path_buf();
     for part in [".cache", "characters", "s36_shadow.sqlite"] {
         path.push(part);
@@ -207,6 +259,7 @@ fn shadow_rows(root: &Path, doubtful: bool) -> Result<Option<(String, Vec<Shadow
 
 /// [`shadow_rows`] over an already open cache connection.
 fn rows_of_cache(c: &Connection, doubtful: bool) -> Result<Option<(String, Vec<ShadowRow>)>> {
+    shadow_read_phase();
     let origin = if super::character_shadow::cache_has_origin(c)? {
         "origin"
     } else {
@@ -485,6 +538,26 @@ struct CachedList {
     assembled: Option<(BTreeMap<String, TargetInfo>, Arc<ShadowReviewItems>)>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct SummaryKey {
+    definitions: u64,
+    publication: i64,
+    list: ListKey,
+}
+type SummarySlot<T> = Arc<Mutex<Option<(SummaryKey, T)>>>;
+
+fn summary_slot<T>(
+    slots: &Mutex<HashMap<Option<String>, SummarySlot<T>>>,
+    series: Option<&str>,
+) -> SummarySlot<T> {
+    let mut slots = slots.lock().unwrap_or_else(PoisonError::into_inner);
+    let key = series.map(str::to_owned);
+    if !slots.contains_key(&key) && slots.len() >= MAX_CACHED_LISTS {
+        slots.clear();
+    }
+    slots.entry(key).or_default().clone()
+}
+
 type ListSlot = Arc<Mutex<Option<CachedList>>>;
 
 /// Lists kept at most; past it the slots start over (a slot in use stays valid).
@@ -501,6 +574,10 @@ pub(crate) struct ReviewCache {
     /// Indexed by mode: candidates, doubtful.
     rows: [Mutex<Option<(ShadowStamp, Option<ShadowRows>)>>; 2],
     lists: Mutex<HashMap<(bool, Option<String>), ListSlot>>,
+    totals: Mutex<HashMap<Option<String>, SummarySlot<ConfirmTotals>>>,
+    readiness: Mutex<HashMap<Option<String>, SummarySlot<Vec<S36Readiness>>>>,
+    #[cfg(test)]
+    summary_count: std::sync::atomic::AtomicUsize,
     /// Times a list's database part was computed.
     #[cfg(test)]
     prepared_count: std::sync::atomic::AtomicUsize,
@@ -526,16 +603,26 @@ fn prepare(
     doubtful: bool,
     series_id: Option<&str>,
 ) -> Result<Prepared> {
+    prepare_read(c, cache, rows, doubtful, series_id)
+}
+
+fn prepare_read(
+    c: &impl ReviewRead,
+    cache: Option<&Connection>,
+    rows: Option<&ShadowRows>,
+    doubtful: bool,
+    series_id: Option<&str>,
+) -> Result<Prepared> {
     let Some(rows) = rows else {
         return Ok(Prepared::default());
     };
     let (version, all) = &**rows;
     let mut rows = match series_id {
         Some(series_id) => {
-            let in_series = c
+            let in_series = c.read(|c| Ok(c
                 .prepare("SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1")?
                 .query_map([series_id], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+                .collect::<std::result::Result<BTreeSet<_>, _>>()?))?;
             all.iter()
                 .filter(|row| in_series.contains(&row.target_id))
                 .cloned()
@@ -545,12 +632,12 @@ fn prepare(
     };
     // With the broad-folder rule off, scores of images filed outside every registered
     // series stay in the cache but are not offered (turning the rule on shows them again).
-    retain_in_character_scope(c, &mut rows)?;
+    c.read(|c| retain_in_character_scope(c, &mut rows))?;
     // Pairs the native pass already accepted automatically come after new findings
     // and are labelled as such; each group keeps the stable pseudo-random order.
     // (Backfill rows recorded "none" as the native outcome for them.)
     let rows = {
-        let native = latest_decisions(c, &rows, false)?;
+        let native = c.read(|c| latest_decisions(c, &rows, false))?;
         let mut keyed = Vec::with_capacity(rows.len());
         for (index, mut row) in rows.into_iter().enumerate() {
             let classified = native
@@ -567,8 +654,8 @@ fn prepare(
         keyed.sort_by_key(|(key, _)| *key);
         keyed.into_iter().map(|(_, row)| row).collect::<Vec<_>>()
     };
-    let manual = latest_decisions(c, &rows, true)?;
-    let assets = eligible_assets(c, &rows)?;
+    let manual = c.read(|c| latest_decisions(c, &rows, true))?;
+    let assets = c.read(|c| eligible_assets(c, &rows))?;
     let policy = if doubtful {
         ListPolicy::default()
     } else {
@@ -729,6 +816,14 @@ pub(super) fn agreed_pairs_of(
     cache: Option<&Connection>,
     pairs: &[(&str, &str)],
 ) -> Result<BTreeSet<(String, String)>> {
+    agreed_pairs_read(c, cache, pairs)
+}
+
+fn agreed_pairs_read(
+    c: &impl ReviewRead,
+    cache: Option<&Connection>,
+    pairs: &[(&str, &str)],
+) -> Result<BTreeSet<(String, String)>> {
     let targets = pairs
         .iter()
         .map(|(target, _)| (*target).to_owned())
@@ -738,7 +833,7 @@ pub(super) fn agreed_pairs_of(
     if targets.is_empty() || cache.is_none() {
         return Ok(BTreeSet::new());
     }
-    let judged = judgments_of(c, cache, &targets, Auto::Full)?;
+    let judged = judgments_of_read(c, cache, &targets, Auto::Full)?;
     Ok(pairs
         .iter()
         .filter(|(target, asset)| {
@@ -796,7 +891,18 @@ pub(super) fn confirm_totals_in(
 /// (target, asset, reason), each pair once under its highest kind. `series_id` limits the
 /// shadow lists; the caller limits the tag pairs the same way.
 fn confirm_totals_of(
-    connection: &Connection,
+    c: &Connection,
+    cache: Option<&Connection>,
+    candidates: Option<&ShadowRows>,
+    doubtful: Option<&ShadowRows>,
+    tags: Vec<(String, String, String)>,
+    series_id: Option<&str>,
+) -> Result<ConfirmTotals> {
+    confirm_totals_of_read(c, cache, candidates, doubtful, tags, series_id)
+}
+
+fn confirm_totals_of_read(
+    connection: &impl ReviewRead,
     cache: Option<&Connection>,
     candidates: Option<&ShadowRows>,
     doubtful: Option<&ShadowRows>,
@@ -807,7 +913,7 @@ fn confirm_totals_of(
     // whether the overview folds them.
     let pending =
         |rows: Option<&ShadowRows>, doubtful: bool| -> Result<Vec<(String, String, bool)>> {
-            let prepared = prepare(connection, cache, rows, doubtful, series_id)?;
+            let prepared = prepare_read(connection, cache, rows, doubtful, series_id)?;
             let folded = prepared
                 .pending
                 .iter()
@@ -818,7 +924,7 @@ fn confirm_totals_of(
                 .into_iter()
                 .map(|pending| pending.row)
                 .collect::<Vec<_>>();
-            let enabled = enabled_target_names(connection, &rows)?;
+            let enabled = connection.read(|c| enabled_target_names(c, &rows))?;
             Ok(rows
                 .into_iter()
                 .zip(folded)
@@ -830,7 +936,7 @@ fn confirm_totals_of(
     let recheck_by_recognition = pending(doubtful, true)?;
     // 0 tag, 1 recognition, 2 recheck: a pair takes the highest kind any list gives it.
     let mut kinds = BTreeMap::<(String, String), u8>::new();
-    let agreed = agreed_pairs_of(
+    let agreed = agreed_pairs_read(
         connection,
         cache,
         &tags
@@ -877,6 +983,16 @@ fn confirm_totals_of(
 }
 
 impl Library {
+    /// Opt-in diagnostics for summary query scopes: total and longest library borrow in ms.
+    /// Connection acquisition/opening and shadow work are excluded from this measurement.
+    #[doc(hidden)]
+    pub fn measure_character_summary_hold<T>(read: impl FnOnce() -> T) -> (T, f64, f64) {
+        let _scope = SummaryHoldScope(SUMMARY_HOLD.with(|hold| hold.replace(Some((0.0, 0.0)))));
+        let result = read();
+        let (total, longest) = SUMMARY_HOLD.with(|hold| hold.get().unwrap());
+        (result, total, longest)
+    }
+
     /// Pending counts for PC Home. Unlike the review page, this does not validate reference
     /// files or construct item fingerprints; all row-dependent database reads stay batched.
     pub fn character_shadow_review_summary(&self) -> Result<ShadowReviewPendingSummary> {
@@ -941,19 +1057,71 @@ impl Library {
 
     /// [`Self::character_confirm_counts`] with what the 확인 overview folds away.
     pub(crate) fn confirm_totals(&self, series_id: Option<&str>) -> Result<ConfirmTotals> {
-        let candidates = self.shadow_rows_cached(false)?.1;
-        let doubtful = self.shadow_rows_cached(true)?.1;
-        let cache = open_shadow_cache(&self.root)?;
-        let connection = self.connection()?;
-        let tags = pending_tag_rows(&connection, series_id)?;
-        confirm_totals_of(
-            &connection,
-            cache.as_ref(),
-            candidates.as_ref(),
-            doubtful.as_ref(),
-            tags,
-            series_id,
-        )
+        let slot = summary_slot(&self.character_changes.shadow_review.totals, series_id);
+        self.cached_summary(&slot, || {
+            let candidates = self.shadow_rows_cached(false)?.1;
+            let doubtful = self.shadow_rows_cached(true)?.1;
+            let cache = open_shadow_cache(&self.root)?;
+            let tags = self.read(|c| pending_tag_rows(c, series_id))?;
+            confirm_totals_of_read(
+                self,
+                cache.as_ref(),
+                candidates.as_ref(),
+                doubtful.as_ref(),
+                tags,
+                series_id,
+            )
+        })
+    }
+
+    fn summary_key(&self) -> Result<SummaryKey> {
+        // Never read the filesystem while holding the library connection.
+        let shadow = shadow_cache_stamp(&self.root);
+        self.read(|c| {
+            Ok(SummaryKey {
+                definitions: self.character_changes.definition_revision(),
+                // Candidate rows are WITHOUT ROWID: their existing publication triggers
+                // provide a committed revision even when SQLite's update hook skips them.
+                publication: c.query_row(
+                    "SELECT generation FROM mobile_publication_state WHERE kind='characters'",
+                    [],
+                    |r| r.get(0),
+                )?,
+                list: ListKey {
+                    inputs: self.character_changes.shadow_review_generation(),
+                    shadow,
+                    broad_folder_scope: super::character_scope::broad_folder_scope_enabled(c)?,
+                },
+            })
+        })
+    }
+
+    fn cached_summary<T: Clone>(
+        &self,
+        slot: &SummarySlot<T>,
+        compute: impl Fn() -> Result<T>,
+    ) -> Result<T> {
+        let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            let key = self.summary_key()?;
+            if let Some((seen, value)) = slot.as_ref() {
+                if *seen == key {
+                    return Ok(value.clone());
+                }
+            }
+            #[cfg(test)]
+            self.character_changes
+                .shadow_review
+                .summary_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let value = compute()?;
+            // Scoped queries can interleave with writes. Retry rather than publish a mixed
+            // result or label it with a newer revision than the inputs actually read.
+            if self.summary_key()? == key {
+                *slot = Some((key, value.clone()));
+                return Ok(value);
+            }
+        }
     }
 
     /// The pairs the taggers judged correct by agreement and nobody judged by hand: a pair among
@@ -1195,6 +1363,7 @@ impl LearningTargets {
 /// version of the latest score. The cache owner indexes `(scored_at, policy_version)`, so
 /// this is a lookup, not a scan; a copy without the index is only slower.
 fn newest_policy(cache: &Connection) -> Result<Option<String>> {
+    shadow_read_phase();
     Ok(cache
         .query_row(
             "SELECT policy_version FROM scores ORDER BY scored_at DESC, policy_version DESC LIMIT 1",
@@ -1245,10 +1414,13 @@ struct TaggerSignals {
     disagree: BTreeSet<String>,
 }
 
-fn tagger_signals(c: &Connection, targets: &[String]) -> Result<HashMap<String, TaggerSignals>> {
+fn tagger_signals(
+    reader: &impl ReviewRead,
+    targets: &[String],
+) -> Result<HashMap<String, TaggerSignals>> {
     let ids = serde_json::to_string(targets)?;
-    let known = c
-        .prepare(
+    let known = reader.read(|c| {
+        Ok(c.prepare(
             "SELECT t.id,t.series_classification_id FROM character_targets t
              WHERE t.id IN (SELECT value FROM json_each(?1))
                AND t.role='character' AND t.series_classification_id IS NOT NULL
@@ -1262,13 +1434,14 @@ fn tagger_signals(c: &Connection, targets: &[String]) -> Result<HashMap<String, 
         .query_map([&ids], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?
-        .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
+        .collect::<std::result::Result<BTreeMap<_, _>, _>>()?)
+    })?;
     if known.is_empty() {
         return Ok(HashMap::new());
     }
     let series = serde_json::to_string(&known.values().collect::<BTreeSet<_>>())?;
-    let peers = c
-        .prepare(
+    let peers = reader.read(|c| {
+        Ok(c.prepare(
             "SELECT id,series_classification_id FROM character_targets
              WHERE role='character'
                AND series_classification_id IN (SELECT value FROM json_each(?1))",
@@ -1276,12 +1449,13 @@ fn tagger_signals(c: &Connection, targets: &[String]) -> Result<HashMap<String, 
         .query_map([&series], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+    })?;
     let peer_ids = serde_json::to_string(&peers.iter().map(|(id, _)| id).collect::<Vec<_>>())?;
     // How many taggers read each (character, image): 2 is both.
     let mut reads = HashMap::<String, HashMap<String, u32>>::new();
-    for row in c
-        .prepare(
+    let readings = reader.read(|c| {
+        Ok(c.prepare(
             "SELECT m.target_id,s.asset_id,COUNT(DISTINCT s.source)
              FROM character_target_tagger_tags m
              JOIN asset_tagger_character_scores s ON s.tag=m.tag AND s.score>=?2
@@ -1296,8 +1470,9 @@ fn tagger_signals(c: &Connection, targets: &[String]) -> Result<HashMap<String, 
                 r.get::<_, u32>(2)?,
             ))
         })?
-    {
-        let (target, asset, sources) = row?;
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+    })?;
+    for (target, asset, sources) in readings {
         reads.entry(target).or_default().insert(asset, sources);
     }
     // Per series: the images some character is read on by both taggers, and which characters.
@@ -1357,6 +1532,7 @@ fn scored_at(
     target: &str,
     version: &str,
 ) -> Result<Option<String>> {
+    shadow_read_phase();
     Ok(score
         .query_row(params![asset, target, version], |r| r.get(0))
         .optional()?)
@@ -1402,6 +1578,15 @@ pub(super) fn judgments_of(
     targets: &[String],
     auto: Auto,
 ) -> Result<Judgments> {
+    judgments_of_read(c, cache, targets, auto)
+}
+
+fn judgments_of_read(
+    c: &impl ReviewRead,
+    cache: Option<&Connection>,
+    targets: &[String],
+    auto: Auto,
+) -> Result<Judgments> {
     let version = cache.map(newest_policy).transpose()?.flatten();
     let mut score = match (&version, cache) {
         (Some(_), Some(cache)) => Some(cache.prepare(
@@ -1409,20 +1594,18 @@ pub(super) fn judgments_of(
         )?),
         _ => None,
     };
-    let mut decisions = c.prepare(
-        "SELECT d.source_asset_id,d.decision,d.created_at FROM character_decisions d
-         WHERE d.target_id=?1 AND d.origin='manual' ORDER BY d.source_asset_id,d.sequence DESC",
-    )?;
-    let mut examples = c.prepare(
+    let example_counts = c.read(|c| {
+        let mut examples = c.prepare(
         "SELECT COUNT(*) FROM (SELECT d.source_asset_id,
            (SELECT x.decision FROM character_decisions x WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id ORDER BY x.sequence DESC LIMIT 1) AS latest
          FROM character_decisions d WHERE d.target_id=?1 AND d.origin='manual' GROUP BY d.source_asset_id)
          WHERE latest='accepted'",
     )?;
-    let example_counts = targets
+        targets
         .iter()
         .map(|target| Ok(examples.query_row([target], |r| r.get::<_, u32>(0))?))
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>>>()
+    })?;
     let signals = if version.is_none() {
         HashMap::new()
     } else {
@@ -1452,14 +1635,21 @@ pub(super) fn judgments_of(
             // one leaves the pair without any.
             let mut latest = HashMap::<String, (String, String)>::new();
             let mut seen = BTreeSet::new();
-            for row in decisions.query_map([target], |r| {
+            let manual_rows = c.read(|c| {
+                let mut decisions = c.prepare(
+                    "SELECT d.source_asset_id,d.decision,d.created_at FROM character_decisions d
+                     WHERE d.target_id=?1 AND d.origin='manual' ORDER BY d.source_asset_id,d.sequence DESC",
+                )?;
+                let rows = decisions.query_map([target], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                 ))
-            })? {
-                let (asset, decision, at) = row?;
+            })?.collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })?;
+            for (asset, decision, at) in manual_rows {
                 if seen.insert(asset.clone()) && decision != "cleared" {
                     latest.insert(asset, (decision, at));
                 }
@@ -1519,7 +1709,7 @@ struct ListPolicy {
 
 impl ListPolicy {
     fn build(
-        c: &Connection,
+        c: &impl ReviewRead,
         cache: Option<&Connection>,
         targets: BTreeSet<String>,
     ) -> Result<Self> {
@@ -1527,8 +1717,9 @@ impl ListPolicy {
             return Ok(Self::default());
         }
         let ids = targets.into_iter().collect::<Vec<_>>();
-        let judged = judgments_of(c, cache, &ids, Auto::Full)?;
-        let automatic = automatic_targets(c, &ids)?
+        let judged = judgments_of_read(c, cache, &ids, Auto::Full)?;
+        let automatic = c
+            .read(|c| automatic_targets(c, &ids))?
             .into_iter()
             .collect::<BTreeSet<_>>();
         let mut policy = Self {
@@ -1636,15 +1827,18 @@ impl Library {
 
     /// Read-only: the shadow cache and the library decisions of one series.
     pub fn character_s36_readiness(&self, series_id: &str) -> Result<Vec<S36Readiness>> {
-        let cache = open_shadow_cache(&self.root)?;
-        let c = self.connection()?;
-        let targets = c
-            .prepare(
-                "SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1 ORDER BY id",
-            )?
-            .query_map([series_id], |r| r.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        readiness_of(&c, cache.as_ref(), &targets)
+        let slot = summary_slot(
+            &self.character_changes.shadow_review.readiness,
+            Some(series_id),
+        );
+        self.cached_summary(&slot, || {
+            let cache = open_shadow_cache(&self.root)?;
+            let targets = self.read(|c| Ok(c
+                .prepare("SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1 ORDER BY id")?
+                .query_map([series_id], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?))?;
+            Ok(judgments_of_read(self, cache.as_ref(), &targets, Auto::Full)?.readiness)
+        })
     }
 
     /// Every character 학습 인식 places right now, and the series they belong to.
@@ -3825,6 +4019,198 @@ mod tests {
             .collect();
         insert(f.temp.path(), &rows);
         (f, target)
+    }
+
+    fn summary_fixture() -> (Fixture, Target) {
+        let (f, _) = cached_review_fixture();
+        let target = f.ready_in_series("Summary", &f.series);
+        Connection::open(f.temp.path().join(".cache/characters/s36_shadow.sqlite"))
+            .unwrap()
+            .execute("UPDATE scores SET target_id=?1", [&target.id])
+            .unwrap();
+        {
+            let c = f.library.connection().unwrap();
+            seed_readiness(
+                f.temp.path(),
+                &c,
+                &target.id,
+                "v1",
+                "summary",
+                (0, 0, READY_EXAMPLES),
+            );
+        }
+        (f, target)
+    }
+
+    #[test]
+    fn character_summary_shadow_reads_release_library_connection() {
+        let (f, target) = summary_fixture();
+        decide(&f, &target, "cached-0", DecisionKind::Accepted);
+        let library = f.library.clone();
+        let phases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = phases.clone();
+        struct ResetHook;
+        impl Drop for ResetHook {
+            fn drop(&mut self) {
+                SHADOW_READ_HOOK.with(|hook| *hook.borrow_mut() = None);
+            }
+        }
+        let _reset = ResetHook;
+        SHADOW_READ_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                // Block this shadow phase until another thread actually obtains the connection.
+                // A held connection causes a bounded failure instead of hanging the test.
+                let other = library.clone();
+                let (send, receive) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let connection = other.connection().unwrap();
+                    let _ = send.send(
+                        connection
+                            .query_row("SELECT 1", [], |r| r.get::<_, i64>(0))
+                            .unwrap(),
+                    );
+                });
+                assert_eq!(
+                    receive
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap(),
+                    1
+                );
+                seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }))
+        });
+        f.library.confirm_totals(Some(&f.series)).unwrap();
+        let after_totals = phases.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            after_totals >= 4,
+            "opens, policy and score lookups must be exercised"
+        );
+        f.library.character_s36_readiness(&f.series).unwrap();
+        assert!(phases.load(std::sync::atomic::Ordering::Relaxed) > after_totals);
+        SHADOW_READ_HOOK.with(|hook| *hook.borrow_mut() = None);
+    }
+
+    fn checked_summaries(f: &Fixture) -> (ConfirmTotals, Vec<S36Readiness>) {
+        let actual = (
+            f.library.confirm_totals(Some(&f.series)).unwrap(),
+            f.library.character_s36_readiness(&f.series).unwrap(),
+        );
+        let candidates = shadow_rows(f.temp.path(), false).unwrap().map(Arc::new);
+        let doubtful = shadow_rows(f.temp.path(), true).unwrap().map(Arc::new);
+        let cache = open_shadow_cache(f.temp.path()).unwrap();
+        let c = f.library.connection().unwrap();
+        let expected = confirm_totals_of(
+            &c,
+            cache.as_ref(),
+            candidates.as_ref(),
+            doubtful.as_ref(),
+            pending_tag_rows(&c, Some(&f.series)).unwrap(),
+            Some(&f.series),
+        )
+        .unwrap();
+        let targets = c.prepare("SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1 ORDER BY id").unwrap()
+            .query_map([&f.series], |r| r.get::<_, String>(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        assert_eq!(actual.0, expected);
+        assert_eq!(
+            actual.1,
+            readiness_of(&c, cache.as_ref(), &targets).unwrap()
+        );
+        actual
+    }
+
+    #[test]
+    fn character_summary_cache_golden_and_invalidation() {
+        let (f, target) = summary_fixture();
+        let computes = || {
+            f.library
+                .character_changes
+                .shadow_review
+                .summary_count
+                .load(std::sync::atomic::Ordering::Relaxed)
+        };
+        let initial = checked_summaries(&f);
+        assert_eq!(
+            initial.0.counts,
+            ConfirmCounts {
+                recognition: 5,
+                tag: 0,
+                recheck: 0
+            }
+        );
+        let readiness = initial
+            .1
+            .iter()
+            .find(|row| row.target_id == target.id)
+            .unwrap();
+        assert_eq!(readiness.reviewed, 0);
+        assert_eq!(readiness.examples, READY_EXAMPLES);
+        assert_eq!(computes(), 2);
+        assert_eq!(checked_summaries(&f), initial);
+        assert_eq!(
+            computes(),
+            2,
+            "unchanged inputs compute neither result again"
+        );
+        let mut expected = 2;
+        let mut step = |change: &dyn Fn()| {
+            change();
+            let result = checked_summaries(&f);
+            expected += 2;
+            assert_eq!(computes(), expected);
+            assert_eq!(checked_summaries(&f), result);
+            assert_eq!(computes(), expected);
+            result
+        };
+        let accepted = step(&|| decide(&f, &target, "cached-0", DecisionKind::Accepted));
+        assert_eq!(accepted.0.counts.recognition, 4);
+        assert_eq!(
+            accepted
+                .1
+                .iter()
+                .find(|row| row.target_id == target.id)
+                .unwrap()
+                .reviewed,
+            1
+        );
+        step(&|| decide(&f, &target, "cached-1", DecisionKind::Rejected));
+        step(&|| {
+            f.library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE character_targets SET manual_only=1 WHERE id=?1",
+                    [&target.id],
+                )
+                .unwrap();
+        });
+        step(&|| f.library.set_character_broad_folder_scope(true).unwrap());
+        // WITHOUT ROWID candidates change only the existing publication revision.
+        step(&|| {
+            f.library.connection().unwrap().execute("INSERT INTO character_tagger_candidates VALUES(?1,'cached-2',?2,'veto',0.9,0.9,'now')", params![target.id, content_hash("cached-2")]).unwrap();
+        });
+        step(&|| {
+            f.library
+                .connection()
+                .unwrap()
+                .execute(
+                    "DELETE FROM character_tagger_candidates WHERE target_id=?1",
+                    [&target.id],
+                )
+                .unwrap();
+        });
+        step(&|| link_tag(&f, &target, "summary_tag"));
+        step(&|| tagger_reads(&f, "cached-2", "summary_tag", Some(0.9), Some(0.9)));
+        // Same-sized score rewrite must move the file stamp even without a library write.
+        step(&|| {
+            Connection::open(f.temp.path().join(".cache/characters/s36_shadow.sqlite"))
+                .unwrap()
+                .execute(
+                    "UPDATE scores SET scored_at='2026-10-01T01:00:00Z' WHERE asset_id='cached-2'",
+                    [],
+                )
+                .unwrap();
+        });
+        step(&|| f.library.character_changes.database_replaced());
     }
 
     #[test]

@@ -1,3 +1,5 @@
+import { useOptionalLibrary } from "../library/LibraryContext";
+import { publishCharacterDefinitionRevision, seriesDataScope } from "./seriesMountCache";
 import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
 import { isWindowFocused, subscribeWindowFocus, windowPollDelay } from "../app/windowFocus";
 import { useEffect, useRef, useState } from "react";
@@ -91,6 +93,9 @@ export function useCharacterAutomation(
   onChanged: (change: AutomaticCharacterChange) => void,
   api = defaultApi,
 ): QuietCharacterAutomationState {
+  const library = useOptionalLibrary();
+  const gateway = library?.gateway;
+  const dataScope = seriesDataScope(gateway, library?.library?.root);
   const [revision, setRevision] = useState(0);
   const [persistentError, setPersistentError] = useState<string | null>(null);
   const [historyRefreshActive, setHistoryRefreshActive] = useState(false);
@@ -132,6 +137,7 @@ export function useCharacterAutomation(
       try {
         const status = await api.status();
         if (!active) return;
+        if (gateway && status.definitionRevision !== undefined) publishCharacterDefinitionRevision(gateway, dataScope, status.definitionRevision);
         setPaused(status.paused);
         setHistoryRefreshActive(status.historyRefreshActive);
         // Each status read is a fresh IPC object: keep the current value when nothing changed,
@@ -192,7 +198,7 @@ export function useCharacterAutomation(
       unsubscribeFocus();
       document.removeEventListener("visibilitychange", onVisible);
     }; // Navigation never cancels native work.
-  }, [api]);
+  }, [api, gateway, dataScope]);
 
   const control = (value: boolean) => {
     void api.pause(value)

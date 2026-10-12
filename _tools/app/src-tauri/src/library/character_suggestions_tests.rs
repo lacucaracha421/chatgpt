@@ -720,3 +720,128 @@ fn suggestions_skip_images_in_character_excluded_folders() {
         .iter()
         .all(|image| image.asset_id != "asset-6"));
 }
+
+#[test]
+fn char_folder_perf_suggestions_golden_and_index_plan() {
+    let f = fixture();
+    let target = f.ready("Registered");
+    let c = f.library.connection().unwrap();
+    c.execute_batch("INSERT INTO tagger_character_vocabulary VALUES('pixai','low_only');
+      INSERT INTO asset_tagger_character_scores SELECT asset_id,source,'low_only',0.849
+        FROM asset_tagger_coverage WHERE source='pixai';
+      UPDATE asset_tagger_character_scores SET score=0.85 WHERE asset_id='asset-1' AND source='pixai' AND tag='new_character';
+      UPDATE asset_tagger_character_scores SET score=0.1 WHERE asset_id='asset-2' AND source='canary';").unwrap();
+    let rows = |sql: &str, minimum: i64| {
+        let mut statement = c.prepare(sql).unwrap();
+        let columns = statement.column_count();
+        statement
+            .query_map([minimum], |r| {
+                (0..columns)
+                    .map(|i| r.get::<_, rusqlite::types::Value>(i))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    for phase in 0..5 {
+        for minimum in [1, 4, 5, 7, 50] {
+            assert_eq!(
+                rows(LIST_SQL, minimum),
+                rows(include_str!("character_suggestions_list.sql"), minimum),
+                "phase {phase}, minimum {minimum}"
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(list_in(&c, 5).unwrap()).unwrap(),
+            serde_json::to_value(
+                list_in_sql(&c, 5, include_str!("character_suggestions_list.sql")).unwrap()
+            )
+            .unwrap()
+        );
+        match phase {
+            0 => {
+                c.execute("UPDATE assets SET status='trash' WHERE id='asset-0'", [])
+                    .unwrap();
+            }
+            1 => {
+                c.execute(
+                    "INSERT INTO character_folder_exclusions(classification_id) VALUES(?1)",
+                    [&f.child],
+                )
+                .unwrap();
+            }
+            2 => {
+                c.execute(
+                    "INSERT INTO character_suggestion_ignored_tags VALUES('new_character','now')",
+                    [],
+                )
+                .unwrap();
+            }
+            3 => {
+                c.execute("DELETE FROM character_suggestion_ignored_tags", [])
+                    .unwrap();
+                c.execute("DELETE FROM character_folder_exclusions", [])
+                    .unwrap();
+                c.execute(
+                    "INSERT INTO character_target_tagger_tags VALUES(?1,'new_character')",
+                    [&target.id],
+                )
+                .unwrap();
+            }
+            _ => {}
+        }
+    }
+    let plan = c
+        .prepare(&format!("EXPLAIN QUERY PLAN {LIST_SQL}"))
+        .unwrap()
+        .query_map([5], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    eprintln!("suggestion plan: {}", plan.join("\n"));
+    assert!(plan.iter().any(|line| line.contains(
+        "SEARCH evidence USING COVERING INDEX tagger_scores_suggestion_threshold (score>?)"
+    )));
+    assert!(
+        !plan.iter().any(|line| line.starts_with("SCAN evidence ")
+            || line == "SCAN evidence"
+            || line.starts_with("SCAN a ")
+            || line == "SCAN a"
+            || line == "SCAN t"),
+        "{plan:?}"
+    );
+    // CTE/window scans are bounded by the qualifying score rows; base scores/assets must use lookups.
+    c.execute("DELETE FROM character_folder_exclusions", [])
+        .unwrap();
+    c.execute("DELETE FROM character_suggestion_ignored_tags", [])
+        .unwrap();
+    c.execute("DELETE FROM character_target_tagger_tags", [])
+        .unwrap();
+    let baseline = rows(LIST_SQL, 5);
+    c.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
+      INSERT INTO tagger_character_vocabulary SELECT 'pixai','filler-'||x FROM n;
+      INSERT INTO asset_tagger_character_scores SELECT 'asset-1','pixai',tag,0.1 FROM tagger_character_vocabulary WHERE tag LIKE 'filler-%';").unwrap();
+    c.execute("INSERT INTO character_target_tagger_tags SELECT ?1,tag FROM tagger_character_vocabulary WHERE tag LIKE 'filler-%'", [&target.id]).unwrap();
+    assert_eq!(rows(LIST_SQL, 5), baseline);
+    let mut query = c.prepare(LIST_SQL).unwrap();
+    let mut result = query.query([5]).unwrap();
+    while result.next().unwrap().is_some() {}
+    drop(result);
+    let fullscan = query.get_status(rusqlite::StatementStatus::FullscanStep);
+    eprintln!("suggestion fullscan steps with 2000 low scores: {fullscan}");
+    assert!(
+        fullscan < 200,
+        "fullscan grew with irrelevant scores: {fullscan}"
+    );
+    drop(query);
+    // Measure the old statement without the new indexes on the very same disposable fixture.
+    c.execute_batch("DROP INDEX tagger_scores_suggestion_threshold; DROP INDEX character_target_tagger_tags_by_tag;").unwrap();
+    let mut old_query = c.prepare(include_str!("character_suggestions_list.sql")).unwrap();
+    let mut old_result = old_query.query([5]).unwrap();
+    while old_result.next().unwrap().is_some() {}
+    drop(old_result);
+    let old_fullscan = old_query.get_status(rusqlite::StatementStatus::FullscanStep);
+    eprintln!("suggestion fixture fullscan: before {old_fullscan}, after {fullscan}");
+    assert!(old_fullscan >= 2000, "the fixture must expose the old full scan: {old_fullscan}");
+}

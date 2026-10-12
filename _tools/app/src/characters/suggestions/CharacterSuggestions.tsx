@@ -2,7 +2,7 @@ import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { AssetImage } from "../../privacy/AssetImage";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useOptionalLibrary } from "../../library/LibraryContext";
-import { RevisionReadCache, seriesDataScope } from "../seriesMountCache";
+import { characterDefinitionRevision, subscribeCharacterDefinitionRevision, RevisionReadCache, seriesDataScope, type SeriesRevisions } from "../seriesMountCache";
 import { onFolderPrefetchInvalidated } from "../../assets/folderPrefetch";
 import { thumbnailUrl } from "../../assets/mediaUrl";
 import { commandErrorMessage } from "../../library/errorMessage";
@@ -29,41 +29,52 @@ const snapshot = () => filters;
 const setFilters = (next: typeof filters) => { filters = next; writeSuggestionFilters(next); listeners.forEach(listener => listener()); };
 
 const suggestionCache = new RevisionReadCache<{ rows: Suggestion[]; ignored: IgnoredTag[] }>();
+const suggestionSeriesRevisions = new WeakMap<object, Map<string, string>>();
 onFolderPrefetchInvalidated(() => suggestionCache.clear());
-export function prefetchCharacterSuggestions(version: number, scope: string, api: SuggestionApi = suggestionApi) {
-  return suggestionCache.read(api, scope, version, String(filters.minimum), async () => {
+export function prefetchCharacterSuggestions(version: number, scope: string, api: SuggestionApi = suggestionApi, seriesRevisions?: SeriesRevisions) {
+  let seen = suggestionSeriesRevisions.get(api);
+  if (!seen) suggestionSeriesRevisions.set(api, seen = new Map());
+  const key = JSON.stringify([scope, filters.minimum]);
+  const analysis = seriesRevisions && JSON.stringify(Object.entries(seriesRevisions).sort(([a], [b]) => a.localeCompare(b)));
+  const stale = analysis !== undefined && seen.has(key) && seen.get(key) !== analysis;
+  if (analysis !== undefined) seen.set(key, analysis);
+  const read = stale ? suggestionCache.refresh.bind(suggestionCache) : suggestionCache.read.bind(suggestionCache);
+  return read(api, scope, version, String(filters.minimum), async () => {
     const [rows, ignored] = await Promise.all([api.list(filters.minimum), api.ignored()]);
     return { rows, ignored };
   });
 }
 
-export function useCharacterSuggestions(version: number, api: SuggestionApi = suggestionApi) {
+export function useCharacterSuggestions(version: number, api: SuggestionApi = suggestionApi, seriesRevisions?: SeriesRevisions) {
   const currentFilters = useSyncExternalStore(subscribe, snapshot);
   const library = useOptionalLibrary();
   const dataScope = seriesDataScope(library?.gateway, library?.library?.root);
+  const definitionVersion = useSyncExternalStore(subscribeCharacterDefinitionRevision, () => characterDefinitionRevision(library?.gateway, dataScope, version));
   const revision = useSyncExternalStore(suggestionCache.subscribe, () => suggestionCache.generation(api, dataScope));
-  const cached = suggestionCache.peek(api, dataScope, version, String(currentFilters.minimum));
+  const analysisRevision = seriesRevisions && JSON.stringify(seriesRevisions);
+  const currentCached = suggestionCache.peek(api, dataScope, definitionVersion, String(currentFilters.minimum));
+  const cached = currentCached ?? suggestionCache.peekKnown(api, dataScope, String(currentFilters.minimum));
   const [rows, setRows] = useState<Suggestion[]>([]);
   const [ignored, setIgnored] = useState<IgnoredTag[]>([]);
   const [settledRequest, setSettledRequest] = useState<{ api: SuggestionApi; scope: string; minimum: number; version: number; revision: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const loading = !cached && (!settledRequest || settledRequest.api !== api || settledRequest.scope !== dataScope || settledRequest.minimum !== currentFilters.minimum || settledRequest.version !== version || settledRequest.revision !== revision);
+  const loading = !currentCached && (!settledRequest || settledRequest.api !== api || settledRequest.scope !== dataScope || settledRequest.minimum !== currentFilters.minimum || settledRequest.version !== definitionVersion || settledRequest.revision !== revision);
   // Only the first read for this scope locks the rows; a later refresh (analysis keeps changing the
   // library) keeps the shown rows and their actions usable instead of flickering.
-  const firstLoad = loading && !(settledRequest && settledRequest.api === api && settledRequest.scope === dataScope && settledRequest.minimum === currentFilters.minimum);
+  const firstLoad = loading && !cached && !(settledRequest && settledRequest.api === api && settledRequest.scope === dataScope && settledRequest.minimum === currentFilters.minimum);
   const [message, setMessage] = useState<string | null>(null);
   const [postponed, setPostponed] = useState<string[]>([]);
   const refresh = useCallback(() => suggestionCache.invalidate(api, dataScope), [api, dataScope]);
   useEffect(() => {
     let live = true;
     setError(null);
-    const request = { api, scope: dataScope, minimum: currentFilters.minimum, version, revision };
-    void prefetchCharacterSuggestions(version, dataScope, api).then(({ rows: next, ignored: hidden }) => {
+    const request = { api, scope: dataScope, minimum: currentFilters.minimum, version: definitionVersion, revision };
+    void prefetchCharacterSuggestions(definitionVersion, dataScope, api, seriesRevisions).then(({ rows: next, ignored: hidden }) => {
       if (live) { setRows(next); setIgnored(hidden); setSettledRequest(request); }
     }, reason => { if (live) { setSettledRequest(request); setError(commandErrorMessage(reason, "새 캐릭터 제안을 불러오지 못했습니다.")); } });
     return () => { live = false; };
-  }, [api, dataScope, currentFilters.minimum, version, revision]);
+  }, [api, dataScope, currentFilters.minimum, definitionVersion, revision, analysisRevision]);
   const ignore = async (tag: string, value: boolean) => {
     if (busy) return;
     setBusy(true); setError(null);
