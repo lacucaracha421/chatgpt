@@ -1,5 +1,6 @@
 import {api} from './transport';
 import type {AlbumTree,NativeAlbum} from './albumModel';
+import {batches} from './batchCommands';
 
 export const ALBUM_TREE_CHANGED = 'lakomics-album-tree-changed';
 export type AuthorityAlbum = NativeAlbum & {entityRevision:number;deleted:boolean};
@@ -29,6 +30,40 @@ export async function readAlbumSnapshot(tree:AlbumTree,signal?:AbortSignal):Prom
 export function albumCommand<T>(tree:AlbumTree,commandType:string,fields:Record<string,unknown>):Promise<T> {
   if(!tree.adopted||!tree.libraryId||tree.epoch===null)throw new Error('앨범 동기화가 준비된 뒤 편집할 수 있습니다.');
   return api<T>('/v1/albums/commands',undefined,{libraryId:tree.libraryId,epoch:tree.epoch,contractVersion:1,operationId:crypto.randomUUID(),commandType,...fields},'PUT');
+}
+
+export type AlbumBatchError = {code?:string;status?:number;message?:string;current?:unknown};
+/** One command's outcome from `PUT /v1/albums/commands/batch`; `failed` means the request itself did not complete. */
+export type AlbumBatchOutcome = {
+  operationId:string;
+  status:'applied'|'noop'|'conflict'|'rejected'|'failed';
+  changed:boolean;
+  changeSequence:number|null;
+  membership?:unknown;
+  album?:{id:string}|null;
+  error?:AlbumBatchError;
+};
+type AlbumBatchReply = {results:AlbumBatchOutcome[]};
+
+/**
+ * Send commands in requests of at most 100 and return one outcome per command, in order.
+ * A command refused by the server comes back as `conflict`/`rejected` on its own entry; a request that never
+ * completed marks only its own commands `failed`, so earlier chunks keep their results.
+ */
+export async function albumBatchCommand(tree:AlbumTree,commands:Record<string,unknown>[]):Promise<AlbumBatchOutcome[]> {
+  if(!tree.adopted||!tree.libraryId||tree.epoch===null)throw new Error('앨범 동기화가 준비된 뒤 편집할 수 있습니다.');
+  const outcomes:AlbumBatchOutcome[]=[];
+  for(const chunk of batches(commands.map(command=>({...command,operationId:crypto.randomUUID()})))) {
+    try {
+      const reply=await api<AlbumBatchReply>('/v1/albums/commands/batch',undefined,{libraryId:tree.libraryId,epoch:tree.epoch,contractVersion:1,batchId:crypto.randomUUID(),commands:chunk},'PUT');
+      if(!Array.isArray(reply?.results)||reply.results.length!==chunk.length||reply.results.some((item,index)=>item.operationId!==chunk[index].operationId))throw new Error('앨범 일괄 응답이 올바르지 않습니다. 다시 시도해 주세요.');
+      outcomes.push(...reply.results);
+    } catch(reason) {
+      const message=reason instanceof Error?reason.message:String(reason);
+      outcomes.push(...chunk.map(command=>({operationId:command.operationId,status:'failed' as const,changed:false,changeSequence:null,error:{message}})));
+    }
+  }
+  return outcomes;
 }
 
 export function publishAlbumTree(tree:AlbumTree,albums:NativeAlbum[]) {

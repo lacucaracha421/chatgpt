@@ -1051,6 +1051,15 @@ public final class AlbumReplicaTest {
             confirmationPreservesLaterOptimisticStateAndBlocksConflict(directory);
             membershipOutboxSurvivesProcessRestart(directory);
             membershipOutboxFlushesFifoAndConfirms(directory);
+            jsonWriterRoundTripsTheNativeProtocolValues();
+            consecutiveDifferentRelationsShareOneBatchRequest(directory);
+            batchOutcomesFollowTheSingleRouteRulesPerRow(directory);
+            oneRelationNeverTravelsTwiceInOneBatch(directory);
+            aServerWithoutTheBatchRouteGetsTheSingleRoute(directory);
+            aLongQueueIsChunkedAtTheServerLimit(directory);
+            aBatchEchoThatDoesNotMatchLeavesTheQueueIntact(directory);
+            aWholeRequestRefusalIsReportedLikeTheSingleRoute(directory);
+            queueingManyMembershipsIsOneTransactionWithPerAssetResults(directory);
             lostCommandResponseRetriesIdenticalPayload(directory);
             membershipConflictBlocksDurablyAndStopsFifo(directory);
             useServerResolutionRestoresAuthorityThenReplaysLaterFifo(directory);
@@ -1166,6 +1175,323 @@ public final class AlbumReplicaTest {
         }
     }
 
+    // ---------------------------------------------------------------------------------
+    // Batch delivery: consecutive intents of different relations share one request
+    // ---------------------------------------------------------------------------------
+
+    private interface BatchItem {
+        String item(int index, Map<String, Object> command);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String batchResponse(String payload, long cursor, BatchItem factory) {
+        Map<String, Object> request = (Map<String, Object>) Json.parse(payload);
+        List<Object> commands = (List<Object>) request.get("commands");
+        StringBuilder items = new StringBuilder();
+        for (int i = 0; i < commands.size(); i++) {
+            if (i > 0) items.append(',');
+            items.append(factory.item(i, (Map<String, Object>) commands.get(i)));
+        }
+        return "{\"libraryId\":\"" + LIBRARY + "\",\"epoch\":1,\"contractVersion\":1,\"batchId\":\""
+                + request.get("batchId") + "\",\"authorityCursor\":" + cursor + ",\"results\":["
+                + items + "]}";
+    }
+
+    private static String appliedItem(Map<String, Object> command, boolean changed, long cursor) {
+        long revision = (Long) command.get("expectedRevision") + (changed ? 1 : 0);
+        return "{\"operationId\":\"" + command.get("operationId") + "\",\"status\":\""
+                + (changed ? "applied" : "noop") + "\",\"changed\":" + changed
+                + ",\"changeSequence\":" + (changed ? Long.toString(cursor) : "null")
+                + ",\"authorityCursor\":" + cursor + ",\"album\":null,\"membership\":"
+                + member((String) command.get("albumId"), (String) command.get("assetId"),
+                        (Boolean) command.get("desiredState"), revision) + "}";
+    }
+
+    private static String refusedItem(Map<String, Object> command, String status, int http,
+                                      String code, String extra) {
+        return "{\"operationId\":\"" + command.get("operationId") + "\",\"status\":\"" + status
+                + "\",\"changed\":false,\"changeSequence\":null,\"error\":{\"code\":\"" + code
+                + "\",\"status\":" + http + (extra.isEmpty() ? "" : "," + extra) + "}}";
+    }
+
+    private static void queueRoot(LibraryReplicaStore store, String assetId, boolean desired,
+                                  String operationId) {
+        store.queueMembership("scope-a", "root", assetId, desired, operationId, CLOCK.now());
+    }
+
+    private static void jsonWriterRoundTripsTheNativeProtocolValues() {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("text", "line\n\"quoted\" \\ \t \u0001 한글");
+        value.put("number", 7L);
+        value.put("flag", true);
+        value.put("none", null);
+        value.put("list", Arrays.asList("a", 2L, false, null));
+        value.put("nested", new LinkedHashMap<String, Object>());
+        equal(value, Json.parse(Json.write(value)), "The writer is the inverse of the strict reader");
+        try {
+            Json.write(Double.NaN);
+            throw new AssertionError("A non-finite number is not JSON");
+        } catch (IllegalArgumentException expected) {
+            checks++;
+        }
+    }
+
+    private static void consecutiveDifferentRelationsShareOneBatchRequest(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        queueRoot(store, "asset_3", true, "a1000000-0000-0000-0000-000000000001");
+        queueRoot(store, "asset_1", false, "a1000000-0000-0000-0000-000000000002");
+        store.queueMembership("scope-a", "child", "asset_4", true,
+                "a1000000-0000-0000-0000-000000000003", CLOCK.now());
+        List<String> paths = new ArrayList<>();
+        List<String> payloads = new ArrayList<>();
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            paths.add(path);
+            payloads.add(payload);
+            return batchResponse(payload, 20, (index, command) ->
+                    appliedItem(command, true, 20 + index));
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush result = engine.flush("scope-a");
+        equal(Arrays.asList(AlbumMembershipOutbox.BATCH_PATH), paths,
+                "Three different relations travel in exactly one batch request");
+        equal(3, result.sent, "Every accepted command is counted");
+        equal(0, result.pending, "Nothing stays pending");
+        equal(0, store.outbox("scope-a").size(), "Accepted intents leave the queue");
+        check(!payloads.get(0).contains("\"libraryId\":\"" + LIBRARY + "\",\"epoch\":1,\"contractVersion\":1,\"operationId\""),
+                "A command inside the batch does not repeat the shared identity");
+        Map<String, Object> request = (Map<String, Object>) Json.parse(payloads.get(0));
+        equal(LIBRARY, request.get("libraryId"), "The envelope carries the library");
+        equal(3, ((List<?>) request.get("commands")).size(), "Three commands in one envelope");
+        equal(true, store.memberships("scope-a", false).get("root:asset_3").desiredState,
+                "Confirmed state follows the batch result");
+        equal(1L, store.memberships("scope-a", false).get("root:asset_3").entityRevision,
+                "Confirmed revision comes from the item");
+        equal(false, store.memberships("scope-a", false).get("root:asset_1").desiredState,
+                "A removal in the batch is confirmed too");
+        store.close();
+    }
+
+    private static void batchOutcomesFollowTheSingleRouteRulesPerRow(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        queueRoot(store, "asset_3", true, "a2000000-0000-0000-0000-000000000001");
+        queueRoot(store, "asset_4", true, "a2000000-0000-0000-0000-000000000002");
+        queueRoot(store, "asset_1", false, "a2000000-0000-0000-0000-000000000003");
+        queueRoot(store, "asset_5", true, "a2000000-0000-0000-0000-000000000004");
+        List<String> paths = new ArrayList<>();
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            paths.add(path);
+            return batchResponse(payload, 30, (index, command) -> {
+                if (index == 0) return appliedItem(command, true, 30);
+                if (index == 1) return refusedItem(command, "rejected", 409, "assetTombstoned",
+                        "\"assetId\":\"asset_4\"");
+                if (index == 2) return refusedItem(command, "conflict", 409, "revisionConflict",
+                        "\"authorityCursor\":30,\"current\":" + member("root", "asset_1", true, 6));
+                return appliedItem(command, true, 31);
+            });
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush result = engine.flush("scope-a");
+        equal(1, paths.size(), "One request carried all four");
+        equal(1, result.sent, "The first row was confirmed");
+        equal(1, result.dropped, "A tombstoned Asset is dropped, not blocked");
+        equal(1, result.blocked, "A revision conflict blocks its row");
+        check(result.stopped, "A blocked row stops the flush");
+        List<ReplicaDb.OutboxRow> rows = store.outbox("scope-a");
+        equal(2, rows.size(), "Confirmed and dropped rows left; the blocked and the later row remain");
+        equal("blocked", rows.get(0).state, "The conflicting row is durably blocked");
+        equal("revisionConflict", rows.get(0).conflictCode, "with the server's code");
+        equal("pending", rows.get(1).state, "A row after the blocked one is not confirmed around it");
+        equal(false, store.memberships("scope-a", false).get("root:asset_4").desiredState,
+                "The dropped intent returns to its last confirmed state");
+        // The blocked row keeps exactly the detail the explicit resolution flow reads.
+        store.useServerMembership("scope-a", "root", "asset_1", CLOCK.now());
+        equal(6L, store.memberships("scope-a", false).get("root:asset_1").entityRevision,
+                "Using server state reads the revision out of the batch item's error");
+        store.close();
+    }
+
+    private static void oneRelationNeverTravelsTwiceInOneBatch(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        queueRoot(store, "asset_3", true, "a3000000-0000-0000-0000-000000000001");
+        queueRoot(store, "asset_3", false, "a3000000-0000-0000-0000-000000000002");
+        queueRoot(store, "asset_4", true, "a3000000-0000-0000-0000-000000000003");
+        List<String> paths = new ArrayList<>();
+        List<Integer> sizes = new ArrayList<>();
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            paths.add(path);
+            if (AlbumMembershipOutbox.BATCH_PATH.equals(path)) {
+                return batchResponse(payload, 40, (index, command) -> {
+                    sizes.add(index);
+                    return appliedItem(command, true, 40 + index);
+                });
+            }
+            ReplicaDb.OutboxRow row = store.outbox("scope-a").get(0);
+            return acceptedMembership(row, true, row.expectedRevision + 1, 40, row.desiredState);
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush result = engine.flush("scope-a");
+        equal(Arrays.asList(AlbumMembershipOutbox.COMMAND_PATH, AlbumMembershipOutbox.BATCH_PATH), paths,
+                "The first intent of a relation goes alone; its successor starts the next batch");
+        equal(2, sizes.size(), "The second request carried the successor and the other relation");
+        equal(3, result.sent, "All three are delivered");
+        store.close();
+    }
+
+    private static void aServerWithoutTheBatchRouteGetsTheSingleRoute(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        queueRoot(store, "asset_3", true, "a4000000-0000-0000-0000-000000000001");
+        queueRoot(store, "asset_4", true, "a4000000-0000-0000-0000-000000000002");
+        List<String> paths = new ArrayList<>();
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            paths.add(path);
+            refuseBatchRoute(path);
+            ReplicaDb.OutboxRow row = store.outbox("scope-a").get(0);
+            return acceptedMembership(row, true, row.expectedRevision + 1, 50 + paths.size(), row.desiredState);
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush first = engine.flush("scope-a");
+        equal(Arrays.asList(AlbumMembershipOutbox.BATCH_PATH, AlbumMembershipOutbox.COMMAND_PATH,
+                AlbumMembershipOutbox.COMMAND_PATH), paths,
+                "A 404 without a coded body falls back to one command per request");
+        equal(2, first.sent, "Both intents are still delivered");
+        queueRoot(store, "asset_5", true, "a4000000-0000-0000-0000-000000000003");
+        queueRoot(store, "asset_6", true, "a4000000-0000-0000-0000-000000000004");
+        paths.clear();
+        engine.flush("scope-a");
+        equal(Arrays.asList(AlbumMembershipOutbox.COMMAND_PATH, AlbumMembershipOutbox.COMMAND_PATH), paths,
+                "The missing route is remembered; later flushes do not retry it");
+        store.close();
+    }
+
+    private static void aLongQueueIsChunkedAtTheServerLimit(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        for (int i = 0; i < AlbumMembershipOutbox.BATCH_LIMIT + 1; i++) {
+            queueRoot(store, "bulk_" + i, true,
+                    String.format("a5000000-0000-0000-0000-%012d", i));
+        }
+        List<String> paths = new ArrayList<>();
+        List<Integer> sizes = new ArrayList<>();
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            paths.add(path);
+            if (AlbumMembershipOutbox.BATCH_PATH.equals(path)) {
+                return batchResponse(payload, 60, (index, command) -> {
+                    if (index == 0) sizes.add(0);
+                    sizes.set(sizes.size() - 1, index + 1);
+                    return appliedItem(command, true, 60 + index);
+                });
+            }
+            ReplicaDb.OutboxRow row = store.outbox("scope-a").get(0);
+            return acceptedMembership(row, true, row.expectedRevision + 1, 61, row.desiredState);
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush result = engine.flush("scope-a");
+        equal(Arrays.asList(AlbumMembershipOutbox.BATCH_PATH, AlbumMembershipOutbox.COMMAND_PATH), paths,
+                "One full batch of 100, then the last intent on its own");
+        equal(Arrays.asList(100), sizes, "The batch carried exactly the server's limit");
+        equal(101, result.sent, "Every intent is delivered");
+        equal(0, store.outbox("scope-a").size(), "The queue drains");
+        store.close();
+    }
+
+    private static void aBatchEchoThatDoesNotMatchLeavesTheQueueIntact(Path directory) throws Exception {
+        String[] mutations = {"operation", "count", "batch"};
+        for (String mutation : mutations) {
+            MemoryDb db = new MemoryDb();
+            LibraryReplicaStore store = new LibraryReplicaStore(db);
+            installReferenceBaseline(store, "scope-a");
+            queueRoot(store, "asset_3", true, "a6000000-0000-0000-0000-000000000001");
+            queueRoot(store, "asset_4", true, "a6000000-0000-0000-0000-000000000002");
+            AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+                String response = batchResponse(payload, 70, (index, command) ->
+                        appliedItem(command, true, 70 + index));
+                if ("operation".equals(mutation)) {
+                    return response.replace("a6000000-0000-0000-0000-000000000001",
+                            "a6000000-0000-0000-0000-0000000000ff");
+                }
+                if ("count".equals(mutation)) {
+                    return response.substring(0, response.indexOf("},{\"operationId\"")) + "}]}";
+                }
+                return response.replaceFirst("\"batchId\":\"[^\"]*\"", "\"batchId\":\"other\"");
+            }, store, CLOCK);
+            try {
+                engine.flush("scope-a");
+                throw new AssertionError("A mismatched batch echo must not retire intents: " + mutation);
+            } catch (AlbumMembershipOutbox.Failure failure) {
+                equal(AlbumMembershipOutbox.CODE_PROTOCOL_INTEGRITY, failure.code,
+                        "A mismatched batch echo is a protocol-integrity failure: " + mutation);
+            }
+            equal(2, store.outbox("scope-a").size(), "Nothing is retired on a bad echo: " + mutation);
+            store.close();
+        }
+    }
+
+    private static void aWholeRequestRefusalIsReportedLikeTheSingleRoute(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        queueRoot(store, "asset_3", true, "a7000000-0000-0000-0000-000000000001");
+        queueRoot(store, "asset_4", true, "a7000000-0000-0000-0000-000000000002");
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            throw new AlbumMembershipOutbox.HttpFailure(409,
+                    "{\"detail\":{\"code\":\"authorityLibraryMismatch\"}}");
+        }, store, CLOCK);
+        try {
+            engine.flush("scope-a");
+            throw new AssertionError("An identity refusal must surface");
+        } catch (AlbumMembershipOutbox.Failure failure) {
+            equal("authorityLibraryMismatch", failure.code, "The coded refusal is reported");
+        }
+        equal(2, store.outbox("scope-a").size(), "Both intents stay pending");
+        try {
+            new AlbumMembershipOutbox((path, payload) -> {
+                throw new AlbumMembershipOutbox.HttpFailure(401, "{\"detail\":\"Unauthorized\"}");
+            }, store, CLOCK).flush("scope-a");
+            throw new AssertionError("An unauthorized batch must surface");
+        } catch (AlbumMembershipOutbox.Failure failure) {
+            equal(AlbumReplica.CODE_UNAUTHORIZED, failure.code, "Unauthorized is not retried as a fallback");
+            check(!failure.retryable, "and is not retryable");
+        }
+        store.close();
+    }
+
+    private static void queueingManyMembershipsIsOneTransactionWithPerAssetResults(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        queueRoot(store, "asset_5", true, "a8000000-0000-0000-0000-0000000000a0");
+        store.blockMembership("scope-a", store.outbox("scope-a").get(0).seq, "revisionConflict", "{}");
+        List<String> ids = Arrays.asList("asset_3", "asset_5", "bad id!", "asset_1", "asset_2");
+        List<String> ops = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) ops.add("a8000000-0000-0000-0000-00000000000" + i);
+        List<LibraryReplicaStore.ManyEdit> edits = store.queueMembershipMany("scope-a", "root", ids,
+                true, ops, CLOCK.now());
+        equal(5, edits.size(), "One entry per requested Asset, in order");
+        check(edits.get(0).ok && edits.get(0).changed, "A new add is queued");
+        check(!edits.get(1).ok && "blocked".equals(edits.get(1).code), "A relation blocked by a conflict is refused alone");
+        check(!edits.get(2).ok && "invalidAsset".equals(edits.get(2).code), "An invalid id is refused alone");
+        check(edits.get(3).ok && !edits.get(3).changed, "An Asset already in the Album is a satisfied no-op");
+        check(edits.get(4).ok && edits.get(4).changed, "A removed Asset is added back");
+        equal(3, store.outbox("scope-a").size(), "The blocked row plus the two queued commands");
+        equal(0L, store.outbox("scope-a").get(1).expectedRevision,
+                "A never-seen relation presents revision 0");
+        equal(3L, store.outbox("scope-a").get(2).expectedRevision,
+                "A removed relation presents its tombstone revision");
+        try {
+            store.queueMembershipMany("scope-a", "missing", Arrays.asList("asset_9"), true,
+                    Arrays.asList("a8000000-0000-0000-0000-0000000000b0"), CLOCK.now());
+            throw new AssertionError("An unknown Album refuses the whole request");
+        } catch (IllegalArgumentException expected) {
+            checks++;
+        }
+        equal(3, store.outbox("scope-a").size(), "A refused request writes nothing");
+        store.close();
+    }
+
     private static void optimisticMembershipQueueIsAtomicAndSkipsNoOps(Path directory) throws Exception {
         MemoryDb db = new MemoryDb();
         LibraryReplicaStore store = new LibraryReplicaStore(db);
@@ -1266,6 +1592,13 @@ public final class AlbumReplicaTest {
         restored.close();
     }
 
+    /** Makes a fake transport behave like a server that predates the batch route. */
+    private static void refuseBatchRoute(String path) throws AlbumMembershipOutbox.HttpFailure {
+        if (AlbumMembershipOutbox.BATCH_PATH.equals(path)) {
+            throw new AlbumMembershipOutbox.HttpFailure(404, "{\"detail\":\"Not Found\"}");
+        }
+    }
+
     private static String acceptedMembership(ReplicaDb.OutboxRow row, boolean changed,
                                              long revision, long cursor, boolean desired) {
         return "{\"libraryId\":\"" + LIBRARY + "\",\"epoch\":1,\"contractVersion\":1,"
@@ -1343,6 +1676,7 @@ public final class AlbumReplicaTest {
                 "70000000-0000-0000-0000-000000000002", CLOCK.now());
         final int[] calls = {0};
         AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            refuseBatchRoute(path);
             calls[0]++;
             throw new AlbumMembershipOutbox.HttpFailure(409,
                     "{\"detail\":{\"code\":\"revisionConflict\",\"authorityCursor\":9}}" );

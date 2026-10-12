@@ -14,7 +14,8 @@ beforeEach(()=>{
   vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
   localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();generation='a'.repeat(64);
   mocks.native.mockImplementation(async(op:string,p:{assetId:string;classificationId:string|null})=>{
-    if(op.startsWith('classificationAssignment'))return {adopted:true,assetId:p.assetId,classificationId:op==='classificationAssignmentSet'?p.classificationId:null,classifications:[{id:'game',kind:'root',name:'게임',parentId:null,iconKey:null,colorKey:null}]};
+    if(op==='classificationAssignmentSetMany')return {adopted:true,results:(p as unknown as {assetIds:string[]}).assetIds.map(assetId=>({assetId,ok:true,pending:false,blocked:false,conflictCode:null,message:''}))};
+    if(op.startsWith('classificationAssignment'))return {adopted:true,assetId:p.assetId,classificationId:null,classifications:[{id:'game',kind:'root',name:'게임',parentId:null,iconKey:null,colorKey:null}]};
     return {configured:true,endpoint:'https://example.invalid'};
   });
   mocks.api.mockImplementation(async(path:string)=>{
@@ -48,7 +49,7 @@ it('keeps selected tiles and the list DOM until refreshed data arrives after bat
   fireEvent.click(await within(sheet).findByRole('radio',{name:'게임'}));fireEvent.click(within(sheet).getByRole('button',{name:'적용'}));
   await waitFor(()=>expect(reads).toBeGreaterThan(0));
   expect(screen.getByText('tile-a1')).toBe(old);expect(screen.getByLabelText('자산 목록')).toBe(gallery);
-  expect(mocks.native.mock.calls.filter(([op])=>op==='classificationAssignmentSet').map(([,p])=>p)).toEqual([{assetId:'a1',classificationId:'game'},{assetId:'a2',classificationId:'game'}]);
+  expect(mocks.native.mock.calls.filter(([op])=>op==='classificationAssignmentSetMany').map(([,p])=>p)).toEqual([{assetIds:['a1','a2'],classificationId:'game'}]);
   await within(sheet).findByText('2/2개 분류 변경');
   fireEvent.click(within(sheet).getByRole('button',{name:'닫기',exact:true}));
   expect(screen.getByText('2개 선택')).toBeTruthy();

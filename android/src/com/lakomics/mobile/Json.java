@@ -47,6 +47,71 @@ final class Json {
         return value;
     }
 
+    /** Serialize maps, lists, strings, integers, doubles, booleans and null; the inverse of {@link #parse}. */
+    static String write(Object value) {
+        StringBuilder out = new StringBuilder();
+        write(out, value);
+        return out.toString();
+    }
+
+    private static void write(StringBuilder out, Object value) {
+        if (value == null) { out.append("null"); return; }
+        if (value instanceof String) { quote(out, (String) value); return; }
+        if (value instanceof Boolean || value instanceof Long || value instanceof Integer) { out.append(value); return; }
+        if (value instanceof Double) {
+            double number = (Double) value;
+            if (Double.isNaN(number) || Double.isInfinite(number)) throw new IllegalArgumentException("Unwritable JSON number");
+            out.append(number);
+            return;
+        }
+        if (value instanceof Map) {
+            out.append('{');
+            boolean first = true;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Unwritable JSON key");
+                if (!first) out.append(',');
+                first = false;
+                quote(out, (String) entry.getKey());
+                out.append(':');
+                write(out, entry.getValue());
+            }
+            out.append('}');
+            return;
+        }
+        if (value instanceof List) {
+            out.append('[');
+            boolean first = true;
+            for (Object item : (List<?>) value) {
+                if (!first) out.append(',');
+                first = false;
+                write(out, item);
+            }
+            out.append(']');
+            return;
+        }
+        throw new IllegalArgumentException("Unwritable JSON value");
+    }
+
+    private static void quote(StringBuilder out, String text) {
+        out.append('"');
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '"': out.append("\\\""); break;
+                case '\\': out.append("\\\\"); break;
+                case '\b': out.append("\\b"); break;
+                case '\f': out.append("\\f"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\t': out.append("\\t"); break;
+                default:
+                    if (c < 0x20) out.append(String.format("\\u%04x", (int) c));
+                    else out.append(c);
+            }
+        }
+        out.append('"');
+    }
+
     private void space() {
         while (at < text.length()) {
             char c = text.charAt(at);

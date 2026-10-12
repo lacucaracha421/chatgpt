@@ -1141,11 +1141,11 @@ it('runs likes from the tablet selection bar and retains only failed selections 
  const original=mocks.api.getMockImplementation()!;
  mocks.native.mockImplementation(async op=>op==='albumTree'?{adopted:true,libraryId:'a'.repeat(32),epoch:1,albums:[]}:{configured:true,endpoint:'https://example.invalid'});
  mocks.api.mockImplementation(async(path:string,signal:AbortSignal,body:Record<string,unknown>)=>{
-   if(path==='/v1/albums/commands'){
-     if(body.commandType==='ensureLikesAlbum')return {album:{id:'likes'}};
-     if(body.assetId==='a2')throw new Error('failure');return {membership:{}};
-   }
-   if(path.startsWith('/v1/albums/likes?'))return {albumId:'likes',memberships:[{assetId:new URL(`https://test${path}`).searchParams.get('assetIds'),desiredState:false,entityRevision:3}]};
+   if(path==='/v1/albums/commands'&&body.commandType==='ensureLikesAlbum')return {album:{id:'likes'}};
+   if(path==='/v1/albums/commands/batch')return {results:(body.commands as {operationId:string;assetId:string}[]).map(command=>command.assetId==='a2'
+     ?{operationId:command.operationId,status:'rejected',changed:false,changeSequence:null,error:{code:'assetTombstoned',status:409,message:'failure'}}
+     :{operationId:command.operationId,status:'applied',changed:true,changeSequence:1,membership:{}})};
+   if(path.startsWith('/v1/albums/likes?'))return {albumId:'likes',memberships:(new URL(`https://test${path}`).searchParams.get('assetIds')??'').split(',').map(assetId=>({assetId,desiredState:false,entityRevision:3}))};
    return original(path,signal,body);
  });
  render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
@@ -1174,8 +1174,9 @@ it('trashes the selected assets and offers a batch undo in the tablet gallery',a
 it('keeps queued album removals hidden across refresh and opens the correct remaining asset',async()=>{
  const original=mocks.api.getMockImplementation()!;
  let blocked=false;
- mocks.native.mockImplementation(async(op:string)=>{
+ mocks.native.mockImplementation(async(op:string,payload:Record<string,unknown>={})=>{
    if(op==='albumTree')return {adopted:true,libraryId:'a'.repeat(32),epoch:1,albums:[{id:'trip',name:'여행',parentId:null,iconKey:null,colorKey:null,assetCount:2}]};
+   if(op==='albumMembershipSetMany')return {adopted:true,results:(payload.assetIds as string[]).map(assetId=>({assetId,ok:true,pending:true,blocked:false,conflictCode:null,message:''}))};
    if(op==='albumMembershipSet'||op==='albumMemberships')return {adopted:true,albums:[{id:'trip',desiredState:false,pending:!blocked,blocked}]};
    return {configured:true,endpoint:'https://example.invalid'};
  });

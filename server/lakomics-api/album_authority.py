@@ -78,6 +78,7 @@ import asset_filters
 import asset_list_query
 import asset_visibility
 import classification_authority
+import command_batch
 
 DOMAIN = "albums"
 CONTRACT_VERSION = 1
@@ -175,6 +176,8 @@ MEMBERSHIP = "setAlbumMembership"
 ENSURE_LIKES = "ensureLikesAlbum"
 LIKES_NAME = "마음에 들어요"
 COMMAND_TYPES = (CREATE, RENAME, MOVE, APPEARANCE, DELETE, MEMBERSHIP, ENSURE_LIKES)
+#: The batch route carries tablet multi-select work only: structural commands stay single.
+BATCH_COMMAND_TYPES = (MEMBERSHIP, ENSURE_LIKES)
 
 #: Common envelope plus the exact per-command keys. A body carrying anything else is
 #: a caller bug rather than a silently ignored hint.
@@ -1015,16 +1018,8 @@ def likes_album_id(db, library_id, *, persist=False, require_unique=True):
     return album_id
 
 
-def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
-                  entity, now):
-    """Execute one typed Album command inside the caller's ``BEGIN IMMEDIATE``.
-
-    Receipts, canonical state, the ordered change and the domain cursor commit
-    together or not at all. Structural commands are compare-and-set on the Album
-    entity revision; membership commands are compare-and-set on the membership
-    relation's own revision. A stale writer therefore receives the current server
-    state instead of overwriting a newer one, and never wins by wall-clock arrival.
-    """
+def require_scope(db, library_id, epoch, contract_version):
+    """The active authority row a command may be applied against, or a coded rejection."""
     asset_visibility.install(db)
     row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
     if row["epoch"] != epoch:
@@ -1035,6 +1030,20 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
     if contract_version != CONTRACT_VERSION:
         fail(409, authority.CODE_AUTHORITY_CONTRACT_UNSUPPORTED,
              "서버가 지원하지 않는 앨범 계약 버전입니다.", domain=DOMAIN)
+    return row
+
+
+def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
+                  entity, now):
+    """Execute one typed Album command inside the caller's ``BEGIN IMMEDIATE``.
+
+    Receipts, canonical state, the ordered change and the domain cursor commit
+    together or not at all. Structural commands are compare-and-set on the Album
+    entity revision; membership commands are compare-and-set on the membership
+    relation's own revision. A stale writer therefore receives the current server
+    state instead of overwriting a newer one, and never wins by wall-clock arrival.
+    """
+    row = require_scope(db, library_id, epoch, contract_version)
     payload_sha = payload_digest(library_id, epoch, contract_version, command_type, entity)
     receipt = db.execute(
         "SELECT payload_digest,result_payload FROM album_authority_receipts"
@@ -1667,7 +1676,46 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     raise
         return await run_in_threadpool(run)
 
+    @app.put(PREFIX + "/commands/batch")
+    async def album_command_batch(request: Request,
+                                  authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        body = await command_batch.read_body(request, fail, "invalidAlbumBatch")
+        identity, parsed = command_batch.parse_batch(
+            body, parse_command=parse_command, allowed_types=BATCH_COMMAND_TYPES,
+            uuid_pattern=UUID_PATTERN, fail=fail, invalid_code="invalidAlbumBatch")
+        if any(entry[4] == ENSURE_LIKES for entry in parsed[1:]):
+            fail(422, "invalidAlbumBatch", "마음에 들어요 앨범 확인은 일괄 명령의 맨 앞에만 둘 수 있습니다.")
+        now = now_iso()
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    response = apply_batch(db, identity, parsed, now)
+                    db.commit()
+                    return response
+                except BaseException:
+                    db.rollback()
+                    raise
+        return await run_in_threadpool(run)
+
     return lambda: startup(get_db)
+
+
+def apply_batch(db, identity, parsed, now):
+    """Apply a parsed batch inside the caller's ``BEGIN IMMEDIATE`` and build the response.
+
+    Identity problems (inactive domain, other library or epoch, unsupported contract) refuse
+    the whole request like the single route; everything else is reported per command.
+    """
+    require_scope(db, identity["libraryId"], identity["epoch"], identity["contractVersion"])
+    results = command_batch.apply_each(
+        db, parsed, apply_one=apply_command, now=now,
+        summarize=lambda result: {"authorityCursor": result["authorityCursor"],
+                                  "album": result["album"], "membership": result["membership"]})
+    row = require_scope(db, identity["libraryId"], identity["epoch"], identity["contractVersion"])
+    return {**identity, "authorityCursor": row["cursor"], "results": results}
 
 
 def prune(get_db, days=RETENTION_DAYS, receipt_days=RECEIPT_RETENTION_DAYS, now=None):

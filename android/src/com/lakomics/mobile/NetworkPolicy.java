@@ -71,7 +71,7 @@ final class NetworkPolicy {
   // create and rename from the tablet. The server still requires the publisher role for
   // move, delete and appearance, so those structural mutations stay PC-only. Activate stays
   // absent from every allowlist.
-  boolean classificationPut=p.equals("/v1/classifications/authority/commands");
+  boolean classificationPut=p.equals("/v1/classifications/authority/commands") || p.equals("/v1/classifications/authority/commands/batch");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   post=post || p.equals("/v1/providers/apply") || p.equals("/v1/providers/artwork") || p.equals("/v1/providers/stashdb/portrait");
   // Artist edit submission only; the ordered log GET remains publisher-only.
@@ -131,7 +131,7 @@ final class NetworkPolicy {
   // Pin values stay in the JSON body, never in path segments.
   get=get || p.equals("/v1/mobile-catalog/index/pins") || p.equals("/v1/mobile-catalog/index/frequent");
   boolean pinPut=p.equals("/v1/mobile-catalog/index/pins/artist/artist") || p.matches("/v1/mobile-catalog/index/pins/tag/(?!artist$)[a-z]{1,32}");
-  boolean albumPut=p.equals("/v1/albums/commands");
+  boolean albumPut=p.equals("/v1/albums/commands") || p.equals("/v1/albums/commands/batch");
   // Mobile Library Trash: the trash read, and the Asset lifecycle command route written by
   // `AssetLifecycleOutbox`, which constructs `trashAsset`/`restoreAsset` only. The server
   // requires the publisher role for `tombstoneAsset`, so emptying the trash stays on the PC.

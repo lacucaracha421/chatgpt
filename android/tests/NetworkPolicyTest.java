@@ -187,6 +187,10 @@ public final class NetworkPolicyTest {
  // Membership outbox delivery gets exactly one write route.
  pass(()->NetworkPolicy.api("/v1/albums/commands","PUT"));
  for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/albums/commands",method));
+ // The batch form of the same command: PUT at this exact path only.
+ pass(()->NetworkPolicy.api("/v1/albums/commands/batch","PUT"));
+ for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/albums/commands/batch",method));
+ for(String path:new String[]{"/v1/albums/commands/batch/","/v1/albums/commands/batch/extra","/v1/albums/commands/batchx","/v1/albums/commands/../commands/batch","/v1/albums/commands/batch%2f.."})reject(()->NetworkPolicy.api(path,"PUT"));
  reject(()->NetworkPolicy.api("/v1/albums/authority/activate","POST"));
  for(String path:new String[]{"/v1/albums/commands/","/v1/albums/authority/activate","/v1/albums","/v1/albums/","/v1/sync","/v1/sync/","/v1/sync/status/extra","/v1/sync/statusx","/v1/albums/baseline/extra","/v1/albums/baselinex","/v1/albums/commands/x"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline","/v1/albums/changes"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
@@ -200,6 +204,10 @@ public final class NetworkPolicyTest {
  // The assignment command route: PUT only, and only at this exact path.
  pass(()->NetworkPolicy.api("/v1/classifications/authority/commands","PUT"));
  for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/classifications/authority/commands",method));
+ // The batch form carries assignment commands only (the server refuses any other); PUT at this exact path.
+ pass(()->NetworkPolicy.api("/v1/classifications/authority/commands/batch","PUT"));
+ for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/classifications/authority/commands/batch",method));
+ for(String path:new String[]{"/v1/classifications/authority/commands/batch/","/v1/classifications/authority/commands/batch/extra","/v1/classifications/authority/commands/batchx","/v1/classifications/authority/commands/batch%2f.."})reject(()->NetworkPolicy.api(path,"PUT"));
  for(String path:new String[]{"/v1/classifications/authority/activate","/v1/classifications/authority","/v1/classifications/authority/","/v1/classifications/authority/baseline/extra","/v1/classifications/authority/baselinex","/v1/classifications/authority/changes/extra","/v1/classifications/authority/commands/","/v1/classifications/authority/commands/extra","/v1/classifications/authorityx/commands"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  reject(()->NetworkPolicy.api("/v1/classifications/authority/../authority/baseline","GET"));
  reject(()->NetworkPolicy.api("/v1/classifications/authority/baseline%2f..","GET"));

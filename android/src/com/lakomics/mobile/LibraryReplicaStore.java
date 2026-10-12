@@ -257,40 +257,11 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
                 if (authority == null || !authority.scope.equals(scope)) {
                     throw new IllegalStateException("Album authority is not adopted");
                 }
-                boolean albumLive = false;
-                for (AlbumReplica.Album album : db.albums(true)) {
-                    if (album.id.equals(albumId)) { albumLive = true; break; }
-                }
-                if (!albumLive) throw new IllegalArgumentException("Unknown Album");
-                AlbumReplica.Member current = db.member(albumId, assetId);
-                boolean currentDesired = current != null && current.desiredState;
-                long confirmedRevision = current == null ? 0 : current.entityRevision;
-                List<ReplicaDb.OutboxRow> queued = db.outbox();
-                long predecessorCount = 0;
-                long nextSeq = 1;
-                for (ReplicaDb.OutboxRow row : queued) {
-                    nextSeq = Math.max(nextSeq, row.seq + 1);
-                    if (row.albumId.equals(albumId) && row.assetId.equals(assetId)) {
-                        if (row.blocked()) throw new IllegalStateException("Album membership is blocked");
-                        predecessorCount++;
-                    }
-                }
-                if (currentDesired == desiredState) {
-                    db.rollback();
-                    return new MembershipEdit(false, desiredState,
-                            confirmedRevision + predecessorCount, operationId);
-                }
-                long expected = confirmedRevision + predecessorCount;
-                String payload = membershipPayload(authority, operationId, albumId, assetId,
-                        desiredState, expected);
-                db.writeMember(new AlbumReplica.Member(albumId, assetId, desiredState,
-                        confirmedRevision), now);
-                db.writeOutbox(new ReplicaDb.OutboxRow(nextSeq, operationId, MEMBERSHIP_COMMAND,
-                        albumId, assetId, authority.libraryId, authority.epoch,
-                        authority.contractVersion, desiredState, expected, payload,
-                        "pending", null, null, now));
-                db.commit();
-                return new MembershipEdit(true, desiredState, expected, operationId);
+                requireLiveAlbum(albumId);
+                MembershipEdit edit = stageMembership(authority, albumId, assetId, desiredState,
+                        operationId, now);
+                if (edit.changed) db.commit(); else db.rollback();
+                return edit;
             } catch (RuntimeException failure) {
                 try { db.rollback(); } catch (RuntimeException ignored) { }
                 throw failure;
@@ -298,6 +269,122 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
         } finally {
             lock.unlock();
         }
+    }
+
+    /** One Asset's outcome in a many-at-once queue request. */
+    static final class ManyEdit {
+        final String assetId;
+        /** The intent is queued, or the Asset already shows the requested state. */
+        final boolean ok;
+        /** A command was appended to the outbox (false for an already satisfied request). */
+        final boolean changed;
+        /** Why the Asset was refused: "blocked" (an earlier intent awaits a decision) or "invalidAsset". */
+        final String code;
+
+        ManyEdit(String assetId, boolean ok, boolean changed, String code) {
+            this.assetId = assetId;
+            this.ok = ok;
+            this.changed = changed;
+            this.code = code;
+        }
+    }
+
+    /**
+     * Queue the same membership choice for many Assets in one transaction.
+     *
+     * Each Asset is staged exactly as {@link #queueMembership} would stage it, so predicted
+     * expectations and optimistic presentation are identical; what differs is that every
+     * accepted intent commits together and an Asset the single call would refuse (a blocked
+     * predecessor, an invalid id) is reported on its own entry instead of aborting the rest.
+     * An unknown Album or an unadopted authority still refuses the whole request.
+     */
+    List<ManyEdit> queueMembershipMany(String scope, String albumId, List<String> assetIds,
+                                       boolean desiredState, List<String> operationIds,
+                                       String now) {
+        if (assetIds == null || operationIds == null || assetIds.size() != operationIds.size()) {
+            throw new IllegalArgumentException("Mismatched batch");
+        }
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority authority = db.authority();
+                if (authority == null || !authority.scope.equals(scope)) {
+                    throw new IllegalStateException("Album authority is not adopted");
+                }
+                requireLiveAlbum(albumId);
+                List<ManyEdit> results = new java.util.ArrayList<>();
+                boolean wrote = false;
+                for (int i = 0; i < assetIds.size(); i++) {
+                    String assetId = assetIds.get(i);
+                    if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+                        results.add(new ManyEdit(assetId, false, false, "invalidAsset"));
+                        continue;
+                    }
+                    try {
+                        MembershipEdit edit = stageMembership(authority, albumId, assetId,
+                                desiredState, operationIds.get(i), now);
+                        wrote |= edit.changed;
+                        results.add(new ManyEdit(assetId, true, edit.changed, null));
+                    } catch (IllegalStateException blocked) {
+                        results.add(new ManyEdit(assetId, false, false, "blocked"));
+                    }
+                }
+                if (wrote) db.commit(); else db.rollback();
+                return results;
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Caller holds {@link #lock} and an open database transaction. */
+    private void requireLiveAlbum(String albumId) {
+        for (AlbumReplica.Album album : db.albums(true)) {
+            if (album.id.equals(albumId)) return;
+        }
+        throw new IllegalArgumentException("Unknown Album");
+    }
+
+    /**
+     * Stage one membership choice inside the caller's transaction: write the optimistic
+     * relation and append the immutable command, or write nothing when the Asset already shows
+     * the requested state. Throws {@link IllegalStateException} when an earlier intent for
+     * this relation is blocked. Caller holds {@link #lock}.
+     */
+    private MembershipEdit stageMembership(ReplicaDb.StoredAuthority authority, String albumId,
+                                           String assetId, boolean desiredState,
+                                           String operationId, String now) {
+        AlbumReplica.Member current = db.member(albumId, assetId);
+        boolean currentDesired = current != null && current.desiredState;
+        long confirmedRevision = current == null ? 0 : current.entityRevision;
+        List<ReplicaDb.OutboxRow> queued = db.outbox();
+        long predecessorCount = 0;
+        long nextSeq = 1;
+        for (ReplicaDb.OutboxRow row : queued) {
+            nextSeq = Math.max(nextSeq, row.seq + 1);
+            if (row.albumId.equals(albumId) && row.assetId.equals(assetId)) {
+                if (row.blocked()) throw new IllegalStateException("Album membership is blocked");
+                predecessorCount++;
+            }
+        }
+        if (currentDesired == desiredState) {
+            return new MembershipEdit(false, desiredState,
+                    confirmedRevision + predecessorCount, operationId);
+        }
+        long expected = confirmedRevision + predecessorCount;
+        String payload = membershipPayload(authority, operationId, albumId, assetId,
+                desiredState, expected);
+        db.writeMember(new AlbumReplica.Member(albumId, assetId, desiredState,
+                confirmedRevision), now);
+        db.writeOutbox(new ReplicaDb.OutboxRow(nextSeq, operationId, MEMBERSHIP_COMMAND,
+                albumId, assetId, authority.libraryId, authority.epoch,
+                authority.contractVersion, desiredState, expected, payload,
+                "pending", null, null, now));
+        return new MembershipEdit(true, desiredState, expected, operationId);
     }
 
     /** Retire one accepted row while keeping any later optimistic choice visible. */
@@ -1034,54 +1121,15 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
                 // assigned. The protected `originals` role is deliberately *not* refused:
                 // the authority protects it from rename/move/delete only, and assignment
                 // to it is an ordinary operation the server accepts.
-                if (classificationId != null) {
-                    boolean live = false;
-                    for (ClassificationReplica.Node node : db.classifications(true)) {
-                        if (node.id.equals(classificationId)) { live = true; break; }
-                    }
-                    if (!live) throw new IllegalArgumentException("Unknown Classification");
-                }
-                long confirmedRevision = 0;
-                boolean confirmed = false;
-                String confirmedValue = null;
+                requireLiveClassification(classificationId);
+                ClassificationReplica.Assignment confirmedRow = null;
                 for (ClassificationReplica.Assignment assignment : db.assignments()) {
-                    if (assignment.assetId.equals(assetId)) {
-                        confirmed = true;
-                        confirmedRevision = assignment.entityRevision;
-                        confirmedValue = assignment.classificationId;
-                        break;
-                    }
+                    if (assignment.assetId.equals(assetId)) { confirmedRow = assignment; break; }
                 }
-                List<ReplicaDb.ClassificationAssignment> queued = db.classificationOutbox();
-                long predecessorCount = 0;
-                long nextSeq = 1;
-                for (ReplicaDb.ClassificationAssignment row : queued) {
-                    nextSeq = Math.max(nextSeq, row.seq + 1);
-                    if (!row.assetId.equals(assetId)) continue;
-                    // A blocked predecessor needs a user decision before this Asset's
-                    // lineage can advance again, so stacking another intent behind it would
-                    // only queue work that cannot legally follow.
-                    if (row.blocked()) {
-                        throw new IllegalStateException("Classification assignment is blocked");
-                    }
-                    predecessorCount++;
-                }
-                if (java.util.Objects.equals(
-                        visibleClassification(confirmedValue, confirmed, queued, assetId),
-                        classificationId)) {
-                    db.rollback();
-                    return new AssignmentEdit(false, classificationId,
-                            confirmedRevision + predecessorCount, operationId);
-                }
-                long expected = confirmedRevision + predecessorCount;
-                String payload = classificationPayload(authority, operationId, assetId,
-                        classificationId, expected);
-                db.writeClassificationOutbox(new ReplicaDb.ClassificationAssignment(nextSeq,
-                        operationId, LibraryReplicaStore.ASSIGNMENT_COMMAND, assetId,
-                        classificationId, authority.libraryId, authority.epoch,
-                        authority.contractVersion, expected, payload, "pending", null, null, now));
-                db.commit();
-                return new AssignmentEdit(true, classificationId, expected, operationId);
+                AssignmentEdit edit = stageClassificationAssignment(authority, confirmedRow,
+                        assetId, classificationId, operationId, now);
+                if (edit.changed) db.commit(); else db.rollback();
+                return edit;
             } catch (RuntimeException failure) {
                 try { db.rollback(); } catch (RuntimeException ignored) { }
                 throw failure;
@@ -1089,6 +1137,122 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
         } finally {
             lock.unlock();
         }
+    }
+
+    /**
+     * Queue the same Classification choice for many Assets in one transaction.
+     *
+     * Each Asset is staged exactly as {@link #queueClassificationAssignment} would stage it;
+     * what differs is that every accepted intent commits together, and an Asset the single call
+     * would refuse (a blocked predecessor, an invalid id) is reported on its own entry instead
+     * of aborting the rest. An unknown Classification or an unadopted authority still refuses
+     * the whole request.
+     */
+    List<ManyEdit> queueClassificationAssignmentMany(String scope, List<String> assetIds,
+                                                     String classificationId,
+                                                     List<String> operationIds, String now) {
+        if (assetIds == null || operationIds == null || assetIds.size() != operationIds.size()) {
+            throw new IllegalArgumentException("Mismatched batch");
+        }
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority authority = requireClassificationAuthority(scope);
+                requireLiveClassification(classificationId);
+                // The confirmed lineage does not change while intents are staged, so it is read once.
+                Map<String, ClassificationReplica.Assignment> confirmedByAsset = new LinkedHashMap<>();
+                for (ClassificationReplica.Assignment assignment : db.assignments()) {
+                    confirmedByAsset.put(assignment.assetId, assignment);
+                }
+                List<ManyEdit> results = new java.util.ArrayList<>();
+                boolean wrote = false;
+                for (int i = 0; i < assetIds.size(); i++) {
+                    String assetId = assetIds.get(i);
+                    String operationId = operationIds.get(i);
+                    if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+                        results.add(new ManyEdit(assetId, false, false, "invalidAsset"));
+                        continue;
+                    }
+                    if (operationId == null || operationId.isEmpty() || operationId.length() > 128) {
+                        throw new IllegalArgumentException("Invalid operation id");
+                    }
+                    try {
+                        AssignmentEdit edit = stageClassificationAssignment(authority,
+                                confirmedByAsset.get(assetId), assetId, classificationId,
+                                operationId, now);
+                        wrote |= edit.changed;
+                        results.add(new ManyEdit(assetId, true, edit.changed, null));
+                    } catch (IllegalStateException blocked) {
+                        results.add(new ManyEdit(assetId, false, false, "blocked"));
+                    }
+                }
+                if (wrote) db.commit(); else db.rollback();
+                return results;
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * A tombstoned Classification is gone rather than empty, so it cannot be assigned. The
+     * protected `originals` role is deliberately *not* refused: the authority protects it from
+     * rename/move/delete only, and assignment to it is an ordinary operation the server accepts.
+     * Caller holds {@link #lock} and an open database transaction.
+     */
+    private void requireLiveClassification(String classificationId) {
+        if (classificationId == null) return;
+        for (ClassificationReplica.Node node : db.classifications(true)) {
+            if (node.id.equals(classificationId)) return;
+        }
+        throw new IllegalArgumentException("Unknown Classification");
+    }
+
+    /**
+     * Stage one assignment choice inside the caller's transaction: append the immutable command,
+     * or write nothing when the Asset already shows the requested value. Throws
+     * {@link IllegalStateException} when an earlier intent for this Asset is blocked. Caller holds
+     * {@link #lock}.
+     */
+    private AssignmentEdit stageClassificationAssignment(ReplicaDb.StoredAuthority authority,
+                                                         ClassificationReplica.Assignment confirmedRow,
+                                                         String assetId, String classificationId,
+                                                         String operationId, String now) {
+        long confirmedRevision = confirmedRow == null ? 0 : confirmedRow.entityRevision;
+        boolean confirmed = confirmedRow != null;
+        String confirmedValue = confirmedRow == null ? null : confirmedRow.classificationId;
+        List<ReplicaDb.ClassificationAssignment> queued = db.classificationOutbox();
+        long predecessorCount = 0;
+        long nextSeq = 1;
+        for (ReplicaDb.ClassificationAssignment row : queued) {
+            nextSeq = Math.max(nextSeq, row.seq + 1);
+            if (!row.assetId.equals(assetId)) continue;
+            // A blocked predecessor needs a user decision before this Asset's
+            // lineage can advance again, so stacking another intent behind it would
+            // only queue work that cannot legally follow.
+            if (row.blocked()) {
+                throw new IllegalStateException("Classification assignment is blocked");
+            }
+            predecessorCount++;
+        }
+        if (java.util.Objects.equals(
+                visibleClassification(confirmedValue, confirmed, queued, assetId),
+                classificationId)) {
+            return new AssignmentEdit(false, classificationId,
+                    confirmedRevision + predecessorCount, operationId);
+        }
+        long expected = confirmedRevision + predecessorCount;
+        String payload = classificationPayload(authority, operationId, assetId,
+                classificationId, expected);
+        db.writeClassificationOutbox(new ReplicaDb.ClassificationAssignment(nextSeq,
+                operationId, LibraryReplicaStore.ASSIGNMENT_COMMAND, assetId,
+                classificationId, authority.libraryId, authority.epoch,
+                authority.contractVersion, expected, payload, "pending", null, null, now));
+        return new AssignmentEdit(true, classificationId, expected, operationId);
     }
 
     /**

@@ -11,13 +11,67 @@ beforeEach(()=>{mocks.api.mockReset();mocks.native.mockReset();});
 afterEach(()=>{cleanup();vi.useRealTimers();});
 const options=()=>({scope:'folder',selectedIds:new Set(['a','b','c']),tree,onTrash:vi.fn(async()=>{}),onComplete:vi.fn()});
 describe('tablet selection actions',()=>{
-  it.each(['like','unlike'] as const)('%s uses explicit desired state and fresh per-asset revisions',async action=>{
-    mocks.api.mockImplementation(async(path:string,_signal:unknown,body:Record<string,unknown>)=>path.includes('/likes?')?{albumId:'likes',memberships:[{assetId:new URL(`https://test${path}`).searchParams.get('assetIds'),entityRevision:6,desiredState:action!=='like'}]}:body.commandType==='ensureLikesAlbum'?{album:{id:'likes'}}:{membership:{}});
+  const likesApi=(action:'like'|'unlike',options:{refuse?:string[];conflict?:string[];revisions?:Record<string,number>}={})=>async(path:string,_signal:unknown,body:Record<string,unknown>&{commands?:Record<string,unknown>[]})=>{
+    if(path.includes('/likes?')){
+      const ids=(new URL(`https://test${path}`).searchParams.get('assetIds')??'').split(',');
+      return {albumId:'likes',memberships:ids.map(assetId=>({assetId,entityRevision:options.revisions?.[assetId]??6,desiredState:action!=='like'}))};
+    }
+    if(path==='/v1/albums/commands/batch')return {results:body.commands!.map(command=>options.conflict?.includes(command.assetId as string)
+      ?{operationId:command.operationId,status:'conflict',changed:false,changeSequence:null,error:{code:'revisionConflict',status:409}}
+      :options.refuse?.includes(command.assetId as string)
+        ?{operationId:command.operationId,status:'rejected',changed:false,changeSequence:null,error:{code:'assetTombstoned',status:409,message:'영구 삭제된 자산입니다.'}}
+        :{operationId:command.operationId,status:'applied',changed:true,changeSequence:1,membership:{}})};
+    if(body.commandType==='ensureLikesAlbum')return {album:{id:'likes'}};
+    throw new Error(`unexpected ${path}`);
+  };
+  it.each(['like','unlike'] as const)('%s reads revisions once and writes every asset in one batch request',async action=>{
+    mocks.api.mockImplementation(likesApi(action));
     const props=options(),{result}=renderHook(()=>useSelectionActions(props));
     await act(()=>result.current.run(action));
-    const writes=mocks.api.mock.calls.filter(([, ,body])=>body?.commandType==='setAlbumMembership');
-    expect(writes.map(([, ,body])=>[body.assetId,body.desiredState,body.expectedRevision])).toEqual([['a',action==='like',6],['b',action==='like',6],['c',action==='like',6]]);
+    const batch=mocks.api.mock.calls.filter(([path])=>path==='/v1/albums/commands/batch');
+    expect(batch).toHaveLength(1);
+    expect(batch[0][3]).toBe('PUT');
+    expect(batch[0][2]).toMatchObject({libraryId:tree.libraryId,epoch:1,contractVersion:1});
+    expect((batch[0][2].commands as Record<string,unknown>[]).map(body=>[body.commandType,body.assetId,body.desiredState,body.expectedRevision,body.albumId])).toEqual(['a','b','c'].map(assetId=>['setAlbumMembership',assetId,action==='like',6,'likes']));
+    expect(mocks.api.mock.calls.filter(([path])=>String(path).includes('/likes?'))).toHaveLength(1);
+    expect(mocks.api.mock.calls.filter(([, ,body])=>body?.commandType==='setAlbumMembership')).toHaveLength(0);
     expect(props.onComplete).toHaveBeenCalledWith(['a','b','c'],action);expect(result.current.notice).toBe('');
+  });
+  it('writes nothing for assets that already have the requested state',async()=>{
+    mocks.api.mockImplementation(async(path:string)=>path.includes('/likes?')?{albumId:'likes',memberships:['a','b','c'].map(assetId=>({assetId,entityRevision:2,desiredState:true}))}:{album:{id:'likes'}});
+    const props=options(),{result}=renderHook(()=>useSelectionActions(props));
+    await act(()=>result.current.run('like'));
+    expect(mocks.api.mock.calls.some(([path])=>path==='/v1/albums/commands/batch')).toBe(false);
+    expect(props.onComplete).toHaveBeenLastCalledWith(['a','b','c'],'like');
+  });
+  it('reports a stale or refused favorite per asset and keeps only those selected',async()=>{
+    mocks.api.mockImplementation(likesApi('like',{conflict:['b'],refuse:['c']}));
+    const props=options(),{result}=renderHook(()=>useSelectionActions(props));
+    await act(()=>result.current.run('like'));
+    expect(props.onComplete).toHaveBeenCalledWith(['a'],'like');
+    expect(result.current.notice).toContain('3개 중 1개 완료, 2개 실패');expect(result.current.notice).toContain('선택을 유지');
+    expect(result.current.notice).toContain('다른 기기에서 먼저 바뀌었습니다');
+  });
+  it('splits favorites into chunks of 100 assets for both the read and the write',async()=>{
+    const ids=Array.from({length:230},(_,index)=>`asset-${index}`);
+    mocks.api.mockImplementation(likesApi('like'));
+    const props={...options(),selectedIds:new Set(ids)},{result}=renderHook(()=>useSelectionActions(props));
+    await act(()=>result.current.run('like'));
+    const reads=mocks.api.mock.calls.filter(([path])=>String(path).includes('/likes?')).map(([path])=>new URL(`https://test${path}`).searchParams.get('assetIds')!.split(',').length);
+    const writes=mocks.api.mock.calls.filter(([path])=>path==='/v1/albums/commands/batch').map(([, ,body])=>(body.commands as unknown[]).length);
+    expect(reads).toEqual([100,100,30]);expect(writes).toEqual([100,100,30]);
+    expect(props.onComplete).toHaveBeenCalledWith(ids,'like');expect(result.current.progress).toEqual({done:230,total:230});
+  });
+  it('marks only the failed request chunk when one batch request does not complete',async()=>{
+    const ids=Array.from({length:150},(_,index)=>`asset-${index}`),inner=likesApi('like');let writes=0;
+    mocks.api.mockImplementation(async(path:string,signal:unknown,body:Record<string,unknown>)=>{
+      if(path==='/v1/albums/commands/batch'&&++writes===2)throw new Error('연결 끊김');
+      return inner(path,signal,body);
+    });
+    const props={...options(),selectedIds:new Set(ids)},{result}=renderHook(()=>useSelectionActions(props));
+    await act(()=>result.current.run('like'));
+    expect(props.onComplete).toHaveBeenCalledWith(ids.slice(0,100),'like');
+    expect(result.current.notice).toContain('150개 중 100개 완료, 50개 실패');expect(result.current.notice).toContain('연결 끊김');
   });
   it('runs sequentially, rejects duplicate clicks and reports partial failures',async()=>{
     let release!:()=>void;
@@ -31,12 +85,22 @@ describe('tablet selection actions',()=>{
     expect(props.onComplete).toHaveBeenCalledWith(['a','c'],'trash');
     expect(result.current.notice).toContain('3개 중 2개 완료, 1개 실패');expect(result.current.notice).toContain('선택을 유지');
   });
-  it('removes only membership in the current album and retains blocked failures',async()=>{
-    mocks.native.mockImplementation(async(_op:string,body:{assetId:string})=>({adopted:true,albums:[{id:'album',desiredState:false,blocked:body.assetId==='b'}]}));
+  it('removes only membership in the current album with one native call and retains blocked failures',async()=>{
+    mocks.native.mockImplementation(async(_op:string,body:{assetIds:string[]})=>({adopted:true,results:body.assetIds.map(assetId=>({assetId,ok:assetId!=='b',pending:assetId!=='b',blocked:assetId==='b',conflictCode:assetId==='b'?'blocked':null,message:assetId==='b'?'앨범 연결 충돌을 먼저 해결해 주세요.':''}))}));
     const props={...options(),albumId:'album'},{result}=renderHook(()=>useSelectionActions(props));
     await act(()=>result.current.run('remove'));
-    expect(mocks.native.mock.calls.filter(([op])=>op==='albumMembershipSet')).toEqual(['a','b','c'].map(assetId=>['albumMembershipSet',{assetId,albumId:'album',desiredState:false}]));
+    expect(mocks.native.mock.calls.filter(([op])=>op==='albumMembershipSetMany')).toEqual([['albumMembershipSetMany',{albumId:'album',assetIds:['a','b','c'],desiredState:false}]]);
+    expect(mocks.native.mock.calls.filter(([op])=>op==='albumMembershipSet')).toHaveLength(0);
     expect(props.onComplete).toHaveBeenCalledWith(['a','c'],'remove');expect(mocks.api).not.toHaveBeenCalled();
+    expect(result.current.notice).toContain('3개 중 2개 완료, 1개 실패');expect(result.current.notice).toContain('앨범 연결 충돌');
+  });
+  it('removes more than 100 assets in chunks of 100',async()=>{
+    const ids=Array.from({length:101},(_,index)=>`asset-${index}`);
+    mocks.native.mockImplementation(async(_op:string,body:{assetIds:string[]})=>({adopted:true,results:body.assetIds.map(assetId=>({assetId,ok:true,pending:true,blocked:false,conflictCode:null,message:''}))}));
+    const props={...options(),selectedIds:new Set(ids),albumId:'album'},{result}=renderHook(()=>useSelectionActions(props));
+    await act(()=>result.current.run('remove'));
+    expect(mocks.native.mock.calls.filter(([op])=>op==='albumMembershipSetMany').map(([,body])=>body.assetIds.length)).toEqual([100,1]);
+    expect(props.onComplete).toHaveBeenCalledWith(ids,'remove');
   });
   it('stops the remaining writes when the user changes scope',async()=>{
     let release!:()=>void;const props=options();props.onTrash.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));

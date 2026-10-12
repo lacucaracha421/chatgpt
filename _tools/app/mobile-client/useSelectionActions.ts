@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {api,errorText,native} from './transport';
-import {albumCommand} from './albumCommands';
+import {albumBatchCommand,albumCommand} from './albumCommands';
+import {batches,manyFailures,type ManyReply} from './batchCommands';
 import type {AlbumTree} from './albumModel';
 import type {AlbumMembershipState} from './AlbumMembershipEditor';
 import {viewerEditEvent} from './listGeneration';
@@ -44,6 +45,10 @@ export function useSelectionActions({scope,selectedIds,tree,albumId,onTrash,onCo
     lock.current=true;setBusy(true);setNotice('');
     const ids=[...selectedIds],current=generation.current,successful:string[]=[],failed:string[]=[];
     let firstError='';
+    const record=(id:string,problem:string|null)=>{
+      if(problem===null)successful.push(id);
+      else{failed.push(id);if(!firstError)firstError=problem;}
+    };
     setProgress({done:0,total:ids.length});
     try {
       let likesId:string|undefined;
@@ -53,25 +58,25 @@ export function useSelectionActions({scope,selectedIds,tree,albumId,onTrash,onCo
         likesId=reply.album?.id;
         if(!likesId)throw new Error('마음에 들어요 앨범을 찾을 수 없습니다.');
       }
-      for(const [index,id] of ids.entries()) {
-        if(current!==generation.current)break;
-        try {
-          if(action==='trash')await onTrash(id);
-          else if(action==='remove') {
-            if(!albumId)throw new Error('앨범을 다시 열어 주세요.');
-            const state=await native<AlbumMembershipState>('albumMembershipSet',{assetId:id,albumId,desiredState:false});
-            const member=state.albums?.find(item=>item.id===albumId);
-            if(!state.adopted||!member||member.blocked||member.desiredState)throw new Error('앨범에서 빼지 못했습니다. 다시 시도해 주세요.');
-          } else {
-            const state=await api<{albumId:string|null;memberships:{assetId:string;desiredState:boolean;entityRevision:number}[]}>(`/v1/albums/likes?libraryId=${encodeURIComponent(tree!.libraryId!)}&epoch=${tree!.epoch}&assetIds=${encodeURIComponent(id)}`);
-            const member=state.memberships.find(item=>item.assetId===id);
-            if(state.albumId!==likesId||!member)throw new Error('좋아요 상태를 다시 불러와 주세요.');
-            if(current!==generation.current)break;
-            if(member.desiredState!==(action==='like'))await albumCommand(tree!,'setAlbumMembership',{albumId:likesId,assetId:id,desiredState:action==='like',expectedRevision:member.entityRevision});
-          }
-          successful.push(id);
-        } catch(reason) {failed.push(id);if(!firstError)firstError=errorText(reason);}
-        if(current===generation.current)setProgress({done:index+1,total:ids.length});
+      if(action==='trash') {
+        // Trash stays per item: each Asset is one recoverable lifecycle intent.
+        for(const [index,id] of ids.entries()) {
+          if(current!==generation.current)break;
+          try {await onTrash(id);record(id,null);} catch(reason) {record(id,errorText(reason));}
+          if(current===generation.current)setProgress({done:index+1,total:ids.length});
+        }
+      } else {
+        // Album membership and favorites go out in requests of at most 100 Assets; every Asset keeps its own outcome.
+        for(const chunk of batches(ids)) {
+          if(current!==generation.current)break;
+          let problems:(string|null)[];
+          try {
+            problems=action==='remove'?await removeFromAlbum(chunk):await setLikes(chunk,action==='like',likesId!);
+          } catch(reason) {problems=chunk.map(()=>errorText(reason));}
+          if(current!==generation.current)break;
+          chunk.forEach((id,index)=>record(id,problems[index]));
+          setProgress({done:successful.length+failed.length,total:ids.length});
+        }
       }
       if(current===generation.current) {
         if(action==='remove'&&successful.length)setRemoved(previous=>({...previous,[scope]:new Set([...(previous[scope]??[]),...successful])}));
@@ -81,6 +86,30 @@ export function useSelectionActions({scope,selectedIds,tree,albumId,onTrash,onCo
       }
     } catch(reason) {if(current===generation.current)setNotice(errorText(reason));}
     finally {lock.current=false;setBusy(false);}
+  };
+  const removeFromAlbum=async(chunk:string[]):Promise<(string|null)[]> => {
+    if(!albumId)throw new Error('앨범을 다시 열어 주세요.');
+    const reply=await native<ManyReply>('albumMembershipSetMany',{albumId,assetIds:chunk,desiredState:false});
+    return manyFailures(chunk,reply,'앨범에서 빼지 못했습니다. 다시 시도해 주세요.');
+  };
+  const setLikes=async(chunk:string[],liked:boolean,likesId:string):Promise<(string|null)[]> => {
+    const state=await api<{albumId:string|null;memberships:{assetId:string;desiredState:boolean;entityRevision:number}[]}>(`/v1/albums/likes?libraryId=${encodeURIComponent(tree!.libraryId!)}&epoch=${tree!.epoch}&assetIds=${encodeURIComponent(chunk.join(','))}`);
+    if(state.albumId!==likesId)return chunk.map(()=>'좋아요 상태를 다시 불러와 주세요.');
+    const problems:(string|null)[]=chunk.map(()=>null),commands:Record<string,unknown>[]=[],commandIndex:number[]=[];
+    chunk.forEach((id,index)=>{
+      const member=state.memberships.find(item=>item.assetId===id);
+      if(!member)problems[index]='좋아요 상태를 다시 불러와 주세요.';
+      else if(member.desiredState!==liked){
+        commands.push({commandType:'setAlbumMembership',albumId:likesId,assetId:id,desiredState:liked,expectedRevision:member.entityRevision});
+        commandIndex.push(index);
+      }
+    });
+    const outcomes=commands.length?await albumBatchCommand(tree!,commands):[];
+    outcomes.forEach((outcome,position)=>{
+      if(outcome.status==='applied'||outcome.status==='noop')return;
+      problems[commandIndex[position]]=outcome.status==='conflict'?'다른 기기에서 먼저 바뀌었습니다. 다시 시도해 주세요.':outcome.error?.message||'좋아요를 바꾸지 못했습니다.';
+    });
+    return problems;
   };
   return {busy,progress,notice,run,hiddenIds};
 }

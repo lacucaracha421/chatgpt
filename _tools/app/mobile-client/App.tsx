@@ -1161,7 +1161,7 @@ export function App() {
       {!privacyMode&&!nsfwFilter&&faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}
     </div></BottomSheet>}
     {classificationNotice&&<div className="exchange-toast" role="status" ref={classificationToast} data-state="open"><span>{classificationNotice}</span><Button variant="ghost" onClick={()=>setClassificationNotice('')}>닫기</Button></div>}
-    {albumBatchOpen&&<AlbumBatchSheet assetIds={albumBatchAssetIds} open onClose={closeAlbumBatch} onComplete={clearSelection}/>}
+    {albumBatchOpen&&<AlbumBatchSheet assetIds={albumBatchAssetIds} open onClose={closeAlbumBatch} onComplete={clearSelection} onPartial={failedIds=>setSelectedIds(new Set(failedIds))}/>}
     {folderManagement&&folderAuthority&&<FolderManagement authority={folderAuthority} folders={classifications} folder={folderManagement.folder} parentId={folderManagement.parentId??null} onClose={()=>setFolderManagement(null)} onChanged={folderChange}/>}
     {albumManagementOpen&&albumTree&&currentAlbum&&<AlbumManagement tree={albumTree} album={currentAlbum} onClose={()=>setAlbumManagementOpen(false)} onDeleted={albumRoot}/>}
     {selectionActions.notice&&!selectedIds.size&&<div className="trash-snackbar" role="alert">{selectionActions.notice}</div>}

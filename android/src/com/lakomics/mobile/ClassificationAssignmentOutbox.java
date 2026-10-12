@@ -1,7 +1,12 @@
 package com.lakomics.mobile;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Membership-only Android writer for Classification authority.
@@ -21,10 +26,16 @@ import java.util.Map;
  *
  * It sends the bytes stored in the outbox row, never a re-encoded body: a payload that
  * changed representation between attempts could turn one logical operation into two.
+ * Consecutive rows of different Assets travel together on the batch route; each row's frozen
+ * command is carried unchanged under one shared envelope.
  */
 final class ClassificationAssignmentOutbox {
     /** The only Classification route this client may write to. */
     static final String COMMAND_PATH = "/v1/classifications/authority/commands";
+    /** The batch form of the same route: assignment commands only, per-command results. */
+    static final String BATCH_PATH = "/v1/classifications/authority/commands/batch";
+    /** The server accepts at most this many commands per batch request. */
+    static final int BATCH_LIMIT = 100;
     /** The one command this writer constructs. */
     static final String COMMAND_TYPE = "setAssetClassification";
     static final String CODE_PROTOCOL_INTEGRITY = "classificationCommandOutcomeUnknown";
@@ -72,6 +83,8 @@ final class ClassificationAssignmentOutbox {
     private final Transport transport;
     private final LibraryReplicaStore store;
     private final ClassificationReplica.Clock clock;
+    /** Set once the server answered the batch route as missing; later flushes use the single route. */
+    private boolean batchUnsupported;
 
     ClassificationAssignmentOutbox(Transport transport, LibraryReplicaStore store,
                                    ClassificationReplica.Clock clock) {
@@ -97,22 +110,14 @@ final class ClassificationAssignmentOutbox {
             if (row.blocked()) report.blocked++;
             else report.pending++;
         }
-        for (ReplicaDb.ClassificationAssignment row : rows) {
+        int index = 0;
+        while (index < rows.size()) {
+            ReplicaDb.ClassificationAssignment row = rows.get(index);
             if (row.blocked()) { report.stopped = true; return report; }
             // The frozen payload and the row's own columns must agree. A row whose stored
             // bytes describe another authority identity is not a command this build may
             // send, and re-encoding it would send something the user never queued.
-            PayloadIdentity identity = payloadIdentity(row.payload);
-            if (!row.libraryId.equals(identity.libraryId)
-                    || row.epoch != identity.epoch
-                    || row.contractVersion != identity.contractVersion
-                    || !COMMAND_TYPE.equals(identity.commandType)
-                    || !row.operationId.equals(identity.operationId)
-                    || !row.assetId.equals(identity.assetId)
-                    || !java.util.Objects.equals(row.classificationId, identity.classificationId)
-                    || row.expectedRevision != identity.expectedRevision) {
-                throw integrity();
-            }
+            requireConsistent(row);
             if (!authority.libraryId.equals(row.libraryId)) {
                 store.blockClassificationAssignment(scope, row.seq,
                         ClassificationReplica.CODE_LIBRARY_MISMATCH, null);
@@ -136,58 +141,260 @@ final class ClassificationAssignmentOutbox {
                 report.stopped = true;
                 return report;
             }
-            final String body;
-            try {
-                body = transport.put(COMMAND_PATH, row.payload);
-            } catch (HttpFailure rejected) {
-                String code = detailCode(rejected.body);
-                if (CODE_ASSET_TOMBSTONED.equals(code)) {
-                    // Definitive: the Asset was emptied from the trash, so the assignment can
-                    // never apply. Dropped rather than retried or blocked, so it cannot hold
-                    // the queue.
-                    store.dropClassificationAssignment(scope, row.seq);
-                    report.pending--;
-                    report.dropped++;
-                    continue;
+            if (!batchUnsupported) {
+                List<ReplicaDb.ClassificationAssignment> group = batchGroup(rows, index, authority);
+                if (group.size() > 1) {
+                    int handled = sendBatch(scope, group, authority, report);
+                    if (handled < 0) return report;
+                    if (handled > 0) { index += handled; continue; }
+                    // handled == 0: an older server without the batch route; send this row alone.
                 }
-                if (CODE_REVISION_CONFLICT.equals(code)) {
-                    // The rejected command was never accepted or receipted, and an
-                    // assignment's whole meaning is its desired value, so presenting the
-                    // same logical intent against the authority's current revision is
-                    // legal. The row keeps its operation id and payload identity; only the
-                    // expectation moves, and the pass stops so the retry is the next step.
-                    long current = conflictRevision(rejected.body, row);
-                    store.rebaseClassificationAssignment(scope, row.seq, current, clock.now());
-                    report.rebased++;
-                    report.stopped = true;
-                    return report;
-                }
-                if (isBlockingRejection(code)) {
-                    store.blockClassificationAssignment(scope, row.seq, code, rejected.body);
-                    report.pending--;
-                    report.blocked++;
-                    report.stopped = true;
-                    return report;
-                }
-                if (rejected.status == 401 || rejected.status == 403) {
-                    throw new Failure(ClassificationReplica.CODE_UNAUTHORIZED, false, rejected);
-                }
-                // An uncoded or unknown rejection is retryable rather than blocked:
-                // `invalidClassificationAssignment` in particular is a transient
-                // cross-domain ordering state — Asset replication has not reached the
-                // server yet — that resolves itself, so refusing the user's intent
-                // permanently would be wrong.
-                throw new Failure(code == null ? CODE_TRANSPORT : code, true, rejected);
-            } catch (Exception unavailable) {
-                throw new Failure(CODE_TRANSPORT, true, unavailable);
             }
-            Accepted accepted = parseAccepted(body, row, authority);
-            store.confirmClassificationAssignment(scope, row.seq, accepted.assignment,
-                    clock.now());
-            report.pending--;
-            if (accepted.changed) report.sent++; else report.noOp++;
+            if (!sendOne(scope, row, authority, report)) return report;
+            index++;
         }
         return report;
+    }
+
+    private static void requireConsistent(ReplicaDb.ClassificationAssignment row) throws Failure {
+        PayloadIdentity identity = payloadIdentity(row.payload);
+        if (!row.libraryId.equals(identity.libraryId)
+                || row.epoch != identity.epoch
+                || row.contractVersion != identity.contractVersion
+                || !COMMAND_TYPE.equals(identity.commandType)
+                || !row.operationId.equals(identity.operationId)
+                || !row.assetId.equals(identity.assetId)
+                || !java.util.Objects.equals(row.classificationId, identity.classificationId)
+                || row.expectedRevision != identity.expectedRevision) {
+            throw integrity();
+        }
+    }
+
+    /**
+     * The consecutive sendable rows starting at {@code from} that one batch request may carry.
+     *
+     * At most one row per Asset: an Asset's later intents predict their expectation from the
+     * earlier one, so they must not travel in the same request where a refused earlier row
+     * could leave a later one accepted on the server.
+     */
+    private static List<ReplicaDb.ClassificationAssignment> batchGroup(
+            List<ReplicaDb.ClassificationAssignment> rows, int from,
+            ClassificationReplica.Adopted authority) {
+        List<ReplicaDb.ClassificationAssignment> group = new ArrayList<>();
+        Set<String> assets = new HashSet<>();
+        for (int i = from; i < rows.size() && group.size() < BATCH_LIMIT; i++) {
+            ReplicaDb.ClassificationAssignment row = rows.get(i);
+            if (row.blocked() || !authority.libraryId.equals(row.libraryId)
+                    || row.epoch != authority.epoch
+                    || row.contractVersion != authority.contractVersion) break;
+            try {
+                requireConsistent(row);
+            } catch (Failure malformed) {
+                break;
+            }
+            if (!assets.add(row.assetId)) break;
+            group.add(row);
+        }
+        return group;
+    }
+
+    /**
+     * Send one row on the single-command route.
+     *
+     * @return false when the flush must stop; true to continue
+     */
+    private boolean sendOne(String scope, ReplicaDb.ClassificationAssignment row,
+                            ClassificationReplica.Adopted authority, Flush report) throws Failure {
+        final String body;
+        try {
+            body = transport.put(COMMAND_PATH, row.payload);
+        } catch (HttpFailure rejected) {
+            String code = detailCode(rejected.body);
+            if (CODE_ASSET_TOMBSTONED.equals(code)) {
+                // Definitive: the Asset was emptied from the trash, so the assignment can
+                // never apply. Dropped rather than retried or blocked, so it cannot hold
+                // the queue.
+                store.dropClassificationAssignment(scope, row.seq);
+                report.pending--;
+                report.dropped++;
+                return true;
+            }
+            if (CODE_REVISION_CONFLICT.equals(code)) {
+                // The rejected command was never accepted or receipted, and an
+                // assignment's whole meaning is its desired value, so presenting the
+                // same logical intent against the authority's current revision is
+                // legal. The row keeps its operation id and payload identity; only the
+                // expectation moves, and the pass stops so the retry is the next step.
+                long current = conflictRevision(rejectedDetail(rejected.body), row);
+                store.rebaseClassificationAssignment(scope, row.seq, current, clock.now());
+                report.rebased++;
+                report.stopped = true;
+                return false;
+            }
+            if (isBlockingRejection(code)) {
+                store.blockClassificationAssignment(scope, row.seq, code, rejected.body);
+                report.pending--;
+                report.blocked++;
+                report.stopped = true;
+                return false;
+            }
+            if (rejected.status == 401 || rejected.status == 403) {
+                throw new Failure(ClassificationReplica.CODE_UNAUTHORIZED, false, rejected);
+            }
+            // An uncoded or unknown rejection is retryable rather than blocked:
+            // `invalidClassificationAssignment` in particular is a transient
+            // cross-domain ordering state — Asset replication has not reached the
+            // server yet — that resolves itself, so refusing the user's intent
+            // permanently would be wrong.
+            throw new Failure(code == null ? CODE_TRANSPORT : code, true, rejected);
+        } catch (Exception unavailable) {
+            throw new Failure(CODE_TRANSPORT, true, unavailable);
+        }
+        Accepted accepted = parseAccepted(body, row, authority);
+        store.confirmClassificationAssignment(scope, row.seq, accepted.assignment, clock.now());
+        report.pending--;
+        if (accepted.changed) report.sent++; else report.noOp++;
+        return true;
+    }
+
+    /**
+     * Send consecutive rows in one batch request and apply each row's own outcome with the
+     * single route's rules: confirm an accepted row, drop a tombstoned one, rebase a revision
+     * conflict, block an unknown classification, retry later on anything else.
+     *
+     * @return the number of rows handled; 0 when the server has no batch route and the rows
+     *         must be sent one by one; -1 when the flush must stop
+     */
+    private int sendBatch(String scope, List<ReplicaDb.ClassificationAssignment> group,
+                          ClassificationReplica.Adopted authority, Flush report) throws Failure {
+        String batchId = UUID.randomUUID().toString();
+        String payload = batchPayload(group, authority, batchId);
+        final String body;
+        try {
+            body = transport.put(BATCH_PATH, payload);
+        } catch (HttpFailure rejected) {
+            String code = detailCode(rejected.body);
+            if (((rejected.status == 404 || rejected.status == 405 || rejected.status == 501) && code == null)
+                    || "invalidClassificationBatch".equals(code)
+                    || "unsupportedBatchCommand".equals(code)) {
+                // An older server has no batch route (FastAPI answers 404/405 with a plain
+                // string detail). The single route carries the same commands.
+                batchUnsupported = true;
+                return 0;
+            }
+            if (rejected.status == 401 || rejected.status == 403) {
+                throw new Failure(ClassificationReplica.CODE_UNAUTHORIZED, false, rejected);
+            }
+            throw new Failure(code == null ? CODE_TRANSPORT : code, true, rejected);
+        } catch (Exception unavailable) {
+            throw new Failure(CODE_TRANSPORT, true, unavailable);
+        }
+        List<Object> results;
+        Map<String, Object> envelope;
+        try {
+            envelope = object(Json.parse(body));
+            if (!authority.libraryId.equals(string(envelope, "libraryId"))
+                    || authority.epoch != number(envelope, "epoch")
+                    || authority.contractVersion != number(envelope, "contractVersion")
+                    || !batchId.equals(string(envelope, "batchId"))) {
+                throw integrity();
+            }
+            results = list(envelope, "results");
+            if (results.size() != group.size()) throw integrity();
+        } catch (Failure failure) {
+            throw failure;
+        } catch (RuntimeException malformed) {
+            throw integrity();
+        }
+        for (int i = 0; i < group.size(); i++) {
+            ReplicaDb.ClassificationAssignment row = group.get(i);
+            Map<String, Object> item;
+            String status;
+            try {
+                item = object(results.get(i));
+                if (!row.operationId.equals(string(item, "operationId"))) throw integrity();
+                status = string(item, "status");
+            } catch (Failure failure) {
+                throw failure;
+            } catch (RuntimeException malformed) {
+                throw integrity();
+            }
+            if ("applied".equals(status) || "noop".equals(status)) {
+                Accepted accepted = parseAcceptedItem(item, envelope, row, authority);
+                store.confirmClassificationAssignment(scope, row.seq, accepted.assignment,
+                        clock.now());
+                report.pending--;
+                if (accepted.changed) report.sent++; else report.noOp++;
+                continue;
+            }
+            if (!"conflict".equals(status) && !"rejected".equals(status)) throw integrity();
+            Map<String, Object> error;
+            String code;
+            try {
+                error = object(item.get("error"));
+                code = string(error, "code");
+            } catch (RuntimeException malformed) {
+                throw integrity();
+            }
+            if (CODE_ASSET_TOMBSTONED.equals(code)) {
+                store.dropClassificationAssignment(scope, row.seq);
+                report.pending--;
+                report.dropped++;
+                continue;
+            }
+            if (CODE_REVISION_CONFLICT.equals(code)) {
+                long current = conflictRevision(error, row);
+                store.rebaseClassificationAssignment(scope, row.seq, current, clock.now());
+                report.rebased++;
+                report.stopped = true;
+                return -1;
+            }
+            if (isBlockingRejection(code)) {
+                store.blockClassificationAssignment(scope, row.seq, code, singleRouteBody(error));
+                report.pending--;
+                report.blocked++;
+                report.stopped = true;
+                return -1;
+            }
+            // Any other refusal is the failure the single route would report. Rows after it
+            // were not confirmed here and replay through their server-side receipts.
+            throw new Failure(code, true);
+        }
+        return group.size();
+    }
+
+    /** The batch request body: the rows' frozen commands under one shared envelope. */
+    private static String batchPayload(List<ReplicaDb.ClassificationAssignment> group,
+                                       ClassificationReplica.Adopted authority, String batchId)
+            throws Failure {
+        List<Object> commands = new ArrayList<>();
+        for (ReplicaDb.ClassificationAssignment row : group) {
+            try {
+                Map<String, Object> command = new LinkedHashMap<>(object(Json.parse(row.payload)));
+                command.remove("libraryId");
+                command.remove("epoch");
+                command.remove("contractVersion");
+                commands.add(command);
+            } catch (RuntimeException malformed) {
+                throw integrity();
+            }
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("libraryId", authority.libraryId);
+        body.put("epoch", authority.epoch);
+        body.put("contractVersion", authority.contractVersion);
+        body.put("batchId", batchId);
+        body.put("commands", commands);
+        return Json.write(body);
+    }
+
+    /** A batch item's error rendered as the single route's rejection body. */
+    private static String singleRouteBody(Map<String, Object> error) {
+        Map<String, Object> detail = new LinkedHashMap<>(error);
+        detail.remove("status");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("detail", detail);
+        return Json.write(body);
     }
 
     /**
@@ -219,6 +426,15 @@ final class ClassificationAssignmentOutbox {
         }
     }
 
+    /** The `detail` object of a rejected response, or an empty one when it has none. */
+    private static Map<String, Object> rejectedDetail(String body) {
+        try {
+            return object(object(Json.parse(body)).get("detail"));
+        } catch (RuntimeException malformed) {
+            return new LinkedHashMap<>();
+        }
+    }
+
     /**
      * The authoritative assignment revision a `revisionConflict` reported.
      *
@@ -227,11 +443,9 @@ final class ClassificationAssignmentOutbox {
      * replace a correct expectation with a foreign revision — so that is refused as a
      * protocol integrity failure, exactly as the PC's own rebase does.
      */
-    private static long conflictRevision(String body, ReplicaDb.ClassificationAssignment row)
-            throws Failure {
+    private static long conflictRevision(Map<String, Object> detail,
+                                         ReplicaDb.ClassificationAssignment row) throws Failure {
         try {
-            Map<String, Object> root = object(Json.parse(body));
-            Map<String, Object> detail = object(root.get("detail"));
             if (!CODE_REVISION_CONFLICT.equals(string(detail, "code"))) throw integrity();
             Map<String, Object> current = object(detail.get("current"));
             if (!row.assetId.equals(string(current, "assetId"))) throw integrity();
@@ -297,6 +511,42 @@ final class ClassificationAssignmentOutbox {
         }
     }
 
+    private static Accepted parseAccepted(String body, ReplicaDb.ClassificationAssignment row,
+                                          ClassificationReplica.Adopted authority) throws Failure {
+        try {
+            return parseAccepted(object(Json.parse(body)), row, authority);
+        } catch (Failure failure) {
+            throw failure;
+        } catch (RuntimeException malformed) {
+            throw integrity();
+        }
+    }
+
+    /**
+     * A batch item read as the single route's acceptance body: the item carries the
+     * per-command fields and the batch envelope carries the identity, so the same checks
+     * apply unchanged.
+     */
+    private static Accepted parseAcceptedItem(Map<String, Object> item, Map<String, Object> envelope,
+                                              ReplicaDb.ClassificationAssignment row,
+                                              ClassificationReplica.Adopted authority) throws Failure {
+        try {
+            Map<String, Object> root = new LinkedHashMap<>(item);
+            root.put("libraryId", envelope.get("libraryId"));
+            root.put("epoch", envelope.get("epoch"));
+            root.put("contractVersion", envelope.get("contractVersion"));
+            root.put("commandType", COMMAND_TYPE);
+            List<Object> assignments = new ArrayList<>();
+            assignments.add(item.get("assignment"));
+            root.put("assignments", assignments);
+            return parseAccepted(root, row, authority);
+        } catch (Failure failure) {
+            throw failure;
+        } catch (RuntimeException malformed) {
+            throw integrity();
+        }
+    }
+
     /**
      * Prove a 200 is an acceptance of *this* intent before the durable row is retired.
      *
@@ -305,10 +555,10 @@ final class ClassificationAssignmentOutbox {
      * intent and record state belonging to something else. Every identity field must agree
      * exactly, and the returned projection must be the one shape this command produces.
      */
-    private static Accepted parseAccepted(String body, ReplicaDb.ClassificationAssignment row,
+    private static Accepted parseAccepted(Map<String, Object> root,
+                                          ReplicaDb.ClassificationAssignment row,
                                           ClassificationReplica.Adopted authority) throws Failure {
         try {
-            Map<String, Object> root = object(Json.parse(body));
             if (!authority.libraryId.equals(string(root, "libraryId"))
                     || authority.epoch != number(root, "epoch")
                     || authority.contractVersion != number(root, "contractVersion")

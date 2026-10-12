@@ -146,6 +146,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import command_batch
 import conditional
 import asset_visibility
 
@@ -218,6 +219,8 @@ COMMAND_TYPES = (CREATE, RENAME, MOVE, APPEARANCE, DELETE, ASSIGNMENT)
 #: Commands an ordinary client credential may issue. Move, delete and appearance stay
 #: publisher-only (see "Structural commands" in the module docstring).
 CLIENT_COMMANDS = (ASSIGNMENT, CREATE, RENAME)
+#: The batch route carries tablet multi-select assignment only.
+BATCH_COMMAND_TYPES = (ASSIGNMENT,)
 
 #: Common envelope plus the exact per-command keys. A body carrying anything else is
 #: a caller bug rather than a silently ignored hint.
@@ -933,16 +936,8 @@ def _delete(db, *, row, library_id, epoch, operation_id, payload_sha, entity, cu
         assignments=[], assignment_transition=transition)
 
 
-def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
-                  entity, now):
-    """Execute one typed Classification command inside the caller's ``BEGIN IMMEDIATE``.
-
-    Receipts, canonical state, the ordered changes and the domain cursor commit
-    together or not at all. Structural commands are compare-and-set on the entity
-    revision; the assignment command is compare-and-set on the assignment's own
-    revision. A stale writer therefore receives the current server state instead of
-    overwriting a newer one, and never wins by wall-clock arrival.
-    """
+def require_scope(db, library_id, epoch, contract_version):
+    """The active authority row a command may be applied against, or a coded rejection."""
     asset_visibility.install(db)
     row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
     if row["epoch"] != epoch:
@@ -953,6 +948,20 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
     if contract_version != CONTRACT_VERSION:
         fail(409, authority.CODE_AUTHORITY_CONTRACT_UNSUPPORTED,
              "서버가 지원하지 않는 분류 계약 버전입니다.", domain=DOMAIN)
+    return row
+
+
+def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
+                  entity, now):
+    """Execute one typed Classification command inside the caller's ``BEGIN IMMEDIATE``.
+
+    Receipts, canonical state, the ordered changes and the domain cursor commit
+    together or not at all. Structural commands are compare-and-set on the entity
+    revision; the assignment command is compare-and-set on the assignment's own
+    revision. A stale writer therefore receives the current server state instead of
+    overwriting a newer one, and never wins by wall-clock arrival.
+    """
+    row = require_scope(db, library_id, epoch, contract_version)
     payload_sha = payload_digest(library_id, epoch, contract_version, command_type, entity)
     receipt = db.execute(
         "SELECT payload_digest,result_payload FROM classification_authority_receipts"
@@ -1610,7 +1619,45 @@ def register_classification_authority(app, get_db, require_client, require_publi
                     raise
         return await run_in_threadpool(run)
 
+    @app.put(PREFIX + "/commands/batch")
+    async def classification_command_batch(request: Request,
+                                           authorization: str | None = Header(default=None)):
+        # Only assignment is batchable, and assignment is an ordinary client command.
+        require_client(authorization)
+        body = await command_batch.read_body(request, fail, "invalidClassificationBatch")
+        identity, parsed = command_batch.parse_batch(
+            body, parse_command=parse_command, allowed_types=BATCH_COMMAND_TYPES,
+            uuid_pattern=UUID_PATTERN, fail=fail, invalid_code="invalidClassificationBatch")
+        now = now_iso()
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    response = apply_batch(db, identity, parsed, now)
+                    db.commit()
+                    return response
+                except BaseException:
+                    db.rollback()
+                    raise
+        return await run_in_threadpool(run)
+
     return lambda: startup(get_db)
+
+
+def apply_batch(db, identity, parsed, now):
+    """Apply a parsed batch inside the caller's ``BEGIN IMMEDIATE`` and build the response.
+
+    Identity problems (inactive domain, other library or epoch, unsupported contract) refuse
+    the whole request like the single route; everything else is reported per command.
+    """
+    require_scope(db, identity["libraryId"], identity["epoch"], identity["contractVersion"])
+    results = command_batch.apply_each(
+        db, parsed, apply_one=apply_command, now=now,
+        summarize=lambda result: {"authorityCursor": result["authorityCursor"],
+                                  "assignment": result["assignments"][0]})
+    row = require_scope(db, identity["libraryId"], identity["epoch"], identity["contractVersion"])
+    return {**identity, "authorityCursor": row["cursor"], "results": results}
 
 
 def prune(get_db, days=RETENTION_DAYS, receipt_days=RECEIPT_RETENTION_DAYS, now=None):

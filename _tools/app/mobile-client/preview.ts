@@ -251,6 +251,16 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   // Classification sidebar instead of replacing it.
   if (op === 'albumTree') return {adopted:true,libraryId:'a'.repeat(32),epoch:1,contractVersion:1,cursor:12,code:'',albums:demoAlbums};
   if (op === 'albumMemberships') return demoMembershipState(String(payload.assetId));
+  if (op === 'albumMembershipSetMany') {
+    // Mirrors the native bulk queue: every Asset is queued in one call and reported on its own entry.
+    const albumId=String(payload.albumId),assetIds=(payload.assetIds as string[]).slice(0,100);
+    for(const assetId of assetIds){
+      const selected=new Set(demoAlbumMemberships.get(assetId)??[]);
+      if(payload.desiredState===true)selected.add(albumId);else selected.delete(albumId);
+      demoAlbumMemberships.set(assetId,selected);
+    }
+    return {adopted:true,results:assetIds.map(assetId=>({assetId,ok:true,pending:true,blocked:false,conflictCode:null,message:''}))};
+  }
   if (op === 'albumMembershipSet') {
     const assetId=String(payload.assetId),albumId=String(payload.albumId),selected=new Set(demoAlbumMemberships.get(assetId)??[]);
     if(payload.desiredState===true)selected.add(albumId);else selected.delete(albumId);
@@ -261,6 +271,14 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   // and reported pending, and the periodic read is what turns it confirmed — so the preview
   // shows the same 저장 대기 transition the device does.
   if (op === 'classificationAssignmentState') return demoAssignmentState(String(payload.assetId));
+  if (op === 'classificationAssignmentSetMany') {
+    const assetIds=(payload.assetIds as string[]).slice(0,100);
+    for(const assetId of assetIds){
+      demoAssignments.set(assetId,payload.classificationId==null?null:String(payload.classificationId));
+      demoAssignmentQueuedAt.set(assetId,Date.now());
+    }
+    return {adopted:true,results:assetIds.map(assetId=>({assetId,ok:true,pending:true,blocked:false,conflictCode:null,message:''}))};
+  }
   if (op === 'classificationAssignmentSet') {
     const assetId=String(payload.assetId);
     demoAssignments.set(assetId,payload.classificationId==null?null:String(payload.classificationId));

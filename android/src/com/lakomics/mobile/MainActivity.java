@@ -360,6 +360,7 @@ public final class MainActivity extends Activity {
      case "albumTree":data=albumStatus().put("albums",AlbumReplicaService.get(MainActivity.this).albumList());break;
      case "albumMemberships":data=AlbumReplicaService.get(MainActivity.this).membershipState(p.getString("assetId"));break;
      case "albumMembershipSet":data=AlbumReplicaService.get(MainActivity.this).setMembership(p.getString("assetId"),p.getString("albumId"),p.getBoolean("desiredState"));break;
+     case "albumMembershipSetMany":data=AlbumReplicaService.get(MainActivity.this).setMembershipMany(p.getString("albumId"),p.getJSONArray("assetIds"),p.getBoolean("desiredState"));break;
      case "albumMembershipResolve":data=AlbumReplicaService.get(MainActivity.this).resolveMembership(p.getString("assetId"),p.getString("albumId"),p.getString("action"));break;
      // The single-Asset Classification editor. Both operations are narrow: the read
      // returns the visible assignment plus the live hierarchy, and the write accepts only
@@ -368,6 +369,7 @@ public final class MainActivity extends Activity {
      // expected revision — so no raw Classification command can be constructed here.
      case "classificationAssignmentState":data=AlbumReplicaService.get(MainActivity.this).classificationAssignmentState(p.getString("assetId"));break;
      case "classificationAssignmentSet":data=AlbumReplicaService.get(MainActivity.this).setClassificationAssignment(p.getString("assetId"),p.isNull("classificationId")?null:p.getString("classificationId"));break;
+     case "classificationAssignmentSetMany":data=AlbumReplicaService.get(MainActivity.this).setClassificationAssignmentMany(p.getJSONArray("assetIds"),p.isNull("classificationId")?null:p.getString("classificationId"));break;
      // Library Trash: the web supplies only the Asset, `trash`/`restore` and the lifecycle
      // revision it saw; the native outbox owns every protocol field. There is no empty or
      // tombstone operation: emptying the trash stays on the PC.

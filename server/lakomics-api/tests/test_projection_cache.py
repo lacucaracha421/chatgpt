@@ -169,3 +169,41 @@ CachedSummaryRoutes = with_cache(
 CachedCharacterRoutes = with_cache(test_mobile_characters.MobileCharactersTests)
 CachedHomeRevisitRoutes = with_cache(test_home_revisit.HomeRouteTests)
 CachedClassificationTreeRoutes = with_cache(test_classification_cutover.ClassificationTreeCutoverTests)
+
+
+def test_a_classification_batch_rebuilds_the_cached_counts(self):
+    self.prepare_asset()
+    self.assertEqual(self.commit_asset(test_classification_cutover.ROOT, 0, "legacy-relation").status_code, 200)
+    staged = self.stage(test_classification_cutover.snapshot(
+        assignments=[{"assetId": test_classification_cutover.ASSET,
+                      "classificationId": test_classification_cutover.ROOT}]))
+    self.assertEqual(self.activate(staged.json()["snapshotDigest"]).status_code, 200)
+
+    def counts():
+        listed = self.client.get("/v1/library/classifications", headers=self.admin)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        return {item["id"]: item["asset_count"] for item in listed.json()["items"]}
+
+    self.assertEqual(counts()[test_classification_cutover.ROOT], 1)
+    self.assertEqual(counts()[test_classification_cutover.TAG], 0)
+    with api_app.get_db() as db:
+        before = generation(db)
+    batch = self.client.put("/v1/classifications/authority/commands/batch", headers=self.publisher, json={
+        "libraryId": test_classification_cutover.LIBRARY, "epoch": 1, "contractVersion": 1,
+        "batchId": "44444444-4444-4444-8444-444444444444",
+        "commands": [{"operationId": "55555555-5555-4555-8555-555555555555",
+                      "commandType": "setAssetClassification",
+                      "assetId": test_classification_cutover.ASSET,
+                      "classificationId": test_classification_cutover.TAG, "expectedRevision": 1}]})
+    self.assertEqual(batch.status_code, 200, batch.text)
+    self.assertEqual(batch.json()["results"][0]["status"], "applied")
+    with api_app.get_db() as db:
+        self.assertGreater(generation(db), before)
+    rebuilt = counts()
+    self.assertEqual(rebuilt[test_classification_cutover.TAG], 1)
+    self.assertEqual(rebuilt[test_classification_cutover.ROOT], 0)
+
+
+CachedClassificationBatchRoutes = with_cache(
+    test_classification_cutover.CutoverFixture,
+    test_a_classification_batch_rebuilds_the_cached_counts=test_a_classification_batch_rebuilds_the_cached_counts)

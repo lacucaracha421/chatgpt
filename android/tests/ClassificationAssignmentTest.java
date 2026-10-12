@@ -59,6 +59,13 @@ public final class ClassificationAssignmentTest {
         return rows.size();
     }
 
+    /** Makes a fake transport behave like a server that predates the batch route. */
+    private static void refuseBatchRoute(String path) throws ClassificationAssignmentOutbox.HttpFailure {
+        if (ClassificationAssignmentOutbox.BATCH_PATH.equals(path)) {
+            throw new ClassificationAssignmentOutbox.HttpFailure(404, "{\"detail\":\"Not Found\"}");
+        }
+    }
+
     private static void equal(Object expected, Object actual, String message) {
         if (expected == null ? actual != null : !expected.equals(actual)) {
             throw new AssertionError(message + " (expected " + expected + ", got " + actual + ")");
@@ -100,6 +107,15 @@ public final class ClassificationAssignmentTest {
             malformedAcceptanceNeverDeletesIntent(directory);
             acceptedNoOpRetiresWithoutAdvancingRevision(directory);
             identityMismatchBlocksUnsendableIntent(directory);
+            // Batch delivery.
+            consecutiveDifferentAssetsShareOneBatchRequest(directory);
+            batchOutcomesFollowTheSingleRouteRulesPerRow(directory);
+            anUnknownClassificationInABatchBlocksItsRow(directory);
+            oneAssetNeverTravelsTwiceInOneBatch(directory);
+            aServerWithoutTheBatchRouteGetsTheSingleRoute(directory);
+            aLongQueueIsChunkedAtTheServerLimit(directory);
+            aBatchEchoThatDoesNotMatchLeavesTheQueueIntact(directory);
+            queueingManyAssignmentsIsOneTransactionWithPerAssetResults(directory);
             // The foreground pass.
             receiveCatchUpCannotHideAPendingChoice(directory);
             acceptedCommandAdvancesTheCursorOnce(directory);
@@ -412,6 +428,294 @@ public final class ClassificationAssignmentTest {
                 + "\"updatedAt\":\"2026-09-18T00:00:01Z\"}";
     }
 
+    // ---------------------------------------------------------------------------------
+    // Batch delivery: consecutive intents of different Assets share one request
+    // ---------------------------------------------------------------------------------
+
+    private interface BatchItem {
+        String item(int index, Map<String, Object> command);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String batchResponse(String payload, long cursor, BatchItem factory) {
+        Map<String, Object> request = (Map<String, Object>) Json.parse(payload);
+        List<Object> commands = (List<Object>) request.get("commands");
+        StringBuilder items = new StringBuilder();
+        for (int i = 0; i < commands.size(); i++) {
+            if (i > 0) items.append(',');
+            items.append(factory.item(i, (Map<String, Object>) commands.get(i)));
+        }
+        return "{\"libraryId\":\"" + LIBRARY + "\",\"epoch\":1,\"contractVersion\":1,\"batchId\":\""
+                + request.get("batchId") + "\",\"authorityCursor\":" + cursor + ",\"results\":["
+                + items + "]}";
+    }
+
+    private static String assignmentJson(Map<String, Object> command, long revision) {
+        Object value = command.get("classificationId");
+        return "{\"assetId\":\"" + command.get("assetId") + "\",\"classificationId\":"
+                + (value == null ? "null" : "\"" + value + "\"") + ",\"entityRevision\":" + revision + "}";
+    }
+
+    private static String appliedItem(Map<String, Object> command, boolean changed, long cursor) {
+        long revision = (Long) command.get("expectedRevision") + (changed ? 1 : 0);
+        return "{\"operationId\":\"" + command.get("operationId") + "\",\"status\":\""
+                + (changed ? "applied" : "noop") + "\",\"changed\":" + changed
+                + ",\"changeSequence\":" + (changed ? Long.toString(cursor) : "null")
+                + ",\"authorityCursor\":" + cursor + ",\"assignment\":"
+                + assignmentJson(command, revision) + "}";
+    }
+
+    private static String refusedItem(Map<String, Object> command, String status, int http,
+                                      String code, String extra) {
+        return "{\"operationId\":\"" + command.get("operationId") + "\",\"status\":\"" + status
+                + "\",\"changed\":false,\"changeSequence\":null,\"error\":{\"code\":\"" + code
+                + "\",\"status\":" + http + (extra.isEmpty() ? "" : "," + extra) + "}}";
+    }
+
+    private static void queueAssignment(LibraryReplicaStore store, String assetId,
+                                        String classificationId, String operationId) {
+        store.queueClassificationAssignment("scope-a", assetId, classificationId, operationId,
+                CLOCK.now());
+    }
+
+    private static void consecutiveDifferentAssetsShareOneBatchRequest(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("batch-share.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        queueAssignment(store, "asset_2", SERIES, "b1000000-0000-0000-0000-000000000001");
+        queueAssignment(store, "asset_3", SERIES, "b1000000-0000-0000-0000-000000000002");
+        queueAssignment(store, "asset_1", null, "b1000000-0000-0000-0000-000000000003");
+        List<String> paths = new ArrayList<>();
+        List<String> payloads = new ArrayList<>();
+        ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox((path, payload) -> {
+            paths.add(path);
+            payloads.add(payload);
+            return batchResponse(payload, 20, (index, command) -> appliedItem(command, true, 20 + index));
+        }, store, CLOCK);
+        ClassificationAssignmentOutbox.Flush result = writer.flush("scope-a");
+        equal(Arrays.asList(ClassificationAssignmentOutbox.BATCH_PATH), paths,
+                "Three different Assets travel in exactly one batch request");
+        equal(3, result.sent, "Every accepted command is counted");
+        equal(0, store.classificationOutbox("scope-a").size(), "Accepted intents leave the queue");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = (Map<String, Object>) Json.parse(payloads.get(0));
+        equal(LIBRARY, request.get("libraryId"), "The envelope carries the library");
+        equal(3, ((List<?>) request.get("commands")).size(), "Three commands in one envelope");
+        check(!payloads.get(0).contains("\"commandType\":\"setAssetClassification\",\"libraryId\""),
+                "A command inside the batch does not repeat the shared identity");
+        equal(SERIES, store.classificationAssignment("scope-a", "asset_2").classificationId,
+                "Confirmed assignment follows the batch result");
+        equal(1L, store.classificationAssignment("scope-a", "asset_2").confirmedRevision,
+                "Confirmed revision comes from the item");
+        equal(null, store.classificationAssignment("scope-a", "asset_1").classificationId,
+                "A clear is confirmed too");
+        equal(4L, store.classificationAssignment("scope-a", "asset_1").confirmedRevision,
+                "and advances its lineage");
+        store.close();
+    }
+
+    private static void batchOutcomesFollowTheSingleRouteRulesPerRow(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("batch-outcomes.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        queueAssignment(store, "asset_2", SERIES, "b2000000-0000-0000-0000-000000000001");
+        queueAssignment(store, "asset_3", SERIES, "b2000000-0000-0000-0000-000000000002");
+        queueAssignment(store, "asset_4", SERIES, "b2000000-0000-0000-0000-000000000003");
+        queueAssignment(store, "asset_5", SERIES, "b2000000-0000-0000-0000-000000000004");
+        ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox((path, payload) ->
+                batchResponse(payload, 30, (index, command) -> {
+                    if (index == 0) return appliedItem(command, true, 30);
+                    if (index == 1) return refusedItem(command, "rejected", 409, "assetTombstoned",
+                            "\"assetId\":\"asset_3\"");
+                    if (index == 2) return refusedItem(command, "conflict", 409, "revisionConflict",
+                            "\"authorityCursor\":30,\"current\":{\"assetId\":\"asset_4\","
+                                    + "\"classificationId\":\"" + ORIGINALS + "\",\"entityRevision\":5}");
+                    return appliedItem(command, true, 31);
+                }), store, CLOCK);
+        ClassificationAssignmentOutbox.Flush result = writer.flush("scope-a");
+        equal(1, result.sent, "The first row was confirmed");
+        equal(1, result.dropped, "A tombstoned Asset is dropped, not blocked");
+        equal(1, result.rebased, "A revision conflict rebases onto the authority's revision");
+        check(result.stopped, "A rebased row stops the flush so the retry is the next step");
+        List<ReplicaDb.ClassificationAssignment> rows = store.classificationOutbox("scope-a");
+        equal(2, rows.size(), "Confirmed and dropped rows left; the rebased and the later row remain");
+        equal("pending", rows.get(0).state, "The rebased row stays pending, not blocked");
+        equal(5L, rows.get(0).expectedRevision, "with the authority's revision as its expectation");
+        equal("b2000000-0000-0000-0000-000000000003", rows.get(0).operationId,
+                "and the same operation id");
+        equal("pending", rows.get(1).state, "A row after it is not confirmed around it");
+        store.close();
+    }
+
+    private static void anUnknownClassificationInABatchBlocksItsRow(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("batch-notfound.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        queueAssignment(store, "asset_2", SERIES, "b3000000-0000-0000-0000-000000000001");
+        queueAssignment(store, "asset_3", SERIES, "b3000000-0000-0000-0000-000000000002");
+        ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox((path, payload) ->
+                batchResponse(payload, 30, (index, command) -> index == 0
+                        ? refusedItem(command, "rejected", 404, "classificationNotFound",
+                                "\"classificationId\":\"series\"")
+                        : appliedItem(command, true, 30)), store, CLOCK);
+        ClassificationAssignmentOutbox.Flush result = writer.flush("scope-a");
+        equal(1, result.blocked, "The refused row is durably blocked");
+        equal("classificationNotFound", store.classificationOutbox("scope-a").get(0).conflictCode,
+                "with the server's code");
+        equal("pending", store.classificationOutbox("scope-a").get(1).state,
+                "The later row is not confirmed around it");
+        store.close();
+    }
+
+    private static void oneAssetNeverTravelsTwiceInOneBatch(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("batch-once.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        queueAssignment(store, "asset_2", SERIES, "b4000000-0000-0000-0000-000000000001");
+        queueAssignment(store, "asset_2", null, "b4000000-0000-0000-0000-000000000002");
+        queueAssignment(store, "asset_3", SERIES, "b4000000-0000-0000-0000-000000000003");
+        List<String> paths = new ArrayList<>();
+        ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox((path, payload) -> {
+            paths.add(path);
+            if (ClassificationAssignmentOutbox.BATCH_PATH.equals(path)) {
+                return batchResponse(payload, 40, (index, command) -> appliedItem(command, true, 40 + index));
+            }
+            ReplicaDb.ClassificationAssignment row = store.classificationOutbox("scope-a").get(0);
+            return acceptedAssignment(row.operationId, row.assetId, row.classificationId,
+                    row.expectedRevision + 1, true, 40);
+        }, store, CLOCK);
+        ClassificationAssignmentOutbox.Flush result = writer.flush("scope-a");
+        equal(Arrays.asList(ClassificationAssignmentOutbox.COMMAND_PATH,
+                ClassificationAssignmentOutbox.BATCH_PATH), paths,
+                "The first intent of an Asset goes alone; its successor starts the next batch");
+        equal(3, result.sent, "All three are delivered");
+        store.close();
+    }
+
+    private static void aServerWithoutTheBatchRouteGetsTheSingleRoute(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("batch-old-server.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        queueAssignment(store, "asset_2", SERIES, "b5000000-0000-0000-0000-000000000001");
+        queueAssignment(store, "asset_3", SERIES, "b5000000-0000-0000-0000-000000000002");
+        List<String> paths = new ArrayList<>();
+        ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox((path, payload) -> {
+            paths.add(path);
+            refuseBatchRoute(path);
+            ReplicaDb.ClassificationAssignment row = store.classificationOutbox("scope-a").get(0);
+            return acceptedAssignment(row.operationId, row.assetId, row.classificationId,
+                    row.expectedRevision + 1, true, 50 + paths.size());
+        }, store, CLOCK);
+        ClassificationAssignmentOutbox.Flush first = writer.flush("scope-a");
+        equal(Arrays.asList(ClassificationAssignmentOutbox.BATCH_PATH,
+                ClassificationAssignmentOutbox.COMMAND_PATH, ClassificationAssignmentOutbox.COMMAND_PATH), paths,
+                "A 404 without a coded body falls back to one command per request");
+        equal(2, first.sent, "Both intents are still delivered");
+        queueAssignment(store, "asset_4", SERIES, "b5000000-0000-0000-0000-000000000003");
+        queueAssignment(store, "asset_5", SERIES, "b5000000-0000-0000-0000-000000000004");
+        paths.clear();
+        writer.flush("scope-a");
+        equal(Arrays.asList(ClassificationAssignmentOutbox.COMMAND_PATH,
+                ClassificationAssignmentOutbox.COMMAND_PATH), paths,
+                "The missing route is remembered; later flushes do not retry it");
+        store.close();
+    }
+
+    private static void aLongQueueIsChunkedAtTheServerLimit(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("batch-limit.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        for (int i = 0; i < ClassificationAssignmentOutbox.BATCH_LIMIT + 1; i++) {
+            queueAssignment(store, "bulk_" + i, SERIES,
+                    String.format("b6000000-0000-0000-0000-%012d", i));
+        }
+        List<String> paths = new ArrayList<>();
+        int[] largest = {0};
+        ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox((path, payload) -> {
+            paths.add(path);
+            if (ClassificationAssignmentOutbox.BATCH_PATH.equals(path)) {
+                return batchResponse(payload, 60, (index, command) -> {
+                    largest[0] = Math.max(largest[0], index + 1);
+                    return appliedItem(command, true, 60 + index);
+                });
+            }
+            ReplicaDb.ClassificationAssignment row = store.classificationOutbox("scope-a").get(0);
+            return acceptedAssignment(row.operationId, row.assetId, row.classificationId,
+                    row.expectedRevision + 1, true, 61);
+        }, store, CLOCK);
+        ClassificationAssignmentOutbox.Flush result = writer.flush("scope-a");
+        equal(Arrays.asList(ClassificationAssignmentOutbox.BATCH_PATH,
+                ClassificationAssignmentOutbox.COMMAND_PATH), paths,
+                "One full batch of 100, then the last intent on its own");
+        equal(100, largest[0], "The batch carried exactly the server's limit");
+        equal(101, result.sent, "Every intent is delivered");
+        equal(0, store.classificationOutbox("scope-a").size(), "The queue drains");
+        store.close();
+    }
+
+    private static void aBatchEchoThatDoesNotMatchLeavesTheQueueIntact(Path directory) throws Exception {
+        String[] mutations = {"operation", "count", "batch", "asset"};
+        for (String mutation : mutations) {
+            SqliteDb db = new SqliteDb(directory.resolve("batch-echo-" + mutation + ".sqlite"), true);
+            LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+            queueAssignment(store, "asset_2", SERIES, "b7000000-0000-0000-0000-000000000001");
+            queueAssignment(store, "asset_3", SERIES, "b7000000-0000-0000-0000-000000000002");
+            ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox((path, payload) -> {
+                String response = batchResponse(payload, 70, (index, command) ->
+                        appliedItem(command, true, 70 + index));
+                if ("operation".equals(mutation)) {
+                    return response.replace("b7000000-0000-0000-0000-000000000001",
+                            "b7000000-0000-0000-0000-0000000000ff");
+                }
+                if ("count".equals(mutation)) {
+                    return response.substring(0, response.indexOf("},{\"operationId\"")) + "}]}";
+                }
+                if ("asset".equals(mutation)) {
+                    return response.replaceFirst("\"assignment\":\\{\"assetId\":\"asset_2\"",
+                            "\"assignment\":{\"assetId\":\"asset_9\"");
+                }
+                return response.replaceFirst("\"batchId\":\"[^\"]*\"", "\"batchId\":\"other\"");
+            }, store, CLOCK);
+            try {
+                writer.flush("scope-a");
+                throw new AssertionError("A mismatched batch echo must not retire intents: " + mutation);
+            } catch (ClassificationAssignmentOutbox.Failure failure) {
+                equal(ClassificationAssignmentOutbox.CODE_PROTOCOL_INTEGRITY, failure.code,
+                        "A mismatched batch echo is a protocol-integrity failure: " + mutation);
+            }
+            equal(2, store.classificationOutbox("scope-a").size(),
+                    "Nothing is retired on a bad echo: " + mutation);
+            store.close();
+        }
+    }
+
+    private static void queueingManyAssignmentsIsOneTransactionWithPerAssetResults(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("many-queue.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        queueAssignment(store, "asset_5", SERIES, "b8000000-0000-0000-0000-0000000000a0");
+        store.blockClassificationAssignment("scope-a", store.classificationOutbox("scope-a").get(0).seq,
+                "classificationNotFound", "{}");
+        List<String> ids = Arrays.asList("asset_2", "asset_5", "bad id!", "asset_1", "asset_3");
+        List<String> ops = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) ops.add("b8000000-0000-0000-0000-00000000000" + i);
+        List<LibraryReplicaStore.ManyEdit> edits = store.queueClassificationAssignmentMany("scope-a",
+                ids, ORIGINALS, ops, CLOCK.now());
+        equal(5, edits.size(), "One entry per requested Asset, in order");
+        check(edits.get(0).ok && edits.get(0).changed, "A new assignment is queued");
+        check(!edits.get(1).ok && "blocked".equals(edits.get(1).code), "An Asset blocked by a conflict is refused alone");
+        check(!edits.get(2).ok && "invalidAsset".equals(edits.get(2).code), "An invalid id is refused alone");
+        check(edits.get(3).ok && !edits.get(3).changed, "An Asset already in that Classification is a satisfied no-op");
+        check(edits.get(4).ok && edits.get(4).changed, "A second new assignment is queued");
+        List<ReplicaDb.ClassificationAssignment> rows = store.classificationOutbox("scope-a");
+        equal(3, rows.size(), "The blocked row plus the two queued commands");
+        equal(0L, rows.get(1).expectedRevision, "A never-assigned Asset presents revision 0");
+        equal(ORIGINALS, store.classificationAssignment("scope-a", "asset_2").classificationId,
+                "The optimistic value is visible at once");
+        try {
+            store.queueClassificationAssignmentMany("scope-a", Arrays.asList("asset_9"), "missing",
+                    Arrays.asList("b8000000-0000-0000-0000-0000000000b0"), CLOCK.now());
+            throw new AssertionError("An unknown Classification refuses the whole request");
+        } catch (IllegalArgumentException expected) {
+            checks++;
+        }
+        equal(3, store.classificationOutbox("scope-a").size(), "A refused request writes nothing");
+        store.close();
+    }
+
     private static void acceptedCommandsRetireInFifoOrder(Path directory) throws Exception {
         try (Fixture fixture = new Fixture((method, target, body) -> {
             // The fixture answers for the row the writer is actually delivering, which is the
@@ -702,6 +1006,7 @@ public final class ClassificationAssignmentTest {
         final int[] calls = {0};
         ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox(
                 (path, payload) -> {
+                    refuseBatchRoute(path);
                     calls[0]++;
                     throw new ClassificationAssignmentOutbox.HttpFailure(409,
                             "{\"detail\":{\"code\":\"assetTombstoned\",\"assetId\":\"x\"}}");
@@ -730,6 +1035,7 @@ public final class ClassificationAssignmentTest {
         final int[] calls = {0};
         ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox(
                 (path, payload) -> {
+                    refuseBatchRoute(path);
                     calls[0]++;
                     throw new ClassificationAssignmentOutbox.HttpFailure(404,
                             "{\"detail\":{\"code\":\"classificationNotFound\","

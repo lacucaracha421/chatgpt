@@ -14,13 +14,17 @@
 .mobile-collections .collection-list--grid .collection-card__meta { padding-top: var(--space-1); }
 .mobile-collections .collection-card__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); font-weight: 500; }
 /* A tablet pick turns the case inside its cell instead of lifting beyond the column. */
-.mobile-collections .collection-list__cell:has(.collection-cover-cell) { overflow:clip; }
-.mobile-collections .collection-cover-cell .collection-card__light { overflow:hidden; }
+.mobile-collections .collection-list__cell:has(.collection-cover-cell) { overflow:visible; }
+.mobile-collections .collection-cover-cell .collection-card__light { overflow:visible; }
+/* Reserve the spine lead (.08 * .6 of the face height, at least 4.8px) and full front.
+   Both poses use the same hinge, so picking changes only the rotation, not its anchor. */
+.mobile-collections .collection-cover-cell .collection-light-case { --face-height:min(var(--case-height), calc((var(--cell-width) - 4.8px) / var(--case-ratio)), calc(var(--cell-width) / (var(--case-ratio) + .048))); }
+.mobile-collections .collection-cover-cell .collection-light-case .cs-box { transform-origin:0 100%; transition:transform 360ms var(--ease-sheet); }
 .mobile-collections .collection-cover-cell:active { transform:none; background:var(--color-surface-pressed); }
-.mobile-collections .collection-cover-cell .collection-light-case[data-front] .cs-box { transform-origin:center; transform:scale(.98); transition:transform var(--motion-small) var(--ease-standard); }
+.mobile-collections .collection-cover-cell .collection-light-case[data-front] .cs-box { transform:rotateX(0deg) rotateY(0deg); }
 .mobile-collections .collection-cover-cell .collection-light-case[data-front]::after { transform:none; }
 @media (prefers-reduced-motion:reduce) {
-  .mobile-collections .collection-cover-cell .collection-light-case[data-front] .cs-box { transition:none; }
+  .mobile-collections .collection-cover-cell .collection-light-case .cs-box { transition:none; }
 }
 /* 만화 · 책장: the shared bookcase rows (mangaShelf.css) run to the screen edge like the planks; titles keep the gutter. */
 .mobile-collections .manga-shelf-list { margin: 0 calc(var(--mobile-gutter) * -1); padding: var(--space-4) 0 var(--space-6); }

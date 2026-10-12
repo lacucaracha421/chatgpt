@@ -1073,6 +1073,105 @@ final class AlbumReplicaService {
         }
     }
 
+    /** The most Assets one bridge call may carry; the web client chunks larger selections. */
+    static final int MANY_LIMIT = 100;
+
+    private static List<String> manyAssetIds(JSONArray assetIds) {
+        if (assetIds == null || assetIds.length() < 1 || assetIds.length() > MANY_LIMIT) {
+            throw new IllegalArgumentException("Invalid Asset list");
+        }
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < assetIds.length(); i++) {
+            String id = assetIds.optString(i, "");
+            if (!id.matches("[A-Za-z0-9_-]{1,128}") || ids.contains(id)) {
+                throw new IllegalArgumentException("Invalid Asset id");
+            }
+            ids.add(id);
+        }
+        return ids;
+    }
+
+    private static List<String> freshOperationIds(int count) {
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < count; i++) ids.add(UUID.randomUUID().toString());
+        return ids;
+    }
+
+    /**
+     * Queue one desired membership state for up to 100 Assets in a single durable transaction.
+     *
+     * Per-Asset results, never all-or-nothing: an Asset whose relation is blocked behind an
+     * unresolved conflict is refused on its own entry while the rest are queued.
+     */
+    JSONObject setMembershipMany(String albumId, JSONArray assetIds, boolean desiredState) {
+        if (albumId == null || !albumId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Album id");
+        }
+        List<String> ids = manyAssetIds(assetIds);
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            if (scope.isEmpty()) throw new IllegalStateException("Not configured");
+            engine();
+            List<LibraryReplicaStore.ManyEdit> edits = store.queueMembershipMany(scope, albumId,
+                    ids, desiredState, freshOperationIds(ids.size()), Instant.now().toString());
+            try {
+                JSONArray results = new JSONArray();
+                boolean queued = false;
+                for (LibraryReplicaStore.ManyEdit edit : edits) {
+                    queued |= edit.changed;
+                    results.put(new JSONObject()
+                            .put("assetId", edit.assetId)
+                            .put("ok", edit.ok)
+                            .put("pending", edit.changed)
+                            .put("blocked", "blocked".equals(edit.code))
+                            .put("conflictCode", edit.code == null ? JSONObject.NULL : edit.code)
+                            .put("message", edit.ok ? "" : "앨범 연결 충돌을 먼저 해결해 주세요."));
+                }
+                if (queued) localWork();
+                return new JSONObject().put("adopted", true).put("results", results);
+            } catch (org.json.JSONException unrepresentable) {
+                throw new IllegalStateException("Album membership result unavailable");
+            }
+        }
+    }
+
+    /**
+     * Queue one desired Classification (null to clear) for up to 100 Assets in a single durable
+     * transaction, with per-Asset results.
+     */
+    JSONObject setClassificationAssignmentMany(JSONArray assetIds, String classificationId) {
+        if (classificationId != null && !classificationId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Classification id");
+        }
+        List<String> ids = manyAssetIds(assetIds);
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            if (scope.isEmpty()) throw new IllegalStateException("Not configured");
+            engine();
+            List<LibraryReplicaStore.ManyEdit> edits = store.queueClassificationAssignmentMany(
+                    scope, ids, classificationId, freshOperationIds(ids.size()),
+                    Instant.now().toString());
+            try {
+                JSONArray results = new JSONArray();
+                boolean queued = false;
+                for (LibraryReplicaStore.ManyEdit edit : edits) {
+                    queued |= edit.changed;
+                    results.put(new JSONObject()
+                            .put("assetId", edit.assetId)
+                            .put("ok", edit.ok)
+                            .put("pending", edit.changed)
+                            .put("blocked", "blocked".equals(edit.code))
+                            .put("conflictCode", edit.code == null ? JSONObject.NULL : edit.code)
+                            .put("message", edit.ok ? "" : "분류 충돌을 먼저 해결해 주세요."));
+                }
+                if (queued) localWork();
+                return new JSONObject().put("adopted", true).put("results", results);
+            } catch (org.json.JSONException unrepresentable) {
+                throw new IllegalStateException("Classification assignment result unavailable");
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Library Trash (mobile): trash / restore intents
     // -----------------------------------------------------------------------

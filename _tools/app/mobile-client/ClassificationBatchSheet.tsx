@@ -4,6 +4,7 @@ import {BottomSheet} from './BottomSheet';
 import {Button} from './ui';
 import {ClassificationAssignmentChoices,type ClassificationAssignmentState} from './ClassificationAssignmentEditor';
 import {errorText,native} from './transport';
+import {batches,manyFailures,type ManyReply} from './batchCommands';
 import {viewerEditEvent} from './listGeneration';
 import './ClassificationBatchSheet.css';
 
@@ -46,16 +47,21 @@ export function ClassificationBatchSheet({assetIds,onClose,onBusyChange,onComple
     saving.current=true;setBusy(true);onBusyChange(true);setProgress(0);
     let done=0,success=0,failed=unavailable.length,pendingWrites=0;
     const failures=unavailable.map(item=>item.error||item.state?.conflictMessage||'분류 동기화가 준비된 뒤 편집할 수 있습니다.');
-    await forEachBounded(eligible,async({assetId})=>{
+    // One native call per 100 Assets; each Asset keeps its own outcome.
+    for(const chunk of batches(eligible)){
       // Do not start another write after a connection/navigation change unmounts the sheet.
-      if(!alive.current){failed++;return;}
+      if(!alive.current){failed+=chunk.length;continue;}
+      const ids=chunk.map(item=>item.assetId);
       try{
-        const next=await native<ClassificationAssignmentState>('classificationAssignmentSet',{assetId,classificationId:selectedId});
-        if(!next.adopted||next.blocked)throw new Error(next.conflictMessage||'분류 변경을 적용할 수 없습니다.');
-        success++;if(next.pending)pendingWrites++;
-      }catch(reason){failed++;failures.push(errorText(reason));}
-      finally{done++;if(alive.current)setProgress(done);}
-    });
+        const reply=await native<ManyReply>('classificationAssignmentSetMany',{assetIds:ids,classificationId:selectedId});
+        const problems=manyFailures(ids,reply,'분류 변경을 적용할 수 없습니다.');
+        problems.forEach((problem,index)=>{
+          if(problem===null){success++;if(reply.results.find(item=>item.assetId===ids[index])?.pending)pendingWrites++;}
+          else{failed++;failures.push(problem);}
+        });
+      }catch(reason){failed+=chunk.length;failures.push(errorText(reason));}
+      done+=chunk.length;if(alive.current)setProgress(done);
+    }
     if(success)window.dispatchEvent(viewerEditEvent());
     saving.current=false;
     if(!alive.current)return;
