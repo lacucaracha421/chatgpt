@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.5.38 — 2026-10-13
+
+- The Arca Live picker follows the PC sidebar folder arrangement and the series/group
+  screens' stored group and character order, including search matches. Groups, loose
+  characters and sub-folders retain the series screen's section order.
+- PC-pinned folders appear in a top 고정 section in pin order and remain in the full tree.
+  Requires the PC picker API with explicit `order`, `pinned` and `pinOrder` fields.
+  Older PC responses retain their supplied order and show no pin section.
+
+## 3.5.37 — 2026-10-13
+
+- Arca Live image picker: besides library folders the panel can pick from a character or a
+  character group (COLLECTOR-PICKER-001). In the folder popover each series folder lists its
+  groups (expandable to their characters), then its characters without a group, then its
+  sub-folders, each with its image count and a small folder / group / character icon.
+  Searching matches characters and groups by name too and shows their series path beside them.
+  The header button names the chosen scope with its path. 하위 폴더 포함 only applies to folders,
+  so it is hidden for a character or group (the count keeps its place). The last scope,
+  folder or character/group, is remembered like the last folder.
+- A character's pictures are the ones the PC's character folders show: every current acceptance
+  (manual and automatic) plus its reference pictures; a group is the union of its enabled
+  characters and its own 기타. Needs a PC Lakomics build whose `/v1/picker/folders` answers with
+  `characters` and whose `/v1/picker/batch` accepts `scope`; an older PC still lists folders only.
+- A character or group that disappeared or was switched off on the PC sends you back to the
+  popover with a message, like a missing folder.
+
 ## 3.5.36 — 2026-10-13
 
 - Add the Arca Live image picker (COLLECTOR-PICKER-001, desktop Chrome, new-post page

@@ -29,7 +29,7 @@
     if (status === 409) return "library";
     if (status === 413) return "tooLarge";
     if (status === 423) return code === "pickerPrivacyUnavailable" ? "privacyUnavailable" : "locked";
-    if (status === 404) return code === "pickerAssetNotFound" ? "missing" : code === "classification_not_found" ? "folderGone" : "notFound";
+    if (status === 404) return code === "pickerAssetNotFound" ? "missing" : code === "classification_not_found" ? "folderGone" : code === "pickerScopeNotFound" ? "scopeGone" : "notFound";
     if (status === 400) return "invalid";
     return status >= 500 ? "server" : "unknown";
   }
@@ -148,6 +148,8 @@
 
   // ---- folder tree -----------------------------------------------------------------------
   function normalize(text) { return String(text || "").normalize("NFC").toLowerCase(); }
+  const cleanOrder = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const pcOrder = (a, b) => (cleanOrder(a.order) ?? Number.MAX_SAFE_INTEGER) - (cleanOrder(b.order) ?? Number.MAX_SAFE_INTEGER);
   function cleanFolders(entries) {
     const seen = new Set(), result = [];
     for (const entry of Array.isArray(entries) ? entries : []) {
@@ -156,6 +158,7 @@
       result.push({
         id: entry.id, parentId: validId(entry.parentId) ? entry.parentId : null, name: entry.name.trim().slice(0, 200),
         path: (Array.isArray(entry.path) ? entry.path : [entry.name]).filter(part => typeof part === "string").map(part => part.slice(0, 200)).slice(0, 32),
+        order: cleanOrder(entry.order), pinned: entry.pinned === true, pinOrder: cleanOrder(entry.pinOrder),
         imageCount: clampInt(entry.imageCount), imageCountWithDescendants: clampInt(entry.imageCountWithDescendants, clampInt(entry.imageCount)),
       });
     }
@@ -195,6 +198,114 @@
     const byId = new Map(entries.map(entry => [entry.id, entry])), result = [];
     for (let node = byId.get(id), guard = 0; node && node.parentId && guard < 40; node = byId.get(node.parentId), guard += 1) result.push(node.parentId);
     return result;
+  }
+
+  // ---- characters and groups ---------------------------------------------------------------
+  // The PC lists them next to the folders: `{kind: "character"|"group", id, name, seriesId,
+  // seriesPath, groupId, imageCount}`. They hang under their series folder in the popover.
+  const SCOPE_KINDS = ["folder", "character", "group"];
+  function cleanCharacters(entries) {
+    const seen = new Set(), result = [];
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry || (entry.kind !== "character" && entry.kind !== "group") || !validId(entry.id) || !validId(entry.seriesId) || typeof entry.name !== "string" || !entry.name.trim()) continue;
+      const key = entry.kind + ":" + entry.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({
+        order: cleanOrder(entry.order),
+        kind: entry.kind, id: entry.id, name: entry.name.trim().slice(0, 200), seriesId: entry.seriesId,
+        seriesPath: (Array.isArray(entry.seriesPath) ? entry.seriesPath : []).filter(part => typeof part === "string").map(part => part.slice(0, 200)).slice(0, 32),
+        groupId: entry.kind === "character" && validId(entry.groupId) ? entry.groupId : null, imageCount: clampInt(entry.imageCount),
+      });
+    }
+    return result;
+  }
+  // `{kind, id}` of a remembered or chosen scope, or null.
+  function cleanScope(value) {
+    return value && typeof value === "object" && SCOPE_KINDS.includes(value.kind) && validId(value.id) ? { kind: value.kind, id: value.id } : null;
+  }
+  function findScope(folders, characters, scope) {
+    if (!scope) return null;
+    if (scope.kind === "folder") return folders.find(entry => entry.id === scope.id) || null;
+    return characters.find(entry => entry.kind === scope.kind && entry.id === scope.id) || null;
+  }
+  // Breadcrumb parts of a scope: a folder's path, or series path > (group >) name.
+  function scopeParts(folders, characters, scope) {
+    const entry = findScope(folders, characters, scope);
+    if (!entry) return [];
+    if (scope.kind === "folder") return entry.path.length ? entry.path : [entry.name];
+    const group = entry.groupId ? characters.find(item => item.kind === "group" && item.id === entry.groupId) : null;
+    return [...entry.seriesPath, ...(group ? [group.name] : []), entry.name];
+  }
+  // The scope part of a batch request; folders keep their original shape.
+  function batchTarget(scope, includeDescendants) {
+    return scope.kind === "folder" ? { folderId: scope.id, includeDescendants: includeDescendants === true } : { scope: { kind: scope.kind, id: scope.id } };
+  }
+  function scopeCount(entry, kind, includeDescendants) {
+    return kind === "folder" ? (includeDescendants ? entry.imageCountWithDescendants : entry.imageCount) : entry.imageCount;
+  }
+
+  // Rows of the popover tree. Folders as in `folderRows`; under a series folder its groups,
+  // then its characters without a group, then its sub-folders. A group's own characters hang
+  // under the group. While searching, folders, groups and characters match by name and the
+  // path above a match stays; character and group rows then carry their series path as `secondary`.
+  function treeRows(folders, characters = [], { expanded = new Set(), query = "" } = {}) {
+    folders = [...folders].sort(pcOrder);
+    characters = [...characters].sort(pcOrder);
+    const folderIds = new Set(folders.map(entry => entry.id)), byId = new Map(folders.map(entry => [entry.id, entry]));
+    const byParent = new Map(), groupsOf = new Map(), looseOf = new Map(), membersOf = new Map(), groupById = new Map();
+    const push = (map, key, value) => { if (!map.has(key)) map.set(key, []); map.get(key).push(value); };
+    for (const entry of folders) push(byParent, entry.parentId && folderIds.has(entry.parentId) ? entry.parentId : null, entry);
+    const usable = characters.filter(entry => folderIds.has(entry.seriesId));
+    for (const entry of usable) if (entry.kind === "group") groupById.set(entry.id, entry);
+    for (const entry of usable) {
+      if (entry.kind === "group") push(groupsOf, entry.seriesId, entry);
+      else if (entry.groupId && groupById.has(entry.groupId) && groupById.get(entry.groupId).seriesId === entry.seriesId) push(membersOf, entry.groupId, entry);
+      else push(looseOf, entry.seriesId, entry);
+    }
+    const needle = normalize(query.trim());
+    const keep = new Set(), direct = new Set();
+    const keepFolderChain = id => { for (let node = byId.get(id), guard = 0; node && guard < 40; node = byId.get(node.parentId), guard += 1) keep.add("folder:" + node.id); };
+    if (needle) {
+      for (const entry of folders) if (normalize(entry.name).includes(needle)) { direct.add("folder:" + entry.id); keepFolderChain(entry.id); }
+      for (const entry of usable) {
+        if (!normalize(entry.name).includes(needle)) continue;
+        direct.add(entry.kind + ":" + entry.id); keep.add(entry.kind + ":" + entry.id); keepFolderChain(entry.seriesId);
+        if (entry.kind === "character" && entry.groupId && groupById.has(entry.groupId)) keep.add("group:" + entry.groupId);
+      }
+    }
+    const rows = [];
+    const row = (entry, kind, depth, children, open, secondary) => {
+      const key = kind + ":" + entry.id, hit = Boolean(needle) && direct.has(key), at = hit ? normalize(entry.name).indexOf(needle) : -1;
+      rows.push({ entry, kind, depth, hasChildren: children, open, match: at >= 0 ? [at, at + needle.length] : null, ancestorOnly: Boolean(needle) && !hit, secondary: needle && kind !== "folder" ? secondary : "" });
+    };
+    for (const entry of folders.filter(entry => entry.pinned === true && (!needle || direct.has("folder:" + entry.id)))
+      .sort((a, b) => (cleanOrder(a.pinOrder) ?? Number.MAX_SAFE_INTEGER) - (cleanOrder(b.pinOrder) ?? Number.MAX_SAFE_INTEGER))) {
+      row(entry, "folder", 0, false, false, "");
+      rows[rows.length - 1].section = "pinned";
+    }
+    const shown = (kind, entry) => !needle || keep.has(kind + ":" + entry.id);
+    (function walk(parent, depth) {
+      for (const entry of byParent.get(parent) || []) {
+        if (!shown("folder", entry)) continue;
+        const groups = (groupsOf.get(entry.id) || []).filter(group => shown("group", group));
+        const loose = (looseOf.get(entry.id) || []).filter(member => shown("character", member));
+        const subs = (byParent.get(entry.id) || []).filter(child => shown("folder", child));
+        const hasChildren = (groupsOf.get(entry.id) || []).length + (looseOf.get(entry.id) || []).length + (byParent.get(entry.id) || []).length > 0;
+        const open = hasChildren && (needle ? groups.length + loose.length + subs.length > 0 : expanded.has(entry.id));
+        row(entry, "folder", depth, hasChildren, open, "");
+        if (!open) continue;
+        for (const group of groups) {
+          const members = (membersOf.get(group.id) || []).filter(member => shown("character", member));
+          const hasMembers = (membersOf.get(group.id) || []).length > 0, groupOpen = hasMembers && (needle ? members.length > 0 : expanded.has(group.id));
+          row(group, "group", depth + 1, hasMembers, groupOpen, group.seriesPath.join(" › "));
+          if (groupOpen) for (const member of members) row(member, "character", depth + 2, false, false, member.seriesPath.join(" › "));
+        }
+        for (const member of loose) row(member, "character", depth + 1, false, false, member.seriesPath.join(" › "));
+        walk(entry.id, depth + 1);
+      }
+    })(null, 0);
+    return rows;
   }
 
   // ---- no-blink busy label ---------------------------------------------------------------
@@ -242,6 +353,7 @@
   globalThis.LakomicsPickerModel = {
     ID, BATCH, MAX_BATCH, MAX_EXCLUDE, VIEW_KEY, PC_KEY, MIMES, validId, clampInt, isArcaWriteUrl, mapFailure, STATES, stateFor, jobReason,
     createSelection, createSeen, createJobs, gridKey, trayKey, cleanFolders, folderRows, ancestorIds, createDelayedBusy,
+    SCOPE_KINDS, cleanCharacters, cleanScope, findScope, scopeParts, batchTarget, scopeCount, treeRows,
     toBase64, fromBase64, formatCount, formatBytes,
   };
 })();

@@ -121,3 +121,50 @@ test('Alt+Shift+L is routed to the active Arca write tab only', async () => {
   assert.equal(f.sent.length, 1);
   fixture.activeUrl = 'https://arca.live/b/channel/write';
 });
+
+test('folders also carry the characters and groups of the PC, cleaned; an older PC answers without them', async () => {
+  const f = fixture({ routes: { '/v1/picker/folders': () => json(200, {
+    entries: [{ id: 'f1', parentId: null, name: '리버스', path: ['리버스'], imageCount: 3, imageCountWithDescendants: 9 }],
+    characters: [
+      { kind: 'group', id: 'g1', name: '라플라스', seriesId: 'f1', seriesPath: ['리버스'], groupId: null, imageCount: 5, secret: 'C:\\x' },
+      { kind: 'character', id: 'c1', name: '라플라스 A', seriesId: 'f1', seriesPath: ['리버스'], groupId: 'g1', imageCount: 4 },
+      { kind: 'character', id: '../x', name: 'bad', seriesId: 'f1' },
+    ],
+  }) } });
+  const reply = await f.service.handle({ type: 'picker:folders' }, page);
+  assert.deepEqual(reply.characters.map(c => `${c.kind}:${c.id}:${c.imageCount}`), ['group:g1:5', 'character:c1:4']);
+  assert.equal(JSON.stringify(reply).includes('secret'), false);
+  assert.equal(reply.characters[1].groupId, 'g1');
+  const older = fixture({ routes: { '/v1/picker/folders': () => json(200, { entries: [] }) } });
+  assert.deepEqual((await older.service.handle({ type: 'picker:folders' }, page)).characters, []);
+});
+
+test('batch takes either a folder or a character/group scope, never both and never a folder-kind scope', async () => {
+  const bodies = [];
+  const f = fixture({ routes: { '/v1/picker/batch': init => { bodies.push(JSON.parse(init.body)); return json(200, { items: [], remaining: 0 }); } } });
+  assert.equal((await f.service.handle({ type: 'picker:batch', scope: { kind: 'group', id: 'g1' }, exclude: ['a'], limit: 18 }, page)).ok, true);
+  assert.equal((await f.service.handle({ type: 'picker:batch', scope: { kind: 'character', id: 'c1' } }, page)).ok, true);
+  assert.deepEqual(bodies, [{ scope: { kind: 'group', id: 'g1' }, limit: 18, exclude: ['a'] }, { scope: { kind: 'character', id: 'c1' }, limit: 18, exclude: [] }]);
+  assert.equal('folderId' in bodies[0] || 'includeDescendants' in bodies[0], false);
+  for (const bad of [{}, { folderId: 'f1', scope: { kind: 'group', id: 'g1' } }, { scope: { kind: 'folder', id: 'f1' } }, { scope: { kind: 'series', id: 'x' } }, { scope: { kind: 'group', id: '../x' } }, { scope: 'g1' }, { scope: { kind: 'group' } }]) {
+    assert.equal((await f.service.handle({ type: 'picker:batch', ...bad }, page)).kind, 'invalid', JSON.stringify(bad));
+  }
+  assert.equal(bodies.length, 2, 'invalid requests never reach the PC');
+});
+
+test('an unknown character or group becomes scopeGone', async () => {
+  const f = fixture({ routes: { '/v1/picker/batch': () => json(404, { code: 'pickerScopeNotFound' }) } });
+  const reply = await f.service.handle({ type: 'picker:batch', scope: { kind: 'character', id: 'c1' } }, page);
+  assert.deepEqual([reply.ok, reply.kind, reply.status], [false, 'scopeGone', 404]);
+});
+
+
+test('folder and character order and pin metadata survive the service worker boundary', async () => {
+  const f = fixture({ routes: { '/v1/picker/folders': () => json(200, {
+    entries: [{ id: 'z', name: 'Zulu', order: 0, pinned: true, pinOrder: 2 }],
+    characters: [{ kind: 'character', id: 'c', name: 'Person', seriesId: 'z', order: 7 }],
+  }) } });
+  const reply = await f.service.handle({ type: 'picker:folders' }, page);
+  assert.equal(reply.entries[0].order, 0); assert.equal(reply.entries[0].pinned, true);
+  assert.equal(reply.entries[0].pinOrder, 2); assert.equal(reply.characters[0].order, 7);
+});

@@ -64,15 +64,21 @@
 
     async function folders() {
       const result = await json("/v1/picker/folders", { timeoutMs: 10000 });
-      return result.ok ? { ok: true, entries: Model.cleanFolders(result.data?.entries) } : fail(result);
+      // An older PC build has no `characters`; the panel then simply lists folders.
+      return result.ok ? { ok: true, entries: Model.cleanFolders(result.data?.entries), characters: Model.cleanCharacters(result.data?.characters) } : fail(result);
     }
 
     async function batch(message) {
       const exclude = Array.isArray(message.exclude) ? message.exclude : [];
       const limit = message.limit === undefined ? Model.BATCH : Number(message.limit);
-      if (!Model.validId(message.folderId) || !Number.isInteger(limit) || limit < 1 || limit > Model.MAX_BATCH
+      // Exactly one of a folder and a character/group scope.
+      const scope = message.scope === undefined ? null : Model.cleanScope(message.scope);
+      const byScope = message.scope !== undefined, byFolder = message.folderId !== undefined;
+      if (byScope === byFolder || (byScope && (!scope || scope.kind === "folder")) || (byFolder && !Model.validId(message.folderId))
+        || !Number.isInteger(limit) || limit < 1 || limit > Model.MAX_BATCH
         || exclude.length > Model.MAX_EXCLUDE || !exclude.every(Model.validId)) return { ok: false, kind: "invalid", status: 400, code: "invalid" };
-      const result = await json("/v1/picker/batch", { method: "POST", body: { folderId: message.folderId, includeDescendants: message.includeDescendants === true, limit, exclude }, timeoutMs: 20000 });
+      const target = byScope ? { scope: { kind: scope.kind, id: scope.id } } : { folderId: message.folderId, includeDescendants: message.includeDescendants === true };
+      const result = await json("/v1/picker/batch", { method: "POST", body: { ...target, limit, exclude }, timeoutMs: 20000 });
       if (!result.ok) return fail(result);
       const items = (Array.isArray(result.data?.items) ? result.data.items : [])
         .filter(item => item && Model.validId(item.assetId) && Model.MIMES.includes(item.mime))

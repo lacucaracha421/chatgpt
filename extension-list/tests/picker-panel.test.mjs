@@ -82,11 +82,11 @@ const FOLDERS = [
 ];
 const item = n => ({ assetId: 'a' + n, width: 1536, height: 2048, byteSize: 1_468_006, mime: 'image/webp' });
 
-function setup({ stored = {}, folders = FOLDERS, batches = null, width = 1440, formRight = 900 } = {}) {
+function setup({ stored = {}, folders = FOLDERS, characters = [], batches = null, width = 1440, formRight = 900 } = {}) {
   const w = world({ html: toolbarHtml, width }), doc = w.document;
   doc.querySelector('form').getBoundingClientRect = () => ({ left: 100, right: formRight, top: 0, bottom: 500, width: formRight - 100, height: 500 });
   const sent = [], store = { ...stored }; let nextBatch = 0;
-  const behaviour = { folders: { ok: true, entries: folders }, batch: null, original: null };
+  const behaviour = { folders: { ok: true, entries: folders, characters }, batch: null, original: null };
   const send = async message => {
     sent.push(message);
     if (message.type === 'picker:folders') return behaviour.folders;
@@ -366,5 +366,179 @@ test('a remembered folder that disappeared on the PC sends the user back to the 
   await f.panel.open(); await settle();
   assert.equal(f.q('.empty b').textContent, '폴더를 골라 주세요'); assert.ok(f.q('.pop'));
   assert.equal(f.panel.state.folderId, null);
+  f.panel.destroy(); f.w.close();
+});
+
+// ---- characters and groups ------------------------------------------------------------------
+const SERIES_PATH = ['캐릭터', '아로나'];
+const PEOPLE = [
+  { kind: 'group', id: 'g1', name: '라플라스', seriesId: 'f2', seriesPath: SERIES_PATH, groupId: null, imageCount: 30 },
+  { kind: 'character', id: 'c1', name: '라플라스 A', seriesId: 'f2', seriesPath: SERIES_PATH, groupId: 'g1', imageCount: 20 },
+  { kind: 'character', id: 'c2', name: '호시노', seriesId: 'f2', seriesPath: SERIES_PATH, groupId: null, imageCount: 8 },
+];
+const VIEW = 'lakomics:picker:view:v1';
+const batchesOf = f => f.sent.filter(m => m.type === 'picker:batch').map(plain);
+
+test('the popover lists groups, then characters, under their series folder with distinct icons and counts', async () => {
+  const f = setup({ characters: PEOPLE });
+  await f.panel.open(); await settle();
+  const ids = () => f.qa('.trow').map(r => `${r.dataset.kind}:${r.dataset.id}`);
+  assert.deepEqual(ids(), ['folder:f1', 'folder:f3']);
+  f.q('.trow[data-id="f1"] .tw').click();
+  assert.deepEqual(ids(), ['folder:f1', 'folder:f2', 'folder:f3']);
+  f.q('.trow[data-id="f2"] .tw').click();
+  assert.deepEqual(ids(), ['folder:f1', 'folder:f2', 'group:g1', 'character:c2', 'folder:f3'], 'groups first, then characters without a group');
+  assert.equal(f.q('.trow[data-id="g1"]').getAttribute('aria-expanded'), 'false');
+  assert.equal(f.q('.trow[data-id="c2"]').hasAttribute('aria-expanded'), false);
+  f.q('.trow[data-id="g1"] .tw').click();
+  assert.deepEqual(ids(), ['folder:f1', 'folder:f2', 'group:g1', 'character:c1', 'character:c2', 'folder:f3'], 'a group opens to its characters');
+  assert.equal(f.q('.trow[data-id="c1"]').getAttribute('aria-level'), '4');
+  assert.equal(f.q('.trow[data-id="c2"]').getAttribute('aria-level'), '3');
+  // counts: folders with sub-folders, groups and characters their own
+  assert.deepEqual(['f2', 'g1', 'c1', 'c2'].map(id => f.q(`.trow[data-id="${id}"] .n`).textContent), ['40', '30', '20', '8']);
+  // one small icon per row, different for folder, group and character
+  const shape = id => f.q(`.trow[data-id="${id}"] .ki path`).getAttribute('d');
+  assert.equal(new Set([shape('f2'), shape('g1'), shape('c2')]).size, 3);
+  assert.equal(shape('c1'), shape('c2'));
+  assert.equal(f.qa('.trow .ki').length, f.qa('.trow').length);
+  assert.equal(f.q('.trow .sec'), null, 'no secondary text while browsing');
+  f.panel.destroy(); f.w.close();
+});
+
+test('search matches characters and groups by name and shows the series path as secondary text', async () => {
+  const f = setup({ characters: PEOPLE });
+  await f.panel.open(); await settle();
+  const input = f.q('.pop input');
+  input.value = '라플라스'; input.dispatchEvent(new f.w.Event('input'));
+  assert.deepEqual(f.qa('.trow').map(r => `${r.dataset.kind}:${r.dataset.id}`), ['folder:f1', 'folder:f2', 'group:g1', 'character:c1']);
+  assert.deepEqual(f.qa('.trow mark').map(m => m.textContent), ['라플라스', '라플라스']);
+  assert.equal(f.q('.trow[data-id="g1"] .sec').textContent, '캐릭터 › 아로나');
+  assert.equal(f.q('.trow[data-id="c1"] .sec').textContent, '캐릭터 › 아로나');
+  assert.equal(f.q('.trow[data-id="f2"] .sec'), null);
+  assert.ok(f.q('.trow[data-id="f2"]').classList.contains('anc'));
+  input.value = '호시노'; input.dispatchEvent(new f.w.Event('input'));
+  assert.deepEqual(f.qa('.trow').map(r => r.dataset.id), ['f1', 'f2', 'c2']);
+  input.value = '없는'; input.dispatchEvent(new f.w.Event('input'));
+  assert.equal(f.q('.pop .none').textContent, '찾는 폴더·캐릭터가 없음');
+  f.panel.destroy(); f.w.close();
+});
+
+test('choosing a character loads its pictures by scope, names it in the header and hides the sub-folder switch', async () => {
+  const f = setup({ characters: PEOPLE });
+  await f.panel.open(); await settle();
+  const input = f.q('.pop input');
+  input.value = '호시노'; input.dispatchEvent(new f.w.Event('input'));
+  f.q('.trow[data-id="c2"]').click(); await settle();
+  assert.equal(f.q('.pop'), null);
+  const request = batchesOf(f)[0];
+  assert.deepEqual({ ...request, exclude: [...request.exclude] }, { type: 'picker:batch', scope: { kind: 'character', id: 'c2' }, exclude: [], limit: 18 });
+  assert.equal('folderId' in request || 'includeDescendants' in request, false);
+  assert.equal(f.qa('.tile').length, 18);
+  assert.equal(f.q('.folder .par').textContent, '캐릭터 › 아로나 › '); assert.equal(f.q('.folder .leaf').textContent, '호시노');
+  assert.equal(f.q('.lk-sub .cnt').textContent, '8장', 'the character count, not a folder count');
+  assert.equal(f.q('.lk-sub .scope').hidden, true, 'the sub-folder switch is hidden, not shown disabled');
+  assert.equal(f.q('.lk-sub .cnt').parentElement, f.q('.lk-sub'), 'the count keeps its place in the row');
+  assert.equal(f.q('.folder .ic').firstElementChild.getAttribute('d'), f.w.LakomicsPickerPanel.icon(f.doc, 'character').firstElementChild.getAttribute('d'), 'the header icon is the character icon');
+  assert.deepEqual(plain(f.store[VIEW]), { folderId: null, includeDescendants: true, scope: { kind: 'character', id: 'c2' } });
+  assert.equal(f.panel.state.folderId, null);
+  // the next "다른 그림" keeps asking for the same scope
+  f.q('.foot .cbtn').click(); await settle();
+  assert.deepEqual(batchesOf(f)[1].scope, { kind: 'character', id: 'c2' });
+  assert.equal(batchesOf(f)[1].exclude.length, 18);
+  // a group, then back to a folder: the switch returns and the request has the folder shape
+  f.q('.folder').click();
+  f.q('.pop input').value = '라플라스'; f.q('.pop input').dispatchEvent(new f.w.Event('input'));
+  f.q('.trow[data-id="g1"]').click(); await settle();
+  assert.deepEqual(batchesOf(f)[2].scope, { kind: 'group', id: 'g1' });
+  assert.equal(f.q('.folder .leaf').textContent, '라플라스'); assert.equal(f.q('.lk-sub .cnt').textContent, '30장'); assert.equal(f.q('.lk-sub .scope').hidden, true);
+  f.q('.folder').click();
+  f.q('.pop input').value = '아로나'; f.q('.pop input').dispatchEvent(new f.w.Event('input'));
+  f.q('.trow[data-id="f2"]').click(); await settle();
+  const folderRequest = batchesOf(f)[3];
+  assert.equal(folderRequest.folderId, 'f2'); assert.equal(folderRequest.includeDescendants, true); assert.equal('scope' in folderRequest, false);
+  assert.equal(f.q('.lk-sub .scope').hidden, false); assert.equal(f.q('.lk-sub .cnt').textContent, '40장');
+  assert.deepEqual(plain(f.store[VIEW]), { folderId: 'f2', includeDescendants: true });
+  f.panel.destroy(); f.w.close();
+});
+
+test('a remembered character or group scope is restored on the next open, with its own request shape', async () => {
+  const f = setup({ characters: PEOPLE, stored: { [VIEW]: { folderId: null, includeDescendants: false, scope: { kind: 'group', id: 'g1' } } } });
+  await f.panel.open(); await settle();
+  assert.equal(f.q('.pop'), null, 'no picker when the scope is remembered');
+  assert.deepEqual(batchesOf(f)[0].scope, { kind: 'group', id: 'g1' });
+  assert.equal(f.q('.folder .leaf').textContent, '라플라스'); assert.equal(f.q('.lk-sub .scope').hidden, true);
+  assert.equal(f.panel.state.scopeKind, 'group'); assert.equal(f.panel.state.scopeId, 'g1');
+  // opening the popover shows the remembered row expanded to it and marked as the current one
+  f.q('.folder').click();
+  assert.ok(f.q('.trow[data-id="g1"]').classList.contains('me')); assert.equal(f.q('.trow[data-id="g1"] .cur') !== null, true);
+  // a member of a group: the popover opens the group around it
+  f.panel.destroy(); f.w.close();
+  const g = setup({ characters: PEOPLE, stored: { [VIEW]: { scope: { kind: 'character', id: 'c1' }, includeDescendants: true } } });
+  await g.panel.open(); await settle();
+  assert.equal(g.q('.folder .leaf').textContent, '라플라스 A'); assert.equal(g.q('.folder .par').textContent, '캐릭터 › 아로나 › 라플라스 › ');
+  g.q('.folder').click();
+  assert.ok(g.q('.trow[data-id="c1"]').classList.contains('me'));
+  // junk in the stored view is ignored
+  g.panel.destroy(); g.w.close();
+  const h = setup({ characters: PEOPLE, stored: { [VIEW]: { folderId: 'f2', scope: { kind: 'series', id: 'c1' }, includeDescendants: true } } });
+  await h.panel.open(); await settle();
+  assert.equal(batchesOf(h)[0].folderId, 'f2');
+  h.panel.destroy(); h.w.close();
+});
+
+test('a remembered character that is gone on the PC sends the user back to the picker', async () => {
+  const missing = setup({ characters: PEOPLE, stored: { [VIEW]: { scope: { kind: 'character', id: 'zz' }, includeDescendants: true } } });
+  await missing.panel.open(); await settle();
+  assert.equal(batchesOf(missing).length, 0, 'unknown on the list: no request');
+  assert.equal(missing.q('.empty b').textContent, '폴더를 골라 주세요'); assert.ok(missing.q('.pop'));
+  missing.panel.destroy(); missing.w.close();
+  const f = setup({ characters: PEOPLE, stored: { [VIEW]: { scope: { kind: 'character', id: 'c2' }, includeDescendants: true } } });
+  f.behaviour.batch = async () => ({ ok: false, kind: 'scopeGone' });
+  await f.panel.open(); await settle();
+  assert.equal(f.q('.empty b').textContent, '폴더를 골라 주세요'); assert.match(f.q('.empty small').textContent, /캐릭터·그룹/);
+  assert.ok(f.q('.pop')); assert.equal(f.panel.state.scopeId, null); assert.equal(f.panel.state.folderId, null);
+  assert.equal(f.q('.lk-sub .scope').hidden, false, 'with nothing chosen the switch is back');
+  f.panel.destroy(); f.w.close();
+});
+
+test('a character without pictures says so and offers no sub-folder action', async () => {
+  const f = setup({ characters: PEOPLE, stored: { [VIEW]: { scope: { kind: 'character', id: 'c2' }, includeDescendants: false } }, batches: [[]] });
+  await f.panel.open(); await settle();
+  assert.equal(f.q('.empty b').textContent, '이 캐릭터에 그림 없음'); assert.equal(f.q('.empty .btn'), null);
+  f.panel.destroy(); f.w.close();
+});
+
+test('popover keyboard walks groups and characters: right opens a group, left goes to its parent row', async () => {
+  const f = setup({ characters: PEOPLE, stored: { [VIEW]: { scope: { kind: 'character', id: 'c2' }, includeDescendants: true } } });
+  await f.panel.open(); await settle();
+  f.q('.folder').click();
+  const input = f.q('.pop input');
+  assert.deepEqual(f.qa('.trow').map(r => r.dataset.id), ['f1', 'f2', 'g1', 'c2', 'f3']);
+  f.key(input, 'ArrowDown'); f.key(input, 'ArrowDown'); // f1 -> f2 -> g1
+  f.key(input, 'ArrowRight');
+  assert.deepEqual(f.qa('.trow').map(r => r.dataset.id), ['f1', 'f2', 'g1', 'c1', 'c2', 'f3']);
+  f.key(input, 'ArrowDown'); f.key(input, 'ArrowLeft'); // member c1 -> its group g1
+  assert.ok(f.qa('.trow').find(r => r.dataset.id === 'g1').classList.contains('kf'));
+  f.key(input, 'ArrowDown'); f.key(input, 'Enter'); await settle();
+  assert.deepEqual(batchesOf(f).at(-1).scope, { kind: 'character', id: 'c1' });
+  f.panel.destroy(); f.w.close();
+});
+
+
+test('고정 section precedes the full tree in pin order and search keeps PC order', async () => {
+  const f = setup({ folders: [
+    { id: 'a', name: 'match Alpha', path: ['match Alpha'], imageCount: 0, imageCountWithDescendants: 0, parentId: null, order: 1, pinned: true, pinOrder: 0 },
+    { id: 'z', name: 'match Zulu', path: ['match Zulu'], imageCount: 0, imageCountWithDescendants: 0, parentId: null, order: 0, pinned: true, pinOrder: 1 },
+  ] });
+  await f.panel.open(); await settle();
+  assert.deepEqual(f.qa('.tree-section').map(e => e.textContent), ['고정', '폴더']);
+  assert.deepEqual(f.qa('.trow').map(e => [e.dataset.section, e.dataset.id]),
+    [['pinned', 'a'], ['pinned', 'z'], ['tree', 'z'], ['tree', 'a']]);
+  const input = f.q('.pop input'); input.value = 'match'; input.dispatchEvent(new f.w.Event('input'));
+  assert.deepEqual(f.qa('.trow').map(e => e.dataset.id), ['a', 'z', 'z', 'a']);
+  input.value = 'Zulu'; input.dispatchEvent(new f.w.Event('input'));
+  assert.deepEqual(f.qa('.trow').map(e => e.dataset.id), ['z', 'z']);
+  f.q('.trow[data-section="pinned"]').click(); await settle();
+  assert.equal(f.sent.find(m => m.type === 'picker:batch').folderId, 'z');
   f.panel.destroy(); f.w.close();
 });

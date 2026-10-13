@@ -4,6 +4,11 @@
 //! service: the folder tree with eligible image counts, a random batch of thumbnails from
 //! one folder, one thumbnail, and (only after the user presses "본문에 넣기") one original.
 //!
+//! Besides folders the panel can draw from a character or a character group (a group is its
+//! characters plus its own 기타 bucket). `/folders` lists them under `characters`, and a batch
+//! takes `{"scope": {"kind": "character"|"group", "id": ...}}` instead of `folderId`; their
+//! membership is the PC's own (`unit_members`).
+//!
 //! Eligibility is decided here and nowhere else (`eligibility_sql`): a normal-status image or
 //! GIF row of the main library. The Private Vault (plain folder index and encrypted store) is
 //! a separate store whose items are never rows of `assets`, so the picker cannot reach them.
@@ -55,9 +60,23 @@ pub(crate) struct Privacy {
 const PRIVACY_FRESH: Duration = Duration::from_millis(1000);
 const PRIVACY_WAIT: Duration = Duration::from_millis(1500);
 
+/// Presentation preferences reported with the privacy answer by the PC window.
+#[derive(Debug, Clone, Default)]
+pub(super) struct PickerContext {
+    pub(super) privacy: Privacy,
+    pub(super) order_ids: Vec<String>,
+    pub(super) pinned_ids: Vec<String>,
+}
+
+impl From<Privacy> for PickerContext {
+    fn from(privacy: Privacy) -> Self {
+        Self { privacy, ..Self::default() }
+    }
+}
+
 #[derive(Default)]
 struct GateState {
-    latest: Option<(Privacy, Instant)>,
+    latest: Option<(PickerContext, Instant)>,
     pending: Option<String>,
 }
 
@@ -72,13 +91,18 @@ pub(crate) struct PrivacyGate {
 
 impl PrivacyGate {
     /// Accepts the page's answer to the pending request only.
+    #[cfg(test)]
     pub(crate) fn report(&self, nonce: &str, privacy: Privacy) -> bool {
+        self.report_context(nonce, privacy.into())
+    }
+
+    pub(super) fn report_context(&self, nonce: &str, context: PickerContext) -> bool {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.pending.as_deref() != Some(nonce) {
             return false;
         }
         state.pending = None;
-        state.latest = Some((privacy, Instant::now()));
+        state.latest = Some((context, Instant::now()));
         self.changed.notify_all();
         true
     }
@@ -86,19 +110,29 @@ impl PrivacyGate {
     /// The last answer when it is fresh, otherwise a new one: `ask` receives the nonce and
     /// must hand it to the page (returning false when it could not). Concurrent callers share
     /// one question.
+    #[cfg(test)]
     fn read(
         &self,
         ask: impl Fn(&str) -> bool,
         fresh_for: Duration,
         wait: Duration,
     ) -> Result<Privacy, ApiError> {
+        self.read_context(ask, fresh_for, wait).map(|context| context.privacy)
+    }
+
+    fn read_context(
+        &self,
+        ask: impl Fn(&str) -> bool,
+        fresh_for: Duration,
+        wait: Duration,
+    ) -> Result<PickerContext, ApiError> {
         let started = Instant::now();
         let deadline = started + wait;
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         loop {
-            if let Some((privacy, at)) = state.latest {
-                if at.elapsed() < fresh_for || at >= started {
-                    return Ok(privacy);
+            if let Some((context, at)) = &state.latest {
+                if at.elapsed() < fresh_for || *at >= started {
+                    return Ok(context.clone());
                 }
             }
             if state.pending.is_none() {
@@ -131,20 +165,35 @@ impl PrivacyGate {
 
 /// Reads the saved UI preferences in the main window (`lakomics.uiPreferences.v1`). A missing
 /// window, a page that does not answer, or unreadable storage is "unknown".
-pub(super) fn read_privacy(app: &AppHandle, gate: &PrivacyGate) -> Result<Privacy, ApiError> {
-    gate.read(
+pub(super) fn read_context(
+    app: &AppHandle,
+    gate: &PrivacyGate,
+    library: Option<&Library>,
+    folders_requested: bool,
+) -> Result<PickerContext, ApiError> {
+    // buildTree uses localeCompare("ko") for unranked folders. Resolve that fallback
+    // in the same PC WebView instead of approximating its collation in SQLite.
+    gate.read_context(
         |nonce| {
+            let folders = library.and_then(|library| library.read_without_lock(|connection| {
+                let mut statement = connection.prepare("SELECT id,name FROM classification_entries")?;
+                let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            }).ok());
+            let Some(folders) = folders else { return false; };
             app.get_webview_window("main")
-                .is_some_and(|window| window.eval(privacy_probe_script(nonce)).is_ok())
+                .is_some_and(|window| window.eval(privacy_probe_script(nonce, &folders)).is_ok())
         },
-        PRIVACY_FRESH,
+        if folders_requested { Duration::ZERO } else { PRIVACY_FRESH },
         PRIVACY_WAIT,
     )
 }
 
-fn privacy_probe_script(nonce: &str) -> String {
+fn privacy_probe_script(nonce: &str, folders: &[(String, String)]) -> String {
+    let folders = serde_json::to_string(folders).expect("folder names serialize");
     format!(
-        "(function(){{var p=false,n=false;try{{var v=JSON.parse(window.localStorage.getItem('lakomics.uiPreferences.v1')||'{{}}');if(v&&typeof v==='object'){{p=v.privacyMode===true;n=v.nsfwFilter===true;}}}}catch(e){{return;}}try{{window.__TAURI_INTERNALS__.invoke('report_picker_privacy',{{nonce:'{nonce}',privacyMode:p,nsfwFilter:n}});}}catch(e){{}}}})();"
+        "(function(){{var p=false,n=false,v={{}},o=[],pins=[];try{{v=JSON.parse(window.localStorage.getItem('lakomics.uiPreferences.v1')||'{{}}');if(v&&typeof v==='object'){{p=v.privacyMode===true;n=v.nsfwFilter===true;}}}}catch(e){{return;}}try{{v=v&&typeof v==='object'?v:{{}};var ids=Array.isArray(v.classificationOrderIds)?v.classificationOrderIds:[],rank=new Map(ids.map((id,i)=>[id,i]));o={folders}.sort((a,b)=>(rank.get(a[0])??Number.MAX_SAFE_INTEGER)-(rank.get(b[0])??Number.MAX_SAFE_INTEGER)||a[1].localeCompare(b[1],'ko')).map(a=>a[0]);pins=Array.isArray(v.pinnedClassificationIds)?v.pinnedClassificationIds.filter(id=>typeof id==='string'):[];}}catch(e){{o=[];pins=[];}}try{{window.__TAURI_INTERNALS__.invoke('report_picker_privacy',{{nonce:'{nonce}',privacyMode:p,nsfwFilter:n,orderIds:o,pinnedIds:pins}});}}catch(e){{}}}})();"
     )
 }
 
@@ -156,14 +205,15 @@ pub(super) fn cache_headers(response: &mut ApiResponse) {
 pub(super) fn dispatch(
     request: &ApiRequest,
     library: &Library,
-    privacy: Privacy,
+    context: PickerContext,
 ) -> Result<ApiResponse, ApiError> {
+    let privacy = context.privacy;
     if privacy.privacy_mode {
         return Err(ApiError::PickerLibraryLocked);
     }
     let path = request.path.as_str();
     match request.method.as_str() {
-        "GET" if path == "/v1/picker/folders" => folders(library, privacy),
+        "GET" if path == "/v1/picker/folders" => folders(library, privacy, &context),
         "GET" if path.starts_with(THUMBNAIL_PREFIX) => {
             thumbnail(library, privacy, &path[THUMBNAIL_PREFIX.len()..])
         }
@@ -220,16 +270,218 @@ struct FolderEntry {
     path: Vec<String>,
     image_count: u64,
     image_count_with_descendants: u64,
+    order: usize,
+    pinned: bool,
+    pin_order: Option<usize>,
+}
+
+/// A character or a character group the panel can pick from, next to the folders.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CharacterEntry {
+    kind: &'static str,
+    order: usize,
+    id: String,
+    name: String,
+    series_id: String,
+    series_path: Vec<String>,
+    group_id: Option<String>,
+    image_count: u64,
 }
 
 #[derive(Serialize)]
 struct FoldersResponse {
     entries: Vec<FolderEntry>,
+    characters: Vec<CharacterEntry>,
 }
 
-fn folders(library: &Library, privacy: Privacy) -> Result<ApiResponse, ApiError> {
+// ------------------------------------------------------- character membership
+
+/// Every enabled character and every group, as `(kind, unit id, target id, series id)`. A
+/// group is its enabled characters plus its own 기타 bucket (a target with role `extras`
+/// and `extras_group_id` = the group); a series-level 기타 belongs to no unit.
+const ALL_UNITS_SQL: &str = "
+    SELECT 'character' AS unit_kind, t.id AS unit_id, t.id AS target_id,
+           t.series_classification_id AS series_id
+    FROM character_targets AS t
+    WHERE t.role='character' AND t.enabled=1 AND t.series_classification_id IS NOT NULL
+    UNION ALL
+    SELECT 'group', g.id, gm.target_id, g.series_id
+    FROM character_groups AS g
+    CROSS JOIN character_group_members AS gm ON gm.group_id=g.id
+    CROSS JOIN character_targets AS t ON t.id=gm.target_id
+    WHERE (t.role='character' AND t.enabled=1) OR (t.role='extras' AND t.extras_group_id=g.id)";
+
+/// One character (`?1`).
+const CHARACTER_UNIT_SQL: &str = "
+    SELECT 'character' AS unit_kind, t.id AS unit_id, t.id AS target_id,
+           t.series_classification_id AS series_id
+    FROM character_targets AS t
+    WHERE t.id=?1 AND t.role='character' AND t.enabled=1
+      AND t.series_classification_id IS NOT NULL";
+
+/// One group (`?1`).
+const GROUP_UNIT_SQL: &str = "
+    SELECT 'group' AS unit_kind, g.id AS unit_id, gm.target_id AS target_id,
+           g.series_id AS series_id
+    FROM character_groups AS g
+    CROSS JOIN character_group_members AS gm ON gm.group_id=g.id
+    CROSS JOIN character_targets AS t ON t.id=gm.target_id
+    WHERE g.id=?1
+      AND ((t.role='character' AND t.enabled=1) OR (t.role='extras' AND t.extras_group_id=g.id))";
+
+/// The classification folders of a library, to decide which folders lie inside a series.
+struct FolderGraph {
+    parent: HashMap<String, String>,
+    children: HashMap<String, Vec<String>>,
+}
+
+/// A series folder's subtree and the folders above it (the series itself is in both).
+struct SeriesScope {
+    inside: HashSet<String>,
+    above: HashSet<String>,
+}
+
+impl FolderGraph {
+    fn new(rows: impl IntoIterator<Item = (String, Option<String>)>) -> Self {
+        let mut graph = FolderGraph {
+            parent: HashMap::new(),
+            children: HashMap::new(),
+        };
+        for (id, parent) in rows {
+            if let Some(parent) = parent {
+                graph
+                    .children
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(id.clone());
+                graph.parent.insert(id, parent);
+            }
+        }
+        graph
+    }
+
+    fn scope(&self, series: &str) -> SeriesScope {
+        let mut inside = HashSet::from([series.to_owned()]);
+        let mut queue = vec![series.to_owned()];
+        while let Some(folder) = queue.pop() {
+            for child in self.children.get(&folder).into_iter().flatten() {
+                if inside.insert(child.clone()) {
+                    queue.push(child.clone());
+                }
+            }
+        }
+        let mut above = HashSet::from([series.to_owned()]);
+        let mut current = series;
+        while let Some(parent) = self.parent.get(current) {
+            if !above.insert(parent.clone()) {
+                break;
+            }
+            current = parent;
+        }
+        SeriesScope { inside, above }
+    }
+}
+
+/// Eligible images of the chosen units, once per unit: `members` holds `(index into units,
+/// asset rowid)`.
+struct UnitMembers {
+    /// `(unit kind, unit id)`.
+    units: Vec<(String, String)>,
+    members: HashSet<(usize, i64)>,
+}
+
+fn text<'a>(row: &'a rusqlite::Row<'_>, column: usize) -> rusqlite::Result<&'a str> {
+    row.get_ref(column)?.as_str().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+/// Membership is what the PC's character folders show (`SIDEBAR_COUNTS_SQL` and
+/// `TARGET_GALLERY_SQL` in `library/character_hub.rs`): the current acceptances of
+/// `character_relations` (manual and automatic; the last decision per image wins, so a later
+/// rejection or removal drops it) plus the character's own references and learned
+/// references, restricted to normal images that sit in the series folder's subtree, or that
+/// were accepted from a folder above the series. The SQL joins the memberships, the asset
+/// and its folder links (`CROSS JOIN` keeps the chosen units as the driver); the folder test
+/// is done here against [`FolderGraph`] because a recursive folder scope inside a correlated
+/// subquery is rebuilt per image by SQLite (about 100 us each).
+fn unit_members(
+    connection: &Connection,
+    graph: &FolderGraph,
+    units: &str,
+    eligible: &str,
+    unit_id: Option<&str>,
+) -> Result<UnitMembers, LibraryError> {
+    let mut statement = connection.prepare(&format!(
+        "WITH chosen(unit_kind, unit_id, target_id, series_id) AS ({units}),
+         members(unit_kind, unit_id, series_id, asset_id, accepted) AS (
+             SELECT c.unit_kind, c.unit_id, c.series_id, r.asset_id, 1
+             FROM chosen c CROSS JOIN character_relations r ON r.target_id=c.target_id
+             UNION ALL
+             SELECT c.unit_kind, c.unit_id, c.series_id, r.asset_id, 0
+             FROM chosen c CROSS JOIN character_references r ON r.target_id=c.target_id
+             WHERE r.asset_id IS NOT NULL
+             UNION ALL
+             SELECT c.unit_kind, c.unit_id, c.series_id, r.asset_id, 0
+             FROM chosen c CROSS JOIN character_learned_references r ON r.target_id=c.target_id
+         ),
+         unit_assets(unit_kind, unit_id, series_id, asset_id, accepted) AS (
+             SELECT unit_kind, unit_id, series_id, asset_id, MAX(accepted)
+             FROM members GROUP BY unit_kind, unit_id, series_id, asset_id
+         )
+         SELECT u.unit_kind, u.unit_id, u.series_id, u.accepted, asset.rowid, link.classification_id
+         FROM unit_assets AS u
+         CROSS JOIN assets AS asset ON asset.id=u.asset_id
+         CROSS JOIN asset_classifications AS link ON link.asset_id=asset.id
+         WHERE {eligible}"
+    ))?;
+    // Rows of one unit and one series arrive together, so the lookups below run on changes only.
+    let mut result = UnitMembers {
+        units: Vec::new(),
+        members: HashSet::new(),
+    };
+    let mut unit_slots = HashMap::<(String, String), usize>::new();
+    let mut scopes = Vec::<SeriesScope>::new();
+    let mut scope_slots = HashMap::<String, usize>::new();
+    let (mut unit, mut unit_slot) = ((String::new(), String::new()), usize::MAX);
+    let (mut series, mut scope_slot) = (String::new(), usize::MAX);
+    let mut rows = statement.query(params_from_iter(unit_id.iter()))?;
+    while let Some(row) = rows.next()? {
+        let (kind, id) = (text(row, 0)?, text(row, 1)?);
+        if unit_slot == usize::MAX || kind != unit.0 || id != unit.1 {
+            unit = (kind.to_owned(), id.to_owned());
+            unit_slot = *unit_slots.entry(unit.clone()).or_insert_with(|| {
+                result.units.push(unit.clone());
+                result.units.len() - 1
+            });
+        }
+        let row_series = text(row, 2)?;
+        if scope_slot == usize::MAX || row_series != series {
+            series = row_series.to_owned();
+            scope_slot = *scope_slots.entry(series.clone()).or_insert_with(|| {
+                scopes.push(graph.scope(&series));
+                scopes.len() - 1
+            });
+        }
+        let scope = &scopes[scope_slot];
+        let folder = text(row, 5)?;
+        if scope.inside.contains(folder)
+            || (row.get::<_, i64>(3)? == 1 && scope.above.contains(folder))
+        {
+            result.members.insert((unit_slot, row.get(4)?));
+        }
+    }
+    Ok(result)
+}
+
+fn folders(library: &Library, privacy: Privacy, context: &PickerContext) -> Result<ApiResponse, ApiError> {
     let eligible = eligibility_sql(privacy);
-    let (entries, direct, multi_linked) = library
+    let (mut entries, direct, multi_linked, units, unit_counts) = library
         .read_without_lock(|connection| {
             let snapshot = connection.unchecked_transaction()?;
             let mut statement = snapshot.prepare(
@@ -280,10 +532,57 @@ fn folders(library: &Library, privacy: Privacy) -> Result<ApiResponse, ApiError>
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             drop(statement);
-            Ok((entries, direct, multi_linked))
+
+            // Enabled characters and groups with their eligible image counts: one query for
+            // the names, one grouped query for the counts.
+            let mut statement = snapshot.prepare(
+                "SELECT kind,id,name,series_id,group_id FROM (
+                 SELECT 'group' AS kind, g.id, g.name, g.series_id, NULL AS group_id,
+                        g.position, 0 AS kind_rank
+                 FROM character_groups AS g
+                 UNION ALL
+                 SELECT 'character', t.id, t.display_name, t.series_classification_id, gm.group_id,
+                        o.position, 1
+                 FROM character_targets AS t
+                 JOIN character_folder_order AS o ON o.target_id=t.id
+                 LEFT JOIN character_group_members AS gm ON gm.target_id=t.id
+                 WHERE t.role='character' AND t.enabled=1
+                   AND t.series_classification_id IS NOT NULL)
+                 ORDER BY kind_rank,series_id,position IS NULL,position,
+                          CASE WHEN kind='group' THEN name END,id",
+            )?;
+            let units = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            let graph = FolderGraph::new(
+                entries
+                    .iter()
+                    .map(|(id, parent, _)| (id.clone(), parent.clone())),
+            );
+            let mut unit_counts = HashMap::<(String, String), u64>::new();
+            let found = unit_members(&snapshot, &graph, ALL_UNITS_SQL, &eligible, None)?;
+            for (slot, _) in &found.members {
+                *unit_counts.entry(found.units[*slot].clone()).or_default() += 1;
+            }
+            Ok((entries, direct, multi_linked, units, unit_counts))
         })
         .map_err(internal)?;
 
+    let ranks: HashMap<&str, usize> = context.order_ids.iter().enumerate()
+        .map(|(rank, id)| (id.as_str(), rank)).collect();
+    // Stable fallback for folders created after the window's snapshot.
+    entries.sort_by_key(|(id, _, _)| ranks.get(id.as_str()).copied().unwrap_or(usize::MAX));
+    let pins: HashMap<&str, usize> = context.pinned_ids.iter().enumerate().rev()
+        .map(|(rank, id)| (id.as_str(), rank)).collect();
     let index: HashMap<&str, usize> = entries
         .iter()
         .enumerate()
@@ -340,7 +639,39 @@ fn folders(library: &Library, privacy: Privacy) -> Result<ApiResponse, ApiError>
     }
     settle(&mut hits, &mut totals);
 
+    let mut characters = Vec::<CharacterEntry>::new();
+    for (kind, id, name, series_id, group_id) in units {
+        // A series folder that is gone (corrupt link) leaves nothing to nest the entry under.
+        let Some(&series) = index.get(series_id.as_str()) else {
+            continue;
+        };
+        let mut series_path: Vec<String> = lineage(series)
+            .into_iter()
+            .map(|ancestor| entries[ancestor].2.clone())
+            .collect();
+        series_path.reverse();
+        let kind = if kind == "group" {
+            "group"
+        } else {
+            "character"
+        };
+        let image_count = unit_counts
+            .get(&(kind.to_owned(), id.clone()))
+            .copied()
+            .unwrap_or(0);
+        characters.push(CharacterEntry {
+            order: characters.len(),
+            kind,
+            id,
+            name,
+            series_id,
+            series_path,
+            group_id,
+            image_count,
+        });
+    }
     let response = FoldersResponse {
+        characters,
         entries: entries
             .iter()
             .enumerate()
@@ -351,6 +682,9 @@ fn folders(library: &Library, privacy: Privacy) -> Result<ApiResponse, ApiError>
                     .collect();
                 path.reverse();
                 FolderEntry {
+                    order: position,
+                    pinned: pins.contains_key(id.as_str()),
+                    pin_order: pins.get(id.as_str()).copied(),
                     id: id.clone(),
                     parent_id: parent_id.clone(),
                     name: name.clone(),
@@ -369,12 +703,20 @@ fn folders(library: &Library, privacy: Privacy) -> Result<ApiResponse, ApiError>
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BatchRequest {
-    folder_id: String,
+    folder_id: Option<String>,
     #[serde(default)]
     include_descendants: bool,
+    scope: Option<ScopeRequest>,
     limit: Option<u32>,
     #[serde(default)]
     exclude: Vec<String>,
+}
+
+/// A character or character group to draw from instead of a folder.
+#[derive(Deserialize)]
+struct ScopeRequest {
+    kind: String,
+    id: String,
 }
 
 #[derive(Serialize)]
@@ -433,7 +775,15 @@ fn batch(
     let request: BatchRequest =
         serde_json::from_slice(body).map_err(|_| ApiError::PickerInvalidRequest)?;
     let limit = request.limit.unwrap_or(DEFAULT_BATCH);
-    if !valid_id(&request.folder_id)
+    // Exactly one of a folder and a character/group scope.
+    let scope_is_valid = match (&request.folder_id, &request.scope) {
+        (Some(folder_id), None) => valid_id(folder_id),
+        (None, Some(scope)) => {
+            matches!(scope.kind.as_str(), "character" | "group") && valid_id(&scope.id)
+        }
+        _ => false,
+    };
+    if !scope_is_valid
         || !(1..=MAX_BATCH).contains(&limit)
         || request.exclude.len() > MAX_EXCLUDED
         || !request.exclude.iter().all(|id| valid_id(id))
@@ -453,12 +803,16 @@ fn batch(
             )
         })
         .map_err(internal)?;
-    let (items, remaining) = selection.ok_or(ApiError::ClassificationNotFound)?;
+    let (items, remaining) = selection.ok_or(if request.scope.is_some() {
+        ApiError::PickerScopeNotFound
+    } else {
+        ApiError::ClassificationNotFound
+    })?;
     Ok(json_response(&BatchResponse { items, remaining }))
 }
 
-/// `None` when the folder does not exist. Otherwise up to `limit` random eligible images and
-/// the eligible count minus the excluded ones.
+/// `None` when the folder or the character/group does not exist. Otherwise up to `limit`
+/// random eligible images and the eligible count minus the excluded ones.
 fn select_batch(
     library: &Library,
     connection: &Connection,
@@ -467,55 +821,16 @@ fn select_batch(
     limit: usize,
     rng: &mut Rng,
 ) -> Result<Option<(Vec<BatchItem>, u64)>, LibraryError> {
-    // The folder and, optionally, its descendants.
-    let mut statement = connection.prepare("SELECT id, parent_id FROM classification_entries")?;
-    let mut children = HashMap::<String, Vec<String>>::new();
-    let mut found = false;
-    let mut rows = statement.query([])?;
-    while let Some(row) = rows.next()? {
-        let id: String = row.get(0)?;
-        found |= id == request.folder_id;
-        if let Some(parent) = row.get::<_, Option<String>>(1)? {
-            children.entry(parent).or_default().push(id);
+    let candidates = match (&request.folder_id, &request.scope) {
+        (Some(folder_id), _) => {
+            folder_candidates(connection, eligible, folder_id, request.include_descendants)?
         }
-    }
-    drop(rows);
-    drop(statement);
-    if !found {
+        (None, Some(scope)) => scope_candidates(connection, eligible, scope)?,
+        (None, None) => None,
+    };
+    let Some(mut candidates) = candidates else {
         return Ok(None);
-    }
-    let mut scope = vec![request.folder_id.clone()];
-    if request.include_descendants {
-        let mut seen = HashSet::from([request.folder_id.clone()]);
-        let mut next = 0;
-        while next < scope.len() {
-            for child in children.get(&scope[next]).into_iter().flatten() {
-                if seen.insert(child.clone()) {
-                    scope.push(child.clone());
-                }
-            }
-            next += 1;
-        }
-    }
-
-    // One indexed read of the eligible row ids in scope (integers, not 36-character ids).
-    let mut candidates = Vec::<i64>::new();
-    for chunk in scope.chunks(SQL_CHUNK) {
-        let mut statement = connection.prepare_cached(&format!(
-            "SELECT asset.rowid
-             FROM asset_classifications AS link
-             CROSS JOIN assets AS asset ON asset.id = link.asset_id
-             WHERE link.classification_id IN ({}) AND {eligible}",
-            placeholders(chunk.len())
-        ))?;
-        let rows =
-            statement.query_map(params_from_iter(chunk.iter()), |row| row.get::<_, i64>(0))?;
-        for row in rows {
-            candidates.push(row?);
-        }
-    }
-    candidates.sort_unstable();
-    candidates.dedup();
+    };
 
     if !request.exclude.is_empty() {
         let mut excluded = HashSet::<i64>::new();
@@ -599,6 +914,108 @@ fn select_batch(
         }
     }
     Ok(Some((items, remaining)))
+}
+
+/// Eligible row ids of a folder (and optionally its descendants); `None` for an unknown folder.
+fn folder_candidates(
+    connection: &Connection,
+    eligible: &str,
+    folder_id: &str,
+    include_descendants: bool,
+) -> Result<Option<Vec<i64>>, LibraryError> {
+    // The folder and, optionally, its descendants.
+    let mut statement = connection.prepare("SELECT id, parent_id FROM classification_entries")?;
+    let mut children = HashMap::<String, Vec<String>>::new();
+    let mut found = false;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        found |= id == folder_id;
+        if let Some(parent) = row.get::<_, Option<String>>(1)? {
+            children.entry(parent).or_default().push(id);
+        }
+    }
+    drop(rows);
+    drop(statement);
+    if !found {
+        return Ok(None);
+    }
+    let mut scope = vec![folder_id.to_owned()];
+    if include_descendants {
+        let mut seen = HashSet::from([folder_id.to_owned()]);
+        let mut next = 0;
+        while next < scope.len() {
+            for child in children.get(&scope[next]).into_iter().flatten() {
+                if seen.insert(child.clone()) {
+                    scope.push(child.clone());
+                }
+            }
+            next += 1;
+        }
+    }
+
+    // One indexed read of the eligible row ids in scope (integers, not 36-character ids).
+    let mut candidates = Vec::<i64>::new();
+    for chunk in scope.chunks(SQL_CHUNK) {
+        let mut statement = connection.prepare_cached(&format!(
+            "SELECT asset.rowid
+             FROM asset_classifications AS link
+             CROSS JOIN assets AS asset ON asset.id = link.asset_id
+             WHERE link.classification_id IN ({}) AND {eligible}",
+            placeholders(chunk.len())
+        ))?;
+        let rows =
+            statement.query_map(params_from_iter(chunk.iter()), |row| row.get::<_, i64>(0))?;
+        for row in rows {
+            candidates.push(row?);
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    Ok(Some(candidates))
+}
+
+/// Eligible row ids of one character or group; `None` for an unknown or disabled one.
+fn scope_candidates(
+    connection: &Connection,
+    eligible: &str,
+    scope: &ScopeRequest,
+) -> Result<Option<Vec<i64>>, LibraryError> {
+    let (exists, units) = if scope.kind == "group" {
+        ("SELECT 1 FROM character_groups WHERE id=?1", GROUP_UNIT_SQL)
+    } else {
+        (
+            "SELECT 1 FROM character_targets
+             WHERE id=?1 AND role='character' AND enabled=1
+               AND series_classification_id IS NOT NULL",
+            CHARACTER_UNIT_SQL,
+        )
+    };
+    if connection
+        .query_row(exists, [&scope.id], |_| Ok(()))
+        .optional()?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let mut statement = connection.prepare("SELECT id, parent_id FROM classification_entries")?;
+    let graph = FolderGraph::new(
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    drop(statement);
+    let mut candidates: Vec<i64> =
+        unit_members(connection, &graph, units, eligible, Some(&scope.id))?
+            .members
+            .into_iter()
+            .map(|(_, rowid)| rowid)
+            .collect();
+    candidates.sort_unstable();
+    candidates.dedup();
+    Ok(Some(candidates))
 }
 
 // ---------------------------------------------------------------- files

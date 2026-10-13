@@ -102,6 +102,8 @@ enum ApiError {
     PickerAssetNotFound,
     #[error("picker original exceeds 20 MiB")]
     PickerOriginalTooLarge,
+    #[error("picker character or group was not found")]
+    PickerScopeNotFound,
 }
 
 #[derive(Clone, Default)]
@@ -293,8 +295,9 @@ fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token:
         body,
     };
     let library = state.current_library();
-    let (response, outcome) = dispatch_with_picker(api_request, library.as_ref(), token, || {
-        picker::read_privacy(&app, state.picker_privacy_gate())
+    let folders_requested = api_request.method == "GET" && api_request.path == "/v1/picker/folders";
+    let (response, outcome) = dispatch_with_picker_context(api_request, library.as_ref(), token, || {
+        picker::read_context(&app, state.picker_privacy_gate(), library.as_ref(), folders_requested)
     });
     if let Some(outcome) = outcome {
         let _ = app.emit("extension://ingestion", &outcome);
@@ -309,13 +312,16 @@ pub fn report_picker_privacy(
     nonce: String,
     privacy_mode: bool,
     nsfw_filter: bool,
+    order_ids: Option<Vec<String>>,
+    pinned_ids: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) {
-    state.picker_privacy_gate().report(
+    state.picker_privacy_gate().report_context(
         &nonce,
-        PickerPrivacy {
-            privacy_mode,
-            nsfw_filter,
+        picker::PickerContext {
+            privacy: PickerPrivacy { privacy_mode, nsfw_filter },
+            order_ids: order_ids.unwrap_or_default(),
+            pinned_ids: pinned_ids.unwrap_or_default(),
         },
     );
 }
@@ -698,11 +704,21 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (Api
     dispatch_with_picker(request, library, token, || Ok(picker::Privacy::default()))
 }
 
+#[cfg(test)]
 fn dispatch_with_picker(
     request: ApiRequest,
     library: Option<&Library>,
     token: &str,
     privacy: impl FnOnce() -> Result<picker::Privacy, ApiError>,
+) -> (ApiResponse, Option<IngestOutcome>) {
+    dispatch_with_picker_context(request, library, token, || privacy().map(Into::into))
+}
+
+fn dispatch_with_picker_context(
+    request: ApiRequest,
+    library: Option<&Library>,
+    token: &str,
+    privacy: impl FnOnce() -> Result<picker::PickerContext, ApiError>,
 ) -> (ApiResponse, Option<IngestOutcome>) {
     let is_picker = request.path.starts_with("/v1/picker/");
     let error_to_pair = |error: ApiError| {
@@ -1077,6 +1093,7 @@ fn api_error_response(error: ApiError) -> ApiResponse {
         ApiError::PickerLibraryLocked => (423, "pickerLibraryLocked", "Disable PC privacy mode before using the picker."),
         ApiError::PickerAssetNotFound => (404, "pickerAssetNotFound", "Image is missing or excluded from the picker, including private vault media."),
         ApiError::PickerOriginalTooLarge => (413, "pickerOriginalTooLarge", "Original image exceeds 20 MiB."),
+        ApiError::PickerScopeNotFound => (404, "pickerScopeNotFound", "Character or group was not found. Refresh the list and select again."),
     };
     ApiResponse::json(status, &ErrorResponse { code, message })
 }

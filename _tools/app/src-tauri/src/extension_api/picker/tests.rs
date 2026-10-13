@@ -834,7 +834,7 @@ fn picker_privacy_gate_asks_once_and_fails_closed() {
 
 #[test]
 fn picker_privacy_probe_reads_only_the_saved_preferences() {
-    let script = privacy_probe_script("abc123");
+    let script = privacy_probe_script("abc123", &[]);
     assert!(script.contains("lakomics.uiPreferences.v1"));
     assert!(script.contains("nonce:'abc123'"));
     assert!(script.contains("report_picker_privacy"));
@@ -1002,4 +1002,720 @@ fn picker_latency_on_a_fifty_thousand_asset_library() {
         times.sort();
         eprintln!("{label}: median {:?}, max {:?}", times[2], times[4]);
     }
+}
+
+// ------------------------------------------------------- characters and groups
+
+/// A series folder registered for characters.
+fn series_folder(library: &Library, name: &str, parent: Option<&str>) -> String {
+    let id = folder(library, name, parent);
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_series(classification_id) VALUES (?1)",
+            [&id],
+        )
+        .unwrap();
+    id
+}
+
+fn add_target(
+    library: &Library,
+    id: &str,
+    name: &str,
+    series: &str,
+    enabled: bool,
+    role: &str,
+    extras_group: Option<&str>,
+) {
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_targets
+             (id, series_classification_id, display_name, enabled, manual_only, role,
+              extras_group_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, 'now', 'now')",
+            rusqlite::params![id, series, name, enabled as i64, role, extras_group],
+        )
+        .unwrap();
+}
+
+fn character(library: &Library, id: &str, name: &str, series: &str) {
+    add_target(library, id, name, series, true, "character", None);
+}
+
+fn decide(library: &Library, target: &str, asset: &str, decision: &str, origin: &str) {
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_decisions
+             (target_id, asset_id, source_asset_id, asset_hash, decision, target_fingerprint,
+              baseline_fingerprint, reference_snapshot, origin, created_at)
+             VALUES (?1, ?2, ?2, ?3, ?4, 'fingerprint', NULL, '{}', ?5, 'now')",
+            rusqlite::params![target, asset, format!("hash-{asset}"), decision, origin],
+        )
+        .unwrap();
+}
+
+fn group(library: &Library, id: &str, name: &str, series: &str, members: &[&str]) {
+    let connection = library.connection().unwrap();
+    connection
+        .execute(
+            "INSERT INTO character_groups(id, series_id, name) VALUES (?1, ?2, ?3)",
+            [id, series, name],
+        )
+        .unwrap();
+    for member in members {
+        connection
+            .execute(
+                "INSERT INTO character_group_members(target_id, group_id) VALUES (?1, ?2)",
+                [member, id],
+            )
+            .unwrap();
+    }
+}
+
+fn scope_batch(
+    library: &Library,
+    privacy: Privacy,
+    kind: &str,
+    id: &str,
+) -> (Vec<String>, serde_json::Value) {
+    let response = post_batch(
+        library,
+        privacy,
+        serde_json::json!({"scope": {"kind": kind, "id": id}, "limit": 24}),
+    );
+    assert_eq!(
+        response.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&response.body)
+    );
+    let mut ids = batch_ids(&response);
+    ids.sort();
+    (ids, json(&response)["remaining"].clone())
+}
+
+type CharacterEntries = HashMap<(String, String), serde_json::Value>;
+
+fn character_entries(library: &Library, privacy: Privacy) -> CharacterEntries {
+    let response = get(library, privacy, "/v1/picker/folders");
+    assert_eq!(response.status, 200);
+    json(&response)["characters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            (
+                (
+                    entry["kind"].as_str().unwrap().to_owned(),
+                    entry["id"].as_str().unwrap().to_owned(),
+                ),
+                entry.clone(),
+            )
+        })
+        .collect()
+}
+
+fn entry<'a>(characters: &'a CharacterEntries, kind: &str, id: &str) -> &'a serde_json::Value {
+    &characters[&(kind.to_owned(), id.to_owned())]
+}
+
+fn listed(characters: &CharacterEntries, kind: &str, id: &str) -> bool {
+    characters.contains_key(&(kind.to_owned(), id.to_owned()))
+}
+
+#[test]
+fn picker_character_scope_follows_current_acceptances_manual_and_automatic() {
+    let (_root, library) = library();
+    let franchise = folder(&library, "Franchise", None);
+    let series = series_folder(&library, "Series", Some(&franchise));
+    let sub = folder(&library, "Sub", Some(&series));
+    let elsewhere = folder(&library, "Elsewhere", None);
+    for id in [
+        "manual",
+        "auto",
+        "rejected",
+        "cleared",
+        "cleared-again",
+        "nested",
+        "unrelated",
+    ] {
+        add_asset(&library, id, "image", "normal", "png", &[&series]);
+    }
+    add_asset(&library, "in-sub", "image", "normal", "png", &[&sub]);
+    // Accepted from a folder above the series still belongs to the character.
+    add_asset(
+        &library,
+        "from-franchise",
+        "image",
+        "normal",
+        "png",
+        &[&franchise],
+    );
+    // Accepted from an unrelated folder, trash, video, review: never offered.
+    add_asset(&library, "outside", "image", "normal", "png", &[&elsewhere]);
+    add_asset(&library, "trashed", "image", "trash", "png", &[&series]);
+    add_asset(&library, "clip", "video", "normal", "mp4", &[&series]);
+    add_asset(&library, "in-review", "image", "review", "png", &[&series]);
+    add_asset(&library, "gif", "gif", "normal", "gif", &[&series]);
+
+    character(&library, "ayame", "Ayame", &series);
+    character(&library, "bruno", "Bruno", &series);
+    add_target(
+        &library,
+        "retired",
+        "Retired",
+        &series,
+        false,
+        "character",
+        None,
+    );
+
+    decide(&library, "ayame", "manual", "accepted", "manual");
+    decide(&library, "ayame", "auto", "accepted", "automatic");
+    decide(&library, "ayame", "rejected", "accepted", "automatic");
+    decide(&library, "ayame", "rejected", "rejected", "manual");
+    decide(&library, "ayame", "cleared", "accepted", "manual");
+    decide(&library, "ayame", "cleared", "cleared", "manual");
+    // Accepted, cleared and accepted again: a member again.
+    decide(&library, "ayame", "cleared-again", "accepted", "manual");
+    decide(&library, "ayame", "cleared-again", "cleared", "manual");
+    decide(&library, "ayame", "cleared-again", "accepted", "automatic");
+    decide(&library, "ayame", "in-sub", "accepted", "automatic");
+    decide(&library, "ayame", "from-franchise", "accepted", "manual");
+    decide(&library, "ayame", "outside", "accepted", "manual");
+    decide(&library, "ayame", "trashed", "accepted", "manual");
+    decide(&library, "ayame", "clip", "accepted", "manual");
+    decide(&library, "ayame", "in-review", "accepted", "manual");
+    decide(&library, "ayame", "gif", "accepted", "automatic");
+    decide(&library, "bruno", "nested", "accepted", "automatic");
+    decide(&library, "retired", "unrelated", "accepted", "manual");
+
+    let (ids, remaining) = scope_batch(&library, OFF, "character", "ayame");
+    assert_eq!(
+        ids,
+        [
+            "auto",
+            "cleared-again",
+            "from-franchise",
+            "gif",
+            "in-sub",
+            "manual"
+        ]
+    );
+    assert_eq!(remaining, 6);
+    let (ids, _) = scope_batch(&library, OFF, "character", "bruno");
+    assert_eq!(ids, ["nested"]);
+
+    let characters = character_entries(&library, OFF);
+    let ayame = entry(&characters, "character", "ayame");
+    assert_eq!(ayame["imageCount"], 6);
+    assert_eq!(ayame["name"], "Ayame");
+    assert_eq!(ayame["seriesId"], serde_json::json!(series));
+    assert_eq!(
+        ayame["seriesPath"],
+        serde_json::json!(["Franchise", "Series"])
+    );
+    assert!(ayame["groupId"].is_null());
+    assert_eq!(entry(&characters, "character", "bruno")["imageCount"], 1);
+    // A disabled character is neither listed nor selectable.
+    assert!(!listed(&characters, "character", "retired"));
+    let response = post_batch(
+        &library,
+        OFF,
+        serde_json::json!({"scope": {"kind": "character", "id": "retired"}}),
+    );
+    assert_eq!(
+        (response.status, code(&response).as_str()),
+        (404, "pickerScopeNotFound")
+    );
+    // No filesystem paths in the tree.
+    let tree = get(&library, OFF, "/v1/picker/folders");
+    assert!(!String::from_utf8_lossy(&tree.body).contains("assets/"));
+
+    // Same random/exclude/remaining semantics as folders.
+    let response = post_batch(
+        &library,
+        OFF,
+        serde_json::json!({"scope": {"kind": "character", "id": "ayame"}, "limit": 2, "exclude": ["manual", "auto"]}),
+    );
+    assert_eq!(batch_ids(&response).len(), 2);
+    assert_eq!(json(&response)["remaining"], 4);
+    assert!(batch_ids(&response)
+        .iter()
+        .all(|id| !["manual", "auto"].contains(&id.as_str())));
+}
+
+#[test]
+fn picker_group_scope_is_the_union_of_members_and_its_extras_bucket() {
+    let (_root, library) = library();
+    let series = series_folder(&library, "Series", None);
+    for id in [
+        "a-only",
+        "b-only",
+        "shared",
+        "extra",
+        "series-extra",
+        "disabled-only",
+        "plain",
+    ] {
+        add_asset(&library, id, "image", "normal", "png", &[&series]);
+    }
+    character(&library, "ayame", "Ayame", &series);
+    character(&library, "bruno", "Bruno", &series);
+    character(&library, "chika", "Chika", &series);
+    character(&library, "stray", "Stray", &series);
+    add_target(
+        &library,
+        "retired",
+        "Retired",
+        &series,
+        false,
+        "character",
+        None,
+    );
+    group(
+        &library,
+        "g1",
+        "Reverse",
+        &series,
+        &["ayame", "bruno", "retired"],
+    );
+    // The group's own 기타 and a series-level 기타.
+    add_target(
+        &library,
+        "g1-extras",
+        "기타",
+        &series,
+        true,
+        "extras",
+        Some("g1"),
+    );
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_group_members(target_id, group_id) VALUES ('g1-extras', 'g1')",
+            [],
+        )
+        .unwrap();
+    add_target(
+        &library,
+        "series-extras",
+        "기타 2",
+        &series,
+        true,
+        "extras",
+        None,
+    );
+
+    decide(&library, "ayame", "a-only", "accepted", "manual");
+    decide(&library, "ayame", "shared", "accepted", "automatic");
+    decide(&library, "bruno", "shared", "accepted", "manual");
+    decide(&library, "bruno", "b-only", "accepted", "automatic");
+    decide(&library, "g1-extras", "extra", "accepted", "manual");
+    decide(
+        &library,
+        "series-extras",
+        "series-extra",
+        "accepted",
+        "manual",
+    );
+    decide(&library, "retired", "disabled-only", "accepted", "manual");
+    decide(&library, "chika", "plain", "accepted", "manual");
+
+    let (ids, remaining) = scope_batch(&library, OFF, "group", "g1");
+    assert_eq!(ids, ["a-only", "b-only", "extra", "shared"]);
+    assert_eq!(remaining, 4);
+
+    let characters = character_entries(&library, OFF);
+    let g1 = entry(&characters, "group", "g1");
+    assert_eq!(g1["imageCount"], 4);
+    assert_eq!(g1["name"], "Reverse");
+    assert!(g1["groupId"].is_null());
+    assert_eq!(g1["seriesPath"], serde_json::json!(["Series"]));
+    // Members point at their group; the 기타 buckets and the disabled member are not listed.
+    let ayame = entry(&characters, "character", "ayame");
+    assert_eq!(
+        (ayame["groupId"].as_str(), &ayame["imageCount"]),
+        (Some("g1"), &serde_json::json!(2))
+    );
+    assert_eq!(entry(&characters, "character", "bruno")["imageCount"], 2);
+    assert!(entry(&characters, "character", "chika")["groupId"].is_null());
+    for hidden in ["retired", "g1-extras", "series-extras"] {
+        assert!(!listed(&characters, "character", hidden), "{hidden}");
+    }
+    assert_eq!(characters.len(), 5); // g1, ayame, bruno, chika, stray
+    assert_eq!(entry(&characters, "character", "stray")["imageCount"], 0);
+
+    // A scope id of the wrong kind, a 기타 bucket and an unknown id are all unknown.
+    for (kind, id) in [
+        ("group", "ayame"),
+        ("character", "g1"),
+        ("character", "g1-extras"),
+        ("character", "series-extras"),
+        ("group", "missing"),
+    ] {
+        let response = post_batch(
+            &library,
+            OFF,
+            serde_json::json!({"scope": {"kind": kind, "id": id}}),
+        );
+        assert_eq!(
+            (response.status, code(&response).as_str()),
+            (404, "pickerScopeNotFound"),
+            "{kind} {id}"
+        );
+    }
+}
+
+#[test]
+fn picker_character_scope_applies_the_nsfw_filter_and_privacy_mode() {
+    let (_root, library) = library();
+    let series = series_folder(&library, "Series", None);
+    for id in ["safe", "explicit", "unrated"] {
+        add_asset(&library, id, "image", "normal", "png", &[&series]);
+    }
+    rate(&library, "safe", "rating:g");
+    rate(&library, "explicit", "rating:e");
+    character(&library, "ayame", "Ayame", &series);
+    group(&library, "g1", "Group", &series, &["ayame"]);
+    for id in ["safe", "explicit", "unrated"] {
+        decide(&library, "ayame", id, "accepted", "automatic");
+    }
+    let filtered = Privacy {
+        privacy_mode: false,
+        nsfw_filter: true,
+    };
+    for (kind, id) in [("character", "ayame"), ("group", "g1")] {
+        let (ids, remaining) = scope_batch(&library, filtered, kind, id);
+        assert_eq!(ids, ["safe"], "{kind}");
+        assert_eq!(remaining, 1);
+        assert_eq!(scope_batch(&library, OFF, kind, id).0.len(), 3);
+    }
+    let characters = character_entries(&library, filtered);
+    assert_eq!(entry(&characters, "character", "ayame")["imageCount"], 1);
+    assert_eq!(entry(&characters, "group", "g1")["imageCount"], 1);
+    let locked = Privacy {
+        privacy_mode: true,
+        nsfw_filter: false,
+    };
+    let response = post_batch(
+        &library,
+        locked,
+        serde_json::json!({"scope": {"kind": "character", "id": "ayame"}}),
+    );
+    assert_eq!(
+        (response.status, code(&response).as_str()),
+        (423, "pickerLibraryLocked")
+    );
+}
+
+#[test]
+fn picker_batch_takes_exactly_one_of_folder_and_scope() {
+    let (_root, library) = library();
+    let series = series_folder(&library, "Series", None);
+    add_asset(&library, "one", "image", "normal", "png", &[&series]);
+    character(&library, "ayame", "Ayame", &series);
+    decide(&library, "ayame", "one", "accepted", "manual");
+
+    let invalid = [
+        serde_json::json!({}),
+        serde_json::json!({"folderId": series, "scope": {"kind": "character", "id": "ayame"}}),
+        serde_json::json!({"scope": {"kind": "series", "id": "ayame"}}),
+        serde_json::json!({"scope": {"kind": "character"}}),
+        serde_json::json!({"scope": {"kind": "character", "id": ""}}),
+        serde_json::json!({"scope": {"kind": "character", "id": "bad id!"}}),
+        serde_json::json!({"scope": "ayame"}),
+    ];
+    for body in invalid {
+        let response = post_batch(&library, OFF, body.clone());
+        assert_eq!(
+            (response.status, code(&response).as_str()),
+            (400, "pickerInvalidRequest"),
+            "{body}"
+        );
+    }
+    let response = post_batch(
+        &library,
+        OFF,
+        serde_json::json!({"scope": {"kind": "character", "id": "missing"}}),
+    );
+    assert_eq!(
+        (response.status, code(&response).as_str()),
+        (404, "pickerScopeNotFound")
+    );
+    // Folders keep their own answers.
+    let response = post_batch(&library, OFF, serde_json::json!({"folderId": "missing"}));
+    assert_eq!(
+        (response.status, code(&response).as_str()),
+        (404, "classification_not_found")
+    );
+    assert_eq!(
+        batch_ids(&post_batch(
+            &library,
+            OFF,
+            serde_json::json!({"folderId": series})
+        )),
+        ["one"]
+    );
+    // An existing but empty character is an empty batch, not an error.
+    character(&library, "empty", "Empty", &series);
+    let (ids, remaining) = scope_batch(&library, OFF, "character", "empty");
+    assert!(ids.is_empty());
+    assert_eq!(remaining, 0);
+}
+
+#[test]
+#[ignore = "measurement on a generated library with ~300 characters"]
+fn picker_character_latency_with_three_hundred_characters() {
+    let (_root, library) = library();
+    let root = folder(&library, "Franchises", None);
+    let mut series_ids = Vec::new();
+    for number in 0..12 {
+        series_ids.push(series_folder(
+            &library,
+            &format!("Series {number}"),
+            Some(&root),
+        ));
+    }
+    let started = Instant::now();
+    let mut targets = Vec::new();
+    {
+        let mut connection = library.connection().unwrap();
+        let transaction = connection.transaction().unwrap();
+        for (position, series) in series_ids.iter().enumerate() {
+            for number in 0..25 {
+                let id = format!("t-{position}-{number}");
+                transaction
+                    .execute(
+                        "INSERT INTO character_targets
+                         (id, series_classification_id, display_name, enabled, manual_only, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, 1, 1, 'now', 'now')",
+                        rusqlite::params![id, series, format!("Character {position}-{number}")],
+                    )
+                    .unwrap();
+                targets.push(id);
+            }
+            for number in 0..3 {
+                let group_id = format!("g-{position}-{number}");
+                transaction
+                    .execute(
+                        "INSERT INTO character_groups(id, series_id, name) VALUES (?1, ?2, ?3)",
+                        rusqlite::params![group_id, series, format!("Group {position}-{number}")],
+                    )
+                    .unwrap();
+                for member in 0..8 {
+                    transaction
+                        .execute(
+                            "INSERT INTO character_group_members(target_id, group_id) VALUES (?1, ?2)",
+                            rusqlite::params![
+                                format!("t-{position}-{}", number * 8 + member),
+                                group_id
+                            ],
+                        )
+                        .unwrap();
+                }
+            }
+        }
+        {
+            let mut asset = transaction
+                .prepare(
+                    "INSERT INTO assets (id, content_hash, media_kind, original_name, relative_path,
+                        thumbnail_relative_path, byte_size, width, height, collected_at, status)
+                     VALUES (?1, ?2, 'image', 'a', ?3, ?4, 100000, 1000, 1500, '2026-10-01T00:00:00Z', 'normal')",
+                )
+                .unwrap();
+            let mut link = transaction
+                .prepare("INSERT INTO asset_classifications(asset_id, classification_id) VALUES (?1, ?2)")
+                .unwrap();
+            let mut decision = transaction
+                .prepare(
+                    "INSERT INTO character_decisions
+                     (target_id, asset_id, source_asset_id, asset_hash, decision, target_fingerprint,
+                      baseline_fingerprint, reference_snapshot, origin, created_at)
+                     VALUES (?1, ?2, ?2, ?3, 'accepted', 'fp', NULL, '{}', ?4, 'now')",
+                )
+                .unwrap();
+            for number in 0..20_000_usize {
+                let id = format!(
+                    "{:08x}-0000-4000-8000-{number:012x}",
+                    number.wrapping_mul(2_654_435_761)
+                );
+                asset
+                    .execute(rusqlite::params![
+                        id,
+                        format!("h{number}"),
+                        format!("assets/{number}.jpg"),
+                        format!("thumbnails/{number}.webp")
+                    ])
+                    .unwrap();
+                let position = number % series_ids.len();
+                link.execute([&id, &series_ids[position]]).unwrap();
+                // The first 8,000 images are accepted by one or two characters of their series.
+                if number < 8_000 {
+                    let target = &targets[(number * 7) % 25 + position * 25];
+                    decision
+                        .execute(rusqlite::params![
+                            target,
+                            id,
+                            format!("h{number}"),
+                            if number % 2 == 0 {
+                                "manual"
+                            } else {
+                                "automatic"
+                            }
+                        ])
+                        .unwrap();
+                    if number % 5 == 0 {
+                        let other = &targets[(number * 3 + 1) % 25 + position * 25];
+                        if other != target {
+                            decision
+                                .execute(rusqlite::params![
+                                    other,
+                                    id,
+                                    format!("h{number}"),
+                                    "automatic"
+                                ])
+                                .unwrap();
+                        }
+                    }
+                }
+            }
+        }
+        transaction.commit().unwrap();
+    }
+    eprintln!(
+        "fixture: 12 series, 300 characters, 36 groups, 20000 assets in {:?}",
+        started.elapsed()
+    );
+
+    for (label, privacy) in [
+        ("folders + characters", OFF),
+        (
+            "folders + characters, NSFW filter",
+            Privacy {
+                privacy_mode: false,
+                nsfw_filter: true,
+            },
+        ),
+    ] {
+        let mut times = Vec::new();
+        let mut size = 0;
+        for _ in 0..7 {
+            let started = Instant::now();
+            let response = get(&library, privacy, "/v1/picker/folders");
+            times.push(started.elapsed());
+            assert_eq!(response.status, 200);
+            size = response.body.len();
+        }
+        times.sort();
+        eprintln!(
+            "{label}: median {:?}, max {:?}, body {size} bytes",
+            times[3], times[6]
+        );
+    }
+    let characters = character_entries(&library, OFF);
+    let total: u64 = characters
+        .values()
+        .filter(|entry| entry["kind"] == "character")
+        .map(|entry| entry["imageCount"].as_u64().unwrap())
+        .sum();
+    eprintln!(
+        "{} entries, character image links {total}",
+        characters.len()
+    );
+    for (label, kind, id) in [
+        ("character batch", "character", "t-0-7"),
+        ("group batch", "group", "g-0-0"),
+    ] {
+        let mut times = Vec::new();
+        let mut remaining = serde_json::Value::Null;
+        for _ in 0..7 {
+            let started = Instant::now();
+            let response = post_batch(
+                &library,
+                OFF,
+                serde_json::json!({"scope": {"kind": kind, "id": id}}),
+            );
+            times.push(started.elapsed());
+            assert_eq!(response.status, 200);
+            remaining = json(&response)["remaining"].clone();
+        }
+        times.sort();
+        eprintln!(
+            "{label}: median {:?}, max {:?}, remaining {remaining}",
+            times[3], times[6]
+        );
+    }
+}
+
+#[test]
+fn picker_uses_pc_folder_group_character_order_and_pins() {
+    let (_root, library) = library();
+    let alpha = folder(&library, "Alpha", None);
+    let zulu = series_folder(&library, "Zulu", None);
+    let child_a = folder(&library, "Alpha child", Some(&zulu));
+    let child_z = folder(&library, "Zulu child", Some(&zulu));
+    character(&library, "ca", "Alpha character", &zulu);
+    character(&library, "cz", "Zulu character", &zulu);
+    character(&library, "loose-a", "Alpha loose", &zulu);
+    character(&library, "loose-z", "Zulu loose", &zulu);
+    group(&library, "ga", "Alpha group", &zulu, &["ca", "cz"]);
+    group(&library, "gz", "Zulu group", &zulu, &[]);
+    {
+        let connection = library.connection().unwrap();
+        connection.execute("UPDATE character_groups SET position=CASE id WHEN 'gz' THEN 0 ELSE 1 END", []).unwrap();
+        connection.execute("UPDATE character_folder_order SET position=CASE target_id WHEN 'cz' THEN 0 WHEN 'ca' THEN 1 WHEN 'loose-z' THEN 2 ELSE 3 END", []).unwrap();
+    }
+    let context = PickerContext {
+        privacy: OFF,
+        order_ids: vec![zulu.clone(), alpha.clone(), child_z.clone(), child_a.clone()],
+        pinned_ids: vec![child_a.clone(), zulu.clone(), "deleted".into()],
+    };
+    let request = ApiRequest::get("/v1/picker/folders", EXTENSION_ORIGIN, BEARER);
+    let response = crate::extension_api::dispatch_with_picker_context(request, Some(&library), TOKEN, || Ok(context)).0;
+    assert_eq!(response.status, 200);
+    let data = json(&response);
+    let folders = data["entries"].as_array().unwrap();
+    assert_eq!(folders.iter().map(|e| e["id"].as_str().unwrap()).collect::<Vec<_>>(),
+        vec![zulu.as_str(), alpha.as_str(), child_z.as_str(), child_a.as_str(), "lakomics-originals"]);
+    for (rank, entry) in folders.iter().enumerate() {
+        assert_eq!(entry["order"], rank);
+    }
+    assert_eq!(folders[0]["pinned"], true);
+    assert_eq!(folders[0]["pinOrder"], 1);
+    assert_eq!(folders[3]["pinned"], true);
+    assert_eq!(folders[3]["pinOrder"], 0);
+    assert_eq!(folders[1]["pinned"], false);
+    assert!(folders[1]["pinOrder"].is_null());
+    let units = data["characters"].as_array().unwrap();
+    assert_eq!(units.iter().map(|e| e["id"].as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["gz", "ga", "cz", "ca", "loose-z", "loose-a"]);
+    for (rank, entry) in units.iter().enumerate() {
+        assert_eq!(entry["order"], rank);
+    }
+    // Old/missing presentation reports stay usable with no pins; privacy remains gated.
+    let unpinned = json(&get(&library, OFF, "/v1/picker/folders"));
+    assert!(unpinned["entries"].as_array().unwrap().iter().all(|e| e["pinned"] == false && e["pinOrder"].is_null()));
+}
+
+#[test]
+fn picker_context_gate_keeps_order_and_pins_with_the_nonce_answer() {
+    let gate = PrivacyGate::default();
+    let context = gate.read_context(|nonce| {
+        assert!(!gate.report_context("forged", PickerContext::default()));
+        gate.report_context(nonce, PickerContext {
+            privacy: OFF,
+            order_ids: vec!["z".into(), "a".into()],
+            pinned_ids: vec!["a".into(), "z".into()],
+        })
+    }, Duration::ZERO, Duration::from_secs(1)).unwrap();
+    assert_eq!(context.order_ids, vec!["z", "a"]);
+    assert_eq!(context.pinned_ids, vec!["a", "z"]);
 }

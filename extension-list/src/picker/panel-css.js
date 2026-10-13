@@ -6,6 +6,7 @@ globalThis.LakomicsPickerCss = String.raw`
 *{box-sizing:border-box}[hidden]{display:none!important}
 .lk{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--p-bg);border-left:1px solid var(--p-line);box-shadow:var(--p-shadow);color:var(--p-text);font:400 15px/20px var(--ui);-webkit-font-smoothing:antialiased;animation:lkIn 200ms var(--ease) both}
 .lk.leaving{animation:lkOut 140ms var(--ease) both}
+.tree-section{padding:8px 12px 4px;color:var(--p-muted);font-size:12px;font-weight:600}
 .lk .ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .lk button{font:inherit;color:inherit;cursor:pointer}
 .lk button:focus-visible,.lk [tabindex]:focus-visible,.lk input:focus-visible{outline:2px solid var(--p-focus);outline-offset:-2px}
@@ -91,7 +92,12 @@ globalThis.LakomicsPickerCss = String.raw`
 .trow{display:flex;align-items:center;gap:4px;height:32px;padding:0 8px;border-radius:2px;white-space:nowrap;cursor:pointer}
 .trow:hover{background:var(--p-hover)}
 .trow .tw{width:16px;height:16px;flex:none;color:var(--p-muted);display:grid;place-items:center;border:0;background:transparent;padding:0}
-.trow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.trow .ki{color:var(--p-faint)}
+.trow.me .ki{color:var(--p-text)}
+.trow .nm{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;overflow:hidden}
+.trow .nmt{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.trow .nm.two .nmt{max-width:70%}
+.trow .sec{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--p-faint)}
 .trow .n{font-size:12px;color:var(--p-faint);font-variant-numeric:tabular-nums}
 .trow .cur{width:5px;height:5px;flex:none;margin-left:8px;background:var(--p-accent)}
 .trow.me .nm{font-weight:600}

@@ -10,6 +10,8 @@
     expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7", check: "M5 12l4 4L19 6", alert: "M12 8v5M12 17h.01M3 20L12 4l9 16z",
     search: "M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13zM15.5 15.5L21 21", right: "M9 6l6 6-6 6", left: "M15 6l-6 6 6 6",
     image: "M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5M16 7h.01", plug: "M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5",
+    character: "M8.5 7.5a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0zM5 20v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1z",
+    group: "M10 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM2 20v-.5A4.5 4.5 0 0 1 6.5 15h1a4.5 4.5 0 0 1 4.5 4.5V20zM15 5.2a3 3 0 0 1 0 5.6M16.5 15a4.5 4.5 0 0 1 4.5 4.5V20h-5",
   };
   const MARK = "M2 2h8v2H4v16h14v-6h2v8H2zM8 8h12v4H8z";
   const PANEL_WIDTH = 360, RETRY_MS = 5000, DECODE_CAP_MS = 1500, SKELETON_MS = 300;
@@ -41,22 +43,40 @@
     const setTimer = timers.set || ((fn, ms) => win.setTimeout(fn, ms)), clearTimer = timers.clear || (id => win.clearTimeout(id));
     const selection = Model.createSelection(), seen = Model.createSeen(), jobs = Model.createJobs();
     const items = new Map(), thumbs = new Map();
-    const s = { folders: [], folderId: null, include: true, body: "loading", error: null, batch: [], allSeen: false, popover: false, preview: null, notice: null, inserted: new Set(), focus: 0, jobVisible: false, running: false, hasGrid: false, expanded: new Set(), query: "", cursor: 0, settled: false };
+    const s = { folders: [], characters: [], folderId: null, scopeKind: null, scopeId: null, include: true, body: "loading", error: null, batch: [], allSeen: false, popover: false, preview: null, notice: null, inserted: new Set(), focus: 0, jobVisible: false, running: false, hasGrid: false, expanded: new Set(), query: "", cursor: 0, settled: false };
     let host = null, root = null, ui = {}, isOpen = false, opening = false, loadToken = 0, retryTimer = null, themeObserver = null, pushed = false, leaveTimer = null;
     const reduced = () => Boolean(win.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
     const message = async payload => { try { return await send(payload); } catch { return { ok: false, kind: "offline" }; } };
     const announce = text => { if (ui.live) ui.live.textContent = text; };
-    const entryFor = id => s.folders.find(entry => entry.id === id) || null;
-    const current = () => entryFor(s.folderId);
+    // The chosen scope: a folder, or a character or group of the PC library. `folderId` stays the
+    // folder's id for a folder scope and is null otherwise.
+    const scope = () => (s.scopeKind && s.scopeId ? { kind: s.scopeKind, id: s.scopeId } : null);
+    const current = () => Model.findScope(s.folders, s.characters, scope());
+    function setScope(kind, id) { s.scopeKind = id ? kind : null; s.scopeId = id || null; s.folderId = kind === "folder" ? id : null; }
+    function scopeAncestors() {
+      const entry = current();
+      if (!entry) return [];
+      if (s.scopeKind === "folder") return Model.ancestorIds(s.folders, s.scopeId);
+      return [entry.seriesId, ...Model.ancestorIds(s.folders, entry.seriesId), ...(entry.groupId ? [entry.groupId] : [])];
+    }
 
     // ---- persistence ---------------------------------------------------------------------
     async function loadView() {
       try {
         const stored = (await storage?.get([Model.VIEW_KEY]))?.[Model.VIEW_KEY];
-        if (stored && typeof stored === "object") { s.folderId = Model.validId(stored.folderId) ? stored.folderId : null; s.include = stored.includeDescendants !== false; }
+        if (stored && typeof stored === "object") {
+          const remembered = Model.cleanScope(stored.scope);
+          if (remembered && remembered.kind !== "folder") setScope(remembered.kind, remembered.id);
+          else setScope("folder", Model.validId(stored.folderId) ? stored.folderId : null);
+          s.include = stored.includeDescendants !== false;
+        }
       } catch {}
     }
-    function saveView() { try { void storage?.set({ [Model.VIEW_KEY]: { folderId: s.folderId, includeDescendants: s.include } }); } catch {} }
+    function saveView() {
+      const view = { folderId: s.folderId, includeDescendants: s.include };
+      if (s.scopeKind && s.scopeKind !== "folder") view.scope = { kind: s.scopeKind, id: s.scopeId };
+      try { void storage?.set({ [Model.VIEW_KEY]: view }); } catch {}
+    }
 
     // ---- thumbnails ----------------------------------------------------------------------
     async function pool(list, size, work) {
@@ -83,7 +103,8 @@
       if (win.CSSStyleSheet?.prototype.replaceSync) { const sheet = new win.CSSStyleSheet(); sheet.replaceSync(css); root.adoptedStyleSheets = [sheet]; }
       else root.append(h(doc, "style", {}, css));
       ui.path = h(doc, "span", { class: "path" });
-      ui.folderBtn = h(doc, "button", { type: "button", class: "folder", "aria-haspopup": "tree", "aria-expanded": "false", onclick: () => (s.popover ? closePopover() : openPopover()) }, icon(doc, "folder"), ui.path, icon(doc, "chevron"));
+      ui.kindIcon = icon(doc, "folder"); shownKind = "folder";
+      ui.folderBtn = h(doc, "button", { type: "button", class: "folder", "aria-haspopup": "tree", "aria-expanded": "false", onclick: () => (s.popover ? closePopover() : openPopover()) }, ui.kindIcon, ui.path, icon(doc, "chevron"));
       ui.close = h(doc, "button", { type: "button", class: "cbtn sq", "aria-label": "닫기", onclick: () => close() }, icon(doc, "close"));
       ui.scope = h(doc, "button", { type: "button", class: "scope", role: "switch", "aria-checked": "true", onclick: () => setInclude(!s.include) }, h(doc, "span", { class: "sw" }), h(doc, "span", {}, "하위 폴더 포함"));
       ui.count = h(doc, "span", { class: "cnt" });
@@ -104,26 +125,30 @@
       skeleton = Model.createDelayedBusy({ delay: SKELETON_MS, minShow: 0, show: () => { if (!s.hasGrid) showSkeleton(); }, hide: () => {}, setTimer, clearTimer });
       doc.documentElement.append(host);
     }
-    let busy = null, skeleton = null;
+    let busy = null, skeleton = null, shownKind = "folder";
 
     // ---- rendering of small parts --------------------------------------------------------
     function renderPath() {
-      const entry = current(), parts = entry?.path?.length ? entry.path : entry ? [entry.name] : [];
+      const parts = Model.scopeParts(s.folders, s.characters, scope());
+      const kind = s.scopeKind === "character" || s.scopeKind === "group" ? s.scopeKind : "folder";
+      if (kind !== shownKind) { const next = icon(doc, kind); ui.kindIcon.replaceWith(next); ui.kindIcon = next; shownKind = kind; }
       ui.path.replaceChildren();
-      if (!parts.length) { ui.path.append(h(doc, "span", { class: "none" }, "폴더 선택")); return; }
+      if (!parts.length) { ui.path.append(h(doc, "span", { class: "none" }, "폴더·캐릭터 선택")); return; }
       if (parts.length > 1) ui.path.append(h(doc, "span", { class: "par" }, parts.slice(0, -1).join(" › ") + " › "));
       ui.path.append(h(doc, "span", { class: "leaf" }, parts[parts.length - 1]));
     }
     function renderScope() {
       ui.scope.setAttribute("aria-checked", String(s.include)); ui.scope.firstChild.classList.toggle("on", s.include);
+      // The sub-folder switch only means something for folders; it is hidden (the count keeps its place) otherwise.
+      ui.scope.hidden = s.scopeKind === "character" || s.scopeKind === "group";
       const entry = current();
-      ui.count.textContent = entry ? Model.formatCount(s.include ? entry.imageCountWithDescendants : entry.imageCount) + "장" + (s.allSeen ? " · 모두 봄" : "") : "";
+      ui.count.textContent = entry ? Model.formatCount(Model.scopeCount(entry, s.scopeKind, s.include)) + "장" + (s.allSeen ? " · 모두 봄" : "") : "";
     }
     function renderFooter() {
       const count = selection.size;
       ui.insert.textContent = count ? `본문에 넣기 (${count}장)` : "본문에 넣기";
       ui.insert.disabled = !count || s.running || !s.hasGrid;
-      ui.other.disabled = !s.folderId || s.running;
+      ui.other.disabled = !s.scopeId || s.running;
     }
     function renderNotice() {
       ui.note.hidden = !s.notice; ui.note.replaceChildren();
@@ -230,59 +255,82 @@
     async function loadFolders() {
       const reply = await message({ type: "picker:folders" });
       if (!reply?.ok) return reply || { ok: false, kind: "offline" };
-      s.folders = reply.entries;
-      if (s.folderId && !entryFor(s.folderId)) s.folderId = null;
-      s.expanded = new Set(Model.ancestorIds(s.folders, s.folderId));
+      s.folders = reply.entries; s.characters = reply.characters || [];
+      if (s.scopeId && !current()) setScope(null, null);
+      s.expanded = new Set(scopeAncestors());
       return reply;
     }
     function openPopover() {
       if (s.popover) return; s.popover = true; s.query = ""; s.cursor = 0;
-      s.expanded = new Set([...s.expanded, ...Model.ancestorIds(s.folders, s.folderId)]);
+      s.expanded = new Set([...s.expanded, ...scopeAncestors()]);
       ui.folderBtn.setAttribute("aria-expanded", "true");
-      ui.searchInput = h(doc, "input", { type: "text", placeholder: "폴더 찾기", "aria-label": "폴더 찾기", autocomplete: "off", spellcheck: "false", oninput: () => { s.query = ui.searchInput.value; s.cursor = 0; renderTree(); }, onkeydown: popoverKey });
-      ui.tree = h(doc, "div", { class: "tree", role: "tree", "aria-label": "폴더" });
-      ui.pop = h(doc, "div", { class: "pop", role: "dialog", "aria-label": "폴더 고르기" }, h(doc, "label", { class: "search" }, icon(doc, "search"), ui.searchInput), ui.tree);
-      ui.lk.append(ui.pop); renderTree(); ui.searchInput.focus();
+      ui.searchInput = h(doc, "input", { type: "text", placeholder: "폴더·캐릭터 찾기", "aria-label": "폴더·캐릭터 찾기", autocomplete: "off", spellcheck: "false", oninput: () => { s.query = ui.searchInput.value; s.cursor = 0; renderTree(); }, onkeydown: popoverKey });
+      ui.tree = h(doc, "div", { class: "tree", role: "tree", "aria-label": "폴더와 캐릭터" });
+      ui.pop = h(doc, "div", { class: "pop", role: "dialog", "aria-label": "폴더·캐릭터 고르기" }, h(doc, "label", { class: "search" }, icon(doc, "search"), ui.searchInput), ui.tree);
+      ui.lk.append(ui.pop); renderTree({ reveal: true }); ui.searchInput.focus();
     }
     function closePopover({ refocus = true } = {}) {
       if (!s.popover) return; s.popover = false; ui.pop?.remove(); ui.pop = null;
       ui.folderBtn.setAttribute("aria-expanded", "false"); if (refocus) ui.folderBtn.focus();
     }
-    function renderTree() {
-      const rows = Model.folderRows(s.folders, { expanded: s.expanded, query: s.query });
+    // `reveal`: keyboard moves bring the cursor row into view; a mouse expand/collapse keeps the
+    // list where it was (rebuilding the rows would otherwise jump it to the top).
+    function renderTree({ reveal = false } = {}) {
+      const rows = Model.treeRows(s.folders, s.characters, { expanded: s.expanded, query: s.query });
       s.cursor = Math.max(0, Math.min(rows.length - 1, s.cursor)); s.rows = rows;
+      const top = ui.tree.scrollTop;
       ui.tree.replaceChildren();
-      if (!rows.length) { ui.tree.append(h(doc, "div", { class: "none" }, s.folders.length ? "찾는 폴더가 없음" : "폴더 없음")); return; }
+      if (!rows.length) { ui.tree.append(h(doc, "div", { class: "none" }, s.folders.length ? "찾는 폴더·캐릭터가 없음" : "폴더 없음")); return; }
       rows.forEach((row, index) => {
-        const name = row.entry.name, label = h(doc, "span", { class: "nm" });
+        if (row.section === "pinned" && (index === 0 || rows[index - 1].section !== "pinned"))
+          ui.tree.append(h(doc, "div", { class: "tree-section", role: "presentation" }, "고정"));
+        if (index > 0 && rows[index - 1].section === "pinned" && row.section !== "pinned")
+          ui.tree.append(h(doc, "div", { class: "tree-section", role: "presentation" }, "폴더"));
+        const entry = row.entry, name = entry.name, label = h(doc, "span", { class: "nmt" });
         if (row.match) label.append(name.slice(0, row.match[0]), h(doc, "mark", {}, name.slice(row.match[0], row.match[1])), name.slice(row.match[1])); else label.append(name);
-        const line = h(doc, "div", { class: "trow" + (row.entry.id === s.folderId ? " me" : "") + (index === s.cursor ? " kf" : "") + (row.ancestorOnly ? " anc" : ""), role: "treeitem", "aria-level": String(row.depth + 1), "aria-selected": String(row.entry.id === s.folderId), "aria-expanded": row.hasChildren ? String(row.open) : null, "data-id": row.entry.id, style: `padding-left:${8 + row.depth * 16}px`, onclick: event => { if (event.target.closest(".tw")) return; chooseFolder(row.entry.id); } },
-          row.hasChildren ? h(doc, "button", { type: "button", class: "tw", tabindex: "-1", "aria-label": row.open ? "접기" : "펼치기", onclick: () => toggleBranch(row.entry.id) }, icon(doc, row.open ? "chevron" : "right")) : h(doc, "span", { class: "tw" }),
-          label, h(doc, "span", { class: "n" }, Model.formatCount(row.entry.imageCountWithDescendants)), row.entry.id === s.folderId ? h(doc, "span", { class: "cur", "aria-hidden": "true" }) : null);
+        const mine = row.kind === s.scopeKind && entry.id === s.scopeId;
+        const count = row.kind === "folder" ? entry.imageCountWithDescendants : entry.imageCount;
+        const line = h(doc, "div", { class: "trow " + row.kind + (mine ? " me" : "") + (index === s.cursor ? " kf" : "") + (row.ancestorOnly ? " anc" : ""), role: "treeitem", "aria-level": String(row.depth + 1), "aria-selected": String(mine), "aria-expanded": row.hasChildren ? String(row.open) : null, "data-id": entry.id, "data-kind": row.kind, "data-section": row.section || "tree", style: `padding-left:${8 + row.depth * 16}px`, onclick: event => { if (event.target.closest(".tw")) return; chooseScope(row.kind, entry.id); } },
+          row.hasChildren ? h(doc, "button", { type: "button", class: "tw", tabindex: "-1", "aria-label": row.open ? "접기" : "펼치기", onclick: () => toggleBranch(entry.id) }, icon(doc, row.open ? "chevron" : "right")) : h(doc, "span", { class: "tw" }),
+          icon(doc, row.kind, "ic ki"),
+          h(doc, "span", { class: "nm" + (row.secondary ? " two" : "") }, label, row.secondary ? h(doc, "small", { class: "sec" }, row.secondary) : null),
+          h(doc, "span", { class: "n" }, Model.formatCount(count)), mine ? h(doc, "span", { class: "cur", "aria-hidden": "true" }) : null);
         ui.tree.append(line);
       });
-      ui.tree.querySelector(".kf")?.scrollIntoView?.({ block: "nearest" });
+      ui.tree.scrollTop = top;
+      if (reveal) ui.tree.querySelector(".kf")?.scrollIntoView?.({ block: "nearest" });
     }
-    function toggleBranch(id) { if (s.expanded.has(id)) s.expanded.delete(id); else s.expanded.add(id); renderTree(); }
+    function toggleBranch(id) {
+      if (s.expanded.has(id)) s.expanded.delete(id); else s.expanded.add(id);
+      const index = (s.rows || []).findIndex(row => row.section !== "pinned" && row.entry.id === id);
+      if (index >= 0) s.cursor = index;
+      renderTree();
+    }
     function popoverKey(event) {
       const rows = s.rows || [], row = rows[s.cursor];
       const stop = () => { event.preventDefault(); event.stopPropagation(); };
-      if (event.key === "ArrowDown") { stop(); s.cursor = Math.min(rows.length - 1, s.cursor + 1); renderTree(); }
-      else if (event.key === "ArrowUp") { stop(); s.cursor = Math.max(0, s.cursor - 1); renderTree(); }
-      else if (event.key === "ArrowRight" && row?.hasChildren && !row.open && !s.query) { stop(); s.expanded.add(row.entry.id); renderTree(); }
-      else if (event.key === "ArrowLeft" && row && !s.query) { stop(); if (row.open) { s.expanded.delete(row.entry.id); renderTree(); } else if (row.entry.parentId) { s.cursor = Math.max(0, rows.findIndex(r => r.entry.id === row.entry.parentId)); renderTree(); } }
-      else if (event.key === "Enter" && row) { stop(); chooseFolder(row.entry.id); }
+      if (event.key === "ArrowDown") { stop(); s.cursor = Math.min(rows.length - 1, s.cursor + 1); renderTree({ reveal: true }); }
+      else if (event.key === "ArrowUp") { stop(); s.cursor = Math.max(0, s.cursor - 1); renderTree({ reveal: true }); }
+      else if (event.key === "ArrowRight" && row?.hasChildren && !row.open && !s.query) { stop(); s.expanded.add(row.entry.id); renderTree({ reveal: true }); }
+      else if (event.key === "ArrowLeft" && row && !s.query) {
+        stop();
+        if (row.open) { s.expanded.delete(row.entry.id); renderTree({ reveal: true }); return; }
+        const parent = row.kind === "folder" ? (row.entry.parentId ? ["folder", row.entry.parentId] : null)
+          : row.kind === "group" || !rows.some(r => r.kind === "group" && r.entry.id === row.entry.groupId) ? ["folder", row.entry.seriesId] : ["group", row.entry.groupId];
+        if (parent) { s.cursor = Math.max(0, rows.findIndex(r => r.section !== "pinned" && r.kind === parent[0] && r.entry.id === parent[1])); renderTree({ reveal: true }); }
+      }
+      else if (event.key === "Enter" && row) { stop(); chooseScope(row.kind, row.entry.id); }
       else if (event.key !== "Escape") event.stopPropagation();
     }
-    async function chooseFolder(id) {
+    async function chooseScope(kind, id) {
       closePopover({ refocus: false });
-      s.folderId = id; s.allSeen = false; saveView(); renderPath(); renderScope();
+      setScope(kind, id); s.allSeen = false; saveView(); renderPath(); renderScope();
       await loadBatch({ initial: !s.hasGrid });
     }
     async function setInclude(value) {
       if (s.include === value) return;
       s.include = value; saveView(); renderScope();
-      if (s.folderId) await loadBatch({ initial: !s.hasGrid });
+      if (s.scopeKind === "folder") await loadBatch({ initial: !s.hasGrid });
     }
 
     // ---- batches (no flash: the old grid stays until the new one is ready) ----------------
@@ -293,10 +341,11 @@
     }
     function failure(kind) {
       s.error = kind;
-      if (kind === "folderGone") {
-        // The remembered folder no longer exists on the PC: choose again.
-        s.folderId = null; s.hasGrid = false; ui.grid = null; saveView(); renderPath(); renderScope();
-        showEmpty({ title: "폴더를 골라 주세요", hint: "이 폴더는 PC에서 없어졌습니다" }); openPopover(); return;
+      if (kind === "folderGone" || kind === "scopeGone") {
+        // The remembered folder, character or group no longer exists on the PC: choose again.
+        const folder = s.scopeKind === "folder";
+        setScope(null, null); s.hasGrid = false; ui.grid = null; saveView(); renderPath(); renderScope();
+        showEmpty({ title: "폴더를 골라 주세요", hint: folder ? "이 폴더는 PC에서 없어졌습니다" : "이 캐릭터·그룹은 PC에서 없어졌거나 꺼져 있습니다" }); openPopover(); return;
       }
       if (s.hasGrid) { setNotice("그림을 불러오지 못함", () => void refresh()); return; }
       s.body = "error";
@@ -310,12 +359,12 @@
       retryTimer = setTimer(() => { retryTimer = null; if (isOpen && s.body === "error" && !s.hasGrid) void start({ silent: true }); }, RETRY_MS);
     }
     async function loadBatch({ initial = false } = {}) {
-      if (!s.folderId) return;
-      const token = ++loadToken;
+      if (!s.scopeId) return;
+      const token = ++loadToken, target = Model.batchTarget(scope(), s.include);
       if (ui.grid) ui.grid.inert = true;
       busy.begin(); if (initial) skeleton.begin(); setNotice("");
       try {
-        const ask = exclude => message({ type: "picker:batch", folderId: s.folderId, includeDescendants: s.include, exclude, limit: Model.BATCH });
+        const ask = exclude => message({ type: "picker:batch", ...target, exclude, limit: Model.BATCH });
         const first = await ask(seen.exclude());
         if (token !== loadToken) return;
         if (!first.ok) { failure(first.kind); return; }
@@ -342,12 +391,13 @@
       }
     }
     function emptyFolder() {
-      const entry = current(), extra = entry ? entry.imageCountWithDescendants - entry.imageCount : 0;
+      const entry = current(), extra = entry && s.scopeKind === "folder" ? entry.imageCountWithDescendants - entry.imageCount : 0;
       s.hasGrid = false; ui.grid = null;
+      if (s.scopeKind !== "folder") { showEmpty({ title: s.scopeKind === "group" ? "이 그룹에 그림 없음" : "이 캐릭터에 그림 없음" }); return; }
       const action = !s.include && extra > 0 ? { label: "하위 폴더 포함", run: () => void setInclude(true) } : null;
       showEmpty({ title: "이 폴더에 그림 없음", hint: action ? `하위 폴더에 ${Model.formatCount(extra)}장` : "", action });
     }
-    async function refresh() { if (!s.folderId || s.running) return; await loadBatch({ initial: !s.hasGrid }); if (s.hasGrid) focusTile(0, false); }
+    async function refresh() { if (!s.scopeId || s.running) return; await loadBatch({ initial: !s.hasGrid }); if (s.hasGrid) focusTile(0, false); }
     async function start({ silent = false } = {}) {
       if (!silent) { s.body = "loading"; if (!s.hasGrid) { skeleton.begin(); } }
       const folders = await loadFolders();
@@ -355,7 +405,7 @@
       if (!folders.ok) { failure(folders.kind); return; }
       if (!isOpen) return;
       renderPath(); renderScope();
-      if (!s.folderId) { s.body = "empty"; showEmpty({ title: "폴더를 골라 주세요", hint: "위의 폴더 버튼에서 그림을 가져올 폴더를 고르세요" }); openPopover(); return; }
+      if (!s.scopeId) { s.body = "empty"; showEmpty({ title: "폴더를 골라 주세요", hint: "위의 폴더 버튼에서 그림을 가져올 폴더나 캐릭터를 고르세요" }); openPopover(); return; }
       await loadBatch({ initial: !s.hasGrid });
       if (!silent && isOpen && s.hasGrid && !s.popover) focusTile(0, false);
     }
