@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko" data-desc="a">
+<html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -286,227 +286,142 @@ ul.ideas li::marker { color: var(--c-faint); }
 .back { transform: rotateY(180deg); }
 .face > * { position: absolute; }
 
-/* --- shared front parts ---
-   One printed geometry for every tier: 3.8cqw outer border, art window 15.4–95.4cqw (sides 7cqw),
-   description area under the window sized to its content, two-line print footer. */
-.card { --wt: 15.4cqw; --wx: 7cqw; --wh: 80cqw; --wbm: 44.28cqw; }
-.front { --ink: #2a2622; --ink2: #5b554c;
-  --d-bg: linear-gradient(180deg, #f8f3e6, #ece3cc); --d-line: linear-gradient(135deg, #5e4d33, #8f7a55 45%, #5e4d33); --d-linec: #6e5c3e; --d-ink: #261f15; --d-ink2: #5d5140; --d-tab: #f8f3e6;
-  --r-bg: linear-gradient(180deg, #fffaf0 0%, #efe6cf 45%, #d9cba8 100%);
-  --m-rim: linear-gradient(135deg, #6e5634, #e6d3a8 40%, #8a7048 70%, #d9c497); --m-face: radial-gradient(circle at 40% 32%, #fffdf6, #efe6cf 55%, #cfc09c);
+/* --- ONE skeleton for all six tiers (round 5) ---
+   3.8cqw border · art nearly full-bleed · top-left 코스트 + 보유 badges · top-right 파워 + 속성 gem ·
+   effect rows with keyword pills · notched name bar (Lv | name | set·rarity) · traits row · vertical credit on the right border.
+   N/R/SR: printed materials, art stops at the name bar (117cqw). SSR/UR/LR: metal border, art runs to the border,
+   panels turn translucent dark or foil. Card height = 139.68cqw. */
+.card { --wt: 3.8cqw; --wx: 3.8cqw; --wh: 113.2cqw; --wbm: 22.68cqw; --c1: #ffb08a; --c2: #c92a4a; }
+.front { --ink: #261f15; --ink2: #5d5140;
+  --p-fill: rgba(250, 245, 232, .94); --p-line: linear-gradient(135deg, #5e4d33, #a08a60 45%, #5e4d33); --p-ink: #261f15; --p-ink2: #5d5140;
+  --nb-fill: linear-gradient(180deg, #fbf6e8, #e9dfc6); --nb-line: linear-gradient(135deg, #5e4d33, #a08a60 45%, #5e4d33); --nb-ink: #241c12;
+  --ring: linear-gradient(135deg, #6e5634, #e6d3a8 40%, #8a7048 70%, #d9c497); --tr-ink: #4a3f2e; --vc-ink: #5a4c36;
   background: #15131c; color: var(--ink); }
 .f-bg { inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--bgpos, 50% 50%); display: block; }
 .f-sheen { inset: 0; pointer-events: none; opacity: 0; -webkit-mask-image: var(--lum, none); mask-image: var(--lum, none); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
-.f-shade { top: var(--wt); left: var(--wx); right: var(--wx); height: var(--wh); pointer-events: none; box-shadow: inset 0 0 2.4cqw rgba(0, 0, 0, .45); }
+.f-shade { top: var(--wt); left: var(--wx); right: var(--wx); height: var(--wh); pointer-events: none; box-shadow: inset 0 0 1.8cqw rgba(0, 0, 0, .4); }
 .f-frame { inset: 0; padding: var(--wt) var(--wx) var(--wbm); border-radius: inherit; pointer-events: none; background-size: 100% 100%;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
 .f-frame::after { content: ""; position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .f-glit { inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; mix-blend-mode: plus-lighter; }
-.f-rim { top: var(--wt); left: var(--wx); right: var(--wx); height: var(--wh); padding: .55cqw; pointer-events: none; background: #3d372f;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+/* glare sits UNDER the subject so a cutout is never washed or blended (round-5 overframe fix) */
+.f-glare { inset: 0; pointer-events: none; border-radius: inherit; mix-blend-mode: soft-light; opacity: calc(var(--o) * .75);
+  background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .6) 0%, rgba(255, 255, 255, .2) 22%, transparent 50%); }
 .f-subjwrap { inset: 0; pointer-events: none; clip-path: inset(var(--wt) var(--wx) var(--wbm) var(--wx)); }
-.f-subj { position: absolute; left: var(--sx, 0%); top: var(--sy, 0%); width: var(--sw, 100%); height: auto; max-width: none; display: block;
+.f-subj { position: absolute; left: var(--sx, 0%); top: var(--sy, 0%); width: var(--sw, 100%); height: auto; max-width: none; display: block; opacity: 1; mix-blend-mode: normal;
   -webkit-mask-image: var(--sfade, none); mask-image: var(--sfade, none); }
 .card[data-subj="0"] .f-subjwrap { display: none; }
-.f-name { top: 5cqw; left: 8cqw; right: 7.2cqw; height: 9.6cqw; display: flex; align-items: center; gap: 2cqw; }
-/* condensed bold card-name type */
-.f-title { flex: 0 1 auto; margin-right: auto; min-width: 0; font-size: 5.7cqw; font-weight: 800; letter-spacing: -.035em; white-space: nowrap; line-height: 1.25; padding: .3cqw 0;
-  transform: scaleX(.9); transform-origin: 0 50%; }
-.f-type { flex: none; width: 7.4cqw; height: 7.4cqw; border-radius: 50%; display: grid; place-items: center;
-  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .45cqw rgba(255, 255, 255, .55), 0 0 0 .8cqw rgba(0, 0, 0, .35), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); }
-.f-type svg { width: 4.5cqw; height: 4.5cqw; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 .2cqw .3cqw rgba(0, 0, 0, .35)); }
 
-/* print footer: two tiny rows on the frame */
-.f-foot { left: 10.6cqw; right: 10.6cqw; bottom: 6.4cqw; display: flex; flex-direction: column; gap: .7cqw; font-size: 2.1cqw; line-height: 1.15; color: var(--ink2); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
-.fr { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 2cqw; }
-.fr > :last-child { justify-self: end; }
-.f-illus { font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.f-no { display: inline-flex; align-items: center; gap: .8cqw; white-space: nowrap; font-weight: 700; }
-.f-no svg { width: 2.4cqw; height: 2.8cqw; }
-.f-rar { display: inline-flex; align-items: center; gap: .6cqw; font-weight: 800; letter-spacing: .06em; color: var(--ink); }
-.f-rar svg { width: 2.6cqw; height: 2.6cqw; fill: currentColor; }
-.f-serial { white-space: nowrap; font-weight: 700; }
-.f-copy { white-space: nowrap; }
-.f-glare, .f-edge { inset: 0; pointer-events: none; border-radius: inherit; }
-.f-glare { mix-blend-mode: soft-light; opacity: calc(var(--o) * .75);
-  background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .6) 0%, rgba(255, 255, 255, .2) 22%, transparent 50%); }
-.f-edge { box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .2); }
+/* top-left: 코스트 (tier) and 보유 (duplicates) */
+.f-cost, .f-dup { display: grid; place-items: center; border-radius: 50%; border: .8cqw solid transparent; color: #fff; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: radial-gradient(circle at 40% 32%, #3d3756 0%, #1b1828 70%) padding-box, var(--ring) border-box;
+  box-shadow: 0 .4cqw .9cqw rgba(0, 0, 0, .5), inset 0 0 0 .35cqw color-mix(in srgb, var(--c2) 70%, transparent); text-shadow: 0 .2cqw .3cqw rgba(0, 0, 0, .6); }
+.f-cost { left: 5.4cqw; top: 5.6cqw; width: 13cqw; height: 13cqw; font-size: 7cqw; line-height: 1; }
+.f-dup { left: 8.6cqw; top: 19.4cqw; width: 8.6cqw; height: 8.6cqw; font-size: 3.8cqw; line-height: 1; }
+.f-cost::before, .f-dup::before { position: absolute; left: 50%; top: -1.2cqw; transform: translateX(-50%); padding: .2cqw 1.1cqw; border-radius: .6cqw; white-space: nowrap;
+  font-size: 1.7cqw; font-weight: 800; letter-spacing: .04em; color: #fff; background: linear-gradient(180deg, var(--c1), var(--c2)); box-shadow: 0 0 0 .2cqw rgba(0, 0, 0, .35); text-shadow: 0 .1cqw .2cqw rgba(0, 0, 0, .5); }
+.f-cost::before { content: "코스트"; }
+.f-dup::before { content: "보유"; top: -1.4cqw; font-size: 1.5cqw; }
+.f-dup small { font-size: 2.2cqw; margin-right: .2cqw; }
 
-/* metallic name letters (foil): base metal + a highlight band that slides with the light; dark outline for legibility */
+/* top-right: 파워 (resolution) + 속성 gem + favourite heart */
+.f-power { right: 6cqw; top: 3.9cqw; display: flex; align-items: baseline; gap: .6cqw; color: #fff; font-weight: 800; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 .25cqw #000, 0 0 .25cqw #000, 0 0 .6cqw rgba(0, 0, 0, .7), 0 .3cqw .7cqw rgba(0, 0, 0, .55); }
+.f-power b { font-size: 9.2cqw; }
+.f-power small { font-size: 5cqw; }
+.f-power i { font-style: normal; font-size: 2.1cqw; letter-spacing: .04em; align-self: flex-start; margin-top: 1.2cqw; }
+.f-gem { right: 6cqw; top: 14.6cqw; display: flex; align-items: center; gap: 1cqw; }
+.f-type { width: 7.2cqw; height: 7.2cqw; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .45cqw rgba(255, 255, 255, .6), 0 0 0 .8cqw rgba(0, 0, 0, .4), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); }
+.f-type svg { width: 4.4cqw; height: 4.4cqw; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 .2cqw .3cqw rgba(0, 0, 0, .35)); }
+.f-heart { width: 4.6cqw; height: 4.6cqw; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 38% 30%, #ffe1e4 0%, #ff5a6a 30%, #b3122c 70%, #5a0612);
+  box-shadow: 0 0 0 .3cqw rgba(255, 255, 255, .6), 0 0 0 .55cqw rgba(0, 0, 0, .4); }
+.f-heart svg { width: 2.6cqw; height: 2.6cqw; fill: rgba(255, 255, 255, .9); }
+
+/* effect rows — notched panel (the cartouche motif the user picked), keyword pills in the attribute colour */
+.f-fx { left: 5.4cqw; right: 5.4cqw; bottom: 23.8cqw; padding: 1.8cqw 2.4cqw; display: flex; flex-direction: column; gap: 1.1cqw; isolation: isolate; color: var(--p-ink); }
+.f-fx::before, .f-fx::after { content: ""; position: absolute; inset: 0; z-index: -2; --c: 2cqw;
+  clip-path: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)); }
+.f-fx::before { background: var(--p-line); }
+.f-fx::after { inset: .3cqw; --c: 1.85cqw; z-index: -1; background: var(--p-fill); }
+.fx { display: flex; align-items: flex-start; gap: 1.4cqw; font-size: 2.65cqw; line-height: 1.4; word-break: keep-all; }
+.fx .kw { flex: none; padding: .35cqw 1.7cqw .45cqw; font-size: 2.2cqw; font-weight: 800; color: #fff; white-space: nowrap; letter-spacing: -.01em;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c1) 55%, var(--c2)), var(--c2)); text-shadow: 0 .1cqw .25cqw rgba(0, 0, 0, .55);
+  clip-path: polygon(1cqw 0, calc(100% - 1cqw) 0, 100% 50%, calc(100% - 1cqw) 100%, 1cqw 100%, 0 50%); }
+.fx b { font-weight: 800; }
+.fx .tx { padding-top: .1cqw; }
+
+/* name bar: Lv box | name | set · rarity, notched like the cartouche; the Lv box carries the attribute colour */
+.f-nb { left: 5.4cqw; right: 5.4cqw; top: 117.6cqw; height: 10.4cqw; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 1.6cqw; padding: 0 2.2cqw 0 1.1cqw; isolation: isolate; color: var(--nb-ink); }
+.f-nb::before, .f-nb::after { content: ""; position: absolute; inset: 0; z-index: -2; --c: 2.2cqw;
+  clip-path: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)); }
+.f-nb::before { background: var(--nb-line); filter: drop-shadow(0 .3cqw .5cqw rgba(0, 0, 0, .35)); }
+.f-nb::after { inset: .35cqw; --c: 2cqw; z-index: -1; background: var(--nb-fill); }
+.nb-lv { display: inline-flex; align-items: baseline; gap: .2cqw; padding: .9cqw 1.6cqw 1cqw 1.8cqw; color: #fff; font-weight: 800; font-size: 4.6cqw; line-height: 1; font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c2) 70%, #000), color-mix(in srgb, var(--c2) 45%, #000)); box-shadow: inset 0 0 0 .25cqw rgba(255, 255, 255, .3);
+  clip-path: polygon(1.2cqw 0, 100% 0, 100% 100%, 1.2cqw 100%, 0 calc(100% - 1.2cqw), 0 1.2cqw); text-shadow: 0 .15cqw .3cqw rgba(0, 0, 0, .5); }
+.nb-lv i { font-style: normal; font-size: 2.4cqw; }
+.f-title { justify-self: center; max-width: 100%; font-size: 5.6cqw; font-weight: 800; letter-spacing: -.035em; white-space: nowrap; line-height: 1.25; padding: .3cqw 0; transform: scaleX(.92); }
+.nb-no { display: flex; flex-direction: column; align-items: flex-end; gap: .4cqw; font-size: 2.1cqw; font-weight: 800; letter-spacing: .03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.f-rar { display: inline-flex; align-items: center; gap: .4cqw; font-weight: 800; letter-spacing: .06em; }
+.f-rar svg { width: 2.3cqw; height: 2.3cqw; fill: currentColor; }
+.f-traits { left: 7cqw; right: 7cqw; top: 129.2cqw; display: flex; align-items: center; justify-content: flex-end; gap: 1.2cqw; font-size: 2.05cqw; font-weight: 700; color: var(--tr-ink); white-space: nowrap; }
+.f-traits .t + .t::before { content: ""; display: inline-block; width: .14cqw; height: 1.8cqw; margin-right: 1.2cqw; vertical-align: -.25cqw; background: currentColor; opacity: .5; }
+.f-traits .f-serial { margin-right: auto; padding: 0 .9cqw; border-radius: .5cqw; box-shadow: inset 0 0 0 .2cqw currentColor; font-variant-numeric: tabular-nums; }
+.f-vc { right: 1.55cqw; top: 46cqw; writing-mode: vertical-rl; font-size: 1.5cqw; line-height: 1; letter-spacing: .05em; color: var(--vc-ink); white-space: nowrap; font-weight: 600; }
+
+/* metallic name letters (foil) */
 .card .f-title.metal { color: transparent; -webkit-background-clip: text; background-clip: text;
   background-image: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, .95) 50%, transparent 62%), var(--metal);
-  background-size: 260% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(115% - var(--mx) * 1.3) 0, 0 0; }
-.card .f-name.outlined .f-title { filter: drop-shadow(0 0 .2cqw #000) drop-shadow(0 0 .2cqw rgba(0, 0, 0, .95)) drop-shadow(0 0 .25cqw rgba(0, 0, 0, .8)) drop-shadow(0 .45cqw .45cqw rgba(0, 0, 0, .55)); }
-.card .f-name.stamped { filter: drop-shadow(0 .15cqw 0 rgba(255, 255, 255, .55)) drop-shadow(0 -.12cqw 0 rgba(0, 0, 0, .45)); }
+  background-size: 260% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(115% - var(--mx) * 1.3) 0, 0 0;
+  filter: drop-shadow(0 0 .15cqw rgba(0, 0, 0, .9)) drop-shadow(0 .2cqw .2cqw rgba(0, 0, 0, .45)); }
 .card { --gold: linear-gradient(180deg, #fff8dc 0%, #f7d77e 28%, #a8711c 50%, #e7bd5c 68%, #fff0bb 100%);
   --silver: linear-gradient(180deg, #ffffff 0%, #e6ebf1 28%, #7f8a9c 50%, #d3d9e3 68%, #ffffff 100%);
-  --silverdk: linear-gradient(180deg, #8a939f 0%, #4b535e 30%, #1d2229 52%, #59626e 70%, #9aa3ae 100%);
   --prism: linear-gradient(180deg, #ffffff 0%, #ffe6f2 24%, #8f9bc4 50%, #d8fff0 70%, #fff7e0 100%); }
 
-/* ---------- description area (3 styles, chosen page-wide on <html data-desc>) ---------- */
-.f-desc { left: 7cqw; right: 7cqw; top: 97.4cqw; color: var(--d-ink); }
-.d-body { display: flex; flex-direction: column; gap: 1cqw; }
-.d-type { font-size: 2.75cqw; font-weight: 800; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.d-flavor { margin: 0; font-size: 3.15cqw; line-height: 1.5; word-break: keep-all; }
-.d-stats { display: flex; align-items: center; gap: 3cqw; font-size: 2.55cqw; color: var(--d-ink2); font-variant-numeric: tabular-nums; }
-.d-stats i { font-style: normal; }
-.d-stats b { color: var(--d-ink); font-weight: 800; margin-left: .7cqw; }
-.d-stats .fav svg { width: 3.1cqw; height: 3.1cqw; fill: #d22f3c; display: block; }
-.d-orn { display: none; }
-
-/* A · 장식 카르투슈 — notched-corner cartouche, double rule, type line set into its top edge as a tab */
-:root[data-desc="a"] .f-desc { padding: 3.6cqw 4.2cqw 2.2cqw; isolation: isolate; filter: drop-shadow(0 .35cqw .7cqw rgba(0, 0, 0, .3)); }
-:root[data-desc="a"] .f-desc::before, :root[data-desc="a"] .f-desc::after, :root[data-desc="a"] .d-orn, :root[data-desc="a"] .d-orn::after {
-  content: ""; position: absolute; inset: 0; z-index: -3; --c: 2.8cqw;
-  clip-path: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)); }
-:root[data-desc="a"] .f-desc::before { background: var(--d-line); }
-:root[data-desc="a"] .f-desc::after { inset: .4cqw; --c: 2.6cqw; z-index: -2; background: var(--d-bg); }
-:root[data-desc="a"] .d-orn { display: block; inset: 1.1cqw; --c: 2.2cqw; z-index: -1; background: var(--d-linec); opacity: .7; }
-:root[data-desc="a"] .d-orn::after { inset: .16cqw; --c: 2.1cqw; z-index: 0; background: var(--d-bg); }
-:root[data-desc="a"] .d-body { gap: 1.4cqw; }
-:root[data-desc="a"] .d-type { position: absolute; top: -2.1cqw; left: 50%; transform: translateX(-50%); max-width: 78%; padding: .7cqw 3.2cqw; font-size: 2.5cqw;
-  background: var(--d-line); color: var(--d-tab); clip-path: polygon(1.6cqw 0, calc(100% - 1.6cqw) 0, 100% 50%, calc(100% - 1.6cqw) 100%, 1.6cqw 100%, 0 50%); }
-:root[data-desc="a"] .d-flavor { text-align: center; padding: .4cqw 0 0; }
-:root[data-desc="a"] .d-stats { justify-content: center; padding-top: 1.4cqw; margin-top: 1.4cqw; border-top: .22cqw solid color-mix(in srgb, var(--d-linec) 55%, transparent); }
-
-/* B · 리본 + 메달 — no box: a forked ribbon carries the line, stats become medallions on the bottom border */
-:root[data-desc="b"] .f-desc { top: 96.8cqw; bottom: 15.4cqw; left: 4.4cqw; right: 4.4cqw; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; }
-:root[data-desc="b"] .d-body { position: relative; isolation: isolate; align-items: center; gap: .5cqw; padding: 1.5cqw 10.5cqw 1.9cqw; filter: drop-shadow(0 .4cqw .6cqw rgba(0, 0, 0, .35)); }
-:root[data-desc="b"] .d-body::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--r-bg);
-  clip-path: polygon(0 0, 100% 0, 94.5% 50%, 100% 100%, 0 100%, 5.5% 50%); box-shadow: inset 0 .35cqw 0 rgba(255, 255, 255, .45), inset 0 -.35cqw 0 rgba(0, 0, 0, .18); }
-:root[data-desc="b"] .d-body::after { content: ""; position: absolute; left: 6.5%; right: 6.5%; top: .7cqw; bottom: .7cqw; z-index: -1; border-top: .18cqw solid var(--d-linec); border-bottom: .18cqw solid var(--d-linec); opacity: .65; }
-:root[data-desc="b"] .d-type { font-size: 2.4cqw; color: var(--d-ink2); }
-:root[data-desc="b"] .d-flavor { font-size: 3.1cqw; font-weight: 600; }
-:root[data-desc="b"] .d-stats { gap: 2.6cqw; }
-:root[data-desc="b"] .d-stats .st { width: 11cqw; height: 11cqw; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .1cqw;
-  border: .65cqw solid transparent; background: var(--m-face) padding-box, var(--m-rim) border-box;
-  box-shadow: 0 .5cqw 1cqw rgba(0, 0, 0, .45), inset 0 .3cqw .4cqw rgba(255, 255, 255, .5), inset 0 -.4cqw .6cqw rgba(0, 0, 0, .18); font-size: 1.7cqw; line-height: 1.05; }
-:root[data-desc="b"] .d-stats .st b { margin: 0; font-size: 2.45cqw; }
-:root[data-desc="b"] .d-stats .st.fav { background: radial-gradient(circle at 38% 30%, #ffe1e4 0%, #ff5a6a 22%, #c41a33 52%, #5a0612 100%) padding-box, var(--m-rim) border-box; }
-:root[data-desc="b"] .d-stats .st.fav svg { width: 3.4cqw; height: 3.4cqw; fill: rgba(255, 255, 255, .85); }
-
-/* C · 아치 플레이트 — short plate whose arched top hugs the art; stats sit in its bottom rule */
-:root[data-desc="c"] .f-desc { top: 91.4cqw; padding: 6.4cqw 4.6cqw 0; text-align: center; isolation: isolate; filter: drop-shadow(0 .35cqw .7cqw rgba(0, 0, 0, .3)); }
-:root[data-desc="c"] .f-desc::before, :root[data-desc="c"] .f-desc::after { content: ""; position: absolute; inset: 0; z-index: -2; background: var(--d-line); border-radius: 50% 50% 1.4cqw 1.4cqw / 7cqw 7cqw 1.4cqw 1.4cqw; }
-:root[data-desc="c"] .f-desc::after { inset: .4cqw; z-index: -1; background: var(--d-bg); border-radius: 50% 50% 1.1cqw 1.1cqw / 6.6cqw 6.6cqw 1.1cqw 1.1cqw; }
-:root[data-desc="c"] .d-orn { display: block; left: 1.4cqw; right: 1.4cqw; top: 1.3cqw; height: 8cqw; border-top: .2cqw solid var(--d-linec); border-radius: 50% 50% 0 0 / 5.8cqw 5.8cqw 0 0; opacity: .75; }
-:root[data-desc="c"] .d-body { align-items: center; gap: 1cqw; }
-:root[data-desc="c"] .d-type { font-size: 2.5cqw; letter-spacing: .04em; }
-:root[data-desc="c"] .d-stats { margin-top: 1.4cqw; padding-bottom: 1.6cqw; gap: 2cqw; }
-:root[data-desc="c"] .d-stats::before, :root[data-desc="c"] .d-stats::after { content: ""; flex: 1; height: .22cqw; background: var(--d-linec); opacity: .7; }
-
-/* premium tiers: warm translucent parchment so the overframe figure shows through */
-.parch .front { --d-bg: linear-gradient(180deg, rgba(252, 242, 220, .82), rgba(240, 224, 190, .76)); --d-line: linear-gradient(135deg, #7a4c10, #e9c46e 30%, #9a6a1e 55%, #f3d58a 80%, #7a4c10);
-  --d-linec: #9a6e2a; --d-ink: #2a1c0c; --d-ink2: #5a4128; --d-tab: #fff6dc;
-  --r-bg: linear-gradient(180deg, rgba(255, 248, 228, .9) 0%, rgba(240, 222, 182, .86) 50%, rgba(214, 186, 132, .88) 100%);
-  --m-rim: linear-gradient(135deg, #7a4c10, #ffe9a6 35%, #a8711c 60%, #f3d58a 85%); --m-face: radial-gradient(circle at 40% 32%, #fffaf0, #f0e0bc 55%, #c9a86a); }
-
-/* N · 일반 — matte printed card stock, engraved ivory frame (canvas texture) */
-.card[data-tier="n"] .f-shade { box-shadow: inset 0 0 1.6cqw rgba(0, 0, 0, .35); }
-.card[data-tier="n"] .f-rim, .card[data-tier="r"] .f-rim, .card[data-tier="sr"] .f-rim { display: none; }
-
-/* R · 레어 — same card, pewter frame, silver foil stamp on the name and set mark, foil border line */
-.card[data-tier="r"] .front { --ink2: #444b55;
-  --d-bg: linear-gradient(180deg, #f7f8fa, #e4e8ec); --d-line: linear-gradient(135deg, #5f6772, #f3f5f7 40%, #7d8590 65%, #dfe3e7); --d-linec: #6c7480; --d-tab: #f7f8fa;
-  --r-bg: linear-gradient(180deg, #ffffff 0%, #e9ecf0 45%, #c6ccd3 100%); --m-rim: linear-gradient(135deg, #5f6772, #ffffff 40%, #8a929c 70%, #e6e9ed); --m-face: radial-gradient(circle at 40% 32%, #ffffff, #e9ecf0 55%, #b9c0c8); }
+/* ---- N · R · SR: printed materials (frame texture drawn on canvas) ---- */
+.card[data-tier="r"] .front { --p-fill: rgba(247, 248, 250, .94); --p-line: linear-gradient(135deg, #5f6772, #f3f5f7 40%, #7d8590 65%, #dfe3e7); --p-ink: #1e232a;
+  --nb-fill: linear-gradient(180deg, #ffffff, #d5dae0); --nb-line: linear-gradient(135deg, #5f6772, #f3f5f7 40%, #7d8590 65%, #dfe3e7); --nb-ink: #1c2128;
+  --ring: linear-gradient(135deg, #5f6772, #ffffff 40%, #8a929c 70%, #e6e9ed); --tr-ink: #3c434d; --vc-ink: #4b525c; }
 .card[data-tier="r"] .f-frame::after { opacity: calc(var(--o) * .8); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .95), transparent 40%); }
-.card[data-tier="r"] .f-no svg { color: #8f98a3; filter: drop-shadow(0 .1cqw 0 rgba(255, 255, 255, .8)); }
-
-/* SR · 홀로 레어 — brushed gunmetal frame with silver inlay; thin-film holo only on the background, never on the subject */
-.card[data-tier="sr"] .front { --ink: #eef0ff; --ink2: #b3b9dc;
-  --d-bg: linear-gradient(180deg, rgba(34, 40, 92, .94), rgba(16, 20, 50, .94)); --d-line: linear-gradient(135deg, #7d86a8, #f4f6ff 40%, #8890ad 65%, #dfe3f4); --d-linec: #aab3d6;
-  --d-ink: #eef0ff; --d-ink2: #b8bfe0; --d-tab: #14183a;
-  --r-bg: linear-gradient(180deg, #3a4486 0%, #252c62 50%, #151a40 100%); --m-rim: linear-gradient(135deg, #6d7690, #f4f6ff 40%, #8890ad 70%, #e6e9f6); --m-face: radial-gradient(circle at 40% 32%, #4a55a0, #262d64 55%, #121638); }
+.card[data-tier="sr"] .front { --p-fill: rgba(20, 24, 58, .9); --p-line: linear-gradient(135deg, #7d86a8, #f4f6ff 40%, #8890ad 65%, #dfe3f4); --p-ink: #eef0ff;
+  --nb-fill: linear-gradient(180deg, #353f80, #181d44); --nb-line: linear-gradient(135deg, #7d86a8, #f4f6ff 40%, #8890ad 65%, #dfe3f4); --nb-ink: #eef0ff;
+  --ring: linear-gradient(135deg, #6d7690, #f4f6ff 40%, #8890ad 70%, #e6e9f6); --tr-ink: #c9d0f0; --vc-ink: #b8c0e6; }
 .card[data-tier="sr"] .f-frame::after { opacity: calc(var(--o) * .7); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(220, 228, 255, .9), transparent 42%); }
 .card[data-tier="sr"] .f-sheen { opacity: calc(.18 + var(--o) * .42); mix-blend-mode: color-dodge; filter: saturate(.75) brightness(.72);
   background: linear-gradient(var(--ang), #ffb3d0, #ffe6a8, #b3f5d8, #b0d4ff, #d6c2ff, #ffb3d0); background-size: 220% 220%; background-position: var(--mx) var(--my); }
 
-/* =====================================================================================
-   SSR · UR · LR — box-less full art (modern illustration-rare layout, Lakomics' own vocabulary).
-   Same 3.8cqw outer border as N/R/SR, metal per tier; art full bleed; header with a portrait medallion,
-   condensed metallic name and a swoosh rule; text printed straight on the art in the lower third;
-   tone (light/dark ink) is chosen from the art behind the text block.
-   ===================================================================================== */
-.fa-medal, .fa-sub, .fa-swoosh, .fa-body, .fa-copy, .fa-value { display: none; }
-.fa .f-desc, .fa .f-foot, .fa .f-rim, .fa .f-shade { display: none; }
-.fa .f-frame { padding: 3.8cqw; }
+/* ---- SSR · UR · LR: art runs to the metal border, panels translucent/foil, cutout may cover the border ---- */
+.fa { --wbm: 3.8cqw; --wh: 132.08cqw; }
+.fa .f-shade { display: none; }
 .fa .f-subjwrap { clip-path: none; }
 .fa .f-subj { filter: drop-shadow(0 1cqw 1.2cqw rgba(0, 0, 0, .45)); }
-.fa .f-edge { box-shadow: inset .35cqw .35cqw .5cqw rgba(255, 255, 255, .55), inset -.35cqw -.35cqw .6cqw rgba(0, 0, 0, .45), inset 0 0 0 3.8cqw transparent, inset 0 0 0 4.15cqw rgba(0, 0, 0, .28); }
-.card[data-tone="light"] { --fa-ink: #ffffff; --fa-ink2: rgba(255, 255, 255, .88); --fa-sh: rgba(0, 0, 0, .95); --fa-sh2: rgba(0, 0, 0, .6); --fa-rule: linear-gradient(90deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .95) 12%, rgba(205, 212, 222, .9) 60%, rgba(255, 255, 255, .2)); }
-.card[data-tone="dark"] { --fa-ink: #16110a; --fa-ink2: rgba(22, 17, 10, .86); --fa-sh: rgba(255, 252, 240, .95); --fa-sh2: rgba(255, 250, 235, .55); --fa-rule: linear-gradient(90deg, rgba(60, 44, 20, .15), rgba(60, 44, 20, .9) 12%, rgba(120, 90, 40, .85) 60%, rgba(60, 44, 20, .2)); }
-.fa { --fa-halo: 0 0 .2cqw var(--fa-sh), 0 0 .2cqw var(--fa-sh), 0 0 .55cqw var(--fa-sh2), 0 .25cqw .6cqw var(--fa-sh2); }
-
-/* header */
-.fa .fa-medal { display: block; left: 5.2cqw; top: 5cqw; width: 12.4cqw; height: 12.4cqw; border-radius: 50%; border: .9cqw solid transparent;
-  background: var(--medal-img, none) var(--medal-pos, 50% 35%) / var(--medal-size, 300%) no-repeat padding-box, radial-gradient(circle at 40% 35%, #f6f2ea, #b9b4aa) padding-box, var(--band) border-box;
-  box-shadow: 0 .4cqw 1cqw rgba(0, 0, 0, .45), inset 0 0 0 .25cqw rgba(0, 0, 0, .35); }
-.fa .f-name { left: 19.6cqw; right: 5.6cqw; top: 4.8cqw; height: 8.4cqw; gap: 1.2cqw; }
-.fa .f-title { font-size: 6.2cqw; }
-.fa .fa-value { display: inline-flex; align-items: baseline; gap: .5cqw; color: var(--fa-ink); text-shadow: var(--fa-halo); font-weight: 800; font-size: 6.6cqw; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
-.fa .fa-value i { font-style: normal; font-size: 2cqw; font-weight: 800; letter-spacing: .02em; }
-.fa .f-type { width: 7cqw; height: 7cqw; }
-.fa .fa-swoosh { display: block; left: 19cqw; right: 5.4cqw; top: 12.2cqw; height: 4.4cqw; overflow: visible; filter: drop-shadow(0 .15cqw .2cqw rgba(0, 0, 0, .5)); }
-.fa .fa-swoosh path { fill: none; stroke-width: 1.1; vector-effect: non-scaling-stroke; stroke-linecap: round; }
-.fa .fa-swoosh path.hl { stroke-width: .5; opacity: .9; }
-.card[data-tier="ssr"] .fa-swoosh path { stroke: url(#swSsr); } .card[data-tier="ur"] .fa-swoosh path { stroke: url(#swUr); } .card[data-tier="lr"] .fa-swoosh path { stroke: url(#swLr); }
-.fa .fa-sub { display: block; left: 20cqw; top: 12.6cqw; font-size: 2.2cqw; font-style: italic; font-weight: 700; color: var(--fa-ink); text-shadow: var(--fa-halo); white-space: nowrap; }
-
-/* body printed on the art */
-.fa .fa-body { display: flex; flex-direction: column; left: 6.6cqw; right: 6.6cqw; bottom: 5.6cqw; color: var(--fa-ink); text-shadow: var(--fa-halo); isolation: isolate; }
-.fa[data-scrim="1"] .fa-body::before { content: ""; position: absolute; inset: -9cqw -10cqw -4cqw; z-index: -1; pointer-events: none;
-  background: radial-gradient(60% 55% at 50% 58%, var(--scrim, rgba(0, 0, 0, .5)), transparent 100%); }
-.card[data-tone="dark"] { --scrim: rgba(255, 250, 238, .55); }
-.fa-type { display: flex; align-items: center; gap: 1.6cqw; font-size: 3.5cqw; font-weight: 800; letter-spacing: -.02em; }
-.fa-type .gem { flex: none; width: 4.6cqw; height: 4.6cqw; border-radius: 50%; display: grid; place-items: center;
-  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .3cqw rgba(255, 255, 255, .7), 0 0 0 .5cqw rgba(0, 0, 0, .4); }
-.fa-type .gem svg { width: 2.9cqw; height: 2.9cqw; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.fa-type .fa-pt { margin-left: auto; font-size: 4.2cqw; font-weight: 800; font-variant-numeric: tabular-nums; }
-.fa-type .fa-pt small { font-size: 2cqw; margin-left: .4cqw; }
-.fa-flavor { margin: 1cqw 0 0; font-size: 3.05cqw; line-height: 1.42; font-weight: 500; word-break: keep-all; }
-.fa-stats { position: relative; display: flex; align-items: center; margin-top: 2.4cqw; padding: 1.1cqw 0; font-size: 2.2cqw; font-weight: 700; }
-.fa-stats::before, .fa-stats::after { content: ""; position: absolute; left: 0; right: 0; height: .5cqw; background: var(--fa-rule);
-  -webkit-mask: linear-gradient(#000 0 0) top / 100% .16cqw no-repeat, linear-gradient(#000 0 0) bottom / 100% .16cqw no-repeat; mask: linear-gradient(#000 0 0) top / 100% .16cqw no-repeat, linear-gradient(#000 0 0) bottom / 100% .16cqw no-repeat;
-  filter: drop-shadow(0 0 .15cqw var(--fa-sh2)); }
-.fa-stats::before { top: 0; } .fa-stats::after { bottom: 0; }
-.fa-stats > span { flex: 1; display: inline-flex; align-items: center; gap: 1cqw; padding: 0 1.6cqw; }
-.fa-stats > span + span { border-left: .14cqw solid color-mix(in srgb, var(--fa-ink) 55%, transparent); }
-.fa-stats i { font-style: normal; font-weight: 500; font-size: 1.9cqw; opacity: .9; }
-.fa-stats .mini { width: 2.8cqw; height: 2.8cqw; border-radius: 50%; display: inline-grid; place-items: center; background: radial-gradient(circle at 35% 30%, #fff, var(--c1) 40%, var(--c2)); box-shadow: 0 0 0 .2cqw rgba(0, 0, 0, .35); }
-.fa-stats .mini svg { width: 1.9cqw; height: 1.9cqw; fill: none; stroke: #fff; stroke-width: 2.6; }
-.fa-stats .heart svg { width: 2.8cqw; height: 2.8cqw; fill: #e5394a; filter: drop-shadow(0 0 .2cqw var(--fa-sh)); display: block; }
-.fa-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 3cqw; margin-top: 1.8cqw; }
-.fa-credit { font-size: 1.95cqw; line-height: 1.35; white-space: nowrap; }
-.fa-credit em { font-style: italic; font-weight: 700; }
-.fa-credit .set { display: inline-flex; align-items: center; gap: .8cqw; font-weight: 800; }
-.fa-credit .set .code { padding: 0 .7cqw; border-radius: .5cqw; font-size: 1.7cqw; line-height: 2.4cqw; color: var(--fa-sh); background: var(--fa-ink); text-shadow: none; }
-.fa-credit .f-rar { color: inherit; gap: .3cqw; }
-.fa-credit .f-rar svg { width: 2.3cqw; height: 2.3cqw; }
-.fa-credit .f-rar span { display: none; }
-.fa-credit .f-serial { margin-left: 1cqw; }
-.fa-note { margin: 0; max-width: 52%; text-align: right; font-size: 1.95cqw; line-height: 1.38; font-style: italic; word-break: keep-all; }
-.fa .fa-copy { display: block; left: 0; right: 0; bottom: .95cqw; text-align: center; font-size: 1.65cqw; font-weight: 600; letter-spacing: .04em; color: var(--copy-ink, #2b2f36); text-shadow: 0 .1cqw 0 rgba(255, 255, 255, .45); }
-
-/* SSR · 폴리시드 실버 */
-.card[data-tier="ssr"] { --band: linear-gradient(135deg, #8d949c 0%, #f4f6f8 18%, #a8afb7 34%, #ffffff 50%, #8f969e 66%, #e6e9ec 84%, #7d848c 100%); --swoosh-a: #ffffff; --swoosh-b: #8a929c; }
-.card[data-tier="ssr"] .f-frame { background: var(--band); }
+.fa .f-frame { padding: 3.8cqw; background: var(--band);
+  box-shadow: inset 0 0 0 .25cqw rgba(0, 0, 0, .35), inset .5cqw .5cqw .7cqw rgba(255, 255, 255, .55), inset -.5cqw -.5cqw .8cqw rgba(0, 0, 0, .4); }
+.fa .front { --p-fill: rgba(10, 10, 20, .62); --p-ink: #ffffff; --tr-ink: #ffffff; }
+.fa .fx .tx { text-shadow: 0 .15cqw .3cqw rgba(0, 0, 0, .6); }
+.fa .f-traits { text-shadow: 0 0 .25cqw #000, 0 0 .5cqw rgba(0, 0, 0, .8); }
+.card[data-fav="1"] .f-frame::after { opacity: calc(.3 + var(--o) * .9) !important; }
+.card[data-tier="ssr"] { --band: linear-gradient(135deg, #8d949c 0%, #f4f6f8 18%, #a8afb7 34%, #ffffff 50%, #8f969e 66%, #e6e9ec 84%, #7d848c 100%); }
+.card[data-tier="ssr"] .front { --p-line: linear-gradient(135deg, #8d949c, #ffffff 40%, #a8afb7 65%, #eef0f2); --nb-fill: var(--band); --nb-line: linear-gradient(135deg, #4d545c, #c8ced4 50%, #4d545c); --nb-ink: #15181d;
+  --ring: linear-gradient(135deg, #8d949c, #ffffff 40%, #a8afb7 70%, #eef0f2); --vc-ink: #2b2f36; }
 .card[data-tier="ssr"] .f-frame::after { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 42%); }
 .card[data-tier="ssr"] .f-sheen { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 245, 230, .7), transparent 46%); }
-/* UR · 골드 */
-.card[data-tier="ur"] { --band: linear-gradient(135deg, #7a4c10 0%, #ffe9a6 16%, #c88d2a 32%, #fff6d6 48%, #a8701c 64%, #ffe08a 82%, #6e4309 100%); --copy-ink: #3a2405; --swoosh-a: #fff3c8; --swoosh-b: #a8711c; }
-.card[data-tier="ur"] .f-frame { background: var(--band); }
+.card[data-tier="ur"] { --band: linear-gradient(135deg, #7a4c10 0%, #ffe9a6 16%, #c88d2a 32%, #fff6d6 48%, #a8701c 64%, #ffe08a 82%, #6e4309 100%); }
+.card[data-tier="ur"] .front { --p-fill: rgba(22, 13, 2, .6); --p-line: linear-gradient(135deg, #7a4c10, #ffe9a6 35%, #a8711c 60%, #f3d58a 85%); --nb-fill: var(--band); --nb-line: linear-gradient(135deg, #4a2c05, #d9a84a 50%, #4a2c05); --nb-ink: #2a1a04;
+  --ring: linear-gradient(135deg, #7a4c10, #ffe9a6 35%, #a8711c 60%, #f3d58a 85%); --vc-ink: #3a2405; }
 .card[data-tier="ur"] .f-frame::after { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); }
 .card[data-tier="ur"] .f-sheen { opacity: calc(.25 + var(--o) * .75); mix-blend-mode: color-dodge;
   background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 236, 180, .85) 0%, rgba(255, 200, 110, .35) 28%, transparent 60%); }
 .card[data-tier="ur"][data-cut="0"] .f-sheen { background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 226, 150, .95) 0%, rgba(255, 190, 90, .55) 35%, rgba(200, 140, 40, .25) 70%); }
-.card[data-tier="ur"] .f-rar svg { fill: #f3c869; }
-/* LR · 별빛 */
-.card[data-tier="lr"] { --band: conic-gradient(from var(--ang), #f2d6e6, #f8eccc, #d4f2e6, #d2e2f8, #e2d8f8, #f2d6e6); --copy-ink: #2c2f4a; --swoosh-a: #ffffff; --swoosh-b: #b9b2e6; }
+.card[data-tier="ur"] .f-rar svg { fill: #b07a1a; }
+.card[data-tier="lr"] { --band: conic-gradient(from var(--ang), #f2d6e6, #f8eccc, #d4f2e6, #d2e2f8, #e2d8f8, #f2d6e6); }
+.card[data-tier="lr"] .front { --p-fill: rgba(14, 12, 34, .6); --p-line: linear-gradient(135deg, #ffc6dc, #ffffff 30%, #c6f5e6 55%, #cfe0ff 80%, #e6d6ff); --nb-fill: var(--band); --nb-line: linear-gradient(135deg, #6d6aa0, #ffffff 50%, #6d6aa0); --nb-ink: #1e1d38;
+  --ring: linear-gradient(135deg, #ffc6dc, #ffffff 30%, #c6f5e6 55%, #cfe0ff 80%, #e6d6ff); --vc-ink: #2c2f4a; }
 .card[data-tier="lr"] .f-frame { background: var(--tex-brush), var(--band); }
 .card[data-tier="lr"] .f-frame::after { opacity: calc(var(--o) * .9); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); }
 .card[data-tier="lr"] .f-sheen { opacity: calc(.1 + var(--o) * .32); mix-blend-mode: color-dodge; filter: saturate(.7) brightness(.8);
   background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .7), transparent 45%), linear-gradient(var(--ang), #ffb8d6, #ffe9b0, #b8f7dc, #b6d8ff, #dcc6ff, #ffb8d6); background-size: 100% 100%, 220% 220%; background-position: 0 0, var(--mx) var(--my); }
-.card[data-tier="lr"] .f-serial { padding: 0 .9cqw; border-radius: .6cqw; box-shadow: inset 0 0 0 .2cqw currentColor; }
 .card[data-tier="lr"] .f-rar svg { fill: url(#prismFill); }
 
 /* Effects off (comparison toggle) */
@@ -559,7 +474,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 <main class="doc">
   <header class="top">
     <h1>에셋 카드 뽑기 · 카드 시안</h1>
-    <p class="lead">모아 둔 에셋 그림을 <b>트레이딩 카드</b>로 만들어 뽑는 기능의 시안입니다. 2차에서는 효과를 그림 위에 덮지 않고 <b>그림 뒤와 틀에만</b> 두었습니다. 인물은 원래 색 그대로 두고, 금박·은박 배경과 반짝이가 그 뒤에서 빛을 받습니다. 상위 등급은 인물이 그림 창과 틀을 넘어 <b>튀어나옵니다</b>.</p>
+    <p class="lead">모아 둔 에셋 그림을 <b>트레이딩 카드</b>로 만들어 뽑는 기능의 시안입니다. 여섯 등급이 <b>하나의 뼈대</b>(코스트 · 파워 · 효과 줄 · 이름줄)를 쓰고 재질만 바뀝니다. 숫자는 에셋의 실제 정보에서 나옵니다: 해상도가 파워, 중복 수가 레벨, 주된 색이 속성. 효과는 그림 뒤와 테두리에만 두어 인물은 원래 색 그대로이고, 상위 등급은 인물이 테두리 위로 <b>튀어나옵니다</b>.</p>
   </header>
 
   <div class="imgbar" id="imgbar">
@@ -579,7 +494,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 
   <section aria-labelledby="s1">
     <h2 class="sec" id="s1">등급 사다리 <span class="num">6단계</span></h2>
-    <p class="note">같은 그림 한 장이 등급마다 어떻게 달라지는지입니다. N·R·SR은 인쇄된 틀과 그림 창, 카르투슈 설명창. <b>SSR부터는 설명창 없는 풀아트</b>로, 글자가 그림 위에 바로 인쇄되고 인물이 테두리 밖으로 나옵니다. 여섯 등급 모두 바깥 테두리 폭이 같습니다.</p>
+    <p class="note">같은 그림 한 장, 같은 뼈대(코스트 · 파워 · 효과 · 이름줄). 등급이 오르면 <b>재질만</b> 바뀝니다. N·R·SR은 카드 스톡 · 백랍 · 건메탈 인쇄, <b>SSR부터는</b> 그림이 테두리까지 차고 패널이 반투명·박으로 바뀌며 인물이 테두리 위를 덮습니다.</p>
     <div class="ladder" id="ladder"></div>
     <p class="slabel">카드 뒷면 · 모든 등급 공통</p>
     <div class="backrow">
@@ -609,8 +524,6 @@ ul.ideas li::marker { color: var(--c-faint); }
           <button class="btn" type="button" id="tgFlip"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg>뒤집기</button>
         </div>
         <p class="note" style="font-size:13px">광택을 끄면 같은 카드의 맨 상태가 보여, 효과가 얼마나 더해졌는지 비교할 수 있습니다.</p>
-        <label class="demo-pick">N·R·SR 설명창 (보조 시안)
-          <select class="sel" id="descSel"><option value="a">카르투슈 (기본)</option><option value="b">리본 · 메달</option><option value="c">아치</option></select></label>
       </div>
     </div>
   </section>
@@ -649,8 +562,8 @@ ul.ideas li::marker { color: var(--c-faint); }
 
   <section aria-labelledby="s4">
     <h2 class="sec" id="s4">카드 해부도</h2>
-    <p class="note">카드의 칸마다 에셋의 어떤 정보가 들어가는지입니다. 원본 파일과 정보는 그대로 두고, 카드는 그것을 읽어서 보여 주기만 합니다.</p>
-    <div class="seg" role="radiogroup" aria-label="카드 형태" id="anatSeg" style="max-width:380px"><button type="button" role="radio" data-l="fa" aria-checked="true">풀아트형 · SSR 이상</button><button type="button" role="radio" data-l="frame" aria-checked="false">테두리형 · N·R·SR</button></div>
+    <p class="note">여섯 등급이 같은 뼈대를 쓰고 재질만 바뀝니다. 칸마다 에셋의 어떤 실제 정보에서 숫자가 나오는지 적었습니다. 원본 파일과 정보는 그대로 두고, 카드는 읽어서 보여 주기만 합니다.</p>
+    <div class="seg" role="radiogroup" aria-label="카드 형태" id="anatSeg" style="max-width:380px"><button type="button" role="radio" data-l="fa" aria-checked="true">박 재질 · SSR 이상</button><button type="button" role="radio" data-l="frame" aria-checked="false">인쇄 재질 · N·R·SR</button></div>
     <div class="anat">
       <div class="anat-card" id="anatCard"></div>
       <ol class="fields" id="fields"></ol>
@@ -660,10 +573,11 @@ ul.ideas li::marker { color: var(--c-faint); }
   <section aria-labelledby="s5">
     <h2 class="sec" id="s5">다음 단계 아이디어</h2>
     <ul class="ideas">
-      <li><b>튀어나올 부분 만들기</b> — 흰 배경 그림은 배경을 지운 투명 레이어를 한 번 만들어 두면 오버프레임 카드가 됩니다. 앱이 자동으로 따거나, 직접 넣은 투명 PNG를 에셋에 붙여 두는 방식.</li>
-      <li><b>등급 정하기</b> — 등급은 뽑을 때 확률로, 어떤 그림이 나올지는 즐겨찾기와 감상 횟수가 많을수록 조금 더 잘 나오게.</li>
-      <li><b>중복 카드</b> — 같은 그림·같은 등급이 또 나오면 겹침 수(×3)만 올리고, 5장이 모이면 한 단계 위 등급으로.</li>
-      <li><b>카드 도감</b> — 작가별·속성별 바인더 화면. 못 뽑은 칸은 흐린 실루엣, 상위 등급은 바인더 안에서도 반짝임 유지.</li>
+      <li><b>중복과 레벨</b> — 같은 카드가 또 나오면 보유 수와 Lv가 1씩 오르고(최대 Lv.5), 5장이 모이면 한 단계 위 등급으로 바꿀 수 있게.</li>
+      <li><b>파워는 그림 품질</b> — 해상도가 큰 원본일수록 강한 카드. 앨범에 담을수록 +500씩, 같은 작가 3장을 모으면 +2,000.</li>
+      <li><b>뽑기권</b> — 하루 무료 1장, 도감에 처음 등록되는 카드마다 +1. 수집하는 습관이 그대로 보상이 되도록.</li>
+      <li><b>카드 도감</b> — 작가별·속성별 바인더. 못 뽑은 칸은 흐린 실루엣, 즐겨찾기한 카드는 테두리가 빛남.</li>
+      <li><b>튀어나올 부분</b> — 흰 배경 그림은 배경을 지운 투명 레이어를 한 번 만들어 두면 SSR 이상에서 테두리 위로 나옵니다.</li>
       <li><b>원본은 그대로</b> — 카드는 에셋을 가리키기만 하고 파일을 복사하거나 바꾸지 않음.</li>
     </ul>
   </section>
@@ -681,11 +595,6 @@ ul.ideas li::marker { color: var(--c-faint); }
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = (s, r = document) => r.querySelector(s);
 const DPR = Math.min(2, window.devicePixelRatio || 1);
-// Description-area style applies page-wide (all cards, gacha, anatomy) and is remembered per viewer.
-const DESC = [['a', 'A 카르투슈'], ['b', 'B 리본·메달'], ['c', 'C 아치']];
-let descStyle = 'a';
-try { const v = localStorage.getItem('lk-gacha-desc-v2'); if (/^[abc]$/.test(v || '')) descStyle = v; } catch (e) { /* storage blocked */ }
-document.documentElement.dataset.desc = descStyle;
 
 /* ------------------------------------------------------- procedural art
    Every scene is two layers at card size (600×840): a background and a transparent subject.
@@ -1072,50 +981,51 @@ function buildArt() {
 /* ------------------------------------------------------------------ data */
 const TIERS = [
   { k: 'n',   code: 'N',   name: '일반',        odds: 55,  glow: '#e9edf3', sym: ['dot'],
-    desc: '종이 프레임. 그림은 그림 창 안에만, 광택 없이.',
-    layers: [['종이 프레임', '미세한 종이 결'], ['그림 창', '얇은 먹선 테두리'], ['반사광', '아주 약하게']] },
+    desc: '인쇄 카드 스톡. 그림은 이름줄 위까지, 효과 1줄. 여섯 등급이 모두 같은 뼈대를 씁니다.',
+    layers: [['카드 스톡 테두리', '종이 결 + 음각선'], ['코스트 · 보유 · 파워', '모든 등급 같은 자리'], ['효과 1줄', '카르투슈 모양 패널'], ['이름줄', 'Lv · 이름 · 번호·등급']] },
   { k: 'r',   code: 'R',   name: '레어',        odds: 25,  glow: '#5aa8ff', sym: ['dia'],
-    desc: '헤어라인 은박 프레임과 은박 이름. 기울이면 프레임에만 빛이 맺힙니다.',
-    layers: [['은박 프레임', '헤어라인 결 + 베벨'], ['은박 이름', '빛 따라 하이라이트'], ['그림 창', '은색 테두리']] },
+    desc: '같은 뼈대에 백랍(은회색) 재질과 은박 줄, 은박 이름. 효과 2줄.',
+    layers: [['백랍 테두리', '헤어라인 결 + 은박 줄'], ['은박 이름', '빛 따라 하이라이트'], ['효과 2줄', '']] },
   { k: 'sr',  code: 'SR',  name: '홀로 레어',   odds: 13,  glow: '#b46bff', sym: ['dia', 'dia'],
-    desc: '그림 창의 배경에만 옅은 무지개 박막. 인물은 원래 색 그대로.',
-    layers: [['남색 금속 프레임', ''], ['배경 홀로', '채도 낮은 박막, 인물 뒤에만'], ['은가루', '배경에 드문드문'], ['은박 이름', '']] },
+    desc: '건메탈 재질과 은 상감. 그림 배경에만 옅은 홀로, 인물은 원래 색 그대로. 효과 2줄.',
+    layers: [['건메탈 테두리', '은 상감'], ['배경 홀로', '인물 뒤에만'], ['은가루', '배경에 드문드문'], ['은박 이름', '']] },
   { k: 'ssr', code: 'SSR', name: '실버 풀아트', odds: 5,   glow: '#ffd25a', sym: ['star'],
-    desc: '설명창 없이 그림이 카드 전체를 채우고, 글자는 그림 위에 바로 인쇄됩니다. 은박 테두리, 인물은 이름줄과 테두리 위로 튀어나옵니다.',
-    layers: [['은박 테두리', 'N·R·SR과 같은 폭'], ['배경 박', '틀 색 선버스트, 금가루는 테두리에'], ['인물 층', '테두리·이름 위로'], ['머리줄', '메달 · 은박 이름 · 곡선 띠 · 감상 수'], ['그림 위 글자', '밝기 따라 흰 글/검은 글 자동']] },
+    desc: '같은 뼈대가 은박으로 바뀝니다. 그림이 테두리까지 채우고 효과 패널은 반투명, 이름줄은 은박. 인물은 테두리 위를 완전히 덮습니다.',
+    layers: [['은박 테두리', 'N·R·SR과 같은 폭'], ['배경 박', '틀 색 선버스트, 금가루는 테두리에'], ['인물 층', '테두리 위로, 완전 불투명'], ['반투명 효과 패널', '2줄'], ['은박 이름줄', '']] },
   { k: 'ur',  code: 'UR',  name: '골드 풀아트', odds: 1.8, glow: '#ffb21e', sym: ['star', 'star'],
-    desc: '금박 테두리, 금박 선버스트 위에 인물. 금가루는 배경과 테두리에만 촘촘하고, 빛 방향에 따라 다른 알갱이가 반짝입니다. 글자는 그림 위에 바로.',
-    layers: [['금박 테두리', ''], ['금박 선버스트', '빛 받는 곳이 밝아짐'], ['금가루', '알갱이마다 면 방향이 다름'], ['은박 이름 + 금빛 곡선 띠', ''], ['그림 위 글자', '상자 없이']] },
+    desc: '금박 테두리와 금박 이름줄, 금박 선버스트 위에 인물. 금가루는 배경과 테두리에만. 효과 3줄.',
+    layers: [['금박 테두리 · 이름줄', ''], ['금박 선버스트', '빛 받는 곳이 밝아짐'], ['금가루', '알갱이마다 면 방향이 다름'], ['반투명 효과 패널', '3줄']] },
   { k: 'lr',  code: 'LR',  name: '별빛 한정',   odds: .2,  glow: 'rainbow', sym: ['spark'],
-    desc: '그림마다 단 1장. 무지갯빛 은 테두리, 별빛 선버스트와 옅은 박막, 별 모양으로 반짝이는 가루, 시리얼 1 / 1.',
-    layers: [['무지갯빛 은 테두리', '각도 따라 색이 돎'], ['별빛 선버스트', '옅은 박막색'], ['별가루', '큰 알갱이는 십자 빛'], ['프리즘 이름', ''], ['시리얼', 'No. 1 / 1']] },
+    desc: '그림마다 단 1장. 무지갯빛 은 테두리와 이름줄, 별빛 선버스트, 별가루. 시리얼 1 / 1, 효과 3줄.',
+    layers: [['무지갯빛 은 테두리 · 이름줄', '각도 따라 색이 돎'], ['별빛 선버스트', '옅은 박막색'], ['별가루', '큰 알갱이는 십자 빛'], ['시리얼', 'No. 1 / 1']] },
 ];
 const TI = Object.fromEntries(TIERS.map((t, i) => [t.k, i]));
 const PREMIUM = new Set(['ssr', 'ur', 'lr']);
+// 속성 comes from the art's dominant colour (detectAttr below); this list is the palette and icon per attribute.
 const ATTR = [
-  { name: '빛',   c1: '#ffe39a', c2: '#c98a1c', icon: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>' },
+  { name: '빛',   c1: '#ffe39a', c2: '#b8820f', icon: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>' },
   { name: '어둠', c1: '#c7a6ff', c2: '#3a1c78', icon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>' },
   { name: '불꽃', c1: '#ffb08a', c2: '#c92a4a', icon: '<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.4 2.6-5.6 3.6-8.8 1.6 1.5 2.2 3 2.2 4.6 1.2-1 1.8-2.4 1.9-4.1 2.6 2.2 5.3 5.1 5.3 8.6 0 3.4-2.6 5.9-6.5 5.9z"/>' },
-  { name: '물결', c1: '#8fe2ff', c2: '#1a5fb4', icon: '<path d="M3 10c3 0 3-3 6-3s3 3 6 3 3-3 6-3M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/>' },
-  { name: '바람', c1: '#c3f2b0', c2: '#2f7a5a', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h7"/>' },
-  { name: '별',   c1: '#e2d6ff', c2: '#5a4fb0', icon: '<path d="M12 3.5l2.4 5 5.4.6-4 3.7 1.1 5.3L12 15.4 7.1 18.1l1.1-5.3-4-3.7 5.4-.6z"/>' },
+  { name: '물',   c1: '#8fe2ff', c2: '#1a5fb4', icon: '<path d="M3 10c3 0 3-3 6-3s3 3 6 3 3-3 6-3M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/>' },
+  { name: '숲',   c1: '#c8f0a0', c2: '#2f7a3a', icon: '<path d="M5 19C5 10 11 5 19 5c0 8-5 14-14 14zM5 19l8-8"/>' },
+  { name: '바람', c1: '#e6f2f4', c2: '#5f8a94', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h7"/>' },
 ];
 // Real samples (scratch testing only; never committed). They load from ./samples/ next to the page and fall back silently.
 const SAMPLE_DEFS = [
   { key: 's1', art: 'samples/art1.jpg', cut: 'samples/cut1.webp', fit: [-14, -1.2, 124], tint: '#b0246e', best: 'ur', id: 1013, face: '64% 36%', faceSize: '250%',
-    title: '사탕과 주먹', credit: '@loped00', date: '2026.10.13', attr: 2, tags: ['격투', '인물'], flavor: '사탕을 문 채로, 먼저 덤비라고 손짓했다.', views: 4210, albums: 3, fav: true },
+    title: '사탕과 주먹', credit: '@loped00', date: '2026.10.13', attr: 2, tags: ['격투가', '경단머리', '사탕'], w: 3000, h: 3000, dup: 2, albums: 3, fav: true },
   { key: 's2', art: 'samples/art2.jpg', cut: 'samples/cut2.webp', fit: [-24, -1.6, 148], tint: '#a3203c', best: 'ssr', id: 1014, face: '45% 21%', faceSize: '420%',
-    title: '방울창의 여우', credit: '작가 미상', date: '2026.10.13', attr: 4, tags: ['여우귀', '창'], flavor: '방울 소리가 들렸다면, 이미 늦었다.', views: 1877, albums: 2, fav: true },
+    title: '방울창의 여우', credit: 'NoOne', date: '2026.10.13', attr: 2, tags: ['여우귀', '창', '방울'], w: 4008, h: 4096, dup: 1, albums: 2, fav: true },
   { key: 's3', art: 'samples/art3.jpg', pos: '50% 40%', protect: [.57, .42, .2, .19], best: 'ur', id: 1015, face: '60% 33%',
-    title: '가면 아래의 노장', credit: '작가 미상', date: '2026.10.13', attr: 0, tags: ['초상', '유화풍'], flavor: '반쯤 깨진 가면 너머로 오래된 빛이 남아 있다.', views: 962, albums: 1, fav: false },
+    title: '가면 아래의 노장', credit: 'NoOne', date: '2026.10.13', attr: 1, tags: ['가면', '은발', '유화풍'], w: 1181, h: 1507, dup: 3, albums: 1, fav: false },
   { key: 's4', art: 'samples/art4.jpg', pos: '68% 50%', protect: [.58, .33, .2, .13], best: 'lr', id: 1016, face: '60% 32%',
-    title: '나비가 깨운 관', credit: '@moudanji', date: '2026.10.13', attr: 1, tags: ['고딕', '나비'], flavor: '나비 한 마리가 날아든 밤, 관 뚜껑이 열렸다.', views: 3305, albums: 4, fav: true },
+    title: '나비가 깨운 관', credit: '@moudanji', date: '2026.10.13', attr: 1, tags: ['고딕', '나비', '관'], w: 1024, h: 1024, dup: 1, albums: 4, fav: true },
 ];
 const PROC_DEFS = [
-  { key: 'p0', proc: 0, best: 'ur', id: 427, title: '여명의 수정룡', credit: '@yunseul_art', date: '2026.04.27', attr: 5, tags: ['용', '수정'], flavor: '해가 뜨는 쪽으로, 수정 날개가 먼저 빛났다.', views: 2431, albums: 3, fav: true },
-  { key: 'p1', proc: 1, best: 'lr', id: 112, title: '심해의 등불', credit: '@haemu_ink', date: '2026.01.12', attr: 3, tags: ['바다', '환상'], flavor: '빛이 닿지 않는 곳에도 등불은 떠다닌다.', views: 986, albums: 1, fav: false },
-  { key: 'p2', proc: 2, best: 'ssr', id: 1038, title: '별을 지키는 날개', credit: '@dawn_ink', date: '2026.10.03', attr: 0, tags: ['천사', '별'], flavor: '별 하나를 품고, 밤새 날개를 접지 않았다.', views: 5120, albums: 4, fav: true },
-  { key: 'p3', proc: 3, best: 'ur', id: 904, title: '오로라를 벤 검', credit: '@kiri_paints', date: '2026.09.04', attr: 4, tags: ['검', '오로라'], flavor: '검이 지나간 자리마다 하늘이 초록으로 갈라졌다.', views: 1873, albums: 2, fav: true },
+  { key: 'p0', proc: 0, best: 'ur', id: 427, title: '여명의 수정룡', credit: '@yunseul_art', date: '2026.04.27', attr: 3, tags: ['용', '수정', '날개'], w: 600, h: 840, dup: 2, albums: 3, fav: true },
+  { key: 'p1', proc: 1, best: 'lr', id: 112, title: '심해의 등불', credit: 'NoOne', date: '2026.01.12', attr: 3, tags: ['바다', '해파리'], w: 600, h: 840, dup: 1, albums: 1, fav: false },
+  { key: 'p2', proc: 2, best: 'ssr', id: 1038, title: '별을 지키는 날개', credit: '@dawn_ink', date: '2026.10.03', attr: 0, tags: ['천사', '별', '날개'], w: 600, h: 840, dup: 4, albums: 4, fav: true },
+  { key: 'p3', proc: 3, best: 'ur', id: 904, title: '오로라를 벤 검', credit: '@kiri_paints', date: '2026.09.04', attr: 5, tags: ['검', '오로라'], w: 600, h: 840, dup: 1, albums: 2, fav: true },
 ];
 let ASSETS = [];
 
@@ -1161,10 +1071,10 @@ function frameTex(k) {
     sr: { border: '#0c0d15', base: ['#3b4488', '#272e62', '#181c42', '#2a3268'], mott: .06, brush: .1, slope: .015, grain: .06, ink: 'rgba(206,214,246,.9)', hi: 'rgba(2,3,14,.75)',
           plate: ['#3a4488', '#1b2048'], plateLine: 'rgba(206,214,246,.9)', foil: ['#6d7690', '#ffffff', '#8890ad', '#eef1ff', '#6d7690'], win: ['rgba(200,210,255,.55)', 'rgba(0,0,10,.7)'] },
   }[k];
-  const B = 3.8 * u, IN = B + 1.6 * u;
+  // round-5 skeleton: thin dark print edge, then the material as the border (3.8cqw) and the lower block under the art (117cqw down)
+  const E = .9 * u, B = 3.8 * u, AB = 117 * u;
   c.fillStyle = M.border; c.fillRect(0, 0, FW, FH);
-  // material panel
-  c.save(); rrPath(c, B, B, FW - 2 * B, FH - 2 * B, 1.5 * u); c.clip();
+  c.save(); rrPath(c, E, E, FW - 2 * E, FH - 2 * E, 3.4 * u); c.clip();
   const g = c.createLinearGradient(0, 0, FW * .7, FH); M.base.forEach((col, i) => g.addColorStop(i / (M.base.length - 1), col)); c.fillStyle = g; c.fillRect(0, 0, FW, FH);
   for (let i = 0; i < 180; i++) { const x = R() * FW, y = R() * FH, r = 20 + R() * 130, a = M.mott * R(), gg = c.createRadialGradient(x, y, 0, x, y, r);
     gg.addColorStop(0, R() < .5 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`); gg.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gg; c.fillRect(x - r, y - r, 2 * r, 2 * r); }
@@ -1174,42 +1084,25 @@ function frameTex(k) {
   for (let i = 0; i < id.data.length; i += 4) { const v = R() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
   nc.putImageData(id, 0, 0); c.globalAlpha = M.grain; c.globalCompositeOperation = 'overlay'; c.fillStyle = c.createPattern(n, 'repeat'); c.fillRect(0, 0, FW, FH);
   c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
-  const vg = c.createRadialGradient(FW / 2, FH / 2, FH * .35, FW / 2, FH / 2, FH * .75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.16)'); c.fillStyle = vg; c.fillRect(0, 0, FW, FH);
   c.restore();
-  // engraved strokes: a highlight offset down-right, the ink line on top
   const eng = (path, lw, fill) => {
     c.save(); c.translate(.13 * u, .13 * u); path(); if (fill) { c.fillStyle = M.hi; c.fill(); } else { c.strokeStyle = M.hi; c.lineWidth = lw; c.stroke(); } c.restore();
     c.save(); path(); if (fill) { c.fillStyle = M.ink; c.fill(); } else { c.strokeStyle = M.ink; c.lineWidth = lw; c.stroke(); } c.restore();
   };
-  if (M.foil) { c.save(); rrPath(c, B + .35 * u, B + .35 * u, FW - 2 * B - .7 * u, FH - 2 * B - .7 * u, 1.3 * u); const fg = c.createLinearGradient(0, 0, FW, FH); M.foil.forEach((col, i) => fg.addColorStop(i / (M.foil.length - 1), col)); c.strokeStyle = fg; c.lineWidth = .45 * u; c.stroke(); c.restore(); }
-  eng(() => rrPath(c, B + 1 * u, B + 1 * u, FW - 2 * B - 2 * u, FH - 2 * B - 2 * u, 1 * u), .26 * u);
-  eng(() => rrPath(c, IN, IN, FW - 2 * IN, FH - 2 * IN, .6 * u), .12 * u);
-  // corner ornaments: diamond, quarter arc, end beads (Lakomics' own motif)
-  const corner = (x, y, sx, sy) => {
-    const tr = f => () => { c.translate(x, y); c.scale(sx, sy); f(); };
-    eng(tr(() => { c.beginPath(); c.arc(0, 0, 4.2 * u, 0, Math.PI / 2); }), .2 * u);
-    eng(tr(() => { c.beginPath(); c.arc(0, 0, 5.4 * u, .12, Math.PI / 2 - .12); }), .1 * u);
+  if (M.foil) { c.save(); rrPath(c, E + .45 * u, E + .45 * u, FW - 2 * E - .9 * u, FH - 2 * E - .9 * u, 3 * u); const fg = c.createLinearGradient(0, 0, FW, FH); M.foil.forEach((col, i) => fg.addColorStop(i / (M.foil.length - 1), col)); c.strokeStyle = fg; c.lineWidth = .4 * u; c.stroke(); c.restore(); }
+  // engraved line around the art opening and around the lower block
+  eng(() => rrPath(c, B - .7 * u, B - .7 * u, FW - 2 * B + 1.4 * u, AB - B + 1.4 * u, 1.2 * u), .16 * u);
+  eng(() => rrPath(c, B - .7 * u, AB + 1.2 * u, FW - 2 * B + 1.4 * u, FH - AB - B - .5 * u, 1.2 * u), .16 * u);
+  // raised lip along the art's lower edge
+  c.fillStyle = M.win[0]; c.fillRect(B, AB, FW - 2 * B, .45 * u); c.fillStyle = M.win[1]; c.fillRect(B, AB - .25 * u, FW - 2 * B, .25 * u);
+  // corner ornaments on the lower block and small diamonds at the top corners
+  const corner = (x, y, sx, sy, s) => { const tr = f => () => { c.translate(x, y); c.scale(sx * s, sy * s); f(); };
+    eng(tr(() => { c.beginPath(); c.arc(0, 0, 4.2 * u, 0, Math.PI / 2); }), .2 * u / s);
     eng(tr(() => { c.beginPath(); c.moveTo(1.9 * u, .7 * u); c.lineTo(3.1 * u, 1.9 * u); c.lineTo(1.9 * u, 3.1 * u); c.lineTo(.7 * u, 1.9 * u); c.closePath(); }), 0, true);
-    eng(tr(() => { c.beginPath(); c.arc(4.2 * u, 0, .45 * u, 0, 7); c.moveTo(.45 * u, 4.2 * u); c.arc(0, 4.2 * u, .45 * u, 0, 7); }), 0, true);
-  };
-  c.save(); corner(IN, IN, 1, 1); c.restore(); c.save(); corner(FW - IN, IN, -1, 1); c.restore();
-  c.save(); corner(IN, FH - IN, 1, -1); c.restore(); c.save(); corner(FW - IN, FH - IN, -1, -1); c.restore();
-  // art window bevel: raised lip, light top-left, shadow bottom-right
-  const wx0 = 7 * u, wx1 = 93 * u, wy0 = 15.4 * u, wy1 = 95.4 * u, bw = 1.05 * u;
-  c.fillStyle = M.win[0]; P(c, [[wx0 - bw, wy0 - bw], [wx1 + bw, wy0 - bw], [wx1, wy0], [wx0, wy0], [wx0, wy1], [wx0 - bw, wy1 + bw]]); c.fill();
-  c.fillStyle = M.win[1]; P(c, [[wx1 + bw, wy0 - bw], [wx1 + bw, wy1 + bw], [wx0 - bw, wy1 + bw], [wx0, wy1], [wx1, wy1], [wx1, wy0]]); c.fill();
-  eng(() => { c.beginPath(); c.rect(wx0 - bw - .5 * u, wy0 - bw - .5 * u, wx1 - wx0 + 2 * bw + u, wy1 - wy0 + 2 * bw + u); }, .12 * u);
-  // notched name plate
-  const px0 = 6.6 * u, px1 = 93.4 * u, py0 = 4.7 * u, py1 = 14.3 * u, nt = 1.5 * u;
-  const plate = (inset) => () => P(c, [[px0 + nt + inset, py0 + inset], [px1 - nt - inset, py0 + inset], [px1 - inset, py0 + nt], [px1 - inset, py1 - nt], [px1 - nt - inset, py1 - inset], [px0 + nt + inset, py1 - inset], [px0 + inset, py1 - nt], [px0 + inset, py0 + nt]]);
-  c.save(); c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = .8 * u; c.shadowOffsetY = .3 * u; plate(0)(); const pg = c.createLinearGradient(0, py0, 0, py1); pg.addColorStop(0, M.plate[0]); pg.addColorStop(1, M.plate[1]); c.fillStyle = pg; c.fill(); c.restore();
-  c.save(); plate(0)(); c.strokeStyle = M.plateLine; c.lineWidth = .24 * u; c.stroke(); c.restore();
-  c.save(); plate(.6 * u)(); c.strokeStyle = M.plateLine; c.globalAlpha = .55; c.lineWidth = .1 * u; c.stroke(); c.restore();
-  c.save(); c.beginPath(); c.moveTo(px0 + nt, py0 + .25 * u); c.lineTo(px1 - nt, py0 + .25 * u); c.strokeStyle = M.hi; c.lineWidth = .16 * u; c.stroke(); c.restore();
-  // footer rule with a centre diamond
-  const fy = 125.6 * u;
-  eng(() => { c.beginPath(); c.moveTo(10 * u, fy); c.lineTo(47.6 * u, fy); c.moveTo(52.4 * u, fy); c.lineTo(90 * u, fy); }, .12 * u);
-  eng(() => P(c, [[50 * u, fy - 1 * u], [51.2 * u, fy], [50 * u, fy + 1 * u], [48.8 * u, fy]]), 0, true);
+    eng(tr(() => { c.beginPath(); c.arc(4.2 * u, 0, .45 * u, 0, 7); c.moveTo(.45 * u, 4.2 * u); c.arc(0, 4.2 * u, .45 * u, 0, 7); }), 0, true); };
+  const by = FH - B + .2 * u;
+  c.save(); corner(B + .2 * u, by, 1, -1, .62); c.restore(); c.save(); corner(FW - B - .2 * u, by, -1, -1, .62); c.restore();
+  [[B / 2 + E / 2, B / 2 + E / 2], [FW - B / 2 - E / 2, B / 2 + E / 2]].forEach(([x, y]) => eng(() => P(c, [[x, y - .8 * u], [x + .8 * u, y], [x, y + .8 * u], [x - .8 * u, y]]), 0, true));
   return FT[k] = cv.toDataURL('image/jpeg', .92);
 }
 
@@ -1257,36 +1150,35 @@ const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;'
 let userBg = null, userFg = null; const madeURLs = [];
 const cards = new Set();
 
-const descHTML = a => { const at = ATTR[a.attr]; return `<span class="d-orn"></span><div class="d-body"><div class="d-type">[${at.name} / ${a.tags.join(' · ')}]</div><p class="d-flavor">${esc(a.flavor)}</p></div>`
-  + `<div class="d-stats"><span class="st"><i>감상</i><b>${fmt(a.views)}</b></span><span class="st"><i>앨범</i><b>${a.albums}</b></span>${a.fav ? `<span class="st fav" title="즐겨찾기">${HEART}</span>` : ''}</div>`; };
-const footHTML = a => `<div class="fr"><span class="f-illus">Illus. ${esc(a.credit)}</span><span class="f-rar"></span><span class="f-no"><svg viewBox="0 0 32 36"><use href="#mk"/></svg>LK01 · ${pad(a.id)}</span></div>`
-  + `<div class="fr"><span>수집 ${a.date}</span><span class="f-serial"></span><span class="f-copy">© Lakomics</span></div>`;
-const SWOOSH = '<svg class="fa-swoosh" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><path d="M0 8.6 H58 C68 8.6 70 1.6 80 1.2 H100"/><path class="hl" d="M3 9.6 H57 C67 9.6 69.5 2.6 79.5 2.2 H97"/></svg>';
+/* Card-game stats from real asset data:
+   코스트 ← tier · 보유 / Lv ← duplicates · 파워 ← resolution · 속성 ← dominant colour · 특성 ← tags · effects ← artist, albums, favourite. */
+const powerOf = (w, h) => Math.max(500, Math.floor(w * h / 1e6 * 1000 / 500) * 500);
+const powerHTML = v => v >= 1000 ? `<i>파워</i><b>${Math.floor(v / 1000)}</b><small>,${String(v % 1000).padStart(3, '0')}</small>` : `<i>파워</i><b>${v}</b>`;
+function effectsFor(a, tier) {
+  const out = [];
+  if (a.albums) out.push(['앨범', `담긴 앨범 ${a.albums}곳 · 파워 <b>+${fmt(a.albums * 500)}</b>`]);
+  if (a.credit !== 'NoOne') out.push(['작가 연계', '같은 작가 카드 3장을 모으면 파워 <b>+2,000</b>']);
+  if (a.fav) out.push(['즐겨찾기', '즐겨찾기 중이면 등급 테두리가 빛난다']);
+  out.push(['첫 수집', '도감에 새로 등록되면 뽑기권 <b>+1</b>']);
+  return out.slice(0, { n: 1, r: 2, sr: 2, ssr: 2, ur: 3, lr: 3 }[tier]);
+}
 function frontInner(a) {
-  const at = ATTR[a.attr], gem = `<span class="gem" style="--c1:${at.c1};--c2:${at.c2}"><svg viewBox="0 0 24 24">${at.icon}</svg></span>`;
+  const at = ATTR[a.attr];
   return `<img class="f-bg" alt="" draggable="false" decoding="async">
       <div class="f-sheen"></div><div class="f-shade"></div><div class="f-frame"></div>
-      <canvas class="f-glit"></canvas>
-      <div class="f-rim"></div>
+      <canvas class="f-glit"></canvas><div class="f-glare"></div>
       <div class="f-subjwrap"><img class="f-subj" alt="" draggable="false" decoding="async"></div>
-      <div class="fa-medal"></div>
-      <div class="f-name"><span class="f-title">${esc(a.title)}</span><span class="fa-value"><i>감상</i>${fmt(a.views)}</span><span class="f-type" style="--c1:${at.c1};--c2:${at.c2}" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
-      ${SWOOSH}<div class="fa-sub">${at.name} 속성 · ${esc(a.tags[0])}</div>
-      <div class="f-desc">${descHTML(a)}</div>
-      <div class="f-foot">${footHTML(a)}</div>
-      <div class="fa-body">
-        <div class="fa-type">${gem}<span>${esc(a.tags.join(' · '))}</span><span class="fa-pt">${a.albums}<small>앨범</small></span></div>
-        <p class="fa-flavor">${esc(a.flavor)}</p>
-        <div class="fa-stats"><span><i>속성</i><span class="mini" style="--c1:${at.c1};--c2:${at.c2}"><svg viewBox="0 0 24 24">${at.icon}</svg></span>${at.name}</span><span><i>앨범</i>${a.albums}</span><span><i>즐겨찾기</i>${a.fav ? `<span class="heart">${HEART}</span>` : '–'}</span></div>
-        <div class="fa-foot"><div class="fa-credit"><em>Illus. ${esc(a.credit)}</em><br><span class="set"><span class="code">LK01</span>${pad(a.id)} <span class="f-rar"></span><span class="f-serial"></span></span></div>
-          <p class="fa-note">${a.date.slice(0, 4)}년 ${+a.date.slice(5, 7)}월 ${+a.date.slice(8, 10)}일에 모였다. 앨범 ${a.albums}곳에 함께 담겨 있다.</p></div>
-      </div>
-      <div class="fa-copy">© Lakomics · Illus. ${esc(a.credit)}</div>
-      <div class="f-glare"></div><div class="f-edge"></div>`;
+      <div class="f-cost">1</div><div class="f-dup"><small>×</small>1</div>
+      <div class="f-power">${powerHTML(powerOf(a.w || 600, a.h || 840))}</div>
+      <div class="f-gem">${a.fav ? `<span class="f-heart" title="즐겨찾기">${HEART}</span>` : ''}<span class="f-type" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
+      <div class="f-fx"></div>
+      <div class="f-nb"><span class="nb-lv"><i>Lv.</i>1</span><span class="f-title">${esc(a.title)}</span><span class="nb-no"><span>LK01-${pad(a.id)}</span><span class="f-rar"></span></span></div>
+      <div class="f-traits"><span class="f-serial" hidden></span>${a.tags.map(t => `<span class="t">${esc(t)}</span>`).join('')}</div>
+      <div class="f-vc">Illus. ${esc(a.credit)} · © Lakomics</div>`;
 }
 function makeCard(a, tier, opts = {}) {
   const el = document.createElement('div'); el.className = 'card'; el._asset = a; el._serial = opts.serial; el._live = !!opts.live;
-  el.dataset.tone = 'light';
+  el._dup = opts.dup || a.dup || 1;
   el.innerHTML = `<div class="card__flip"><div class="card__tilt">
     <div class="face front">${frontInner(a)}</div>
     <div class="face back">
@@ -1303,19 +1195,47 @@ function makeCard(a, tier, opts = {}) {
   return el;
 }
 function setTier(el, k) {
-  const t = TIERS[TI[k]];
-  el.dataset.tier = k; el.dataset.glow = t.glow === 'rainbow' ? 'rainbow' : '';
+  const t = TIERS[TI[k]], a = el._asset;
+  el.dataset.tier = k; el.dataset.glow = t.glow === 'rainbow' ? 'rainbow' : ''; el.dataset.fav = a.fav ? '1' : '0';
   el.style.setProperty('--glow', t.glow === 'rainbow' ? '#fff' : t.glow);
   el.querySelectorAll('.f-rar').forEach(r => { r.innerHTML = t.sym.map(s => SYM[s]).join('') + `<span>${t.code}</span>`; });
   const serial = el._serial ?? (k === 'lr' ? 'No. 1 / 1' : k === 'ur' ? 'No. 3 / 10' : '');
-  el.querySelectorAll('.f-serial').forEach(f => { f.textContent = (k === 'lr' || k === 'ur' || el.classList.contains('show-serial')) ? serial || 'No. 3 / 10' : ''; f.hidden = !f.textContent; });
-  const title = $('.f-title', el), name = $('.f-name', el);
-  const metal = { r: 'silverdk', sr: 'silver', ssr: 'silver', ur: 'silver', lr: 'prism' }[k];
-  title.classList.toggle('metal', !!metal); name.classList.toggle('outlined', PREMIUM.has(k) || k === 'sr'); name.classList.toggle('stamped', k === 'n' || k === 'r');
+  el.querySelectorAll('.f-serial').forEach(f => { f.textContent = (k === 'lr' || k === 'ur') ? serial : ''; f.hidden = !f.textContent; });
+  $('.f-cost', el).textContent = TI[k] + 1;
+  $('.f-dup', el).innerHTML = `<small>×</small>${el._dup}`;
+  $('.nb-lv', el).innerHTML = `<i>Lv.</i>${Math.min(5, el._dup)}`;
+  $('.f-fx', el).innerHTML = effectsFor(a, k).map(([kw, tx]) => `<div class="fx"><span class="kw">${kw}</span><span class="tx">${tx}</span></div>`).join('');
+  const title = $('.f-title', el), metal = { r: 'silverdk', sr: 'silver' }[k];
+  title.classList.toggle('metal', !!metal); if (metal) title.style.setProperty('--metal', `var(--${metal})`);
   const fr = $('.f-frame', el); if (k === 'n' || k === 'r' || k === 'sr') fr.style.backgroundImage = `url(${frameTex(k)})`; else fr.style.removeProperty('background-image');
-  if (metal) title.style.setProperty('--metal', `var(--${metal})`);
-  el.classList.toggle('parch', PREMIUM.has(k)); el.classList.toggle('fa', PREMIUM.has(k));
+  el.classList.toggle('fa', PREMIUM.has(k));
   refreshArt(el);
+}
+function applyAttr(el, i) {
+  const at = ATTR[i]; el._attr = i; el.style.setProperty('--c1', at.c1); el.style.setProperty('--c2', at.c2);
+  const ty = $('.f-type', el); ty.title = '속성 ' + at.name; ty.innerHTML = `<svg viewBox="0 0 24 24">${at.icon}</svg>`;
+}
+/* 속성 from the art's dominant colour: dark → 어둠, pale → 바람, else the strongest saturated hue. */
+const ATTRC = new Map();
+function detectAttr(src) {
+  if (ATTRC.has(src)) return ATTRC.get(src);
+  const pr = loadI(src).then(im => {
+    if (!im) return null;
+    try {
+      const w = 48, h = 48, cv = newCanvas(w, h), c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(im, 0, 0, w, h);
+      const d = c.getImageData(0, 0, w, h).data, bins = new Float32Array(12); let n = 0, dark = 0, pale = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] < 200) continue; const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, ch = mx - mn;
+        const sat = ch === 0 ? 0 : ch / (1 - Math.abs(2 * l - 1)); n++;
+        if (l < .2) dark++; if (sat < .15 && l > .72) pale++;
+        if (ch > 0 && sat > .25 && l > .15 && l < .9) { let hue = mx === r ? ((g - b) / ch) % 6 : mx === g ? (b - r) / ch + 2 : (r - g) / ch + 4; hue = (hue * 60 + 360) % 360; bins[Math.floor(hue / 30) % 12] += sat; }
+      }
+      if (!n) return null; if (dark / n > .5) return 1; if (pale / n > .45) return 5;
+      let bi = 0; bins.forEach((v, i) => { if (v > bins[bi]) bi = i; }); const hue = bi * 30 + 15;
+      return hue < 25 || hue >= 290 ? 2 : hue < 70 ? 0 : hue < 165 ? 4 : hue < 255 ? 3 : 1;
+    } catch (e) { return null; } // a file:// page cannot read pixels: keep the asset's stored attribute
+  });
+  ATTRC.set(src, pr); return pr;
 }
 /* Which layers a card shows, from its asset, its tier and any user images. */
 function artPlan(el) {
@@ -1339,44 +1259,24 @@ function refreshArt(el) {
   el.dataset.subj = p.cut ? '1' : '0'; el.dataset.cut = p.cut ? '1' : '0';
   if (p.cut) { if (sj.getAttribute('src') !== p.cut) sj.src = p.cut; sj.style.setProperty('--sx', p.fit[0] + '%'); sj.style.setProperty('--sy', p.fit[1] + '%'); sj.style.setProperty('--sw', p.fit[2] + '%');
     sj.style.setProperty('--sfade', 'none');
-    if (p.fade) { const setFade = () => { if (!sj.naturalWidth) return; const h = p.fit[2] * sj.naturalHeight / sj.naturalWidth, top = p.fit[1] * 1.3968;
-        const end = Math.min(1, ((PREMIUM.has(el.dataset.tier) ? 136 : 124) - top) / h), start = Math.max(0, end - 22 / h);
+    if (p.fade && PREMIUM.has(el.dataset.tier)) { const setFade = () => { if (!sj.naturalWidth) return; const h = p.fit[2] * sj.naturalHeight / sj.naturalWidth, top = p.fit[1] * 1.3968;
+        const end = Math.min(1, (128 - top) / h), start = Math.max(0, end - 18 / h);
         sj.style.setProperty('--sfade', `linear-gradient(180deg, #000 ${(start * 100).toFixed(1)}%, transparent ${(end * 100).toFixed(1)}%)`); };
       sj.complete ? setFade() : sj.addEventListener('load', setFade, { once: true }); } }
   el._lum = null; el.style.removeProperty('--lum');
   const token = el._artToken = {};
-  const a = el._asset, msrc = p.cut || p.bg;
-  el.style.setProperty('--medal-img', `url("${msrc}")`); el.style.setProperty('--medal-pos', a.face || (p.cut ? '50% 22%' : '50% 35%')); el.style.setProperty('--medal-size', p.cut ? (a.faceSize || '260%') : '320%');
-  if (PREMIUM.has(el.dataset.tier)) computeTone(el, p, token);
+  const a = el._asset;
+  applyAttr(el, a.attr);
+  detectAttr(p.cut || p.bg).then(i => { if (el._artToken === token && i != null) applyAttr(el, i); });
+  const pw = $('.f-power', el), ownArt = el._ovBg || userBg || userFg;
+  pw.innerHTML = powerHTML(powerOf(a.w || 600, a.h || 840));
+  if (ownArt) loadI(ownArt).then(im => { if (im && el._artToken === token) pw.innerHTML = powerHTML(powerOf(im.naturalWidth, im.naturalHeight)); });
   if (p.lumNeeded) lumMap(p.bg, p.pos, p.protect).then(m => { if (el._artToken !== token) return; el._lum = m; if (m) el.style.setProperty('--lum', m.mask); regen(el); });
   regen(el);
 }
 
-/* Text tone for box-less full art: light or dark ink from the art behind the text block; a feathered
-   scrim only when the area is mid-grey or busy. If pixels can't be read, white ink with a dark outline. */
 const IMGC = new Map();
 const loadI = src => { if (!IMGC.has(src)) IMGC.set(src, new Promise(r => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = src; })); return IMGC.get(src); };
-async function computeTone(el, p, token) {
-  let tone = 'light', scrim = '0';
-  try {
-    const [bi, si] = await Promise.all([loadI(p.bg), p.cut ? loadI(p.cut) : null]);
-    if (!bi) throw 0;
-    const w = 63, h = 88, cv = newCanvas(w, h), c = cv.getContext('2d', { willReadFrequently: true });
-    const [px, py] = (p.pos || '50% 50%').split(' ').map(v => parseFloat(v) / 100), ia = bi.width / bi.height, ca = w / h;
-    let sx = 0, sy = 0, sw = bi.width, sh = bi.height;
-    if (ia > ca) { sw = bi.height * ca; sx = (bi.width - sw) * px; } else { sh = bi.width / ca; sy = (bi.height - sh) * py; }
-    c.drawImage(bi, sx, sy, sw, sh, 0, 0, w, h);
-    if (si) { const dw = p.fit[2] / 100 * w; c.drawImage(si, p.fit[0] / 100 * w, p.fit[1] / 100 * h, dw, dw * si.height / si.width); }
-    const d = c.getImageData(4, 56, 55, 28).data; let sum = 0, sq = 0, n = 0;
-    for (let i = 0; i < d.length; i += 4) { const l = (.299 * d[i] + .587 * d[i + 1] + .114 * d[i + 2]) / 255; sum += l; sq += l * l; n++; }
-    const mean = sum / n, sd = Math.sqrt(Math.max(0, sq / n - mean * mean));
-    tone = mean > .58 ? 'dark' : 'light';
-    scrim = (mean > .4 && mean < .66) || sd > .27 ? '1' : '0';
-  } catch (e) { tone = 'light'; scrim = '0'; }
-  if (el._artToken !== token) return;
-  el.dataset.tone = tone; el.dataset.scrim = scrim;
-}
-
 /* ---------------------------------------------------------------- glitter
    Each flake has a facet: it flashes when the light sits at its own reflection spot (flake position + facet offset),
    so moving the light makes different flakes catch it — like real foil glitter. Crisp 1–2 device-px cores; the
@@ -1507,9 +1407,6 @@ function sections() {
     if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
   });
   showTier(featTier);
-  const dsel = $('#descSel'); dsel.value = descStyle;
-  dsel.addEventListener('change', () => { descStyle = dsel.value; document.documentElement.dataset.desc = descStyle;
-    try { localStorage.setItem('lk-gacha-desc-v2', descStyle); } catch (e) { /* ignore */ } requestAnimationFrame(placePins); });
   new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
   const tgDemo = $('#tgDemo'); if (RM) tgDemo.setAttribute('aria-pressed', 'false');
   tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
@@ -1549,32 +1446,21 @@ function startDemo() { if (!feat || !demoOn || demoRAF || !featVisible) return; 
 function stopDemo() { if (demoRAF) cancelAnimationFrame(demoRAF), demoRAF = 0; feat && feat.classList.remove('demo'); }
 function scheduleDemo() { clearTimeout(demoTimer); if (!demoOn) return; demoTimer = setTimeout(() => { if (!feat.classList.contains('active')) startDemo(); }, 2600); }
 
-// [selector, name, what fills it, example, tag, pin side, optional fixed point (fraction of card)]
-const FIELDS_FRAME = [
-  ['.f-title', '카드 이름', '에셋 제목. 없으면 파일 이름에서 정리', '@', '', 'L'],
-  ['.f-type', '속성', '태그나 분류를 6가지 속성으로 묶어 아이콘과 색으로', '', '', 'R'],
-  ['.f-bg', '그림 창', '에셋 그림. 흰 배경 그림은 투명 레이어를 등급별 배경 위에', '', '', 'C', [.16, .3]],
-  ['.d-type', '타입 줄', '속성 + 대표 태그 2–3개, 카르투슈 윗변에 박힘', '', '', 'L'],
-  ['.d-flavor', '한 줄 글', '직접 적거나 비워 둠', '', '아이디어', 'L'],
-  ['.d-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기', '', '아이디어', 'L'],
-  ['.f-illus', '인쇄 정보', '작가 · 수집일 · © Lakomics (아래 두 줄)', '', '', 'L'],
-  ['.f-no', '세트·카드 번호', '세트 LK01 + 에셋마다 고정 번호', '', '', 'R'],
-  ['.f-rar', '등급 마크', '뽑을 때 정해진 등급, 모양 개수로 구분', '', '', 'B'],
+// [selector, name, ← which asset data fills it, example, tag, pin side, optional fixed point (fraction of card)] — same skeleton for every tier
+const FIELDS_ALL = [
+  ['.f-cost', '코스트', '← 등급. N 1 · R 2 · SR 3 · SSR 4 · UR 5 · LR 6', '', '', 'L'],
+  ['.f-dup', '보유', '← 중복 수. 같은 카드를 뽑은 장수', '', '', 'L'],
+  ['.f-power', '파워', '← 해상도. 메가픽셀 × 1,000, 500 단위 내림 (3000×3000 → 9,000)', '', '', 'R'],
+  ['.f-type', '속성', '← 그림의 주된 색. 분홍·빨강 불꽃 · 파랑 물 · 초록 숲 · 금·노랑 빛 · 어두움 어둠 · 옅음 바람', '', '', 'R'],
+  ['.f-subj', '튀어나오는 인물 층', '← 배경을 지운 투명 레이어. SSR부터 테두리 위로, 완전 불투명', '', '', 'C', [.6, .07]],
+  ['.f-fx', '효과', '← 작가 · 앨범 · 즐겨찾기 · 첫 수집. 등급에 따라 1–3줄', '', '', 'L'],
+  ['.nb-lv', '레벨', '← 중복 수. 1장이면 Lv.1, 1장 더할 때마다 +1, 최대 Lv.5', '', '', 'L'],
+  ['.f-title', '카드 이름', '← 에셋 제목', '@', '', 'C', [.4, .925]],
+  ['.nb-no', '세트·번호·등급', '← 세트 LK01 + 에셋 번호 + 등급 마크', '', '', 'R'],
+  ['.f-traits', '특성', '← 태그 2–3개', '', '', 'R'],
+  ['.f-vc', '인쇄 정보', '← 작가 (모르면 NoOne) · © Lakomics, 오른쪽 테두리에 세로로', '', '', 'R'],
 ];
-const FIELDS_FA = [
-  ['.fa-medal', '메달', '그림의 얼굴 부분을 둥글게 잘라 보여 줌', '', '', 'L'],
-  ['.f-title', '카드 이름', '은박 글자 + 아래 곡선 띠', '@', '', 'C', [.5, .035]],
-  ['.fa-sub', '작은 줄', '속성 · 대표 태그 하나', '', '', 'C', [.3, .125]],
-  ['.fa-value', '큰 숫자', '감상 횟수. 카드의 대표 숫자', '', '아이디어', 'R'],
-  ['.f-subj', '튀어나오는 인물 층', '배경을 지운 투명 레이어. 이름줄과 테두리 위로', '', '', 'C', [.86, .2]],
-  ['.f-bg', '배경 박', '흰 배경 그림은 등급별 선버스트 박. 어두운 그림은 그대로', '', '', 'C', [.14, .42]],
-  ['.fa-type', '타입 줄', '속성 보석 + 태그 + 앨범 수, 그림 위에 바로', '', '', 'L'],
-  ['.fa-flavor', '한 줄 글', '상자 없이 그림 위에. 밝기 따라 흰 글/검은 글', '', '아이디어', 'L'],
-  ['.fa-stats', '정보 줄', '이중 금속선 사이에 속성 | 앨범 | 즐겨찾기', '', '', 'R'],
-  ['.fa-credit', '인쇄 정보', '작가 · 세트 LK01 · 번호 · 등급 마크 · 시리얼', '', '', 'L'],
-  ['.fa-note', '수집 메모', '수집일과 앨범 수로 만든 짧은 문장', '', '', 'R'],
-  ['.fa-copy', '저작 줄', '© Lakomics · 작가, 아래 테두리 가운데', '', '', 'B'],
-];
+const FIELDS_FA = FIELDS_ALL, FIELDS_FRAME = FIELDS_ALL;
 let FIELDS = FIELDS_FA, anatLayout = 'fa';
 function renderAnat(layout) {
   anatLayout = layout; FIELDS = layout === 'fa' ? FIELDS_FA : FIELDS_FRAME;
@@ -1582,7 +1468,7 @@ function renderAnat(layout) {
   if (anat) { cards.delete(anat); ro.unobserve(anat); anat.remove(); }
   anatHolder.querySelectorAll('.pin').forEach(p => p.remove());
   const usingSamples = ASSETS[0].key[0] === 's', anatAsset = usingSamples ? byKey('s2') : byKey('p2');
-  anat = makeCard(anatAsset, layout === 'fa' ? 'ssr' : 'r'); anatHolder.prepend(anat);
+  anat = makeCard(anatAsset, layout === 'fa' ? 'ssr' : 'r', { dup: 2 }); anatHolder.prepend(anat);
   const fl = $('#fields'); fl.innerHTML = '';
   FIELDS.forEach((f, i) => {
     fl.insertAdjacentHTML('beforeend', `<li data-i="${i}" tabindex="0"><span class="k">${i + 1}</span><b>${f[1]}${f[4] ? `<span class="tag">${f[4]}</span>` : ''}</b><span>${f[2]}${f[3] ? `<i>${esc(f[3] === '@' ? anatAsset.title : f[3])}</i>` : ''}</span></li>`);
