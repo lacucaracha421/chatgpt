@@ -21,6 +21,8 @@ use super::error::LibraryError;
 #[serde(rename_all = "camelCase")]
 struct MachineSettingsFile {
     #[serde(default)]
+    motion: crate::motion::Preference,
+    #[serde(default)]
     workload: crate::workload::Settings,
     #[serde(default, deserialize_with = "present_value", skip_serializing_if = "Option::is_none")]
     performance: Option<serde_json::Value>,
@@ -239,6 +241,44 @@ mod tests {
 
 pub(crate) fn workload(path: &Path) -> Result<crate::workload::Settings, LibraryError> {
     Ok(read_file(path)?.workload)
+}
+pub(crate) fn motion(path: &Path) -> Result<crate::motion::Preference, LibraryError> {
+    Ok(read_file(path)?.motion)
+}
+pub(crate) fn set_motion(path: &Path, preference: crate::motion::Preference) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    file.motion = preference;
+    write_file(path, &file)
+}
+
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+    use crate::motion::Preference;
+
+    #[test]
+    fn motion_round_trips_per_machine_and_survives_other_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("machine.json");
+        let other = temp.path().join("other-machine.json");
+        assert_eq!(motion(&path).unwrap(), Preference::System);
+        assert!(!path.exists());
+        fs::write(&path, br#"{"futureSetting":true,"libraries":{"lib":{"mangaRoot":null}}}"#).unwrap();
+        set_motion(&path, Preference::Always).unwrap();
+        set_workload(&path, crate::workload::Settings::default()).unwrap();
+        assert_eq!(motion(&path).unwrap(), Preference::Always);
+        assert_eq!(motion(&other).unwrap(), Preference::System);
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["motion"], "always");
+        assert_eq!(saved["futureSetting"], true);
+        assert!(saved["libraries"]["lib"]["mangaRoot"].is_null());
+        set_motion(&path, Preference::System).unwrap();
+        assert_eq!(motion(&path).unwrap(), Preference::System);
+        fs::write(&path, b"invalid").unwrap();
+        assert!(set_motion(&path, Preference::Always).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"invalid");
+    }
 }
 pub(crate) fn set_workload(path: &Path, settings: crate::workload::Settings) -> Result<(), LibraryError> {
     let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

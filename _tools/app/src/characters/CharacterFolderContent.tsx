@@ -104,6 +104,7 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
 
 type FolderKind = "series" | "plain";
 const RETAINED_SERIES_LIMIT = 16;
+export const FOLDER_SWITCH_HARD_CAP_MS = READY_CAP_MS * 5;
 
 /**
  * A series folder and a plain folder open in different browsers. Visited series views keep their
@@ -111,6 +112,7 @@ const RETAINED_SERIES_LIMIT = 16;
  * out of sight: no chrome in the shell and no first-load entrance. Once its first screen is ready
  * (its data, shelf reads and the images in view decoded, within READY_CAP_MS) the two swap in one
  * step; first-screen images still loading at the cap then appear together, not one by one.
+ * A longer hard cap releases the old inert browser even if data or measurement never finishes.
  */
 export function FolderKindSwitch({ kind, children, seriesKey = "", cacheScope = "" }: { kind: FolderKind; children: ReactNode; seriesKey?: string; cacheScope?: string }) {
   const active = JSON.stringify([cacheScope, kind, kind === "series" ? seriesKey : ""]);
@@ -149,7 +151,7 @@ export function FolderKindSwitch({ kind, children, seriesKey = "", cacheScope = 
     let done = false, frame = 0, stopImages: (() => void) | undefined;
     const stop = () => {
       done = true; check.current = null;
-      observer.disconnect(); window.clearTimeout(cap); window.cancelAnimationFrame(frame); stopImages?.();
+      observer.disconnect(); window.clearTimeout(cap); window.clearTimeout(hardCap); window.cancelAnimationFrame(frame); stopImages?.();
     };
     const commit = () => { if (!done) { stop(); setShown(active); } };
     const ready = () => {
@@ -165,8 +167,12 @@ export function FolderKindSwitch({ kind, children, seriesKey = "", cacheScope = 
     };
     const observer = new MutationObserver(ready);
     observer.observe(host, { subtree: true, childList: true, attributes: true });
-    // Never leave an inert old browser up: its data cap shows the new one as it is.
-    const cap = window.setTimeout(commit, READY_CAP_MS);
+    // The cap bounds image decoding, not first-page data. Publishing an unfinished
+    // browser here would replace the painted screen with its empty initial render.
+    const cap = window.setTimeout(ready, READY_CAP_MS);
+    // Keep this independent of readiness and rAF: failed reads, zero-size hosts
+    // and suspended frames must never strand the outgoing inert screen.
+    const hardCap = window.setTimeout(commit, FOLDER_SWITCH_HARD_CAP_MS);
     check.current = ready;
     ready();
     return stop;

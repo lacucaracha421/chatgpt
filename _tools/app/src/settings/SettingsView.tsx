@@ -48,6 +48,7 @@ import { useCaseSounds } from "../preferences/caseSoundPreference";
 import { SettingsGroup, SettingsRow } from "../shared/ui/SettingsRow";
 import { ConfirmLine, CredentialRow, InlineEdit } from "./CredentialRow";
 import { ClaudeSettings } from "./ClaudeSettings";
+import { AnimationSettings } from "./AnimationSettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -515,6 +516,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <SettingsGroup title="화면">
             <SimpleRow name="화면 배율" control={<span className="settings-view__control-pair"><Select label="화면 배율" value={appZoom} onChange={event => onAppZoomChange(Number(event.target.value))}>{APP_ZOOM_LEVELS.map(level => <option key={level} value={level}>{level}%</option>)}</Select><Button size="sm" variant="quiet" disabled={appZoom === 100} onClick={() => onAppZoomChange(100)}>100%</Button></span>} />
             {appZoomError && <p className="settings-view__row-message" role="alert">{appZoomError}</p>}
+            <AnimationSettings />
             <SimpleRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => onPrivacyModeChange(event.target.checked)} />} />
             <SimpleRow name="NSFW 필터" status="전연령 이미지만 보여요" control={<Switch aria-label="NSFW 필터" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />} />
             <SimpleRow name="케이스 소리" status="컬렉션에서 케이스와 책을 열고 닫을 때" control={<Switch aria-label="케이스 소리" checked={caseSounds} onChange={event => setCaseSounds(event.target.checked)} />} />

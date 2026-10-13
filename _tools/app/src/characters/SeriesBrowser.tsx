@@ -782,7 +782,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     }).slice(0, shelfCardsInView(host.current)).flat() : [];
     return [...new Set([...tiles, ...strip])];
   }
-  const content = <section ref={host} className="series-browser" aria-label={focusedName ?? name} aria-busy={loading || shelfLoading} onKeyDown={event => {
+  const content = <section ref={host} className="series-browser" aria-label={focusedName ?? name} aria-busy={loading || shelfLoading || (!error && pageScope !== scope)} onKeyDown={event => {
     if (picking || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
   }}>

@@ -7,6 +7,7 @@ vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
+import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -548,6 +549,61 @@ describe("CollectionBrowser", () => {
     expect(list.querySelector('[data-collection-id="count-0"]')).toBe(card);
     expect(card?.querySelector(".cs-front img")).toBe(image);
     expect([...list.querySelectorAll<HTMLElement>(".collection-list__cell")].filter(cell => cell.style.gridRow === "1")).toHaveLength(6);
+  });
+
+  it.each([false, true])("keeps the PC case mounted on pick and put-down with the correct transition (reduced=%s)", async reduced => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: reduced && /prefers-reduced-motion\s*:\s*reduce/.test(query) }));
+    const style = document.createElement("style");
+    style.textContent = ["src/collections/collections.css", "src/collections/case/LightCase.css", "src/collections/CollectionBrowser.css", "src/collections/collectionShelfRules.css", "mobile-client/collectionShelf.css"]
+      .map(path => readFileSync(path, "utf8").replace(/^@import[^\n]*\n/gm, "")).join("\n");
+    document.head.append(style);
+    // jsdom does not evaluate media queries. Apply the actual matching reduced-motion
+    // declarations from the loaded stylesheets rather than inventing test-only rules.
+    const media = document.createElement("style");
+    media.textContent = Array.from(style.sheet!.cssRules).flatMap(rule => {
+      if (rule.type !== CSSRule.MEDIA_RULE) return [];
+      const query = rule as CSSMediaRule;
+      if (!window.matchMedia(query.media.mediaText).matches) return [];
+      // jsdom also miscalculates specificity for the mixed .cs-box / ::after
+      // selector list. Separate its selectors without changing their declarations.
+      return Array.from(query.cssRules).flatMap(child => {
+        const declaration = child as CSSStyleRule;
+        return declaration.selectorText.split(",").map(selector => `${selector} { ${declaration.style.cssText} }`);
+      });
+    }).join("\n");
+    document.head.append(media);
+    try {
+      renderBrowser({ collections: [sample, { ...sample, id: "c2", name: "Second" }], typeFilter: "game", showcase: false });
+      const first = await screen.findByRole("button", { name: /Astral Chain/ });
+      const second = screen.getByRole("button", { name: /Second/ });
+      const frame = first.querySelector(".collection-light-case")!;
+      const box = first.querySelector(".cs-box")!;
+      const front = first.querySelector(".cs-front")!;
+      const transition = () => getComputedStyle(box).transition;
+      const assertSameCase = () => {
+        expect(screen.getByRole("button", { name: /Astral Chain/ })).toBe(first);
+        expect(first.querySelector(".collection-light-case")).toBe(frame);
+        expect(first.querySelector(".cs-box")).toBe(box);
+        expect(first.querySelector(".cs-front")).toBe(front);
+        if (reduced) expect(transition()).toBe("none");
+        else expect(transition()).toContain("transform 360ms");
+      };
+      assertSameCase();
+      expect(getComputedStyle(box).transform).toContain("rotateY(34deg)");
+      fireEvent.click(first);
+      assertSameCase();
+      expect(frame).toHaveAttribute("data-front");
+      expect(getComputedStyle(box).transform).toContain("translateZ(34px)");
+      fireEvent.click(second);
+      assertSameCase();
+      expect(frame).not.toHaveAttribute("data-front");
+      expect(frame.hasAttribute("data-settling")).toBe(!reduced);
+      expect(getComputedStyle(box).transform).toContain("rotateY(34deg)");
+      fireEvent.click(first);
+      fireEvent.click(document.querySelector(".collection-list__plank")!);
+      assertSameCase();
+      expect(frame).not.toHaveAttribute("data-front");
+    } finally { media.remove(); style.remove(); vi.unstubAllGlobals(); }
   });
 
   it("picks with click and arrows, then opens with Enter or double-click", async () => {

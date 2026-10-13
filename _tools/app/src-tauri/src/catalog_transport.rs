@@ -61,14 +61,17 @@ async fn ensure_window(
     }
 
     let (ready_sender, ready_receiver) = std::sync::mpsc::channel();
-    let window = WebviewWindowBuilder::new(
-        app,
-        "catalog-transport",
-        WebviewUrl::External(
-            K_HENTAI_ORIGIN
-                .parse()
-                .expect("static catalog origin is valid"),
+    let window = crate::motion::apply_browser_args(
+        WebviewWindowBuilder::new(
+            app,
+            "catalog-transport",
+            WebviewUrl::External(
+                K_HENTAI_ORIGIN
+                    .parse()
+                    .expect("static catalog origin is valid"),
+            ),
         ),
+        app,
     )
     .visible(false)
     .skip_taskbar(true)

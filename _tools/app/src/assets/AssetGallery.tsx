@@ -478,7 +478,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       }}
     >
       {intro && <div ref={introRef} className="asset-gallery__intro" onKeyDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>{intro}</div>}
-      <div className="asset-gallery__virtual-space" role={intro ? "listbox" : undefined} aria-label={intro ? "자산" : undefined} aria-multiselectable={intro ? true : undefined} style={{ height: reservedTotal }}>
+      <div className="asset-gallery__virtual-space" aria-busy={items.length > 0 && mountedTiles.length === 0} role={intro ? "listbox" : undefined} aria-label={intro ? "자산" : undefined} aria-multiselectable={intro ? true : undefined} style={{ height: reservedTotal }}>
         {layout === "masonry" && masonry.headings.filter((heading) => heading.top >= scrollTop - 500 && heading.top < scrollTop + viewportHeight + 500).map((heading) => <div key={heading.key} className="asset-gallery__date" data-gallery-date="" data-date-label={heading.label} tabIndex={0} style={{ left: heading.left, width: heading.width, transform: `translateY(${heading.top}px)` }}><span className="asset-gallery__date-day">{heading.label}</span>{heading.weekday && <span className="asset-gallery__date-weekday">{heading.weekday}</span>}{heading.count > 1 && <span className="asset-gallery__date-count">{heading.count.toLocaleString()}</span>}</div>)}
         {layout === "justified" && virtualRows.map(virtualRow => {
           const row = rows[virtualRow.index]; if (!row) return null;

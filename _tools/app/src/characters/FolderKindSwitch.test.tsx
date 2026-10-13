@@ -1,12 +1,13 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { useContext } from "react";
+import { Profiler, useContext } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { LibraryGateway } from "../library/types";
+import type { AssetSummary, LibraryGateway } from "../library/types";
+import { AssetGallery } from "../assets/AssetGallery";
 import { AreaEntering, READY_CAP_MS } from "../shared/motion/AreaSwitch";
 import { REVEAL_HOLD_ATTRIBUTE } from "../shared/motion/viewportImages";
 import { StableImage } from "../shared/ui/StableImage";
-import { FolderKindSwitch } from "./CharacterFolderContent";
+import { FOLDER_SWITCH_HARD_CAP_MS, FolderKindSwitch } from "./CharacterFolderContent";
 import { createCharacterFixture, fixtureClassifications } from "./characterFixtures";
 import type { CharacterHubApi, SeriesFolder } from "./hubApi";
 import { SeriesBrowser } from "./SeriesBrowser";
@@ -61,6 +62,141 @@ const settle = (images: string[]) => act(async () => {
     document.querySelectorAll(`img[alt="${name}"]`).forEach(element => element.dispatchEvent(new Event("load")));
     decode(`https://media.test/${name}`).resolve();
   }
+});
+
+it("never commits an empty main area on cold or cached series switches before the hard fallback", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  const commits: string[][] = [];
+  const tree = (name: string, ready: boolean) => <Profiler id="main" onRender={() => {
+    commits.push(Array.from(document.querySelectorAll<HTMLElement>(".folder-kind-switch"))
+      .filter(host => host.style.display !== "none" && host.style.opacity !== "0" && host.style.visibility !== "hidden")
+      .flatMap(host => Array.from(host.querySelectorAll<HTMLElement>("[data-first-content]"), node => node.textContent!)));
+  }}><FolderKindSwitch kind="series" seriesKey={name} cacheScope="no-blank">
+    <section aria-label={name} aria-busy={!ready}>{ready && <div data-first-content>{name}</div>}</section>
+  </FolderKindSwitch></Profiler>;
+  try {
+    const view = render(tree("A", true));
+    const original = browser("A");
+    view.rerender(tree("B", false));
+    await act(async () => { vi.advanceTimersByTime(READY_CAP_MS + 100); });
+    expect(browser("A")).toBeVisible();
+    expect(preparing("B")).not.toBeNull();
+    view.rerender(tree("B", true));
+    await act(async () => { vi.advanceTimersByTime(40); });
+    expect(browser("B")).toBeVisible();
+    expect(browser("A")).not.toBeVisible();
+    view.rerender(tree("A", true));
+    await act(async () => { vi.advanceTimersByTime(40); });
+    expect(browser("A")).toBe(original);
+    expect(browser("A")).toBeVisible();
+    expect(commits.length).toBeGreaterThan(3);
+    expect(commits.every(content => content.length === 1)).toBe(true);
+    expect(commits[commits.length - 1]).toEqual(["A"]);
+  } finally { vi.useRealTimers(); }
+});
+
+it("keeps the old series while the incoming gallery has data but has not committed its measured tiles", async () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(0);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+  const measures = new Set<() => void>();
+  vi.stubGlobal("ResizeObserver", class {
+    private measure?: () => void;
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(element: HTMLElement) {
+      if (element.classList.contains("asset-gallery__scroll")) {
+        this.measure = () => this.callback(
+          [{ target: element, contentRect: { width: 600, height: 600, x: 0, y: 0, top: 0, left: 0, right: 600, bottom: 600, toJSON() {} },
+            borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }], this as unknown as ResizeObserver);
+        measures.add(this.measure);
+      }
+    }
+    unobserve() { this.disconnect(); }
+    disconnect() { if (this.measure) measures.delete(this.measure); }
+  });
+  try {
+    const view = render(<FolderKindSwitch kind="series" seriesKey="A"><Browser name="A" images={[]} /></FolderKindSwitch>);
+    const asset = { id: "next", title: null, originalName: "next.png", width: 200, height: 200,
+      collectedAt: "2026-10-13T00:00:00Z", media: { kind: "image" }, favorite: false } as AssetSummary;
+    view.rerender(<FolderKindSwitch kind="series" seriesKey="B"><section aria-label="B" aria-busy={false}>
+      <AssetGallery layout="masonry" items={[asset]} />
+    </section></FolderKindSwitch>);
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 80)); });
+    expect(browser("A")).toBeVisible();
+    expect(preparing("B")).not.toBeNull();
+    expect(browser("B")!.querySelector("[data-gallery-cell]")).toBeNull();
+    // Both gallery metrics and the scrubber observe the host; notify every observer.
+    expect(measures.size).toBeGreaterThan(1);
+    act(() => { measures.forEach(measure => measure()); });
+    await waitFor(() => expect(preparing("B")).toBeNull());
+    expect(browser("B")!.querySelector("[data-gallery-cell]")).not.toBeNull();
+    expect(browser("A")).not.toBeVisible();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it.each(["empty", "error"])("publishes a legitimate %s result without waiting for the hard fallback", async result => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  const tree = (name: string, ready: boolean) => <FolderKindSwitch kind="series" seriesKey={name}>
+    <section aria-label={name} aria-busy={!ready}>
+      {ready && (result === "empty" ? <AssetGallery layout="masonry" items={[]} /> : <p role="alert">Read failed</p>)}
+    </section>
+  </FolderKindSwitch>;
+  try {
+    const view = render(tree("A", true));
+    view.rerender(tree("B", false));
+    await act(async () => { vi.advanceTimersByTime(READY_CAP_MS + 100); });
+    expect(browser("A")).toBeVisible();
+    view.rerender(tree("B", true));
+    await act(async () => { vi.advanceTimersByTime(40); });
+    expect(preparing("B")).toBeNull();
+    expect(browser("B")).toBeVisible();
+    expect(browser("A")).not.toBeVisible();
+    expect(browser("B")!.closest("[inert]")).toBeNull();
+  } finally { cleanup(); vi.useRealTimers(); }
+});
+
+it.each(["data", "measurement", "frame"])("releases the old series at the hard fallback when %s never finishes", async stalled => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(0);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+  if (stalled === "frame") vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+  try {
+    const view = render(<FolderKindSwitch kind="series" seriesKey="A"><Browser name="A" images={[]} /></FolderKindSwitch>);
+    const asset = { id: "next", title: null, originalName: "next.png", width: 200, height: 200,
+      collectedAt: "2026-10-13T00:00:00Z", media: { kind: "image" }, favorite: false } as AssetSummary;
+    view.rerender(<FolderKindSwitch kind="series" seriesKey="B"><section aria-label="B" aria-busy={stalled === "data"}>
+      {stalled === "measurement" && <AssetGallery layout="masonry" items={[asset]} />}
+      {stalled === "frame" && <p>Ready</p>}
+    </section></FolderKindSwitch>);
+    await act(async () => { vi.advanceTimersByTime(FOLDER_SWITCH_HARD_CAP_MS - 1); });
+    expect(browser("A")).toBeVisible();
+    expect(preparing("B")).not.toBeNull();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(preparing("B")).toBeNull();
+    expect(browser("B")).toBeVisible();
+    expect(browser("A")).not.toBeVisible();
+    expect(browser("B")!.closest("[inert]")).toBeNull();
+  } finally { cleanup(); vi.useRealTimers(); }
+});
+
+it("cancels the old hard fallback when another series is requested or the switch unmounts", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  const tree = (name: string, ready: boolean) => <FolderKindSwitch kind="series" seriesKey={name}>
+    <Browser name={name} images={ready ? [] : undefined} />
+  </FolderKindSwitch>;
+  try {
+    const view = render(tree("A", true));
+    view.rerender(tree("B", false));
+    await act(async () => { vi.advanceTimersByTime(FOLDER_SWITCH_HARD_CAP_MS - 100); });
+    view.rerender(tree("C", true));
+    await act(async () => { vi.advanceTimersByTime(40); });
+    expect(browser("C")).toBeVisible();
+    await act(async () => { vi.advanceTimersByTime(FOLDER_SWITCH_HARD_CAP_MS); });
+    expect(browser("C")).toBeVisible();
+    expect(browser("B")).not.toBeVisible();
+    view.rerender(tree("D", false));
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { cleanup(); vi.useRealTimers(); }
 });
 
 it("keeps the series painted until the plain folder's data and first-screen images are ready, then swaps once", async () => {

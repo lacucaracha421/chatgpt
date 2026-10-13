@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { LibraryProvider } from "../library/LibraryContext";
 import { libraryGateway } from "../library/client";
 import type { LibraryGateway } from "../library/types";
@@ -37,6 +38,17 @@ function createGateway(overrides: Partial<LibraryGateway> = {}) {
 function renderSettings(gateway: LibraryGateway, props: Partial<React.ComponentProps<typeof SettingsView>> = {}) {
   return render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} {...props} /></LibraryProvider>);
 }
+
+it("includes the animation setting in the display group and saves it", async () => {
+  vi.mocked(invoke).mockResolvedValueOnce({ selected: "system", active: "system" });
+  renderSettings(createGateway(), { initialSection: "display" });
+  const select = screen.getByRole("combobox", { name: "애니메이션" });
+  await waitFor(() => expect(select).toBeEnabled());
+  vi.mocked(invoke).mockResolvedValueOnce({ selected: "always", active: "system" });
+  await userEvent.selectOptions(select, "always");
+  expect(invoke).toHaveBeenCalledWith("motion_preference", { preference: "always" });
+  expect(await screen.findByText("다시 시작하면 적용됩니다")).toBeVisible();
+});
 
 it("asks for the TMDB read access token and preserves it after a save failure", async () => {
   const gateway = createGateway({ setTmdbToken: vi.fn().mockRejectedValue(null) });

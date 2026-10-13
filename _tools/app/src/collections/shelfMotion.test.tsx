@@ -66,6 +66,33 @@ it("lifts the selected case toward the viewer and lowers it again", () => {
   } finally { style.remove(); }
 });
 
+it("keeps the PC pick transition when tablet shelf overrides are also loaded", () => {
+  vi.useFakeTimers(); motion(false);
+  const style = document.createElement("style");
+  style.textContent = ["src/collections/case/LightCase.css", "src/collections/CollectionBrowser.css", "mobile-client/collectionShelf.css"]
+    .map(path => readFileSync(path, "utf8").replace(/^@import[^\n]*\n/gm, "")).join("\n");
+  document.head.append(style);
+  try {
+    // Even a cell with the tablet's class must keep PC motion outside mobile-collections.
+    const draw = (selected: boolean) => <div className="collection-browser"><div className="collection-list collection-list--shelf">
+      <div className="collection-list__cell collection-cover-cell"><button className="collection-card" aria-selected={selected}>
+        <LightCase data={data} selected={selected} />
+      </button></div>
+    </div></div>;
+    const view = render(draw(false));
+    const box = view.container.querySelector<HTMLElement>(".cs-box")!;
+    const transition = getComputedStyle(box).transition;
+    expect(transition).toContain("transform 360ms");
+    view.rerender(draw(true));
+    expect(view.container.querySelector(".cs-box")).toBe(box);
+    expect(getComputedStyle(box).transition).toBe(transition);
+    expect(getComputedStyle(box).transform).toContain("translateZ(34px)");
+    view.rerender(draw(false));
+    expect(getComputedStyle(box).transition).toBe(transition);
+    expect(getComputedStyle(box).transform).toContain("rotateY(34deg)");
+  } finally { style.remove(); }
+});
+
 it("paints a selected volume above a settling neighbour in the bookcase", () => {
   const style = document.createElement("style");
   style.textContent = readFileSync("src/collections/work/collectionWork.css", "utf8");

@@ -9,6 +9,7 @@ mod http_agent;
 pub mod library;
 pub mod perf_log;
 mod performance;
+mod motion;
 mod window_size;
 mod workload;
 pub use cloud::backfill::BackfillControlState;
@@ -42,6 +43,7 @@ pub fn run() {
         .manage(catalog_transport::CatalogTransport::default())
         .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
+            motion::create_main_window(app.handle())?;
             perf_log::setup(app.handle());
             if let Ok(cache) = app.path().app_cache_dir() {
                 media_protocol::set_preview_disk_cache(cache.join("provider-previews-v1"));
@@ -266,6 +268,7 @@ pub fn run() {
             media_protocol_queue::media_view_changed,
             workload::workload_profile,
             performance::performance_profile,
+            motion::motion_preference,
             workload::workload_quit,
             workload::workload_close_window,
             workload::workload_cancel_scans,
