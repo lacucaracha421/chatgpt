@@ -24,7 +24,8 @@ while ($rest.Count) {
 if ($Jobs -gt 0) { $env:CARGO_BUILD_JOBS = "$Jobs" } elseif (-not $env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS = '2' }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 # Cargo runs in the crate, but worker paths are normally supplied relative to the caller.
-if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR, (Get-Location).Path) }
+# Windows PowerShell 5.1 (.NET Framework) has no GetFullPath(path, base); resolve against the current directory by hand.
+if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = [IO.Path]::GetFullPath([IO.Path]::Combine((Get-Location).Path, $env:CARGO_TARGET_DIR)) }
 $log = Join-Path ([IO.Path]::GetTempPath()) ("lakomics-cargo-test.{0}.log" -f [IO.Path]::GetRandomFileName())
 New-Item -ItemType File -Path $log | Out-Null
 "Log: $log"
@@ -58,6 +59,8 @@ $errLog = "$log.stderr"
 $quoted = @('test') + $CargoArgs | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }
 $cargo = Start-Process -FilePath cargo -ArgumentList $quoted -WorkingDirectory (Join-Path $repoRoot '_tools/app/src-tauri') `
     -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError $errLog
+# On .NET Framework a process started with -PassThru reports no ExitCode unless its handle was taken while it ran.
+$null = $cargo.Handle
 $slow = [Collections.Generic.HashSet[string]]::new()
 $seen = @{ $log = 0; $errLog = 0 }
 function Show-NewLines {

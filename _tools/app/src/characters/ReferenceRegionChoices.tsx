@@ -1,7 +1,9 @@
 import { useAssetMask } from "../privacy/PrivacyContext";
 import { AssetSvgImage } from "../privacy/AssetImage";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { UserIcon } from "@heroicons/react/24/outline";
 import { commandErrorMessage } from "../library/errorMessage";
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { Button } from "../shared/ui/Button";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { characterApi, type CharacterApi } from "./api";
@@ -30,11 +32,49 @@ export const needsReferenceConfirmation = (inspections: ReferenceInspection[]) =
   (usableReferenceCount(inspections) < AUTOMATIC_CHARACTER_REFERENCE_COUNT && inspections.some(needsReferenceRegionChoice))
   || inspections.some(sharedNeedsChoice);
 
+/** The references whose missing person choice makes the save refuse, as 1-based slots in the draft. */
+export function blockedSaveReferences(inspections: ReferenceInspection[] | null | undefined, assetIds: string[]) {
+  if (!inspections) return [];
+  return assetIds.flatMap((assetId, index) => {
+    const region = inspections.find(row => row.assetId === assetId);
+    return region && sharedNeedsChoice(region) ? [{ assetId, number: index + 1 }] : [];
+  });
+}
+
+/** A person choice would make this reference usable: it has a person left that no other character owns. */
+export const referenceNeedsPerson = (region: ReferenceInspection) =>
+  needsReferenceRegionChoice(region) && region.boxes.length - (region.takenBoxes?.length ?? 0) > 0;
+
+/** How many references the quiet indicators ask a person for; zero when nothing is asked. */
+export const personChoiceCount = (inspections: ReferenceInspection[]) =>
+  needsReferenceConfirmation(inspections) ? inspections.filter(needsReferenceRegionChoice).length : 0;
+
 export type ReferenceRegionInspection = { inspections: ReferenceInspection[] | null; error: string | null; retry?: () => void; refresh?: () => Promise<void> };
 type InspectionRequest = {
   seriesId: string; targetId: string | null; assetIds: string[]; draftRegions: ReferenceRegions;
   api?: (import("./api").CharacterApi)["inspectReferenceRegions"]; revision?: string;
+  /** Identifies the open library, so a remembered result never crosses libraries. */
+  libraryKey?: string;
 };
+
+/**
+ * Last inspection per library, character, revision, reference set and draft choices for this
+ * session (per inspection API). Reopening the editor paints that known result at once while the
+ * native side answers again silently. An entry is only valid for exactly the key it was stored under.
+ */
+const MAX_REMEMBERED_INSPECTIONS = 48;
+const rememberedInspections = new WeakMap<object, Map<string, ReferenceInspection[]>>();
+const rememberedFor = (api: object) => {
+  let entries = rememberedInspections.get(api);
+  if (!entries) rememberedInspections.set(api, entries = new Map());
+  return entries;
+};
+function rememberInspections(api: object, key: string, rows: ReferenceInspection[]) {
+  const entries = rememberedFor(api);
+  entries.delete(key);
+  entries.set(key, rows);
+  while (entries.size > MAX_REMEMBERED_INSPECTIONS) entries.delete(entries.keys().next().value as string);
+}
 
 /**
  * A person the user just chose counts at once, before the native reinspection returns: the
@@ -60,10 +100,11 @@ export function withDraftChoices(inspections: ReferenceInspection[], draftRegion
  * showing the last result for the same references (with the choice applied) instead of
  * dropping to nothing: the "!" marks, the usable count and the chooser must not blink while
  * the native side answers. Any other change (series, character, reference list, revision,
- * retry) still starts from nothing.
+ * retry) still starts from nothing, unless this session already inspected exactly that state.
  */
-export function useReferenceRegionInspection({ seriesId, targetId, assetIds, draftRegions, api, revision }: InspectionRequest): ReferenceRegionInspection {
+export function useReferenceRegionInspection({ seriesId, targetId, assetIds, draftRegions, api, revision, libraryKey = "" }: InspectionRequest): ReferenceRegionInspection {
   const [attempt, setAttempt] = useState(0);
+  const cacheKey = JSON.stringify([libraryKey, seriesId, targetId, [...assetIds].sort(), revision, draftRegions]);
   const key = JSON.stringify([seriesId, targetId, assetIds, draftRegions, revision, attempt]);
   const scope = JSON.stringify([seriesId, targetId, [...assetIds].sort(), revision, attempt]);
   const request = useRef(0);
@@ -75,16 +116,22 @@ export function useReferenceRegionInspection({ seriesId, targetId, assetIds, dra
     let active = true;
     const generation = ++request.current;
     api(seriesId, targetId, assetIds, draftRegions)
-      .then(inspections => { if (active && generation === request.current) setResult({ key, scope, api, inspections, error: null }); })
+      .then(inspections => {
+        if (!active || generation !== request.current) return;
+        rememberInspections(api, cacheKey, inspections);
+        setResult({ key, scope, api, inspections, error: null });
+      })
       .catch(reason => {
         if (active && generation === request.current) setResult({ key, scope, api, inspections: null, error: commandErrorMessage(reason, "인물 영역을 확인하지 못했습니다.") });
       });
     return () => { active = false; ++request.current; };
   }, [key, api]);
   const none = { inspections: null, error: null };
-  const current = !api || !result ? none
-    : result.key === key && result.api === api ? result
-    : result.scope === scope && result.inspections ? { inspections: withDraftChoices(result.inspections, draftRegions), error: null }
+  const known = api && assetIds.length ? rememberedFor(api).get(cacheKey) : undefined;
+  const current = !api ? none
+    : result && result.key === key && result.api === api ? result
+    : known ? { inspections: known, error: null }
+    : result && result.scope === scope && result.inspections ? { inspections: withDraftChoices(result.inspections, draftRegions), error: null }
     : none;
   // Refresh ownership in place: preserve the last result until its replacement arrives.
   const refresh = async () => {
@@ -92,6 +139,7 @@ export function useReferenceRegionInspection({ seriesId, targetId, assetIds, dra
     const generation = ++request.current;
     const inspections = await api(seriesId, targetId, assetIds, draftRegions);
     if (generation === request.current && latest.current.key === key && latest.current.api === api) {
+      rememberInspections(api, cacheKey, inspections);
       setResult({ key, scope, api, inspections, error: null });
     }
   };
@@ -144,6 +192,79 @@ function RegionImage({ assetId, box, width, height, label, selectionLabel, taken
 }
 
 /**
+ * What the user may place or change. An unresolved reference is one the user must still place;
+ * a stored binding is not trusted on its own: when the native side reports it stale, the user
+ * re-chooses rather than having the region silently swapped for them.
+ */
+function splitReferences(inspections: ReferenceInspection[], draftRegions: ReferenceRegions) {
+  const unresolved = inspections.filter(region => needsReferenceRegionChoice(region));
+  // References the user already decided and that the inspection still honours. Their region
+  // can be replaced, but they are never part of the required prompt.
+  const adjustable = inspections.filter(region => draftRegions[region.assetId] && !needsReferenceRegionChoice(region));
+  // References the worker resolved on its own. Correction stays reachable even when
+  // nothing is required, because an inferred crop is not a user decision.
+  const resolved = inspections.filter(region => !draftRegions[region.assetId] && usableRegion(region));
+  // Anything the user may correct: the unresolved images, their own honoured choices, and
+  // the crops the worker inferred. `no_region` is excluded because there is no crop.
+  const correctable = [...unresolved, ...adjustable, ...resolved].filter(region => region.boxes.length > 0);
+  const choosable = correctable.filter((region, index) => correctable.findIndex(row => row.assetId === region.assetId) === index);
+  return { unresolved, choosable };
+}
+
+/**
+ * Correcting an inferred, chosen, or stale crop is always possible, but never requested.
+ * A stale binding must stay recoverable even when the image holds a single person, and a
+ * choice the user made stays theirs to change.
+ */
+function referenceCorrections(inspections: ReferenceInspection[], draftRegions: ReferenceRegions, assetIds: string[]) {
+  return splitReferences(inspections, draftRegions).choosable
+    .filter(region => region.boxes.length > 1 || Boolean(draftRegions[region.assetId]) || staleReferenceRegion(region))
+    .sort((a, b) => assetIds.indexOf(a.assetId) - assetIds.indexOf(b.assetId));
+}
+
+export type ReferenceRequest = { kind: "required" | "correction" | "close"; key: number };
+export type ReferenceWorkflow = "required" | "correction" | "focus" | null;
+
+/**
+ * The status slot at the right of the reference heading. It is always rendered at the compact
+ * control height, so nothing below it moves: empty at first, a delayed "checking" note, then
+ * the person count to choose, the usable count with the optional crop adjustment, or a retry.
+ */
+export function ReferenceCheckSlot({ inspection, active, assetIds, draftRegions, busy, expanded = null, onRequest }: {
+  inspection: ReferenceRegionInspection; active: boolean; assetIds: string[]; draftRegions: ReferenceRegions; busy: boolean;
+  /** The workflow the chooser section is showing; the buttons that open one toggle it closed again. */
+  expanded?: ReferenceWorkflow;
+  onRequest: (kind: ReferenceRequest["kind"]) => void;
+}) {
+  const { inspections, error, retry } = inspection;
+  const showChecking = useDelayedBusy(active && !error && inspections === null, { delay: 400, minVisible: 600 });
+  let state = "idle";
+  let content: ReactNode = null;
+  if (active && error) {
+    state = "error";
+    content = <Button size="sm" variant="quiet" disabled={busy || !retry} aria-description={error} onClick={retry}>확인 실패 · 다시 시도</Button>;
+  } else if (active && inspections) {
+    const needed = personChoiceCount(inspections);
+    if (needed > 0) {
+      state = "needed";
+      content = <Button size="sm" variant="quiet" className="character-reference-slot__needed" disabled={busy} aria-expanded={expanded === "required"} onClick={() => onRequest(expanded === "required" ? "close" : "required")}>
+        <UserIcon aria-hidden="true" />인물 선택 <span className="character-reference-slot__count">{needed.toLocaleString()}</span></Button>;
+    } else {
+      state = "usable";
+      content = <>
+        <span>사용 <span className="character-reference-slot__count">{usableReferenceCount(inspections).toLocaleString()}</span></span>
+        {referenceCorrections(inspections, draftRegions, assetIds).length > 0
+          && <Button size="sm" variant="quiet" disabled={busy} aria-expanded={expanded === "correction"} onClick={() => onRequest(expanded === "correction" ? "close" : "correction")}>인물 영역</Button>}
+      </>;
+    }
+  } else if (active && showChecking) {
+    state = "checking";
+    content = <span>인물 확인 중</span>;
+  }
+  return <div className="character-reference-slot">{content && <div className="character-reference-slot__content" key={state}>{content}</div>}</div>;
+}
+
+/**
  * Region correction for the references of one character.
  *
  * The backend decides on its own which references it can use. This section only
@@ -152,48 +273,42 @@ function RegionImage({ assetId, box, width, height, label, selectionLabel, taken
  * enough usable references there is no prompt at all, and the chooser opens on
  * request rather than on render.
  */
-export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegions, savedRegions = {}, privacyMode, busy: parentBusy, api, decisionApi = characterApi, inspection, focusRequest, onOpenOriginal, onChange }: {
-  seriesId: string; targetId: string | null; assetIds: string[]; draftRegions: ReferenceRegions; savedRegions?: ReferenceRegions;
-  privacyMode: boolean; busy: boolean; api: NonNullable<(import("./api").CharacterApi)["inspectReferenceRegions"]>;
-  inspection?: ReferenceRegionInspection;
+export function ReferenceRegionChoices({ assetIds, draftRegions, savedRegions = {}, privacyMode, busy: parentBusy, decisionApi = characterApi, inspection, focusRequest, request, onModeChange, onOpenOriginal, onChange }: {
+  assetIds: string[]; draftRegions: ReferenceRegions; savedRegions?: ReferenceRegions;
+  privacyMode: boolean; busy: boolean;
+  /** The one inspection owner shared with the status slot and the series indicator. */
+  inspection: ReferenceRegionInspection;
   decisionApi?: Pick<CharacterApi, "targets" | "decide">;
   /** Opens one reference's crop directly (e.g. from a tapped strip tile); `key` repeats the same request. */
   focusRequest?: { assetId: string; key: number } | null;
+  /** Opens the shortfall workflow or the crop list from the status slot; `key` repeats the same request. */
+  request?: ReferenceRequest | null;
+  /** Reports which workflow is open, so the status slot can show and toggle it. */
+  onModeChange?: (mode: ReferenceWorkflow) => void;
   onOpenOriginal?: (assetId: string) => void;
   /** Receives only manual draft overrides; nothing is written to the database. */
   onChange: (regions: ReferenceRegions) => void;
 }) {
-  const localInspection = useReferenceRegionInspection({ seriesId, targetId, assetIds, draftRegions, api: inspection ? undefined : api });
   // "required" is the shortfall workflow the user explicitly opened; it ends by itself
   // once the threshold is met. "correction" is an optional adjustment that stays open.
   // "focus" checks one reference the user tapped and closes after a choice.
-  const [mode, setMode] = useState<"required" | "correction" | "focus" | null>(null);
+  const [mode, setMode] = useState<ReferenceWorkflow>(null);
+  const reportedMode = useRef(onModeChange);
+  reportedMode.current = onModeChange;
+  useEffect(() => { reportedMode.current?.(mode); }, [mode]);
   const [chosen, setChosen] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const rejectingRef = useRef(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const busy = parentBusy || rejecting !== null;
   const sectionRef = useRef<HTMLElement>(null);
-  const { inspections: current, error, retry, refresh } = inspection ?? localInspection;
+  const { inspections: current, refresh } = inspection;
   const inspections = current ?? [];
   const changedRegions = draftReferenceRegions(draftRegions, assetIds, savedRegions);
   const regionStatus = (region: ReferenceInspection) => referenceRegionStatus(region, draftRegions, changedRegions);
-  // An unresolved reference is one the user must still place. A stored binding is not
-  // trusted on its own: when the native side reports it stale, the user re-chooses rather
-  // than having the region silently swapped for them.
-  const unresolved = inspections.filter(region => needsReferenceRegionChoice(region));
-  // References the user already decided and that the inspection still honours. Their region
-  // can be replaced, but they are never part of the required prompt.
-  const adjustable = inspections.filter(region => draftRegions[region.assetId] && !needsReferenceRegionChoice(region));
-  // References the worker resolved on its own. Correction stays reachable even when
-  // nothing is required, because an inferred crop is not a user decision.
-  const resolved = inspections.filter(region => !draftRegions[region.assetId] && usableRegion(region));
+  const { unresolved, choosable } = splitReferences(inspections, draftRegions);
   const usable = usableReferenceCount(inspections);
   const enough = usable >= AUTOMATIC_CHARACTER_REFERENCE_COUNT;
-  // Anything the user may correct: the unresolved images, their own honoured choices, and
-  // the crops the worker inferred. `no_region` is excluded because there is no crop.
-  const correctable = [...unresolved, ...adjustable, ...resolved].filter(region => region.boxes.length > 0);
-  const choosable = correctable.filter((region, index) => correctable.findIndex(row => row.assetId === region.assetId) === index);
   // In the required workflow the next unresolved reference is the default target, so a
   // settled reference never leaves the chooser pointing at nothing.
   const fallback = mode === "required" ? unresolved[0]?.assetId ?? null : null;
@@ -214,6 +329,15 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     setMode("focus"); setChosen(focusRequest.assetId);
   }, [focusRequest?.key, choosable.length > 0]);
 
+  // The status slot asks for a workflow; it waits for the first inspection result.
+  const handledRequest = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || handledRequest.current === request.key || !current) return;
+    handledRequest.current = request.key;
+    setMode(request.kind === "close" ? null : request.kind);
+    setChosen(request.kind === "required" ? unresolved[0]?.assetId ?? null : null);
+  }, [request?.key, Boolean(current)]);
+
   // A tapped or refused reference may sit below the fold: bring its chooser into view.
   useEffect(() => {
     if (mode === "focus" && chosen) sectionRef.current?.scrollIntoView?.({ block: "nearest" });
@@ -230,7 +354,6 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
 
   if (!assetIds.length) return null;
 
-  const openRequired = () => { setMode("required"); setChosen(unresolved[0]?.assetId ?? null); };
   // Correction opens the list first so the user picks which reference to adjust.
   const openCorrection = () => { setMode("correction"); setChosen(null); };
   const close = () => { setMode(null); setChosen(null); };
@@ -277,17 +400,10 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
   // A suggestion is only useful when it differs from the crop already in effect.
   const suggested = open?.region.suggestedIndex !== null && open?.region.suggestedIndex !== undefined && open.region.suggestedIndex !== referenceRegionIndex(open.region)
     && takenBoxOwner(open.region, open.region.suggestedIndex) === null ? open.region.suggestedIndex : null;
-  // A shortfall with something unresolved is the only reason to interrupt the user.
-  const askRequired = Boolean(current) && needsReferenceConfirmation(inspections);
-  // Correcting an inferred, chosen, or stale crop is always possible, but never requested.
-  // A stale binding must stay recoverable even when the image holds a single person, and a
-  // choice the user made stays theirs to change.
-  const corrections = correctable
-    .filter(region => region.boxes.length > 1 || Boolean(draftRegions[region.assetId]) || staleReferenceRegion(region))
-    .sort((a, b) => assetIds.indexOf(a.assetId) - assetIds.indexOf(b.assetId));
+  const corrections = referenceCorrections(inspections, draftRegions, assetIds);
   const canCorrect = Boolean(current) && corrections.length > 0;
-  // With enough usable references the section stays quiet unless the user opened it.
-  const showSection = Boolean(error || decisionError) || Boolean(open) || askRequired || mode === "correction" || canCorrect;
+  // The status slot owns the quiet default; this section exists only while a workflow is open.
+  const showSection = Boolean(decisionError) || Boolean(open) || (mode === "correction" && corrections.length > 0) || (mode === "required" && canCorrect);
   if (!showSection) return null;
   // Progress counts the references still needing a decision. A correction may target a
   // reference that is not in that list, so it reports its position in the draft instead.
@@ -298,19 +414,9 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
     : null;
   return <section ref={sectionRef} className="character-reference-regions" aria-label="인물 영역 확인">
     {decisionError && <p role="alert">{decisionError}</p>}
-    {error && <><p role="alert">{error}</p>{retry && <Button size="sm" variant="ghost" disabled={busy} onClick={retry}>인물 확인 다시 시도</Button>}</>}
-    {!error && mode === null && <div className="character-actions">
-      {askRequired && <Button size="sm" disabled={busy} onClick={openRequired}>필요한 인물만 확인</Button>}
-      {/* A shortfall and an optional adjustment are different jobs, so both stay reachable. */}
-      {canCorrect && <Button size="sm" variant="ghost" disabled={busy} onClick={openCorrection}>인물 영역 조정</Button>}
-    </div>}
     {/* A required workflow that no longer needs anything becomes an optional adjustment. */}
-    {!error && mode === "required" && !open && <div className="character-actions">
-      {canCorrect && <Button size="sm" variant="ghost" disabled={busy} onClick={openCorrection}>인물 영역 조정</Button>}
-      <Button size="sm" variant="ghost" disabled={busy} onClick={close}>닫기</Button>
-    </div>}
-    {mode === "correction" && !open && <div className="character-actions">
-      <Button size="sm" variant="ghost" disabled={busy} onClick={close}>닫기</Button>
+    {mode === "required" && !open && canCorrect && <div className="character-actions">
+      <Button size="sm" variant="ghost" disabled={busy} onClick={openCorrection}>인물 영역 조정</Button>
     </div>}
     {/* The correction list belongs to an open correction, so the quiet default shows nothing. */}
     {mode === "correction" && !open && corrections.length > 0 && <div className="character-region-summary" role="region" aria-label="인물 영역 목록">{corrections.map(region => {
@@ -353,7 +459,8 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
         {/* An optional adjustment stays reachable while the shortfall workflow is running. */}
         {open.mode === "required" && canCorrect && <Button size="sm" variant="ghost" disabled={busy} onClick={openCorrection}>인물 영역 조정</Button>}
         {open.mode === "focus" && onOpenOriginal && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onOpenOriginal(open.region.assetId)}>원본 보기</Button>}
-        <Button size="sm" variant="ghost" disabled={busy} onClick={close}>닫기</Button>
+        {/* The status slot toggles the shortfall workflow and the crop list; only a tapped tile has no other way out. */}
+        {open.mode === "focus" && <Button size="sm" variant="ghost" disabled={busy} onClick={close}>닫기</Button>}
       </div>
     </>}
   </section>;

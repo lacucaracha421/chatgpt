@@ -40,7 +40,8 @@ import { collectPages, faultAssets, faultSelectionItem, useFaultGame, type Fault
 import { CharacterRegistry, characterDraft, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
 import { CharacterTaggerTags } from "./CharacterTaggerTags";
-import { needsReferenceConfirmation, useReferenceRegionInspection } from "./ReferenceRegionChoices";
+import { blockedSaveReferences, personChoiceCount, useReferenceRegionInspection } from "./ReferenceRegionChoices";
+import { CountBadge } from "../shared/ui/Badge";
 import { CharacterGroups } from "./CharacterGroups";
 import { ExtrasCard, useExtrasPreviews, useExtrasSuggestions } from "./ExtrasCard";
 import { ExtrasPromotionDialog, type ExtrasPromotionApi, type ExtrasPromotionOutcome } from "./ExtrasPromotionDialog";
@@ -265,13 +266,19 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     seriesId: series.classificationId, targetId: inspectionTarget?.id ?? null,
     assetIds: inspectionDraft.references, draftRegions: inspectionDraft.referenceRegions,
     api: inspectionEnabled ? api.inspectReferenceRegions : undefined,
-    revision: `${inspectionTarget?.fingerprint ?? "new"}:${reload}`,
+    revision: `${inspectionTarget?.fingerprint ?? "new"}:${reload}`, libraryKey: library?.root ?? "",
   });
-  const characterAttention = characterTarget && inspectionEnabled && inspectionTarget?.id === characterTarget.id
+  const attentionActive = Boolean(characterTarget && inspectionEnabled && inspectionTarget?.id === characterTarget.id);
+  // The pencil shows a neutral count of the references still waiting for a person choice.
+  const attentionCount = attentionActive && referenceInspection.inspections ? personChoiceCount(referenceInspection.inspections) : 0;
+  const characterAttention = attentionActive
     ? referenceInspection.error ? "인물 영역 확인 실패 · 캐릭터 정보에서 확인해 주세요."
-      : referenceInspection.inspections && needsReferenceConfirmation(referenceInspection.inspections) ? "필요한 인물 확인이 있습니다."
+      : attentionCount > 0 ? "필요한 인물 확인이 있습니다."
       : null
     : null;
+  // A shared image without a chosen person makes the save refuse: say so before, and jump to it on 저장.
+  const blockedReferences = editor ? blockedSaveReferences(referenceInspection.inspections, editor.draft.references) : [];
+  const [saveJump, setSaveJump] = useState<{ assetId: string; key: number } | null>(null);
   const extrasForSuggestions = currentExtras ? current : !targetId ? shelfExtras : undefined;
   const extrasSuggestions = useExtrasSuggestions(extrasForSuggestions?.id ?? null, refreshVersion + reload + analysisRevision, extrasApi);
   const extrasPreviews = useExtrasPreviews(series.classificationId, shelfExtras?.id ?? null, refreshVersion + reload + analysisRevision, hubApi);
@@ -582,13 +589,16 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const editorS36 = editorTarget && readiness.get(editorTarget.id) ? readinessLabel(readiness.get(editorTarget.id)!) : null;
   const editorDirty = Boolean(editor && editor.target && JSON.stringify(editor.draft) !== JSON.stringify(characterDraft(editor.target)));
   const editorPanel = <AnchoredPanel open={Boolean(editor) && !picking} onOpenChange={open => { if (open) openEditor(characterTarget ?? null); else if (!picking && !busy) setEditor(null); }} title={editor?.target ? `${editor.target.displayName} · 캐릭터 정보` : "새 캐릭터"}
-    trigger={characterTarget ? <Button size="icon" variant="ghost" className="character-info-trigger" aria-label="캐릭터 편집" aria-description={characterAttention ?? "캐릭터 정보 편집"}><PencilIcon aria-hidden="true" />{characterAttention && <span className="character-info-attention" aria-hidden="true">!</span>}</Button>
+    trigger={characterTarget ? <Button size="icon" variant="ghost" className="character-info-trigger" aria-label="캐릭터 편집" aria-description={characterAttention ?? "캐릭터 정보 편집"}><PencilIcon aria-hidden="true" />{attentionCount > 0 && <CountBadge variant="corner" className="character-info-count" aria-hidden="true" value={attentionCount} max={99} />}</Button>
       : <Button size="icon" variant="ghost" className="character-info-trigger" aria-label="캐릭터 만들기" aria-description="캐릭터 만들기"><CharacterPanelIcon aria-hidden="true" /></Button>}
     footer={editor ? <>
-      <span role="status">{editorDirty ? "저장하지 않은 변경" : ""}</span>
-      <Button size="sm" variant={editorDirty || !editor.target ? "primary" : "secondary"} disabled={busy || !editor.draft.name.trim()} onClick={() => void saveEditor()}>{editor.target ? "저장" : "캐릭터 만들기"}</Button>
+      {blockedReferences.length > 0
+        ? <span role="status" className="character-foot-status character-foot-status--blocking"><UserIcon aria-hidden="true" />{`레퍼런스 ${blockedReferences[0]!.number}${blockedReferences.length > 1 ? ` 외 ${blockedReferences.length - 1}장` : ""} · 인물 선택 후 저장`}</span>
+        : <span role="status">{editorDirty ? "저장하지 않은 변경" : ""}</span>}
+      <Button size="sm" variant={editorDirty || !editor.target ? "primary" : "secondary"} disabled={busy || !editor.draft.name.trim()}
+        onClick={() => blockedReferences.length > 0 ? setSaveJump(old => ({ assetId: blockedReferences[0]!.assetId, key: (old?.key ?? 0) + 1 })) : void saveEditor()}>{editor.target ? "저장" : "캐릭터 만들기"}</Button>
     </> : undefined}>
-    {editor && <CharacterRegistry draft={editor.draft} target={editor.target} seriesId={series.classificationId} privacyMode={privacyMode} busy={busy} error={editorError} api={api} inspection={referenceInspection}
+    {editor && <CharacterRegistry draft={editor.draft} target={editor.target} seriesId={series.classificationId} libraryKey={library?.root ?? ""} privacyMode={privacyMode} busy={busy} error={editorError} api={api} inspection={referenceInspection} jumpRequest={saveJump}
       automationStatus={editorS36}
       onOpenReference={assetId => void (async () => {
         try { const asset = await gateway.getAsset(assetId); setExternalAsset(asset); setViewer(assetId); }

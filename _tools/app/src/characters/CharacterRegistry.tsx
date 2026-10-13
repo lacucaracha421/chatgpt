@@ -1,11 +1,11 @@
 import { AssetSvgImage } from "../privacy/AssetImage";
 import { AssetImage } from "../privacy/AssetImage";
-import { useEffect, useId, useState, type ReactNode } from "react";
-import { PhotoIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { EyeSlashIcon, PhotoIcon, UserIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
 import { thumbnailUrl } from "../assets/mediaUrl";
-import { ReferenceRegionChoices, AUTOMATIC_CHARACTER_REFERENCE_COUNT, currentReferenceCrop, isUsableReferenceRegion, referenceRegionStatus, useReferenceRegionInspection, usableReferenceCount, type ReferenceRegionInspection } from "./ReferenceRegionChoices";
+import { ReferenceRegionChoices, ReferenceCheckSlot, AUTOMATIC_CHARACTER_REFERENCE_COUNT, currentReferenceCrop, isUsableReferenceRegion, referenceNeedsPerson, referenceRegionStatus, useReferenceRegionInspection, usableReferenceCount, type ReferenceRegionInspection, type ReferenceRequest, type ReferenceWorkflow } from "./ReferenceRegionChoices";
 import { draftReferenceRegions, type CharacterApi, type CharacterTarget, type ReferenceInspection, type ReferenceRegions } from "./api";
 
 export type CharacterEditorDraft = { name: string; description: string; thumbnail: string | null; references: string[]; referenceRegions: ReferenceRegions; enabled: boolean };
@@ -52,10 +52,12 @@ function ReferenceThumb({ assetId, region, privacyMode }: { assetId: string; reg
  * Character panel body. References and their crops come first; automation state is
  * one line; rarely used settings sit in one closed disclosure. Saving is the host's footer.
  */
-export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, error, api, inspection, automationStatus, management, onChange, onPick, onOpenReference, onRecommendReferences }: {
-  draft: CharacterEditorDraft; target: CharacterTarget | null; seriesId?: string; privacyMode: boolean; busy: boolean; error: string | null;
+export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacyMode, busy, error, api, inspection, jumpRequest, automationStatus, management, onChange, onPick, onOpenReference, onRecommendReferences }: {
+  draft: CharacterEditorDraft; target: CharacterTarget | null; seriesId?: string; libraryKey?: string; privacyMode: boolean; busy: boolean; error: string | null;
   api?: Pick<CharacterApi, "inspectReferenceRegions"> & Partial<Pick<CharacterApi, "targets" | "decide">>;
   inspection?: ReferenceRegionInspection;
+  /** The host asks for one reference's person chooser (e.g. a save blocked on it); `key` repeats the same request. */
+  jumpRequest?: { assetId: string; key: number } | null;
   /** S36 state for this character, appended to the automation line. */
   automationStatus?: string | null;
   /** Host-owned rare actions (history refresh, conversion, S36 exclusion, FAULT) shown under 관리. */
@@ -69,13 +71,22 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
   // still inspect their own references, including a new character's draft.
   const inspectable = Boolean(seriesId && inspect && !target?.manualOnly && draft.enabled && draft.references.length > 0);
   const localInspection = useReferenceRegionInspection({ seriesId: seriesId ?? "", targetId: target?.id ?? null,
-    assetIds: draft.references, draftRegions: draft.referenceRegions, api: inspection || !inspectable ? undefined : inspect });
+    assetIds: draft.references, draftRegions: draft.referenceRegions, libraryKey, api: inspection || !inspectable ? undefined : inspect });
   const shared = inspection ?? localInspection;
   const inspections = inspectable ? shared.inspections : null;
   const regionOf = (assetId: string) => inspections?.find(region => region.assetId === assetId);
   const changedRegions = draftReferenceRegions(draft.referenceRegions, draft.references, characterDraft(target).referenceRegions);
   const headingId = useId();
   const [focusRequest, setFocusRequest] = useState<{ assetId: string; key: number } | null>(null);
+  const [slotRequest, setSlotRequest] = useState<ReferenceRequest | null>(null);
+  const [workflow, setWorkflow] = useState<ReferenceWorkflow>(null);
+  // A request that already existed when the panel opened again belongs to an earlier visit.
+  const seenJump = useRef(jumpRequest?.key ?? 0);
+  useEffect(() => {
+    if (!jumpRequest || jumpRequest.key === seenJump.current) return;
+    seenJump.current = jumpRequest.key;
+    setFocusRequest(old => ({ assetId: jumpRequest.assetId, key: (old?.key ?? 0) + 1 }));
+  }, [jumpRequest?.key]);
   // A refused save names the reference that still needs a person ("3번째 레퍼런스"): open its chooser.
   useEffect(() => {
     const slot = Number(/(\d+)번째 레퍼런스/.exec(error ?? "")?.[1]);
@@ -84,14 +95,19 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
   }, [error]);
   const automatic = !target?.manualOnly && draft.enabled;
   const usable = inspections ? usableReferenceCount(inspections) : draft.references.length;
+  // The line exists from the first paint with the raw count and only its number changes.
   const shortfall = automatic && usable < AUTOMATIC_CHARACTER_REFERENCE_COUNT
-    ? `${inspections ? "사용 가능" : "레퍼런스"} ${usable.toLocaleString()}장 · ${AUTOMATIC_CHARACTER_REFERENCE_COUNT}장 이상 권장` : null;
+    ? `사용 가능 ${usable.toLocaleString()}장 · ${AUTOMATIC_CHARACTER_REFERENCE_COUNT}장 이상 권장` : null;
   const nameField = <TextField label="캐릭터 이름" value={draft.name} onChange={e => onChange({ ...draft, name: e.target.value })} disabled={busy} />;
   return <section className="character-registry" aria-label="캐릭터 설정">
     {!target && nameField}
     {error && <p role="alert" className="character-message">{error}</p>}
     <section className="character-registry__references" aria-labelledby={headingId}>
-      <h3 className="character-registry__heading" id={headingId}>레퍼런스<small>{draft.references.length}/{MAX_CHARACTER_REFERENCES}</small></h3>
+      <div className="character-registry__head">
+        <h3 className="character-registry__heading" id={headingId}>레퍼런스<small>{draft.references.length}/{MAX_CHARACTER_REFERENCES}</small></h3>
+        <ReferenceCheckSlot inspection={shared} active={inspectable} assetIds={draft.references} draftRegions={draft.referenceRegions} busy={busy} expanded={workflow}
+          onRequest={kind => setSlotRequest(old => ({ kind, key: (old?.key ?? 0) + 1 }))} />
+      </div>
       <div className="character-actions">
         <Button size="sm" disabled={busy} onClick={() => onPick("references")}>레퍼런스 추가</Button>
         {onRecommendReferences && <Button size="sm" variant="ghost" disabled={busy} onClick={onRecommendReferences}>추천으로 보강</Button>}
@@ -101,22 +117,24 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
         const region = regionOf(assetId);
         const croppable = Boolean(region && region.boxes.length > 0);
         const status = region ? referenceRegionStatus(region, draft.referenceRegions, changedRegions) : undefined;
-        const attention = Boolean(region && !isUsableReferenceRegion(region));
-        return <div className="character-reference-tile" key={assetId}>
+        const needsPerson = Boolean(region && referenceNeedsPerson(region));
+        const unusable = Boolean(region && !isUsableReferenceRegion(region) && !needsPerson);
+        return <div className={`character-reference-tile${unusable ? " character-reference-tile--unusable" : ""}`} key={assetId}>
           {croppable
             ? <button type="button" className="character-reference-tile__open" disabled={busy} aria-label={`레퍼런스 ${index + 1} 크롭 확인`} aria-description={status}
               onClick={() => setFocusRequest(old => ({ assetId, key: (old?.key ?? 0) + 1 }))}><ReferenceThumb assetId={assetId} region={region} privacyMode={privacyMode} /></button>
             : <button type="button" className="character-reference-tile__open" disabled={busy || !onOpenReference} aria-label={`레퍼런스 ${index + 1} 원본 보기`} aria-description={status}
               onClick={() => onOpenReference?.(assetId)}><ReferenceThumb assetId={assetId} region={region} privacyMode={privacyMode} /></button>}
-          {attention && <span className="character-reference-tile__mark" aria-hidden="true">!</span>}
+          {needsPerson && <span className="character-reference-tile__mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true"><UserIcon /></span>}
+          {unusable && <span className="character-reference-tile__mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true"><EyeSlashIcon /></span>}
           <Button size="icon" variant="ghost" className="character-reference-tile__remove" disabled={busy} aria-label={`레퍼런스 ${index + 1} 제거`}
             onClick={() => onChange(updateCharacterReferences(draft, draft.references.filter(id => id !== assetId)))}><XMarkIcon aria-hidden="true" /></Button>
         </div>;
       })}</section> : !shortfall && <p className="character-message">레퍼런스가 없습니다.</p>}
-      {inspectable && inspect && seriesId && <ReferenceRegionChoices seriesId={seriesId} targetId={target?.id ?? null} assetIds={draft.references}
-        draftRegions={draft.referenceRegions} savedRegions={characterDraft(target).referenceRegions} privacyMode={privacyMode} busy={busy} api={inspect} inspection={shared}
+      {inspectable && inspect && seriesId && <ReferenceRegionChoices assetIds={draft.references}
+        draftRegions={draft.referenceRegions} savedRegions={characterDraft(target).referenceRegions} privacyMode={privacyMode} busy={busy} inspection={shared}
         decisionApi={api?.targets && api.decide ? { targets: api.targets, decide: api.decide } : undefined}
-        focusRequest={focusRequest} onOpenOriginal={onOpenReference}
+        focusRequest={focusRequest} request={slotRequest} onModeChange={setWorkflow} onOpenOriginal={onOpenReference}
         onChange={referenceRegions => onChange({ ...draft, referenceRegions })} />}
     </section>
     {target && <div className="character-registry__automation">
@@ -126,14 +144,14 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
     <details className="character-registry__section" open={!target ? true : undefined}>
       <summary><span>{target ? "관리" : "설명·대표 이미지"}</span></summary>
       <div className="character-registry__section-body">
-        {target && nameField}
-        <label className="character-description">설명<textarea value={draft.description} onChange={e => onChange({ ...draft, description: e.target.value })} disabled={busy} rows={3} /></label>
         <div className="character-portrait-editor">
           <button type="button" className="character-portrait-editor__preview" disabled={busy} aria-label="대표 이미지 선택" onClick={() => onPick("thumbnail")}>
             {draft.thumbnail ? <AssetImage className={privacyMode ? "character-private" : ""} src={thumbnailUrl(draft.thumbnail)} alt="대표 이미지" /> : <PhotoIcon aria-hidden="true" />}
           </button>
           <div><Button size="sm" disabled={busy} onClick={() => onPick("thumbnail")}>대표 이미지</Button>{draft.thumbnail && <Button size="icon" variant="ghost" aria-label="대표 이미지 해제" disabled={busy} onClick={() => onChange({ ...draft, thumbnail: null })}><XMarkIcon aria-hidden="true" /></Button>}</div>
         </div>
+        {target && nameField}
+        <label className="character-description">설명<textarea value={draft.description} onChange={e => onChange({ ...draft, description: e.target.value })} disabled={busy} rows={3} /></label>
         {management && <div className="character-registry__management">{management}</div>}
       </div>
     </details>

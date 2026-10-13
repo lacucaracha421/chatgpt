@@ -869,19 +869,21 @@ it("marks required person confirmation before opening info, shares inspection, a
   await mount("hina", false, [], undefined, false, { inspect });
   const user = userEvent.setup();
   const info = await screen.findByRole("button", { name: "캐릭터 편집" });
-  await waitFor(() => expect(within(info).getByText("!")).toBeInTheDocument());
+  // A neutral count on the pencil, not a red mark.
+  await waitFor(() => expect(within(info).getByText("1")).toBeInTheDocument());
+  expect(info.querySelector(".character-info-count")).toHaveClass("ui-badge--corner");
   expect(info).toHaveAttribute("aria-description", "필요한 인물 확인이 있습니다.");
   expect(screen.queryByRole("dialog", { name: "히나 · 캐릭터 정보" })).not.toBeInTheDocument();
   expect(inspect).toHaveBeenCalledTimes(1);
   await user.click(info);
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
-  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 선택 1" }));
   expect(inspect).toHaveBeenCalledTimes(1);
   await user.click(within(panel).getByRole("button", { name: "인물 영역 1 선택" }));
-  await waitFor(() => expect(within(info).queryByText("!")).not.toBeInTheDocument());
+  await waitFor(() => expect(info.querySelector(".character-info-count")).toBeNull());
   expect(inspect).toHaveBeenCalledTimes(2);
   await user.click(within(panel).getByRole("button", { name: "히나 · 캐릭터 정보 닫기" }));
-  await waitFor(() => expect(within(info).getByText("!")).toBeInTheDocument());
+  await waitFor(() => expect(within(info).getByText("1")).toBeInTheDocument());
 });
 
 it("does not mark optional correction when six references are usable", async () => {
@@ -891,24 +893,24 @@ it("does not mark optional correction when six references are usable", async () 
   await mount("hina", false, [], undefined, false, { inspect, targetOverrides: { references } });
   const info = await screen.findByRole("button", { name: "캐릭터 편집" });
   await waitFor(() => expect(inspect).toHaveBeenCalledTimes(1));
-  expect(within(info).queryByText("!")).not.toBeInTheDocument();
+  expect(info.querySelector(".character-info-count")).toBeNull();
   await userEvent.setup().click(info);
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
-  expect(within(panel).queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "인물 선택 1" })).not.toBeInTheDocument();
   expect(inspect).toHaveBeenCalledTimes(1);
 });
 
-it("marks a failed inspection and clears it after retrying from character info", async () => {
+it("describes a failed inspection on the pencil and clears it after retrying from the status slot", async () => {
   const inspect = vi.fn().mockRejectedValueOnce(new Error("인물 확인 실패"))
     .mockImplementation(async (_series: string, _target: string | null, ids: string[]) => ids.map(id => inspection(id, "single")));
   await mount("hina", false, [], undefined, false, { inspect });
   const info = await screen.findByRole("button", { name: "캐릭터 편집" });
-  await waitFor(() => expect(within(info).getByText("!")).toBeInTheDocument());
-  expect(info).toHaveAttribute("aria-description", expect.stringContaining("확인 실패"));
+  await waitFor(() => expect(info).toHaveAttribute("aria-description", expect.stringContaining("확인 실패")));
+  expect(info.querySelector(".character-info-count")).toBeNull();
   const user = userEvent.setup();
   await user.click(info);
-  await user.click(await screen.findByRole("button", { name: "인물 확인 다시 시도" }));
-  await waitFor(() => expect(within(info).queryByText("!")).not.toBeInTheDocument());
+  await user.click(await screen.findByRole("button", { name: "확인 실패 · 다시 시도" }));
+  await waitFor(() => expect(info).toHaveAttribute("aria-description", "캐릭터 정보 편집"));
   await waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
 });
 
@@ -916,7 +918,7 @@ it.each([{ targetEnabled: false }, { targetOverrides: { manualOnly: true } }])("
   const inspect = vi.fn(async () => []);
   await mount("hina", false, [], undefined, false, { ...options, inspect });
   const info = await screen.findByRole("button", { name: "캐릭터 편집" });
-  expect(within(info).queryByText("!")).not.toBeInTheDocument();
+  expect(info.querySelector(".character-info-count")).toBeNull();
   expect(inspect).not.toHaveBeenCalled();
 });
 
@@ -940,7 +942,7 @@ it("never prompts for unambiguous references and still inspects read-only", asyn
   // Five single-person references leave nothing to ask, so the section stays out of the way.
   await waitFor(() => expect(inspect).toHaveBeenCalledWith("series", "hina", expect.arrayContaining(["image-0"]), {}));
   expect(within(panel).queryByRole("region", { name: "인물 영역 확인" })).not.toBeInTheDocument();
-  expect(within(panel).queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "인물 선택 1" })).not.toBeInTheDocument();
   expect(saveSettings).not.toHaveBeenCalled();
   expect(mounted.changed).not.toHaveBeenCalled();
 });
@@ -956,7 +958,7 @@ it("asks for one unresolved reference and stores the choice in the draft only", 
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "히나 편집" }));
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
-  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 선택 1" }));
   await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
   // The correction list is reached only through the optional adjustment action.
   await user.click(await within(panel).findByRole("button", { name: "인물 영역 조정" }));
@@ -969,27 +971,45 @@ it("asks for one unresolved reference and stores the choice in the draft only", 
   await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ referenceRegions: { "image-0": { contentHash: "hash-image-0", baselineFingerprint: "baseline", bounds: [200, 40, 380, 520] } } }), true));
 });
 
-it("drops the refusal about another character's image once its person is chosen", async () => {
-  const hint = "다른 캐릭터(자오)에 등록된 이미지입니다. 인물 영역을 지정하면 레퍼런스로 쓸 수 있습니다.";
+const sharedFirst = (two: [number, number, number, number][]) => async (_seriesId: string, _targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) =>
+  assetIds.map(id => id !== "image-0" ? inspection(id, "single")
+    : regions?.[id] ? { ...inspection(id, "selected", two), selectedIndex: 1, otherCharacters: ["자오"] }
+    : { ...inspection(id, "needs_region", two), suggestedIndex: 0, otherCharacters: ["자오"] });
+
+it("names a save blocked on a shared image's person before saving, and opens that chooser instead of failing", async () => {
   const two: [number, number, number, number][] = [[10, 20, 110, 220], [200, 40, 380, 520]];
-  const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) =>
-    assetIds.map(id => id !== "image-0" ? inspection(id, "single")
-      : regions?.[id] ? { ...inspection(id, "selected", two), selectedIndex: 1, otherCharacters: ["자오"] }
-      : { ...inspection(id, "needs_region", two), suggestedIndex: 0, otherCharacters: ["자오"] }));
+  const inspect = vi.fn(sharedFirst(two));
   const { api, user, panel } = await openReferences(inspect);
-  const save = vi.spyOn(api, "saveSettings").mockRejectedValueOnce(new Error(hint));
-  await within(panel).findByRole("button", { name: "필요한 인물만 확인" });
+  const save = vi.spyOn(api, "saveSettings");
+  await within(panel).findByRole("button", { name: "인물 선택 1" });
+  // Before anything is pressed: the footer says what the save waits for, in normal text, with no alert.
+  const status = await within(panel).findByText("레퍼런스 1 · 인물 선택 후 저장");
+  expect(status).toHaveAttribute("role", "status");
+  expect(status).toHaveClass("character-foot-status--blocking");
+  const registry = within(within(panel).getByRole("region", { name: "캐릭터 설정" }));
+  expect(registry.queryByRole("alert")).not.toBeInTheDocument();
+  // 저장 stays enabled; pressing it opens that reference's chooser and writes nothing.
+  expect(within(panel).getByRole("button", { name: "저장" })).toBeEnabled();
   await user.click(within(panel).getByRole("button", { name: "저장" }));
-  expect(await within(panel).findByText(hint)).toBeInTheDocument();
-  expect(within(panel).getByRole("button", { name: /레퍼런스 1 크롭 확인/ }).parentElement).toHaveTextContent("!");
-  // The right person (not 자오's) is chosen: the old refusal must not keep contradicting the draft,
-  // the "!" mark goes, and the usable count rises without the section blinking.
-  await user.click(within(panel).getByRole("button", { name: "필요한 인물만 확인" }));
-  await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
-  expect(within(panel).queryByText(hint)).not.toBeInTheDocument();
-  await waitFor(() => expect(within(panel).getByRole("button", { name: /레퍼런스 1 크롭 확인/ }).parentElement).not.toHaveTextContent("!"));
+  expect(save).not.toHaveBeenCalled();
+  expect(await within(panel).findByRole("region", { name: "인물 영역 확인" })).toBeVisible();
+  expect(registry.queryByRole("alert")).not.toBeInTheDocument();
+  // The right person (not 자오's) is chosen: the footer line and the mark go, and the save goes through.
+  await user.click(within(panel).getByRole("button", { name: "인물 영역 2 선택" }));
+  await waitFor(() => expect(within(panel).queryByText(/인물 선택 후 저장/)).not.toBeInTheDocument());
+  await waitFor(() => expect(within(panel).getByRole("button", { name: /레퍼런스 1 크롭 확인/ }).parentElement!.querySelector(".character-reference-tile__mark")).toBeNull());
   expect(within(panel).getByText(/사용 가능 5장/)).toBeInTheDocument();
-  expect(save).toHaveBeenCalledTimes(1);
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+});
+
+it("still shows a real save failure as the one-line error", async () => {
+  const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[]) => assetIds.map(id => inspection(id, "single")));
+  const { api, user, panel } = await openReferences(inspect);
+  vi.spyOn(api, "saveSettings").mockRejectedValueOnce(new Error("서버가 응답하지 않습니다."));
+  await waitFor(() => expect(inspect).toHaveBeenCalled());
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  expect(await within(within(panel).getByRole("region", { name: "캐릭터 설정" })).findByRole("alert")).toHaveTextContent("서버가 응답하지 않습니다.");
 });
 
 it("keeps asking only through the quiet button until the requirement is met", async () => {
@@ -1003,13 +1023,13 @@ it("keeps asking only through the quiet button until the requirement is met", as
   const { user, panel } = await openReferences(inspect);
   // The chooser is closed until the user asks for it.
   expect(within(panel).queryByRole("button", { name: /인물 영역 \d+ 선택/ })).not.toBeInTheDocument();
-  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 선택 1" }));
   await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
   // The confirmed choice is included in the next inspection request.
   await waitFor(() => expect(calls.some(call => call.regions["image-0"])).toBe(true));
   // Six usable references are reached, so the requirement becomes an optional correction.
-  expect(await within(panel).findByRole("button", { name: "인물 영역 조정" })).toBeInTheDocument();
-  expect(within(panel).queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+  expect(await within(panel).findByRole("button", { name: "인물 영역" })).toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "인물 선택 1" })).not.toBeInTheDocument();
 });
 
 it("keeps a manual region choice for replacement and drops it when its reference is removed", async () => {
@@ -1020,7 +1040,7 @@ it("keeps a manual region choice for replacement and drops it when its reference
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "히나 편집" }));
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
-  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 선택 1" }));
   await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
   await user.click(await within(panel).findByRole("button", { name: "인물 영역 조정" }));
   const regions = await within(panel).findByRole("region", { name: "인물 영역 목록" });

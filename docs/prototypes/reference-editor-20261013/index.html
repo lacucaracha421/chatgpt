@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>레퍼런스 편집 시안</title>
+<!-- 앱의 실제 폰트, 토큰, 공용 베이스, 컨트롤, 크롬(앵커 패널), 캐릭터 편집기 CSS를 불러온다.
+     페이지 틀, 임시 이미지, 새로 제안하는 몇 가지(제목 상태 칸, 타일 표시, 흐린 추천 타일, 보강 안내 줄)만 이 파일에 있다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/characters/CharacterManagement.css">
+<link rel="stylesheet" href="../../../_tools/app/src/characters/SeriesBrowser.css">
+<style>
+/* 앱 셸은 html/body 높이를 고정하지만, 이 페이지는 문서처럼 스크롤된다. */
+html, body, #root { height: auto !important; min-height: 100%; overflow: visible !important; overflow-y: auto !important; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b0c0d; color: var(--color-text); font: 400 var(--type-body)/1.55 var(--font-ui); user-select: text; -webkit-user-select: text; }
+.doc { word-break: keep-all; overflow-wrap: break-word; width: 1440px; max-width: 100%; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 8px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+h3.sub { margin: 0 0 8px; font-size: var(--type-body); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.lead, .note { margin: 0 0 8px; color: var(--color-muted); max-width: 110ch; line-height: 1.7; }
+.lead b, .note b { color: var(--color-text); font-weight: 600; }
+.row { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; margin-top: 16px; }
+.col { width: 320px; flex: none; display: flex; flex-direction: column; gap: 8px; }
+.cap { font-size: var(--type-meta); color: var(--color-faint); font-variant-numeric: tabular-nums; }
+.cap b { color: var(--color-text); font-weight: 600; }
+.ann { margin: 0; padding-left: 0; list-style: none; font-size: var(--type-meta); color: var(--color-muted); line-height: 1.6; }
+.ann li + li { margin-top: 4px; }
+.ann li::before { content: "— "; color: var(--color-faint); }
+.ann b { color: var(--color-text); font-weight: 600; }
+.pair { display: grid; grid-template-columns: 672px 672px; gap: 32px; margin-top: 16px; }
+.pair > section { display: flex; flex-direction: column; gap: 8px; }
+.pair .row { margin-top: 0; }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 2px; font-size: var(--type-meta); font-weight: 600; background: var(--color-surface-elevated); color: var(--color-muted); }
+.tag--rec { background: var(--color-accent); color: var(--color-on-accent); }
+table.cond { border-collapse: collapse; width: 100%; max-width: 1376px; margin-top: 16px; font-size: var(--type-meta); }
+table.cond th, table.cond td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--color-border); line-height: 1.6; }
+table.cond th { color: var(--color-faint); font-weight: 600; }
+table.cond td:first-child { color: var(--color-text); width: 260px; }
+table.cond td { color: var(--color-muted); }
+.decisions { margin: 8px 0 0; padding-left: 20px; color: var(--color-muted); line-height: 1.8; max-width: 110ch; }
+.decisions b { color: var(--color-text); }
+
+/* ===== 정적 앵커 패널 (실제 패널은 position: fixed) ===== */
+.mock-panel.ui-anchored-panel { position: relative; width: 320px; max-height: none; z-index: auto; }
+.mock-panel .ui-anchored-panel__body { overflow: visible; }
+
+/* ===== 임시 이미지 (시안에는 실제 라이브러리 이미지를 쓰지 않음) ===== */
+.ph { position: absolute; inset: 0; background:
+  radial-gradient(circle at 50% 34%, rgba(240,226,214,.50) 0 15%, transparent 16%),
+  radial-gradient(ellipse 44% 30% at 50% 96%, rgba(240,226,214,.22) 0 97%, transparent 100%),
+  linear-gradient(160deg, var(--a), var(--b)); }
+.ph--two { background:
+  radial-gradient(circle at 30% 36%, rgba(240,226,214,.48) 0 11%, transparent 12%),
+  radial-gradient(circle at 70% 30%, rgba(240,226,214,.48) 0 11%, transparent 12%),
+  radial-gradient(ellipse 26% 26% at 30% 98%, rgba(240,226,214,.2) 0 97%, transparent 100%),
+  radial-gradient(ellipse 26% 30% at 70% 98%, rgba(240,226,214,.2) 0 97%, transparent 100%),
+  linear-gradient(160deg, var(--a), var(--b)); }
+.h1 { --a: #5d4c6e; --b: #2a2331; } .h2 { --a: #6e5c49; --b: #2c251e; } .h3 { --a: #48626e; --b: #1e292e; }
+.h4 { --a: #6e4a53; --b: #2e1f23; } .h5 { --a: #4f6e53; --b: #202d22; } .h6 { --a: #69634b; --b: #2a281f; }
+.h7 { --a: #4b536e; --b: #1f222e; } .h8 { --a: #6e5763; --b: #2e2529; }
+.character-reference-tile__open { position: relative; }
+
+/* ===== 제안하는 요소 ===== */
+/* 제목 줄: 왼쪽에 제목, 오른쪽에 항상 존재하는 상태 칸(첫 렌더링부터 확보). */
+.ref-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height-compact); }
+.ref-head .character-registry__heading { flex: none; }
+.ref-slot { margin-left: auto; display: flex; align-items: center; min-height: var(--control-height-compact); color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.ref-slot .ui-button--quiet { margin-right: calc(var(--space-2) * -1); font-size: var(--type-meta); }
+.ref-slot .ui-button--quiet.is-needed { color: var(--color-text); }
+.ref-slot .slot-count { color: var(--color-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.slot-reserved { display: inline-block; width: 1px; height: 1px; }
+/* 타일 표시: 사각 배지 하나, 스크림 바탕, 아이콘만. 가장자리 줄 없음, 색만으로 의미를 전달하지 않음. */
+.tile-mark.ui-badge { position: absolute; left: var(--space-1); bottom: var(--space-1); pointer-events: none; width: 20px; }
+.tile-mark.ui-badge > svg { width: 14px; height: 14px; }
+.character-reference-tile--unusable .ph { opacity: .38; }
+/* 흐린 추천 타일(B안): 플러스 배지가 붙은 흐린 추천, 호버하면 밝아짐. */
+.character-reference-tile--ghost .character-reference-tile__open { border-color: transparent; background: transparent; }
+.character-reference-tile--ghost .ph { opacity: .42; transition: opacity var(--motion-fast) var(--ease-standard); }
+.character-reference-tile--ghost:hover .ph { opacity: .8; }
+.character-reference-tile--ghost .tile-mark { left: auto; right: var(--space-1); }
+/* 레퍼런스 줄 아래 보강 안내 줄. 호버하면 언급된 타일에 윤곽선이 생긴다(카드 선택 윤곽선, 에코 없음). */
+.reinforce-line { display: flex; align-items: center; gap: var(--space-1); margin: 0; min-height: var(--control-height-compact); color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.reinforce-line .ui-button--quiet { font-size: var(--type-meta); color: var(--color-text); }
+.reinforce-line .dot { color: var(--color-faint); }
+.mock-panel:has(.reinforce-line:hover) .character-reference-tile--auto .character-reference-tile__open,
+.character-reference-tile--auto.is-lit .character-reference-tile__open { border-color: var(--color-accent); }
+/* 저장 전에 인물 선택이 필요할 때의 푸터 상태. */
+.foot-status { display: inline-flex; align-items: center; gap: var(--space-1); }
+.foot-status.is-blocking { color: var(--color-text); }
+.foot-status svg { width: 14px; height: 14px; }
+/* 현재: 늦게 뜨는 버튼 줄을 흐린 점선 틀로 가리킨다. */
+.late { outline: 1px dashed color-mix(in srgb, var(--color-faint) 70%, transparent); outline-offset: 3px; }
+.today-mark { position: absolute; bottom: var(--space-1); left: var(--space-1); display: grid; place-items: center; width: 14px; height: 14px; border-radius: var(--radius-sm); background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; font-weight: 700; line-height: 1; }
+/* 타일 확대 */
+.zoom { zoom: 2; display: flex; gap: 8px; }
+.zoom .character-reference-tile { width: 66px; }
+.zoom-caps { display: flex; gap: 16px; }
+.zoom-caps span { width: 132px; font-size: var(--type-meta); color: var(--color-muted); }
+.hovered .character-reference-tile__open { border-color: var(--color-accent); }
+/* 시리즈 헤더 트리거 */
+.series-bar { display: flex; align-items: center; gap: var(--space-2); height: var(--toolbar-height); padding: 0 var(--space-3); background: var(--color-toolbar); border: 1px solid var(--color-border); font-weight: 600; }
+.series-bar .spacer { flex: 1; }
+.series-bar .character-info-trigger { position: relative; }
+.series-bar .corner.ui-badge { position: absolute; top: -2px; right: -4px; }
+.region-ph { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div class="doc" id="doc"></div>
+<script>
+const I = {
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>',
+  slash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>',
+  pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg>',
+};
+
+/* 레퍼런스 타일 하나. kind: plain | person(인물 선택 필요) | unusable | ghost | auto | today */
+function tile(n, hue, kind = "plain", opts = {}) {
+  const two = kind === "person" || kind === "today" || opts.two;
+  const cls = ["character-reference-tile",
+    kind === "unusable" && "character-reference-tile--unusable",
+    kind === "ghost" && "character-reference-tile--ghost",
+    kind === "auto" && "character-reference-tile--auto",
+    opts.lit && "is-lit", opts.hover && "hovered"].filter(Boolean).join(" ");
+  const mark = kind === "person" ? `<span class="tile-mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true">${I.user}</span>`
+    : kind === "unusable" ? `<span class="tile-mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true">${I.slash}</span>`
+    : kind === "ghost" ? `<span class="tile-mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true">${I.plus}</span>`
+    : kind === "today" ? `<span class="today-mark" aria-hidden="true">!</span>` : "";
+  const remove = kind === "ghost" ? "" : `<button class="ui-button ui-button--ghost ui-button--icon character-reference-tile__remove" aria-label="레퍼런스 ${n} 제거">${I.x}</button>`;
+  return `<div class="${cls}"><button class="character-reference-tile__open" aria-label="레퍼런스 ${n}"><span class="ph ${two ? "ph--two " : ""}h${hue}"></span></button>${mark}${remove}</div>`;
+}
+const hues = [1,2,3,4,5,6,7,8,3,1,5,2,4,6,8,7];
+function tiles(count, special = {}) {
+  let out = "";
+  for (let i = 1; i <= count; i++) out += tile(i, hues[(i - 1) % hues.length], special[i] || "plain");
+  return out;
+}
+
+/* 캐릭터 정보 패널(AnchoredPanel, 320 px). */
+function panel({ count = 12, slot = "", actions = "both", strip = "", below = "", chooser = "", foot = "", footBtn = "secondary", head = "아스나 · 캐릭터 정보" }) {
+  const act = actions === "both"
+    ? `<div class="character-actions"><button class="ui-button ui-button--secondary ui-button--sm">레퍼런스 추가</button><button class="ui-button ui-button--ghost ui-button--sm">추천으로 보강</button></div>`
+    : actions === "add" ? `<div class="character-actions"><button class="ui-button ui-button--secondary ui-button--sm">레퍼런스 추가</button></div>` : actions;
+  const headRow = slot === null
+    ? `<h3 class="character-registry__heading">레퍼런스<small>${count}/25</small></h3>`
+    : `<div class="ref-head"><h3 class="character-registry__heading">레퍼런스<small>${count}/25</small></h3><span class="ref-slot">${slot}</span></div>`;
+  return `<div class="ui-anchored-panel mock-panel" role="dialog" aria-label="${head}">
+    <div class="ui-anchored-panel__head"><h2>${head}</h2><button class="ui-button ui-button--icon ui-button--ghost" aria-label="닫기">${I.x}</button></div>
+    <div class="ui-anchored-panel__body"><section class="character-registry">
+      <section class="character-registry__references">
+        ${headRow}
+        ${act}
+        <section class="character-reference-strip">${strip}</section>
+        ${below}
+        ${chooser}
+      </section>
+      <div class="character-registry__automation"><span>자동 인식 켜짐 · 학습 인식 준비됨</span></div>
+      <details class="character-registry__section"><summary><span>관리</span></summary></details>
+    </section></div>
+    <div class="ui-anchored-panel__foot"><span role="status">${foot}</span><button class="ui-button ui-button--${footBtn} ui-button--sm">저장</button></div>
+  </div>`;
+}
+const col = (cap, body, notes) => `<div class="col"><div class="cap">${cap}</div>${body}<ul class="ann">${notes.map(n => `<li>${n}</li>`).join("")}</ul></div>`;
+
+const slotNeeded = (n, blocking) => `<button class="ui-button ui-button--quiet${blocking ? " is-needed" : ""}">${I.user}인물 선택 <span class="slot-count">${n}</span></button>`;
+const slotAdjust = `<span>사용 12</span><button class="ui-button ui-button--quiet">인물 영역</button>`;
+
+const chooser = `<section class="character-reference-regions" aria-label="인물 영역 확인">
+  <p class="character-registry__label"><small>1/2</small><span>사용할 인물을 한 명 선택하세요</span></p>
+  <p class="character-message">다른 캐릭터(유이) 이미지 · 인물 지정 필요</p>
+  <div class="character-region-options">
+    <div class="character-region-option"><button class="character-region-frame" style="aspect-ratio:3/4"><span class="ph h3"></span></button></div>
+    <div class="character-region-option"><button class="character-region-frame character-region-frame--taken" style="aspect-ratio:3/4" disabled><span class="ph h4"></span><span class="character-region-frame__selection">유이 인물</span></button></div>
+  </div>
+  <div class="character-actions"><button class="ui-button ui-button--ghost ui-button--sm">다음 이미지</button><button class="ui-button ui-button--ghost ui-button--sm">닫기</button></div>
+</section>`;
+
+const doc = document.getElementById("doc");
+doc.innerHTML = `
+<header>
+  <h1>캐릭터 정보 · 레퍼런스 편집 — 조용한 인물 확인과 보강</h1>
+  <p class="lead">2026-10-13, 사용자 항목 10: “필요한 인물만 확인” 버튼이 항상 늦게 뜬다. 추천으로 보강이 조용히 알아서 처리될 수는 없는지, 인물 검출 확인을 조용한 표시로 바꿀 수는 없는지. 이 페이지는 320&nbsp;px 캐릭터 정보 패널(실제 <b>tokens.css / controls.css / chrome.css / CharacterManagement.css</b> 사용)의 상태별 모습을 보여준다. 이미지는 임시 그라데이션이며, 인물이 여러 명인 이미지는 두 사람 형상으로 표시한다.</p>
+</header>
+
+<section>
+  <h2 class="sec">현재</h2>
+  <p class="note">인물 검사 결과가 돌아오기 전까지 인물 영역에는 아무것도 그려지지 않는다. 결과가 오면 레퍼런스 줄 아래에 버튼 줄이 나타나고, 타일에 “!” 표시가 붙고, 부족분 안내 문구가 스스로 바뀐다. “추천으로 보강”은 이 패널을 닫고 넓은 모달을 연다.</p>
+  <div class="row">
+    ${col("<b>0 ms</b> · 패널 열림", panel({ count: 9, slot: null, strip: tiles(9), below: "" }),
+      ["인물 상태가 아직 전혀 없다. 레퍼런스 줄이 해당 영역의 마지막 요소다.", "원본 레퍼런스가 9장이면 부족분 안내 문구는 아직 없고, 사용 가능한 것이 4장뿐임이 밝혀진 뒤에야 나타난다."])}
+    ${col("<b>≈ 0.5–2 s</b> · 인물 검사 결과 도착", panel({ count: 9, slot: null, strip: tiles(9, { 3: "today", 7: "today", 8: "today" }),
+      below: `<p class="character-registry__hint">사용 가능 4장 · 6장 이상 권장</p><div class="character-reference-regions late"><div class="character-actions"><button class="ui-button ui-button--secondary ui-button--sm">필요한 인물만 확인</button><button class="ui-button ui-button--ghost ui-button--sm">인물 영역 조정</button></div></div>` }),
+      ["점선 영역이 <b>갑자기 나타나</b> 패널이 길어지고, 상아색 “!” 표시 세 개가 한꺼번에 붙는다.",
+       "상아색(강조색)을 경고용으로 쓰고 있는데, 색 역할상 강조색은 선택/기본 동작/NEW 전용이다.",
+       "안내 문구가 새로운 문구로 바뀌어 나타난다.",
+       "시리즈 바의 연필 아이콘에 빨간 “!”가 붙는다."])}
+    <div class="col"><div class="cap"><b>늦어지는 이유</b></div>
+      <ul class="ann">
+        <li><code>ReferenceRegionChoices</code>는 <code>inspections</code>가 생길 때까지 <code>null</code>을 반환한다. 레퍼런스 목록이 바뀌면 검사가 처음부터 다시 시작된다.</li>
+        <li>시리즈 화면은 연필 “!” 표시를 위해 같은 캐릭터를 이미 검사하며 그 결과는 공유되지만, 레퍼런스를 바꾼 뒤 다시 연 패널은 또 기다린다.</li>
+        <li>해결책은 버튼을 빠르게 만드는 것이 아니라, 자리를 미리 확보하고 바뀌지 않은 레퍼런스는 지난 결과를 재사용하는 것이다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">목표 1 — 인물 확인 자리를 첫 렌더링부터 확보</h2>
+  <p class="note">제목 줄 <b>오른쪽에 상태 칸</b>을 두고, 컴팩트 컨트롤 높이(28&nbsp;px)로 항상 렌더링해서 아래 요소가 움직이지 않게 한다. 칸에는 한 번에 하나만 들어가며, 글자가 바뀔 때는 140&nbsp;ms 크로스페이드한다. 캐릭터별 마지막 검사 결과를 세션 동안 보관하므로, 다시 연 패널은 알려진 상태를 즉시 그리고 조용히 갱신한다. 새로 추가되거나 바뀐 레퍼런스만 “확인 중”이 된다.</p>
+  <div class="row">
+    ${col("<b>a · 0–400 ms</b> · 확인 중, 아직 보여줄 것 없음", panel({ slot: `<span class="slot-reserved"></span>`, strip: tiles(12) }),
+      ["상태 칸은 자리만 확보하고 비워 둔다. 빠르게 끝나는 검사에서는 문구가 전혀 나타나지 않는다.", "타일은 이미지만 보인다."])}
+    ${col("<b>b · 400 ms 이후</b> · 계속 확인 중", panel({ slot: `<span>인물 확인 중</span>`, strip: tiles(12) }),
+      ["공용 지연 표시 문구를 흐린 메타 글씨로 보여준다. 한 번 나타나면 깜빡이지 않도록 최소 ~600 ms 유지한다.", "스피너도, 타일 위 스켈레톤도 없다(타일에는 이미 내용이 있음)."])}
+    ${col("<b>c · 인물 선택이 필요한 레퍼런스 있음</b>", panel({ count: 9, slot: slotNeeded(3), strip: tiles(9, { 3: "person", 7: "person", 8: "person" }), below: `<p class="character-registry__hint">사용 4장 · 6장 이상 권장</p>` }),
+      ["상태 칸이 <b>인물 선택 3</b> 컴팩트 버튼으로 바뀌고, 기존 인물 선택기를 첫 항목부터 연다(= 현재의 “필요한 인물만 확인”).",
+       "해당되는 타일마다 사람 아이콘이 든 사각 스크림 배지가 하나 붙는다(140 ms 페이드 인). 타일을 클릭하면 그 이미지의 인물 선택기가 열린다.",
+       "안내 문구 줄은 첫 렌더링부터 존재하며(원본 장수 기준) 숫자만 갱신된다."])}
+    ${col("<b>d · 필요한 것 없음</b>", panel({ slot: slotAdjust, strip: tiles(12) }),
+      ["상태 칸에 사용 가능 장수와 선택 사항인 <b>인물 영역</b>(현재의 “인물 영역 조정”)을 흐리게 표시한다.",
+       "오류 시 칸에는 <b>확인 실패 · 다시 시도</b>(한 줄, 재시도)만 표시되고 다른 것은 바뀌지 않는다."])}
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">목표 3 — 인물 선택을 조용한 표시로, 막힌 저장은 알아보기 쉽게</h2>
+  <p class="note">화면 전체에서 표시 모양은 하나: 20&nbsp;px 사각 스크림 배지, 아이콘만(색 줄도, 상아색도 없음). 의미는 색이 아니라 아이콘과 접근성 설명으로 전달한다. 섹션 제목의 상태 칸에 장수가 표시되고, 시리즈 바의 연필에도 같은 숫자가 중립적인 모서리 배지로 붙는다.</p>
+  <div class="row">
+    <div class="col" style="width:672px">
+      <div class="cap"><b>타일 표시</b> · 2× 확대</div>
+      <div class="zoom">${tile(1, 2)}${tile(2, 3, "person")}${tile(3, 6, "person", { hover: true })}${tile(4, 7, "unusable")}</div>
+      <div class="zoom-caps"><span>사용 가능 · 표시 없음</span><span>인물 선택 필요 · 사람 배지</span><span>호버 · 1px 상아색 테두리(기존 타일 호버)</span><span>사용 불가(인물 없음 / 모든 인물이 다른 캐릭터 소속) · 흐리게 + 눈 사선 아이콘</span></div>
+      <ul class="ann">
+        <li>상아색 “!”를 대체한다(강조색은 경고색이 아님). <b>aria-description</b>이 전체 상태(“다른 캐릭터(유이) 이미지 · 인물 지정 필요”)를 그대로 전달한다.</li>
+        <li>표시는 검사 결과가 도착했을 때만 나타나며 140 ms 페이드 인한다. 갱신 중에는 새 결과가 올 때까지 이전 표시를 유지한다(네이티브 쪽이 다시 확인하는 동안 깜빡임 없음).</li>
+      </ul>
+      <div class="cap" style="margin-top:16px"><b>시리즈 바</b> · 연필 트리거</div>
+      <div style="display:flex; gap:16px">
+        <div class="series-bar" style="width:260px">아스나<span class="spacer"></span><button class="ui-button ui-button--icon ui-button--ghost character-info-trigger" aria-label="캐릭터 편집">${I.pencil}<span class="character-info-attention" aria-hidden="true">!</span></button></div>
+        <div class="series-bar" style="width:260px">아스나<span class="spacer"></span><button class="ui-button ui-button--icon ui-button--ghost character-info-trigger" aria-label="캐릭터 편집">${I.pencil}<span class="corner ui-badge ui-badge--corner">3</span></button></div>
+      </div>
+      <div class="zoom-caps" style="margin-top:4px"><span style="width:260px">현재 · 빨간 “!”</span><span style="width:260px">제안 · 중립적인 모서리 숫자(공용 <code>CountBadge corner</code>)</span></div>
+    </div>
+    ${col("<b>e · 타일 또는 상태 칸에서 연 인물 선택기</b>", panel({ count: 9, slot: slotNeeded(2), strip: tiles(9, { 3: "person", 7: "person" }), chooser }),
+      ["기존 인라인 인물 선택기를 내용 변경 없이 쓰며, 갑자기 나타나지 않고 부드럽게 열린다(140 ms 페이드 + 4 px 상승).",
+       "선택하면 타일 배지가 즉시 사라지고(선택은 지금처럼 바로 반영됨) 상태 칸의 숫자가 줄어든다."])}
+    ${col("<b>f · 저장 막힘: 인물이 정해지지 않은 공유 이미지</b>", panel({ count: 9, slot: slotNeeded(1, true), strip: tiles(9, { 7: "person" }), foot: `<span class="foot-status is-blocking">${I.user}레퍼런스 7 · 인물 선택 후 저장</span>`, footBtn: "primary" }),
+      ["백엔드 규칙은 그대로다: 다른 캐릭터와 공유된 이미지는 인물을 고르지 않으면 저장할 수 없다.",
+       "저장을 누르기 전에 알 수 있다: 푸터 상태 줄(현재 “저장하지 않은 변경”이 있는 자리)이 해당 레퍼런스를 빨간색이 아닌 본문 글자색으로 알려 준다.",
+       "저장은 계속 활성 상태다. 누르면 저장 실패 후 빨간 경고를 띄우는 대신, 레퍼런스 7의 인물 선택기를 열고 그 위치로 스크롤한다. 실제 실패는 지금처럼 한 줄 오류로 표시된다."])}
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">목표 2 — 모달 왕복 없는 보강</h2>
+  <p class="note">현재 “추천으로 보강”은 패널을 닫고, 모든 추천이 미리 선택된 “레퍼런스 선택” 창(“잘못된 항목만 빼주세요”)을 연다. 추천은 이미 좁혀져 있다: 사용자가 이 캐릭터에 직접 넣었고, 다른 캐릭터에는 없고, 이전에 제거한 적이 없는 이미지만이며, 인물 한 명짜리를 우선하고 다양하게 정렬한다. 모달에서 사용자가 할 일은 잘못된 것의 선택을 해제하는 것뿐이다. 모달 왕복을 없애는 두 가지 방법:</p>
+  <div class="pair">
+    <section>
+      <h3 class="sub">A · 자동 보강 — 더 자동화 <span class="tag tag--rec">안전한 단계에 권장</span></h3>
+      <div class="row">
+        ${col("<b>A1 · 백그라운드 보강 후 패널을 연 모습</b>", panel({ count: 12, slot: slotAdjust, actions: "add", strip: tiles(9) + tile(10, 5, "auto") + tile(11, 8, "auto") + tile(12, 1, "auto"),
+          below: `<p class="reinforce-line"><span>3장 보강됨</span><span class="dot">·</span><button class="ui-button ui-button--quiet">되돌리기</button></p>` }),
+          ["안전한 추천은 PC가 학습된 레퍼런스에 알아서 추가했다(조건은 아래). 버튼도 모달도 없다.",
+           "레퍼런스 줄 아래 메타 한 줄: <b>3장 보강됨 · 되돌리기</b>. 호버하면 해당 타일을 윤곽선으로 표시한다.",
+           "“추천으로 보강”은 없어지고, 패널의 다른 부분은 바뀌지 않는다."])}
+        ${col("<b>A2 · 안내 줄에 호버</b>", panel({ count: 12, slot: slotAdjust, actions: "add", strip: tiles(9) + tile(10, 5, "auto", { lit: true }) + tile(11, 8, "auto", { lit: true }) + tile(12, 1, "auto", { lit: true }),
+          below: `<p class="reinforce-line"><span>3장 보강됨</span><span class="dot">·</span><button class="ui-button ui-button--quiet">되돌리기</button></p>` }),
+          ["추가된 타일 세 개에 1px 상아색 카드 윤곽선이 생긴다(에코 없음, 평소에는 배지 없음).",
+           "<b>되돌리기</b>는 세 장을 한 번에 제거하고 제거된 것으로 기억해 다시 추천하지 않는다(기존 레퍼런스 제거 규칙).",
+           "타일의 ✕로 하나만 제거하는 것은 지금처럼 동작하며 같은 방식으로 기억된다.",
+           "이 줄은 본 뒤 패널을 한 번 저장하거나 닫을 때까지 유지된다."])}
+      </div>
+    </section>
+    <section>
+      <h3 class="sub">B · 인라인 추천 — 더 보수적</h3>
+      <div class="row">
+        ${col("<b>B1 · 레퍼런스 줄 뒤에 흐린 추천 타일</b>", panel({ count: 9, slot: slotAdjust.replace("12", "9"), actions: "add", strip: tiles(9) + tile(10, 5, "ghost") + tile(11, 8, "ghost") + tile(12, 1, "ghost") + tile(13, 6, "ghost", { two: true }),
+          below: `<p class="reinforce-line"><span>추천 4장</span><span class="dot">·</span><button class="ui-button ui-button--quiet">모두 추가</button></p>` }),
+          ["인물 검사와 함께 가져온다. 흐린 추천 타일이 빈 격자 칸에 페이드 인하며(200 ms, 등장 규칙) 위쪽 요소는 움직이지 않는다.",
+           "흐린 얼굴 + 플러스 배지(색만으로 구분하지 않음). 클릭 한 번에 하나가 추가되고, <b>모두 추가</b>는 전부 추가한다.",
+           "추가된 타일은 초안에 들어가 패널 자체의 저장으로 기록된다 — 모든 항목을 사용자가 결정한다."])}
+        ${col("<b>B2 · 두 장 추가, 두 장 남음</b>", panel({ count: 11, slot: slotAdjust.replace("12", "11"), actions: "add", strip: tiles(11) + tile(12, 1, "ghost") + tile(13, 6, "ghost", { two: true }),
+          below: `<p class="reinforce-line"><span>추천 2장</span><span class="dot">·</span><button class="ui-button ui-button--quiet">모두 추가</button></p>`, foot: "저장하지 않은 변경", footBtn: "primary" }),
+          ["추가된 타일은 그 자리에서 진하게 바뀌고(90 ms) 남은 흐린 타일은 앞으로 당겨진다.",
+           "여기서 인물 두 명짜리 추천을 추가하면 목표 3의 인물 선택 배지 흐름으로 바로 이어진다.",
+           "저장하지 않고 나가면 다른 초안 변경처럼 버려진다."])}
+      </div>
+    </section>
+  </div>
+
+  <h3 class="sub" style="margin-top:24px">조용한 자동 적용(A)이 허용되는 경우 — 모든 행이 성립해야 하며, 아니면 추천은 B로 되돌아간다</h3>
+  <table class="cond">
+    <tr><th>조건</th><th>이유</th><th>현재 코드 상태</th></tr>
+    <tr><td>사용자가 이 이미지를 이 캐릭터에 직접 넣었다</td><td>가장 강한 근거다. PC는 자신의 추측을 승격하지 않는다.</td><td>이미 후보 풀이다(수동 결정, 학습 비활성 아님).</td></tr>
+    <tr><td>이미지에 다른 캐릭터가 없고, 제외되지 않았고, 이 캐릭터의 레퍼런스에서 제거된 적이 없다</td><td>공유되었거나 한 번 거부된 이미지가 바로 잘못된 레퍼런스의 원인이다.</td><td>이미 걸러진다.</td></tr>
+    <tr><td>검출기가 <b>정확히 한 명</b>을 찾았고, 그 박스가 크롭이다</td><td>한 명이면 영역이 엉뚱한 사람일 수 없다. 두 명 이상이거나 아직 검출 전이면 사람의 선택이 필요하다.</td><td>현재 가장 앞에 정렬된다(안전 단계 0)지만 필수는 아니다 — A는 이를 필수로 해야 한다.</td></tr>
+    <tr><td>기존 레퍼런스와 거의 같은 이미지가 아니다</td><td>중복은 얻는 것이 없고 25칸을 차지한다.</td><td>다양성 정렬은 있다. A에는 최소 거리 기준이 필요하다.</td></tr>
+    <tr><td>자동 인식이 켜져 있고 수동 전용이 아니다(학습 레퍼런스 추가만, 최초 설정은 제외)</td><td>최초 설정(캐릭터 시작에 레퍼런스 5장 이상)은 모달에서의 의도적인 단계로 남긴다.</td><td>모드가 이미 학습 추가와 초기화를 구분한다.</td></tr>
+    <tr><td>한 번에 최대 4장, 25장 한도 안, 아무것도 제거하거나 교체하지 않음, 리비전 검사 통과</td><td>영향 범위가 제한되고, 되돌리기 한 번이 한 번의 실행을 덮는다.</td><td>확정 시 리비전/해시 검사가 있다.</td></tr>
+  </table>
+  <p class="note" style="margin-top:12px">되돌리기와 가시성: 다음에 패널을 열면 “N장 보강됨 · 되돌리기” 줄이 보이고, 호버하면 타일이 윤곽선으로 표시되며, 되돌리기와 ✕는 제거를 기억해 거부한 이미지가 다시 돌아오지 않는다. 과거 이미지는 자동으로 다시 분석하지 않으므로(변경 없음), 잘못된 레퍼런스는 제거될 때까지 새 인식에만 영향을 준다. 모달은 최초 설정(수동 전용 캐릭터와 폴더 변환)용으로 남는다.</p>
+</section>
+
+<section>
+  <h2 class="sec">권장안</h2>
+  <div class="row" style="margin-top:0">
+    ${col("<b>혼합 · 안전한 단계는 A, 나머지는 B</b>", panel({ count: 12, slot: slotNeeded(1), actions: "add", strip: tiles(9, { 7: "person" }) + tile(10, 5, "auto") + tile(11, 8, "auto") + tile(12, 1, "auto") + tile(13, 6, "ghost", { two: true }),
+      below: `<p class="reinforce-line"><span>3장 보강됨</span><span class="dot">·</span><button class="ui-button ui-button--quiet">되돌리기</button></p>` }),
+      ["인물 한 명짜리 추천 세 장이 조용히 적용되었다(안내 줄 + 되돌리기).",
+       "인물 두 명짜리 추천 한 장은 흐린 타일로 대기한다. 흐린 타일이 하나뿐이면 “모두 추가”가 필요 없고 타일 자체가 버튼이다.",
+       "레퍼런스 7은 아직 인물 선택이 필요하다: 타일에 배지, 상태 칸에 숫자 — 어디서나 같은 조용한 표시다."])}
+    <div class="col" style="width:672px">
+      <div class="cap"><b>동작 및 타이밍 요약</b></div>
+      <ul class="ann">
+        <li>상태 칸 글자: 140 ms 크로스페이드. “인물 확인 중”은 400 ms 후에만 표시되고 이후 ≥ ~600 ms 유지(공용 지연 표시 헬퍼).</li>
+        <li>타일 배지: 결과 도착 시 140 ms 페이드 인. 재확인 중에는 새 결과로 바뀔 때까지 유지.</li>
+        <li>흐린 추천 타일과 자동 추가 타일: 200 ms 등장 페이드, 투명도만 사용(DESIGN §10 등장). 추가된 흐린 타일 → 진한 타일은 90 ms.</li>
+        <li>인라인 인물 선택기: 열릴 때 140 ms 페이드 + 4 px 상승, 닫을 때는 즉시.</li>
+        <li>동작 줄이기: 모든 변화를 즉시 교체.</li>
+      </ul>
+    </div>
+  </div>
+  <ul class="decisions">
+    <li><b>목표 1:</b> 제목 상태 칸을 첫 렌더링부터 확보 + 캐릭터별 마지막 검사의 세션 캐시, “인물 확인 중”은 400 ms 후에만.</li>
+    <li><b>목표 2:</b> 혼합 — 위 조건을 모두 만족하는 추천은 A, 나머지(인물 두 명이거나 미검출 이미지)는 B의 흐린 추천 타일. “추천으로 보강” 버튼과 모달은 편집기에서 사라진다.</li>
+    <li><b>목표 3:</b> 타일의 사각 스크림 사람 배지 + 상태 칸과 연필의 숫자. 막힌 저장은 푸터 상태 줄로 알리고, 저장을 누르면 빨간 실패 대신 인물 선택기로 이동한다.</li>
+  </ul>
+</section>
+`;
+</script>
+</body>
+</html>

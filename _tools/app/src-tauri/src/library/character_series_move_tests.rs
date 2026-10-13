@@ -80,6 +80,172 @@ fn other_in(f: &Fixture, series: &str) -> Target {
 }
 
 #[test]
+fn move_ignores_already_unserved_participants_and_preserves_their_links() {
+    for without_series in [false, true] {
+        for own_reference in [false, true] {
+            let f = Fixture::new();
+            register(&f, &f.series);
+            register(&f, &f.child);
+            register(&f, &f.outside);
+            let target = f.ready("Marcus");
+            let shared = if own_reference { "asset-0" } else { "asset-5" };
+            if !own_reference {
+                decide(&f, &target, shared, DecisionKind::Accepted);
+            }
+            let other = f.target("Other");
+            decide(&f, &other, shared, DecisionKind::Accepted);
+            let c = f.library.connection().unwrap();
+            c.execute(
+                "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id=?2",
+                params![f.series, shared],
+            )
+            .unwrap();
+            c.execute(
+                "UPDATE character_targets SET series_classification_id=?1 WHERE id=?2",
+                params![
+                    if without_series {
+                        None
+                    } else {
+                        Some(&f.outside)
+                    },
+                    other.id
+                ],
+            )
+            .unwrap();
+            let relation_before: String = c.query_row(
+                "SELECT json_array(target_id,asset_id,sequence) FROM character_relations WHERE target_id=?1 AND asset_id=?2",
+                params![other.id, shared], |r| r.get(0),
+            ).unwrap();
+            drop(c);
+            let other_before = f.library.get_character_target(&other.id).unwrap();
+            let preview = f
+                .library
+                .character_series_move_preview(&target.id, &f.child)
+                .unwrap();
+            assert_eq!(preview.shared_count, 1);
+            assert_eq!(preview.relocation_count, usize::from(own_reference));
+            let moved = f
+                .library
+                .move_character_to_series(&target.id, &f.child, &preview.token)
+                .unwrap();
+            assert_eq!(
+                moved.series_classification_id.as_deref(),
+                Some(f.child.as_str())
+            );
+            assert_eq!(
+                f.library.get_asset_classifications(shared).unwrap()[0].id,
+                if own_reference { &f.child } else { &f.series }.as_str()
+            );
+            assert_eq!(
+                serde_json::to_value(f.library.get_character_target(&other.id).unwrap()).unwrap(),
+                serde_json::to_value(other_before).unwrap()
+            );
+            let relation_after: String = f.library.connection().unwrap().query_row(
+                "SELECT json_array(target_id,asset_id,sequence) FROM character_relations WHERE target_id=?1 AND asset_id=?2",
+                params![other.id, shared], |r| r.get(0),
+            ).unwrap();
+            assert_eq!(relation_after, relation_before);
+        }
+    }
+}
+
+#[test]
+fn move_preserves_served_participants_when_an_unserved_participant_is_also_linked() {
+    let f = Fixture::new();
+    register(&f, &f.series);
+    register(&f, &f.child);
+    register(&f, &f.outside);
+    let destination = child_folder(&f, &f.series, "Destination");
+    register(&f, &destination);
+    let target = f.ready("Marcus");
+    decide(&f, &target, "asset-5", DecisionKind::Accepted);
+    let served = other_in(&f, &f.child);
+    let unserved = other_in(&f, &f.outside);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+            [&f.outside],
+        )
+        .unwrap();
+    decide(&f, &unserved, "asset-5", DecisionKind::Accepted);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+            [&f.child],
+        )
+        .unwrap();
+    decide(&f, &served, "asset-5", DecisionKind::Accepted);
+    let preview = f
+        .library
+        .character_series_move_preview(&target.id, &destination)
+        .unwrap();
+    assert_eq!(preview.shared_locations[0].classification_id, f.series);
+    f.library
+        .move_character_to_series(&target.id, &destination, &preview.token)
+        .unwrap();
+    assert_eq!(
+        f.library.get_asset_classifications("asset-5").unwrap()[0].id,
+        f.series
+    );
+    assert!(browse(&f, &f.child, &served.id).contains(&"asset-5".into()));
+}
+
+#[test]
+fn move_preview_tracks_changes_to_an_already_unserved_participant() {
+    let f = Fixture::new();
+    register(&f, &f.series);
+    register(&f, &f.child);
+    register(&f, &f.outside);
+    let target = f.ready("Marcus");
+    decide(&f, &target, "asset-5", DecisionKind::Accepted);
+    let other = other_in(&f, &f.outside);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+            [&f.outside],
+        )
+        .unwrap();
+    decide(&f, &other, "asset-5", DecisionKind::Accepted);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+            [&f.series],
+        )
+        .unwrap();
+    let preview = f
+        .library
+        .character_series_move_preview(&target.id, &f.child)
+        .unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE character_targets SET series_classification_id=NULL WHERE id=?1",
+            [&other.id],
+        )
+        .unwrap();
+    let updated = f
+        .library
+        .character_series_move_preview(&target.id, &f.child)
+        .unwrap();
+    assert_eq!(updated.relocations, preview.relocations);
+    assert_ne!(updated.token, preview.token);
+    assert!(matches!(
+        f.library
+            .move_character_to_series(&target.id, &f.child, &preview.token),
+        Err(Error::Stale)
+    ));
+}
+
+#[test]
 fn sibling_move_keeps_shared_images_visible_in_both_characters_and_groups_without_analysis() {
     for already_at_ancestor in [false, true] {
         let f = Fixture::new();

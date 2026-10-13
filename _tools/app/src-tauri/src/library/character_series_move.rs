@@ -158,13 +158,26 @@ impl Library {
                 .iter()
                 .chain(&target.learned_references)
                 .any(|r| r.asset_id.as_ref() == Some(id));
-            // Keep an existing theme folder or shared common ancestor when every
-            // participant, including any reference owner, can still use that location.
+            // Preserve memberships served by any current folder. An already unsupported
+            // participant is unchanged by this move, but remains in the preview snapshot.
+            let mut served_others = Vec::new();
+            for other in &others {
+                if let Some(series) = &other.1 {
+                    for folder in &folders {
+                        if supports_membership(c, series, folder, other.2)? {
+                            served_others.push(other.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+            // Keep an existing theme folder or shared common ancestor when the moving
+            // character and every currently served participant can still use it.
             let mut keep_folder = folders.len() == 1
                 && supports_membership(c, destination_id, &folders[0], own_reference)?
                 && (!others.is_empty() || in_subtree(c, destination_id, &folders[0])?);
             if keep_folder {
-                for (_, series, reference) in &others {
+                for (_, series, reference) in &served_others {
                     if !match series {
                         Some(series) => supports_membership(c, series, &folders[0], *reference)?,
                         None => false,
@@ -177,7 +190,7 @@ impl Library {
             let placement = if keep_folder {
                 folders[0].clone()
             } else {
-                shared_destination(c, destination_id, own_reference, &others)?
+                shared_destination(c, destination_id, own_reference, &served_others)?
             };
             if !in_subtree(c, destination_id, &placement)? {
                 let counts = shared_locations.entry(placement.clone()).or_default();

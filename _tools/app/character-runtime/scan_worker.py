@@ -7,6 +7,8 @@ import queue
 import sys
 import threading
 
+from PIL import Image, PngImagePlugin
+
 from reference_regions import compare_bound, compare_bound_delta, inspect_references, resolve_references
 from reference_curation import curate_references
 from runtime import rgb
@@ -14,6 +16,43 @@ from feature_cache import ReferenceBundles, FeatureCache, runtime_fingerprint, e
 from runtime import BASELINE, FINGERPRINT, Runtime
 
 MAX_REQUEST_BYTES = 128 * 1024
+
+
+def image_size(path: Path) -> tuple[int, int]:
+    """Return the first frame's EXIF-oriented size without decoding pixels.
+
+    Falls back to the full decode (the previous behaviour) if the header path fails on an unusual file."""
+    try:
+        return _header_size(path)
+    except Exception:
+        return rgb(path).size
+
+
+def _header_size(path: Path) -> tuple[int, int]:
+    with Image.open(path) as source:
+        source.seek(0)
+        if source.format == "PNG":
+            # PNG getexif() otherwise calls load() when EXIF is absent. Metadata
+            # can also follow IDAT; use Pillow's chunk readers, skipping pixels.
+            source.fp.seek(8)
+            chunks = PngImagePlugin.PngStream(source.fp)
+            seen_pixels = False
+            while True:
+                cid, pos, length = chunks.read()
+                if cid == b"IEND" or (cid == b"fcTL" and seen_pixels):
+                    break
+                if cid in (b"eXIf", b"tEXt", b"zTXt", b"iTXt"):
+                    chunks.call(cid, pos, length)
+                if cid in (b"IDAT", b"fdAT"):
+                    seen_pixels = True
+                source.fp.seek(pos + length + 4)
+            source.info.update(chunks.im_info)
+            chunks.close()
+            source.info.setdefault("exif", None)
+        width, height = source.size
+        if source.getexif().get(0x0112) in (5, 6, 7, 8):
+            return height, width
+        return width, height
 
 
 def emit(value):
@@ -148,7 +187,7 @@ def main():
                 result = inspect_references(engine, inspected, [i.get("region") for i in items])
                 for item, row in zip(items, result):
                     row["assetId"] = item["assetId"]
-                    row["width"], row["height"] = rgb(Path(item["path"])).size
+                    row["width"], row["height"] = image_size(Path(item["path"]))
                 emit({"type": "references_inspected", "items": result})
             elif request["type"] == "curate_references":
                 result = curate_references(engine, cache, request["candidates"],
