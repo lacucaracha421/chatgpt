@@ -1,4 +1,5 @@
 pub(crate) mod auto_publication;
+pub(crate) mod picker_display;
 mod albums;
 pub(crate) mod characters;
 pub(crate) mod backfill;

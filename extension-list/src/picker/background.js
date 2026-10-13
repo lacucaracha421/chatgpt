@@ -8,7 +8,8 @@
   const KEY_PATTERN = /^[0-9a-f]{32}$/;
   const MAX_THUMBNAIL = 8 * 1024 * 1024, MAX_ORIGINAL = 20 * 1024 * 1024;
 
-  function createService({ storage = chrome.storage.local, fetchImpl = (...args) => fetch(...args), runtime = chrome.runtime, tabs = chrome.tabs, base = BASE } = {}) {
+  function createService({ storage = chrome.storage.local, fetchImpl = (...args) => fetch(...args), runtime = chrome.runtime, tabs = chrome.tabs, base = BASE,
+    api = globalThis.LakomicsListApi, userAgent = globalThis.navigator?.userAgent || "" } = {}) {
     async function readKey() {
       const stored = await storage.get([Model.PC_KEY]);
       const value = stored?.[Model.PC_KEY];
@@ -16,7 +17,7 @@
     }
 
     // One PC request. Never throws; failures carry only a kind, status and code.
-    async function call(path, { method = "GET", body, timeoutMs = 15000, limit = 1024 * 1024 } = {}) {
+    async function callPC(path, { method = "GET", body, timeoutMs = 15000, limit = 1024 * 1024 } = {}) {
       const key = await readKey();
       if (!key) return { ok: false, kind: "unpaired", status: 0, code: "no_key" };
       const controller = new AbortController();
@@ -33,31 +34,102 @@
           try { code = String((await response.json())?.code || ""); } catch {}
           return { ok: false, kind: Model.mapFailure({ status: response.status, code }), status: response.status, code };
         }
-        return { ok: true, response, limit };
+        return { ok: true, response, limit, source: "PC" };
       } catch (error) {
         const code = error?.name === "AbortError" ? "timeout" : "offline";
         return { ok: false, kind: Model.mapFailure({ status: 0, code }), status: 0, code };
       } finally { clearTimeout(timer); }
     }
 
+    async function callServer(path, { method = "GET", body, timeoutMs = 15000 } = {}) {
+      const connection = await api?.readConnection();
+      if (!connection) return { ok: false, kind: "unpaired", status: 0, code: "no_key" };
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetchImpl(connection.origin + path, {
+          method, headers: { authorization: "Bearer " + connection.token,
+            ...(body === undefined ? {} : { "content-type": "application/json" }) },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          cache: "no-store", credentials: "omit", redirect: "error", signal: controller.signal,
+        });
+        // Do not deliver a result from a pairing replaced while the request was in flight.
+        const current = await api.readConnection();
+        if (!current || current.origin !== connection.origin || current.token !== connection.token) {
+          return { ok: false, kind: "unpaired", status: 401, code: "connection_changed" };
+        }
+        if (!response.ok) {
+          let code = "";
+          try { const data = await response.json(); code = String(data?.code || data?.detail?.code || ""); } catch {}
+          return { ok: false, kind: Model.mapFailure({ status: response.status, code }), status: response.status, code };
+        }
+        return { ok: true, response, source: "server" };
+      } catch (error) {
+        const code = error?.name === "AbortError" ? "timeout" : "offline";
+        return { ok: false, kind: Model.mapFailure({ status: 0, code }), status: 0, code };
+      } finally { clearTimeout(timer); }
+    }
+
+    async function call(path, options) {
+      if (/Android|Helium/i.test(userAgent) || !await readKey()) return callServer(path, options);
+      const pc = await callPC(path, options);
+      // A PC refusal (including 401/403/423) is final; only unreachable PCs fall back.
+      if (!pc.ok && pc.status === 0 && ["offline", "timeout"].includes(pc.code)) {
+        const server = await callServer(path, options);
+        return server.code === "no_key" ? pc : server;
+      }
+      return pc;
+    }
+
     async function json(path, options) {
       const result = await call(path, options);
       if (!result.ok) return result;
-      try { return { ok: true, data: await result.response.json() }; }
+      try { return { ok: true, data: await result.response.json(), source: result.source }; }
       catch { return { ok: false, kind: "unknown", status: 200, code: "bad_json" }; }
     }
 
     async function bytes(path, { cap, timeoutMs }) {
       const result = await call(path, { timeoutMs });
       if (!result.ok) return result;
-      const declared = Number(result.response.headers.get("content-length"));
-      if (Number.isFinite(declared) && declared > cap) return { ok: false, kind: "tooLarge", status: 413, code: "too_large" };
+      let response = result.response;
+      let controller, timer;
       try {
-        const data = new Uint8Array(await result.response.arrayBuffer());
-        if (data.length > cap) return { ok: false, kind: "tooLarge", status: 413, code: "too_large" };
-        const mime = String(result.response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+        if (result.source === "server") {
+          const ticket = await response.json();
+          const url = new URL(ticket.url);
+          if (url.protocol !== "https:" || url.username || url.password || !Model.MIMES.includes(ticket.contentType)
+            || !Number.isSafeInteger(ticket.sizeBytes) || ticket.sizeBytes < 0) throw new Error("invalid ticket");
+          if (ticket.sizeBytes > cap) return { ok: false, kind: "tooLarge", status: 413, code: "too_large" };
+          controller = new AbortController();
+          timer = setTimeout(() => controller.abort(), timeoutMs);
+          response = await fetchImpl(url.href, { cache: "no-store", credentials: "omit", redirect: "error", signal: controller.signal });
+          if (!response.ok) return { ok: false, kind: "offline", status: response.status, code: "media_unavailable" };
+        }
+        const declared = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declared) && declared > cap) {
+          await response.body?.cancel();
+          return { ok: false, kind: "tooLarge", status: 413, code: "too_large" };
+        }
+        // Bound streaming allocations too, even when storage omits Content-Length.
+        const reader = response.body?.getReader();
+        const chunks = [];
+        let size = 0;
+        if (reader) {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            size += value.length;
+            if (size > cap) { await reader.cancel(); return { ok: false, kind: "tooLarge", status: 413, code: "too_large" }; }
+            chunks.push(value);
+          }
+        }
+        const data = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.length; }
+        const mime = String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
         return { ok: true, data, mime };
       } catch { return { ok: false, kind: "offline", status: 0, code: "offline" }; }
+      finally { if (timer) clearTimeout(timer); }
     }
 
     const fail = result => ({ ok: false, kind: result.kind, status: result.status, code: result.code });

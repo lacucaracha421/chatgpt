@@ -4436,9 +4436,14 @@ mod catalog_admission_tests {
 }
 
 #[tauri::command]
-pub async fn run_due_mobile_publications(state: State<'_, AppState>, order_ids: Vec<String>) -> Result<(),CommandError> {
+pub async fn run_due_mobile_publications(app: tauri::AppHandle, state: State<'_, AppState>, order_ids: Vec<String>) -> Result<(),CommandError> {
+    let picker_state = state.inner().clone();
     let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.save_mobile_navigation_order(order_ids))
+    tauri::async_runtime::spawn_blocking(move || {
+        library.save_mobile_navigation_order(order_ids)?;
+        let (order, pins) = crate::extension_api::picker_display_context(&app, &picker_state, &library)?;
+        library.save_picker_display(order, pins)
+    })
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 

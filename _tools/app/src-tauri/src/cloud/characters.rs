@@ -316,7 +316,7 @@ pub(crate) fn snapshot_from_connection_with_roles(
         for (group, name) in groups {
             nodes.push(node("group", group, &id, Some(parent.clone()), name, None));
         }
-        let targets = tx.prepare("SELECT t.id,t.display_name,t.description,t.manual_only,(SELECT id FROM assets WHERE id=t.thumbnail_asset_id AND status='normal'),gm.group_id,t.role FROM character_targets t LEFT JOIN character_group_members gm ON gm.target_id=t.id WHERE t.series_classification_id=?1 ORDER BY t.display_name COLLATE NOCASE,t.id")?
+        let targets = tx.prepare("SELECT t.id,t.display_name,t.description,t.manual_only,(SELECT id FROM assets WHERE id=t.thumbnail_asset_id AND status='normal'),gm.group_id,t.role FROM character_targets t LEFT JOIN character_group_members gm ON gm.target_id=t.id LEFT JOIN character_folder_order o ON o.target_id=t.id WHERE t.series_classification_id=?1 ORDER BY o.position IS NULL,o.position,t.id")?
             .query_map([&id], |r| {
                 let mut n = node("character",r.get(0)?,&id,Some(r.get::<_,Option<String>>(5)?.map(|g|format!("group:{g}")).unwrap_or(parent.clone())),r.get(1)?,r.get(4)?);
                 n.description=r.get(2)?; n.manual_only=r.get(3)?;
@@ -479,6 +479,29 @@ mod tests {
             .unwrap();
         drop(c);
         (temp, library)
+    }
+
+    #[test]
+    fn picker_character_publication_follows_saved_character_order() {
+        let (_temp, library) = fixture();
+        let before = {
+            let mut db = library.connection().unwrap();
+            snapshot_from_connection(&mut db, None, &|_| {}).unwrap()
+        };
+        let generation: i64 = library.connection().unwrap().query_row(
+            "SELECT generation FROM mobile_publication_state WHERE kind='characters'", [], |row| row.get(0)).unwrap();
+        library.move_character_folder("s", "d", Some("g"), -1).unwrap();
+        let mut db = library.connection().unwrap();
+        let after = snapshot_from_connection(&mut db, None, &|_| {}).unwrap();
+        assert_eq!(after.nodes.iter().filter(|node| node.kind == "character")
+            .map(|node| node.source_id.as_str()).collect::<Vec<_>>(), ["d", "c"]);
+        let scope_members = |snapshot: &Snapshot| {
+            snapshot.scopes.iter().map(|scope| ((scope.node_id.clone(), scope.filter), scope.asset_ids.clone()))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert_eq!(scope_members(&before), scope_members(&after));
+        let changed: i64 = db.query_row("SELECT generation FROM mobile_publication_state WHERE kind='characters'", [], |row| row.get(0)).unwrap();
+        assert!(changed > generation);
     }
 
     #[test]

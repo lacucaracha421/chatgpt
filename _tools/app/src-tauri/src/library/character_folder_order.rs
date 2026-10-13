@@ -55,7 +55,10 @@ impl Library {
              (SELECT id FROM character_targets WHERE series_classification_id=?1)",
             [series_id],
         )?;
+        // Display order now rides the read projection used by the tablet picker.
+        tx.execute("UPDATE mobile_publication_state SET generation=generation+1,first_dirty=CASE WHEN generation=published_generation THEN unixepoch() ELSE first_dirty END,last_dirty=unixepoch() WHERE kind='characters'", [])?;
         tx.commit()?;
+        self.publication_inputs.signal(&[1]);
         Ok(())
     }
 }
@@ -145,7 +148,18 @@ mod tests {
         f.library
             .move_character_folder(&f.series, &a.id, None, 1)
             .unwrap();
-        assert_eq!(publication(&f.library), publication_before);
+        let publication_after = publication(&f.library);
+        assert_eq!(publication_after.0, publication_before.0);
+        let scopes = |value: &serde_json::Value| {
+            value["scopes"].as_array().unwrap().iter().map(|scope| (
+                format!("{}:{}", scope["nodeId"], scope["filter"]), scope["assetIds"].clone()
+            )).collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert_eq!(scopes(&publication_after.1), scopes(&publication_before.1));
+        assert_eq!(publication_after.1["nodes"].as_array().unwrap().iter()
+            .filter(|node| node["kind"] == "character")
+            .map(|node| node["sourceId"].as_str().unwrap()).collect::<Vec<_>>(),
+            [z.id.as_str(), new.id.as_str(), a.id.as_str()]);
         let late = f.target("0 appended after manual ordering");
         let expected = vec![z.id.clone(), new.id.clone(), a.id.clone(), late.id];
         assert_eq!(ids(&f.library), expected);

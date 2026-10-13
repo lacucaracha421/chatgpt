@@ -326,6 +326,16 @@ pub fn report_picker_privacy(
     );
 }
 
+pub(crate) fn picker_display_context(
+    app: &AppHandle,
+    state: &AppState,
+    library: &Library,
+) -> Result<(Vec<String>, Vec<String>), LibraryError> {
+    picker::read_context(app, state.picker_privacy_gate(), Some(library), true)
+        .map(|context| (context.order_ids, context.pinned_ids))
+        .map_err(|_| LibraryError::InvalidCloudResponse)
+}
+
 fn request_header(request: &Request, name: &'static str) -> Option<String> {
     request
         .headers()

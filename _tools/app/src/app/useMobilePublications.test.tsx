@@ -3,6 +3,28 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { LibraryGateway } from "../library/types";
 import { useMobilePublications } from "./useMobilePublications";
 afterEach(() => { cleanup(); vi.useRealTimers(); });
+it("refreshes the resolved fallback order after folder names change", async () => {
+  const send = vi.fn().mockResolvedValue(undefined);
+  const gateway = { runDueMobilePublications: send } as unknown as LibraryGateway;
+  const { rerender } = renderHook(({ name }) => useMobilePublications(gateway, "root", [], [], [{ id: "a", name, parentId: null }]), { initialProps: { name: "A" } });
+  await act(async () => { await Promise.resolve(); });
+  rerender({ name: "A" });
+  expect(send).toHaveBeenCalledOnce();
+  rerender({ name: "B" });
+  await act(async () => { await Promise.resolve(); });
+  expect(send).toHaveBeenCalledTimes(2);
+});
+it("requests a fresh window probe when pins change, including clearing them", async () => {
+  const send = vi.fn().mockResolvedValue(undefined);
+  const gateway = { runDueMobilePublications: send } as unknown as LibraryGateway;
+  const { rerender } = renderHook(({ pins }) => useMobilePublications(gateway, "root", ["a"], pins), { initialProps: { pins: ["a"] } });
+  await act(async () => { await Promise.resolve(); });
+  rerender({ pins: ["a"] });
+  expect(send).toHaveBeenCalledOnce();
+  rerender({ pins: [] });
+  await act(async () => { await Promise.resolve(); });
+  expect(send).toHaveBeenCalledTimes(2);
+});
 it("sends the navigation order only at startup or when it changes", async () => {
   vi.useFakeTimers();
   const send = vi.fn().mockResolvedValue(undefined);

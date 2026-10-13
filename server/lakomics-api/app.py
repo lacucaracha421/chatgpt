@@ -819,6 +819,10 @@ library_revisit.register(app, sys.modules[__name__])
 
 media_tickets.register(app, sys.modules[__name__])
 
+import picker
+startup_picker = picker.register(app, sys.modules[__name__])
+lifecycle(app).on_startup(startup_picker)
+
 
 library_assets.register_trash(app, sys.modules[__name__])
 

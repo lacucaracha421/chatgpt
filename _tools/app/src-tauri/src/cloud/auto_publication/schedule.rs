@@ -314,6 +314,7 @@ impl Library {
             rusqlite::params![metadata_endpoint, now],
             |r| r.get(0),
         )?;
+        due[7] |= crate::cloud::picker_display::due(&db, endpoint, now)?;
         for (slot, kind) in [(8, "upcoming"), (9, "avPick"), (10, "artists")] {
             // A damaged checkpoint belongs to this lane, never to all twelve workers.
             due[slot] = self

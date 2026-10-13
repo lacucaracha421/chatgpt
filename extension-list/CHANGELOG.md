@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.5.39 — 2026-10-13
+
+- The Arca picker uses the paired Lakomics server directly on Android/Helium or
+  without a PC picker key. Desktop tries the PC first and falls back only on an
+  unreachable PC; PC authorization and privacy refusals remain final.
+- Server media tickets are downloaded only by the service worker. Pairing tokens
+  and signed URLs never reach the panel/page, and downloads enforce size limits
+  against both Content-Length and streamed bytes.
+- Server folder order and pins follow the PC-published display settings; character
+  and group membership/order follow the published character projection. Requires
+  the new server picker API and PC display publication build.
+
 ## 3.5.38 — 2026-10-13
 
 - The Arca Live picker follows the PC sidebar folder arrangement and the series/group

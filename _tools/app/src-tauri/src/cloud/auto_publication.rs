@@ -264,7 +264,10 @@ impl Library {
             }),
             // Classification / saved-X / Album read snapshots (`captures.rs`), no longer
             // tied to the capture poll's cadence.
-            "metadata" => self.publish_due_cloud_metadata(endpoint),
+            "metadata" => both(
+                || self.publish_due_picker_display(endpoint),
+                || self.publish_due_cloud_metadata(endpoint),
+            ),
             _ => self.publish_due_mobile_kind(kind, endpoint),
         }
     }
