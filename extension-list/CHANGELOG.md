@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.5.40 — 2026-10-13
+
+- Server picker batches include signed thumbnail tickets, reused only inside the
+  service worker until 30 seconds before expiry. Expired or failed inline tickets
+  fall back to the thumbnail ticket route without exposing URLs to the panel.
+- First-batch checks verify thumbnails only and reuse permitted HEAD metadata;
+  originals are checked when requested for insertion. The panel loads nine
+  thumbnails at a time while retaining the decoded-grid swap and 1.5-second cap.
+
 ## 3.5.39 — 2026-10-13
 
 - The Arca picker uses the paired Lakomics server directly on Android/Helium or

@@ -26,7 +26,21 @@
       node.dataset.lkTheme = detectTheme(doc);
       // Keep the caret in the post body: a Froala-style button never takes focus on mouse down.
       node.addEventListener("mousedown", event => event.preventDefault());
-      node.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); onClick(event); });
+      // On touch, Froala's toolbar handlers cancel the touch so no click follows (the tablet button
+      // did nothing). Keep the touch away from Froala and act on touchend; the synthetic click that
+      // may still arrive right after is ignored so the panel does not open and close again.
+      let touchedAt = 0;
+      node.addEventListener("touchstart", event => { event.stopPropagation(); }, { passive: true });
+      node.addEventListener("touchend", event => {
+        event.stopPropagation();
+        if (event.cancelable) event.preventDefault();
+        touchedAt = Date.now(); onClick(event);
+      });
+      node.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        if (Date.now() - touchedAt < 700) return;
+        onClick(event);
+      });
       return node;
     }
     // Size and margin come from the neighbouring button, measured once.

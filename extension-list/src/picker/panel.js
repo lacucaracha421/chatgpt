@@ -375,7 +375,7 @@
           if (second.ok) { const have = new Set(list.map(item => item.assetId)); list = list.concat(second.items.filter(item => !have.has(item.assetId))).slice(0, Model.BATCH); filled = true; }
         }
         for (const item of list) items.set(item.assetId, item);
-        await pool(list, 6, ensureThumb);
+        await pool(list, 9, ensureThumb);
         if (token !== loadToken) return;
         const grid = buildGrid(list);
         await decodeAll(Array.from(grid.querySelectorAll("img")));

@@ -48,12 +48,12 @@ test('an ignored paste and drop fail without a third try', async () => {
   assert.deepEqual(result, { ok: false, reason: 'ignored' }); assert.deepEqual(sent, ['paste', 'drop']);
 });
 
-test('a handled paste that never produces an image times out', async () => {
+test('a paste marked handled that shows nothing falls back to a drop (the tablet editor), then times out', async () => {
   const editor = fakeEditor(), sent = [];
   const transport = { async dispatch(kind) { sent.push(kind); return { handled: true }; } };
   const started = Date.now();
   const result = await I.createInserter({ editor, getTransport: async () => transport, ackMs: 10, totalMs: 60 }).insertOne(file);
-  assert.deepEqual(result, { ok: false, reason: 'editorTimeout' }); assert.deepEqual(sent, ['paste']);
+  assert.deepEqual(result, { ok: false, reason: 'editorTimeout' }); assert.deepEqual(sent, ['paste', 'drop']);
   assert.ok(Date.now() - started >= 55);
   assert.equal(globalThis.LakomicsPickerModel.jobReason(result.reason), '시간 초과');
 });

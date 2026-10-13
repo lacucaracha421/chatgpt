@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -13,6 +14,7 @@ import app as api
 import authority
 import classification_authority
 import library_search
+import head_cache
 from tests.test_classification_authority import activate_asset_lifecycle
 from fastapi.testclient import TestClient
 from projection_cache import install_generation_triggers
@@ -188,16 +190,71 @@ class PickerTests(unittest.TestCase):
         self.assertEqual(self.batch(folderId='gone').json()['detail']['code'], 'classification_not_found')
         self.assertEqual(self.batch(scope={'kind': 'character', 'id': 'gone'}).json()['detail']['code'], 'pickerScopeNotFound')
 
-    def test_batch_skips_missing_originals_and_thumbnails_and_replaces_the_draw(self):
+    def test_batch_checks_only_thumbnails_returns_tickets_and_replaces_missing_thumbnails(self):
         self.asset('lost-original')
         self.asset('lost-thumbnail')
         fake_s3.objects.pop('private/lost-original')
         fake_s3.objects.pop('thumb/lost-thumbnail')
-        result = self.batch(folderId='s', includeDescendants=True).json()
-        self.assertEqual({row['assetId'] for row in result['items']}, {'a', 'b'})
+        with patch.object(fake_s3, 'head_object', wraps=fake_s3.head_object) as head:
+            response = self.batch(folderId='s', includeDescendants=True)
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual({row['assetId'] for row in result['items']}, {'a', 'b', 'lost-original'})
+        self.assertEqual({call.kwargs['Key'] for call in head.call_args_list},
+                         {'thumb/a', 'thumb/b', 'thumb/lost-original', 'thumb/lost-thumbnail'})
+        self.assertEqual(head.call_count, 4)
         self.assertEqual(result['remaining'], 0)
         for row in result['items']:
             self.assertEqual(row['thumbnailUrl'], '/v1/picker/thumbnail/' + row['assetId'])
+            self.assertEqual(row['thumbnailTicket'], {
+                'url': api.presign_get('thumb/' + row['assetId'], 300),
+                'expiresIn': 300, 'contentType': 'image/webp', 'sizeBytes': 4})
+        response = self.client.get('/v1/picker/original/lost-original', headers=self.headers())
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['detail']['code'], 'pickerAssetNotFound')
+
+    def test_batch_and_thumbnail_route_reuse_permitted_head_cache(self):
+        key = 'derived/image-thumbnails/v2/' + 'a' * 64 + '.webp'
+        fake_s3.objects[key] = {'body': b'webp', 'content_type': 'image/webp'}
+        with api.get_db() as db:
+            db.execute("UPDATE assets SET thumbnail_key=? WHERE id='a'", [key])
+            db.commit()
+        with patch.object(fake_s3, 'meta', SimpleNamespace(endpoint_url='https://r2.example.test'), create=True), \
+                patch.object(head_cache, 'ticket_heads', head_cache.HeadMetadataCache()), \
+                patch.object(fake_s3, 'head_object', wraps=fake_s3.head_object) as head:
+            first = self.batch(folderId='s')
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(head.call_count, 1)
+            second = self.batch(folderId='s')
+            self.assertEqual(second.status_code, 200, second.text)
+            response = self.client.get('/v1/picker/thumbnail/a', headers=self.headers())
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), second.json()['items'][0]['thumbnailTicket'])
+            self.assertEqual(head.call_count, 1)
+
+    def test_first_batch_of_18_needs_only_18_cold_thumbnail_heads(self):
+        for index in range(17):
+            self.asset('batch-' + str(index))
+        with patch.object(fake_s3, 'head_object', wraps=fake_s3.head_object) as head:
+            response = self.batch(folderId='s', limit=18)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()['items']), 18)
+        self.assertEqual(head.call_count, 18)
+        self.assertTrue(all(call.kwargs['Key'].startswith('thumb/') for call in head.call_args_list))
+        self.assertTrue(all('thumbnailTicket' in row for row in response.json()['items']))
+
+    def test_batch_uses_committed_thumbnail_metadata_without_head(self):
+        key = 'derived/image-thumbnails/v2/' + 'b' * 64 + '.webp'
+        with api.get_db() as db:
+            db.execute("UPDATE assets SET thumbnail_key=?,thumbnail_metadata_key=?,"
+                       "thumbnail_size_bytes=4,thumbnail_content_type='image/webp' WHERE id='a'", [key, key])
+            db.commit()
+        with patch.object(fake_s3, 'head_object', wraps=fake_s3.head_object) as head:
+            response = self.batch(folderId='s')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['items'][0]['thumbnailTicket']['sizeBytes'], 4)
+            self.assertEqual(self.client.get('/v1/picker/thumbnail/a', headers=self.headers()).status_code, 200)
+            head.assert_not_called()
 
     def test_media_ticket_shape_missing_objects_and_size_refusal(self):
         for variant, size, mime in [('original', 3, 'image/png'), ('thumbnail', 4, 'image/webp')]:

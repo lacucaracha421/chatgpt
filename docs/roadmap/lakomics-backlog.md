@@ -72,6 +72,16 @@ Wanted: under each greyed-out person tile ("<name> 인물") in the picker, a "<n
 Status: `OPEN` (user request, next direction together with `COLLECTOR-PICKER-001`). The extension's own right-click menu (`extension-list/src/context-menu/*`, settings › 우클릭 메뉴, Shift+right-click = Chrome menu) should appear wherever it does not today — e.g. on videos, inside iframes, on pages or sites that swallow `contextmenu`, in the PDF viewer if reachable, and as a long-press on the tablet's Helium — without breaking site-native menus the user relies on. First inventory where it does not show and why, then fix site by site.
 Later idea (user, same day): save an X post itself (text + media as one item), a link, or a whole page into Lakomics from the same menu.
 
+<a id="pc-series-switch-blank-001"></a>
+## PC-SERIES-SWITCH-BLANK-001 — Switching series folders in the sidebar flashes an empty page (2026-10-13)
+
+Status: `OPEN` (user report with a recording, `C:\Users\laku\Documents\ShareX\Screenshots\2026-10\2026-10-13_14-14-05.mp4`). Switching between character series folders (e.g. 원신 → 블아) in the PC sidebar is fast but every switch shows 1–2 frames (33–66 ms) of an empty main area (only a small placeholder button) before the new series renders: frames 27–28, 53 and 80 of the recording drop the main-area brightness from ~140 to ~24. Must keep the speed (CHAR-FOLDER-PERF-001: kept-mounted visited series views, 0.1–0.26 s opens) and remove the blank: keep the previous view on screen until the next one has its first content ready, then swap in one step (no-flash rule), including for series not yet visited.
+
+<a id="pc-collection-motion-001"></a>
+## PC-COLLECTION-MOTION-001 — PC Collections lost its animations (2026-10-13)
+
+Status: `OPEN` (user report). On the PC the Collections screens no longer animate at all (the tablet still does). Find which change removed or disabled the PC motion (recent shelf/case CSS such as `a5ee2111`/`127703da`, shared case styles, reduced-motion handling, or the tab entrance motion) and restore it without bringing back the tablet shelf bugs.
+
 <a id="tablet-tab-bounce-001"></a>
 ## TABLET-TAB-BOUNCE-001 — Tapping 에셋 sometimes flashes 홈 before settling on 에셋 (2026-10-13)
 

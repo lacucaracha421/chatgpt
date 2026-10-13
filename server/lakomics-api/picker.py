@@ -232,11 +232,10 @@ def register(app, api):
 
                 def available(row):
                     try:
-                        for variant, key in [('original', row['object_key']), ('thumbnail', row['thumbnail_key'])]:
-                            metadata = api._ticket_head(row, variant, key, fresh_head=True)
-                            if (metadata.get('ContentType') or row['content_type']) not in MIMES:
-                                return False
-                        return True
+                        metadata = api._ticket_head(row, 'thumbnail', row['thumbnail_key'])
+                        if (metadata.get('ContentType') or row['content_type']) not in MIMES:
+                            return False
+                        return signed_ticket(row, row['thumbnail_key'], metadata)
                     except ClientError as error:
                         if str(error.response.get('Error', {}).get('Code')) in ('404', 'NoSuchKey', 'NotFound'):
                             return False
@@ -257,14 +256,22 @@ def register(app, api):
                     if any(value is None for value in checked):
                         fail(502, 'pickerStorageUnavailable')
                     scanned += len(rows)
-                    for row, exists in zip(rows, checked):
-                        if exists:
+                    for row, thumbnail_ticket in zip(rows, checked):
+                        if thumbnail_ticket:
                             items.append(dict(assetId=row['id'], width=row['width'] or 0, height=row['height'] or 0,
                                               byteSize=row['size_bytes'] or 0, mime=row['content_type'],
-                                              thumbnailUrl='/v1/picker/thumbnail/' + row['id']))
+                                              thumbnailUrl='/v1/picker/thumbnail/' + row['id'],
+                                              thumbnailTicket=thumbnail_ticket))
                 missing = scanned - len(items)
                 return {'items': items, 'remaining': max(0, count - missing - len(items))}
         return await run_in_threadpool(select)
+
+    def signed_ticket(asset, key, metadata):
+        if type(metadata.get('ContentLength')) is not int or metadata['ContentLength'] < 0:
+            fail(502, 'pickerStorageUnavailable')
+        return dict(url=api.presign_get(key, 300), expiresIn=300,
+                    contentType=metadata.get('ContentType') or asset['content_type'],
+                    sizeBytes=metadata['ContentLength'])
 
     def ticket(asset_id, variant, authorization):
         grant(authorization)
@@ -282,7 +289,7 @@ def register(app, api):
             fail(413, 'pickerOriginalTooLarge')
         try:
             result = media_tickets._bounded_ticket_work(
-                [None], lambda _: api._ticket_head(asset, variant, key, fresh_head=True),
+                [None], lambda _: api._ticket_head(asset, variant, key, fresh_head=variant == 'original'),
                 deadline=time.monotonic() + media_tickets.MEDIA_TICKET_DEADLINE_SECONDS,
                 cancelled=threading.Event())[0]
         except ClientError as error:
@@ -298,8 +305,7 @@ def register(app, api):
             fail(404, 'pickerAssetNotFound')
         if variant == 'original' and result['ContentLength'] > MAX_ORIGINAL:
             fail(413, 'pickerOriginalTooLarge')
-        return dict(url=api.presign_get(key, 300), expiresIn=300,
-                    contentType=content_type, sizeBytes=result['ContentLength'])
+        return signed_ticket(asset, key, result)
 
     @app.get('/v1/picker/thumbnail/{asset_id}')
     def thumbnail(asset_id: str, authorization: str | None = Header(default=None)):

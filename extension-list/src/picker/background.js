@@ -9,7 +9,9 @@
   const MAX_THUMBNAIL = 8 * 1024 * 1024, MAX_ORIGINAL = 20 * 1024 * 1024;
 
   function createService({ storage = chrome.storage.local, fetchImpl = (...args) => fetch(...args), runtime = chrome.runtime, tabs = chrome.tabs, base = BASE,
-    api = globalThis.LakomicsListApi, userAgent = globalThis.navigator?.userAgent || "" } = {}) {
+    api = globalThis.LakomicsListApi, userAgent = globalThis.navigator?.userAgent || "", now = () => Date.now() } = {}) {
+    const thumbnailTickets = new Map();
+    const sameConnection = (a, b) => a && b && a.origin === b.origin && a.token === b.token;
     async function readKey() {
       const stored = await storage.get([Model.PC_KEY]);
       const value = stored?.[Model.PC_KEY];
@@ -44,6 +46,7 @@
     async function callServer(path, { method = "GET", body, timeoutMs = 15000 } = {}) {
       const connection = await api?.readConnection();
       if (!connection) return { ok: false, kind: "unpaired", status: 0, code: "no_key" };
+      const requestedAt = now();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -63,7 +66,7 @@
           try { const data = await response.json(); code = String(data?.code || data?.detail?.code || ""); } catch {}
           return { ok: false, kind: Model.mapFailure({ status: response.status, code }), status: response.status, code };
         }
-        return { ok: true, response, source: "server" };
+        return { ok: true, response, source: "server", connection, requestedAt };
       } catch (error) {
         const code = error?.name === "AbortError" ? "timeout" : "offline";
         return { ok: false, kind: Model.mapFailure({ status: 0, code }), status: 0, code };
@@ -84,18 +87,18 @@
     async function json(path, options) {
       const result = await call(path, options);
       if (!result.ok) return result;
-      try { return { ok: true, data: await result.response.json(), source: result.source }; }
+      try { return { ok: true, data: await result.response.json(), source: result.source, connection: result.connection, requestedAt: result.requestedAt }; }
       catch { return { ok: false, kind: "unknown", status: 200, code: "bad_json" }; }
     }
 
-    async function bytes(path, { cap, timeoutMs }) {
-      const result = await call(path, { timeoutMs });
+    async function bytes(path, { cap, timeoutMs, inlineTicket, initialResult }) {
+      const result = initialResult || (inlineTicket ? { ok: true, source: "server" } : await call(path, { timeoutMs }));
       if (!result.ok) return result;
       let response = result.response;
       let controller, timer;
       try {
         if (result.source === "server") {
-          const ticket = await response.json();
+          const ticket = inlineTicket || await response.json();
           const url = new URL(ticket.url);
           if (url.protocol !== "https:" || url.username || url.password || !Model.MIMES.includes(ticket.contentType)
             || !Number.isSafeInteger(ticket.sizeBytes) || ticket.sizeBytes < 0) throw new Error("invalid ticket");
@@ -152,15 +155,48 @@
       const target = byScope ? { scope: { kind: scope.kind, id: scope.id } } : { folderId: message.folderId, includeDescendants: message.includeDescendants === true };
       const result = await json("/v1/picker/batch", { method: "POST", body: { ...target, limit, exclude }, timeoutMs: 20000 });
       if (!result.ok) return fail(result);
+      for (const [id, entry] of thumbnailTickets) {
+        if (entry.expiresAt <= now() || !sameConnection(entry.connection, result.connection)) thumbnailTickets.delete(id);
+      }
       const items = (Array.isArray(result.data?.items) ? result.data.items : [])
         .filter(item => item && Model.validId(item.assetId) && Model.MIMES.includes(item.mime))
-        .map(item => ({ assetId: item.assetId, width: Model.clampInt(item.width), height: Model.clampInt(item.height), byteSize: Model.clampInt(item.byteSize), mime: item.mime }));
+        .map(item => {
+          thumbnailTickets.delete(item.assetId);
+          const ticket = item.thumbnailTicket;
+          const expiresAt = result.requestedAt + (ticket?.expiresIn - 30) * 1000;
+          if (result.source === "server" && Number.isFinite(ticket?.expiresIn) && expiresAt > now()) {
+            thumbnailTickets.set(item.assetId, { ticket, expiresAt, connection: result.connection });
+          }
+          return { assetId: item.assetId, width: Model.clampInt(item.width), height: Model.clampInt(item.height), byteSize: Model.clampInt(item.byteSize), mime: item.mime };
+        });
+      while (thumbnailTickets.size > Model.MAX_EXCLUDE) thumbnailTickets.delete(thumbnailTickets.keys().next().value);
       return { ok: true, items, remaining: Model.clampInt(result.data?.remaining) };
     }
 
     async function thumbnail(message) {
       if (!Model.validId(message.assetId)) return { ok: false, kind: "invalid", status: 400, code: "invalid" };
-      const result = await bytes("/v1/picker/thumbnail/" + message.assetId, { cap: MAX_THUMBNAIL, timeoutMs: 20000 });
+      const path = "/v1/picker/thumbnail/" + message.assetId;
+      const entry = thumbnailTickets.get(message.assetId);
+      let result;
+      if (entry && entry.expiresAt > now() && sameConnection(entry.connection, await api?.readConnection())) {
+        // Cached server tickets still respect desktop PC-first privacy refusals.
+        if (!/Android|Helium/i.test(userAgent) && await readKey()) {
+          const pc = await callPC(path, { timeoutMs: 20000 });
+          if (pc.ok) result = await bytes(path, { cap: MAX_THUMBNAIL, timeoutMs: 20000, initialResult: pc });
+          else if (pc.status !== 0 || !["offline", "timeout"].includes(pc.code)) return fail(pc);
+        }
+        if (!result && entry.expiresAt > now() && sameConnection(entry.connection, await api?.readConnection())) {
+          result = await bytes(path, { cap: MAX_THUMBNAIL, timeoutMs: 20000, inlineTicket: entry.ticket });
+          if (!sameConnection(entry.connection, await api?.readConnection())) {
+            thumbnailTickets.delete(message.assetId);
+            return { ok: false, kind: "unpaired", status: 401, code: "connection_changed" };
+          }
+        }
+      }
+      if (!result?.ok) {
+        thumbnailTickets.delete(message.assetId);
+        result = await bytes(path, { cap: MAX_THUMBNAIL, timeoutMs: 20000 });
+      }
       if (!result.ok) return fail(result);
       return { ok: true, mime: result.mime.startsWith("image/") ? result.mime : "image/webp", base64: Model.toBase64(result.data) };
     }

@@ -187,8 +187,9 @@
         // A new <img> of any kind (the upload placeholder) means the editor took the paste: never
         // fall back to a drop then, or the picture would be inserted twice.
         const startedOrDone = ms => { const timer = sleep(ms); waits.push(timer); return Promise.race([watcher.started || watcher.promise, watcher.promise, timer.promise]); };
-        if (sent.handled) image = await waitFor(totalMs);
-        else if (await startedOrDone(ackMs)) image = await waitFor(totalMs);
+        // The tablet's Froala marks a synthetic paste handled yet drops the file (no placeholder, no
+        // upload), while a drop works there; so a paste only counts once a picture actually appears.
+        if (await startedOrDone(ackMs)) image = await waitFor(totalMs);
         else {
           editor.restore();
           try { sent = await transport.dispatch("drop", file); } catch { sent = { handled: false }; }
