@@ -399,14 +399,10 @@ ul.ideas li::marker { color: var(--c-faint); }
 .fa .f-frame { padding: 3.8cqw; background: var(--band);
   box-shadow: inset 0 0 0 .25cqw rgba(0, 0, 0, .35), inset .5cqw .5cqw .7cqw rgba(255, 255, 255, .55), inset -.5cqw -.5cqw .8cqw rgba(0, 0, 0, .4); }
 .fa .front { --p-fill: rgba(10, 10, 20, .62); --p-ink: #ffffff; --tr-ink: #ffffff; }
-/* round 6: SSR+ effect rows printed straight on the art — no panel; white type with a hard dark outline,
-   plus a very soft feathered shade behind each line only (like the secret-rare reference) */
+/* SSR+ effect rows printed straight on the art: no panel and no per-line shade; white type with a hard dark outline */
 .fa .f-fx { padding: 0 .4cqw; gap: .9cqw; }
 .fa .f-fx::before, .fa .f-fx::after { display: none; }
 .fa .fx { position: relative; isolation: isolate; color: #fff; }
-.fa .fx::before { content: ""; position: absolute; inset: -.5cqw -2.4cqw; z-index: -1; pointer-events: none;
-  background: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .4) 10%, rgba(0, 0, 0, .4) 90%, transparent 100%);
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 30%, #000 70%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0%, #000 30%, #000 70%, transparent 100%); }
 .fa .fx .tx { font-weight: 700; text-shadow: 0 0 .2cqw #000, 0 0 .2cqw #000, .12cqw .12cqw 0 #000, -.12cqw -.12cqw 0 #000, .12cqw -.12cqw 0 #000, -.12cqw .12cqw 0 #000, 0 .3cqw .7cqw rgba(0, 0, 0, .7); }
 .fa .fx .kw { box-shadow: none; filter: drop-shadow(0 0 .2cqw rgba(0, 0, 0, .9)); }
 .fa .f-traits { text-shadow: 0 0 .25cqw #000, 0 0 .5cqw rgba(0, 0, 0, .8); }
