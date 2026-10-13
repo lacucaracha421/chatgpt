@@ -1,0 +1,1172 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>에셋 카드 뽑기</title>
+<!-- Page chrome uses the app's real tokens, font and shared controls. Every token has a literal fallback so the
+     file also works standalone. The cards themselves are deliberately lavish: they are collectible objects. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+/* ---------- Registered pointer variables (so they can transition when the pointer leaves) ---------- */
+@property --mx { syntax: '<percentage>'; inherits: true; initial-value: 50%; }
+@property --my { syntax: '<percentage>'; inherits: true; initial-value: 50%; }
+@property --rx { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+@property --ry { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+@property --ang { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+@property --o { syntax: '<number>'; inherits: true; initial-value: .5; }
+
+/* ---------- Page chrome (app tokens with literal fallbacks) ---------- */
+:root {
+  --pg: #0e0f10;
+  --c-text: var(--color-text, #e7e9ec);
+  --c-muted: var(--color-muted, #a0a3a5);
+  --c-faint: var(--color-faint, #7d8184);
+  --c-border: var(--color-border, #363739);
+  --c-border-strong: var(--color-border-strong, #55585a);
+  --c-surface: var(--color-surface, #222324);
+  --c-control: var(--color-control, #232425);
+  --c-control-hover: var(--color-control-hover, #2d2e2f);
+  --c-accent: var(--color-accent, #ddd8ca);
+  --c-accent-hover: var(--color-accent-hover, #e7e2d5);
+  --c-on-accent: var(--color-on-accent, #202628);
+  --c-focus: var(--color-focus, #7db1ff);
+  --c-mark: var(--color-section-mark, rgba(221, 216, 202, .6));
+  --c-echo: var(--color-selection-echo, rgba(221, 216, 202, .4));
+  --f-ui: var(--font-ui, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif);
+  --r-ctl: var(--radius-control, 4px);
+  --ease: var(--ease-out, cubic-bezier(.2, 0, 0, 1));
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; overflow-x: clip; }
+body { margin: 0; background: var(--pg); color: var(--c-text); font: 400 15px/1.55 var(--f-ui); overflow-x: clip; }
+.doc { max-width: 1280px; margin: 0 auto; padding: 32px 16px 96px; display: flex; flex-direction: column; gap: 56px; }
+@media (min-width: 720px) { .doc { padding: 40px 32px 120px; } }
+header.top h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.25; font-weight: 600; letter-spacing: -.3px; }
+.lead, .note { color: var(--c-muted); max-width: 72ch; margin: 0; line-height: 1.65; }
+.lead b, .note b, li b { color: var(--c-text); font-weight: 600; }
+section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+h2.sec { margin: 0; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--c-mark); flex: none; }
+h2.sec .num { color: var(--c-faint); font-weight: 500; font-size: 12px; font-variant-numeric: tabular-nums; margin-left: 4px; }
+.slabel { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--c-faint); margin: 0; }
+.slabel::before { content: ""; width: 5px; height: 5px; background: var(--c-faint); flex: none; }
+.slabel::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--c-border), transparent); }
+
+.btn { -webkit-appearance: none; appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 12px; border: 1px solid var(--c-border); border-radius: var(--r-ctl); background: var(--c-control);
+  color: var(--c-text); font: 500 14px/1 var(--f-ui); cursor: pointer; white-space: nowrap; transition: background-color 120ms var(--ease); }
+.btn:hover { background: var(--c-control-hover); }
+.btn.primary { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); font-weight: 600; }
+.btn.primary:hover { background: var(--c-accent-hover); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.lg { height: 40px; padding: 0 18px; font-size: 15px; }
+.btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+select.sel { height: 32px; padding: 0 8px; border: 1px solid var(--c-border); border-radius: var(--r-ctl); background: var(--c-control); color: var(--c-text); font: 400 13px var(--f-ui); }
+
+/* Image bar (sticky) */
+.imgbar { position: sticky; top: 0; z-index: 60; margin: -8px -16px 0; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  background: color-mix(in srgb, var(--pg) 88%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--c-border); }
+@media (min-width: 720px) { .imgbar { margin: -8px -32px 0; padding: 10px 32px; } }
+.imgbar .hint { color: var(--c-faint); font-size: 12px; }
+@media (max-width: 600px), (pointer: coarse) { .imgbar .hint { display: none; } }
+.imgbar .state { color: var(--c-muted); font-size: 12px; margin-left: auto; }
+.imgbar.drop { outline: 2px dashed var(--c-accent); outline-offset: -6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- Section 1: rarity ladder ---------- */
+.ladder { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 16px; }
+@media (min-width: 640px) { .ladder { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 24px; } }
+@media (min-width: 1100px) { .ladder { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 24px 20px; } }
+.rung { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.rung .card { width: 100%; }
+.rung h3 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.rung p { margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--c-muted); }
+.code { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 2px; font: 700 11px/1 var(--f-ui); letter-spacing: .4px;
+  color: #15161a; background: var(--chip, #cfd3d8); }
+.code[data-t="n"] { --chip: #c9c4b8; }
+.code[data-t="r"] { --chip: linear-gradient(180deg, #f4f6f8, #a9b0b8); }
+.code[data-t="sr"] { --chip: linear-gradient(180deg, #d9c6ff, #8e6bf0); }
+.code[data-t="ssr"] { --chip: linear-gradient(180deg, #fff1b5, #f0b44a); }
+.code[data-t="ur"] { --chip: linear-gradient(180deg, #ffe08a, #c4861c); }
+.code[data-t="lr"] { --chip: linear-gradient(90deg, #ffb3c8, #ffe7a3, #b8ffcf, #a8d8ff, #d6b3ff); }
+.rung .odds { color: var(--c-faint); font-size: 12px; font-weight: 400; margin-left: auto; font-variant-numeric: tabular-nums; }
+.backrow { display: grid; grid-template-columns: minmax(0, 200px) 1fr; gap: 16px 24px; align-items: center; }
+@media (max-width: 520px) { .backrow { grid-template-columns: minmax(0, 140px) 1fr; } }
+
+/* ---------- Section 2: featured ---------- */
+.feat { display: grid; grid-template-columns: 1fr; gap: 24px; }
+@media (min-width: 960px) { .feat { grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 40px; align-items: start; } }
+.feat-stage { position: relative; display: grid; place-items: center; padding: 40px 16px 48px; border: 1px solid var(--c-border);
+  background: radial-gradient(70% 60% at 50% 40%, #23252c 0%, #121316 60%, #0b0c0e 100%); overflow: hidden; }
+.feat-stage .card { width: min(380px, 100%); touch-action: none; }
+.feat-stage .tip { position: absolute; bottom: 12px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--c-faint); margin: 0; }
+.feat-info { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.seg { display: flex; padding: 4px; gap: 0; background: var(--c-surface); border-radius: var(--r-ctl); max-width: 520px; }
+.seg button { flex: 1 1 0; min-width: 0; height: 40px; border: 0; background: transparent; color: var(--c-muted); font: 600 14px/1 var(--f-ui);
+  border-radius: 2px; cursor: pointer; padding: 0 4px; }
+.seg button:hover { color: var(--c-text); }
+.seg button[aria-checked="true"] { background: var(--c-accent); color: var(--c-on-accent);
+  box-shadow: 3px 3px 0 -1px var(--c-surface), 3px 3px 0 0 var(--c-echo); }
+.tier-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tier-head h3 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.2px; }
+.tier-head .o { color: var(--c-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.layers { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--c-border); max-width: 520px; }
+.layers li { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--c-border); font-size: 14px; color: var(--c-muted); }
+.layers li b { color: var(--c-text); font-weight: 600; min-width: 7.5em; }
+.layers li .n { color: var(--c-faint); font-size: 12px; width: 1.5em; font-variant-numeric: tabular-nums; }
+.toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn[aria-pressed="true"] { border-color: var(--c-border-strong); background: var(--c-control-hover); }
+.btn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-faint); }
+.btn[aria-pressed="true"] .dot { background: var(--c-accent); }
+
+/* ---------- Section 3: gacha ---------- */
+.gacha { border: 1px solid var(--c-border); background: #08090b; }
+.stage { position: relative; min-height: 470px; overflow: hidden; display: grid; place-items: center; padding: 28px 12px; cursor: default;
+  background: radial-gradient(60% 55% at 50% 45%, #1a1c26 0%, #0c0d12 60%, #060709 100%); -webkit-tap-highlight-color: transparent; }
+@media (min-width: 720px) { .stage { min-height: 560px; padding: 36px 24px; } }
+.stage.busy { cursor: pointer; }
+.st-rays { position: absolute; left: var(--cx, 50%); top: var(--cy, 50%); width: 1400px; height: 1400px; margin: -700px 0 0 -700px; pointer-events: none; opacity: 0;
+  background: repeating-conic-gradient(from 0deg, var(--ray, #ffd25a) 0deg 5deg, transparent 5deg 15deg);
+  -webkit-mask: radial-gradient(closest-side, #000 0%, rgba(0,0,0,.6) 18%, transparent 62%); mask: radial-gradient(closest-side, #000 0%, rgba(0,0,0,.6) 18%, transparent 62%);
+  transition: opacity .4s ease; }
+.stage[data-ray="rainbow"] .st-rays { background: repeating-conic-gradient(from 0deg, #ff7ba9 0deg 4deg, transparent 4deg 10deg, #ffe17a 10deg 14deg, transparent 14deg 20deg, #7dffc0 20deg 24deg, transparent 24deg 30deg, #7cc8ff 30deg 34deg, transparent 34deg 40deg, #c49bff 40deg 44deg, transparent 44deg 50deg); }
+.stage.rays .st-rays { opacity: .5; animation: spin 9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.st-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 30; }
+.st-flash.on { animation: flash .7s ease-out; }
+@keyframes flash { 0% { opacity: 0; } 12% { opacity: .85; } 100% { opacity: 0; } }
+.st-particles { position: absolute; inset: 0; pointer-events: none; z-index: 25; }
+.pt { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: radial-gradient(circle, #fff 0%, var(--pc, #ffd25a) 45%, transparent 70%);
+  animation: burst var(--dur, 1s) cubic-bezier(.15, .7, .3, 1) forwards; }
+.pt.sq { border-radius: 0; width: 6px; height: 6px; background: var(--pc); transform: rotate(45deg); }
+@keyframes burst { 0% { transform: translate(0, 0) scale(.4); opacity: 1; } 70% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; } }
+.st-hint { position: absolute; left: 0; right: 0; bottom: 12px; margin: 0; text-align: center; font-size: 12px; color: rgba(231, 233, 236, .55); pointer-events: none; z-index: 26; }
+
+.pack { position: relative; width: 186px; height: 292px; cursor: pointer; z-index: 5; filter: drop-shadow(0 18px 30px rgba(0, 0, 0, .6)); }
+.stage.has-cards .pack { display: none; }
+.pack.idle { animation: bob 3.2s ease-in-out infinite; }
+.paused .pack.idle, .paused .st-rays { animation-play-state: paused; }
+@keyframes bob { 0%, 100% { transform: translateY(0) rotate(-1.2deg); } 50% { transform: translateY(-8px) rotate(1.2deg); } }
+.pack-body, .pack-top { position: absolute; left: 0; right: 0; overflow: hidden;
+  background: linear-gradient(160deg, #262c55 0%, #191d3a 35%, #2b1d4a 70%, #12162e 100%); }
+.pack-body { top: 15%; bottom: 0; border-radius: 0 0 6px 6px; }
+.pack-top { top: 0; height: 15%; border-radius: 6px 6px 0 0; transition: transform .7s cubic-bezier(.2, .8, .2, 1), opacity .7s ease; }
+.pack-top::after, .pack-body::after { content: ""; position: absolute; left: 0; right: 0; height: 12px;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .16) 0 2px, rgba(0, 0, 0, .25) 2px 4px); }
+.pack-top::after { top: 0; }
+.pack-body::after { bottom: 0; }
+.pack-body::before, .pack-top::before { content: ""; position: absolute; inset: 0; mix-blend-mode: color-dodge; opacity: .55;
+  background: linear-gradient(115deg, transparent 20%, rgba(255, 140, 200, .5) 32%, rgba(255, 230, 140, .55) 40%, rgba(130, 255, 210, .5) 48%, rgba(120, 180, 255, .5) 56%, transparent 70%);
+  background-size: 260% 100%; animation: packsheen 4s ease-in-out infinite; }
+.pack-top::before { background-position: 0 0; }
+@keyframes packsheen { 0%, 100% { background-position: 100% 0; } 50% { background-position: 0% 0; } }
+.paused .pack-body::before, .paused .pack-top::before { animation-play-state: paused; }
+.tearline { position: absolute; top: 0; left: 8px; right: 8px; border-top: 1px dashed rgba(221, 216, 202, .35); }
+.pack-art { position: absolute; inset: 22px 14px 26px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center;
+  border: 1px solid rgba(221, 216, 202, .35); border-radius: 4px; background: radial-gradient(80% 60% at 50% 40%, rgba(255, 255, 255, .08), transparent); }
+.pack-art .emb { width: 64px; height: 64px; display: grid; place-items: center; transform: rotate(45deg); border: 1.5px solid #d8c48f; background: rgba(0, 0, 0, .25); }
+.pack-art .emb svg { width: 28px; height: 32px; transform: rotate(-45deg); color: #e9d9a6; }
+.pack-art b { font: 700 15px/1 var(--f-ui); letter-spacing: 4px; color: #efe4c0; margin-top: 12px; padding-left: 4px; }
+.pack-art span { font-size: 12px; color: #d8d3c4; }
+.pack-art em { font-style: normal; font-size: 11px; color: rgba(216, 211, 196, .65); }
+.pack-count { position: absolute; right: 10px; bottom: 16px; font: 700 11px/1 var(--f-ui); color: #15161a; background: #e9d9a6; padding: 4px 6px; border-radius: 2px; }
+.pack-leak { position: absolute; left: -10%; right: -10%; top: 15%; height: 3px; margin-top: -1px; opacity: 0; transform: scaleX(.1);
+  background: var(--leak, #fff); box-shadow: 0 0 18px 6px var(--leak, #fff), 0 0 60px 18px var(--leak, #fff); transition: transform .5s ease, opacity .3s ease; border-radius: 2px; }
+.pack[data-leak="rainbow"] .pack-leak { background: linear-gradient(90deg, #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff); box-shadow: 0 0 22px 8px #ffd9f0, 0 0 70px 24px #c9b6ff; }
+.pack.shake { animation: shake .11s linear infinite; }
+@keyframes shake { 0% { transform: translate(0, 0) rotate(0); } 25% { transform: translate(-2px, 1px) rotate(-1.5deg); } 75% { transform: translate(2px, -1px) rotate(1.5deg); } 100% { transform: translate(0, 0) rotate(0); } }
+.pack.shake .pack-leak { opacity: .55; transform: scaleX(.6); }
+.pack.torn .pack-top { transform: translate(40px, -150px) rotate(22deg); opacity: 0; }
+.pack.torn .pack-leak { opacity: 1; transform: scaleX(1.2); }
+.pack.out { transition: transform .35s ease-in, opacity .35s ease-in; transform: translateY(80px) scale(.94); opacity: 0; }
+
+.st-cards { position: relative; z-index: 10; width: 100%; display: grid; justify-content: center; align-content: center; }
+.st-cards.single { grid-template-columns: min(260px, 64vw); }
+.st-cards.multi { grid-template-columns: repeat(5, minmax(0, 128px)); gap: 16px 14px; }
+@media (max-width: 560px) { .st-cards.multi { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px 6px; } }
+.st-cards .card { opacity: 0; transform: translateY(36px) scale(.86); transition: opacity .4s ease, transform .5s cubic-bezier(.2, .9, .25, 1.15); transition-delay: calc(var(--i, 0) * 45ms); }
+.st-cards.dealt .card { opacity: 1; transform: none; }
+.st-cards .card.revealed { cursor: zoom-in; }
+.g-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border-top: 1px solid var(--c-border); background: #0d0e10; }
+.g-bar .sp { flex: 1; }
+.g-odds { font-size: 12px; color: var(--c-faint); line-height: 18px; font-variant-numeric: tabular-nums; }
+.g-odds b { color: var(--c-muted); font-weight: 600; }
+.g-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; min-height: 20px; margin: 0; padding: 0 16px 12px; background: #0d0e10; font-size: 13px; color: var(--c-muted); }
+.g-summary .code { margin: 0 2px 0 8px; height: 18px; }
+.demo-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--c-faint); }
+
+/* Zoom overlay */
+.zoom { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px 16px;
+  background: rgba(7, 10, 15, .86); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.zoom[hidden] { display: none; }
+.zoom .card { width: min(380px, 82vw, 56vh); touch-action: none; }
+.zoom .zbar { position: absolute; top: 12px; right: 12px; }
+.zoom .zcap { position: absolute; bottom: 16px; left: 0; right: 0; margin: 0; text-align: center; font-size: 12px; color: var(--c-muted); }
+
+/* ---------- Section 4: anatomy ---------- */
+.anat { display: grid; grid-template-columns: 1fr; gap: 28px; align-items: start; }
+@media (min-width: 900px) { .anat { grid-template-columns: 444px minmax(0, 1fr); gap: 40px; } }
+.anat-card { position: relative; width: min(444px, 100%); margin: 0 auto; padding: 0 22px 26px; }
+.anat-card .card { width: 100%; }
+.pin { position: absolute; z-index: 20; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--c-accent); color: var(--c-on-accent); font: 700 11px/1 var(--f-ui); box-shadow: 0 0 0 2px rgba(14, 15, 16, .85), 0 2px 8px rgba(0, 0, 0, .5);
+  font-variant-numeric: tabular-nums; pointer-events: none; transition: transform .15s ease; }
+.pin.hot { transform: scale(1.25); }
+.pin::after { content: ""; position: absolute; background: var(--c-accent); opacity: .8; }
+.pin.L::after { left: 100%; top: 50%; width: 9px; height: 1px; margin-left: 2px; }
+.pin.R::after { right: 100%; top: 50%; width: 9px; height: 1px; margin-right: 2px; }
+.pin.B::after { bottom: 100%; left: 50%; width: 1px; height: 9px; margin-bottom: 2px; }
+.pin.C::after { display: none; }
+ol.fields { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--c-border); }
+ol.fields li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 8px; padding: 10px 0; border-bottom: 1px solid var(--c-border); }
+ol.fields li .k { grid-row: span 2; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; margin-top: 1px;
+  border: 1px solid var(--c-border-strong); color: var(--c-muted); font: 600 11px/1 var(--f-ui); }
+ol.fields li:hover .k, ol.fields li:focus-within .k { background: var(--c-accent); color: var(--c-on-accent); border-color: var(--c-accent); }
+ol.fields li b { font-weight: 600; font-size: 15px; }
+ol.fields li span { color: var(--c-muted); font-size: 13px; line-height: 20px; }
+ol.fields li i { font-style: normal; color: var(--c-faint); font-size: 12px; margin-left: 6px; }
+ol.fields li .tag { display: inline-block; font-size: 11px; color: var(--c-faint); border: 1px solid var(--c-border); padding: 0 5px; border-radius: 2px; margin-left: 6px; vertical-align: 1px; }
+
+ul.ideas { margin: 0; padding-left: 20px; color: var(--c-muted); line-height: 1.7; max-width: 80ch; }
+ul.ideas li { margin: 4px 0; }
+ul.ideas li::marker { color: var(--c-faint); }
+
+/* =====================================================================================
+   CARD — every size below is in cqw (percent of card width), so a card scales as one object.
+   Ratio 63:88 · corners 4.5% of width.
+   ===================================================================================== */
+.card { --mx: 34%; --my: 24%; --o: .5; --ang: 35deg; --rx: 0deg; --ry: 0deg;
+  position: relative; z-index: 0; container-type: inline-size; aspect-ratio: 63 / 88; perspective: 1100px; -webkit-user-select: none; user-select: none;
+  touch-action: pan-y; transition: --mx .6s var(--ease), --my .6s var(--ease), --rx .7s var(--ease), --ry .7s var(--ease), --o .6s var(--ease), --ang .6s var(--ease); }
+.card.active { transition: --mx .07s linear, --my .07s linear, --rx .1s linear, --ry .1s linear, --o .2s linear, --ang .07s linear; }
+.card.demo { transition: none; }
+.card::before { content: ""; display: none; position: absolute; inset: -16% -22%; z-index: -1; pointer-events: none; opacity: 0; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--glow, #fff) 0%, var(--glow, #fff) 42%, color-mix(in srgb, var(--glow, #fff) 40%, transparent) 62%, transparent 85%);
+  transition: opacity .35s ease; }
+.card[data-glow="rainbow"]::before { background: conic-gradient(from 0deg, #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9);
+  -webkit-mask: radial-gradient(closest-side, #000 40%, transparent 85%); mask: radial-gradient(closest-side, #000 40%, transparent 85%); }
+.card.charge::before, .card.revealed::before { display: block; }
+.card.charge::before { opacity: .9; animation: pulse .42s ease-in-out infinite alternate; }
+.card.charge .back { box-shadow: 0 0 0 .7cqw var(--glow), 0 0 7cqw 2.5cqw var(--glow), 0 2cqw 6cqw rgba(0, 0, 0, .55); }
+.card.charge[data-glow="rainbow"] .back { box-shadow: 0 0 0 .7cqw #fff, -3cqw -3cqw 8cqw 2cqw #ff7ba9, 3cqw -3cqw 8cqw 2cqw #ffe17a, 3cqw 3cqw 8cqw 2cqw #7cc8ff, -3cqw 3cqw 8cqw 2cqw #c49bff; }
+.card.charge.big::before { inset: -40% -50%; }
+@keyframes pulse { from { transform: scale(.9); } to { transform: scale(1.08); } }
+.card.revealed[data-tier="sr"]::before { opacity: .22; }
+.card.revealed[data-tier="ssr"]::before, .card.revealed[data-tier="ur"]::before { opacity: .32; }
+.card.revealed[data-tier="lr"]::before { opacity: .38; }
+.card.drop-target { outline: 2px dashed var(--c-accent); outline-offset: 6px; border-radius: 5cqw; }
+
+.card__flip, .card__tilt { position: absolute; inset: 0; transform-style: preserve-3d; }
+.card__flip { transition: transform .62s cubic-bezier(.3, .7, .2, 1); }
+.card.down .card__flip { transform: rotateY(180deg); }
+.card.quick .card__flip { transition-duration: .22s; }
+.card__tilt { transform: rotateX(var(--rx)) rotateY(var(--ry)); }
+.card.active .card__tilt { scale: 1.02; }
+.card.pop .card__tilt { animation: pop .5s cubic-bezier(.2, .9, .3, 1.3); }
+@keyframes pop { 0% { scale: 1; } 40% { scale: 1.12; } 100% { scale: 1; } }
+
+.face { position: absolute; inset: 0; border-radius: 4.5cqw; overflow: hidden; isolation: isolate; -webkit-backface-visibility: hidden; backface-visibility: hidden;
+  box-shadow: 0 2cqw 6cqw rgba(0, 0, 0, .55), 0 .5cqw 1.2cqw rgba(0, 0, 0, .35); font-family: var(--f-ui); }
+.back { transform: rotateY(180deg); }
+.face > * { position: absolute; }
+
+/* Shared front parts — framed layout (N / R / SR) */
+.front { --ink: #2a2622; --ink2: #5b554c; --box: #f6f3ec; --boxline: #bdb5a6; background: #d6d0c2; color: var(--ink); }
+.f-plate { inset: 3.4cqw; border-radius: 2.6cqw; background: #efebe2; }
+.f-name { top: 5.6cqw; left: 6.6cqw; right: 6cqw; height: 8.4cqw; display: flex; align-items: center; gap: 2cqw; }
+.f-title { flex: 1; min-width: 0; font-size: 5.3cqw; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+.f-type { flex: none; width: 7.6cqw; height: 7.6cqw; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .5cqw rgba(0, 0, 0, .18), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); }
+.f-type svg { width: 4.6cqw; height: 4.6cqw; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 .2cqw .3cqw rgba(0, 0, 0, .35)); }
+.f-art { top: 15cqw; left: 6.6cqw; right: 6.6cqw; height: 64cqw; overflow: hidden; background: #222; box-shadow: 0 0 0 .55cqw #4a453e, 0 0 0 .9cqw rgba(255, 255, 255, .5); }
+.f-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 46%; display: block; }
+.f-artholo { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.f-band { display: none; }
+.f-illus { top: 80.2cqw; left: 6.6cqw; right: 6.6cqw; height: 4cqw; font-size: 2.35cqw; line-height: 4cqw; text-align: right; color: var(--ink2); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .01em; }
+.f-typeline { top: 85.2cqw; left: 7cqw; right: 7cqw; font-size: 3cqw; font-weight: 700; line-height: 4.4cqw; color: var(--ink); white-space: nowrap; overflow: hidden; }
+.f-text { top: 90.4cqw; left: 6.6cqw; right: 6.6cqw; height: 34.6cqw; padding: 2.6cqw 3.2cqw 2.2cqw; display: flex; flex-direction: column;
+  background: var(--box); border: .45cqw solid var(--boxline); border-radius: 1cqw; }
+.f-flavor { flex: 1; margin: 0; font-size: 3.4cqw; line-height: 1.55; color: var(--ink); word-break: keep-all; }
+.f-stats { display: flex; align-items: center; gap: 3.4cqw; padding-top: 1.8cqw; border-top: .3cqw solid var(--boxline); font-size: 2.8cqw; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.f-stats b { color: var(--ink); font-weight: 700; margin-left: .8cqw; }
+.f-stats .fav { margin-left: auto; display: inline-flex; }
+.f-stats .fav svg { width: 3.4cqw; height: 3.4cqw; fill: #e5484d; }
+.f-foot { left: 7cqw; right: 7cqw; bottom: 4.5cqw; height: 4.6cqw; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; font-size: 2.4cqw; color: var(--ink2); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.f-no { display: inline-flex; align-items: center; gap: 1cqw; white-space: nowrap; }
+.f-no svg { width: 2.6cqw; height: 3cqw; color: currentColor; }
+.f-rar { display: inline-flex; align-items: center; gap: .6cqw; font-weight: 800; letter-spacing: .06em; color: var(--ink); }
+.f-rar svg { width: 2.8cqw; height: 2.8cqw; fill: currentColor; }
+.f-serial { justify-self: end; white-space: nowrap; font-weight: 700; }
+.f-foil, .f-sparkle, .f-glare, .f-edge { inset: 0; pointer-events: none; border-radius: inherit; }
+.f-foil, .f-sparkle { opacity: 0; }
+.f-glare { mix-blend-mode: soft-light; opacity: calc(var(--o) * .9);
+  background: radial-gradient(farthest-corner circle at var(--mx) var(--my), rgba(255, 255, 255, .85) 8%, rgba(255, 255, 255, .45) 24%, rgba(0, 0, 0, .35) 90%); }
+.f-edge { box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .25); }
+
+/* N · 일반: paper frame, no foil */
+.card[data-tier="n"] .front { background: #cfc9bb var(--tex-paper); }
+.card[data-tier="n"] .f-plate { background: #efebe2 var(--tex-paper); }
+
+/* R · 레어: silver frame + silver name plate, light sweeps the frame */
+.card[data-tier="r"] .front { background: linear-gradient(135deg, #8b9198 0%, #e9edf0 20%, #9aa1a8 38%, #f7f8f9 52%, #7d848b 72%, #dfe3e6 88%, #9aa1a8 100%); }
+.card[data-tier="r"] .f-plate { background: #eeece7 var(--tex-paper); box-shadow: 0 0 0 .3cqw rgba(0, 0, 0, .25); }
+.card[data-tier="r"] .f-name { left: 5.4cqw; right: 5.4cqw; padding: 0 1.4cqw 0 2.4cqw; border-radius: 1.2cqw;
+  background: linear-gradient(180deg, #fbfcfd 0%, #c3c9cf 46%, #eef1f3 54%, #a9b0b7 100%); box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .6), 0 .3cqw .6cqw rgba(0, 0, 0, .25); }
+.card[data-tier="r"] .f-name::after { content: ""; position: absolute; inset: 0; border-radius: inherit; mix-blend-mode: overlay; pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .95) 46%, transparent 62%); background-size: 300% 100%; background-position: calc(100% - var(--mx)) 0; }
+.card[data-tier="r"] .f-art { box-shadow: 0 0 0 .55cqw #6d747b, 0 0 0 1cqw #e6e9ec; }
+.card[data-tier="r"] .f-foil { opacity: 1; padding: 3.4cqw; mix-blend-mode: overlay;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  background: linear-gradient(115deg, transparent 25%, rgba(255, 255, 255, .95) 45%, rgba(255, 255, 255, .2) 52%, transparent 65%); background-size: 280% 280%;
+  background-position: calc(100% - var(--mx)) calc(100% - var(--my)); }
+
+/* SR · 홀로 레어: dark metal frame, rainbow holo on the art window only */
+.card[data-tier="sr"] .front { --ink: #f1f2ff; --ink2: #aeb3d6; --box: rgba(255, 255, 255, .05); --boxline: rgba(196, 204, 255, .28);
+  background: linear-gradient(160deg, #3a4280 0%, #1a1f42 32%, #2f3570 64%, #121531 100%); }
+.card[data-tier="sr"] .f-plate { background: radial-gradient(120% 70% at 50% 0%, #20264d 0%, #0f1229 70%); box-shadow: 0 0 0 .35cqw rgba(200, 208, 255, .35); }
+.card[data-tier="sr"] .f-title { background: linear-gradient(180deg, #ffffff, #cfd5ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.card[data-tier="sr"] .f-art { box-shadow: 0 0 0 .55cqw #c9cfe6, 0 0 0 1cqw #0a0c1c; }
+.card[data-tier="sr"] .f-artholo { opacity: calc(.12 + var(--o) * .5); mix-blend-mode: color-dodge; filter: brightness(.5) contrast(1.5) saturate(1.3);
+  background:
+    repeating-linear-gradient(115deg, hsl(0 90% 62%) 0%, hsl(50 95% 62%) 4%, hsl(110 85% 60%) 8%, hsl(185 90% 64%) 12%, hsl(230 90% 66%) 16%, hsl(290 85% 64%) 20%, hsl(360 90% 62%) 24%),
+    repeating-linear-gradient(-45deg, #0b0e24 0%, #7b8fa8 3%, #b8d5e0 3.6%, #7b8fa8 4.2%, #0b0e24 8%);
+  background-blend-mode: overlay; background-size: 260% 260%, 220% 220%;
+  background-position: calc(50% + (var(--mx) - 50%) * 1.6) calc(50% + (var(--my) - 50%) * 1.6), var(--mx) var(--my); }
+.card[data-tier="sr"] .f-foil { opacity: calc(var(--o) * .7); padding: 3.4cqw; mix-blend-mode: overlay;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  background: linear-gradient(115deg, transparent 30%, rgba(220, 225, 255, .9) 46%, transparent 62%); background-size: 280% 280%; background-position: calc(100% - var(--mx)) calc(100% - var(--my)); }
+
+/* Full-art layout (SSR / UR / LR): art fills the card, text sits on glass bands */
+.card[data-layout="full"] .front { --ink: #ffffff; --ink2: rgba(255, 255, 255, .78); background: #111; }
+.card[data-layout="full"] .f-plate { display: none; }
+.card[data-layout="full"] .f-art { inset: 0; box-shadow: none; height: auto; }
+.card[data-layout="full"] .f-art img { object-position: 50% 50%; }
+.card[data-layout="full"] .f-band { display: block; left: 3.6cqw; right: 3.6cqw; border-radius: 2.4cqw;
+  background: linear-gradient(180deg, rgba(14, 14, 24, .34), rgba(14, 14, 24, .5)); -webkit-backdrop-filter: blur(1.6cqw) saturate(1.25); backdrop-filter: blur(1.6cqw) saturate(1.25);
+  box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .28), inset 0 .3cqw 0 rgba(255, 255, 255, .25); }
+.card[data-layout="full"] .f-band.top { top: 3.6cqw; height: 12.2cqw; }
+.card[data-layout="full"] .f-band.bot { bottom: 3.6cqw; height: 45cqw; }
+.card[data-layout="full"] .f-name { top: 5.5cqw; left: 7cqw; right: 6cqw; }
+.card[data-layout="full"] .f-title { text-shadow: 0 .3cqw 1cqw rgba(0, 0, 0, .55); }
+.card[data-layout="full"] .f-illus { top: 85.6cqw; right: 6cqw; left: 6cqw; color: rgba(255, 255, 255, .9); text-shadow: 0 .2cqw .8cqw rgba(0, 0, 0, .8); }
+.card[data-layout="full"] .f-typeline { top: 94.4cqw; color: #fff; }
+.card[data-layout="full"] .f-text { top: 99.4cqw; height: 25cqw; background: none; border: 0; padding: 0 1.4cqw; left: 5.6cqw; right: 5.6cqw; }
+.card[data-layout="full"] .f-flavor { color: rgba(255, 255, 255, .92); text-shadow: 0 .2cqw .6cqw rgba(0, 0, 0, .5); }
+.card[data-layout="full"] .f-stats { border-top-color: rgba(255, 255, 255, .25); }
+.card[data-layout="full"] .f-foot { bottom: 5.6cqw; color: rgba(255, 255, 255, .8); }
+.card[data-layout="full"] .f-rar { color: #fff; }
+.card[data-layout="full"] .f-edge { box-shadow: inset 0 0 0 .45cqw rgba(255, 255, 255, .35), inset 0 0 0 1.1cqw rgba(0, 0, 0, .18); }
+
+/* SSR · 풀아트: etched crosshatch foil, visible only near the light, plus a radial grain */
+.card[data-tier="ssr"] .f-foil { opacity: calc(var(--o) * 1.1); mix-blend-mode: color-dodge; filter: brightness(.75) contrast(1.4) saturate(1.4);
+  background: repeating-linear-gradient(125deg, hsl(0 95% 66%) 0%, hsl(55 95% 64%) 5%, hsl(120 85% 62%) 10%, hsl(190 95% 66%) 15%, hsl(250 90% 70%) 20%, hsl(310 90% 68%) 25%, hsl(360 95% 66%) 30%);
+  background-size: 300% 300%; background-position: calc(50% + (var(--mx) - 50%) * 1.8) calc(50% + (var(--my) - 50%) * 1.8);
+  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .55) 30%, transparent 62%), var(--tex-hatch);
+  -webkit-mask-size: 100% 100%, 2.2cqw 2.2cqw; -webkit-mask-composite: source-in;
+  mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .55) 30%, transparent 62%), var(--tex-hatch);
+  mask-size: 100% 100%, 2.2cqw 2.2cqw; mask-composite: intersect; }
+.card[data-tier="ssr"] .f-sparkle { opacity: calc(var(--o) * .3); mix-blend-mode: overlay;
+  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, transparent 55%); mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, transparent 55%);
+  background: repeating-conic-gradient(from var(--ang) at 50% 42%, rgba(255, 255, 255, 0) 0deg 1.4deg, rgba(255, 255, 255, .55) 1.6deg 2deg, rgba(255, 255, 255, 0) 2.2deg 3.6deg); }
+.card[data-tier="ssr"] .f-edge { box-shadow: inset 0 0 0 .45cqw rgba(255, 255, 255, .5), inset 0 0 0 1.1cqw rgba(0, 0, 0, .18); }
+
+/* UR · 골드 시크릿: gold-toned art, gold frame and type, glitter that twinkles as the light moves */
+.card[data-tier="ur"] .front { --ink: #ffe9a8; --ink2: rgba(255, 228, 160, .82); }
+.card[data-tier="ur"] .f-art img { filter: sepia(.6) saturate(1.5) hue-rotate(-8deg) contrast(1.06) brightness(1.04); }
+.card[data-tier="ur"] .f-artholo { opacity: .55; mix-blend-mode: color; background: linear-gradient(165deg, #fff3c4 0%, #e3ae45 40%, #a8701c 75%, #4d3008 100%); }
+.card[data-tier="ur"] .f-band { background: linear-gradient(180deg, rgba(48, 30, 4, .38), rgba(36, 22, 2, .58));
+  box-shadow: inset 0 0 0 .3cqw rgba(255, 216, 128, .55), inset 0 .3cqw 0 rgba(255, 240, 200, .35); }
+.card[data-tier="ur"] .f-title, .card[data-tier="ur"] .f-typeline, .card[data-tier="ur"] .f-rar, .card[data-tier="ur"] .f-serial {
+  background: linear-gradient(100deg, #b37a1a 0%, #fff1b8 22%, #d9a03a 40%, #fff6d0 58%, #c58a24 80%, #fff0b0 100%); background-size: 220% 100%;
+  background-position: calc(100% - var(--mx)) 0; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.card[data-tier="ur"] .f-title { text-shadow: none; filter: drop-shadow(0 .3cqw .5cqw rgba(0, 0, 0, .55)); }
+.card[data-tier="ur"] .f-rar svg { fill: #f3c869; }
+.card[data-tier="ur"] .f-type { background: radial-gradient(circle at 35% 30%, #fff8dc 0%, #e8b24a 40%, #8a5a12 100%); }
+.card[data-tier="ur"] .f-foil { opacity: 1; padding: 2.2cqw;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  background: linear-gradient(135deg, #8a5a12 0%, #ffe9a6 18%, #c88d2a 34%, #fff7d6 50%, #a8701c 66%, #ffe08a 82%, #7a4c0c 100%); background-size: 200% 200%;
+  background-position: var(--mx) var(--my); }
+.card[data-tier="ur"] .f-sparkle { opacity: calc(.25 + var(--o) * .9); mix-blend-mode: color-dodge;
+  background-image: var(--tex-glitter), var(--tex-glitter2); background-size: 34cqw 34cqw, 47cqw 47cqw; background-color: rgba(120, 80, 10, .35);
+  background-position: calc(var(--mx) * .4) calc(var(--my) * .4), calc(100% - var(--mx) * .5) calc(100% - var(--my) * .5);
+  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .35) 35%, transparent 75%), var(--tex-glitter2);
+  -webkit-mask-size: 100% 100%, 41cqw 41cqw; -webkit-mask-position: 0 0, calc(var(--mx) * -.9) calc(var(--my) * .7); -webkit-mask-composite: source-in;
+  mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .35) 35%, transparent 75%), var(--tex-glitter2);
+  mask-size: 100% 100%, 41cqw 41cqw; mask-position: 0 0, calc(var(--mx) * -.9) calc(var(--my) * .7); mask-composite: intersect; }
+.card[data-tier="ur"] .f-glare { mix-blend-mode: overlay; background: radial-gradient(farthest-corner circle at var(--mx) var(--my), rgba(255, 244, 210, .9) 6%, rgba(255, 220, 140, .35) 26%, rgba(30, 15, 0, .45) 90%); }
+.card[data-tier="ur"] .f-edge { box-shadow: inset 0 0 0 2.2cqw transparent, inset 0 0 0 2.6cqw rgba(60, 35, 0, .55); }
+
+/* LR · 별빛 한정: prism starlight field, rainbow border, serial 1/1 */
+.card[data-tier="lr"] .f-artholo { opacity: calc(.25 + var(--o) * .3); mix-blend-mode: soft-light;
+  background: linear-gradient(var(--ang), #ff6fa5, #ffd86b, #6dffb8, #6cc4ff, #b98aff, #ff6fa5); }
+.card[data-tier="lr"] .f-band { background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(20, 16, 40, .42)); }
+.card[data-tier="lr"] .f-title { background: linear-gradient(100deg, #ffffff 0%, #ffd3ea 18%, #fff6c9 34%, #c9ffe6 50%, #cfe8ff 66%, #ead6ff 82%, #ffffff 100%);
+  background-size: 240% 100%; background-position: calc(100% - var(--mx)) 0; -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none; filter: drop-shadow(0 .3cqw .6cqw rgba(0, 0, 0, .55)); }
+.card[data-tier="lr"] .f-type { background: conic-gradient(from var(--ang), #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9); }
+.card[data-tier="lr"] .f-foil { opacity: calc(.15 + var(--o) * 1.1); mix-blend-mode: color-dodge; filter: saturate(1.4) brightness(.9);
+  background: conic-gradient(from var(--ang) at var(--mx) var(--my), #ff5c93, #ffd64d, #4dffa6, #4dc3ff, #a46bff, #ff5c93);
+  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .45) 40%, rgba(0, 0, 0, .12) 80%), var(--tex-stars);
+  -webkit-mask-size: 100% 100%, 46cqw 46cqw; -webkit-mask-position: 0 0, calc(var(--mx) * .3) calc(var(--my) * .3); -webkit-mask-composite: source-in;
+  mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .45) 40%, rgba(0, 0, 0, .12) 80%), var(--tex-stars);
+  mask-size: 100% 100%, 46cqw 46cqw; mask-position: 0 0, calc(var(--mx) * .3) calc(var(--my) * .3); mask-composite: intersect; }
+.card[data-tier="lr"] .f-sparkle { opacity: calc(.2 + var(--o) * .7); mix-blend-mode: color-dodge;
+  background-image: var(--tex-glitter), var(--tex-glitter2); background-size: 30cqw 30cqw, 43cqw 43cqw; background-color: rgba(60, 50, 90, .3);
+  background-position: calc(var(--mx) * -.4) calc(var(--my) * .5), calc(var(--mx) * .6) calc(var(--my) * -.4);
+  -webkit-mask-image: var(--tex-glitter2); -webkit-mask-size: 37cqw 37cqw; -webkit-mask-position: calc(var(--my) * .8) calc(var(--mx) * -.8);
+  mask-image: var(--tex-glitter2); mask-size: 37cqw 37cqw; mask-position: calc(var(--my) * .8) calc(var(--mx) * -.8); }
+.card[data-tier="lr"] .f-edge { padding: 1.5cqw; box-shadow: none;
+  background: conic-gradient(from var(--ang), #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.card[data-tier="lr"] .f-serial { color: #fff; padding: .4cqw 1.2cqw; border-radius: .8cqw; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 .25cqw rgba(255, 255, 255, .5); }
+.card[data-tier="lr"] .f-rar svg { fill: url(#prismFill); }
+
+/* Effects off (comparison toggle) */
+.plain .f-foil, .plain .f-sparkle, .plain .f-glare, .plain .f-artholo { display: none; }
+.plain .card[data-tier="ur"] .f-artholo { display: block; }
+
+/* Card back: symmetric Lakomics foil */
+.back { background: radial-gradient(90% 70% at 50% 50%, #1f2645 0%, #0d1022 60%, #070914 100%); }
+.b-frame { inset: 4cqw; border-radius: 3cqw; overflow: hidden;
+  background:
+    repeating-conic-gradient(from 0deg at 50% 50%, rgba(221, 205, 160, .13) 0deg .8deg, transparent .8deg 7.5deg),
+    repeating-radial-gradient(circle at 50% 50%, rgba(221, 205, 160, .1) 0 .35cqw, transparent .35cqw 2.8cqw);
+  box-shadow: inset 0 0 0 .55cqw #cdb57a, inset 0 0 0 1.5cqw #0d1022, inset 0 0 0 1.85cqw rgba(205, 181, 122, .65); }
+.b-emblem { left: 50%; top: 50%; width: 34cqw; height: 34cqw; margin: -17cqw 0 0 -17cqw; transform: rotate(45deg); border: .7cqw solid #d8c48f;
+  background: radial-gradient(circle, #232a50 0%, #0d1022 80%); box-shadow: 0 0 0 1.6cqw #0d1022, 0 0 0 1.9cqw rgba(216, 196, 143, .6), 0 0 8cqw rgba(216, 196, 143, .25); }
+.b-mark { left: 50%; top: 50%; width: 13cqw; height: 15cqw; margin: -7.5cqw 0 0 -6.5cqw; color: #ecdcab; }
+.b-word { left: 0; right: 0; text-align: center; font: 700 4.2cqw/1 var(--f-ui); letter-spacing: 1.6em; padding-left: 1.6em; color: #e3cf96; }
+.b-word.t { top: 20cqw; }
+.b-word.b { bottom: 20cqw; transform: rotate(180deg); }
+.b-sub { left: 0; right: 0; text-align: center; font: 600 2.4cqw/1 var(--f-ui); letter-spacing: .6em; padding-left: .6em; color: rgba(227, 207, 150, .7); }
+.b-sub.t { top: 27cqw; }
+.b-sub.b { bottom: 27cqw; transform: rotate(180deg); }
+.b-corner { width: 6cqw; height: 6cqw; border: .5cqw solid #cdb57a; }
+.b-corner.tl { top: 8.5cqw; left: 8.5cqw; border-right: 0; border-bottom: 0; }
+.b-corner.tr { top: 8.5cqw; right: 8.5cqw; border-left: 0; border-bottom: 0; }
+.b-corner.bl { bottom: 8.5cqw; left: 8.5cqw; border-right: 0; border-top: 0; }
+.b-corner.br { bottom: 8.5cqw; right: 8.5cqw; border-left: 0; border-top: 0; }
+.b-sheen { inset: 0; mix-blend-mode: color-dodge; opacity: calc(var(--o) * .7); pointer-events: none;
+  background: linear-gradient(120deg, transparent 32%, rgba(255, 214, 140, .35) 45%, rgba(255, 236, 190, .55) 50%, rgba(255, 214, 140, .35) 55%, transparent 68%);
+  background-size: 260% 260%; background-position: calc(100% - var(--mx)) calc(100% - var(--my)); }
+
+/* Rarity glyph defs (hidden svg) */
+.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .pack.idle, .pack-body::before, .pack-top::before { animation: none; }
+  .card, .card.active { transition: none; }
+  .card.charge::before { animation: none; }
+  .st-cards .card { transition: opacity .2s ease; transform: none; }
+  .card__flip { transition: none; }
+  .stage.rays .st-rays { animation: none; opacity: 0; }
+  .card.pop .card__tilt { animation: none; }
+}
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true">
+  <defs>
+    <linearGradient id="prismFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff9cc0"/><stop offset=".3" stop-color="#ffe7a0"/><stop offset=".55" stop-color="#a8ffd6"/><stop offset=".8" stop-color="#a8d4ff"/><stop offset="1" stop-color="#d9b8ff"/>
+    </linearGradient>
+  </defs>
+  <symbol id="mk" viewBox="0 0 32 36"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+</svg>
+
+<main class="doc">
+  <header class="top">
+    <h1>에셋 카드 뽑기 · 카드 시안</h1>
+    <p class="lead">모아 둔 에셋 그림을 <b>트레이딩 카드</b>로 만들어 뽑는 기능의 시안입니다. 등급이 오를수록 테두리, 광택, 반짝임이 한 단계씩 화려해지고, 상위 등급은 그림이 카드 전체를 채우는 <b>풀아트</b>입니다. 카드를 마우스로 움직이거나 손가락으로 끌면 빛이 따라옵니다.</p>
+  </header>
+
+  <div class="imgbar" id="imgbar">
+    <label class="btn primary" for="file" tabindex="0" id="fileBtn">
+      <svg viewBox="0 0 24 24"><path d="M4 16l4.5-4.5a2 2 0 0 1 2.8 0L16 16m-2-2 1.5-1.5a2 2 0 0 1 2.8 0L20 14M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><circle cx="9" cy="8.5" r="1.2"/></svg>
+      내 이미지로 바꿔보기</label>
+    <input id="file" class="sr-only" type="file" accept="image/*" tabindex="-1">
+    <button class="btn" id="resetArt" type="button" hidden>원래 그림으로</button>
+    <span class="hint">모든 카드에 적용됩니다 · 카드 위에 이미지를 끌어다 놓으면 그 카드만 바뀝니다</span>
+    <span class="state" id="artState" aria-live="polite"></span>
+  </div>
+
+  <!-- 1. Rarity ladder -->
+  <section aria-labelledby="s1">
+    <h2 class="sec" id="s1">등급 사다리 <span class="num">6단계</span></h2>
+    <p class="note">같은 그림 한 장이 등급마다 어떻게 달라지는지입니다. 앞의 세 등급은 테두리가 있는 카드, 뒤의 세 등급은 그림이 카드 전체를 덮는 풀아트입니다.</p>
+    <div class="ladder" id="ladder"></div>
+    <p class="slabel">카드 뒷면 · 모든 등급 공통</p>
+    <div class="backrow">
+      <div id="backHolder"></div>
+      <p class="note">남색 바탕에 금박 선과 마름모 문양. 위아래가 똑같이 대칭이라 어느 쪽으로 놓여도 같아 보입니다. 뽑기에서는 이 면이 먼저 보이고, 뒤집히며 등급이 드러납니다.</p>
+    </div>
+  </section>
+
+  <!-- 2. Featured -->
+  <section aria-labelledby="s2">
+    <h2 class="sec" id="s2">크게 보기</h2>
+    <div class="feat">
+      <div class="feat-stage" id="featStage">
+        <div id="featHolder" style="width:min(380px,100%);display:grid;place-items:center"></div>
+        <p class="tip" id="featTip">카드 위에서 움직이거나 끌어 보세요</p>
+      </div>
+      <div class="feat-info">
+        <div class="seg" role="radiogroup" aria-label="등급" id="tierSeg"></div>
+        <div class="tier-head"><span class="code" id="fCode"></span><h3 id="fName"></h3><span class="o" id="fOdds"></span></div>
+        <p class="note" id="fDesc"></p>
+        <ol class="layers" id="fLayers"></ol>
+        <div class="toggles">
+          <button class="btn" type="button" id="tgFx" aria-pressed="true"><span class="dot"></span>광택 효과</button>
+          <button class="btn" type="button" id="tgDemo" aria-pressed="true"><span class="dot"></span>자동 기울이기</button>
+          <button class="btn" type="button" id="tgFlip"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg>뒤집기</button>
+        </div>
+        <p class="note" style="font-size:13px">광택을 끄면 같은 카드의 맨 상태가 보여, 효과가 얼마나 더해졌는지 비교할 수 있습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Gacha -->
+  <section aria-labelledby="s3">
+    <h2 class="sec" id="s3">뽑기</h2>
+    <p class="note">팩을 뜯는 순간 틈새 빛의 색으로 이번 팩의 최고 등급을 살짝 알려 줍니다. 흰색 → 파랑 → 보라 → 금색 → 무지개 순. 풀아트 이상이 나오면 화면이 번쩍이고 빛줄기와 불꽃이 터집니다.</p>
+    <div class="gacha">
+      <div class="stage" id="stage">
+        <div class="st-rays"></div>
+        <div class="pack idle" id="pack" role="button" tabindex="0" aria-label="팩 열기, 1회 뽑기">
+          <div class="pack-body"><div class="tearline"></div>
+            <div class="pack-art"><span class="emb"><svg><use href="#mk"/></svg></span><b>LAKOMICS</b><span>에셋 카드 팩</span><em>제1탄 · 수집의 밤</em></div>
+            <span class="pack-count" id="packCount">1장</span>
+          </div>
+          <div class="pack-top"></div>
+          <div class="pack-leak"></div>
+        </div>
+        <div class="st-cards" id="stCards"></div>
+        <div class="st-particles" id="stParticles"></div>
+        <div class="st-flash" id="stFlash"></div>
+        <p class="st-hint" id="stHint">팩을 누르거나 아래 버튼으로 뽑기</p>
+      </div>
+      <div class="g-bar">
+        <button class="btn primary lg" type="button" id="pull1">1회 뽑기</button>
+        <button class="btn lg" type="button" id="pull10">10연 뽑기</button>
+        <button class="btn lg" type="button" id="skipBtn" hidden>건너뛰기</button>
+        <span class="sp"></span>
+        <label class="demo-pick">시연용 확정
+          <select class="sel" id="force"><option value="">무작위</option><option value="sr">SR</option><option value="ssr">SSR</option><option value="ur">UR</option><option value="lr">LR</option></select>
+        </label>
+      </div>
+      <p class="g-summary"><span id="gRes"></span><span class="g-odds" id="gOdds"></span></p>
+    </div>
+  </section>
+
+  <!-- 4. Anatomy -->
+  <section aria-labelledby="s4">
+    <h2 class="sec" id="s4">카드 해부도</h2>
+    <p class="note">카드의 칸마다 에셋의 어떤 정보가 들어가는지입니다. 원본 파일과 정보는 그대로 두고, 카드는 그것을 읽어서 보여 주기만 합니다.</p>
+    <div class="anat">
+      <div class="anat-card" id="anatCard"></div>
+      <ol class="fields" id="fields"></ol>
+    </div>
+  </section>
+
+  <!-- 5. Next -->
+  <section aria-labelledby="s5">
+    <h2 class="sec" id="s5">다음 단계 아이디어</h2>
+    <ul class="ideas">
+      <li><b>등급 정하기</b> — 등급은 뽑을 때 확률로 정하고, 어떤 그림이 나올지는 즐겨찾기와 감상 횟수가 많을수록 조금 더 잘 나오게. 좋아하는 그림이 풀아트로 나오는 순간이 가장 기쁘도록.</li>
+      <li><b>중복 카드</b> — 같은 그림·같은 등급이 또 나오면 겹침 수(×3)만 올리고, 5장이 모이면 한 단계 위 등급으로 바꿀 수 있게.</li>
+      <li><b>카드 도감</b> — 작가별·속성별 바인더 화면. 아직 못 뽑은 칸은 흐린 실루엣, 풀아트는 바인더 안에서도 반짝임 유지.</li>
+      <li><b>뽑기권</b> — 하루 무료 1회, 새 에셋을 수집할 때마다 1장. 수집하는 습관이 그대로 보상이 되도록.</li>
+      <li><b>원본은 그대로</b> — 카드는 에셋을 가리키기만 하고 파일을 복사하거나 바꾸지 않음. 에셋을 지우면 카드는 "사라진 그림"으로 남김.</li>
+    </ul>
+  </section>
+</main>
+
+<div class="zoom" id="zoom" hidden role="dialog" aria-modal="true" aria-label="카드 크게 보기">
+  <div class="zbar"><button class="btn" type="button" id="zoomClose">닫기</button></div>
+  <div id="zoomHolder"></div>
+  <p class="zcap">끌어서 기울이기 · Esc로 닫기</p>
+</div>
+
+<script>
+(() => {
+'use strict';
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = (s, r = document) => r.querySelector(s);
+
+/* ------------------------------------------------------------------ data */
+const TIERS = [
+  { k: 'n',   code: 'N',   name: '일반',        odds: 55,  glow: '#e9edf3', sym: ['dot'],
+    desc: '깨끗한 종이 프레임. 광택 없이 그림과 글만.',
+    layers: [['종이 프레임', '미세한 종이 결'], ['그림 창', '얇은 먹선 테두리'], ['반사광', '아주 약하게']] },
+  { k: 'r',   code: 'R',   name: '레어',        odds: 25,  glow: '#5aa8ff', sym: ['dia'],
+    desc: '은박 테두리와 은박 이름판. 기울이면 빛줄기가 테두리를 훑고 지나갑니다.',
+    layers: [['은박 프레임', '금속 그러데이션'], ['움직이는 광택', '테두리에만'], ['은박 이름판', '따로 반짝임'], ['반사광', '']] },
+  { k: 'sr',  code: 'SR',  name: '홀로 레어',   odds: 13,  glow: '#b46bff', sym: ['dia', 'dia'],
+    desc: '어두운 금속 프레임에, 그림 창에만 무지개 홀로. 각도에 따라 색 띠가 흐릅니다.',
+    layers: [['남색 금속 프레임', ''], ['그림 창 홀로', '무지개 + 사선 결'], ['테두리 광택', ''], ['반사광', '']] },
+  { k: 'ssr', code: 'SSR', name: '풀아트',      odds: 5,   glow: '#ffd25a', sym: ['star'],
+    desc: '그림이 카드 전체로. 글자는 반투명 유리 띠 위에, 빛이 닿는 곳에만 식각 무늬가 무지개로 떠오릅니다.',
+    layers: [['그림 전체', '테두리 없음'], ['유리 띠', '흐림 + 얇은 하이라이트'], ['식각 무지개', '빛 근처에만 보임'], ['방사형 결', '그림 중심에서 퍼짐'], ['반사광', '']] },
+  { k: 'ur',  code: 'UR',  name: '골드 시크릿', odds: 1.8, glow: '#ffb21e', sym: ['star', 'star'],
+    desc: '그림 전체가 금빛으로 물든 풀아트. 금박 테두리와 금박 글자, 빛을 따라 반짝이는 금가루.',
+    layers: [['금빛 톤 그림', ''], ['금박 테두리', ''], ['금박 글자', '빛 따라 흐름'], ['금가루', '움직일 때 반짝임'], ['반사광', '따뜻한 색']] },
+  { k: 'lr',  code: 'LR',  name: '별빛 한정',   odds: .2,  glow: 'rainbow', sym: ['spark'],
+    desc: '그림마다 단 1장. 프리즘 별빛이 카드 전체에 흩어지고 테두리는 무지개, 시리얼 번호 1 / 1.',
+    layers: [['그림 전체', '옅은 프리즘 물결'], ['별빛 무늬', '빛 방향 따라 색이 돎'], ['무지개 테두리', ''], ['반짝이 가루', ''], ['시리얼', 'No. 1 / 1']] },
+];
+const TI = Object.fromEntries(TIERS.map((t, i) => [t.k, i]));
+const FULL = new Set(['ssr', 'ur', 'lr']);
+
+const ATTR = [
+  { name: '황혼', c1: '#ffb36b', c2: '#d9466e', icon: '<circle cx="12" cy="13" r="4"/><path d="M12 4v2M5.6 6.6 7 8M18.4 6.6 17 8M3 17h18M6 20h12"/>' },
+  { name: '심해', c1: '#6fd6ff', c2: '#1a5fb4', icon: '<path d="M3 10c3 0 3-3 6-3s3 3 6 3 3-3 6-3M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/>' },
+  { name: '별밤', c1: '#c3b0ff', c2: '#4b2fa8', icon: '<path d="M12 3.5l2.4 5 5.4.6-4 3.7 1.1 5.3L12 15.4 7.1 18.1l1.1-5.3-4-3.7 5.4-.6z"/>' },
+  { name: '숲',   c1: '#c3ec92', c2: '#2f7a3a', icon: '<path d="M5 19C5 10 11 5 19 5c0 8-5 14-14 14zM5 19l8-8"/>' },
+  { name: '오로라', c1: '#86ffd6', c2: '#1b7f8a', icon: '<path d="M3 17c3-9 5 0 9-7s5 4 9-5M3 21c4-6 6 0 9-4s6 2 9-2"/>' },
+  { name: '꽃',   c1: '#ffc7dc', c2: '#d95b8f', icon: '<circle cx="12" cy="12" r="2"/><path d="M12 10c-2-3 0-6 0-6s2 3 0 6zM14 12c3-2 6 0 6 0s-3 2-6 0zM12 14c2 3 0 6 0 6s-2-3 0-6zM10 12c-3 2-6 0-6 0s3-2 6 0z"/>' },
+];
+const ASSETS = [
+  { id: 427,  title: '노을 옥상의 약속', handle: '@yunseul_art',  site: 'pixiv',      date: '2026.04.27', attr: 0, tags: ['풍경', '인물'], flavor: '해가 지는 옥상에서, 내일 또 오자고 했다.', views: 2431, albums: 3, fav: true },
+  { id: 112,  title: '심해의 등불',      handle: '@haemu_ink',    site: 'X',          date: '2026.01.12', attr: 1, tags: ['바다', '환상'], flavor: '빛이 닿지 않는 곳에도 등불은 떠다닌다.', views: 986, albums: 1, fav: false },
+  { id: 1038, title: '별이 내리는 언덕', handle: '@dawn_ink',     site: 'pixiv',      date: '2026.10.03', attr: 2, tags: ['밤하늘', '인물'], flavor: '언덕 위로 별이 쏟아지던 밤의 기록.', views: 5120, albums: 4, fav: true },
+  { id: 731,  title: '숲의 오후',        handle: '@ondam_studio', site: 'Bluesky',    date: '2026.07.31', attr: 3, tags: ['숲', '빛'], flavor: '오후의 빛이 나뭇잎 사이로 천천히 내려앉는다.', views: 744, albums: 2, fav: false },
+  { id: 904,  title: '오로라 설원',      handle: '@kiri_paints',  site: 'ArtStation', date: '2026.09.04', attr: 4, tags: ['설경', '밤'], flavor: '얼어붙은 하늘에 초록 커튼이 걸렸다.', views: 1873, albums: 2, fav: true },
+  { id: 215,  title: '꽃잎 정류장',      handle: '@ppurin_draws', site: 'pixiv',      date: '2026.02.15', attr: 5, tags: ['봄', '일상'], flavor: '꽃잎이 버스보다 먼저 도착했다.', views: 3302, albums: 5, fav: true },
+];
+
+/* --------------------------------------------------------------- textures */
+const svgURL = s => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
+function seeded(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+(function textures() {
+  const root = document.documentElement.style;
+  root.setProperty('--tex-hatch', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><path d='M-2.5 2.5l5-5M0 10L10 0M7.5 12.5l5-5' stroke='#fff' stroke-width='1.6'/><path d='M-2.5 7.5l5 5M0 0l10 10M7.5-2.5l5 5' stroke='#fff' stroke-width='.8' opacity='.7'/></svg>`));
+  const glit = (seed, freq) => svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='${freq}' numOctaves='2' seed='${seed}' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 26 -18.2'/></filter><rect width='160' height='160' filter='url(#f)'/></svg>`);
+  root.setProperty('--tex-glitter', glit(3, .82));
+  root.setProperty('--tex-glitter2', glit(11, .7));
+  root.setProperty('--tex-paper', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' seed='4'/><feColorMatrix values='0 0 0 0 .3  0 0 0 0 .27  0 0 0 0 .22  0 0 0 .09 0'/></filter><rect width='120' height='120' filter='url(#p)'/></svg>`));
+  const R = seeded(77); let p = '';
+  for (let i = 0; i < 46; i++) {
+    const x = (R() * 200).toFixed(1), y = (R() * 200).toFixed(1), s = (1.5 + R() ** 2 * 7).toFixed(2);
+    p += `<path transform='translate(${x} ${y}) scale(${s})' d='M0-1Q.12-.12 1 0Q.12.12 0 1Q-.12.12-1 0Q-.12-.12 0-1z'/>`;
+  }
+  for (let i = 0; i < 70; i++) p += `<circle cx='${(R() * 200).toFixed(1)}' cy='${(R() * 200).toFixed(1)}' r='${(.4 + R() * .9).toFixed(2)}'/>`;
+  root.setProperty('--tex-stars', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' fill='#fff'>${p}</svg>`));
+})();
+
+/* ------------------------------------------------------- procedural art */
+const W = 600, H = 840;
+const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; };
+function sky(c, stops) { const g = c.createLinearGradient(0, 0, 0, H); stops.forEach(([o, col]) => g.addColorStop(o, col)); c.fillStyle = g; c.fillRect(0, 0, W, H); }
+function glow(c, x, y, r, hex, a = 1, op = 'lighter') {
+  c.save(); c.globalCompositeOperation = op; const g = c.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, hexA(hex, a)); g.addColorStop(.3, hexA(hex, a * .45)); g.addColorStop(1, hexA(hex, 0));
+  c.fillStyle = g; c.fillRect(x - r, y - r, r * 2, r * 2); c.restore();
+}
+function bokeh(c, R, n, hexes, y0, y1, r0, r1, a) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < n; i++) {
+    const x = R() * W, y = y0 + R() * (y1 - y0), r = r0 + R() ** 2 * (r1 - r0), h = hexes[R() * hexes.length | 0], al = a * (.35 + R() * .65);
+    const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, hexA(h, al)); g.addColorStop(.72, hexA(h, al * .6)); g.addColorStop(1, hexA(h, 0));
+    c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+  }
+  c.restore();
+}
+function rays(c, R, x, y, n, dir, spread, len, hex, a) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < n; i++) {
+    const ang = dir + (R() - .5) * spread, w = .008 + R() * .03;
+    const g = c.createRadialGradient(x, y, 0, x, y, len); g.addColorStop(0, hexA(hex, a * (.4 + R() * .6))); g.addColorStop(1, hexA(hex, 0));
+    c.fillStyle = g; c.beginPath(); c.moveTo(x, y);
+    c.lineTo(x + Math.cos(ang - w) * len, y + Math.sin(ang - w) * len); c.lineTo(x + Math.cos(ang + w) * len, y + Math.sin(ang + w) * len); c.fill();
+  }
+  c.restore();
+}
+function dabs(c, R, n, hexes, y0, y1, w0, w1, a, op = 'source-over', ang = 0, aj = .3) {
+  c.save(); c.globalCompositeOperation = op;
+  for (let i = 0; i < n; i++) {
+    const w = w0 + R() * (w1 - w0); c.globalAlpha = a * (.4 + R() * .6); c.fillStyle = hexes[R() * hexes.length | 0];
+    c.beginPath(); c.ellipse(R() * W, y0 + R() * (y1 - y0), w, w * (.12 + R() * .25), ang + (R() - .5) * aj, 0, 7); c.fill();
+  }
+  c.restore();
+}
+function ridge(c, R, base, amp, f, col) {
+  const p = [R() * 9, R() * 9, R() * 9]; c.beginPath(); c.moveTo(0, H);
+  for (let x = 0; x <= W; x += 4) c.lineTo(x, base + amp * (Math.sin(x * f + p[0]) * .6 + Math.sin(x * f * 2.3 + p[1]) * .3 + Math.sin(x * f * 5.7 + p[2]) * .1));
+  c.lineTo(W, H); c.closePath(); c.fillStyle = col; c.fill();
+}
+function peaks(c, R, base, amp, n, col, snow) {
+  const pts = [[-20, base]]; for (let i = 0; i <= n; i++) pts.push([i * W / n + (R() - .5) * 40, base - amp * (.35 + R() * .65)], [i * W / n + W / n / 2 + (R() - .5) * 30, base - amp * R() * .3]);
+  pts.push([W + 20, base]);
+  c.beginPath(); c.moveTo(-20, H); pts.forEach(([x, y]) => c.lineTo(x, y)); c.lineTo(W + 20, H); c.closePath(); c.fillStyle = col; c.fill();
+  if (snow) { c.save(); c.clip(); const g = c.createLinearGradient(0, base - amp, 0, base); g.addColorStop(0, snow); g.addColorStop(.55, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, base - amp, W, amp); c.restore(); }
+}
+function skyline(c, R, base, h0, h1, col, win) {
+  let x = -10;
+  while (x < W) {
+    const w = 26 + R() * 58, h = h0 + R() * (h1 - h0); c.fillStyle = col; c.fillRect(x, base - h, w + 1, H);
+    if (R() < .35) c.fillRect(x + w * .5, base - h - 16 - R() * 26, 2, 40);
+    if (win) { c.fillStyle = win; for (let y = base - h + 8; y < base - 4; y += 10) for (let xx = x + 5; xx < x + w - 5; xx += 8) if (R() < .16) c.fillRect(xx, y, 3, 4); }
+    x += w + R() * 5;
+  }
+}
+function figure(c, x, y, s, col, wind = 1, extra) {
+  c.save(); c.translate(x, y); c.scale(s, s); c.fillStyle = col; c.strokeStyle = col;
+  c.fillRect(-5, -31, 3.2, 31); c.fillRect(1.8, -31, 3.2, 31);
+  c.beginPath(); c.moveTo(-7, -70); c.lineTo(7, -70); c.quadraticCurveTo(12, -50, 15 + wind * 3, -30); c.lineTo(-14 + wind, -30); c.quadraticCurveTo(-11, -50, -7, -70); c.fill();
+  c.beginPath(); c.moveTo(-8.5, -74); c.quadraticCurveTo(0, -80, 8.5, -74); c.lineTo(7, -62); c.lineTo(-7, -62); c.closePath(); c.fill();
+  c.lineWidth = 3.2; c.lineCap = 'round'; c.beginPath(); c.moveTo(-8, -73); c.lineTo(-11, -50);
+  if (extra === 'up') { c.moveTo(8, -73); c.lineTo(14, -92); } else { c.moveTo(8, -73); c.lineTo(11, -50); } c.stroke();
+  c.fillRect(-1.7, -81, 3.4, 7);
+  c.beginPath(); c.ellipse(0, -87, 6.6, 7.4, 0, 0, 7); c.fill();
+  c.beginPath(); c.moveTo(-6.8, -90); c.quadraticCurveTo(0, -98, 6.8, -90); c.bezierCurveTo(11 * wind + 2, -86, 18 * wind, -78, 27 * wind, -72);
+  c.bezierCurveTo(17 * wind, -75, 9 * wind, -72, 5, -78); c.lineTo(-6.5, -79); c.closePath(); c.fill();
+  if (extra === 'umbrella') { c.lineWidth = 1.6; c.beginPath(); c.moveTo(11, -50); c.lineTo(16, -118); c.stroke(); c.beginPath(); c.moveTo(-14, -112); c.quadraticCurveTo(16, -150, 46, -112); c.quadraticCurveTo(38, -118, 31, -112); c.quadraticCurveTo(24, -118, 16, -112); c.quadraticCurveTo(8, -118, 1, -112); c.quadraticCurveTo(-6, -118, -14, -112); c.fill(); }
+  c.restore();
+}
+function tree(c, R, x, y, s, col) {
+  c.save(); c.fillStyle = col; c.beginPath(); c.moveTo(x - 5 * s, y); c.quadraticCurveTo(x - 2 * s, y - 40 * s, x - 1.5 * s, y - 70 * s); c.lineTo(x + 1.5 * s, y - 70 * s); c.quadraticCurveTo(x + 2 * s, y - 40 * s, x + 5 * s, y); c.fill();
+  c.strokeStyle = col; c.lineWidth = 2 * s; c.beginPath(); c.moveTo(x, y - 45 * s); c.quadraticCurveTo(x + 14 * s, y - 60 * s, x + 26 * s, y - 70 * s); c.moveTo(x, y - 52 * s); c.quadraticCurveTo(x - 12 * s, y - 64 * s, x - 22 * s, y - 72 * s); c.stroke();
+  for (let i = 0; i < 46; i++) { const a = R() * Math.PI * 2, d = R() ** .6 * 34 * s; c.beginPath(); c.arc(x + Math.cos(a) * d * 1.3, y - 84 * s + Math.sin(a) * d * .8, (7 + R() * 9) * s, 0, 7); c.fill(); }
+  c.restore();
+}
+function moon(c, x, y, r) {
+  glow(c, x, y, r * 6, '#cdd6ff', .35);
+  const m = document.createElement('canvas'); m.width = m.height = r * 2 + 4; const g = m.getContext('2d');
+  g.fillStyle = '#fff4dc'; g.beginPath(); g.arc(r + 2, r + 2, r, 0, 7); g.fill(); g.globalCompositeOperation = 'destination-out';
+  g.beginPath(); g.arc(r + 2 + r * .5, r + 2 - r * .28, r * .88, 0, 7); g.fill(); c.drawImage(m, x - r - 2, y - r - 2);
+}
+function stars(c, R, n, y1, bright) {
+  for (let i = 0; i < n; i++) { const s = R() ** 3 * 1.8 + .4; c.fillStyle = `rgba(255,255,255,${(.25 + R() * .75).toFixed(2)})`; c.fillRect(R() * W, R() * y1, s, s); }
+  for (let i = 0; i < bright; i++) {
+    const x = R() * W, y = R() * y1 * .9, l = 6 + R() * 12; glow(c, x, y, l * 1.6, '#dfe6ff', .6);
+    c.save(); c.globalCompositeOperation = 'lighter'; c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x - l, y); c.lineTo(x + l, y); c.moveTo(x, y - l); c.lineTo(x, y + l); c.stroke(); c.restore();
+  }
+}
+function aurora(c, R, y0, amp, top, bot, a) {
+  c.save(); c.globalCompositeOperation = 'lighter'; const ph = R() * 6;
+  for (let x = -10; x < W + 10; x += 2) {
+    const y = y0 + Math.sin(x * .011 + ph) * amp + Math.sin(x * .033 + ph * 2) * amp * .3, h = 80 + 110 * Math.sin(x * .017 + ph * 3) ** 2;
+    const g = c.createLinearGradient(0, y - h, 0, y + 8); g.addColorStop(0, hexA(top, 0)); g.addColorStop(.65, hexA(top, a * .55)); g.addColorStop(.93, hexA(bot, a)); g.addColorStop(1, hexA(bot, 0));
+    c.fillStyle = g; c.fillRect(x, y - h, 2.2, h + 8);
+  }
+  c.restore();
+}
+function jelly(c, R, x, y, r, hex) {
+  glow(c, x, y, r * 4, hex, .3);
+  c.save(); c.globalCompositeOperation = 'lighter';
+  c.lineWidth = 1.6; for (let i = 0; i < 8; i++) { const sx = x - r * .8 + i * r * .23; c.strokeStyle = hexA(hex, .3 + R() * .2); c.beginPath(); c.moveTo(sx, y); c.bezierCurveTo(sx + (R() - .5) * r, y + r, sx + (R() - .5) * r * 1.4, y + r * 2, sx + (R() - .5) * r, y + r * (2.6 + R())); c.stroke(); }
+  const g = c.createRadialGradient(x, y - r * .3, 0, x, y, r); g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(.45, hexA(hex, .65)); g.addColorStop(1, hexA(hex, .08));
+  c.fillStyle = g; c.beginPath(); c.ellipse(x, y, r, r * .8, 0, Math.PI, 0); c.quadraticCurveTo(x, y + r * .3, x - r, y); c.fill(); c.restore();
+}
+function petals(c, R, n, hexes, big) {
+  for (let i = 0; i < n; i++) {
+    const near = big && R() < .12, s = near ? 14 + R() * 18 : 3 + R() * 6; c.save(); c.translate(R() * W, R() * H); c.rotate(R() * 6.3);
+    if (near && 'filter' in c) c.filter = 'blur(4px)'; c.globalAlpha = near ? .55 : .55 + R() * .4; c.fillStyle = hexes[R() * hexes.length | 0];
+    c.beginPath(); c.ellipse(0, 0, s, s * .58, 0, 0, 7); c.fill(); c.restore();
+  }
+}
+function finish(c, R, vig = .5) {
+  const g = c.createRadialGradient(W / 2, H * .48, H * .25, W / 2, H * .5, H * .8); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${vig})`);
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+  const n = document.createElement('canvas'); n.width = n.height = 128; const nc = n.getContext('2d'), id = nc.createImageData(128, 128);
+  for (let i = 0; i < id.data.length; i += 4) { const v = R() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
+  nc.putImageData(id, 0, 0); c.save(); c.globalAlpha = .07; c.globalCompositeOperation = 'overlay'; c.fillStyle = c.createPattern(n, 'repeat'); c.fillRect(0, 0, W, H); c.restore();
+}
+const PAINT = [
+  (c, R) => { // 0 dusk rooftop — subject sits in the upper 2/3 so full-art bands do not hide it
+    sky(c, [[0, '#1b1340'], [.2, '#4a2466'], [.38, '#a63f6e'], [.5, '#ec7a52'], [.6, '#ffbb6e'], [.68, '#ffe1a6'], [1, '#ffe1a6']]);
+    dabs(c, R, 240, ['#ff9a7a', '#ffc49a', '#c86a9a', '#8a4a8a'], 90, 420, 40, 140, .13, 'source-over', 0, .12);
+    glow(c, 380, 470, 330, '#ffae5a', .55); glow(c, 380, 470, 90, '#fff2cc', 1);
+    c.fillStyle = '#fff6dc'; c.beginPath(); c.arc(380, 470, 44, 0, 7); c.fill();
+    rays(c, R, 380, 470, 26, -Math.PI / 2, Math.PI * 1.2, 650, '#ffd7a0', .09);
+    skyline(c, R, 520, 30, 120, '#6e2f5e', null); skyline(c, R, 566, 40, 170, '#2b1531', '#ffcf86');
+    c.fillStyle = '#150a19'; c.fillRect(0, 596, W, H); c.fillStyle = '#24122a'; c.fillRect(0, 596, W, 5);
+    c.strokeStyle = '#150a19'; c.lineWidth = 3; c.beginPath(); c.moveTo(0, 566); c.lineTo(W, 566); for (let x = 10; x < W; x += 34) { c.moveTo(x, 566); c.lineTo(x, 596); } c.stroke();
+    figure(c, 214, 596, 1.75, '#150a19', 1.1);
+    c.strokeStyle = 'rgba(40,16,40,.8)'; c.lineWidth = 2; for (let i = 0; i < 5; i++) { const bx = 120 + R() * 360, by = 170 + R() * 140, s = 6 + R() * 6; c.beginPath(); c.moveTo(bx - s, by - s * .4); c.quadraticCurveTo(bx - s * .3, by - s * .6, bx, by); c.quadraticCurveTo(bx + s * .3, by - s * .6, bx + s, by - s * .4); c.stroke(); }
+    glow(c, 300, 600, 300, '#ff8a5a', .12);
+    bokeh(c, R, 30, ['#ffcf86', '#ff9a6a'], 600, 840, 4, 22, .3);
+    finish(c, R, .45);
+  },
+  (c, R) => { // 1 deep sea
+    sky(c, [[0, '#3aa9bb'], [.16, '#127090'], [.45, '#073657'], [1, '#020a18']]);
+    rays(c, R, 300, -160, 34, Math.PI / 2, 1.1, 950, '#b8f4ff', .08);
+    dabs(c, R, 220, ['#bff6ff', '#6fd6e8'], 0, 140, 20, 70, .12, 'overlay', 0, .6);
+    c.save(); c.globalAlpha = .28; c.fillStyle = '#021624'; c.beginPath(); c.ellipse(170, 210, 120, 32, -.08, 0, 7); c.fill();
+    c.beginPath(); c.moveTo(60, 210); c.lineTo(10, 178); c.lineTo(22, 212); c.lineTo(8, 242); c.closePath(); c.fill(); c.restore();
+    jelly(c, R, 330, 360, 66, '#8de9ff'); jelly(c, R, 170, 470, 30, '#ff9bd2'); jelly(c, R, 470, 240, 22, '#b4a6ff'); jelly(c, R, 480, 500, 18, '#8de9ff');
+    c.save(); c.strokeStyle = 'rgba(200,245,255,.5)'; c.lineWidth = 1.2; for (let i = 0; i < 40; i++) { c.beginPath(); c.arc(R() * W, 120 + R() * 560, 1.5 + R() ** 2 * 7, 0, 7); c.stroke(); } c.restore();
+    ridge(c, R, 610, 26, .012, '#041a2a'); ridge(c, R, 660, 22, .02, '#020d17');
+    c.strokeStyle = '#03141f'; c.lineWidth = 6; c.lineCap = 'round'; for (let i = 0; i < 9; i++) { const kx = R() * W; c.beginPath(); c.moveTo(kx, H); c.bezierCurveTo(kx + 20, 640, kx - 20, 600, kx + (R() - .5) * 30, 520 + R() * 60); c.stroke(); }
+    bokeh(c, R, 50, ['#8de9ff', '#c0b4ff', '#ffffff'], 80, 820, 2, 12, .45);
+    finish(c, R, .55);
+  },
+  (c, R) => { // 2 star hill
+    sky(c, [[0, '#05061a'], [.3, '#16194e'], [.52, '#43307a'], [.66, '#9a5a9e'], [.74, '#e7a0b3'], [1, '#e7a0b3']]);
+    c.save(); c.translate(300, 290); c.rotate(-.55); dabs(c, R, 380, ['#c9b8ff', '#ffd6f0', '#9ab8ff'], -60, 60, 30, 90, .07, 'lighter', 0, .25); c.restore();
+    c.save(); c.translate(300, 290); c.rotate(-.55); for (let i = 0; i < 500; i++) { const s = R() ** 3 * 1.6 + .4; c.fillStyle = `rgba(255,255,255,${(.3 + R() * .7).toFixed(2)})`; c.fillRect((R() - .5) * 900, (R() - .5) * 120 * (R() + .3), s, s); } c.restore();
+    stars(c, R, 420, 520, 10); moon(c, 470, 140, 30);
+    c.save(); c.globalCompositeOperation = 'lighter'; const sg = c.createLinearGradient(110, 120, 250, 200); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(1, 'rgba(255,255,255,.9)'); c.strokeStyle = sg; c.lineWidth = 2; c.beginPath(); c.moveTo(110, 120); c.lineTo(250, 200); c.stroke(); c.restore();
+    glow(c, 300, 600, 420, '#ff9fc0', .25);
+    ridge(c, R, 586, 18, .006, '#2a1b48');
+    c.fillStyle = '#0b0a1f'; c.beginPath(); c.moveTo(0, H); c.lineTo(0, 610); c.quadraticCurveTo(260, 500, 600, 570); c.lineTo(600, H); c.fill();
+    tree(c, R, 470, 560, 1.25, '#0b0a1f'); figure(c, 270, 548, 1.45, '#0b0a1f', -.6, 'up');
+    bokeh(c, R, 26, ['#e2c8ff', '#ffc8e2'], 600, 840, 3, 14, .3);
+    finish(c, R, .4);
+  },
+  (c, R) => { // 3 forest afternoon
+    sky(c, [[0, '#f4f8cf'], [.25, '#bfdc8c'], [.52, '#5e9c54'], [.8, '#163720'], [1, '#0e2616']]);
+    for (let i = 0; i < 14; i++) { const x = R() * W, w = 6 + R() * 10; c.fillStyle = hexA('#7fa877', .55); c.fillRect(x, 0, w, H); }
+    rays(c, R, 60, -80, 30, 1.0, .5, 1100, '#fff4b0', .1);
+    for (let i = 0; i < 9; i++) { const x = R() * W, w = 14 + R() * 18; c.fillStyle = '#3c6a3f'; c.fillRect(x, 0, w, H); }
+    dabs(c, R, 520, ['#1c3f22', '#2f5f30', '#4f8a3e'], -40, 160, 20, 60, .5, 'source-over', 0, 3);
+    ridge(c, R, 600, 14, .01, '#1f4524'); ridge(c, R, 632, 10, .02, '#12301a');
+    c.fillStyle = '#0d2414'; c.fillRect(-10, 0, 66, H); c.fillRect(520, 0, 60, H); c.fillRect(470, 0, 22, H);
+    figure(c, 300, 618, 1.2, '#12301a', .4);
+    glow(c, 300, 520, 140, '#fff6c0', .25);
+    bokeh(c, R, 70, ['#fff2a0', '#e8ff9a'], 160, 700, 2, 9, .7);
+    bokeh(c, R, 10, ['#fff7c8'], 0, 840, 30, 60, .12);
+    finish(c, R, .45);
+  },
+  (c, R) => { // 4 aurora snowfield
+    sky(c, [[0, '#020812'], [.38, '#07202f'], [.6, '#0f3a48'], [.7, '#1d5360'], [1, '#1d5360']]);
+    stars(c, R, 380, 430, 6);
+    aurora(c, R, 230, 55, '#5effb3', '#c9fff0', .35); aurora(c, R, 160, 36, '#c56bff', '#ff9de0', .18); aurora(c, R, 280, 28, '#45d6ff', '#9ff7ff', .2);
+    peaks(c, R, 490, 170, 4, '#1e4256', 'rgba(220,245,255,.55)'); peaks(c, R, 535, 110, 6, '#0d2433', 'rgba(200,235,255,.3)');
+    const g = c.createLinearGradient(0, 520, 0, H); g.addColorStop(0, '#a8cdd8'); g.addColorStop(.35, '#4c7584'); g.addColorStop(1, '#0d1d27'); c.fillStyle = g;
+    c.beginPath(); c.moveTo(0, H); c.lineTo(0, 545); c.quadraticCurveTo(300, 515, 600, 550); c.lineTo(600, H); c.fill();
+    c.fillStyle = '#0a1720'; c.fillRect(400, 566, 54, 34); c.beginPath(); c.moveTo(394, 568); c.lineTo(427, 544); c.lineTo(460, 568); c.fill();
+    glow(c, 414, 584, 50, '#ffc56b', .9); c.fillStyle = '#ffd890'; c.fillRect(410, 578, 9, 9);
+    figure(c, 250, 624, 1.15, '#0a1720', .5); glow(c, 264, 566, 34, '#ffc56b', .9);
+    bokeh(c, R, 60, ['#ffffff'], 0, 840, 1, 4, .7);
+    finish(c, R, .5);
+  },
+  (c, R) => { // 5 sakura bus stop
+    sky(c, [[0, '#9fb0ee'], [.34, '#e7b4d6'], [.6, '#ffd6dc'], [.68, '#fff1e6'], [1, '#fff1e6']]);
+    glow(c, 170, 200, 300, '#ffffff', .5);
+    dabs(c, R, 200, ['#ffffff', '#ffe1ea', '#f4c4e0'], 80, 420, 30, 110, .16, 'source-over', 0, .2);
+    const g = c.createLinearGradient(0, 572, 0, H); g.addColorStop(0, '#e9a9c1'); g.addColorStop(1, '#a96a90'); c.fillStyle = g; c.fillRect(0, 572, W, H);
+    c.fillStyle = '#6b4468'; c.fillRect(445, 400, 5, 174); c.beginPath(); c.arc(447, 396, 18, 0, 7); c.fill(); c.fillRect(400, 540, 40, 5); c.fillRect(402, 544, 3, 30); c.fillRect(436, 544, 3, 30);
+    c.fillStyle = '#ffe8f0'; c.beginPath(); c.arc(447, 396, 11, 0, 7); c.fill();
+    figure(c, 300, 578, 1.7, '#5a3557', .7, 'umbrella');
+    c.strokeStyle = '#4b2b44'; c.lineCap = 'round';
+    const branch = (x0, y0, x1, y1, w) => { c.lineWidth = w; c.beginPath(); c.moveTo(x0, y0); c.quadraticCurveTo((x0 + x1) / 2 + 30, (y0 + y1) / 2 + 40, x1, y1); c.stroke(); };
+    branch(-20, 40, 260, 150, 14); branch(120, 100, 230, 50, 6); branch(60, 70, 140, 210, 6); branch(620, 10, 380, 110, 12); branch(500, 50, 470, 180, 5);
+    c.save(); for (let i = 0; i < 260; i++) { const t = R(); const left = R() < .55; const bx = left ? -10 + t * 280 : 380 + t * 240, by = left ? 30 + R() * 190 : R() * 190; c.globalAlpha = .6 + R() * .4; c.fillStyle = R() < .5 ? '#ffb3cf' : '#ffd9e6'; c.beginPath(); c.arc(bx, by, 4 + R() * 8, 0, 7); c.fill(); } c.restore();
+    petals(c, R, 140, ['#ffb3cf', '#ffd2e2', '#ff9cc0'], true);
+    finish(c, R, .3);
+  },
+];
+const ART = PAINT.map((fn, i) => {
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const c = cv.getContext('2d');
+  try { fn(c, seeded(1000 + i * 17)); } catch (e) { console.warn('art', i, e); }
+  return cv.toDataURL('image/jpeg', .9);
+});
+
+/* ------------------------------------------------------------ card build */
+const SYM = {
+  dot: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.6"/></svg>',
+  dia: '<svg viewBox="0 0 10 10"><path d="M5 .4 9.6 5 5 9.6.4 5z"/></svg>',
+  star: '<svg viewBox="0 0 10 10"><path d="M5 .3l1.4 3.1 3.3.3-2.5 2.2.8 3.3L5 7.5 2 9.2l.8-3.3L.3 3.7l3.3-.3z"/></svg>',
+  spark: '<svg viewBox="0 0 10 10"><path d="M5 0Q5.6 4.4 10 5 5.6 5.6 5 10 4.4 5.6 0 5 4.4 4.4 5 0z"/></svg>',
+};
+const HEART = '<svg viewBox="0 0 24 24"><path d="M12 20.3 4.6 13a4.6 4.6 0 0 1 6.5-6.5l.9.9.9-.9a4.6 4.6 0 0 1 6.5 6.5z"/></svg>';
+const pad = n => String(n).padStart(4, '0');
+const fmt = n => n.toLocaleString('ko-KR');
+let userArt = null; const madeURLs = [];
+
+function makeCard(a, tier, opts = {}) {
+  const el = document.createElement('div'); el.className = 'card'; el._asset = a; el._serial = opts.serial;
+  const at = ATTR[a.attr];
+  el.innerHTML = `<div class="card__flip"><div class="card__tilt">
+    <div class="face front">
+      <div class="f-plate"></div>
+      <div class="f-art"><img class="art" alt="" draggable="false" decoding="async"><div class="f-artholo"></div></div>
+      <div class="f-band top"></div><div class="f-band bot"></div>
+      <div class="f-name"><span class="f-title">${a.title}</span><span class="f-type" style="--c1:${at.c1};--c2:${at.c2}" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
+      <div class="f-illus">Illus. ${a.handle} · ${a.site} · ${a.date}</div>
+      <div class="f-typeline">[${at.name} / ${a.tags.join(' · ')}]</div>
+      <div class="f-text"><p class="f-flavor">${a.flavor}</p>
+        <div class="f-stats"><span>감상<b>${fmt(a.views)}</b></span><span>앨범<b>${a.albums}</b></span>${a.fav ? `<span class="fav" title="즐겨찾기">${HEART}</span>` : ''}</div></div>
+      <div class="f-foot"><span class="f-no"><svg viewBox="0 0 32 36"><use href="#mk"/></svg>LK-${pad(a.id)}</span><span class="f-rar"></span><span class="f-serial"></span></div>
+      <div class="f-foil"></div><div class="f-sparkle"></div><div class="f-glare"></div><div class="f-edge"></div>
+    </div>
+    <div class="face back">
+      <div class="b-frame"></div><div class="b-corner tl"></div><div class="b-corner tr"></div><div class="b-corner bl"></div><div class="b-corner br"></div>
+      <div class="b-word t">LAKOMICS</div><div class="b-sub t">ASSET CARD</div><div class="b-word b">LAKOMICS</div><div class="b-sub b">ASSET CARD</div>
+      <div class="b-emblem"></div><svg class="b-mark" viewBox="0 0 32 36"><use href="#mk"/></svg>
+      <div class="b-sheen"></div>
+    </div></div></div>`;
+  setTier(el, tier);
+  if (opts.src) el._override = opts.src;
+  refreshArt(el);
+  bindTilt(el, opts.tilt);
+  return el;
+}
+function setTier(el, k) {
+  const t = TIERS[TI[k]];
+  el.dataset.tier = k; el.dataset.layout = FULL.has(k) ? 'full' : 'frame'; el.dataset.glow = t.glow === 'rainbow' ? 'rainbow' : '';
+  el.style.setProperty('--glow', t.glow === 'rainbow' ? '#fff' : t.glow);
+  $('.f-rar', el).innerHTML = t.sym.map(s => SYM[s]).join('') + `<span>${t.code}</span>`;
+  const serial = el._serial ?? (k === 'lr' ? 'No. 1 / 1' : k === 'ur' ? 'No. 3 / 10' : '');
+  $('.f-serial', el).textContent = (k === 'lr' || k === 'ur' || el.classList.contains('show-serial')) ? serial || 'No. 3 / 10' : '';
+}
+function refreshArt(el) { const img = $('img.art', el); const src = el._override || userArt || ART[el._asset.attr]; if (img.getAttribute('src') !== src) img.src = src; }
+
+/* --------------------------------------------------------------- tilt */
+const MAX = RM ? 3 : 14;
+function applyPose(el, x, y) { // x, y in 0..1
+  const px = x - .5, py = y - .5, s = el.style;
+  s.setProperty('--mx', (x * 100).toFixed(2) + '%'); s.setProperty('--my', (y * 100).toFixed(2) + '%');
+  s.setProperty('--rx', (-py * MAX * 1.4).toFixed(2) + 'deg'); s.setProperty('--ry', (px * MAX * 2).toFixed(2) + 'deg');
+  s.setProperty('--ang', (Math.atan2(py, px) * 180 / Math.PI + 90).toFixed(1) + 'deg'); s.setProperty('--o', '1');
+}
+function clearPose(el) { ['--mx', '--my', '--rx', '--ry', '--ang', '--o'].forEach(p => el.style.removeProperty(p)); }
+function bindTilt(el, hooks = {}) {
+  let rect = null, raf = 0, lx = .5, ly = .5, down = false;
+  const update = () => { raf = 0; applyPose(el, lx, ly); };
+  const move = e => {
+    if (el.classList.contains('down') || el.classList.contains('charge')) return;
+    if (e.pointerType === 'touch' && !down) return;
+    if (!rect) rect = el.getBoundingClientRect();
+    lx = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)); ly = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    if (!el.classList.contains('active')) { el.classList.add('active'); hooks.start && hooks.start(); }
+    if (!raf) raf = requestAnimationFrame(update);
+  };
+  const end = () => { down = false; rect = null; if (raf) cancelAnimationFrame(raf), raf = 0; if (el.classList.contains('active')) { el.classList.remove('active'); clearPose(el); hooks.end && hooks.end(); } };
+  el.addEventListener('pointerenter', () => { rect = el.getBoundingClientRect(); });
+  el.addEventListener('pointerdown', e => { down = true; rect = el.getBoundingClientRect(); move(e); });
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerleave', end); el.addEventListener('pointercancel', end);
+  el.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') end(); });
+}
+
+/* ------------------------------------------------------------ sections */
+// 1 ladder
+const ladder = $('#ladder'), ladderAsset = ASSETS[2];
+TIERS.forEach(t => {
+  const r = document.createElement('div'); r.className = 'rung';
+  r.appendChild(makeCard(ladderAsset, t.k));
+  r.insertAdjacentHTML('beforeend', `<div><h3><span class="code" data-t="${t.k}">${t.code}</span>${t.name}<span class="odds">${t.odds}%</span></h3><p>${t.desc}</p></div>`);
+  ladder.appendChild(r);
+});
+const backCard = makeCard(ladderAsset, 'n'); backCard.classList.add('down'); $('#backHolder').appendChild(backCard);
+
+// 2 featured
+const featAsset = ASSETS[0];
+let demoOn = !RM, demoHold = 0, demoRAF = 0, featVisible = true, featTier = 'ssr';
+const feat = makeCard(featAsset, featTier, { tilt: { start: () => stopDemo(true), end: () => scheduleDemo() } });
+$('#featHolder').appendChild(feat);
+const seg = $('#tierSeg');
+TIERS.forEach(t => seg.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-k="${t.k}" aria-checked="false" tabindex="-1">${t.code}</button>`));
+function showTier(k, focus) {
+  featTier = k; setTier(feat, k); const t = TIERS[TI[k]];
+  seg.querySelectorAll('button').forEach(b => { const on = b.dataset.k === k; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); });
+  const code = $('#fCode'); code.dataset.t = k; code.textContent = t.code; $('#fName').textContent = t.name; $('#fOdds').textContent = `뽑힐 확률 ${t.odds}%`;
+  $('#fDesc').textContent = t.desc;
+  $('#fLayers').innerHTML = t.layers.map((l, i) => `<li><span class="n">${i + 1}</span><b>${l[0]}</b><span>${l[1]}</span></li>`).join('');
+}
+seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTier(b.dataset.k); });
+seg.addEventListener('keydown', e => {
+  const i = TI[featTier], d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
+});
+showTier(featTier);
+function demoFrame(t) {
+  demoRAF = 0; if (!demoOn || !featVisible || feat.classList.contains('active') || Date.now() < demoHold) return;
+  if (!demoT0) demoT0 = t; const k = Math.min(1, (t - demoT0) / 1600), e = k * k * (3 - 2 * k);
+  const sx = .5 + .36 * Math.sin(t * .00062), sy = .5 + .26 * Math.sin(t * .00097 + 1.2);
+  applyPose(feat, .34 + (sx - .34) * e, .24 + (sy - .24) * e); feat.style.setProperty('--o', (.5 + .35 * e).toFixed(3));
+  demoRAF = requestAnimationFrame(demoFrame);
+}
+let demoT0 = 0;
+function startDemo() { if (!demoOn || demoRAF || !featVisible) return; demoT0 = 0; feat.classList.add('demo'); demoRAF = requestAnimationFrame(demoFrame); }
+function stopDemo() { if (demoRAF) cancelAnimationFrame(demoRAF), demoRAF = 0; feat.classList.remove('demo'); }
+let demoTimer = 0;
+function scheduleDemo() { clearTimeout(demoTimer); if (!demoOn) return; demoTimer = setTimeout(() => { if (!feat.classList.contains('active')) startDemo(); }, 2600); }
+new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
+const tgDemo = $('#tgDemo');
+if (RM) { tgDemo.setAttribute('aria-pressed', 'false'); }
+tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
+const tgFx = $('#tgFx');
+tgFx.addEventListener('click', () => { const on = tgFx.getAttribute('aria-pressed') !== 'true'; tgFx.setAttribute('aria-pressed', on); $('#featStage').classList.toggle('plain', !on); });
+$('#tgFlip').addEventListener('click', () => feat.classList.toggle('down'));
+
+// 4 anatomy
+const anatAsset = ASSETS[5];
+const anat = makeCard(anatAsset, 'sr', { serial: 'No. 3 / 10' }); anat.classList.add('show-serial'); setTier(anat, 'sr');
+$('#anatCard').appendChild(anat);
+const FIELDS = [
+  ['.f-title', '카드 이름', '에셋 제목. 없으면 파일 이름에서 정리', anatAsset.title],
+  ['.f-type', '속성', '태그나 분류를 6가지 속성으로 묶어 아이콘과 색으로', '꽃'],
+  ['.f-art', '그림', '에셋 이미지 그대로. 풀아트 등급은 카드 전체를 덮음', ''],
+  ['.f-illus', '일러스트 줄', '작가 · 출처 사이트 · 수집일', `${anatAsset.handle} · ${anatAsset.site} · ${anatAsset.date}`],
+  ['.f-typeline', '타입 줄', '속성 + 대표 태그 2–3개', '[꽃 / 봄 · 일상]'],
+  ['.f-flavor', '한 줄 글', '직접 적거나 비워 둠', '', '아이디어'],
+  ['.f-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기 표시. 겨루는 숫자가 아니라 구경용', '', '아이디어'],
+  ['.f-no', '카드 번호', '에셋마다 고정 번호 LK-0001부터', 'LK-0215'],
+  ['.f-rar', '등급 마크', '뽑을 때 정해진 등급, 모양 개수로 구분', 'SR'],
+  ['.f-serial', '시리얼', 'UR·LR만. 이 그림으로 나온 몇 번째 카드인지', 'No. 3 / 10'],
+];
+const fl = $('#fields'), anatHolder = $('#anatCard');
+FIELDS.forEach((f, i) => {
+  fl.insertAdjacentHTML('beforeend', `<li data-i="${i}" tabindex="0"><span class="k">${i + 1}</span><b>${f[1]}${f[4] ? `<span class="tag">${f[4]}</span>` : ''}</b><span>${f[2]}${f[3] ? `<i>${f[3]}</i>` : ''}</span></li>`);
+  anatHolder.insertAdjacentHTML('beforeend', `<span class="pin" data-i="${i}">${i + 1}</span>`);
+});
+function placePins() {
+  const cb = anat.getBoundingClientRect(), hb = anatHolder.getBoundingClientRect();
+  if (!cb.width) return;
+  const L = cb.left - hb.left - 15, Rr = cb.right - hb.left + 15, side = ['L', 'R', 'C', 'R', 'L', 'L', 'L', 'L', 'B', 'R'];
+  FIELDS.forEach((f, i) => {
+    const t = $(f[0], anat); if (!t) return; const r = t.getBoundingClientRect(), pin = anatHolder.querySelector(`.pin[data-i="${i}"]`), sd = side[i];
+    let x = sd === 'L' ? L : sd === 'R' ? Rr : r.left - hb.left + r.width / 2, y = r.top - hb.top + r.height / 2;
+    if (sd === 'C') y = r.top - hb.top + r.height * .5;
+    if (sd === 'B') y = cb.bottom - hb.top + 15;
+    pin.className = 'pin ' + sd; pin.style.left = x + 'px'; pin.style.top = y + 'px';
+  });
+}
+new ResizeObserver(placePins).observe(anatHolder);
+fl.addEventListener('pointerover', e => { const li = e.target.closest('li'); anatHolder.querySelectorAll('.pin').forEach(p => p.classList.toggle('hot', li && p.dataset.i === li.dataset.i)); });
+fl.addEventListener('pointerleave', () => anatHolder.querySelectorAll('.pin').forEach(p => p.classList.remove('hot')));
+fl.addEventListener('focusin', e => { const li = e.target.closest('li'); anatHolder.querySelectorAll('.pin').forEach(p => p.classList.toggle('hot', li && p.dataset.i === li.dataset.i)); });
+
+/* ----------------------------------------------------------------- gacha */
+const stage = $('#stage'), pack = $('#pack'), stCards = $('#stCards'), stFlash = $('#stFlash'), stParticles = $('#stParticles'), stHint = $('#stHint');
+const btn1 = $('#pull1'), btn10 = $('#pull10'), skipBtn = $('#skipBtn'), force = $('#force');
+$('#gOdds').innerHTML = TIERS.map(t => `<b>${t.code}</b> ${t.odds}%`).join(' · ') + ' · 10연은 SR 이상 1장 보장';
+let busy = false, skip = false, waiters = [];
+const wait = ms => new Promise(res => { if (skip) return res(); const id = setTimeout(res, ms); waiters.push(() => { clearTimeout(id); res(); }); });
+function doSkip() { if (!busy || skip) return; skip = true; waiters.splice(0).forEach(f => f()); }
+function roll() { let r = Math.random() * 100; for (const t of TIERS) { if ((r -= t.odds) < 0) return t.k; } return 'n'; }
+function draw(n) {
+  const out = []; for (let i = 0; i < n; i++) out.push({ a: ASSETS[Math.random() * ASSETS.length | 0], k: roll() });
+  if (n === 10 && !out.some(o => TI[o.k] >= TI.sr)) out[9].k = 'sr';
+  if (force.value) out[n === 1 ? 0 : Math.random() * n | 0].k = force.value;
+  return out;
+}
+const glowOf = k => TIERS[TI[k]].glow;
+function setBusy(b) { busy = b; btn1.disabled = btn10.disabled = b; skipBtn.hidden = !b; stage.classList.toggle('busy', b); }
+function flash(color) { stFlash.style.background = color; stFlash.classList.remove('on'); void stFlash.offsetWidth; stFlash.classList.add('on'); }
+function burst(el, k) {
+  const sr = stage.getBoundingClientRect(), r = el.getBoundingClientRect(), cx = r.left - sr.left + r.width / 2, cy = r.top - sr.top + r.height / 2;
+  const pal = k === 'lr' ? ['#ff9cc0', '#ffe7a0', '#a8ffd6', '#a8d4ff', '#d9b8ff'] : k === 'ur' ? ['#ffe08a', '#fff4cc', '#f0b44a'] : ['#fff1b5', '#ffd25a', '#ffffff'];
+  const n = k === 'ssr' ? 34 : 56;
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement('span'); p.className = 'pt' + (i % 3 === 0 ? ' sq' : '');
+    const a = Math.random() * Math.PI * 2, d = 90 + Math.random() * Math.max(160, r.width * 1.4);
+    p.style.cssText = `left:${cx}px;top:${cy}px;--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d}px;--pc:${pal[i % pal.length]};--dur:${.8 + Math.random() * .7}s`;
+    stParticles.appendChild(p); setTimeout(() => p.remove(), 1700);
+  }
+}
+async function pull(n) {
+  if (busy) return; setBusy(true); skip = false; stopDemo();
+  const res = draw(n), top = res.reduce((m, o) => Math.max(m, TI[o.k]), 0), topK = TIERS[top].k;
+  stCards.innerHTML = ''; stCards.className = 'st-cards ' + (n === 1 ? 'single' : 'multi'); stage.classList.remove('has-cards', 'rays');
+  $('#gRes').textContent = '뽑는 중…';
+  stHint.textContent = '화면을 누르면 건너뜁니다';
+  $('#packCount').textContent = n === 1 ? '1장' : '10장';
+  if (!RM) {
+    pack.className = 'pack'; pack.dataset.leak = topK === 'lr' ? 'rainbow' : ''; pack.style.setProperty('--leak', topK === 'lr' ? '#fff' : glowOf(topK));
+    await wait(120); pack.classList.add('shake'); await wait(top >= 3 ? 1000 : 650);
+    pack.classList.remove('shake'); pack.classList.add('torn'); await wait(top >= 3 ? 750 : 480);
+    pack.classList.add('out'); await wait(320);
+  }
+  stage.classList.add('has-cards');
+  const els = res.map((o, i) => {
+    const el = makeCard(o.a, o.k, { serial: o.k === 'ur' ? `No. ${1 + (Math.random() * 10 | 0)} / 10` : undefined });
+    el.style.setProperty('--i', i); if (!RM) el.classList.add('down'); stCards.appendChild(el); return el;
+  });
+  void stCards.offsetWidth; stCards.classList.add('dealt');
+  await wait(RM ? 60 : 420 + n * 45);
+  for (let i = 0; i < els.length; i++) await reveal(els[i], res[i].k, n === 1);
+  stage.classList.remove('rays'); stHint.textContent = '카드를 눌러 크게 보기 · 다시 뽑으려면 아래 버튼';
+  const counts = {}; res.forEach(o => counts[o.k] = (counts[o.k] || 0) + 1);
+  $('#gRes').innerHTML = '이번 결과' + TIERS.slice().reverse().filter(t => counts[t.k]).map(t => `<span class="code" data-t="${t.k}">${t.code}</span>${counts[t.k]}`).join('');
+  setBusy(false); scheduleDemo();
+}
+async function reveal(el, k, single) {
+  const ti = TI[k], big = ti >= TI.ssr;
+  if (RM) { el.classList.add('revealed'); return; }
+  if (skip) { el.classList.add('quick'); el.classList.remove('down'); el.classList.add('revealed'); return; }
+  el.classList.toggle('big', big && single); el.classList.add('charge');
+  if (big) {
+    const sr = stage.getBoundingClientRect(), r = el.getBoundingClientRect();
+    stage.style.setProperty('--cx', (r.left - sr.left + r.width / 2) + 'px'); stage.style.setProperty('--cy', (r.top - sr.top + r.height / 2) + 'px');
+    stage.dataset.ray = k === 'lr' ? 'rainbow' : ''; stage.style.setProperty('--ray', hexA(k === 'ur' ? '#ffb21e' : '#ffd25a', .55)); stage.classList.add('rays');
+  }
+  await wait(big ? (single ? 1100 : 900) : single ? 560 : ti >= TI.sr ? 380 : 220);
+  if (skip) { el.classList.remove('charge'); el.classList.add('quick'); el.classList.remove('down'); el.classList.add('revealed'); return; }
+  if (big) { flash(k === 'lr' ? '#f4ecff' : k === 'ur' ? '#fff3d6' : '#ffffff'); el.classList.add('pop'); }
+  el.classList.remove('down');
+  if (big) setTimeout(() => burst(el, k), 120);
+  await wait(big ? 1000 : single ? 420 : 170);
+  el.classList.remove('charge', 'big'); el.classList.add('revealed');
+  if (big) { await wait(250); stage.classList.remove('rays'); }
+}
+btn1.addEventListener('click', () => pull(1)); btn10.addEventListener('click', () => pull(10)); skipBtn.addEventListener('click', doSkip);
+pack.addEventListener('click', e => { e.stopPropagation(); if (!busy) pull(1); });
+pack.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && !busy) { e.preventDefault(); pull(1); } });
+stage.addEventListener('click', e => { if (busy) { doSkip(); return; } const c = e.target.closest('.card.revealed'); if (c) openZoom(c); });
+new IntersectionObserver(es => stage.classList.toggle('paused', !es[0].isIntersecting)).observe(stage);
+
+// zoom
+const zoom = $('#zoom'), zoomHolder = $('#zoomHolder'); let zoomFrom = null;
+function openZoom(c) {
+  zoomFrom = document.activeElement; zoomHolder.innerHTML = '';
+  const z = makeCard(c._asset, c.dataset.tier, { serial: c._serial, src: c._override }); zoomHolder.appendChild(z);
+  zoom.hidden = false; $('#zoomClose').focus();
+}
+function closeZoom() { zoom.hidden = true; zoomHolder.innerHTML = ''; zoomFrom && zoomFrom.focus && zoomFrom.focus(); }
+$('#zoomClose').addEventListener('click', closeZoom);
+zoom.addEventListener('click', e => { if (e.target === zoom) closeZoom(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !zoom.hidden) closeZoom(); });
+
+/* -------------------------------------------------------- user images */
+const fileIn = $('#file'), artState = $('#artState'), resetBtn = $('#resetArt'), imgbar = $('#imgbar');
+const allCards = () => document.querySelectorAll('.card');
+function setGlobal(file) {
+  if (!file || !/^image\//.test(file.type)) { artState.textContent = '이미지 파일만 쓸 수 있어요'; return; }
+  const url = URL.createObjectURL(file); madeURLs.push(url); userArt = url;
+  allCards().forEach(c => { c._override = null; refreshArt(c); });
+  artState.textContent = `모든 카드: ${file.name}`; resetBtn.hidden = false;
+}
+fileIn.addEventListener('change', () => { setGlobal(fileIn.files[0]); fileIn.value = ''; });
+$('#fileBtn').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileIn.click(); } });
+resetBtn.addEventListener('click', () => {
+  userArt = null; madeURLs.splice(0).forEach(u => URL.revokeObjectURL(u));
+  allCards().forEach(c => { c._override = null; refreshArt(c); }); artState.textContent = '원래 그림으로 돌렸습니다'; resetBtn.hidden = true;
+});
+const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+let lastTarget = null;
+document.addEventListener('dragover', e => {
+  if (!hasFiles(e)) return; e.preventDefault();
+  const c = e.target.closest && e.target.closest('.card'), bar = e.target.closest && e.target.closest('#imgbar');
+  e.dataTransfer.dropEffect = c || bar ? 'copy' : 'none';
+  if (lastTarget !== c) { lastTarget && lastTarget.classList.remove('drop-target'); c && c.classList.add('drop-target'); lastTarget = c; }
+  imgbar.classList.toggle('drop', !!bar);
+});
+document.addEventListener('dragleave', e => { if (e.relatedTarget === null) { lastTarget && lastTarget.classList.remove('drop-target'); lastTarget = null; imgbar.classList.remove('drop'); } });
+document.addEventListener('drop', e => {
+  if (!hasFiles(e)) return; e.preventDefault();
+  lastTarget && lastTarget.classList.remove('drop-target'); lastTarget = null; imgbar.classList.remove('drop');
+  const f = e.dataTransfer.files[0]; const c = e.target.closest && e.target.closest('.card');
+  if (e.target.closest && e.target.closest('#imgbar')) return setGlobal(f);
+  if (!c || !f) return;
+  if (!/^image\//.test(f.type)) { artState.textContent = '이미지 파일만 쓸 수 있어요'; return; }
+  const url = URL.createObjectURL(f); madeURLs.push(url); c._override = url; refreshArt(c);
+  artState.textContent = `카드 한 장: ${f.name}`; resetBtn.hidden = false;
+});
+
+placePins(); startDemo();
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(placePins);
+})();
+</script>
+</body>
+</html>
