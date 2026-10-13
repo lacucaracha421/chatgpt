@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" data-numfont="oswald">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,6 +9,9 @@
 <link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
 <link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
 <link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<!-- Card numerals (PW · COST · Count · Lv) only. The app would bundle the chosen OFL font locally. -->
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@800&family=Oswald:wght@700&display=swap">
 <style>
 /* ---------- Registered pointer variables (so they can transition when the pointer leaves) ---------- */
 @property --mx { syntax: '<percentage>'; inherits: true; initial-value: 50%; }
@@ -313,23 +316,33 @@ ul.ideas li::marker { color: var(--c-faint); }
 .card[data-subj="0"] .f-subjwrap { display: none; }
 
 /* top-left: 코스트 (tier) and 보유 (duplicates) */
-.f-cost, .f-dup { display: grid; place-items: center; border-radius: 50%; border: .8cqw solid transparent; color: #fff; font-weight: 800; font-variant-numeric: tabular-nums;
+.f-cost, .f-dup { display: grid; place-items: center; border-radius: 50%; border: .8cqw solid transparent; color: #fff;
   background: radial-gradient(circle at 40% 32%, #3d3756 0%, #1b1828 70%) padding-box, var(--ring) border-box;
   box-shadow: 0 .4cqw .9cqw rgba(0, 0, 0, .5), inset 0 0 0 .35cqw color-mix(in srgb, var(--c2) 70%, transparent); text-shadow: 0 .2cqw .3cqw rgba(0, 0, 0, .6); }
-.f-cost { left: 5.4cqw; top: 5.6cqw; width: 13cqw; height: 13cqw; font-size: 7cqw; line-height: 1; }
-.f-dup { left: 8.6cqw; top: 19.4cqw; width: 8.6cqw; height: 8.6cqw; font-size: 3.8cqw; line-height: 1; }
-.f-cost::before, .f-dup::before { position: absolute; left: 50%; top: -1.2cqw; transform: translateX(-50%); padding: .2cqw 1.1cqw; border-radius: .6cqw; white-space: nowrap;
-  font-size: 1.7cqw; font-weight: 800; letter-spacing: .04em; color: #fff; background: linear-gradient(180deg, var(--c1), var(--c2)); box-shadow: 0 0 0 .2cqw rgba(0, 0, 0, .35); text-shadow: 0 .1cqw .2cqw rgba(0, 0, 0, .5); }
-.f-cost::before { content: "코스트"; }
-.f-dup::before { content: "보유"; top: -1.4cqw; font-size: 1.5cqw; }
-.f-dup small { font-size: 2.2cqw; margin-right: .2cqw; }
+.f-cost { left: 5.4cqw; top: 5.6cqw; width: 13cqw; height: 13cqw; }
+.f-dup { left: 8.6cqw; top: 19.4cqw; width: 8.6cqw; height: 8.6cqw; }
+/* card numerals: one condensed display face, sized by its digit height (--cap) and trimmed to the cap so it centres optically */
+:root { --num-font: "Oswald", "Arial Narrow", "Roboto Condensed", Impact, sans-serif; --num-w: 700; --cap: .83; }
+:root[data-numfont="barlow"] { --num-font: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", Impact, sans-serif; --num-w: 800; --cap: .72; }
+:root[data-numfont="anton"] { --num-font: "Anton", Impact, "Arial Narrow", sans-serif; --num-w: 400; --cap: .88; }
+.num { display: block; font-family: var(--num-font); font-weight: var(--num-w); font-style: normal; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums;
+  text-box: trim-both cap alphabetic; }
+.f-cost .num { font-size: calc(7.3cqw / var(--cap)); }
+.f-dup .num { font-size: calc(4.6cqw / var(--cap)); }
+.f-dup.two .num { font-size: calc(3.5cqw / var(--cap)); letter-spacing: -.02em; }
+.f-cost::before, .f-dup::before { position: absolute; left: 50%; top: -1.25cqw; transform: translateX(-50%); padding: .25cqw 1.1cqw .2cqw; border-radius: .6cqw; white-space: nowrap;
+  font-family: var(--num-font); font-weight: var(--num-w); font-size: 1.85cqw; line-height: 1.05; letter-spacing: .06em; color: #fff;
+  background: linear-gradient(180deg, var(--c1), var(--c2)); box-shadow: 0 0 0 .2cqw rgba(0, 0, 0, .35); text-shadow: 0 .1cqw .2cqw rgba(0, 0, 0, .5); }
+.f-cost::before { content: "COST"; }
+.f-dup::before { content: "Count"; top: -1.35cqw; font-size: 1.6cqw; letter-spacing: .03em; }
 
-/* top-right: 파워 (resolution) + 속성 gem + favourite heart */
-.f-power { right: 6cqw; top: 3.9cqw; display: flex; align-items: baseline; gap: .6cqw; color: #fff; font-weight: 800; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+/* top-right: PW (resolution) — big leading digits, small trailing 000 with "PW" printed above them */
+.f-power { right: 6cqw; top: 4.6cqw; display: flex; align-items: flex-end; gap: .5cqw; color: #fff; line-height: 1;
   text-shadow: 0 0 .25cqw #000, 0 0 .25cqw #000, 0 0 .6cqw rgba(0, 0, 0, .7), 0 .3cqw .7cqw rgba(0, 0, 0, .55); }
-.f-power b { font-size: 9.2cqw; }
-.f-power small { font-size: 5cqw; }
-.f-power i { font-style: normal; font-size: 2.1cqw; letter-spacing: .04em; align-self: flex-start; margin-top: 1.2cqw; }
+.f-power b.num { font-size: calc(7.4cqw / var(--cap)); }
+.pw-tail { display: flex; flex-direction: column; align-items: flex-end; gap: .7cqw; }
+.pw-tail i { font-family: var(--num-font); font-weight: var(--num-w); font-style: normal; font-size: 2.3cqw; line-height: 1; letter-spacing: .08em; text-box: trim-both cap alphabetic; }
+.pw-tail small.num { font-size: calc(3.9cqw / var(--cap)); }
 .f-gem { right: 6cqw; top: 14.6cqw; display: flex; align-items: center; gap: 1cqw; }
 .f-type { width: 7.2cqw; height: 7.2cqw; border-radius: 50%; display: grid; place-items: center;
   background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .45cqw rgba(255, 255, 255, .6), 0 0 0 .8cqw rgba(0, 0, 0, .4), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); }
@@ -361,6 +374,7 @@ ul.ideas li::marker { color: var(--c-faint); }
   background: linear-gradient(180deg, color-mix(in srgb, var(--c2) 70%, #000), color-mix(in srgb, var(--c2) 45%, #000)); box-shadow: inset 0 0 0 .25cqw rgba(255, 255, 255, .3);
   clip-path: polygon(1.2cqw 0, 100% 0, 100% 100%, 1.2cqw 100%, 0 calc(100% - 1.2cqw), 0 1.2cqw); text-shadow: 0 .15cqw .3cqw rgba(0, 0, 0, .5); }
 .nb-lv i { font-style: normal; font-size: 2.4cqw; }
+.nb-lv .num { display: inline-block; font-size: calc(3.7cqw / var(--cap)); }
 .f-title { justify-self: center; max-width: 100%; font-size: 5.6cqw; font-weight: 800; letter-spacing: -.035em; white-space: nowrap; line-height: 1.25; padding: .3cqw 0; transform: scaleX(.92); }
 .nb-no { display: flex; flex-direction: column; align-items: flex-end; gap: .4cqw; font-size: 2.1cqw; font-weight: 800; letter-spacing: .03em; line-height: 1; font-variant-numeric: tabular-nums; }
 .f-rar { display: inline-flex; align-items: center; gap: .4cqw; font-weight: 800; letter-spacing: .06em; }
@@ -526,6 +540,7 @@ ul.ideas li::marker { color: var(--c-faint); }
         <div class="toggles">
           <button class="btn" type="button" id="tgFx" aria-pressed="true"><span class="dot"></span>광택 효과</button>
           <button class="btn" type="button" id="tgDemo" aria-pressed="true"><span class="dot"></span>자동 기울이기</button>
+          <label class="demo-pick">숫자 폰트 <select class="sel" id="numSel"><option value="oswald">Oswald (기본)</option><option value="barlow">Barlow Condensed</option><option value="anton">Anton</option></select></label>
           <button class="btn" type="button" id="tgFlip"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg>뒤집기</button>
         </div>
         <p class="note" style="font-size:13px">광택을 끄면 같은 카드의 맨 상태가 보여, 효과가 얼마나 더해졌는지 비교할 수 있습니다.</p>
@@ -584,6 +599,7 @@ ul.ideas li::marker { color: var(--c-faint); }
       <li><b>카드 도감</b> — 작가별·속성별 바인더. 못 뽑은 칸은 흐린 실루엣, 즐겨찾기한 카드는 테두리가 빛남.</li>
       <li><b>튀어나올 부분</b> — 흰 배경 그림은 배경을 지운 투명 레이어를 한 번 만들어 두면 SSR 이상에서 테두리 위로 나옵니다.</li>
       <li><b>원본은 그대로</b> — 카드는 에셋을 가리키기만 하고 파일을 복사하거나 바꾸지 않음.</li>
+      <li><b>숫자 폰트</b> — PW · COST · Count · Lv 숫자에만 쓰는 폰트. 데스크톱 앱은 오프라인이라 고른 폰트(OFL 라이선스)를 앱에 직접 넣어 씁니다.</li>
     </ul>
   </section>
 </main>
@@ -600,6 +616,10 @@ ul.ideas li::marker { color: var(--c-faint); }
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = (s, r = document) => r.querySelector(s);
 const DPR = Math.min(2, window.devicePixelRatio || 1);
+// Numeral face for PW · COST · Count · Lv only (comparison option, remembered per viewer).
+let numFont = 'oswald';
+try { const v = localStorage.getItem('lk-gacha-numfont'); if (/^(oswald|barlow|anton)$/.test(v || '')) numFont = v; } catch (e) { /* storage blocked */ }
+document.documentElement.dataset.numfont = numFont;
 
 /* ------------------------------------------------------- procedural art
    Every scene is two layers at card size (600×840): a background and a transparent subject.
@@ -1158,7 +1178,7 @@ const cards = new Set();
 /* Card-game stats from real asset data:
    코스트 ← tier · 보유 / Lv ← duplicates · 파워 ← resolution · 속성 ← dominant colour · 특성 ← tags · effects ← artist, albums, favourite. */
 const powerOf = (w, h) => Math.max(500, Math.floor(w * h / 1e6 * 1000 / 500) * 500);
-const powerHTML = v => v >= 1000 ? `<i>파워</i><b>${Math.floor(v / 1000)}</b><small>,${String(v % 1000).padStart(3, '0')}</small>` : `<i>파워</i><b>${v}</b>`;
+const powerHTML = v => v >= 1000 ? `<b class="num">${Math.floor(v / 1000)}</b><span class="pw-tail"><i>PW</i><small class="num">${String(v % 1000).padStart(3, '0')}</small></span>` : `<b class="num">${v}</b><span class="pw-tail"><i>PW</i></span>`;
 function effectsFor(a, tier) {
   const out = [];
   if (a.albums) out.push(['앨범', `담긴 앨범 ${a.albums}곳 · 파워 <b>+${fmt(a.albums * 500)}</b>`]);
@@ -1173,11 +1193,11 @@ function frontInner(a) {
       <div class="f-sheen"></div><div class="f-shade"></div><div class="f-frame"></div>
       <canvas class="f-glit"></canvas><div class="f-glare"></div>
       <div class="f-subjwrap"><img class="f-subj" alt="" draggable="false" decoding="async"></div>
-      <div class="f-cost">1</div><div class="f-dup"><small>×</small>1</div>
+      <div class="f-cost"><span class="num">1</span></div><div class="f-dup"><span class="num">1</span></div>
       <div class="f-power">${powerHTML(powerOf(a.w || 600, a.h || 840))}</div>
       <div class="f-gem">${a.fav ? `<span class="f-heart" title="즐겨찾기">${HEART}</span>` : ''}<span class="f-type" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
       <div class="f-fx"></div>
-      <div class="f-nb"><span class="nb-lv"><i>Lv.</i>1</span><span class="f-title">${esc(a.title)}</span><span class="nb-no"><span>LK01-${pad(a.id)}</span><span class="f-rar"></span></span></div>
+      <div class="f-nb"><span class="nb-lv"><i>Lv.</i><b class="num">1</b></span><span class="f-title">${esc(a.title)}</span><span class="nb-no"><span>LK01-${pad(a.id)}</span><span class="f-rar"></span></span></div>
       <div class="f-traits"><span class="f-serial" hidden></span>${a.tags.map(t => `<span class="t">${esc(t)}</span>`).join('')}</div>
       <div class="f-vc">Illus. ${esc(a.credit)} · © Lakomics</div>`;
 }
@@ -1206,9 +1226,9 @@ function setTier(el, k) {
   el.querySelectorAll('.f-rar').forEach(r => { r.innerHTML = t.sym.map(s => SYM[s]).join('') + `<span>${t.code}</span>`; });
   const serial = el._serial ?? (k === 'lr' ? 'No. 1 / 1' : k === 'ur' ? 'No. 3 / 10' : '');
   el.querySelectorAll('.f-serial').forEach(f => { f.textContent = (k === 'lr' || k === 'ur') ? serial : ''; f.hidden = !f.textContent; });
-  $('.f-cost', el).textContent = TI[k] + 1;
-  $('.f-dup', el).innerHTML = `<small>×</small>${el._dup}`;
-  $('.nb-lv', el).innerHTML = `<i>Lv.</i>${Math.min(5, el._dup)}`;
+  $('.f-cost', el).innerHTML = `<span class="num">${TI[k] + 1}</span>`;
+  const dup = $('.f-dup', el); dup.innerHTML = `<span class="num">${el._dup}</span>`; dup.classList.toggle('two', el._dup > 9);
+  $('.nb-lv', el).innerHTML = `<i>Lv.</i><b class="num">${Math.min(5, el._dup)}</b>`;
   $('.f-fx', el).innerHTML = effectsFor(a, k).map(([kw, tx]) => `<div class="fx"><span class="kw">${kw}</span><span class="tx">${tx}</span></div>`).join('');
   const title = $('.f-title', el), metal = { r: 'silverdk', sr: 'silver' }[k];
   title.classList.toggle('metal', !!metal); if (metal) title.style.setProperty('--metal', `var(--${metal})`);
@@ -1412,6 +1432,8 @@ function sections() {
     if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
   });
   showTier(featTier);
+  const nsel = $('#numSel'); nsel.value = numFont;
+  nsel.addEventListener('change', () => { numFont = nsel.value; document.documentElement.dataset.numfont = numFont; try { localStorage.setItem('lk-gacha-numfont', numFont); } catch (e) { /* ignore */ } requestAnimationFrame(placePins); });
   new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
   const tgDemo = $('#tgDemo'); if (RM) tgDemo.setAttribute('aria-pressed', 'false');
   tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
@@ -1453,9 +1475,9 @@ function scheduleDemo() { clearTimeout(demoTimer); if (!demoOn) return; demoTime
 
 // [selector, name, ← which asset data fills it, example, tag, pin side, optional fixed point (fraction of card)] — same skeleton for every tier
 const FIELDS_ALL = [
-  ['.f-cost', '코스트', '← 등급. N 1 · R 2 · SR 3 · SSR 4 · UR 5 · LR 6', '', '', 'L'],
-  ['.f-dup', '보유', '← 중복 수. 같은 카드를 뽑은 장수', '', '', 'L'],
-  ['.f-power', '파워', '← 해상도. 메가픽셀 × 1,000, 500 단위 내림 (3000×3000 → 9,000)', '', '', 'R'],
+  ['.f-cost', 'COST (코스트)', '← 등급. N 1 · R 2 · SR 3 · SSR 4 · UR 5 · LR 6', '', '', 'L'],
+  ['.f-dup', 'Count (보유 수)', '← 중복 수. 같은 카드를 뽑은 장수', '', '', 'L'],
+  ['.f-power', 'PW (파워)', '← 해상도. 메가픽셀 × 1,000, 500 단위 내림 (3000×3000 → 9,000)', '', '', 'R'],
   ['.f-type', '속성', '← 그림의 주된 색. 분홍·빨강 불꽃 · 파랑 물 · 초록 숲 · 금·노랑 빛 · 어두움 어둠 · 옅음 바람', '', '', 'R'],
   ['.f-subj', '튀어나오는 인물 층', '← 배경을 지운 투명 레이어. SSR부터 테두리 위로, 완전 불투명', '', '', 'C', [.6, .07]],
   ['.f-fx', '효과', '← 작가 · 앨범 · 즐겨찾기 · 첫 수집. 등급에 따라 1–3줄', '', '', 'L'],
