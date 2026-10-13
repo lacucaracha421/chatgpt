@@ -1377,12 +1377,17 @@ impl Library {
             return Ok(false);
         };
         self.claude_state().active = true;
+        {
+            let state = self.claude_state();
+            crate::activities::report("character-claude", "character_claude", "Claude 자동 판단", "running", state.done as u64, Some(state.total as u64), None, Some("character"), None, None);
+        }
         let runner = Runner {
             transport,
             api_key: &api_key,
             stop,
         };
         let flow = self.claude_process(&runner, &pair);
+        if let Err(error) = &flow { crate::activities::finish("character-claude", Some(error.to_string())); }
         // The marker after our own write, so only other changes rebuild the queue.
         let marker_after = self.review_marker().ok();
         let mut state = self.claude_state();
@@ -1395,20 +1400,26 @@ impl Library {
             }
         };
         match flow {
-            Flow::Cancelled => return Ok(false),
+            Flow::Cancelled => {
+                crate::activities::report("character-claude", "character_claude", "Claude 자동 판단", "queued", state.done as u64, Some(state.total as u64), None, Some("character"), Some("일시 정지됨".into()), None);
+                return Ok(false);
+            }
             Flow::Capped => {
+                crate::activities::report("character-claude", "character_claude", "Claude 자동 판단", "queued", state.done as u64, Some(state.total as u64), None, Some("character"), Some("이번 달 한도".into()), None);
                 state.queue.clear();
                 state.capped_month = Some(month_label(now));
                 state.last_run_at = Some(Utc::now().to_rfc3339());
                 return Ok(false);
             }
             Flow::Credential => {
+                crate::activities::finish("character-claude", Some("연결 정보 확인 필요".into()));
                 state.queue.clear();
                 state.credential_error = true;
                 state.dormant = true;
                 return Ok(false);
             }
             Flow::Transient => {
+                crate::activities::finish("character-claude", Some("Claude 요청 실패".into()));
                 state.queue.pop_front();
                 state.done += 1;
                 state.progress_at = Some(Instant::now());
@@ -1436,6 +1447,8 @@ impl Library {
                 }
             }
         }
+        crate::activities::progress("character-claude", state.done as u64, Some(state.total as u64), None);
+        if state.queue.is_empty() { crate::activities::finish("character-claude", None); }
         Ok(true)
     }
 }

@@ -1,6 +1,4 @@
-import { EmptyState } from "../shared/ui/EmptyState";
 import { useAutoTagInboxStatus } from "../autotags/useAutoTagInboxStatus";
-import { Button } from "../shared/ui/Button";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { ChartBarIcon, ChevronRightIcon, InboxIcon, Square2StackIcon, XMarkIcon } from "@heroicons/react/24/outline";
@@ -9,20 +7,17 @@ import type { AssetBrowserStatus } from "../assets/AssetBrowser";
 import type { CloudSyncStatus } from "../app/useCloudProblems";
 import { LightweightModeToggle } from "../app/WorkloadControls";
 import { nativeWorkload } from "../app/workloadProfile";
-import { CharacterAutomationStatus } from "../characters/CharacterAutomationStatus";
 import type { QuietCharacterAutomationState } from "../characters/useCharacterAutomation";
-import { VaultExportStatus, VaultImportStatus } from "../external-vault/VaultImportStatus";
 import { useVaultExportJob } from "../external-vault/vaultExportJob";
 import { useVaultImportJob } from "../external-vault/vaultImportJob";
 import type { MetadataImportWork } from "../ingestion/metadataImport";
 import type { DropProgress, IngestionWork } from "../ingestion/useFileDrop";
-import { WorkTray } from "../ingestion/WorkTray";
 import { usePublicationJobs } from "../library/publicationJobs";
 import type { AssetView, AuthoritySyncHealth } from "../library/types";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import type { SimilarityIndexState } from "../similarity/useSimilarityIndex";
-import { PublicationStatus } from "./PublicationStatus";
-import { StatusBar } from "./StatusBar";
+import { ActivityList } from "./ActivityList";
+import { useStatusActivities } from "./useStatusActivities";
 import "./StatusCenter.css";
 
 export type StatusWork = IngestionWork | MetadataImportWork;
@@ -59,8 +54,6 @@ export function StatusCenter({
   characterAutomation,
   progress,
   similarityIndex,
-  browserStatus = { loadedCount: 0, selectedAsset: null, loading: false },
-  dropEnabled = false,
   works = [],
   retryWork = noop,
   dismissWork = noop,
@@ -81,18 +74,18 @@ export function StatusCenter({
   const vaultImport = useVaultImportJob().job;
   const vaultExport = useVaultExportJob();
 
-  const freshCharacterWork = Boolean(characterAutomation.activeWork && (characterAutomation.activeWork.freshRemaining > 0
-    || (characterAutomation.activeWork.active && characterAutomation.activeWork.cause !== "reconsideration")));
+  const manualCharacterWork = Boolean(characterAutomation.activeWork?.cause === "manual_scan"
+    && (characterAutomation.activeWork.active || characterAutomation.activeWork.freshRemaining > 0));
   const characterFailures = (characterAutomation.historyRefreshes ?? []).filter(refresh => refresh.state === "failed").length;
   const characterCounted = Boolean(
-    characterAutomation.persistentError || characterAutomation.historyRefreshActive || freshCharacterWork || characterFailures,
+    characterAutomation.persistentError || characterAutomation.historyRefreshActive || manualCharacterWork || characterFailures,
   );
-  const characterVisible = characterCounted || (characterAutomation.activeWork?.reconsiderationRemaining ?? 0) > 0;
   const visibleWorks = works.filter((work) => work.kind !== "drag_out" || work.status !== "completed");
+  const userWorks = visibleWorks.filter(work => work.kind !== "preparation");
   const runningIngestion = visibleWorks.some((work) => work.kind === "ingestion" && work.status === "running");
   // A running file import is described once, by its work row, not also by the drop progress line.
   const libraryProgress = runningIngestion ? null : progress;
-  const libraryVisible = Boolean(libraryProgress || similarityIndex?.running || similarityIndex?.failed || similarityIndex?.message);
+  const libraryVisible = Boolean(libraryProgress || similarityIndex?.failed || similarityIndex?.message);
   const cloudProblems = cloud?.problemCount ?? 0;
   const authority = authoritySyncSummary(authorityHealth);
 
@@ -100,10 +93,9 @@ export function StatusCenter({
     + Number(Boolean(vaultImport?.running))
     + Number(Boolean(vaultExport?.running))
     + Number(characterAutomation.historyRefreshActive)
-    + Number(freshCharacterWork)
+    + Number(manualCharacterWork)
     + Number(libraryProgress !== null)
-    + Number(Boolean(similarityIndex?.running))
-    + visibleWorks.filter((work) => work.status === "running").length;
+    + userWorks.filter((work) => work.status === "running").length;
   const problemCount = Number(Boolean(inbox.status?.error)) + publicationJobs.filter((job) => job.error).length
     + Number(Boolean(vaultImport?.error))
     + Number(Boolean(vaultExport?.error))
@@ -113,8 +105,8 @@ export function StatusCenter({
     + visibleWorks.filter((work) => work.status === "failed" || (work.status === "completed" && work.failures.length > 0)).length
     + cloudProblems
     + authority.problemCount;
-  const workCount = Number(Boolean(inbox.status)) + publicationJobs.length + Number(Boolean(vaultImport)) + Number(Boolean(vaultExport))
-    + Number(characterCounted) + Number(libraryVisible) + visibleWorks.length;
+  const workCount = publicationJobs.length + Number(Boolean(vaultImport)) + Number(Boolean(vaultExport))
+    + Number(characterCounted) + Number(libraryVisible) + userWorks.length;
 
   const state = problemCount > 0 ? "attention" : activeCount > 0 ? "active" : workCount > 0 ? "available" : reviewCount > 0 ? "queue" : "idle";
   const text = { attention: `문제 ${problemCount}`, active: `작업 ${activeCount}`, available: `결과 ${workCount}`, queue: `확인 ${reviewCount}`, idle: "상태" }[state];
@@ -131,6 +123,8 @@ export function StatusCenter({
   ].filter(Boolean).join(" · ") || undefined;
 
   const go = (view: AssetView) => { setOpen(false); onNavigate(view); };
+  const activities = useStatusActivities({ characterAutomation, progress, similarityIndex, works, retryWork, dismissWork,
+    openExisting: id => { setOpen(false); openExisting(id); }, cloud, publicationJobs, vaultImport, vaultExport, inbox, go });
   const queues = [
     { id: "review", label: "유사 이미지 검토", count: reviewCount, icon: <Square2StackIcon />, view: { kind: "similarity_review" } as const },
     { id: "unsorted", label: "미분류", count: unsortedCount ?? 0, icon: <InboxIcon />, view: { kind: "unsorted" } as const },
@@ -155,23 +149,7 @@ export function StatusCenter({
           <AuthoritySyncBlock summary={authority} />
           {connections?.(go)}
           <StatusBlock title="작업">
-            <div className="status-center__list">
-              {workCount === 0 && !characterVisible
-                ? <EmptyState inline className="status-center__empty" title="진행 중인 작업 없음" />
-                : <>
-                  <WorkTray works={works} retryFailed={retryWork} dismissWork={dismissWork}
-                    openReview={() => go({ kind: "similarity_review" })} openExisting={(assetId) => { setOpen(false); openExisting(assetId); }} />
-                  <PublicationStatus />
-                  {inbox.status && <div className="status-bar publication-status" role={inbox.status.error ? "alert" : "status"} aria-label="매일 자동 가져오기">
-                    <span>매일 자동 가져오기 · {inbox.status.message}</span>
-                    <Button size="sm" onClick={inbox.dismiss}>닫기</Button>
-                  </div>}
-                  <VaultImportStatus />
-                  <VaultExportStatus />
-                  <CharacterAutomationStatus state={characterAutomation} />
-                  <StatusBar status={browserStatus} progress={libraryProgress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} />
-                </>}
-            </div>
+            <ActivityList sections={activities} />
           </StatusBlock>
           {queues.length > 0 && <StatusBlock title="확인할 것">
             {queues.map((queue) => <button key={queue.id} type="button" className="status-center__queue" onClick={() => go(queue.view)}>
@@ -208,10 +186,10 @@ function SyncBlock({ cloud, onOpenSettings }: { cloud: CloudSyncStatus; onOpenSe
   }
   if (!progress) return null;
   const remaining = progress.queued + progress.preparing + progress.uploading + progress.committing;
-  const [tone, text] = progress.replicationEnabled === false ? ["off", "클라우드 동기화 꺼짐"]
-    : progress.controlState === "paused" ? ["off", remaining > 0 ? `동기화 일시 정지 · ${remaining.toLocaleString()}개 대기` : "동기화 일시 정지"]
-      : remaining > 0 ? ["active", `동기화 중 · ${remaining.toLocaleString()}개 남음`]
-        : ["ok", "동기화됨"];
+  if (progress.replicationEnabled !== false && progress.controlState !== "paused") return null;
+  const tone = "off";
+  const text = progress.replicationEnabled === false ? "클라우드 동기화 꺼짐"
+    : remaining > 0 ? `동기화 일시 정지 · ${remaining.toLocaleString()}개 대기` : "동기화 일시 정지";
   return <StatusBlock title="동기화">
     <div className="status-center__sync" data-tone={tone} role="status">
       <span className="status-center__dot" aria-hidden="true" />

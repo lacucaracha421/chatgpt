@@ -10,7 +10,8 @@ import type { CharacterTarget } from "./api";
 
 vi.mock("@tauri-apps/api/core", { spy: true });
 
-afterEach(() => { cleanup(); vi.mocked(tauriCore.invoke).mockReset(); vi.restoreAllMocks(); });
+// A finished carry swallows the next click for 100 ms (cleared by a timer that fake timers never run): spend it here.
+afterEach(() => { window.dispatchEvent(new MouseEvent("click")); cleanup(); vi.mocked(tauriCore.invoke).mockReset(); vi.restoreAllMocks(); });
 beforeEach(() => { vi.mocked(tauriCore.invoke).mockResolvedValue(undefined); });
 
 const people = (...ids: string[]) => ids.map(id => fixtureTarget(id, id.toUpperCase()));
@@ -217,5 +218,125 @@ it("shows 그룹에 넣기 over a group card while a character is carried over i
     act(() => { document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse", clientX: 400, clientY: 80 })); });
     expect(screen.queryByText("그룹에 넣기")).not.toBeInTheDocument();
     act(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  } finally { vi.useRealTimers(); }
+});
+
+// ---- The sub-folder band (registered series and plain folders) ----
+const folderNames: Record<string, string> = { f1: "백합", f2: "레트로", f3: "기타 만화" };
+function folderSetup(overrides: Overrides = {}) {
+  const reorderFolders = vi.fn().mockResolvedValue(undefined);
+  const result = setup({
+    folderCards: ["f1", "f2", "f3"].map(id => <article key={id} className="series-character folder-shelf__card" data-order-id={id} data-order-kind="folder"><button className="series-character__open" aria-label={`${folderNames[id]} 폴더 열기`}>{folderNames[id]}</button></article>),
+    folderOrder: { ids: ["f1", "f2", "f3"], names: folderNames, onReorder: reorderFolders },
+    ...overrides,
+  });
+  return { ...result, reorderFolders };
+}
+
+it("gives a sub-folder card the order menu and stores the band through the folder callback", async () => {
+  const { reorderFolders, reorderGroups, reorderCharacters } = folderSetup();
+  fireEvent.contextMenu(screen.getByRole("button", { name: "백합 폴더 열기" }));
+  expect(labels()).toEqual(["앞으로Alt+←", "뒤로Alt+→", "맨 앞으로", "맨 뒤로"]);
+  expect(screen.getByRole("menuitem", { name: "앞으로" })).toBeDisabled();
+  expect(screen.getByRole("menuitem", { name: "맨 앞으로" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("menuitem", { name: "맨 뒤로" }));
+  expect(reorderFolders).toHaveBeenCalledWith(["f2", "f3", "f1"]);
+  fireEvent.contextMenu(screen.getByRole("button", { name: "기타 만화 폴더 열기" }));
+  expect(screen.getByRole("menuitem", { name: "뒤로" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("menuitem", { name: "앞으로" }));
+  expect(reorderFolders).toHaveBeenLastCalledWith(["f1", "f3", "f2"]);
+  expect(reorderGroups).not.toHaveBeenCalled();
+  expect(reorderCharacters).not.toHaveBeenCalled();
+});
+
+it("moves a sub-folder with Alt+arrows, announces its place and keeps focus", async () => {
+  const { reorderFolders } = folderSetup();
+  const user = userEvent.setup();
+  screen.getByRole("button", { name: "레트로 폴더 열기" }).focus();
+  await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+  expect(reorderFolders).toHaveBeenLastCalledWith(["f1", "f3", "f2"]);
+  expect(screen.getByText("레트로, 폴더 3번째")).toBeInTheDocument();
+  await user.keyboard("{Alt>}{Home}{/Alt}");
+  expect(reorderFolders).toHaveBeenLastCalledWith(["f2", "f1", "f3"]);
+  expect(screen.getByRole("button", { name: "레트로 폴더 열기" })).toHaveFocus();
+});
+
+it("keeps sub-folders fixed without an order callback, and out of a group view", () => {
+  const { unmount } = folderSetup({ folderOrder: undefined });
+  fireEvent.contextMenu(screen.getByRole("button", { name: "백합 폴더 열기" }));
+  expect(screen.queryByRole("menuitem", { name: "뒤로" })).not.toBeInTheDocument();
+  unmount();
+  folderSetup({ activeGroupId: "g1" });
+  expect(screen.queryByRole("button", { name: "백합 폴더 열기" })).not.toBeInTheDocument();
+});
+
+it("offers a retry when storing the sub-folder order fails", async () => {
+  const { reorderFolders } = folderSetup();
+  reorderFolders.mockRejectedValueOnce(new Error("저장 실패"));
+  fireEvent.contextMenu(screen.getByRole("button", { name: "백합 폴더 열기" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "뒤로" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("순서를 바꾸지 못했습니다");
+  await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  await waitFor(() => expect(reorderFolders).toHaveBeenCalledTimes(2));
+  expect(reorderFolders).toHaveBeenLastCalledWith(["f2", "f1", "f3"]);
+});
+
+/** Cards sit side by side, 100px apart, in a 800px shelf: groups, loose characters, then the three folders. */
+function mockShelfBoxes() {
+  const cards = [...document.querySelectorAll<HTMLElement>("[data-order-id]")];
+  cards.forEach((card, index) => { card.getBoundingClientRect = () => new DOMRect(index * 100, 0, 100, 170); });
+  cards[0]!.parentElement!.getBoundingClientRect = () => new DOMRect(0, 0, 800, 200);
+  return cards;
+}
+function carryFolder(name: string, id: string, to: number) {
+  const cards = mockShelfBoxes();
+  const from = cards.findIndex(card => card.dataset.orderId === id) * 100 + 50;
+  act(() => { screen.getByRole("button", { name }).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0, clientX: from, clientY: 50 })); });
+  act(() => { vi.advanceTimersByTime(250); });
+  act(() => { document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse", clientX: to, clientY: 50 })); });
+  return () => act(() => { document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse", clientX: to, clientY: 50 })); });
+}
+
+it("holding a sub-folder 0.25 s lifts it and dropping it later in the band reorders the band", () => {
+  vi.useFakeTimers();
+  try {
+    const { reorderFolders, reorderGroups, reorderCharacters } = folderSetup();
+    const drop = carryFolder("백합 폴더 열기", "f1", 790);
+    expect(document.querySelector<HTMLElement>('[data-order-id="f1"]')!.dataset.reorderState).toBe("source");
+    drop();
+    expect(reorderFolders).toHaveBeenCalledWith(["f2", "f3", "f1"]);
+    expect(reorderGroups).not.toHaveBeenCalled();
+    expect(reorderCharacters).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
+
+it("a sub-folder dropped over a group or the characters stays inside its own band", () => {
+  vi.useFakeTimers();
+  try {
+    const { reorderFolders, reorderGroups, reorderCharacters } = folderSetup();
+    // x=50 is the middle of the first group card: a character would be put in there, a folder never is.
+    const drop = carryFolder("기타 만화 폴더 열기", "f3", 50);
+    expect(screen.queryByText("그룹에 넣기")).not.toBeInTheDocument();
+    drop();
+    expect(reorderFolders).toHaveBeenCalledWith(["f3", "f1", "f2"]);
+    expect(reorderGroups).not.toHaveBeenCalled();
+    expect(reorderCharacters).not.toHaveBeenCalled();
+    expect(tauriCore.invoke).not.toHaveBeenCalledWith("save_character_group", expect.anything());
+  } finally { vi.useRealTimers(); }
+});
+
+it("a character carried past the sub-folders only reorders the characters", () => {
+  vi.useFakeTimers();
+  try {
+    const { reorderFolders, reorderGroups, reorderCharacters } = folderSetup();
+    const cards = mockShelfBoxes();
+    const from = cards.findIndex(card => card.dataset.orderId === "d") * 100 + 50;
+    act(() => { screen.getByRole("button", { name: "D 열기" }).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0, clientX: from, clientY: 50 })); });
+    act(() => { vi.advanceTimersByTime(250); });
+    act(() => { document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse", clientX: 750, clientY: 50 })); });
+    act(() => { document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse", clientX: 750, clientY: 50 })); });
+    expect(reorderCharacters).toHaveBeenCalledWith("series", null, ["e", "d"]);
+    expect(reorderFolders).not.toHaveBeenCalled();
+    expect(reorderGroups).not.toHaveBeenCalled();
   } finally { vi.useRealTimers(); }
 });

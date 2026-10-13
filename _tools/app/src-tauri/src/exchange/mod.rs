@@ -621,6 +621,18 @@ fn save_dir(app: &AppHandle) -> Option<PathBuf> {
 fn emit() {
     let Some(app) = app() else { return };
     let payload = current_snapshot(app);
+    crate::activities::finish_missing("transfer_send", &payload.outgoing.iter().map(|row| format!("transfer-send:{}", row.transfer_id)).collect::<Vec<_>>());
+    crate::activities::finish_missing("transfer_receive", &payload.incoming.iter().map(|row| format!("transfer-receive:{}", row.transfer_id)).collect::<Vec<_>>());
+    for row in &payload.outgoing {
+        let key = format!("transfer-send:{}", row.transfer_id);
+        let state = match row.state { "queued" | "waiting" => "queued", "failed" | "interrupted" | "expired" => "failed", "delivered" | "cancelled" => "done", _ => "running" };
+        if state == "done" { crate::activities::finish(&key, None); continue; }
+        crate::activities::report(&key, "transfer_send", "태블릿으로 보내기", state, row.done, Some(row.size_bytes), Some(row.file_name.clone()), None, None, if state == "failed" { Some(row.message.clone().unwrap_or_else(|| "전송 실패".into())) } else { None });
+    }
+    for row in &payload.incoming {
+        crate::activities::report(&format!("transfer-receive:{}", row.transfer_id), "transfer_receive", "태블릿에서 받기", if row.state == "failed" { "failed" } else { "running" }, row.done, Some(row.size_bytes), Some(row.file_name.clone()), None, None, row.message.clone());
+    }
+    for row in &payload.received { crate::activities::finish(&format!("transfer-receive:{}", row.transfer_id), None); }
     let unseen = payload.unseen;
     let _ = app.emit(EVENT, payload);
     crate::workload::set_received_indicator(app, unseen);

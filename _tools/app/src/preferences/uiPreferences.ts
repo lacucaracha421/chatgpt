@@ -155,6 +155,18 @@ export function saveUiPreferences(
   storage.setItem(MANGA_RTL_MIGRATION_KEY, "true");
 }
 
+/** Sidebar and shelf publish together; a failed local save restores the same previous snapshot. */
+export function saveOptimisticUiPreferences(previous: UiPreferences, next: UiPreferences, publish: (value: UiPreferences) => void): void {
+  publish(next);
+  try { saveUiPreferences(next); }
+  catch (error) {
+    publish(previous);
+    // The preferences write may have succeeded before its migration marker failed.
+    try { saveUiPreferences(previous); } catch { /* Keep the original save error. */ }
+    throw error;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

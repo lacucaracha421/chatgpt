@@ -257,99 +257,112 @@ impl Library {
             }
             (id, requested, target, selected, inputs)
         };
-        // Hash immutable sources without holding the library lock. Keep handles alive until
-        // commit; Windows pins originals, and the final identity check detects replacements.
-        let sources = (|| -> Result<_> {
-            let sources = inputs
-                .iter()
-                .map(|(hash, path)| Source::capture(self, path, hash))
-                .collect::<Result<Vec<_>>>()?;
-            for source in &sources {
-                source.verify(self)?;
-            }
-            Ok(sources)
-        })();
-        let sources = match sources {
-            Ok(sources) => sources,
-            Err(error) => {
-                // A missing or externally changed file must not monopolize the owner or
-                // block other characters. Retry on the normal idle safety interval.
-                self.connection()?.execute(
+        let mut activity = crate::activities::Job::start(
+            "reference-reinforcement",
+            "reference_reinforcement",
+            "레퍼런스 보강",
+            Some("character"),
+        );
+        activity.progress(0, None, Some(target.display_name.clone()));
+        let result = (|| {
+            // Hash immutable sources without holding the library lock. Keep handles alive until
+            // commit; Windows pins originals, and the final identity check detects replacements.
+            let sources = (|| -> Result<_> {
+                let sources = inputs
+                    .iter()
+                    .map(|(hash, path)| Source::capture(self, path, hash))
+                    .collect::<Result<Vec<_>>>()?;
+                for source in &sources {
+                    source.verify(self)?;
+                }
+                Ok(sources)
+            })();
+            let sources = match sources {
+                Ok(sources) => sources,
+                Err(error) => {
+                    // A missing or externally changed file must not monopolize the owner or
+                    // block other characters. Retry on the normal idle safety interval.
+                    self.connection()?.execute(
                     "UPDATE character_reference_reinforcement_queue SET retry_at=?3 WHERE target_id=?1 AND requested=?2",
                     params![id,requested,chrono::Utc::now().timestamp()+60],
                 )?;
-                return Err(error);
+                    return Err(error);
+                }
+            };
+            if crate::workload::is_restricted() {
+                return Ok(false);
             }
-        };
-        if crate::workload::is_restricted() {
-            return Ok(false);
-        }
-        let mut c = self.connection()?;
-        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = self.read_character_target(&tx, &id)?;
-        if current.revision != target.revision
-            || reference_set_hash(&current)? != reference_set_hash(&target)?
-        {
-            return Err(Error::Stale);
-        }
-        let pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM character_reference_reinforcement_runs WHERE target_id=?1 AND state='pending')",[&id],|r|r.get(0))?;
-        let paused: bool = tx.query_row(
-            "SELECT paused FROM character_autotag_control WHERE singleton=1",
-            [],
-            |r| r.get(0),
-        )?;
-        if pending || paused {
-            return Ok(false);
-        }
-        let eligible = self.reinforcement_candidates_in(&tx, &current)?;
-        for row in &selected {
-            if !eligible.iter().any(|now| {
-                now.safe
-                    && now.asset_id == row.asset_id
-                    && now.hash == row.hash
-                    && now.region == row.region
-            }) {
+            let mut c = self.connection()?;
+            let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current = self.read_character_target(&tx, &id)?;
+            if current.revision != target.revision
+                || reference_set_hash(&current)? != reference_set_hash(&target)?
+            {
                 return Err(Error::Stale);
             }
-        }
-        for source in &sources {
-            source.check_identity(self)?;
-        }
-        if !selected.is_empty() {
-            let ids = selected
-                .iter()
-                .map(|r| r.asset_id.clone())
-                .collect::<Vec<_>>();
-            let regions: RegionBindings = selected
-                .into_iter()
-                .map(|r| (r.asset_id, r.region.unwrap()))
-                .collect();
-            self.confirm_reference_batch_in(
-                &tx,
-                ConfirmReferenceBatch {
-                    target_id: id.clone(),
-                    expected_revision: target.revision,
-                    expected_reference_set_hash: reference_set_hash(&target)?,
-                    confirmation_mode: ReferenceConfirmationMode::AddLearned,
-                    asset_ids: ids.clone(),
-                },
-                regions,
+            let pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM character_reference_reinforcement_runs WHERE target_id=?1 AND state='pending')",[&id],|r|r.get(0))?;
+            let paused: bool = tx.query_row(
+                "SELECT paused FROM character_autotag_control WHERE singleton=1",
+                [],
+                |r| r.get(0),
             )?;
-            let mut refs = Vec::new();
-            for asset_id in ids {
-                let (hash,created_at) = tx.query_row("SELECT asset_hash,created_at FROM character_learned_references WHERE target_id=?1 AND asset_id=?2",params![id,asset_id],|r|Ok((r.get(0)?,r.get(1)?)))?;
-                refs.push(AddedReference {
-                    asset_id,
-                    hash,
-                    created_at,
-                });
+            if pending || paused {
+                return Ok(false);
             }
-            tx.execute("INSERT INTO character_reference_reinforcement_runs(run_id,target_id,references_json,created_at,state) VALUES(?1,?2,?3,?4,'pending')",
+            let eligible = self.reinforcement_candidates_in(&tx, &current)?;
+            for row in &selected {
+                if !eligible.iter().any(|now| {
+                    now.safe
+                        && now.asset_id == row.asset_id
+                        && now.hash == row.hash
+                        && now.region == row.region
+                }) {
+                    return Err(Error::Stale);
+                }
+            }
+            for source in &sources {
+                source.check_identity(self)?;
+            }
+            if !selected.is_empty() {
+                let ids = selected
+                    .iter()
+                    .map(|r| r.asset_id.clone())
+                    .collect::<Vec<_>>();
+                let regions: RegionBindings = selected
+                    .into_iter()
+                    .map(|r| (r.asset_id, r.region.unwrap()))
+                    .collect();
+                self.confirm_reference_batch_in(
+                    &tx,
+                    ConfirmReferenceBatch {
+                        target_id: id.clone(),
+                        expected_revision: target.revision,
+                        expected_reference_set_hash: reference_set_hash(&target)?,
+                        confirmation_mode: ReferenceConfirmationMode::AddLearned,
+                        asset_ids: ids.clone(),
+                    },
+                    regions,
+                )?;
+                let mut refs = Vec::new();
+                for asset_id in ids {
+                    let (hash,created_at) = tx.query_row("SELECT asset_hash,created_at FROM character_learned_references WHERE target_id=?1 AND asset_id=?2",params![id,asset_id],|r|Ok((r.get(0)?,r.get(1)?)))?;
+                    refs.push(AddedReference {
+                        asset_id,
+                        hash,
+                        created_at,
+                    });
+                }
+                tx.execute("INSERT INTO character_reference_reinforcement_runs(run_id,target_id,references_json,created_at,state) VALUES(?1,?2,?3,?4,'pending')",
                 params![uuid::Uuid::new_v4().to_string(),id,serde_json::to_string(&refs)?,chrono::Utc::now().to_rfc3339()])?;
-        }
-        tx.execute("DELETE FROM character_reference_reinforcement_queue WHERE target_id=?1 AND requested=?2",params![id,requested])?;
-        tx.commit()?;
-        Ok(true)
+            }
+            tx.execute("DELETE FROM character_reference_reinforcement_queue WHERE target_id=?1 AND requested=?2",params![id,requested])?;
+            tx.commit()?;
+            Ok(true)
+        })();
+        if matches!(result, Ok(false)) {
+            activity.defer(crate::workload::is_restricted().then(|| "절약 모드".into()));
+        } else { activity.complete(&result); }
+        result
     }
 
     pub fn acknowledge_reference_reinforcement(&self, target_id: &str, run_id: &str) -> Result<()> {

@@ -250,6 +250,29 @@ pub struct Status {
     persistent_error: Option<String>,
 }
 impl Library {
+    fn publish_character_activities(&self) {
+        let Ok(status) = self.character_incremental_status() else { return; };
+        let work = &status.active_work;
+        for (key, kind, label, remaining, active) in [
+            ("character-fresh", "character_fresh", "새 이미지 분석", work.fresh_remaining, work.active && work.cause.as_deref() != Some("reconsideration")),
+            ("character-reconsideration", "character_reconsideration", "캐릭터 재검토", work.reconsideration_remaining, work.active && work.cause.as_deref() == Some("reconsideration")),
+        ] {
+            if remaining > 0 || active {
+                let reason = if status.paused { Some("일시 정지됨") }
+                    else if crate::workload::is_restricted() && kind == "character_reconsideration" { Some("절약 모드") } else { None };
+                crate::activities::report(key, kind, label, if reason.is_some() { "paused" } else if active { "running" } else { "queued" }, 0, None,
+                    Some(format!("{remaining}개 남음")), Some("character"), reason.map(str::to_owned), None);
+            } else { crate::activities::finish(key, None); }
+        }
+        crate::activities::finish_missing("character_history", &status.history_refreshes.iter().map(|refresh| format!("character-history:{}", refresh.target_id)).collect::<Vec<_>>());
+        for refresh in &status.history_refreshes {
+            crate::activities::report(&format!("character-history:{}", refresh.target_id), "character_history", "과거 미분류 갱신",
+                match refresh.state.as_str() { "completed" => "done", "failed" => "failed", "running" if !status.paused && !crate::workload::is_restricted() => "running", _ => "queued" },
+                refresh.processed as u64, refresh.total.map(|n| n as u64), Some(format!("{} / {}", refresh.series_name, refresh.target_name)), Some("character"),
+                if status.paused { Some("일시 정지됨".into()) } else if crate::workload::is_restricted() { Some("절약 모드".into()) } else { None },
+                (refresh.state == "failed").then(|| "캐릭터에서 다시 갱신해 주세요".into()));
+        }
+    }
     pub fn start_character_incremental(&self, config: RuntimeConfig) {
         let mut engine = self
             .character_incremental
@@ -459,6 +482,8 @@ impl Library {
             "UPDATE character_autotag_control SET paused=?1 WHERE singleton=1",
             [paused],
         )?;
+        crate::activities::pause_group("character", paused.then(|| "일시 정지됨".into()));
+        self.character_wake.notify();
         Ok(())
     }
     /// Runs queue turns back to back while they make progress; otherwise blocks on
@@ -477,6 +502,7 @@ impl Library {
             }
         };
         while !stop.load(Ordering::Acquire) && Arc::strong_count(&self.lease) > 1 {
+            self.publish_character_activities();
             let seen = wake.generation();
             OWNER_WROTE.with(|wrote| wrote.set(false));
             let restricted = crate::workload::is_restricted();
@@ -579,6 +605,7 @@ impl Library {
                     job_config.augmentation_model = None;
                     job_config.shadow_model = None;
                 }
+                self.publish_character_activities();
                 let outcome = self.compare_incremental_asset(&job, &job_config, stop.clone());
                 if let Err(error) = outcome {
                     let stopped = stop.load(Ordering::Acquire);

@@ -604,83 +604,93 @@ impl Library {
         tool: &T,
         video: PendingVideo,
     ) -> Result<(), LibraryError> {
-        if !safe_asset_id(&video.asset_id) {
-            return Err(LibraryError::VideoPreparationFailed);
-        }
-        let source = self.root().join(&video.relative_path);
-        if !source.is_file() {
-            return Err(LibraryError::VideoPreparationFailed);
-        }
-        let pending = self
-            .root()
-            .join("video-media")
-            .join(format!(".pending-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&pending).map_err(|_| LibraryError::VideoPreparationFailed)?;
-        let prepared = (|| {
-            let poster = pending.join("poster.webp");
-            tool.create_poster(&source, poster_seek_ms(video.duration_ms), &poster)?;
-            let timestamps = scrub_timestamps_ms(video.duration_ms);
-            let scrub = pending.join("scrub");
-            tool.create_scrub_frames(&source, &timestamps, &scrub)?;
-            let playback_kind = if direct_playback(
-                &video.container,
-                &video.video_codec,
-                video.audio_codec.as_deref(),
-            ) {
-                "original"
-            } else {
-                tool.create_proxy(&source, &pending.join("playback.mp4"))?;
-                "proxy"
+        let mut activity = crate::activities::Job::start(
+            format!("preview:{}", video.asset_id),
+            "preparation",
+            "미리보기 준비",
+            None,
+        );
+        let result = (|| {
+            if !safe_asset_id(&video.asset_id) {
+                return Err(LibraryError::VideoPreparationFailed);
+            }
+            let source = self.root().join(&video.relative_path);
+            if !source.is_file() {
+                return Err(LibraryError::VideoPreparationFailed);
+            }
+            let pending = self
+                .root()
+                .join("video-media")
+                .join(format!(".pending-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&pending).map_err(|_| LibraryError::VideoPreparationFailed)?;
+            let prepared = (|| {
+                let poster = pending.join("poster.webp");
+                tool.create_poster(&source, poster_seek_ms(video.duration_ms), &poster)?;
+                let timestamps = scrub_timestamps_ms(video.duration_ms);
+                let scrub = pending.join("scrub");
+                tool.create_scrub_frames(&source, &timestamps, &scrub)?;
+                let playback_kind = if direct_playback(
+                    &video.container,
+                    &video.video_codec,
+                    video.audio_codec.as_deref(),
+                ) {
+                    "original"
+                } else {
+                    tool.create_proxy(&source, &pending.join("playback.mp4"))?;
+                    "proxy"
+                };
+                require_non_empty_file(&poster)?;
+                for index in 0..timestamps.len() {
+                    require_non_empty_file(&scrub.join(format!("{index:03}.webp")))?;
+                }
+                if playback_kind == "proxy" {
+                    require_non_empty_file(&pending.join("playback.mp4"))?;
+                }
+                Ok::<_, LibraryError>((playback_kind, timestamps.len()))
+            })();
+            let (playback_kind, scrub_frame_count) = match prepared {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&pending);
+                    return Err(error);
+                }
             };
-            require_non_empty_file(&poster)?;
-            for index in 0..timestamps.len() {
-                require_non_empty_file(&scrub.join(format!("{index:03}.webp")))?;
-            }
-            if playback_kind == "proxy" {
-                require_non_empty_file(&pending.join("playback.mp4"))?;
-            }
-            Ok::<_, LibraryError>((playback_kind, timestamps.len()))
-        })();
-        let (playback_kind, scrub_frame_count) = match prepared {
-            Ok(prepared) => prepared,
-            Err(error) => {
+            let final_directory = self.root().join("video-media").join(&video.asset_id);
+            if final_directory.exists() {
                 let _ = fs::remove_dir_all(&pending);
-                return Err(error);
+                return Err(LibraryError::VideoPreparationFailed);
             }
-        };
-        let final_directory = self.root().join("video-media").join(&video.asset_id);
-        if final_directory.exists() {
-            let _ = fs::remove_dir_all(&pending);
-            return Err(LibraryError::VideoPreparationFailed);
-        }
-        install_prepared_directory(&pending, &final_directory)?;
-        let poster_relative_path = format!("video-media/{}/poster.webp", video.asset_id);
-        let scrub_relative_dir = format!("video-media/{}/scrub", video.asset_id);
-        let proxy_relative_path = (playback_kind == "proxy")
-            .then(|| format!("video-media/{}/playback.mp4", video.asset_id));
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
-            "UPDATE assets SET thumbnail_relative_path = ?2 WHERE id = ?1",
-            params![video.asset_id, poster_relative_path],
-        )?;
-        transaction.execute(
-            "UPDATE video_assets
+            install_prepared_directory(&pending, &final_directory)?;
+            let poster_relative_path = format!("video-media/{}/poster.webp", video.asset_id);
+            let scrub_relative_dir = format!("video-media/{}/scrub", video.asset_id);
+            let proxy_relative_path = (playback_kind == "proxy")
+                .then(|| format!("video-media/{}/playback.mp4", video.asset_id));
+            let mut connection = self.connection()?;
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "UPDATE assets SET thumbnail_relative_path = ?2 WHERE id = ?1",
+                params![video.asset_id, poster_relative_path],
+            )?;
+            transaction.execute(
+                "UPDATE video_assets
              SET preparation_state = 'ready', preparation_error = NULL,
                  playback_kind = ?2, poster_relative_path = ?3, scrub_relative_dir = ?4,
                  scrub_frame_count = ?5, proxy_relative_path = ?6
              WHERE asset_id = ?1",
-            params![
-                video.asset_id,
-                playback_kind,
-                poster_relative_path,
-                scrub_relative_dir,
-                i64::try_from(scrub_frame_count).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                proxy_relative_path
-            ],
-        )?;
-        transaction.commit()?;
-        Ok(())
+                params![
+                    video.asset_id,
+                    playback_kind,
+                    poster_relative_path,
+                    scrub_relative_dir,
+                    i64::try_from(scrub_frame_count).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    proxy_relative_path
+                ],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        activity.complete(&result);
+        result
     }
 
     fn mark_video_failed(&self, asset_id: &str) -> Result<(), LibraryError> {

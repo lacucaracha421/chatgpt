@@ -61,6 +61,8 @@ import { readinessLabel, useS36Readiness, type S36Readiness } from "./S36Publica
 import { characterApi, draftReferenceRegions, moveAssetsToCharacters, type CharacterApi, type CharacterTarget } from "./api";
 import { prefetchRead, prefetchedRead, useFolderPrefetchIntent } from "../assets/folderPrefetch";
 import { characterHubApi, type CharacterBrowsePage, type CharacterBrowseView, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesGalleryFilter, type SeriesFolder } from "./hubApi";
+import { sortFolders } from "../classification/buildTree";
+import { withListedOrder } from "../shared/shelfOrder";
 import "./CharacterManagement.css";
 import "./SeriesBrowser.css";
 
@@ -93,6 +95,9 @@ type Props = {
   /** Stores a new order of the series' groups / one band of its characters; the owner shows it at once and rejects when storing fails. Without them the shelf stores directly and refreshes. */
   onReorderGroups?: (seriesId: string, groupIds: string[]) => Promise<void>;
   onReorderCharacters?: (seriesId: string, groupId: string | null, targetIds: string[]) => Promise<void>;
+  /** The sidebar's folder order: the sub-folder band shows in it (name as the fallback) and stores moves through `onReorderFolders`, which receives the complete list of this series' child folders. Without `classificationOrderIds` the band keeps the order it was read in. */
+  classificationOrderIds?: string[];
+  onReorderFolders?: (parentId: string, ids: string[]) => Promise<void>;
 };
 type TrashUndo = { scope: string; removed: { asset: AssetSummary; index: number }[] };
 type Editor = { target: CharacterTarget | null; draft: CharacterEditorDraft };
@@ -156,7 +161,7 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
   return { detail, warning: Boolean(numbers && numbers.status === "hold" && numbers.wrong > numbers.allowed) };
 }
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, confirmSource = confirmSources, confirmDecisions, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged, groupEditRequest: requestedGroupEdit = null, onGroupEditRequestHandled, onReorderGroups, onReorderCharacters }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, confirmSource = confirmSources, confirmDecisions, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged, groupEditRequest: requestedGroupEdit = null, onGroupEditRequestHandled, onReorderGroups, onReorderCharacters, classificationOrderIds, onReorderFolders }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
@@ -175,6 +180,22 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const folders = cachedFolders ?? retainedFolderRead?.folders ?? [];
   const folderSeriesId = cachedFolders ? series.classificationId : retainedFolderRead?.seriesId ?? series.classificationId;
   const staleFolders = folderSeriesId !== series.classificationId;
+  // The sub-folder band: only folders the library still lists, in the sidebar's order.
+  const shelfFolders = (() => {
+    const known = folders.flatMap(item => {
+      const entry = classifications.find(folder => folder.id === item.classificationId);
+      return entry ? [{ item, entry }] : [];
+    });
+    if (!classificationOrderIds) return known;
+    const byId = new Map(known.map(folder => [folder.entry.id, folder]));
+    return sortFolders(known.map(folder => folder.entry), classificationOrderIds).map(entry => byId.get(entry.id)!);
+  })();
+  /** The band's new order, completed with the series' other child folders (character folders stay where they are in the sidebar order). */
+  async function reorderFolderBand(ids: string[]) {
+    if (!onReorderFolders) return;
+    const siblings = sortFolders(classifications.filter(entry => entry.parentId === series.classificationId), classificationOrderIds ?? []).map(entry => entry.id);
+    await onReorderFolders(series.classificationId, withListedOrder(siblings.map(id => ({ id })), ids).map(entry => entry.id));
+  }
   // The 확인 list opened from this series' count line, so scoped to it.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmCount, setConfirmCount] = useState(() => lastConfirmCounts.get(series.classificationId) ?? 0);
@@ -869,11 +890,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               }} /> : undefined}
             suggestionCards={!currentGroup && !suggestionsHidden ? seriesSuggestions.map(suggestion => <CharacterSuggestionTile key={suggestion.tag} suggestion={suggestion} state={suggestions} privacyMode={privacyMode} onChanged={onChanged} />) : undefined}
             headerAccessory={!currentGroup ? <>{candidateReview}{seriesSuggestions.length > 0 && <Button size="sm" variant="ghost" onClick={() => setHiddenSuggestions(ids => suggestionsHidden ? ids.filter(id => id !== series.classificationId) : [...ids, series.classificationId])}>{suggestionsHidden ? "제안 보기" : "제안 숨기기"}</Button>}</> : undefined} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest} editGroupRequest={requestedGroupEdit} onEditGroupRequestHandled={onGroupEditRequestHandled}
-            folderCards={!staleFolders && folders.length > 0 ? folders.map(item => {
-              const folder = classifications.find(folder => folder.id === item.classificationId);
-              if (!folder) return null;
+            folderOrder={!staleFolders && onReorderFolders && shelfFolders.length > 1 && shelfFolders.every(({ entry }) => entry.parentId === series.classificationId)
+              ? { ids: shelfFolders.map(({ entry }) => entry.id), names: Object.fromEntries(shelfFolders.map(({ entry }) => [entry.id, entry.name])), onReorder: reorderFolderBand } : undefined}
+            folderCards={!staleFolders && shelfFolders.length > 0 ? shelfFolders.map(({ item, entry: folder }) => {
               const isSeries = item.isSeries === true;
-              return <article className="series-character folder-shelf__card" key={folder.id} inert={staleFolders}>
+              return <article className="series-character folder-shelf__card" key={folder.id} inert={staleFolders} data-order-id={folder.id} data-order-kind="folder">
                 <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} ${isSeries ? "시리즈" : "폴더"} 열기`} aria-description={isSeries ? "캐릭터 시리즈" : "일반 폴더"} {...folderIntent({ kind: "classification", classificationId: folder.id })} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
                   {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <StableImage draggable={false} loading="lazy" src={folderCardImage(item)!} alt="" /> : <span className="series-character__placeholder">{isSeries ? <UserGroupIcon aria-hidden="true" /> : <FolderIcon aria-hidden="true" />}{isSeries ? "시리즈" : "일반 폴더"}</span>}
                   <strong>{isSeries ? <UserGroupIcon className="character-group-card__icon" aria-hidden="true" /> : <FolderIcon className="character-group-card__icon" aria-hidden="true" />}<span className="series-character__name">{folder.name}</span></strong>

@@ -13,8 +13,20 @@ export type Tree<T extends TreeEntry> = TreeNode<T>[] & {
   hasOrphans: boolean;
 };
 
-export function buildTree<T extends TreeEntry>(entries: T[], orderedIds: string[] = []): Tree<T> {
+/** The sidebar and plain-folder shelf share explicit ranks, then the Korean name fallback. */
+export function sortFolders<T extends TreeEntry>(entries: readonly T[], orderedIds: readonly string[]): T[] {
+  return [...entries].sort(folderComparator(orderedIds));
+}
+
+function folderComparator(orderedIds: readonly string[]) {
   const order = new Map(orderedIds.map((id, index) => [id, index]));
+  return (left: TreeEntry, right: TreeEntry) =>
+    (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+    || left.name.localeCompare(right.name, "ko");
+}
+
+export function buildTree<T extends TreeEntry>(entries: T[], orderedIds: string[] = []): Tree<T> {
+  const compare = folderComparator(orderedIds);
   const nodes = new Map<string, TreeNode<T>>(
     entries.map((entry) => [entry.id, { entry, children: [] }]),
   );
@@ -30,10 +42,7 @@ export function buildTree<T extends TreeEntry>(entries: T[], orderedIds: string[
 
   const visible = new Set<string>();
   const sort = (items: TreeNode<T>[]) => {
-    items.sort((left, right) =>
-      (order.get(left.entry.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.entry.id) ?? Number.MAX_SAFE_INTEGER)
-      || left.entry.name.localeCompare(right.entry.name, "ko"),
-    );
+    items.sort((left, right) => compare(left.entry, right.entry));
     for (const item of items) {
       visible.add(item.entry.id);
       sort(item.children);

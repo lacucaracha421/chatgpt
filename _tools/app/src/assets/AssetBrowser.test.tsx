@@ -399,11 +399,14 @@ describe("AssetBrowser", () => {
     const folderShelfApi: Pick<CharacterHubApi, "seriesFolders"> = {
       seriesFolders: vi.fn().mockResolvedValue([{ classificationId: "child-b", thumbnailAssetId: "thumb-beta" }]),
     };
-    renderBrowser(gateway, { view: { kind: "classification", classificationId: "parent" }, classifications: entries, folderShelfApi });
+    const onReorderFolders = vi.fn().mockResolvedValue(undefined);
+    renderBrowser(gateway, { view: { kind: "classification", classificationId: "parent" }, classifications: entries, folderShelfApi, onReorderFolders, classificationOrderIds: ["child-a", "child-b"] });
 
     await screen.findByRole("option", { name: "asset-0.png" });
     await waitFor(() => expect(screen.getByRole("heading", { name: "폴더 2" })).toBeVisible());
-    expect(screen.getAllByRole("button", { name: /폴더 열기/ }).map(button => button.getAttribute("aria-label"))).toEqual(["베타 폴더 열기", "알파 폴더 열기"]);
+    expect(screen.getAllByRole("button", { name: /폴더 열기/ }).map(button => button.getAttribute("aria-label"))).toEqual(["알파 폴더 열기", "베타 폴더 열기"]);
+    await act(async () => { fireEvent.keyDown(screen.getByRole("button", { name: "알파 폴더 열기" }), { key: "End", altKey: true }); });
+    expect(onReorderFolders).toHaveBeenCalledWith("parent", ["child-b", "child-a"]);
     expect(screen.getByText("11장")).toBeVisible();
     expect(document.querySelector(".asset-gallery__date")).toBeNull();
     await user.click(screen.getByRole("button", { name: "보기" }));
@@ -1328,7 +1331,7 @@ function withWorkspaceChrome(child: ReactNode) {
   );
 }
 
-type BrowserOptions = Pick<ComponentProps<typeof AssetBrowser>, "characterSeries" | "characterExtras" | "characterTargets" | "characterGroups" | "onCharactersChanged"> & { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void; classifications?: ClassificationEntry[]; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders"> };
+type BrowserOptions = Pick<ComponentProps<typeof AssetBrowser>, "characterSeries" | "characterExtras" | "characterTargets" | "characterGroups" | "onCharactersChanged" | "classificationOrderIds" | "onReorderFolders"> & { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void; classifications?: ClassificationEntry[]; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders"> };
 function browserElement(gateway: LibraryGateway, { navigationMemory, view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn(), classifications: viewClassifications = classifications, folderShelfApi, ...characterProps }: BrowserOptions = {}) {
   return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser {...characterProps} navigationMemory={navigationMemory} galleryLayout="justified" view={view} classifications={viewClassifications} folderShelfApi={folderShelfApi} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
 }

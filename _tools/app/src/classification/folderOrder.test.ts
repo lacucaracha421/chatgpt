@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ClassificationEntry } from "../library/types";
-import { applyCharacterFolderOrder, applyInitialCountOrder, reorderFolders } from "./folderOrder";
+import { applyCharacterFolderOrder, applyInitialCountOrder, reorderFolders, withFolderSiblingOrder } from "./folderOrder";
 import { DEFAULT_UI_PREFERENCES, loadUiPreferences, saveUiPreferences } from "../preferences/uiPreferences";
 import { buildTree } from "./buildTree";
 
@@ -50,4 +50,18 @@ it("preserves manual sibling order and appends moved children without changing u
   const next = reorderFolders(entries, order, "d", { kind: "classification", entryId: "c", position: "before", valid: true }, "a");
   expect(buildTree(entries, next)[1].children.map((node) => node.entry.id)).toEqual(["d", "c"]);
   expect(reorderFolders(entries, next, "b", { kind: "classification", entryId: "a", position: "inside", valid: true }, "a")).toEqual(["a", "d", "c", "b"]);
+});
+
+it("replaces only the requested sibling band and rejects partial, duplicate or foreign ids", () => {
+  const entries = [
+    { id: "parent", name: "Parent", parentId: null },
+    { id: "a", name: "A", parentId: "parent" },
+    { id: "b", name: "B", parentId: "parent" },
+    { id: "other", name: "Other", parentId: null },
+  ].map(entry => ({ ...entry, kind: "tag", iconKey: null, colorKey: null })) as ClassificationEntry[];
+  expect(withFolderSiblingOrder(entries, ["other", "a", "parent", "deleted"], "parent", ["b", "a"])).toEqual(["other", "parent", "b", "a"]);
+  for (const ids of [["a"], ["a", "a"], ["a", "other"]]) {
+    expect(() => withFolderSiblingOrder(entries, [], "parent", ids)).toThrow();
+  }
+  expect(entries.find(entry => entry.id === "b")!.parentId).toBe("parent");
 });

@@ -140,6 +140,7 @@ pub(crate) async fn execute_catalog_update(
     language: CatalogLanguage,
     max_pages: u32,
 ) -> Result<CatalogUpdateResult, LibraryError> {
+    let mut activity = crate::activities::Job::start(format!("catalog-refresh:{language:?}"), "catalog_refresh", "온라인 카탈로그 갱신", None);
     if language == CatalogLanguage::Korean {
         library.record_catalog_update_attempt(&chrono::Utc::now().to_rfc3339())?;
     }
@@ -149,7 +150,7 @@ pub(crate) async fn execute_catalog_update(
     // An interrupted stream may already have committed content. Derived count
     // preparation must not change the ingestion result or checkpoint semantics.
     let _ = library.catalog_source_published(previous_revision.as_deref());
-    match outcome {
+    let outcome = match outcome {
         Ok(mut result) => {
             library.rebuild_catalog_suggestions()?;
             let stream = catalog_checkpoint::statuses(&library.root().join("catalogs/kdata.db"))?
@@ -177,7 +178,9 @@ pub(crate) async fn execute_catalog_update(
             }
             Err(error)
         }
-    }
+    };
+    activity.complete(&outcome);
+    outcome
 }
 
 async fn run_catalog_update(
@@ -255,6 +258,7 @@ async fn run_catalog_update(
         .map_err(|_| LibraryError::CatalogTransportUnavailable)??;
         added += page_added;
         pages += 1;
+        crate::activities::report(&format!("catalog-refresh:{language:?}"), "catalog_refresh", "온라인 카탈로그 갱신", "running", pages as u64, None, Some(format!("{} · {pages}페이지", if language == CatalogLanguage::Korean { "한국어" } else { "일본어" })), None, None, None);
         let up_to_date = checkpoint.initial_complete
             && checkpoint.cursor.is_none()
             && next.pending_max == checkpoint.watermark;

@@ -30,14 +30,14 @@ pub struct ReferenceRefreshReceipt {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReferenceRefreshProgress {
-    target_id: String,
-    target_name: String,
-    series_name: String,
-    state: String,
-    total: Option<usize>,
-    processed: usize,
-    remaining: usize,
-    failed: usize,
+    pub(super) target_id: String,
+    pub(super) target_name: String,
+    pub(super) series_name: String,
+    pub(super) state: String,
+    pub(super) total: Option<usize>,
+    pub(super) processed: usize,
+    pub(super) remaining: usize,
+    pub(super) failed: usize,
 }
 
 pub(super) fn refresh_progress(c: &rusqlite::Connection) -> Result<Vec<ReferenceRefreshProgress>> {

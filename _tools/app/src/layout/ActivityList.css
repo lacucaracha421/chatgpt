@@ -1,0 +1,29 @@
+.activity-list { display: grid; }
+.activity-list__group { display: grid; }
+.activity-list__motion { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 140ms var(--ease-standard), opacity 140ms var(--ease-standard); animation: activity-enter 140ms var(--ease-standard); }
+.activity-list__motion[data-exiting] { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.activity-list__clip { min-height: 0; overflow: hidden; }
+@keyframes activity-enter { from { grid-template-rows: 0fr; opacity: 0; } to { grid-template-rows: 1fr; opacity: 1; } }
+.activity-row { display: flex; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--color-border); }
+.activity-row[data-detail] { min-height: 48px; }
+.activity-row__icon { width: 16px; height: 16px; flex: none; color: var(--color-muted); }
+.activity-row__body { flex: 1; min-width: 0; }
+.activity-row__line { display: flex; align-items: baseline; gap: 8px; }
+.activity-row__name { font-size: var(--type-body, 15px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.activity-row__count { margin-left: auto; flex: none; color: var(--color-muted); font-size: var(--type-meta, 12px); font-variant-numeric: tabular-nums; }
+.activity-row__detail { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--type-meta, 12px); color: var(--color-muted); }
+.activity-row[data-problem], .activity-row[data-problem] .activity-row__icon, .activity-row[data-problem] .activity-row__detail, .activity-row[data-problem] .activity-row__count { color: var(--color-danger); }
+.activity-row[data-waiting] .activity-row__name { color: var(--color-muted); }
+.activity-list__sub { display: flex; gap: 8px; align-items: center; min-height: 28px; color: var(--color-faint); font-size: var(--type-meta, 12px); }
+.activity-list__sub > span { font-variant-numeric: tabular-nums; }
+.activity-row__meter { width: 48px; height: 4px; flex: none; background: var(--color-border); }
+.activity-row__meter > span { display: block; height: 100%; background: var(--color-muted); }
+.activity-row__button { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border: 0; padding: 0; border-radius: var(--radius-control); color: var(--color-muted); background: transparent; cursor: pointer; }
+.activity-row__button svg, .activity-list__fold svg { width: 16px; height: 16px; }
+.activity-row__button:hover, .activity-list__fold:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.activity-row__button:focus-visible, .activity-list__fold:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
+.activity-list__fold { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0; border: 0; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta, 12px); cursor: pointer; }
+.activity-list__fold > span { font-variant-numeric: tabular-nums; }
+.activity-row__result { display: grid; gap: 4px; padding: 8px 0 8px 24px; font-size: var(--type-meta, 12px); overflow-wrap: anywhere; }
+.activity-row__result p { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .activity-list__motion { animation: none; transition: none; } }

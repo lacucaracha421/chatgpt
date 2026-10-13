@@ -2920,7 +2920,15 @@ pub async fn push_cloud_characters(
     on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
 ) -> Result<crate::cloud::characters::CharacterPublishResult, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.push_cloud_characters(&|progress| { let _ = on_progress.send(progress); }))
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut activity = crate::activities::Job::start("publication_characters", "publication_characters", "모바일 캐릭터 업데이트", None);
+        let result = library.push_cloud_characters(&|progress| {
+            activity.progress(progress.completed, progress.total, Some(progress.phase.into()));
+            let _ = on_progress.send(progress);
+        });
+        activity.complete(&result);
+        result
+    })
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
@@ -2930,7 +2938,15 @@ pub async fn push_cloud_catalog(
     on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
 ) -> Result<crate::cloud::catalog::MobileCatalogPublishResult, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.push_cloud_catalog(&|progress| { let _ = on_progress.send(progress); }))
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut activity = crate::activities::Job::start("publication_catalog", "publication_catalog", "카탈로그 게시", None);
+        let result = library.push_cloud_catalog(&|progress| {
+            activity.progress(progress.completed, progress.total, Some(progress.phase.into()));
+            let _ = on_progress.send(progress);
+        });
+        activity.complete(&result);
+        result
+    })
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
@@ -3504,9 +3520,13 @@ pub async fn import_into_encrypted_vault(
 ) -> Result<crate::library::models::EncryptedVaultImportReport, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.import_into_encrypted_vault(std::path::Path::new(&source_folder), &mut |progress| {
+        let mut activity = crate::activities::Job::start("vault_import", "vault_import", "비밀 보관함 가져오기", None);
+        let result = library.import_into_encrypted_vault(std::path::Path::new(&source_folder), &mut |progress| {
+            activity.progress(progress.processed, Some(progress.total), None);
             let _ = on_progress.send(progress.clone());
-        })
+        });
+        activity.complete(&result);
+        result
     })
     .await
     .map_err(|_| background_task_error())?
@@ -3709,10 +3729,14 @@ pub async fn import_files_into_encrypted_vault(
 ) -> Result<crate::library::models::EncryptedVaultImportReport, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let mut activity = crate::activities::Job::start("vault_import", "vault_import", "비밀 보관함 가져오기", None);
         let files = files.into_iter().map(std::path::PathBuf::from).collect::<Vec<_>>();
-        library.import_files_into_encrypted_vault(&files, &mut |progress| {
+        let result = library.import_files_into_encrypted_vault(&files, &mut |progress| {
+            activity.progress(progress.processed, Some(progress.total), None);
             let _ = on_progress.send(progress.clone());
-        })
+        });
+        activity.complete(&result);
+        result
     })
     .await
     .map_err(|_| background_task_error())?
@@ -3776,9 +3800,13 @@ pub async fn export_encrypted_vault_items(
 ) -> Result<crate::library::models::EncryptedVaultExportProgress, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.export_encrypted_vault_items(&item_ids, std::path::Path::new(&destination), &mut |progress| {
+        let mut activity = crate::activities::Job::start("vault_export", "vault_export", "비밀 보관함 내보내기", None);
+        let result = library.export_encrypted_vault_items(&item_ids, std::path::Path::new(&destination), &mut |progress| {
+            activity.progress(progress.processed, Some(progress.total), None);
             let _ = on_progress.send(progress.clone());
-        })
+        });
+        activity.complete(&result);
+        result
     })
     .await
     .map_err(|_| background_task_error())?

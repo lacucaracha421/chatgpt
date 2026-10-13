@@ -1,5 +1,5 @@
 import { AssetImage } from "../privacy/AssetImage";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowUturnLeftIcon, PencilIcon, PhotoIcon, UserGroupIcon, UserPlusIcon } from "@heroicons/react/24/outline";
 import { Dialog } from "../shared/ui/Dialog";
@@ -17,7 +17,7 @@ import { characterExtrasApi } from "./extrasApi";
 import { useExtrasPreviews } from "./ExtrasCard";
 import type { CharacterHubApi } from "./hubApi";
 import { NO_OVER, ShelfDrag, type DragOver, type DropIntent, type ShelfDragHost } from "./shelfDrag";
-import { canMove, movedIds, orderAnnouncement, type OrderKind, type OrderMove } from "./shelfOrder";
+import { SHELF_MOVE_ITEMS as MOVE_ITEMS, SHELF_KEY_MOVES as KEY_MOVES, canMove, movedIds, orderAnnouncement, type OrderKind, type OrderMove } from "./shelfOrder";
 
 type Group = { id: string; name: string; revision: number; targetIds: string[]; extrasTargetId?: string | null };
 type Props = {
@@ -29,6 +29,8 @@ type Props = {
   onOpenGroup?: (groupId: string | null) => void;
   onGroupsChanged?: () => void;
   folderCards?: ReactNode[];
+  /** The sub-folder band (registered series and plain folders): ids in shelf order, aligned with `folderCards`. Without it those cards stay fixed. */
+  folderOrder?: { ids: string[]; names: Record<string, string>; onReorder: (ids: string[]) => Promise<void> };
   suggestionCards?: ReactNode[];
   /** The 기타 card: always the last character card, after the characters (and before suggestions and folders). */
   extrasCard?: ReactNode;
@@ -66,15 +68,8 @@ export type CharacterShelfApi = {
 };
 
 type Notice = { id: number; text: string; tone: "status" | "error"; actionLabel?: string; run?: () => void };
-const MOVE_ITEMS: { move: OrderMove; label: string; shortcut?: string }[] = [
-  { move: "prev", label: "앞으로", shortcut: "Alt+←" },
-  { move: "next", label: "뒤로", shortcut: "Alt+→" },
-  { move: "first", label: "맨 앞으로" },
-  { move: "last", label: "맨 뒤로" },
-];
-const KEY_MOVES: Record<string, OrderMove> = { ArrowLeft: "prev", ArrowRight: "next", Home: "first", End: "last" };
 
-export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, suggestionCards = [], extrasCard, suggestionCount = 0, extrasPreviewApi, extrasPreviewVersion = 0, memberCounts = {}, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, editGroupRequest = null, onEditGroupRequestHandled, onReorderGroups, onReorderCharacters, children }: Props) {
+export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, folderOrder, suggestionCards = [], extrasCard, suggestionCount = 0, extrasPreviewApi, extrasPreviewVersion = 0, memberCounts = {}, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, editGroupRequest = null, onEditGroupRequestHandled, onReorderGroups, onReorderCharacters, children }: Props) {
   const [loadedGroups, setLoadedGroups] = useState<Group[]>([]);
   const [draft, setDraft] = useState<Group | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -127,7 +122,8 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   const groupIds = rootGroups.map(group => group.id);
   const characterIds = visibleMembers.map(target => target.id);
   const looseIds = members.filter(target => !grouped.has(target.id)).map(target => target.id);
-  const bandOf = (kind: OrderKind) => kind === "group" ? groupIds : characterIds;
+  const folderIds = current || !folderOrder || folderOrder.ids.length !== rootFolders.length ? [] : folderOrder.ids;
+  const bandOf = (kind: OrderKind) => kind === "group" ? groupIds : kind === "folder" ? folderIds : characterIds;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
   const [lift, setLift] = useState<{ kind: OrderKind; id: string } | null>(null);
@@ -143,7 +139,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   /** The new order shows at once (the owner updates its lists first); when storing fails it returns and one toast offers a retry. */
   async function applyOrder(kind: OrderKind, ids: string[]) {
     try {
-      await (kind === "group" ? reorderGroups(seriesId, ids) : reorderCharacters(seriesId, current?.id ?? null, ids));
+      await (kind === "group" ? reorderGroups(seriesId, ids) : kind === "folder" ? folderOrder!.onReorder(ids) : reorderCharacters(seriesId, current?.id ?? null, ids));
     } catch {
       showNotice({ text: "순서를 바꾸지 못했습니다", tone: "error", actionLabel: "다시 시도", run: () => { setNotice(null); void applyOrder(kind, ids); } });
     }
@@ -153,13 +149,13 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     const ids = bandOf(kind);
     const next = movedIds(ids, id, move);
     if (!next) return;
-    const name = kind === "group" ? groups.find(group => group.id === id)?.name : members.find(target => target.id === id)?.displayName;
+    const name = kind === "group" ? groups.find(group => group.id === id)?.name : kind === "folder" ? folderOrder?.names[id] : members.find(target => target.id === id)?.displayName;
     if (keyboard) pendingFocus.current = { kind, id };
     setAnnouncement(orderAnnouncement(kind, name ?? "", next.indexOf(id)));
     void applyOrder(kind, next);
   }
   // A moved card is re-inserted by the browser and loses focus: give it back and keep it in view.
-  const orderSignature = `${groupIds.join()}|${characterIds.join()}`;
+  const orderSignature = `${groupIds.join()}|${characterIds.join()}|${folderIds.join()}`;
   const rootRef = useRef<HTMLDivElement>(null);
   const bridge = useRef<ShelfBridge>({ locked: false, track: null }).current;
   useLayoutEffect(() => {
@@ -294,7 +290,11 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     ...(visibleMembers.length > 0 ? [<Fragment key="members">{children(visibleMembers, shelfApi)}</Fragment>] : []),
     ...(extrasCard ? [<Fragment key="extras">{extrasCard}</Fragment>] : []),
     ...suggestionCards,
-    ...rootFolders,
+    ...rootFolders.map((card, index) => {
+      const id = folderIds[index];
+      if (id === undefined) return card;
+      return <ContextMenu key={id} items={MOVE_ITEMS.map(item => ({ id: `move-${item.move}`, label: item.label, shortcut: item.shortcut, disabled: !canMove(folderIds, id, item.move), onSelect: () => moveCard("folder", id, item.move) }))}>{card as ReactElement}</ContextMenu>;
+    }),
   ];
 
   async function save(remove = false) {

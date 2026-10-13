@@ -13,7 +13,7 @@ import { useCharacterHub } from "../characters/useCharacterHub";
 import { movedGroupIds } from "../characters/groupOrder";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { HomeAssetDestination } from "../home/HomeAssetDestination";
-import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
+import { applyInitialCountOrder, reorderFolders, withFolderSiblingOrder } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
 import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "../assets/AssetBrowser";
@@ -52,6 +52,7 @@ import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntr
 import {
   loadUiPreferences,
   saveUiPreferences,
+  saveOptimisticUiPreferences,
   type UiPreferences,
 } from "../preferences/uiPreferences";
 import { useAppZoom } from "../preferences/useAppZoom";
@@ -204,6 +205,17 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const collectionWorkOrderRef = useRef<string[]>([]);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
+  const preferencesRef = useRef(preferences);
+  const savedPreferencesRef = useRef<UiPreferences | null>(null);
+  preferencesRef.current = preferences;
+  function persistPreferences(next: UiPreferences) {
+    saveOptimisticUiPreferences(preferencesRef.current, next, value => { preferencesRef.current = value; setPreferences(value); });
+    savedPreferencesRef.current = next;
+  }
+  async function reorderShelfFolders(parentId: string, ids: string[]) {
+    const current = preferencesRef.current;
+    persistPreferences({ ...current, classificationOrderIds: withFolderSiblingOrder(entries, current.classificationOrderIds, parentId, ids) });
+  }
   useMobilePublications(gateway, libraryRoot, preferences.classificationOrderIds, preferences.pinnedClassificationIds, entries);
   const appZoomError = useAppZoom(preferences.appZoom);
   useEffect(() => {
@@ -442,7 +454,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (result.changedCollections > 0) appendMessage(`${result.provider === "mangadex" ? "MangaDex 새 권" : "Kakao 신간"} 정보가 있는 작품 ${result.changedCollections}개`);
   });
   useEffect(() => {
+    if (savedPreferencesRef.current === preferences) return;
     saveUiPreferences(preferences);
+    savedPreferencesRef.current = preferences;
   }, [preferences]);
   useEffect(() => {
     if (sidebarWidth === preferences.sidebarWidth) return;
@@ -693,13 +707,14 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       const parentId = target.position === "inside" ? target.entryId : destination?.parentId ?? null;
       if (payload.kind === "album") await gateway.moveAlbum(payload.entryId, target.entryId);
       else if (entries.find((entry) => entry.id === payload.entryId)?.parentId !== parentId) await gateway.moveClassification(payload.entryId, parentId);
-      setPreferences((current) => ({
+      const current = preferencesRef.current;
+      persistPreferences({
         ...current,
         ...(payload.kind === "classification" ? { classificationOrderIds: reorderFolders(entries, current.classificationOrderIds, payload.entryId, target, parentId) } : {}),
         ...(payload.kind === "album"
           ? { expandedAlbumIds: current.expandedAlbumIds.includes(target.entryId) ? current.expandedAlbumIds : [...current.expandedAlbumIds, target.entryId] }
           : { expandedClassificationIds: parentId && !current.expandedClassificationIds.includes(parentId) ? [...current.expandedClassificationIds, parentId] : current.expandedClassificationIds }),
-      }));
+      });
       if (payload.kind === "album") await refreshAlbums();
       else await refreshClassifications();
       setMessage(`${payload.kind === "album" ? "앨범" : "폴더"}을 이동했습니다.`);
@@ -892,13 +907,15 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <ArtistHub view={view} onNavigate={navigateView} privacyMode={preferences.privacyMode} />
                 ) : (
                   <HomeAssetDestination active={homeAsset} onExit={homeAsset && requestedAsset ? leaveHomeAsset : undefined}>
-                  <CharacterFolderContent albums={albums} sort={preferences.assetSort} onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={() => setGroupEditRequest(null)} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} galleryLayout={preferences.galleryLayout} onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })} privacyMode={preferences.privacyMode} onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })} metadataVisible={preferences.metadataVisible} onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })} thumbnailRowHeight={preferences.thumbnailRowHeight} onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }} onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }} onMembershipChanged={refreshMembershipCounts}>
+                  <CharacterFolderContent albums={albums} sort={preferences.assetSort} onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={() => setGroupEditRequest(null)} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} galleryLayout={preferences.galleryLayout} onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })} privacyMode={preferences.privacyMode} onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })} metadataVisible={preferences.metadataVisible} onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })} thumbnailRowHeight={preferences.thumbnailRowHeight} onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }} onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }} onMembershipChanged={refreshMembershipCounts} classificationOrderIds={preferences.classificationOrderIds} onReorderFolders={reorderShelfFolders}>
                   <AssetBrowser
                     navigationMemory={assetNavigationMemory.current}
                     view={view}
                     onViewChange={navigateView}
                     onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }}
                     classifications={entries}
+                    classificationOrderIds={preferences.classificationOrderIds}
+                    onReorderFolders={reorderShelfFolders}
                     characterTargets={characterHub.targets}
                     characterGroups={characterHub.groups}
                     characterSeries={characterHub.series}

@@ -227,6 +227,7 @@ pub async fn pause_character_reference_refresh(
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
         library.set_character_reference_refresh_paused(paused)?;
+        library.set_character_incremental_paused(paused)?;
         if !paused {
             start_incremental_if_configured(&app, &library);
         }

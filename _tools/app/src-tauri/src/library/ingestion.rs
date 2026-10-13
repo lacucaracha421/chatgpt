@@ -56,7 +56,10 @@ impl Library {
         &self,
         request: IngestMediaRequest,
     ) -> Result<IngestOutcome, LibraryError> {
-        self.ingest_media_with_identity(request, None)
+        let mut activity = crate::activities::Job::start(format!("ingest:{}", uuid::Uuid::new_v4()), "ingestion", "파일 가져오기", None);
+        let result = self.ingest_media_with_identity(request, None);
+        activity.complete(&result);
+        result
     }
 
     pub(crate) fn ingest_media_with_identity(

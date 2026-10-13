@@ -203,19 +203,6 @@
 .series-shelf > div { grid-area: 1 / 1; min-width: 0; }
 
 /* ===== Carrying a card on the series shelf (user-accepted design 2026-10-13) ===== */
-.shelf-reorder-root { display: contents; }
-.shelf-order-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-html.is-shelf-reordering, html.is-shelf-reordering * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
-/* The cards of the band step aside by sliding; the layout itself never changes while a card is carried. */
-[data-reordering] > [data-order-id] { transition: transform 140ms var(--ease-standard); }
-/* The carried card's own place: a slightly lighter surface, no border and no coloured line. */
-[data-order-id][data-reorder-state] > * { visibility: hidden; }
-[data-order-id][data-reorder-state="source"]::before { content: ""; position: absolute; left: 0; top: 0; width: 132px; height: 170px; border-radius: 2px; background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg)); }
-/* The floating clone: same size, only a shadow lifts it. */
-.shelf-drag-ghost { opacity: .94; }
-.shelf-drag-ghost.is-over { opacity: .6; }
-.shelf-drag-ghost .series-character__open > :is(img, .series-character__placeholder, .character-group-card__mosaic) { box-shadow: var(--shadow-floating); }
-.shelf-drag-ghost .series-character__open { cursor: grabbing; }
 /* 그룹에 넣기 (on a group card) and 그룹에서 빼기 (first slot of a group view): the text sits high so the carried card does not cover it. */
 .shelf-into-face, .shelf-take-out__face { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: var(--space-1); width: 132px; height: 170px; padding-top: var(--space-4); border-radius: 2px; font-size: var(--type-meta); animation: shelf-face-in 140ms var(--ease-standard) both; }
 .shelf-into-face svg, .shelf-take-out__face svg { width: 20px; height: 20px; }
@@ -225,7 +212,6 @@ html.is-shelf-reordering, html.is-shelf-reordering * { cursor: grabbing !importa
 .shelf-take-out[data-over] .shelf-take-out__face { background: var(--color-surface-hover); color: var(--color-text); font-weight: 600; }
 @keyframes shelf-face-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  [data-reordering] > [data-order-id] { transition: none; }
   .shelf-into-face, .shelf-take-out__face { animation: none; }
 }
 /* Menu rows may show their keyboard shortcut at the end. */

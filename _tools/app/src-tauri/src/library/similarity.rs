@@ -650,7 +650,9 @@ impl Library {
     }
 
     pub fn index_missing_similarity_hashes(&self) -> Result<SimilarityIndexProgress, LibraryError> {
-        self.index_missing_similarity_hashes_with_budget(crate::performance::budgets())
+        let result = self.index_missing_similarity_hashes_with_budget(crate::performance::budgets());
+        if let Err(error) = &result { crate::activities::finish("similarity-hashes", Some(error.to_string())); }
+        result
     }
 
     fn index_missing_similarity_hashes_with_budget(
@@ -680,6 +682,9 @@ impl Library {
 
         let workers = budget
             .indexing_workers(std::thread::available_parallelism().map_or(1, |count| count.get()));
+        if !asset_ids.is_empty() {
+            crate::activities::report("similarity-hashes", "similarity", "유사 이미지 준비", "running", 0, None, Some(format!("{}개 처리 중", asset_ids.len())), None, None, None);
+        }
         std::thread::scope(|scope| {
             let handles: Vec<_> = asset_ids
                 .chunks(asset_ids.len().div_ceil(workers).max(1))
@@ -716,6 +721,10 @@ impl Library {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
+        if remaining > 0 {
+            crate::activities::report("similarity-hashes", "similarity", "유사 이미지 준비", if crate::workload::is_restricted() { "queued" } else { "running" }, 0, None, Some(format!("{remaining}개 남음")), None,
+                crate::workload::is_restricted().then(|| "절약 모드".into()), None);
+        } else { crate::activities::finish("similarity-hashes", (failed > 0).then(|| format!("실패 {failed}개"))); }
         Ok(SimilarityIndexProgress {
             remaining: remaining as u64,
             failed: failed as u64,

@@ -164,6 +164,7 @@ impl Library {
              WHERE singleton = 1",
             params![state.as_str(), chrono::Utc::now().to_rfc3339()],
         )?;
+        crate::activities::pause_group("cloud", (state == BackfillControlState::Paused).then(|| "일시 정지됨".into()));
         Ok(state)
     }
 
@@ -524,7 +525,7 @@ impl Library {
                 replication.problems = 0;
             }
         }
-        Ok(BackfillProgress {
+        let progress = BackfillProgress {
             control_state: BackfillControlState::from_database(&control_value)?,
             total_assets,
             queued,
@@ -542,7 +543,21 @@ impl Library {
                 [],
                 |row| row.get(0),
             )?,
-        })
+        };
+        let remaining = progress.queued + progress.preparing + progress.uploading + progress.committing;
+        if remaining > 0 {
+            let reason = if !progress.replication_enabled { Some("동기화 꺼짐") }
+                else if progress.control_state == BackfillControlState::Paused { Some("일시 정지됨") }
+                else if progress.sync_held { Some("송신 보류") } else { None };
+            crate::activities::report("cloud-upload", "cloud_upload", "클라우드 업로드",
+                if reason.is_some() { "paused" } else { "running" },
+                progress.completed, Some(progress.total_assets), Some(format!("{remaining}개 남음")), Some("cloud"), reason.map(str::to_owned), None);
+        } else { crate::activities::finish("cloud-upload", None); }
+        if progress.failed > 0 {
+            crate::activities::report("cloud-upload-problem", "cloud_upload_problem", "클라우드 업로드 문제", "failed", progress.failed, None, None, None, None,
+                Some(progress.last_error.clone().unwrap_or_else(|| format!("업로드 실패 {}개", progress.failed))));
+        } else { crate::activities::clear_dismissed("cloud-upload-problem"); }
+        Ok(progress)
     }
 
     /// failed 상태의 백필 항목을 pending으로 되돌려 재시도 가능하게 한다.

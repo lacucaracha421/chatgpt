@@ -1,3 +1,4 @@
+mod activities;
 mod catalog_source;
 mod catalog_transport;
 mod cloud;
@@ -49,6 +50,7 @@ pub fn run() {
                 media_protocol::set_preview_disk_cache(cache.join("provider-previews-v1"));
             }
             workload::setup(app.handle())?;
+            activities::setup(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 window_size::restore(&window);
             }
@@ -261,6 +263,8 @@ pub fn run() {
             });
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
+            activities::activity_snapshot,
+            activities::dismiss_activity,
             workload::workload_launch_settled,
             extension_api::report_picker_privacy,
             perf_log::perf_log_enabled,

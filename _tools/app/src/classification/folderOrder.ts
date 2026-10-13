@@ -34,3 +34,13 @@ export function reorderFolders(entries: ClassificationEntry[], order: string[], 
   const existing = new Set(entries.map((entry) => entry.id));
   return [...order.filter((id) => existing.has(id) && !reordered.has(id)), ...siblings];
 }
+
+/** Replace a complete sibling band, preserving every other branch's order. Never reparent. */
+export function withFolderSiblingOrder(entries: ClassificationEntry[], order: string[], parentId: string, ids: string[]): string[] {
+  const siblings = new Set(entries.filter(entry => entry.parentId === parentId).map(entry => entry.id));
+  if (ids.length !== siblings.size || new Set(ids).size !== ids.length || ids.some(id => !siblings.has(id))) {
+    throw new Error("Folder siblings changed while reordering");
+  }
+  const existing = new Set(entries.map(entry => entry.id));
+  return [...order.filter(id => existing.has(id) && !siblings.has(id)), ...ids];
+}

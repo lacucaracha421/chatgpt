@@ -210,6 +210,13 @@ async function openStatusPanel(user: ReturnType<typeof userEvent.setup>, gateway
   await act(async () => { await Promise.resolve(); });
 }
 
+/** A finished job sits folded under 최근 끝남; open the fold and the job's result. */
+async function openRecentResult(label: string) {
+  const fold = await screen.findByRole("button", { name: /^최근 끝남/ }, { timeout: 3000 });
+  if (fold.getAttribute("aria-expanded") !== "true") await userEvent.click(fold);
+  await userEvent.click(await screen.findByRole("button", { name: `${label} 결과 열기` }));
+}
+
 /** The app opens on Home; tests of the library screens enter 에셋 from the rail first. */
 async function openAssets() {
   const rail = await screen.findByRole("navigation", { name: "주요 영역" });
@@ -1068,7 +1075,8 @@ describe("App", () => {
         await Promise.resolve();
       });
       await user.click(screen.getByRole("button", { name: /^상태/ }));
-      expect(screen.getByRole("group", { name: "가져오기 작업" })).toHaveTextContent("추가 1");
+      await openRecentResult("파일 가져오기");
+      expect(screen.getByRole("group", { name: "최근 끝남" })).toHaveTextContent("추가 1");
   });
 
   it("shows setup and an error when restoring the saved library fails", async () => {
@@ -1183,9 +1191,10 @@ describe("App", () => {
 
     act(() => drop?.(["C:\\images\\arona.png"]));
 
+    // A job shows under 진행 중 only after it has run for a second.
     expect(
-      await screen.findByText(/가져오는 중 \d \/ 1|파일 가져오기 1 \/ 1/),
-    ).toBeInTheDocument();
+      await screen.findByRole("group", { name: "진행 중" }, { timeout: 3000 }),
+    ).toHaveTextContent(/파일 가져오기\d \/ 1/);
     expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\arona.png",
       classificationId: "tag-arona",
@@ -1196,7 +1205,8 @@ describe("App", () => {
 
     act(() => resolveIngest({ status: "added", asset }));
 
-    expect(await screen.findByText(/추가 1 · 중복 0/)).toBeInTheDocument();
+    await openRecentResult("파일 가져오기");
+    expect(screen.getByRole("group", { name: "최근 끝남" })).toHaveTextContent(/추가 1 · 중복 0/);
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenCalledTimes(
         callsBeforeDrop + 1,
@@ -1276,7 +1286,8 @@ describe("App", () => {
 
     act(() => drop?.(["C:\\images\\duplicate.png"]));
 
-    expect(await screen.findByText(/추가 0 · 중복 1/)).toBeInTheDocument();
+    await openRecentResult("파일 가져오기");
+    expect(screen.getByRole("group", { name: "최근 끝남" })).toHaveTextContent(/추가 0 · 중복 1/);
     expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\duplicate.png",
       classificationId: "root-games",
@@ -1667,8 +1678,8 @@ describe("App", () => {
     fireEvent.pointerMove(tile, { pointerId: 11, clientX: 1001, clientY: 100 });
     await waitFor(() => expect(screen.getByRole("button", { name: /^상태 · 문제/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /^상태 · 문제/ }));
-    expect(await screen.findByRole("button", { name: "실패 파일 다시 시도" })).toBeVisible();
-    expect(screen.getByRole("group", { name: "가져오기 작업" })).toHaveTextContent("탐색기 복사 실패");
+    expect(await screen.findByRole("button", { name: "탐색기로 복사 다시 시도" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "문제" })).toHaveTextContent("탐색기 복사 실패");
   });
 
   it("opens the manga browser and scans the manga folder", async () => {

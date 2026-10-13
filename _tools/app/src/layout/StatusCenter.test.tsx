@@ -19,9 +19,12 @@ import { resetVaultExportJob, startVaultExport } from "../external-vault/vaultEx
 import { resetVaultImportJob, startVaultImport } from "../external-vault/vaultImportJob";
 import { StatusCenter, authoritySyncSummary, type StatusWork } from "./StatusCenter";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
+import { resetActivityFold } from "./ActivityList";
+async function revealJobs() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 1010)); }); }
 
 afterEach(() => {
   cleanup();
+  resetActivityFold();
   dismissPublication("catalog");
   dismissPublication("characters");
   resetVaultImportJob();
@@ -42,6 +45,53 @@ const idleCharacterAutomation = {
 } as any;
 
 const syncedProgress = { controlState: "idle", replicationEnabled: true, totalAssets: 10, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 10, failed: 0, activeWorkers: 0, lastError: null, activity: [] } as CloudBackfillProgress;
+
+it("moves cloud upload into 작업 and keeps background upload out of the trigger count", async () => {
+  render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null}
+    cloud={{ problemCount: 0, progress: { ...syncedProgress, controlState: "running", completed: 6, queued: 4 } }} onNavigate={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "상태" }));
+  await revealJobs();
+  const work = screen.getByRole("region", { name: "작업" });
+  expect(work).toHaveTextContent("클라우드 업로드4개 남음");
+  expect(within(work).getByRole("button", { name: "클라우드 업로드 일시 정지" })).toBeVisible();
+  expect(screen.queryByRole("region", { name: "동기화" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "상태" })).toHaveAttribute("data-state-tone", "idle");
+});
+
+it("pauses every character row from any character pause control", async () => {
+  const pause = vi.fn();
+  render(<StatusCenter characterAutomation={{ ...idleCharacterAutomation, pauseHistoryRefresh: pause,
+    activeWork: { active: false, seriesName: null, targetName: null, cause: null, freshRemaining: 8, reconsiderationRemaining: 12 },
+  }} progress={null} onNavigate={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: /^상태/ }));
+  await userEvent.click(screen.getByRole("button", { name: "새 이미지 분석 일시 정지" }));
+  expect(pause).toHaveBeenCalledTimes(1);
+  const waiting = screen.getByRole("group", { name: "대기" });
+  expect(waiting).toHaveTextContent("새 이미지 분석8개 남음 · 일시 정지됨");
+  expect(waiting).toHaveTextContent("캐릭터 재검토12개 남음 · 일시 정지됨");
+  expect(within(waiting).getByRole("button", { name: "캐릭터 재검토 재개" })).toBeVisible();
+});
+
+it("keeps automatic character, preview and similarity work out of the titlebar count", async () => {
+  const preview: StatusWork = { kind: "preparation", id: "preview", total: 3, completed: 1, added: 0, exactDuplicates: [], reviewPending: [], failures: [], status: "running" };
+  render(<StatusCenter characterAutomation={{ ...idleCharacterAutomation,
+    activeWork: { active: true, seriesName: null, targetName: null, cause: "ingestion", freshRemaining: 12, reconsiderationRemaining: 0 },
+  }} progress={null} works={[preview]} similarityIndex={{ running: true, remaining: 9, failed: 0 }} onNavigate={vi.fn()} />);
+  const trigger = screen.getByRole("button", { name: "상태" });
+  await userEvent.click(trigger); await revealJobs();
+  const running = screen.getByRole("group", { name: "진행 중" });
+  expect(running).toHaveTextContent("새 이미지 분석");
+  expect(running).toHaveTextContent("미리보기 준비");
+  expect(running).toHaveTextContent("유사 이미지 준비");
+  expect(trigger).toHaveTextContent(/^상태$/);
+});
+
+it("counts a user-started manual character analysis", () => {
+  render(<StatusCenter characterAutomation={{ ...idleCharacterAutomation,
+    activeWork: { active: true, seriesName: null, targetName: null, cause: "manual_scan", freshRemaining: 12, reconsiderationRemaining: 0 },
+  }} progress={null} onNavigate={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "상태 · 작업 1개 진행 중" })).toHaveTextContent("작업 1");
+});
 
 it("stays quiet when idle, closes on Escape and returns focus to the indicator", async () => {
   const user = userEvent.setup();
@@ -95,7 +145,7 @@ it("shows sync problems as the indicator's problem state and opens cloud setting
   const { rerender } = render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null}
     cloud={{ problemCount: 0, progress: syncedProgress }} onNavigate={onNavigate} />);
   await user.click(screen.getByRole("button", { name: "상태" }));
-  expect(screen.getByRole("region", { name: "동기화" })).toHaveTextContent("동기화됨");
+  expect(screen.queryByRole("region", { name: "동기화" })).not.toBeInTheDocument();
   await user.keyboard("{Escape}");
 
   rerender(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null}
@@ -133,16 +183,17 @@ it("summarizes an explicit character history refresh alongside other active work
   render(<StatusCenter characterAutomation={{ ...idleCharacterAutomation, historyRefreshActive: true, paused: true }}
     progress={{ current: 1, total: 4 }} similarityIndex={{ running: true, remaining: 9, failed: 0 }} onNavigate={vi.fn()} />);
 
-  const trigger = screen.getByRole("button", { name: "상태 · 작업 4개 진행 중" });
-  expect(trigger).toHaveTextContent("작업 4");
+  const trigger = screen.getByRole("button", { name: "상태 · 작업 3개 진행 중" });
+  expect(trigger).toHaveTextContent("작업 3");
   expect(screen.queryByText("파일 가져오기 1 / 4")).not.toBeInTheDocument();
 
   await userEvent.click(trigger);
+  await revealJobs();
   const panel = screen.getByRole("dialog", { name: "상태" });
-  expect(panel).toHaveTextContent("파일 가져오기 1 / 4");
-  expect(panel).toHaveTextContent("유사 이미지 준비 중 · 9개 남음");
-  expect(panel).toHaveTextContent("과거 미분류 이미지 갱신 일시 정지");
-  expect(within(panel).getByRole("button", { name: "재개" })).toBeVisible();
+  expect(panel).toHaveTextContent("파일 가져오기1 / 4");
+  expect(panel).toHaveTextContent("유사 이미지 준비9개 남음");
+  expect(panel).toHaveTextContent("과거 미분류 갱신일시 정지됨");
+  expect(within(panel).getByRole("button", { name: "과거 미분류 갱신 재개" })).toBeVisible();
 
   await act(async () => { finish(); });
 });
@@ -151,15 +202,16 @@ it("shows fresh character work and a persistent character failure with its recov
   const { rerender } = render(<StatusCenter characterAutomation={{ ...idleCharacterAutomation,
     activeWork: { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12 },
   }} progress={null} onNavigate={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: "상태 · 작업 1개 진행 중" }));
-  expect(screen.getByRole("dialog")).toHaveTextContent("현재 작업 · 젠레스 / 레미엘 비교 중");
-  expect(screen.getByRole("dialog")).toHaveTextContent("새 이미지 분석 · 12개 남음");
+  await userEvent.click(screen.getByRole("button", { name: "상태" }));
+  await revealJobs();
+  expect(screen.getByRole("dialog")).toHaveTextContent("젠레스 / 레미엘");
+  expect(screen.getByRole("dialog")).toHaveTextContent("새 이미지 분석12개 남음");
 
   rerender(<StatusCenter characterAutomation={{ ...idleCharacterAutomation, persistentError: "런타임을 시작하지 못했습니다." }}
     progress={null} onNavigate={vi.fn()} />);
   expect(screen.getByRole("button", { name: "상태 · 문제 1개" })).toHaveAttribute("data-state-tone", "attention");
   expect(screen.getByRole("alert")).toHaveTextContent("캐릭터 분석 오류");
-  expect(screen.getByRole("button", { name: "분석 환경 설정" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "캐릭터 분석 오류 다시 시도" })).toBeVisible();
 });
 
 it("keeps reconsideration quiet in the chip and visible between comparisons, with shared pause controls", async () => {
@@ -172,29 +224,33 @@ it("keeps reconsideration quiet in the chip and visible between comparisons, wit
   expect(trigger).toHaveTextContent(/^상태$/);
   expect(trigger).toHaveAttribute("data-state-tone", "idle");
   await user.click(trigger);
+  await revealJobs();
   const work = screen.getByRole("region", { name: "작업" });
-  expect(work).toHaveTextContent("캐릭터 재검토 · 3,151개 남음");
-  expect(work).toHaveTextContent("현재 작업 · 젠레스 / 레미엘 비교 중");
+  expect(work).toHaveTextContent("캐릭터 재검토3,151개 남음");
+  expect(work).toHaveTextContent("젠레스 / 레미엘");
   expect(work).not.toHaveTextContent("진행 중인 작업 없음");
-  await user.click(within(work).getByRole("button", { name: "일시 정지" }));
+  await user.click(within(work).getByRole("button", { name: "캐릭터 재검토 일시 정지" }));
   expect(characterAutomation.pauseHistoryRefresh).toHaveBeenCalledTimes(1);
 
   rerender(<StatusCenter characterAutomation={{ ...characterAutomation, paused: true,
     activeWork: { ...activeWork, active: false, seriesName: null, targetName: null, cause: null },
   }} progress={null} onNavigate={onNavigate} />);
   expect(trigger).toHaveTextContent(/^상태$/);
-  expect(work).toHaveTextContent("캐릭터 재검토 일시 정지 · 3,151개 남음");
+  expect(work).toHaveTextContent("캐릭터 재검토3,151개 남음 · 일시 정지됨");
   expect(work).not.toHaveTextContent("진행 중인 작업 없음");
-  await user.click(within(work).getByRole("button", { name: "재개" }));
+  await user.click(within(work).getByRole("button", { name: "캐릭터 재검토 재개" }));
   expect(characterAutomation.resumeHistoryRefresh).toHaveBeenCalledTimes(1);
 
   rerender(<StatusCenter characterAutomation={{ ...characterAutomation, historyRefreshActive: true }} progress={null} onNavigate={onNavigate} />);
-  expect(within(work).getAllByRole("button", { name: "일시 정지" })).toHaveLength(1);
+  await revealJobs();
+  expect(within(work).getByRole("button", { name: "캐릭터 재검토 일시 정지" })).toBeVisible();
   expect(trigger).toHaveTextContent("작업 1");
 
   rerender(<StatusCenter characterAutomation={{ ...characterAutomation,
     activeWork: { ...activeWork, active: false, reconsiderationRemaining: 0 },
   }} progress={null} onNavigate={onNavigate} />);
+  await revealJobs();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(work).toHaveTextContent("진행 중인 작업 없음");
   expect(within(work).queryByText(/캐릭터 재검토/)).not.toBeInTheDocument();
   expect(trigger).toHaveTextContent(/^상태$/);
@@ -208,16 +264,18 @@ it("carries the former work tray: import progress once, then results with their 
   const { rerender } = render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={{ current: 1, total: 3 }}
     works={[running]} retryWork={retryWork} openExisting={openExisting} onNavigate={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "상태 · 작업 1개 진행 중" }));
-  expect(screen.getByRole("group", { name: "가져오기 작업" })).toHaveTextContent("가져오는 중 1 / 3");
+  await revealJobs();
+  expect(screen.getByRole("group", { name: "진행 중" })).toHaveTextContent("파일 가져오기1 / 3");
   expect(screen.queryByText("파일 가져오기 1 / 3")).not.toBeInTheDocument();
 
   rerender(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} works={[{ ...running, completed: 3, status: "completed",
     exactDuplicates: [{ fileName: "b.png", existingAssetId: "asset-b" }], failures: [{ fileName: "c.png", message: "읽을 수 없음" }] }]}
     retryWork={retryWork} openExisting={openExisting} onNavigate={vi.fn()} />);
   expect(screen.getByRole("button", { name: "상태 · 문제 1개" })).toBeInTheDocument();
-  const tray = screen.getByRole("group", { name: "가져오기 작업" });
+  const tray = screen.getByRole("group", { name: "문제" });
+  await user.click(within(tray).getByRole("button", { name: "파일 가져오기 결과 열기" }));
   expect(tray).toHaveTextContent("추가 1 · 중복 1 · 검토 대기 0 · 실패 1");
-  await user.click(within(tray).getByRole("button", { name: "실패 파일 다시 시도" }));
+  await user.click(within(tray).getByRole("button", { name: "파일 가져오기 다시 시도" }));
   expect(retryWork).toHaveBeenCalledWith("import");
   await user.click(within(tray).getByRole("button", { name: "b.png 기존 자산 열기" }));
   expect(openExisting).toHaveBeenCalledWith("asset-b");
@@ -242,13 +300,14 @@ it("shows a running Private Vault import on the 비밀 rail item and in the stat
   const rail = screen.getByRole("navigation", { name: "주요 영역" });
   expect(within(rail).getByRole("button", { name: "비밀" })).toHaveAccessibleDescription("가져오는 중 7 / 20");
   await user.click(screen.getByRole("button", { name: "상태 · 작업 1개 진행 중" }));
-  expect(screen.getByRole("status", { name: "비밀 보관함 가져오기" })).toHaveTextContent("비밀 보관함 가져오기 · 가져오는 중 7 / 20");
+  await revealJobs();
+  expect(screen.getByRole("group", { name: "진행 중" })).toHaveTextContent("비밀 보관함 가져오기7 / 20");
 
   await act(async () => finish({ total: 20, imported: 19, skipped: 0, failed: 1, withoutThumbnail: 0, legacyTitles: 0, legacyThumbnails: 0 }));
   expect(within(rail).getByRole("button", { name: "비밀" })).not.toHaveAccessibleDescription();
-  expect(screen.getByRole("status", { name: "비밀 보관함 가져오기" })).toHaveTextContent("완료 · 가져옴 19개 · 실패 1개");
-  await user.click(screen.getByRole("button", { name: "닫기" }));
-  expect(screen.queryByRole("status", { name: "비밀 보관함 가져오기" })).not.toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("완료 · 가져옴 19개 · 실패 1개");
+  await user.click(screen.getByRole("button", { name: "비밀 보관함 가져오기 닫기" }));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
 it("shows a running Private Vault export in the status panel", async () => {
@@ -264,9 +323,10 @@ it("shows a running Private Vault export in the status panel", async () => {
   act(() => progress({ processed: 1, total: 2, exported: 1, failed: 0 }));
 
   await user.click(screen.getByRole("button", { name: "상태 · 작업 1개 진행 중" }));
-  expect(screen.getByRole("status", { name: "비밀 보관함 내보내기" })).toHaveTextContent("내보내는 중 1 / 2");
+  await revealJobs();
+  expect(screen.getByRole("group", { name: "진행 중" })).toHaveTextContent("비밀 보관함 내보내기1 / 2");
   await act(async () => finish({ processed: 2, total: 2, exported: 1, failed: 1 }));
-  expect(screen.getByRole("status", { name: "비밀 보관함 내보내기" })).toHaveTextContent("완료 · 내보냄 1개 · 실패 1개");
+  expect(screen.getByRole("alert")).toHaveTextContent("완료 · 내보냄 1개 · 실패 1개");
 });
 
 const domain = { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null };
