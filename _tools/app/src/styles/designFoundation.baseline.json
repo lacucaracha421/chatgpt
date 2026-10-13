@@ -68,7 +68,7 @@
     },
     "_tools/app/src/characters/CharacterManagement.css": {
       "offScaleSpacing": 0,
-      "offRoleFontSize": 1,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 7
     },
@@ -80,7 +80,7 @@
     },
     "_tools/app/src/characters/SeriesBrowser.css": {
       "offScaleSpacing": 0,
-      "offRoleFontSize": 2,
+      "offRoleFontSize": 1,
       "pillRadius": 0,
       "legacyToken": 20
     },

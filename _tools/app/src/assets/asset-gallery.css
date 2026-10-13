@@ -27,6 +27,8 @@
   /* Dedicated home for the overlay scrollbar so tiles never slide under it.
      (The native scrollbar is hidden below, so no stable gutter is needed.) */
   padding-right: var(--gallery-scrollbar-width);
+  /* Breathing room from the sidebar edge (user 2026-10-13); the layout reads paddingLeft, so tiles follow. */
+  padding-left: max(var(--gallery-gap), var(--space-4));
 }
 
 .asset-gallery__folder-snapshot { position: absolute; z-index: 0; overflow: hidden; pointer-events: none; }

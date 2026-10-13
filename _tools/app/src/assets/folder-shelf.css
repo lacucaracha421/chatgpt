@@ -1,6 +1,6 @@
 /* Folder and character navigation shelf. The scroller supplies wheel, drag, and arrows. */
 .folder-shelf { min-width: 0; margin-bottom: var(--space-4); }
-.asset-browser__folder-head { --gallery-scrollbar-width: 18px; flex: none; padding: var(--gallery-gap) var(--gallery-scrollbar-width) 0 var(--gallery-gap); }
+.asset-browser__folder-head { --gallery-scrollbar-width: 18px; flex: none; padding: var(--gallery-gap) var(--gallery-scrollbar-width) 0 max(var(--gallery-gap), var(--space-4)); }
 .folder-shelf__label { margin: 0 0 var(--space-3); }
 .folder-shelf .home-shelf__track { gap: var(--space-3); padding: 2px 0; }
 .folder-shelf .home-shelf__track > * { width: 132px; min-width: 132px; flex: 0 0 132px; }
