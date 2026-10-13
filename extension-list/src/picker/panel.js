@@ -120,6 +120,7 @@
       ui.lk = h(doc, "div", { class: "lk", role: "complementary", "aria-label": "Lakomics 그림 넣기" },
         h(doc, "div", { class: "lk-head" }, markIcon(doc), ui.folderBtn, ui.close), h(doc, "div", { class: "lk-sub" }, ui.scope, ui.count), ui.body, ui.job, ui.tray, ui.note, foot, ui.live);
       root.append(ui.lk);
+      swipeToClose(ui.lk, () => close({ animate: false }));
       root.addEventListener("keydown", onKey);
       busy = Model.createDelayedBusy({ show: () => { ui.busy.hidden = false; }, hide: () => { ui.busy.hidden = true; }, setTimer, clearTimer });
       skeleton = Model.createDelayedBusy({ delay: SKELETON_MS, minShow: 0, show: () => { if (!s.hasGrid) showSkeleton(); }, hide: () => {}, setTimer, clearTimer });
@@ -437,17 +438,53 @@
     // ---- preview -------------------------------------------------------------------------
     function openPreview(index) {
       const item = s.batch[index]; if (!item) return;
-      closePreview({ refocus: false });
+      // Moving to another picture keeps the same surface (no re-entry animation, no flash).
+      const reuse = ui.prev && s.preview != null;
+      if (!reuse) closePreview({ refocus: false });
       s.preview = index;
       const id = item.assetId, number = selection.numberOf(id);
       const selBtn = h(doc, "button", { type: "button", class: "selbtn", onclick: () => { toggle(id); openPreview(s.preview); } }, number ? h(doc, "span", { class: "num" }, String(number)) : h(doc, "span", { class: "box" }), h(doc, "span", { class: "lbl" }, number ? "선택됨" : "선택"));
-      ui.prev = h(doc, "div", { class: "prev", role: "dialog", "aria-label": "크게 보기" },
+      const parts = [
         h(doc, "div", { class: "ph" }, h(doc, "span", { class: "pos" }, `${index + 1} / ${s.batch.length}`), h(doc, "span", { class: "sp" }), selBtn, h(doc, "button", { type: "button", class: "cbtn sq pclose", "aria-label": "크게 보기 닫기", onclick: () => closePreview() }, icon(doc, "close"))),
         h(doc, "div", { class: "stage" }, thumbs.get(id) ? h(doc, "img", { src: thumbs.get(id), alt: "" }) : null,
           index > 0 ? h(doc, "button", { type: "button", class: "pnav l", "aria-label": "이전", onclick: () => openPreview(index - 1) }, icon(doc, "left")) : null,
           index < s.batch.length - 1 ? h(doc, "button", { type: "button", class: "pnav r", "aria-label": "다음", onclick: () => openPreview(index + 1) }, icon(doc, "right")) : null),
-        h(doc, "div", { class: "pf" }, `${Model.formatCount(item.width)}×${Model.formatCount(item.height)} · ${Model.formatBytes(item.byteSize)}`));
-      root.append(ui.prev); selBtn.focus();
+        h(doc, "div", { class: "pf" }, `${Model.formatCount(item.width)}×${Model.formatCount(item.height)} · ${Model.formatBytes(item.byteSize)}`)];
+      if (reuse) ui.prev.replaceChildren(...parts);
+      else {
+        ui.prev = h(doc, "div", { class: "prev", role: "dialog", "aria-label": "크게 보기" }, ...parts);
+        swipeToClose(ui.prev, () => closePreview());
+        root.append(ui.prev);
+      }
+      selBtn.focus({ preventScroll: true });
+    }
+    // Touch: drag right to close (the preview, or the whole panel). The surface follows the
+    // finger; past a third of its width (or a quick flick) it slides out, otherwise it eases back.
+    function swipeToClose(el, onClose) {
+      let x0 = 0, y0 = 0, t0 = 0, dx = 0, tracking = false, decided = false;
+      el.addEventListener("touchstart", event => {
+        if (event.touches.length !== 1) { tracking = false; return; }
+        const t = event.touches[0]; x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); dx = 0; tracking = true; decided = false;
+      }, { passive: true });
+      el.addEventListener("touchmove", event => {
+        if (!tracking) return;
+        const t = event.touches[0], mx = t.clientX - x0, my = t.clientY - y0;
+        if (!decided) { if (Math.abs(mx) < 10 && Math.abs(my) < 10) return; decided = true; if (mx <= 0 || Math.abs(my) > Math.abs(mx)) { tracking = false; return; } }
+        dx = Math.max(0, mx); el.style.transition = "none"; el.style.transform = `translateX(${dx}px)`;
+        if (event.cancelable) event.preventDefault();
+      }, { passive: false });
+      const end = () => {
+        if (!tracking) return; tracking = false;
+        const fast = dx > 60 && Date.now() - t0 < 300, far = dx > el.getBoundingClientRect().width / 3;
+        el.style.transition = reduced() ? "none" : "transform 160ms cubic-bezier(.2,0,0,1)";
+        if (fast || far) {
+          el.style.transform = `translateX(${el.getBoundingClientRect().width + 24}px)`;
+          // Close first (the surface is already off-screen), then clear the drag offset unseen.
+          const done = () => { onClose(); setTimer(() => { el.style.transition = ""; el.style.transform = ""; }, 200); };
+          if (reduced()) done(); else setTimer(done, 160);
+        } else el.style.transform = "";
+      };
+      el.addEventListener("touchend", end); el.addEventListener("touchcancel", end);
     }
     function closePreview({ refocus = true } = {}) {
       if (s.preview == null) return;
@@ -514,14 +551,14 @@
       renderPath(); renderScope(); renderTray(); renderFooter();
       if (s.hasGrid) focusTile(s.focus, false); else await start();
     }
-    function close() {
+    function close({ animate = true } = {}) {
       if (!isOpen) return;
       isOpen = false; closePopover({ refocus: false }); closePreview({ refocus: false });
       clearTimer(retryTimer); retryTimer = null;
       doc.removeEventListener("selectionchange", onSelectionChange); themeObserver?.disconnect(); themeObserver = null;
-      ui.lk.classList.add("leaving");
+      if (animate) ui.lk.classList.add("leaving");
       const finish = () => { leaveTimer = null; if (!isOpen && host) host.style.display = "none"; };
-      if (reduced()) finish(); else leaveTimer = setTimer(finish, 140);
+      if (reduced() || !animate) finish(); else leaveTimer = setTimer(finish, 140);
       unplace(); onOpenChange(false);
       editor.restore();
     }

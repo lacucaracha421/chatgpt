@@ -2,6 +2,10 @@
 
 ## 3.5.40 — 2026-10-13
 
+- Tablet: moving between pictures in the preview keeps the same surface (no flash), and a
+  rightward swipe closes the preview or the whole panel; the preview's close button and arrows
+  are visible again.
+
 - Server picker batches include signed thumbnail tickets, reused only inside the
   service worker until 30 seconds before expiry. Expired or failed inline tickets
   fall back to the thumbnail ticket route without exposing URLs to the panel.
