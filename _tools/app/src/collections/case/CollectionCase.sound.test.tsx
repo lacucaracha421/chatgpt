@@ -60,6 +60,9 @@ describe("CollectionCase sounds", () => {
     render(<Screen initiallyOpen />);
     toggle();
     expect(play.mock.calls).toEqual([["ps5", "close"]]);
+    // No transitionend is emitted when reduced motion disables CSS transitions.
+    act(() => vi.advanceTimersByTime(2000));
+    expect(play).toHaveBeenCalledOnce();
   });
   it("cancels a waiting close sound when the case reopens, the work changes, the surface goes inactive or unmounts", () => {
     const { rerender, unmount } = render(<Screen initiallyOpen />);

@@ -38,7 +38,8 @@ function linkInfo(link: Profile["urls"][number]) {
   if (name === "twitter" || name === "x" || ["twitter.com", "x.com"].includes(url.hostname)) return { priority: 0, label: "X" };
   if (name === "instagram") return { priority: 1, label: "Instagram" };
   if (name.includes("dmm") || name.includes("fanza")) return { priority: 2, label: "FANZA" };
-  if (["studio profile", "modeling agency"].includes(name)) return { priority: 3, label: "공식" };
+  if (name === "modeling agency") return { priority: 3, label: "소속사" };
+  if (name === "studio profile") return { priority: 3, label: "제작사" };
   if (name === "wikipedia" || url.hostname.endsWith(".wikipedia.org")) return { priority: url.hostname === "ja.wikipedia.org" ? 4 : 5, label: "위키" };
   return { priority: 6, label: link.site.name || url.hostname };
 }

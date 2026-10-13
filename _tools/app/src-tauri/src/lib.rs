@@ -744,6 +744,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                library::Library::finalize_pending_local_manga_imports();
                 app.state::<library::nl_search_worker::Manager>().shutdown();
             }
         });

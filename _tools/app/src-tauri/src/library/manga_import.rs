@@ -1,5 +1,7 @@
-//! Local imports retain reversible page-name changes; archives stay at their source
-//! because the application has no OS trash dependency.
+//! Local imports retain reversible page-name changes and archive originals until
+//! dismissal or normal app exit. Finalization best-effort trashes unchanged archives.
+//! Receipts are process-local: a crash/forced exit leaves originals in place, with
+//! no receipt to finalize on next start. No archive recovery is attempted then.
 use super::*;
 use sha2::{Digest, Sha256};
 use std::{
@@ -28,6 +30,91 @@ fn receipts() -> &'static Mutex<HashMap<String, Vec<Receipt>>> {
 }
 fn message(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+fn finalize_receipts(entries: Vec<Receipt>, trash: &mut impl FnMut(&Path) -> Result<(), String>) {
+    for receipt in entries.into_iter().filter(|r| r.archive) {
+        let outcome = (|| {
+            let metadata = fs::symlink_metadata(&receipt.source).map_err(message)?;
+            if !metadata.is_file() || is_link(&metadata) {
+                return Err("archive original is no longer a regular file".into());
+            }
+            if Some(hash(&receipt.source)?) != receipt.archive_hash {
+                return Err("archive original changed since import".into());
+            }
+            trash(&receipt.source)
+        })();
+        if let Err(error) = outcome {
+            eprintln!(
+                "Manga import: leaving archive {}: {error}",
+                receipt.source.display()
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+fn recycle_path(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut path: Vec<u16> = path.as_os_str().encode_wide().collect();
+    // canonicalize returns extended-length paths; the Shell API expects ordinary paths.
+    if path.starts_with(&[92, 92, 63, 92, 85, 78, 67, 92]) {
+        path.drain(..6);
+        path[0] = 92;
+    } else if path.starts_with(&[92, 92, 63, 92]) {
+        path.drain(..4);
+    }
+    path.extend([0, 0]);
+    path
+}
+
+#[cfg(windows)]
+fn trash_archive(path: &Path) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE,
+        SHFILEOPSTRUCTW,
+    };
+    let path = recycle_path(path);
+    let mut operation = SHFILEOPSTRUCTW {
+        wFunc: FO_DELETE,
+        pFrom: path.as_ptr(),
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT) as u16,
+        ..Default::default()
+    };
+    // The double-NUL-terminated buffer lives for the duration of the synchronous call.
+    let result = unsafe { SHFileOperationW(&mut operation) };
+    if result != 0 || operation.fAnyOperationsAborted != 0 {
+        Err(format!(
+            "recycle bin operation failed ({result}) or was aborted"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn trash_archive(path: &Path) -> Result<(), String> {
+    // GIO implements the desktop trash specification. Missing GIO or an unsupported
+    // filesystem leaves the original in place; never fall back to permanent deletion.
+    let output = std::process::Command::new("gio")
+        .arg("trash")
+        .arg("--")
+        .arg(path)
+        .output()
+        .map_err(message)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "gio trash failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn trash_archive(_path: &Path) -> Result<(), String> {
+    Err("archive trash is unsupported on this platform".into())
 }
 pub(super) fn is_link(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
@@ -642,6 +729,13 @@ impl Library {
         Ok(serde_json::json!({"count":count,"failures":failures}))
     }
     pub fn dismiss_local_manga_import(&self, token: &str) {
+        self.dismiss_local_manga_import_with(token, &mut trash_archive);
+    }
+    fn dismiss_local_manga_import_with(
+        &self,
+        token: &str,
+        trash: &mut impl FnMut(&Path) -> Result<(), String>,
+    ) {
         let mut receipts = receipts()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -649,7 +743,20 @@ impl Library {
             .get(token)
             .is_some_and(|r| r.iter().all(|r| r.library == self.root()))
         {
-            receipts.remove(token);
+            let entries = receipts.remove(token).unwrap();
+            drop(receipts);
+            finalize_receipts(entries, trash);
+        }
+    }
+    pub(crate) fn finalize_pending_local_manga_imports() {
+        let pending = {
+            let mut receipts = receipts()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::mem::take(&mut *receipts)
+        };
+        for entries in pending.into_values() {
+            finalize_receipts(entries, &mut trash_archive);
         }
     }
     pub fn refresh_local_manga_thumbnails(
@@ -759,6 +866,116 @@ mod tests {
             zip.write_all(&bytes).unwrap();
         }
         zip.finish().unwrap();
+    }
+    #[test]
+    fn manga_import_dismiss_trashes_archives_once_and_leaves_folders() {
+        let (temp, library, root) = fixture();
+        let sources = [temp.path().join("one.zip"), temp.path().join("two.cbz")];
+        for source in &sources {
+            archive(source, &["page.png"]);
+        }
+        let folder = temp.path().join("folder");
+        png(&folder.join("001.png"), 1);
+        let result = library
+            .import_local_manga(
+                sources
+                    .iter()
+                    .chain([&folder])
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect(),
+            )
+            .unwrap();
+        assert_eq!(result["count"], 3);
+        assert!(sources.iter().all(|p| p.exists()));
+        let mut trashed = Vec::new();
+        let fake_trash = temp.path().join("trash");
+        fs::create_dir(&fake_trash).unwrap();
+        let mut trash = |path: &Path| {
+            trashed.push(path.file_name().unwrap().to_owned());
+            fs::rename(path, fake_trash.join(path.file_name().unwrap())).map_err(message)
+        };
+        let token = result["undoToken"].as_str().unwrap();
+        library.dismiss_local_manga_import_with(token, &mut trash);
+        library.dismiss_local_manga_import_with(token, &mut trash);
+        assert_eq!(trashed.len(), 2);
+        assert!(sources.iter().all(|p| !p.exists()));
+        assert!(root.join("one/001.png").exists());
+        assert!(root.join("two/001.png").exists());
+        assert!(root.join("folder/001.png").exists());
+        assert_eq!(library.list_manga_series().unwrap().len(), 3);
+        assert!(library.undo_local_manga_import(token).is_err());
+    }
+    #[test]
+    fn manga_import_changed_or_missing_archive_is_not_trashed() {
+        for missing in [false, true] {
+            let (temp, library, root) = fixture();
+            let source = temp.path().join("work.zip");
+            archive(&source, &["page.png"]);
+            let result = import(&library, &source);
+            let token = result["undoToken"].as_str().unwrap();
+            if missing {
+                fs::remove_file(&source).unwrap();
+            } else {
+                fs::write(&source, b"changed").unwrap();
+                assert_eq!(library.undo_local_manga_import(token).unwrap()["count"], 0);
+            }
+            library.dismiss_local_manga_import_with(token, &mut |_| panic!("must not trash"));
+            assert!(root.join("work/001.png").exists());
+            assert_eq!(library.list_manga_series().unwrap().len(), 1);
+            if !missing {
+                assert_eq!(fs::read(source).unwrap(), b"changed");
+            }
+        }
+    }
+    #[test]
+    fn manga_import_undo_preserves_archive_and_dismiss_never_trashes_it() {
+        let (temp, library, root) = fixture();
+        let source = temp.path().join("work.cbz");
+        archive(&source, &["page.png"]);
+        let before = fs::read(&source).unwrap();
+        let result = import(&library, &source);
+        let token = result["undoToken"].as_str().unwrap();
+        assert_eq!(library.undo_local_manga_import(token).unwrap()["count"], 1);
+        library.dismiss_local_manga_import_with(token, &mut |_| panic!("must not trash"));
+        assert_eq!(fs::read(source).unwrap(), before);
+        assert!(!root.join("work").exists());
+        assert!(library.list_manga_series().unwrap().is_empty());
+    }
+    #[test]
+    fn manga_import_trash_failure_keeps_import_and_original() {
+        let (temp, library, root) = fixture();
+        let source = temp.path().join("work.zip");
+        archive(&source, &["page.png"]);
+        let before = fs::read(&source).unwrap();
+        let result = import(&library, &source);
+        let token = result["undoToken"].as_str().unwrap();
+        let mut calls = 0;
+        library.dismiss_local_manga_import_with(token, &mut |_| {
+            calls += 1;
+            Err("fake trash unavailable".into())
+        });
+        assert_eq!(calls, 1);
+        assert_eq!(fs::read(source).unwrap(), before);
+        assert!(root.join("work/001.png").exists());
+        assert_eq!(library.list_manga_series().unwrap().len(), 1);
+        assert!(library.undo_local_manga_import(token).is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn manga_import_recycle_paths_strip_extended_prefix_and_end_with_double_nul() {
+        for (input, expected) in [
+            (r"\\?\C:\망가\work.zip", "C:\\망가\\work.zip\0\0"),
+            (
+                r"\\?\UNC\server\share\work.zip",
+                "\\\\server\\share\\work.zip\0\0",
+            ),
+            (r"C:\work.zip", "C:\\work.zip\0\0"),
+        ] {
+            assert_eq!(
+                recycle_path(Path::new(input)),
+                expected.encode_utf16().collect::<Vec<_>>()
+            );
+        }
     }
     #[test]
     fn manga_folder_move_normalizes_registers_and_undo_restores_names() {

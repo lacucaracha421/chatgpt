@@ -10,7 +10,7 @@ Updated 2026-10-13 against `main` at `6c524cc3`. PC remains canonical for design
 
 0. **`CHAR-CLAUDE-001`** — slice 3: experiment on identifying series members in images without a character or recommendation; retiring the tablet 캐릭터 확인 screen and its review feed is low priority (see [section](#char-claude-001)).
 1. **`COLLECTOR-MENU-SCOPE-001`** — `PARTIAL`: 3.5.35 (`0f578b44`) delivered HTTP pages, frames, media and touch hold; inventory sites that still swallow the menu, investigate the PDF viewer, and retain the later save-X-post/link/page idea (see [section](#collector-menu-scope-001)).
-2. **`PC-REDUCED-MOTION-001`** — replace the systemic reduced-motion duration override without breaking transition-end consumers (see [section](#pc-reduced-motion-001)).
+2. **`PC-REDUCED-MOTION-001`** — source fix 2026-10-13 (uncommitted): transitions off under reduced motion, keyframe animations keep delays/end states; real-app check pending (see [section](#pc-reduced-motion-001)).
 3. **`COLLECTOR-TABLET-001`** — remaining selection chip "번역" and touch-menu slice; the 3.5.35 link/selection hold is delivered (see [section](#collector-tablet-001--tablet-translation-chip-and-touch-menu)).
 4. **`CLOUD-POST-001` step 3 with `SEC-TOKEN-001`** — step 2 closed 2026-10-13: keep the calendar/wishlist fallback.
 5. **`PERF-ALL-001`** — remaining measured performance scenarios; Windows native timing can extend past startup with `LAKOMICS_PERF_NATIVE_SECS`, and `series_open` copies the S36 cache.
@@ -44,7 +44,7 @@ Status: `PARTIAL` — 3.5.35 (`0f578b44`) delivered the menu on HTTP pages, in H
 <a id="pc-reduced-motion-001"></a>
 ## PC-REDUCED-MOTION-001 — Replace the systemic reduced-motion override (2026-10-13)
 
-Status: `TODO` — split from the user-confirmed `PC-SERIES-SWITCH-BLANK-001` fix (`6c524cc3`). With Windows animation effects off, the global `transition-duration: 0.01ms !important` rule turns every style change into a transition because `transition-property` defaults to `all`. Replace that blanket override without animating every property, preserving `transitionend` consumers in `LightCase.tsx`, `CollectionCase.tsx` and `MangaBookcase.tsx`. The folder-switch exception and "항상 켜기" setting do not close this systemic remainder.
+Status: `VERIFY` — 2026-10-13 source fix (Sol, controller-reviewed): the global rule is now `transition: none !important` plus `animation-duration: 0.01ms !important` (keyframe delays and fill states keep working, e.g. delayed loading lines and the timed character badge); surface motion exits immediately under reduced motion; the `.folder-kind-switch` exception is gone. Targeted vitest passed. Remaining: the running app with Windows animation effects off. Original problem: split from the user-confirmed `PC-SERIES-SWITCH-BLANK-001` fix (`6c524cc3`). With Windows animation effects off, the global `transition-duration: 0.01ms !important` rule turns every style change into a transition because `transition-property` defaults to `all`. Replace that blanket override without animating every property, preserving `transitionend` consumers in `LightCase.tsx`, `CollectionCase.tsx` and `MangaBookcase.tsx`. The folder-switch exception and "항상 켜기" setting do not close this systemic remainder.
 
 ## UI-REVIEW-20261011 — Automated UI sweep findings
 
@@ -163,7 +163,7 @@ Status: `PARTIAL` — user 2026-10-03: anything the server can own should stop w
 
 ## TABLET-FEEDBACK-20260928 — Residual tablet requests
 
-Status: `PARTIAL` — compare Home's `마법소녀를 동경해서` thumbnail with the stable calendar path; separate memo `피드백` kind and tablet favourite-performer/Home parity are (unverified 2026-10-10). Catalog request optimisation is consolidated in PERF; its committed fixes are archived.
+Status: `PARTIAL` — the `마법소녀를 동경해서` Home thumbnail mismatch (2026-09-28) is closed 2026-10-13 without a repro: tablet Home now uses the shared `HomeReleaseGrid`; reopen if seen. Separate memo `피드백` kind and tablet favourite-performer/Home parity are (unverified 2026-10-10). Catalog request optimisation is consolidated in PERF; its committed fixes are archived.
 - **Catalog ownership (decided 2026-09-28):** PC should import server refresh additions while retaining its own catalog/publisher/updater; no committed PC import was found (unverified 2026-10-10).
 
 <a id="user-feedback-20260928b--second-feedback-batch-2026-09-28-night"></a>
@@ -172,7 +172,7 @@ Status: `PARTIAL` — compare Home's `마법소녀를 동경해서` thumbnail wi
 Status: `PARTIAL` — implemented redesigns, manga cleanup UI, automatic edition merging and motion are archived; retain only the following gaps.
 - **Safe undo:** authority-revision-conditional folder restore, consumed tagger candidate restoration and an explicit compensation decision; a simple restore can overwrite another device. Still unbuilt (unverified 2026-10-10).
 - **Home AV:** favourite performers should open the performer route rather than AV Collections; AV new releases need a feed; tablet favourite-performer data parity remains (unverified 2026-10-10). Keep no-resume policy (user 2026-09-30): local manga starts at page 1, library video at 0:00; unused 0114 progress tables do not reopen resume.
-- **Refresh motion:** new tiles arriving during refresh were requested to animate; the later accepted motion set only animates first load (`297891ea`, `97edc2c9`). Whether the earlier request was withdrawn is (unverified 2026-10-10); do not add it without reconciling the accepted rule.
+- **Refresh motion:** done in source 2026-10-13 (user decision; uncommitted): after a refresh in the same scope, tiles whose id was not shown before fade in alone (200 ms, opacity only) once their thumbnail is ready (800 ms cap); first load, revisits, filter/scope changes, paging and reduced motion stay as before. Shared `src/shared/motion/arrivalFade.ts` in PC `AssetGallery` and tablet `Gallery` (`arrivalScope`); DESIGN.md §10 updated. Real-app check on PC and tablet pending.
 - **Catalog review:** server automatic-decision origin labels, decision-log restart replay and PC decision reporting completeness need recheck (unverified 2026-10-10); `includesServerWorks=false` deliberately preserves server-only candidates, not unfinished behaviour.
 - **Find / natural-language search:** keep the rail Find button and later improve convenience (decided 2026-09-28). The natural-language search `HOLD` was lifted on 2026-10-04; see `NL-SEARCH-001`.
 - **Vanished manga folders:** UI is implemented (`4542a6b9`, `af2fd1a4`); production deletion still needs separate approval. Preserve user choice of selected records only with verified automatic backup (decided 2026-09-28).
@@ -276,6 +276,30 @@ Status: `IDEA` — user 2026-10-08 selected as a promising **new top-level infor
 
 # Desktop UI follow-ups
 
+<a id="user-feedback-20261013"></a>
+## USER-FEEDBACK-20261013 — PC feedback batch of 2026-10-13
+
+Status: `TODO` — user feedback (PC unless stated; tablet follows where the same screen exists). Numbered as reported.
+1. **Release calendar late:** in the top-bar status button's 연결 list, only the release calendar row appears slightly late.
+2. **작업 panel visibility:** many running jobs are not shown (trimmed earlier for simplicity); without adding notifications, the user wants to see what is running.
+3. **Todo section button:** restyle the "섹션 추가" button to fit the theme and move it next to the existing 복사 / 더보기 buttons.
+4. **Collections toolbar:** merge 정렬, 보기, 별점 etc. into one control (possibly the shared 보기 piece used in 에셋); fold 책등 받기 into it too. Design decision.
+5. **미분류 ↔ 전체:** switching in 에셋 swaps quietly with no animation.
+6. **Viewer overlays:** in the image/asset viewer, the film strip, top bar and side arrows appear only when the pointer moves near them (bottom, top, left/right edges); moving the mouse around the centre keeps only the asset on screen.
+7. **Artists:** the big artist header flashes when it appears; in artist detail the counts at the top arrive late and push the content down; the sidebar artist list should appear quietly with minimal motion.
+8. **Character shelf scroll:** wheel scrolling over the top character-folder shelf in 에셋 scrolls only the shelf, never the content pane; the pane scrolls from the asset area below.
+9. **Search convenience:** tag/folder results first — typing 레베카 + Enter jumps straight to the 레베카 tag or folder; natural-language search later in the order. Context-aware per tab (in Collections, Collection results first without natural-language search; the same idea in every tab). The user does not understand the difference between 화면 and 명령 results — rename, merge or explain.
+10. **Character info / reference editor:** the "필요한 인물만 검출" button always appears late; could reference recommendations reinforce references quietly on their own, and could person-detection confirmations be a quiet indicator instead of a prompt?
+11. **기타 folder header:** only 기타 differs from 게임/만화 in the top bar and the spacing around the folder title.
+12. **Reorder characters/groups:** change the order of the top character folders and groups.
+13. **Move a series folder:** the user wants to move the 레베카 folder from 만화 into the 사이버펑크 folder — user wants the app itself to allow this move (find why it is not possible today and fix it), not a one-off data move.
+
+
+<a id="home-redesign-001"></a>
+## HOME-REDESIGN-001 — Home as a daily check screen (2026-10-13)
+
+Status: `IDEA` — the user finds Home empty and barely useful; only 오늘 할 것 and the release calendar get checked. Direction discussed: turn Home into a "today" check screen (calendar as the main block, to-dos beside it, daily-changing information such as today's saves, received transfers and new volumes of bound works) or drop Home altogether. User decision 2026-10-13: redesign later, once the features they are considering now exist; open questions are whether 지금 하는 중 and 오늘의 그림 stay and which daily information matters. Design worker mockups (PC first) when resumed.
+
 ## AV-AUTHORITY-001 — AV acceptance and remaining profile polish
 
 Status: `PARTIAL` — authority command work in steps 1–6 is implemented; targeted native/device checks are in [Waiting on the user](#waiting-on-the-user-devicenative-checks). No new implementation of these commands is needed; residual crop/polish scope remains below. The accepted performer redesign and retired book import are in the [archive](lakomics-completed.md#closure-checkpoint--2026-10-10--backlog-reconciliation).
@@ -289,7 +313,7 @@ Status: `PARTIAL` — authority command work in steps 1–6 is implemented; targ
 
 Retained user decisions: PC first/tablet in the same round; one-time people reconciliation was approved with server backup first and no null overwrite across clients. Inbox refuses an existing work with a different non-empty product code; migration closes already-applied/dismissed local entries. Tablet uses the default split only, per-surface 후보 사용/유지/비우기, 찾는 중/후보 있음/보내는 중 and 뒤표지; performer/director links stay role-specific and StashDB search prefills Japanese names. Profiles edit birth date, height, B/W/H, cup, breast type, career years, links and Korean/Japanese names; manual fields survive StashDB refresh, untouched fields follow it, names never follow it. Cm input snaps to stored inches; B/W/H and career endpoints reset as groups; links are one field; 직접 입력 hides without a StashDB link; 보형 → 인공; tablet ⋯ 배우 관리. Name order: Hangul name → StashDB romanized → stored name, Japanese subtitle always; original names are the reset baseline.
 
-Remaining polish: two official links both read 공식. Handoff records unresolved inbox code SAVR-01185; current outcome (unverified 2026-10-10). Do not treat a provider miss as a verified app defect.
+Remaining polish: none open. 2026-10-13: the two official link kinds now read 소속사 (modeling agency) and 제작사 (studio profile) instead of 공식 twice (uncommitted); inbox code SAVR-01185 is `dismissed` in the PC `av_link_inbox` since 2026-09-27 (read-only check), so it is not open.
 
 ## USER-FEEDBACK-20261009 — Remaining requests of 2026-10-09
 
@@ -315,16 +339,16 @@ Status: `TODO` — remaining user requests and decisions of 2026-10-05; each bul
 ## WIN-FEEDBACK-20261004 — First Windows release-run findings
 
 Status: `PARTIAL` — reported by the user 2026-10-04 on the first Windows release build (`e8b3d774`, WebView2). The source-fixed bullets were closed by the user on 2026-10-05 (night checkpoint); the bullets below remain.
-- **Windows test debt:** the source-root separator repair is archived (`7c1dd0e5`). Server `tests.test_media_thumbnail_encode` `test_no_kind_leaves_a_partial_file_behind_on_an_unsupported_source` returns exit 7 instead of 4 under the WSL test venv (Pillow/codec environment; untouched code).
+- **Windows test debt:** closed 2026-10-13 — the server encoder test expected exit 4 for a missing video source, but the WSL test venv has no `/usr/bin/ffmpeg`, so the video kind answers 7 (tool unavailable) before opening the source by design; the test now expects 7 for video only when FFmpeg is absent (105 tests OK, 34 FFmpeg tests skipped in WSL). Separately, vitest under Node 26 (newer than `.node-version` 24.19.0) lost jsdom `localStorage`; `src/test/setup.ts` now restores jsdom storage (uncommitted).
 - **Abandoned thumbnail requests — source fix 2026-10-06:** media-protocol requests made after a view change (`media_view_changed`, sent on area and gallery scope changes) are served before older queued ones, FIFO within a view; old ones still finish. Native release timing during rapid switching is unmeasured; targeted measurement remains in `PERF-ALL-001`.
 - **No popping in (user 2026-10-04):** progressed — menus, dialogs, popovers, toasts, selection bar and tablet sheets ease in and out (`2748f0db`); first-screen tiles and late images appear together (`2eef344c`, `288ae552`); the launch mark covers the first Home load (`3dd73981`). Keep sweeping instant panels and late blocks found in use (≈150–250 ms ease-in, reduced motion respected; never fade from a blank frame where the no-flash rule applies).
 
 ## MANGA-CATALOG-FEEDBACK-20261004 — Manga catalog requests
 
 Status: `PARTIAL` — PC local import shipped (`90ae5664`); archive-original trash, author destinations and tablet/server upload remain, alongside the requests below.
-- **Import local works — PC drop done (2026-10-06):** dropping folders or ZIP/CBZ on 망가 → 로컬 moves/extracts them into the manga root at once with a 되돌리기 toast (user: move, no confirmation); pages are renumbered when not already numeric; RAR/7Z refused (no dependency). Not done: the archive original stays in place (no trash helper; user wanted it sent to the trash), author-folder destinations (the manga root is flat today), and the tablet/server upload below.
+- **Import local works — PC drop done (2026-10-06):** dropping folders or ZIP/CBZ on 망가 → 로컬 moves/extracts them into the manga root at once with a 되돌리기 toast (user: move, no confirmation); pages are renumbered when not already numeric; RAR/7Z refused (no dependency). 2026-10-13 (uncommitted): the archive original goes to the OS trash (Windows recycle bin, Linux `gio trash`) when the 되돌리기 toast closes or the app exits normally, only if unchanged since import; a crash leaves it in place; real recycle-bin behaviour unverified. Not done: author-folder destinations (the manga root is flat today), and the tablet/server upload below.
 - **Local manga on the tablet via the server (user 2026-10-04):** the user wants local manga readable on the tablet; NSFW content on the server is already accepted. Direction: the PC uploads local works to the server and the tablet gets a 로컬 source in the catalog, read with the existing catalog reader, available while the PC is off. Measured 2026-10-04 (read-only): VPS `/` 52 GB with 23 GB free; local manga root `C:\laku\2군` is 197 MB. Decided (user 2026-10-04): every local work uploads automatically; import MOVES the source into the manga root (not copy); destination is automatic — read the artist from the name (e.g. `[작가명] 제목`) into that artist folder, ask only when no artist can be read, and show a preview of where each item moves and confirm before moving (moves are hard to undo). Scheduled after the Home fill round.
-- **Selection flash (user 2026-10-04):** selecting a work in the Manga catalog makes its thumbnail flash briefly as the selection effect appears. Check whether the selection style changes the image layer (scale/filter/transform start or end causing a re-raster, as with the shelf lift fixed that round) or swaps the image source.
+- **Selection flash (user 2026-10-04):** 2026-10-13 source trace found no image remount, `src` change or filter/transform change on selection (regression tests added); the likely cause on the PC was the reduced-motion one-frame transition fixed in `PC-REDUCED-MOTION-001`. User check pending; reopen with a recording if it still flashes.
 - **Idea — real-time artist tweets via Web Push (user 2026-10-04, not scheduled):** https://github.com/sh1ma/Angelic-Angel (Rust, MIT, 206★, last push 2026-03-05) emulates a Firefox Web Push client on Mozilla AutoPush to receive X notifications for followed accounts with tweet notifications on, decrypts them and posts to a webhook; X API only at registration, no scraping. Possible use: new artist tweets flow straight into the Lakomics capture inbox (today the `extension-list` collector's job). Concerns: it needs the X session cookies `auth_token`/`ct0` (account-equivalent secrets; must use the app credential store), unofficial-client ToS/account risk, and only notification-enabled accounts are covered (no backfill).
 - **Idea — auto series grouping in 북마크 (user 2026-10-04):** group bookmarked works of the same series (volumes/parts of one title) automatically in the 북마크 view. Not scheduled; decide how a series is recognised (catalog series/parody tags, title stem, same artist) before design.
 

@@ -1,0 +1,4 @@
+/* A tile that newly arrives in a grid after a refresh: hidden until its thumbnail is ready, then a short opacity-only fade. */
+[data-arrival="wait"] { opacity: 0; }
+[data-arrival="in"] { animation: arrival-fade 200ms var(--ease-out) both; }
+@keyframes arrival-fade { from { opacity: 0; } to { opacity: 1; } }

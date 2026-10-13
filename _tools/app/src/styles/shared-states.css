@@ -3,7 +3,10 @@
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
+    /* A tiny transition still paints the old value for a frame, so transitions are off;
+       transitionend consumers complete directly under reduced motion. Keyframe animations
+       keep their delays and end states (delayed loading lines, timed badges), only near-instant. */
+    transition: none !important;
     animation-duration: 0.01ms !important;
   }
 

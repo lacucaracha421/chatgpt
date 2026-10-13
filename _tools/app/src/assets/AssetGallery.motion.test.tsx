@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssetGallery } from './AssetGallery';
 import type { AssetSummary } from '../library/types';
 import { AreaVisible, MotionScope } from '../shared/motion/AreaSwitch';
@@ -238,4 +238,104 @@ it('holds first-screen tiles still loading at the cap and reveals them together,
     expect(held()).toBe(0);
     view.unmount(); expect(vi.getTimerCount()).toBe(0);
   } finally { delete (HTMLImageElement.prototype as Partial<HTMLImageElement>).decode; }
+});
+
+describe('tiles that arrive after a refresh fade in (user 2026-10-13)', () => {
+  const first = Array.from({length: 6}, (_, i) => asset(i));
+  const gallery = (items: AssetSummary[], scopeKey = scope('arrivals'), extra: Partial<React.ComponentProps<typeof AssetGallery>> = {}, visible = true) =>
+    <MotionScope><AreaVisible.Provider value={visible}><AssetGallery layout="masonry" groupDates={false} items={items} scopeKey={scopeKey} {...extra}/></AreaVisible.Provider></MotionScope>;
+  const arriving = (view: ReturnType<typeof render>) => [...view.container.querySelectorAll<HTMLElement>('[data-asset-id][data-arrival]')].map(tile => tile.dataset.assetId);
+  const shown = (view: ReturnType<typeof render>) => [...view.container.querySelectorAll<HTMLElement>('[data-asset-id]')].map(tile => tile.dataset.assetId);
+
+  it('marks only the new ids of the same scope, then clears the marker without re-animating the others', async () => {
+    const view = render(gallery(first)); await tick();
+    expect(arriving(view)).toEqual([]);
+    view.rerender(gallery([asset(100), ...first]));
+    expect(arriving(view)).toEqual(['motion-100']);
+    await tick(16);
+    expect(view.container.querySelector('[data-asset-id="motion-100"]')).toHaveAttribute('data-arrival', 'in');
+    await tick(300);
+    expect(arriving(view)).toEqual([]);
+    view.rerender(gallery([asset(100), ...first])); view.rerender(gallery([asset(101), asset(100), ...first]));
+    expect(arriving(view)).toEqual(['motion-101']);
+  });
+
+  it('keeps an arriving tile transparent until its thumbnail is ready, then fades the whole tile', async () => {
+    const view = render(gallery(first)); await tick();
+    const pending = new WeakSet<HTMLImageElement>();
+    vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockImplementation(function(this: HTMLImageElement) { return !(this.alt === 'motion-100.png' && !pending.has(this)); });
+    view.rerender(gallery([asset(100), ...first])); await tick(100);
+    const tile = view.container.querySelector('[data-asset-id="motion-100"]')!;
+    expect(tile).toHaveAttribute('data-arrival', 'wait');
+    const image = tile.querySelector('img')!; pending.add(image);
+    await act(async () => { fireEvent.load(image); });
+    await tick(16);
+    expect(tile).toHaveAttribute('data-arrival', 'in');
+    await tick(300);
+    expect(tile).not.toHaveAttribute('data-arrival');
+  });
+
+  it('fades in a tile whose thumbnail never settles once the wait cap passes', async () => {
+    const view = render(gallery(first)); await tick();
+    vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(false);
+    view.rerender(gallery([asset(100), ...first])); await tick(700);
+    expect(view.container.querySelector('[data-asset-id="motion-100"]')).toHaveAttribute('data-arrival', 'wait');
+    await tick(150);
+    expect(view.container.querySelector('[data-asset-id="motion-100"]')).toHaveAttribute('data-arrival', 'in');
+  });
+
+  it.each([
+    ['paging a next page', (items: AssetSummary[]) => gallery([...items, asset(200), asset(201)], scope('arrivals'), {hasNextPage: true}), {hasNextPage: true}],
+    ['paging a previous page', (items: AssetSummary[]) => gallery([asset(300), ...items], scope('arrivals'), {hasPreviousPage: true}), {hasPreviousPage: true}],
+    ['a sort change', (items: AssetSummary[]) => gallery([asset(400), ...items], scope('arrivals', {sort: 'oldest'})), {}],
+    ['a filter change', (items: AssetSummary[]) => gallery([asset(401), ...items], scope('arrivals', {mediaKind: 'images'})), {}],
+    ['a folder change', (items: AssetSummary[]) => gallery([asset(402), ...items], scope('elsewhere')), {}],
+    ['a list sharing nothing with the old one', () => gallery([asset(403), asset(404)]), {}],
+  ])('does not fade on %s', async (_name, next, before) => {
+    const view = render(gallery(first, scope('arrivals'), before)); await tick();
+    view.rerender(next(first));
+    expect(arriving(view)).toEqual([]);
+    await tick(300);
+    expect(arriving(view)).toEqual([]);
+  });
+
+  it('does not fade a tile scrolled out of the virtual window and back, or one that arrived offscreen', async () => {
+    const many = Array.from({length: 120}, (_, i) => asset(i));
+    const view = render(gallery(many)); await tick();
+    view.rerender(gallery([asset(500), ...many])); await tick(400);
+    expect(arriving(view)).toEqual([]);
+    const host = view.container.querySelector<HTMLElement>('.asset-gallery__scroll')!;
+    fireEvent.scroll(host, {target: {scrollTop: 6000}}); await tick(400);
+    expect(shown(view)).not.toContain('motion-500');
+    fireEvent.scroll(host, {target: {scrollTop: 0}}); await tick(16);
+    expect(shown(view)).toContain('motion-500');
+    expect(arriving(view)).toEqual([]);
+    // Arrived while far down: offscreen at that moment, so it never animates when it is reached.
+    fireEvent.scroll(host, {target: {scrollTop: 6000}}); await tick(400);
+    view.rerender(gallery([asset(501), asset(500), ...many])); await tick(700);
+    fireEvent.scroll(host, {target: {scrollTop: 0}}); await tick(16);
+    expect(shown(view)).toContain('motion-501');
+    expect(arriving(view)).toEqual([]);
+  });
+
+  it('does not fade on a revisit or while the area is hidden', async () => {
+    const view = render(gallery(first)); await tick();
+    view.rerender(gallery([asset(100), ...first], scope('arrivals'), {}, false));
+    view.rerender(gallery([asset(100), ...first]));
+    expect(arriving(view)).toEqual([]);
+  });
+
+  it('does not fade without a scope key', async () => {
+    const view = render(gallery(first, scope('arrivals'), {scopeKey: undefined})); await tick();
+    view.rerender(gallery([asset(100), ...first], scope('arrivals'), {scopeKey: undefined}));
+    expect(arriving(view)).toEqual([]);
+  });
+
+  it('shows arrivals at once with reduced motion', async () => {
+    vi.stubGlobal('matchMedia', () => ({matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn()}));
+    const view = render(gallery(first)); await tick();
+    view.rerender(gallery([asset(100), ...first]));
+    expect(shown(view)).toContain('motion-100');
+    expect(arriving(view)).toEqual([]);
+  });
 });

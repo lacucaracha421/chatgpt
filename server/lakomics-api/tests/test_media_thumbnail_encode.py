@@ -1541,7 +1541,12 @@ class FailClosedTests(EncoderCase):
         for kind in encoder.KINDS:
             output = self.path(f"absent-{kind}.webp")
             completed = run_encoder([self.path("does-not-exist"), output, kind])
-            self.assertEqual(completed.returncode, encoder.EXIT_UNSUPPORTED_INPUT)
+            if kind == "video" and (FFMPEG is None or FFPROBE is None):
+                # The video path checks its toolchain before it opens the source, so a
+                # host without FFmpeg answers "not provisioned" for any input.
+                self.assertEqual(completed.returncode, encoder.EXIT_TOOL_UNAVAILABLE, kind)
+            else:
+                self.assertEqual(completed.returncode, encoder.EXIT_UNSUPPORTED_INPUT, kind)
             self.assert_no_output(output)
 
     def stub_script(self, program):

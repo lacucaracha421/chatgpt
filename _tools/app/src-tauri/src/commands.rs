@@ -2109,11 +2109,14 @@ pub async fn undo_local_manga_import(
 }
 
 #[tauri::command]
-pub fn dismiss_local_manga_import(
+pub async fn dismiss_local_manga_import(
     token: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?.dismiss_local_manga_import(&token);
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.dismiss_local_manga_import(&token))
+        .await
+        .map_err(|_| background_task_error())?;
     Ok(())
 }
 

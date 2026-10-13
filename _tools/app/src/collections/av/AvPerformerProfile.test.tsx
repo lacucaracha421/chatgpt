@@ -47,7 +47,7 @@ it("sorts and deduplicates safe links, expands and collapses after five, and ope
   ].map(([name, url]) => ({ url, site: { name } }));
   render(<ProfileLinks profile={profile({ urls })} />);
   const links = screen.getByLabelText("배우 링크");
-  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "공식", "위키", "+2"]);
+  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "제작사", "위키", "+2"]);
   fireEvent.click(screen.getByRole("button", { name: "X" })); expect(openUrl).toHaveBeenCalledWith("https://x.com/name");
   fireEvent.click(screen.getByRole("button", { name: "링크 2개 더 보기" }));
   expect(within(links).getAllByRole("button")).toHaveLength(8); expect(screen.queryByText("Unsafe")).toBeNull();
@@ -55,7 +55,7 @@ it("sorts and deduplicates safe links, expands and collapses after five, and ope
   expect(collapse).toHaveAttribute("aria-expanded", "true");
   expect(within(links).getAllByRole("button")[7]).toBe(collapse);
   fireEvent.click(collapse);
-  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "공식", "위키", "+2"]);
+  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "제작사", "위키", "+2"]);
   expect(within(links).getByRole("button", { name: "링크 2개 더 보기" })).toHaveAttribute("aria-expanded", "false");
 });
 it("shows stored profile immediately then updates the page from background refresh", async () => {

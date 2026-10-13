@@ -1,34 +1,47 @@
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
 import { MangaSourceControl } from "./MangaToolbar";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const props = { title: "한 줄 제목", artist: "", coverUrl: null, pageCount: 76, onOpen: vi.fn() };
 
-it("keeps the painted cover and its opacity through opening, selection and deselection", () => {
+it.each([false, true])("keeps the painted cover without another fade through opening, selection and deselection (reduced=%s)", async reduced => {
+  vi.stubGlobal("matchMedia", () => ({ matches: reduced }));
   const base = readFileSync("src/styles/shared-base.css", "utf8");
   const css = readFileSync("src/manga/manga.css", "utf8");
+  const controls = readFileSync("src/styles/controls.css", "utf8");
   const style = document.createElement("style");
-  style.textContent = `${base.match(/button:disabled,[\s\S]*?\}/)![0]}\n${css.match(/\.manga-card__body:disabled\s*\{[^}]*\}/)![0]}`;
+  style.textContent = `${base.match(/button:disabled,[\s\S]*?\}/)![0]}\n${controls}\n${css}`;
   document.head.append(style);
   try {
     const cardProps = { ...props, coverUrl: "https://example.com/cover.jpg" };
     const { container, rerender } = render(<MangaCard {...cardProps} selected={false} />);
     const card = container.querySelector("article");
     const button = screen.getByRole("button");
-    const image = screen.getByAltText(`${props.title} 표지`);
-    fireEvent.load(image);
+    const image = screen.getByAltText<HTMLImageElement>(`${props.title} 표지`);
+    const animate = vi.fn(() => ({ cancel: vi.fn() }));
+    image.animate = animate as unknown as HTMLImageElement["animate"];
+    await act(async () => { fireEvent.load(image); });
+    animate.mockClear();
     for (const state of [{ opening: true, selected: false }, { opening: false, selected: true }, { opening: false, selected: false }]) {
       rerender(<MangaCard {...cardProps} {...state} />);
       expect(container.querySelector("article")).toBe(card);
       expect(screen.getByAltText(`${props.title} 표지`)).toBe(image);
       expect(image).toHaveAttribute("src", cardProps.coverUrl);
       expect(image).toBeVisible();
+      expect(container.querySelectorAll("img")).toHaveLength(1);
       expect(getComputedStyle(button).opacity || "1").toBe("1");
+      for (const layer of [button, image.parentElement!, image]) {
+        const paint = getComputedStyle(layer);
+        expect(paint.opacity || "1").toBe("1");
+        expect(paint.filter || "none").toBe("none");
+        expect(paint.transform || "none").toBe("none");
+      }
+      expect(animate).not.toHaveBeenCalled();
     }
   } finally { style.remove(); }
 });

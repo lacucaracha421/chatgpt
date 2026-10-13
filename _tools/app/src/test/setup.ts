@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import "./jsdomStorage";
 
 // Vitest runs without globals, so Testing Library never registers its own cleanup: a file that forgets
 // afterEach(cleanup) leaves its DOM to whichever test runs next (HOME-OPT-001, order dependence).

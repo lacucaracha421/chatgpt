@@ -32,10 +32,10 @@
 [data-motion="toast"][data-state="closed"] { --surface-y: 4px; --surface-scale: 1; }
 [data-motion][data-state="closed"], [data-motion-ghost], [data-motion-ghost] * { pointer-events: none !important; }
 .ui-selection-presence { display: contents; }
-/* The tablet's blanket reduced-motion reset is overridden only for these surfaces. */
+/* Radix releases presence immediately when the exit animation is absent. */
 @media (prefers-reduced-motion: reduce) {
-  [data-motion][data-motion] { --surface-time: var(--motion-micro); --surface-opacity-time: var(--motion-micro); --surface-exit-time: var(--motion-micro); translate: none !important; scale: none !important; transition: opacity var(--motion-micro) var(--ease-out) !important; }
-  [data-motion][data-motion][data-state="closed"] { animation: ui-surface-exit var(--motion-micro) linear !important; }
+  [data-motion][data-motion] { translate: none !important; scale: none !important; transition: none !important; }
+  [data-motion][data-motion][data-state="closed"] { animation: none !important; }
 }
 /* The favorite/bookmark/showcase pop (shared/motion/togglePop.ts): a burst of dots in the toggle's
    on colour; a host whose icon colour differs from its own sets --toggle-pop-color. */

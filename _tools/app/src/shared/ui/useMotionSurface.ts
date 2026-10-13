@@ -9,7 +9,7 @@ const snapshots = new Map<string, LeavingSurface>();
 const snapshotsByNode = new WeakMap<HTMLElement, LeavingSurface>();
 
 export function surfaceExitTime(kind: MotionSurface, node: Element) {
-  if (prefersReducedMotion()) return motionTime("--motion-micro", motionDefaults.micro, node);
+  if (prefersReducedMotion()) return 0;
   if (kind === "toast") return motionTime("--motion-toast-exit", motionDefaults.toastExit, node);
   if (kind === "scrim") return motionTime("--motion-medium", motionDefaults.medium, node);
   if (kind === "selection") return motionTime("--motion-small", motionDefaults.small, node);
@@ -28,10 +28,12 @@ export function useMotionSurface(kind: MotionSurface, enabled = true, identity?:
     const selectionGhost = kind === "selection" ? node.parentElement?.parentElement?.querySelector<HTMLElement>(':scope > [data-motion="selection"][data-motion-ghost]') : null;
     const previous = leaving.current ?? (snapshotKey ? snapshots.get(snapshotKey) : undefined) ?? (selectionGhost ? snapshotsByNode.get(selectionGhost) : undefined);
     if (previous) {
-      const style = getComputedStyle(previous.node);
-      for (const property of properties) node.style.setProperty(property, style.getPropertyValue(property));
+      if (!prefersReducedMotion()) {
+        const style = getComputedStyle(previous.node);
+        for (const property of properties) node.style.setProperty(property, style.getPropertyValue(property));
+      }
       previous.remove();
-    } else node.dataset.motionEntering = "";
+    } else if (!prefersReducedMotion()) node.dataset.motionEntering = "";
     // Establish the starting style before the first paint, including portals mounted already open.
     void getComputedStyle(node).opacity;
     const frame = requestAnimationFrame(() => {
@@ -51,7 +53,7 @@ export function useMotionSurface(kind: MotionSurface, enabled = true, identity?:
       observer.disconnect(); cancelAnimationFrame(frame);
       // Conditional callers (toasts and tablet sheets) can remove the whole owner. Keep only
       // an inert paint snapshot; focus, scroll locks and React handlers leave immediately.
-      if (!node.isConnected || !node.getBoundingClientRect().width
+      if (prefersReducedMotion() || !node.isConnected || !node.getBoundingClientRect().width
         || kind === "menu") return;
       const style = getComputedStyle(node);
       if (node.dataset.state === "closed" && Number(style.opacity) === 0) return;

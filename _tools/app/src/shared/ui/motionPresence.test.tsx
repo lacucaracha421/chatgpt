@@ -22,7 +22,7 @@ function motionEnvironment(reduced: boolean) {
   vi.spyOn(window, "getComputedStyle").mockImplementation((node, pseudo) => {
     const style = computed(node, pseudo);
     return new Proxy(style, { get(target, key) {
-      if (key === "animationName" && node instanceof HTMLElement && node.dataset.motion) return node.dataset.state === "closed" ? "ui-surface-exit" : "none";
+      if (key === "animationName" && node instanceof HTMLElement && node.dataset.motion) return !reduced && node.dataset.state === "closed" ? "ui-surface-exit" : "none";
       const value = Reflect.get(target, key);
       return typeof value === "function" ? value.bind(target) : value;
     } });
@@ -43,6 +43,13 @@ it.each([false, true])("keeps a closed dialog until exit, reverses on reopen, an
   const scrim = document.querySelector('[data-motion="scrim"]')!;
   rerender(<Dialog {...props} open={false} />);
   await act(async () => {});
+  if (reduced) {
+    expect(panel.isConnected).toBe(false);
+    expect(scrim.isConnected).toBe(false);
+    expect(document.body.style.pointerEvents).not.toBe("none");
+    expect(document.querySelector("[data-motion-ghost]")).toBeNull();
+    return;
+  }
   expect(panel.isConnected).toBe(true);
   expect(panel.dataset.state).toBe("closed");
   expect(panel.inert).toBe(true);
@@ -66,6 +73,11 @@ it.each([false, true])("keeps a closed menu through exit and reuses it on rapid 
   const menu = screen.getByRole("menu");
   rerender(<Menu {...props} open={false} />);
   await act(async () => {});
+  if (reduced) {
+    expect(menu.isConnected).toBe(false);
+    expect(document.querySelector("[data-motion-ghost]")).toBeNull();
+    return;
+  }
   expect(menu.isConnected).toBe(true);
   expect(menu.inert).toBe(true);
   expect(menu.dataset.state).toBe("closed");
@@ -82,10 +94,15 @@ it.each([false, true])("retains an inert toast paint after its owner unmounts (r
   motionEnvironment(reduced); vi.useFakeTimers();
   const { unmount } = render(<Toast onDismiss={vi.fn()}>Saved</Toast>);
   const toast = screen.getByRole("status");
+  if (reduced) expect(toast.hasAttribute("data-motion-entering")).toBe(false);
   vi.spyOn(toast, "getBoundingClientRect").mockReturnValue({ width: 240, height: 48 } as DOMRect);
   act(() => vi.advanceTimersByTime(20));
   unmount();
   expect(screen.queryByRole("status")).toBeNull();
+  if (reduced) {
+    expect(document.querySelector("[data-motion-ghost]")).toBeNull();
+    return;
+  }
   const ghost = document.querySelector<HTMLElement>('[data-motion="toast"][data-motion-ghost]')!;
   expect(ghost).not.toBeNull();
   expect(ghost.inert).toBe(true);
@@ -93,7 +110,7 @@ it.each([false, true])("retains an inert toast paint after its owner unmounts (r
   expect(ghost.textContent).toContain("Saved");
   act(() => vi.advanceTimersToNextFrame());
   expect(ghost.dataset.state).toBe("closed");
-  const duration = reduced ? motionDefaults.micro : motionDefaults.toastExit;
+  const duration = motionDefaults.toastExit;
   act(() => vi.advanceTimersByTime(duration - 1));
   expect(ghost.isConnected).toBe(true);
   act(() => vi.advanceTimersByTime(1));
@@ -181,13 +198,14 @@ it("leaves fullscreen viewers outside the shared surface motion", () => {
   expect(screen.getByRole("dialog").hasAttribute("data-motion")).toBe(false);
 });
 
-it("matches the demo spring samples and keeps reduced motion opacity-only", () => {
+it("matches the demo spring samples and makes reduced motion instant", () => {
   expect(springLinear(.32, 1).duration).toBe(435);
   expect(springLinear(.46, .88).duration).toBe(395);
   const tokens = readFileSync("src/styles/tokens.css", "utf8");
   expect(tokens).toContain(`--spring-snappy: ${springLinear(.32, 1).easing}`);
   expect(tokens).toContain(`--spring-gentle: ${springLinear(.46, .88).easing}`);
-  expect(surfaceCSS).toContain("translate: none !important; scale: none !important; transition: opacity var(--motion-micro)");
+  expect(surfaceCSS).toContain("translate: none !important; scale: none !important; transition: none !important;");
+  expect(surfaceCSS).toContain('[data-motion][data-motion][data-state="closed"] { animation: none !important; }');
   expect(surfaceCSS).toContain("pointer-events: none !important");
   expect(surfaceCSS).toContain("var(--radix-dropdown-menu-content-transform-origin");
 });

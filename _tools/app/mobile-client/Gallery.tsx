@@ -1,6 +1,7 @@
 import {catalogPerfEnabled} from './catalogPerf';
 import {useTabletAssetMask} from './assetMask';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
+import {useArrivalFade, useArrivals, type ArrivalTracker} from '../src/shared/motion/arrivalFade';
 import {AreaVisible} from '../src/shared/motion/AreaSwitch';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {Badge} from '../src/shared/ui/Badge';
@@ -28,11 +29,12 @@ import {buildJustifiedGalleryRows, GALLERY_DATE_HEADING_HEIGHT, type GalleryRowA
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, privacy: requestedPrivacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
+function Tile({arrivals, asset, index, width, height, onOpen, onReady, paused, privacy: requestedPrivacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd}: {arrivals?: ArrivalTracker; asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
   selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
   const privacy=useTabletAssetMask(asset,requestedPrivacy);
   const timer=useRef<number|null>(null), pressStart=useRef<{x:number;y:number}|null>(null), suppressClick=useRef(false), pressCancel=useRef<()=>void>(()=>{});
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
+
   const clearTimer=()=>{if(timer.current!==null){window.clearTimeout(timer.current);timer.current=null;}};
   const cancelPress=()=>{clearTimer();pressStart.current=null;suppressClick.current=true;};
   useEffect(()=>()=>clearTimer(),[]);
@@ -64,6 +66,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy: re
   },[asset.id,asset.kind,asset.pending,paused,privacy,vault]);
   const [loadedPreview, setPreview] = useState(asset.preview);
   const preview=loadedPreview??(vault?undefined:asset.preview);
+  const shell=useRef<HTMLDivElement>(null), arrival=useArrivalFade(arrivals,asset.id,shell,!privacy&&!preview&&asset.thumbnail_available!==false);
   const [retried, setRetried] = useState(false);
   // A new thumbnail revision is a new image: it reloads while the tile keeps the old one.
   useEffect(() => {
@@ -80,7 +83,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy: re
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <div className="media-tile-shell" data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!preview&&asset.thumbnail_available!==false?"true":undefined} data-gallery-cell="" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
+  return <div ref={shell} className="media-tile-shell" data-arrival={arrival} data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!preview&&asset.thumbnail_available!==false?"true":undefined} data-gallery-cell="" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
     if(suppressClick.current){suppressClick.current=false;return;}
     if(selectionMode){onToggle?.(asset.id);return;}
     if(!requestedPrivacy) onOpen(index);
@@ -132,7 +135,8 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope, hasMore=false}: {sparse?:SparseGallerySource;
+export function Gallery({arrivalScope, items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope, hasMore=false}: {sparse?:SparseGallerySource;
+  /** The place, filters and sort these tiles belong to, without the load generation: items that join the same scope after a refresh fade in. Defaults to `identity`, where every identity change restarts without animation. */arrivalScope?:string;
   /** Cursor-paged lists keep their reserved tail neutral only while more items can arrive. */hasMore?:boolean;
   /** The place these tiles belong to (a folder, album or character), without filters: a change moves folders like the PC. */folderScope?:string;
   /** Unused since folder moves stopped animating (user 2026-10-05); remove together with its callers. */folderPath?:readonly string[]; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
@@ -149,6 +153,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   if (!areaVisible) { entryScope.current = folderScope; moved.current = false; }
   else if (folderScope !== entryScope.current) moved.current = true;
   useFirstAppearance(parent, items.length, !paused && !stale && !moved.current, vault ? 'vault-gallery' : 'asset-gallery');
+  const arrivals = useArrivals(arrivalScope ?? identity, items, asset => asset.id, {enabled: areaVisible && !paused && !sparse, hasNext: hasMore, hasPrevious: false});
   const activePress = useRef<(() => void)|null>(null);
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};
   const releasePress=(cancel:()=>void)=>{if(activePress.current===cancel)activePress.current=null;};
@@ -358,7 +363,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
         if(row.spacer)return null;
         const hasDateHeadings = Boolean(row.dateHeadings?.length);
         const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
-        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
+        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} arrivals={arrivals} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
         let itemOffset = 0;
         const tileContent = packedHeadings
           ? packedHeadings.map(heading => {
