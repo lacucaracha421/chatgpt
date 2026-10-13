@@ -253,20 +253,26 @@ impl Library {
         };
         let rows = {
             let c = self.connection()?;
-            let mut s=c.prepare("SELECT v.id,v.cover_artwork_id,a.relative_path FROM collection_volumes v JOIN collections c ON c.id=v.collection_id JOIN collection_work_artworks a ON a.id=v.cover_artwork_id WHERE v.collection_id=?1 AND c.type='manga' AND NOT EXISTS(SELECT 1 FROM collection_volume_cover_focus f WHERE f.volume_id=v.id AND f.cover_artwork_id=v.cover_artwork_id) ORDER BY v.edition_index,v.volume_number LIMIT ?2")?;
+            let mut s=c.prepare("SELECT v.id,v.cover_artwork_id,a.relative_path,COUNT(*) OVER () FROM collection_volumes v JOIN collections c ON c.id=v.collection_id JOIN collection_work_artworks a ON a.id=v.cover_artwork_id WHERE v.collection_id=?1 AND c.type='manga' AND NOT EXISTS(SELECT 1 FROM collection_volume_cover_focus f WHERE f.volume_id=v.id AND f.cover_artwork_id=v.cover_artwork_id) ORDER BY v.edition_index,v.volume_number LIMIT ?2")?;
             let rows = s
                 .query_map(params![id, BATCH_SIZE as i64], |r| {
                     Ok((
                         r.get::<_, String>(0)?,
                         r.get::<_, String>(1)?,
                         r.get::<_, String>(2)?,
+                        r.get::<_, i64>(3)?.max(0) as u64,
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
+        if rows.is_empty() { return Ok(FocusJobResult::default()); }
+        let total = rows[0].3;
+        let mut activity = crate::activities::Job::start(format!("cover-focus:{id}"), "cover_focus", "표지 초점 계산", None);
+        let outcome = (|| -> Result<FocusJobResult, LibraryError> {
         let mut result = FocusJobResult::default();
-        for (volume_id, cover_artwork_id, relative) in rows {
+        for (volume_id, cover_artwork_id, relative, _) in rows {
+            activity.progress(result.processed as u64, None, Some(format!("{}개 남음", total - result.processed as u64)));
             result.processed += 1;
             // Use the same containment/file checks as artwork serving before giving Python a path.
             let focus = self.open_library_media(&relative).and_then(|_| {
@@ -288,7 +294,17 @@ impl Library {
                 Err(_) => result.failed += 1,
             }
         }
+        activity.progress(result.processed as u64, None, Some(format!("{}개 남음", total.saturating_sub((result.processed - result.failed) as u64))));
         Ok(result)
+        })();
+        if let Ok(result) = &outcome {
+            if result.failed > 0 {
+                activity.complete(&Err::<(), _>(format!("실패 {}개", result.failed)));
+            } else if total > result.processed as u64 {
+                activity.defer(None);
+            } else { activity.complete(&outcome); }
+        } else { activity.complete(&outcome); }
+        outcome
     }
 }
 fn detect_focus(config: &RuntimeConfig, path: &std::path::Path) -> Option<(Option<f64>, String)> {

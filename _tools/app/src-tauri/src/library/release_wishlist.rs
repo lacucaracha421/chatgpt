@@ -569,6 +569,8 @@ impl Library {
             remaining,
             stop_reason: None,
         };
+        if due.is_empty() { return Ok(result); }
+        crate::activities::Job::run("release-wishlist", "release_wishlist_check", "발매 캘린더 · 위시리스트 확인", None, |_| {
 
         let games: Vec<i64> = due
             .iter()
@@ -621,6 +623,7 @@ impl Library {
             }
         }
         Ok(result)
+        })
     }
 
     /// Store one check's result and its events. `None` (the provider no longer has the title)

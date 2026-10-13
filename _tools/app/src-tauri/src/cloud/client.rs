@@ -3267,6 +3267,7 @@ impl CloudClient {
     }
 
     fn endpoint(&self, path: &str) -> Result<String, LibraryError> {
+        crate::activities::request_started();
         self.base_url
             .join(path)
             .map(|url| url.to_string())

@@ -388,6 +388,7 @@ impl Library {
     /// Serialize with local commands, complete provider passes, intent application and PUTs.
     /// A persisted seed keeps those writers fenced across crashes and lost replies.
     pub(crate) fn sync_server_release_wishlist(&self) -> Result<(), LibraryError> {
+        crate::activities::RequestJob::run("server-wishlist-check", "release_wishlist_check", "발매 캘린더 · 위시리스트 확인", || {
         let Some((client, token)) = self.authority_client()? else {
             return Ok(());
         };
@@ -404,6 +405,7 @@ impl Library {
             },
             &|body| client.wishlist_send(false, body, token.expose()),
         )
+        })
     }
 
     fn sync_wishlist_with(

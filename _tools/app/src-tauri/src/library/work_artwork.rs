@@ -596,10 +596,25 @@ impl Library {
             rows
         };
 
-        for (artwork_id, collection_id, relative_path) in artworks {
-            if crate::workload::is_restricted() { break; }
-            let _ = self.ensure_work_artwork_thumbnail(&collection_id, &artwork_id, &relative_path);
+        let artworks = artworks.into_iter().filter(|(artwork_id, collection_id, _)| {
+            !self.root().join(work_artwork_thumbnail_relative_path(collection_id, artwork_id)).exists()
+        }).collect::<Vec<_>>();
+        if artworks.is_empty() { return Ok(()); }
+        let mut activity = crate::activities::Job::start("artwork-thumbnails", "artwork_thumbnails", "작품 아트워크 썸네일 채우기", None);
+        let total = artworks.len() as u64;
+        let mut failure = None;
+        for (index, (artwork_id, collection_id, relative_path)) in artworks.into_iter().enumerate() {
+            activity.progress(index as u64, None, Some(format!("{}개 남음", total - index as u64)));
+            if crate::workload::is_restricted() {
+                activity.defer(Some("절약 모드".into()));
+                return Ok(());
+            }
+            if let Err(error) = self.ensure_work_artwork_thumbnail(&collection_id, &artwork_id, &relative_path) {
+                failure.get_or_insert(error);
+            }
         }
+        activity.progress(total, None, Some("0개 남음".into()));
+        activity.complete(&failure.map_or(Ok(()), Err));
         Ok(())
     }
 

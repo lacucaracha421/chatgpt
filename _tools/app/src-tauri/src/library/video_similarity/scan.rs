@@ -223,6 +223,8 @@ impl Library {
     fn spawn_video_similarity_scan(&self, id: String, cancel: Arc<AtomicBool>) {
         let library = self.clone();
         std::thread::spawn(move || {
+            let key = format!("video-similarity:{id}");
+            let activity = crate::activities::Job::start(&key, "video_similarity", "영상 유사 검사", Some(&key));
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 library.run_video_similarity_scan(&id, &cancel)
             }));
@@ -247,6 +249,13 @@ impl Library {
                 .is_some_and(|(active, _)| active == &id)
             {
                 state.active = None;
+            }
+            drop(state);
+            if matches!(reason, Some("cancelled" | "timeout")) {
+                activity.defer(Some(if reason == Some("cancelled") { "일시 정지됨" } else { "시간 제한" }.into()));
+            } else {
+                let mut activity = activity;
+                activity.complete(&reason.map_or(Ok(()), Err));
             }
         });
     }
@@ -350,8 +359,11 @@ impl Library {
                     .filter(|s| &s.hash == hash)
             })
             .collect::<Vec<_>>();
+        let activity_key = format!("video-similarity:{scan_id}");
+        crate::activities::progress(&activity_key, 0, Some(items.len() as u64), None);
         let mut ready = Vec::new();
-        for ((ordinal, _, _), source) in items.iter().zip(&sources) {
+        for (index, ((ordinal, _, _), source)) in items.iter().zip(&sources).enumerate() {
+            crate::activities::progress(&activity_key, index as u64, Some(items.len() as u64), None);
             check_budget(cancel, deadline)?;
             let Some(source) = source else {
                 self.set_video_scan_item(scan_id, *ordinal, "failed", Some("source_changed"))?;
@@ -398,6 +410,7 @@ impl Library {
                 }
             }
         }
+        crate::activities::progress(&activity_key, items.len() as u64, Some(items.len() as u64), None);
         for left in 0..ready.len() {
             for right in left + 1..ready.len() {
                 check_budget(cancel, deadline)?;

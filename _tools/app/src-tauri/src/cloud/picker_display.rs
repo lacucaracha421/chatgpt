@@ -100,6 +100,14 @@ impl Library {
 
     pub(crate) fn publish_due_picker_display(&self, endpoint: &str) -> Result<(), LibraryError> {
         self.ensure_send_to(endpoint)?;
+        self.publish_due_picker_display_with(endpoint, &self.cloud_client(endpoint)?)
+    }
+
+    fn publish_due_picker_display_with(
+        &self,
+        endpoint: &str,
+        client: &dyn HomeTransport,
+    ) -> Result<(), LibraryError> {
         let db = self.connection()?;
         let now = chrono::Utc::now().timestamp();
         if !due(&db, endpoint, now)? {
@@ -114,12 +122,16 @@ impl Library {
             &serde_json::to_string(&sent).map_err(|_| LibraryError::InvalidCloudResponse)?,
         )?;
         drop(db);
-        let token = crate::library::credential_broker::broker()
-            .credential(crate::library::credential::CredentialTarget::CloudApi)?;
+        let broker = crate::library::credential_broker::broker();
+        let target = crate::library::credential::CredentialTarget::CloudPublisher;
+        let token = broker.credential(target)?;
         let body =
             serde_json::from_str(&payload).map_err(|_| LibraryError::InvalidCloudResponse)?;
-        self.cloud_client(endpoint)?
-            .publish("/v1/picker/display", Some(&body), token.expose())?;
+        // This PUT is publisher-only; the ordinary CloudApi credential is a reader.
+        if let Err(error) = client.publish("/v1/picker/display", Some(&body), token.expose()) {
+            broker.invalidate_on_auth_rejection(target, &error);
+            return Err(error);
+        }
         // A change during HTTP remains due: acknowledge only the payload actually sent.
         sent.payload = Some(payload);
         sent.retry_after = 0;
@@ -134,6 +146,64 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picker_display_publication_uses_publisher_and_acknowledges_only_sent_payload() {
+        use crate::library::credential;
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let endpoint = "http://127.0.0.1";
+        library
+            .save_picker_display(vec!["folder".into()], vec![])
+            .unwrap();
+        credential::set_cloud_api_token_os("fixture-reader").unwrap();
+        credential::set_cloud_publisher_token_os("fixture-publisher").unwrap();
+        let (client, requests) = crate::cloud::client::CloudClient::home_test_client(vec![
+            serde_json::json!({"ok":true}),
+        ]);
+        library
+            .publish_due_picker_display_with(endpoint, &client)
+            .unwrap();
+        library
+            .publish_due_picker_display_with(endpoint, &client)
+            .unwrap();
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        let request = String::from_utf8_lossy(&requests[0]);
+        assert!(request.starts_with("PUT /v1/picker/display "));
+        assert!(request.contains("Bearer fixture-publisher"));
+        assert!(!request.contains("fixture-reader"));
+        let db = library.connection().unwrap();
+        assert_eq!(delivery(&db, endpoint).unwrap().retry_after, 0);
+        assert!(!due(&db, endpoint, chrono::Utc::now().timestamp()).unwrap());
+        credential::delete_cloud_api_token_os().unwrap();
+        credential::delete_cloud_publisher_token_os().unwrap();
+    }
+
+    #[test]
+    fn picker_display_publication_without_publisher_preserves_failure_and_retry() {
+        use crate::library::credential;
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let endpoint = "http://127.0.0.1";
+        library
+            .save_picker_display(vec!["folder".into()], vec![])
+            .unwrap();
+        credential::set_cloud_api_token_os("fixture-reader").unwrap();
+        let (client, requests) = crate::cloud::client::CloudClient::home_test_client(vec![]);
+        assert!(matches!(
+            library.publish_due_picker_display_with(endpoint, &client),
+            Err(LibraryError::CloudCredentialNotConfigured)
+        ));
+        let db = library.connection().unwrap();
+        let sent = delivery(&db, endpoint).unwrap();
+        assert!(sent.payload.is_none());
+        assert!(sent.retry_after > chrono::Utc::now().timestamp());
+        assert!(!due(&db, endpoint, sent.retry_after - 1).unwrap());
+        assert!(due(&db, endpoint, sent.retry_after).unwrap());
+        assert!(requests.lock().unwrap().is_empty());
+        credential::delete_cloud_api_token_os().unwrap();
+    }
 
     #[test]
     fn picker_display_payload_and_change_detection() {

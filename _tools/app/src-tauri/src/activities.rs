@@ -47,9 +47,58 @@ struct Registry {
     dismissed: BTreeMap<String, (String, Option<String>)>,
     dirty: bool,
     last_emit: Option<Instant>,
+    publication_pending: Vec<String>,
+    publication_running: BTreeMap<String, usize>,
+    publication_error: Option<String>,
 }
 
 impl Registry {
+    fn publication_failed(&mut self, kind: &str, error: impl std::fmt::Display, now: i64) {
+        self.publication_error = Some(format!("{kind}: {error}"));
+        self.publication(now);
+    }
+    fn publication(&mut self, now: i64) {
+        let mut kinds = self.publication_pending.clone();
+        kinds.extend(self.publication_running.keys().cloned());
+        kinds.sort();
+        kinds.dedup();
+        let failed = self.publication_running.is_empty() && self.publication_error.is_some();
+        if kinds.is_empty() && !failed {
+            self.finish("tablet-publication", None, now);
+            return;
+        }
+        let running = !self.publication_running.is_empty();
+        self.update(
+            Activity {
+                id: String::new(),
+                key: "tablet-publication".into(),
+                kind: "tablet_publication".into(),
+                label: "태블릿용 게시".into(),
+                state: if running {
+                    "running"
+                } else if failed {
+                    "failed"
+                } else {
+                    "queued"
+                }
+                .into(),
+                done: 0,
+                total: None,
+                detail: Some(kinds.join(" · ")),
+                pausable: false,
+                pause_group: None,
+                paused_reason: None,
+                error: if failed {
+                    self.publication_error.clone()
+                } else {
+                    None
+                },
+                started_at: 0,
+                finished_at: None,
+            },
+            now,
+        );
+    }
     fn changed(&mut self) {
         self.revision += 1;
         self.dirty = true;
@@ -94,6 +143,12 @@ impl Registry {
         if matches!(next.state.as_str(), "failed" | "done") {
             next.finished_at = Some(now);
         }
+        if next.state == "failed" {
+            // Keep the latest failure for a logical job, including retries that
+            // created a new running row. Successful runs retain their own history.
+            self.rows
+                .retain(|id, row| id == &next.id || row.key != next.key || row.state != "failed");
+        }
         self.rows.insert(next.id.clone(), next);
         self.prune(now);
         self.changed();
@@ -130,19 +185,18 @@ impl Registry {
         }
     }
     fn finish(&mut self, key: &str, error: Option<String>, now: i64) {
-        let Some(row) = self
+        let Some(mut row) = self
             .rows
-            .values_mut()
+            .values()
             .find(|row| row.key == key && row.finished_at.is_none())
+            .cloned()
         else {
             return;
         };
         row.state = if error.is_some() { "failed" } else { "done" }.into();
         row.error = error;
-        row.finished_at = Some(now);
         row.paused_reason = None;
-        self.prune(now);
-        self.changed();
+        self.update(row, now);
     }
     fn prune(&mut self, now: i64) {
         let mut completed: Vec<_> = self
@@ -334,12 +388,154 @@ pub fn finish_missing(kind: &str, keys: &[String]) {
     });
 }
 
+pub fn publication_pending(kinds: Vec<String>) {
+    change(|registry| {
+        registry.publication_pending = kinds;
+        registry.publication(now());
+    });
+}
+
+// Lane counts keep one row running until the last concurrent sender returns.
+thread_local! {
+    static PUBLICATION_LANE: std::cell::RefCell<Option<(String, std::rc::Rc<std::cell::Cell<bool>>)>> = const { std::cell::RefCell::new(None) };
+}
+pub struct PublicationLane {
+    kind: String,
+    started: std::rc::Rc<std::cell::Cell<bool>>,
+    previous: Option<(String, std::rc::Rc<std::cell::Cell<bool>>)>,
+    finished: bool,
+}
+impl PublicationLane {
+    pub fn start(kind: &str) -> Self {
+        let started = std::rc::Rc::new(std::cell::Cell::new(false));
+        let previous =
+            PUBLICATION_LANE.with(|lane| lane.replace(Some((kind.into(), started.clone()))));
+        Self {
+            kind: kind.into(),
+            started,
+            previous,
+            finished: false,
+        }
+    }
+    pub fn complete<T, E: std::fmt::Display>(mut self, result: &Result<T, E>) {
+        self.finished = true;
+        if let Err(error) = result {
+            change(|registry| {
+                registry.publication_failed(&self.kind, error, now());
+            });
+        }
+    }
+}
+impl Drop for PublicationLane {
+    fn drop(&mut self) {
+        PUBLICATION_LANE.with(|lane| lane.replace(self.previous.take()));
+        change(|registry| {
+            if !self.finished {
+                registry.publication_failed(&self.kind, "작업이 중단되었습니다", now());
+            }
+            if !self.started.get() {
+                if registry.publication_error.is_some() {
+                    registry.publication(now());
+                }
+                return;
+            }
+            if let Some(count) = registry.publication_running.get_mut(&self.kind) {
+                *count -= 1;
+                if *count == 0 {
+                    registry.publication_running.remove(&self.kind);
+                }
+            }
+            registry.publication(now());
+        });
+    }
+}
+
+/// Only a real CloudClient request activates a dispatched publication probe.
+pub fn publication_request() {
+    let kind = PUBLICATION_LANE.with(|lane| {
+        lane.borrow()
+            .as_ref()
+            .and_then(|(kind, started)| (!started.replace(true)).then(|| kind.clone()))
+    });
+    if let Some(kind) = kind {
+        change(|registry| {
+            if registry.publication_running.is_empty() {
+                registry.publication_error = None;
+            }
+            *registry.publication_running.entry(kind).or_default() += 1;
+            registry.publication(now());
+        });
+    }
+}
+
+thread_local! {
+    static REQUEST_JOB: std::cell::RefCell<Option<std::rc::Rc<RequestJob>>> = const { std::cell::RefCell::new(None) };
+}
+/// Conditional exchange owners can do a wholly local no-op. Start their row
+/// only when CloudClient reaches a request, and finish after the owner returns.
+pub struct RequestJob {
+    key: String,
+    kind: &'static str,
+    label: &'static str,
+    job: std::cell::RefCell<Option<Job>>,
+}
+impl RequestJob {
+    pub fn run<T, E: std::fmt::Display>(
+        key: impl Into<String>,
+        kind: &'static str,
+        label: &'static str,
+        work: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        let scope = std::rc::Rc::new(Self {
+            key: key.into(),
+            kind,
+            label,
+            job: std::cell::RefCell::new(None),
+        });
+        let previous = REQUEST_JOB.with(|current| current.replace(Some(scope.clone())));
+        struct Restore(Option<std::rc::Rc<RequestJob>>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                REQUEST_JOB.with(|current| current.replace(self.0.take()));
+            }
+        }
+        let _restore = Restore(previous);
+        let result = work();
+        if let Some(mut job) = scope.job.borrow_mut().take() {
+            job.complete(&result);
+        }
+        result
+    }
+}
+pub fn request_started() {
+    publication_request();
+    let scope = REQUEST_JOB.with(|current| current.borrow().clone());
+    if let Some(scope) = scope {
+        let mut job = scope.job.borrow_mut();
+        if job.is_none() {
+            *job = Some(Job::start(&scope.key, scope.kind, scope.label, None));
+        }
+    }
+}
+
 /// Guards exceptional exits; successful callers explicitly record their outcome.
 pub struct Job {
     key: String,
     finished: bool,
 }
 impl Job {
+    pub fn run<T, E: std::fmt::Display>(
+        key: impl Into<String>,
+        kind: &str,
+        label: &str,
+        group: Option<&str>,
+        work: impl FnOnce(&Job) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let mut job = Self::start(key, kind, label, group);
+        let result = work(&job);
+        job.complete(&result);
+        result
+    }
     pub fn start(key: impl Into<String>, kind: &str, label: &str, group: Option<&str>) -> Self {
         let key = key.into();
         report(
@@ -397,6 +593,175 @@ pub fn dismiss_activity(id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn activity_registry_publication_retry_replaces_failure_with_lane_label() {
+        let mut registry = Registry::default();
+        registry.publication_running.insert("캐릭터".into(), 1);
+        registry.publication(1);
+        registry.publication_failed("캐릭터", "인증 실패", 2);
+        registry.publication_running.clear();
+        registry.publication(3);
+        assert_eq!(
+            registry.snapshot(3).jobs[0].error.as_deref(),
+            Some("캐릭터: 인증 실패")
+        );
+
+        registry.publication_error = None;
+        registry.publication_running.insert("폴더 정보".into(), 1);
+        registry.publication(4);
+        registry.publication_failed("폴더 정보", "인증 실패", 5);
+        registry.publication_running.clear();
+        registry.publication(6);
+        let jobs = registry.snapshot(6).jobs;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].error.as_deref(), Some("폴더 정보: 인증 실패"));
+        assert_eq!(jobs[0].started_at, 4);
+        assert_eq!(jobs[0].finished_at, Some(6));
+        registry.publication(7);
+        assert_eq!(registry.snapshot(7).jobs.len(), 1);
+    }
+    #[test]
+    fn activity_registry_repeated_finish_keeps_latest_failure_and_other_keys() {
+        let mut registry = Registry::default();
+        registry.update(row("other"), 1);
+        registry.finish("other", Some("other failure".into()), 2);
+        for (start, error) in [(3, "first"), (5, "first"), (7, "changed")] {
+            registry.update(row("retry"), start);
+            registry.progress("retry", start as u64, Some(10), None);
+            registry.finish("retry", Some(error.into()), start + 1);
+            assert_eq!(registry.snapshot(start + 1).jobs.len(), 2);
+        }
+        let jobs = registry.snapshot(9).jobs;
+        let retry = jobs.iter().find(|job| job.key == "retry").unwrap();
+        assert_eq!(retry.error.as_deref(), Some("changed"));
+        assert_eq!(retry.done, 7);
+        assert_eq!(retry.finished_at, Some(8));
+        for start in [10, 12] {
+            registry.update(row("retry"), start);
+            registry.finish("retry", None, start + 1);
+        }
+        assert_eq!(
+            registry
+                .snapshot(14)
+                .jobs
+                .iter()
+                .filter(|job| job.state == "done")
+                .count(),
+            2
+        );
+    }
+    #[test]
+    fn activity_registry_changed_terminal_failure_replaces_previous_projection() {
+        let mut registry = Registry::default();
+        let mut failed = row("projection");
+        failed.state = "failed".into();
+        failed.error = Some("first".into());
+        registry.update(failed.clone(), 1);
+        registry.update(failed.clone(), 2);
+        failed.error = Some("changed".into());
+        registry.update(failed, 3);
+        assert_eq!(registry.snapshot(3).jobs.len(), 1);
+        assert_eq!(
+            registry.snapshot(3).jobs[0].error.as_deref(),
+            Some("changed")
+        );
+    }
+    #[test]
+    fn activity_registry_publication_batches_and_overlapping_senders_share_one_row() {
+        let mut registry = Registry::default();
+        registry.publication_pending = vec!["캐릭터".into(), "컬렉션".into()];
+        registry.publication(1);
+        let queued = registry.snapshot(1).jobs.remove(0);
+        assert_eq!(queued.state, "queued");
+        assert_eq!(queued.label, "태블릿용 게시");
+        assert!(queued.detail.as_ref().unwrap().contains("캐릭터"));
+        registry.publication_running.insert("캐릭터".into(), 1);
+        registry.publication_running.insert("홈".into(), 1);
+        registry.publication(2);
+        assert_eq!(registry.snapshot(2).jobs.len(), 1);
+        assert_eq!(registry.snapshot(2).jobs[0].id, queued.id);
+        registry.publication_pending.clear();
+        registry.publication_running.remove("캐릭터");
+        registry.publication(3);
+        assert_eq!(registry.snapshot(3).jobs[0].state, "running");
+        registry.publication_running.clear();
+        registry.publication(4);
+        assert_eq!(registry.snapshot(4).jobs[0].state, "done");
+    }
+    #[test]
+    fn activity_registry_publication_failure_stays_visible_during_retry_wait() {
+        let mut registry = Registry::default();
+        registry.publication_pending = vec!["홈".into()];
+        registry.publication(1);
+        registry.publication_error = Some("요청 실패".into());
+        registry.publication(2);
+        registry.publication(3);
+        assert_eq!(registry.snapshot(3).jobs.len(), 1);
+        assert_eq!(registry.snapshot(3).jobs[0].state, "failed");
+        registry.publication_error = None;
+        registry.publication_running.insert("홈".into(), 1);
+        registry.publication(4);
+        assert_eq!(
+            registry
+                .snapshot(4)
+                .jobs
+                .iter()
+                .filter(|row| row.finished_at.is_none())
+                .count(),
+            1
+        );
+    }
+    #[test]
+    fn activity_registry_auxiliary_character_jobs_inherit_shared_pause() {
+        let mut registry = Registry::default();
+        for kind in [
+            "character_augmentation",
+            "character_shadow",
+            "character_shadow_backfill",
+        ] {
+            let mut activity = row(kind);
+            activity.kind = kind.into();
+            activity.state = "queued".into();
+            registry.update(activity, 1);
+        }
+        registry.pause("character", Some("일시 정지됨".into()));
+        assert!(registry
+            .snapshot(2)
+            .jobs
+            .iter()
+            .all(|row| row.state == "paused" && row.pausable));
+        registry.pause("character", None);
+        assert!(registry
+            .snapshot(3)
+            .jobs
+            .iter()
+            .all(|row| row.state == "queued" && row.paused_reason.is_none()));
+    }
+    #[test]
+    fn activity_registry_conditional_requests_only_start_on_real_work() {
+        let key = format!("request-test:{}", uuid::Uuid::new_v4());
+        let noop: Result<(), &str> = RequestJob::run(&key, "test", "test", || Ok(()));
+        assert!(noop.is_ok());
+        assert!(!activity_snapshot().jobs.iter().any(|row| row.key == key));
+        let result: Result<(), &str> = RequestJob::run(&key, "test", "test", || {
+            request_started();
+            let current = activity_snapshot()
+                .jobs
+                .into_iter()
+                .find(|row| row.key == key)
+                .unwrap();
+            assert_eq!(current.state, "running");
+            Err("fixture failure")
+        });
+        assert!(result.is_err());
+        let current = activity_snapshot()
+            .jobs
+            .into_iter()
+            .find(|row| row.key == key)
+            .unwrap();
+        assert_eq!(current.state, "failed");
+        dismiss_activity(current.id);
+    }
     fn row(key: &str) -> Activity {
         Activity {
             id: String::new(),

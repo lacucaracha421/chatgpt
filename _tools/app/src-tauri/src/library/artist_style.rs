@@ -551,14 +551,14 @@ impl Library {
         }
         let library = self.clone();
         std::thread::spawn(move || {
-            {
+            let _ = crate::activities::Job::run("artist-style", "artist_style", "화풍 순위 계산", None, |_| {
                 let _gate = library
                     .artist_style_runtime
                     .gate
                     .lock()
                     .unwrap_or_else(|e| e.into_inner());
-                let _ = library.ensure_artist_style();
-            }
+                library.ensure_artist_style()
+            });
             library
                 .artist_style_runtime
                 .scheduled

@@ -292,6 +292,7 @@ impl Manager {
     }
     fn start(&self, config: &Config, qwen: bool) -> Result<Worker> {
         self.set_status("starting", None, false);
+        crate::activities::Job::run("description-search-start", "description_search", "설명 검색 준비", None, |_| {
         let worker = Worker::start(config, qwen)?;
         {
             let mut child = self.0.child.lock().unwrap_or_else(|e| e.into_inner());
@@ -313,6 +314,7 @@ impl Manager {
         let actual_qwen = ready["qwen8b"].as_bool().unwrap_or(false);
         self.set_status("ready", None, actual_qwen);
         Ok(worker)
+        })
     }
     fn with<T>(&self, config: &Config, work: impl FnOnce(&mut Worker) -> Result<T>) -> Result<T> {
         let mut session = self.0.session.lock().unwrap_or_else(|e| e.into_inner());

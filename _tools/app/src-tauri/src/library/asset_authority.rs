@@ -699,6 +699,7 @@ impl Library {
         status: &crate::cloud::client::SyncStatus,
         skip_unchanged: bool,
     ) -> Result<Option<(Authority, u32)>, LibraryError> {
+        crate::activities::RequestJob::run("server-trash-receive", "server_exchange", "서버 변경 주고받기", || {
         let Some(remote) = status.domains.iter().find(|d| d.domain == "assets") else {
             if authority(&*self.connection()?)?.is_some() {
                 return invalid();
@@ -741,6 +742,7 @@ impl Library {
             }
         }
         Ok(Some((a, applied)))
+        })
     }
 
     /// Before Album and Classification receive: when `status` shows the adopted Asset
@@ -960,6 +962,7 @@ impl Library {
         a: &Authority,
         result: &mut AssetSyncResult,
     ) -> Result<(), LibraryError> {
+        crate::activities::RequestJob::run("server-trash-send", "server_exchange", "서버 변경 주고받기", || {
         self.ensure_send_to(client.base())?;
         client.ensure_send()?;
         for _ in 0..100 {
@@ -1118,6 +1121,7 @@ impl Library {
             }
         }
         Ok(())
+        })
     }
     fn pending_materializations(&self, restricted: bool) -> Result<Vec<String>, LibraryError> {
         let candidates=self.connection()?.prepare("SELECT projection FROM asset_authority_state
@@ -1209,7 +1213,11 @@ impl Library {
     ) -> Result<(), LibraryError> {
         self.release_resolved_local_conflicts()?;
         let candidates = self.pending_materializations(restricted)?;
+        if !candidates.is_empty() {
+        crate::activities::Job::run("server-downloads", "server_downloads", "파일 내려받기", None, |activity| {
+        let total = candidates.len() as u64;
         for (index, raw) in candidates.into_iter().enumerate() {
+            activity.progress(index as u64, None, Some(format!("{}개 남음", total - index as u64)));
             if crate::workload::is_restricted() && index >= 5 { break; }
             let p: AssetProjection =
                 serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
@@ -1221,6 +1229,9 @@ impl Library {
                     self.record_materialization_failure(&p, &error, chrono::Utc::now())?;
                 }
             }
+        }
+        Ok::<_, LibraryError>(())
+        })?;
         }
         self.fetch_missing_asset_image_text(client, token, restricted)?;
         Ok(())

@@ -415,6 +415,7 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<BookmarkOutboxFlush, LibraryError> {
+        crate::activities::RequestJob::run("catalog-bookmarks-send", "catalog_bookmarks", "카탈로그 북마크 동기화", || {
         self.ensure_send_to(client.base())?;
         client.ensure_send()?;
         let mut outcome = BookmarkOutboxFlush {
@@ -496,6 +497,7 @@ impl Library {
         }
         outcome.pending = self.pending_intent_count()?;
         Ok(outcome)
+        })
     }
 
     /// Pending intents read under one connection guard.

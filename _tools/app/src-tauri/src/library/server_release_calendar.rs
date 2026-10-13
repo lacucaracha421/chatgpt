@@ -561,11 +561,13 @@ impl Library {
     }
 
     pub fn request_server_release_calendar(&self) -> Result<ServerCalendarRun, LibraryError> {
+        crate::activities::RequestJob::run("server-calendar-request", "release_calendar_check", "발매 캘린더 · 위시리스트 확인", || {
         self.request_server_release_calendar_with(&|| {
             let (client, token) = self
                 .authority_client()?
                 .ok_or(LibraryError::CloudRequestUnavailable)?;
             client.calendar_run(token.expose())
+        })
         })
     }
 
@@ -597,6 +599,7 @@ impl Library {
 
     /// Read commands serve disk immediately; their background task revalidates here.
     pub fn refresh_server_calendar_cache(&self, force: bool) -> Result<bool, LibraryError> {
+        crate::activities::RequestJob::run("server-calendar-refresh", "release_calendar_check", "발매 캘린더 · 위시리스트 확인", || {
         if !self.server_release_calendar_enabled() && !self.server_release_wishlist_blocked()? {
             return Ok(false);
         }
@@ -616,6 +619,7 @@ impl Library {
             &|etag| client.calendar_read_conditional("/v1/home/upcoming", token.expose(), etag),
             &|| self.server_release_calendar_status(),
         )
+        })
     }
 
     fn refresh_server_calendar_cache_with(

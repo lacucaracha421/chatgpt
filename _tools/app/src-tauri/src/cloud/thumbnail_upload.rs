@@ -209,10 +209,12 @@ pub(super) fn refresh(
     bytes: Vec<u8>,
     token: &str,
 ) -> Result<(), LibraryError> {
+    crate::activities::Job::run(format!("cloud-thumbnail:{asset_id}"), "cloud_thumbnail", "썸네일 새로고침", None, |_| {
     if let Thumbnail::Upload(upload_id) = upload(client, journal, asset_id, bytes, token)? {
         client
             .commit_thumbnail(asset_id, &upload_id, token)
             .map_err(|error| journal.handle_error(error))?;
     }
     journal.clear()
+    })
 }

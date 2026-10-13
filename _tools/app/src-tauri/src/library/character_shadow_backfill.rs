@@ -55,6 +55,15 @@ fn take_batch(pending: &mut VecDeque<Pending>) -> Vec<Pending> {
 }
 
 impl Library {
+    pub(super) fn publish_shadow_backfill_activity(&self, active: bool) {
+        let status = self.character_shadow_backfill_status();
+        if status.running {
+            crate::activities::report("character-shadow-backfill", "character_shadow_backfill", "과거 이미지 점수 채우기",
+                if active || status.preparing { "running" } else { "queued" },
+                (status.scored + status.skipped) as u64, (!status.preparing).then_some(status.total as u64),
+                None, Some("character"), crate::workload::is_restricted().then(|| "절약 모드".into()), None);
+        } else { crate::activities::finish("character-shadow-backfill", status.error); }
+    }
     pub fn character_shadow_backfill_status(&self) -> Status {
         self.character_shadow_backfill
             .lock()
@@ -74,7 +83,10 @@ impl Library {
             state.status.cancelled = true;
             state.pending.clear();
         }
-        state.status.clone()
+        let status = state.status.clone();
+        drop(state);
+        self.publish_shadow_backfill_activity(false);
+        status
     }
     pub fn character_shadow_backfill_start(&self) -> Result<Status> {
         self.character_shadow_backfill_available()?;
@@ -96,6 +108,7 @@ impl Library {
             };
             state.cancel.clone()
         };
+        self.publish_shadow_backfill_activity(true);
         // No queue registration or library writes. Release the library connection
         // between candidates so native work is not held behind a history scan.
         let result = (|| -> Result<VecDeque<Pending>> {
@@ -122,7 +135,10 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if cancel.load(Ordering::Acquire) {
-            return Ok(state.status.clone());
+            let status = state.status.clone();
+            drop(state);
+            self.publish_shadow_backfill_activity(false);
+            return Ok(status);
         }
         state.status.preparing = false;
         match result {
@@ -138,7 +154,10 @@ impl Library {
                 state.status.error = Some(error.to_string());
             }
         }
-        Ok(state.status.clone())
+        let status = state.status.clone();
+        drop(state);
+        self.publish_shadow_backfill_activity(false);
+        Ok(status)
     }
 
     pub(super) fn character_shadow_candidate(&self, id: &str) -> Result<Option<Pending>> {
@@ -214,6 +233,7 @@ impl Library {
             }
             (pending, state.cancel.clone())
         };
+        self.publish_shadow_backfill_activity(true);
         let mut completed = 0;
         let result =
             self.score_shadow_backfill(&pending, config, stop.clone(), &cancel, |scored| {
@@ -229,12 +249,16 @@ impl Library {
                         state.status.skipped += 1;
                     }
                 }
+                drop(state);
+                self.publish_shadow_backfill_activity(true);
             });
         let mut state = self
             .character_shadow_backfill
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if cancel.load(Ordering::Acquire) {
+            drop(state);
+            self.publish_shadow_backfill_activity(false);
             return true;
         }
         match result {
@@ -243,6 +267,8 @@ impl Library {
                 for item in pending.into_iter().skip(completed).rev() {
                     state.pending.push_front(item);
                 }
+                drop(state);
+                self.publish_shadow_backfill_activity(false);
                 return true;
             }
             Err(error) => {
@@ -254,6 +280,8 @@ impl Library {
         if state.pending.is_empty() {
             state.status.running = false;
         }
+        drop(state);
+        self.publish_shadow_backfill_activity(false);
         true
     }
 

@@ -231,9 +231,14 @@ impl Library {
         status.retry_at = None;
         status.stop_reason = None;
         status.remaining = pending.len() as u64;
+        crate::activities::Job::run(format!("release-check:{provider}"), "release_check", "신간 확인", None, |activity| {
+        let initial_checked = status.checked;
+        let total = pending.len() as u64;
         let started = Instant::now();
         let metrics = provider_requests::metrics();
         for id in pending.iter().take(BATCH_SIZE) {
+            let checked = status.checked - initial_checked;
+            activity.progress(checked, Some(total), Some(format!("{} · {checked}개 확인 · {}개 남음", if provider == "kakao" { "카카오" } else { "MangaDex" }, status.remaining)));
             if crate::workload::is_restricted() {
                 break;
             }
@@ -356,7 +361,9 @@ impl Library {
             status.finished_at = Some(chrono::Utc::now().to_rfc3339());
         }
         self.connection()?.execute("INSERT INTO collection_update_status(provider,status_json) VALUES(?1,?2) ON CONFLICT(provider) DO UPDATE SET status_json=excluded.status_json",params![provider,serde_json::to_string(&status).map_err(|_|LibraryError::InvalidCollectionMetadata)?])?;
+        activity.progress(status.checked - initial_checked, Some(total), Some(format!("{} · {}개 확인 · {}개 남음", if provider == "kakao" { "카카오" } else { "MangaDex" }, status.checked - initial_checked, status.remaining)));
         Ok(status)
+        })
     }
 }
 fn retry_seconds(

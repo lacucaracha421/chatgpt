@@ -272,6 +272,21 @@ impl Library {
                 if status.paused { Some("일시 정지됨".into()) } else if crate::workload::is_restricted() { Some("절약 모드".into()) } else { None },
                 (refresh.state == "failed").then(|| "캐릭터에서 다시 갱신해 주세요".into()));
         }
+        let (preparing, scoring) = {
+            let engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            (engine.training.as_ref().is_some_and(|training| !training.ready), engine.shadow.len())
+        };
+        let reason = if status.paused { Some("일시 정지됨".into()) }
+            else if crate::workload::is_restricted() { Some("절약 모드".into()) } else { None };
+        for (key, kind, label, pending, detail) in [
+            ("character-augmentation", "character_augmentation", "보조 인식 준비", preparing, None),
+            ("character-shadow", "character_shadow", "학습 인식 점수", scoring > 0, Some(format!("{scoring}개 남음"))),
+        ] {
+            if pending {
+                crate::activities::report(key, kind, label, "queued", 0, None, detail, Some("character"), reason.clone(), None);
+            } else { crate::activities::finish(key, None); }
+        }
+        self.publish_shadow_backfill_activity(false);
     }
     pub fn start_character_incremental(&self, config: RuntimeConfig) {
         let mut engine = self
@@ -1164,7 +1179,17 @@ impl Library {
             })
         });
         let Some(pending) = pending else { return false };
-        if let Err(error) = self.score_character_shadow(pending, config, stop) {
+        let mut activity = crate::activities::Job::start("character-shadow", "character_shadow", "학습 인식 점수", Some("character"));
+        let remaining = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner).shadow.len();
+        activity.progress(0, None, Some(format!("{}개 남음", remaining + 1)));
+        let result = self.score_character_shadow(pending, config, stop.clone());
+        activity.progress(0, None, Some(format!("{remaining}개 남음")));
+        if !self.augmentation_idle_allowed(&stop).unwrap_or(false) && result.is_err() {
+            activity.defer(if crate::workload::is_restricted() { Some("절약 모드".into()) } else { None });
+        } else if result.is_ok() && remaining > 0 {
+            activity.defer(None);
+        } else { activity.complete(&result); }
+        if let Err(error) = result {
             eprintln!("S36 shadow scoring skipped: {error}");
         }
         true
@@ -1321,6 +1346,8 @@ impl Library {
             }
             engine.training.take().ok_or(Error::Stale)?
         };
+        let mut activity = crate::activities::Job::start("character-augmentation", "character_augmentation", "보조 인식 준비", Some("character"));
+        let result = (|| -> Result<bool> {
         // Invalid or failed optional preparation is dropped; a later eligible query can retry.
         let snapshot = {
             let mut connection = self.connection()?;
@@ -1387,6 +1414,13 @@ impl Library {
                 .training = Some(training);
         }
         Ok(progressed)
+        })();
+        let pending = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .training.as_ref().is_some_and(|training| !training.ready);
+        if result.is_ok() && pending {
+            activity.defer(if crate::workload::is_restricted() { Some("절약 모드".into()) } else { None });
+        } else { activity.complete(&result); }
+        result
     }
 
     fn prepare_incremental_references(

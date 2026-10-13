@@ -696,6 +696,7 @@ impl Library {
         client: &CloudClient,
         credentials: &dyn CredentialSource,
     ) -> Result<ClassificationOutboxFlush, LibraryError> {
+        crate::activities::RequestJob::run("server-classifications-send", "server_exchange", "서버 변경 주고받기", || {
         self.ensure_send_to(client.base())?;
         client.ensure_send()?;
         // Every Classification delivery entry point funnels through here, so the domain's
@@ -708,6 +709,7 @@ impl Library {
                 credentials,
                 &chrono::Utc::now().to_rfc3339(),
             )
+        })
         })
     }
 

@@ -84,9 +84,11 @@ impl Library {
         &self,
         provider: &str,
     ) -> Result<ServerReleaseCheck, LibraryError> {
+        crate::activities::RequestJob::run(format!("server-release-check:{provider}"), "release_check", "신간 확인", || {
         self.request_server_release_check_with(provider, &|| match self.authority_client()? {
             Some((client, token)) => client.release_checks_run(provider, token.expose()),
             None => Ok(ReleaseCheckRun::Unavailable),
+        })
         })
     }
 

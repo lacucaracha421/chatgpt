@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { nativeWorkload } from "../app/workloadProfile";
 import type { ActivityItem } from "./activityTimeline";
 
-type Snapshot = { revision: number; jobs: ActivityItem[] };
+type NativeActivity = ActivityItem & { key: string; pausable: boolean };
+type Snapshot = { revision: number; jobs: NativeActivity[] };
 
 /** Listen before reading, and reject an initial read overtaken by a newer event. */
 export function useActivityRegistry() {

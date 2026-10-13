@@ -426,7 +426,10 @@ impl Library {
         let endpoint = client.capture_endpoint();
         let cursor: Option<String> = self.connection()?.query_row(
             "SELECT after_id FROM cloud_capture_poll_cursor WHERE endpoint=?1", [endpoint], |r| r.get(0)).optional()?;
+        crate::activities::Job::run("capture-fetch", "capture_fetch", "캡처 받기", None, |activity| {
         let captures = client.list_pending_captures_after(token, cursor.as_deref())?;
+        let total = captures.len() as u64;
+        activity.progress(0, Some(total), None);
         if captures.is_empty() && cursor.is_some() {
             // The end of the inbox. Deferred captures behind the cursor are read from the start
             // by the next poll (they wait at least a minute anyway), not by a second full read
@@ -435,6 +438,7 @@ impl Library {
         }
         let mut result = CloudCaptureSyncResult::default();
         for payload in captures {
+            activity.progress(result.attempted as u64, Some(total), None);
             if !self.cloud_capture_enabled()? { break; }
             if result.attempted >= Self::MAX_CAPTURES_PER_SYNC as u32 {
                 break;
@@ -520,7 +524,9 @@ impl Library {
             }
         }
         self.connection()?.execute("DELETE FROM cloud_capture_retry WHERE retry_after <= ?1", [chrono::Utc::now().timestamp()])?;
+        activity.progress(result.attempted as u64, Some(total), None);
         Ok(result)
+        })
     }
 
     fn consume_cloud_capture(

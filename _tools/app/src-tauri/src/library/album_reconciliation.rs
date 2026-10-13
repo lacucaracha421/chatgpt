@@ -124,6 +124,7 @@ impl Library {
         read_status: &dyn Fn() -> Result<crate::cloud::client::SyncStatus, LibraryError>,
         skip_unchanged: bool,
     ) -> Result<AlbumReconciliation, LibraryError> {
+        crate::activities::RequestJob::run("server-albums-receive", "server_exchange", "서버 변경 주고받기", || {
         // The guard is scoped to the reads it protects: holding it across the network
         // round trip below would block every other database caller, and the helpers
         // this function calls take the same non-reentrant lock themselves.
@@ -225,6 +226,7 @@ impl Library {
             }
             other => other,
         }
+        })
     }
 
     /// The adopt-versus-catch-up dispatch, with the deferral condition left to the caller.

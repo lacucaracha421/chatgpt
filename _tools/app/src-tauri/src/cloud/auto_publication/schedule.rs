@@ -198,6 +198,43 @@ fn feed_due(db: &Connection, endpoint: &str, table: &str, now: i64) -> Result<bo
 }
 
 impl Library {
+    /// Pending content, excluding periodic poll/build timers. Read on the existing
+    /// dispatcher tick and after a lane returns, never from a new polling owner.
+    pub(super) fn publication_lanes_waiting(&self, endpoint: &str) -> Result<Vec<String>, LibraryError> {
+        let mut kinds = Vec::new();
+        let normalized = crate::cloud::status_watch::endpoint_key(endpoint);
+        let db = self.connection()?;
+        let active = crate::library::collection_authority::collection_authority_active(&db)?;
+        for kind in ["collections", "characters"] {
+            if kind == "collections" && active { continue; }
+            let pending = db.query_row("SELECT generation<>published_generation FROM mobile_publication_state WHERE kind=?1 AND endpoint=?2",
+                rusqlite::params![kind, endpoint], |r| r.get::<_, bool>(0)).optional()?.unwrap_or(false);
+            if pending { kinds.push(super::lane_label(kind).to_owned()); }
+        }
+        for (table, predicate, kind, key) in [
+            ("mobile_catalog_visibility_state", "digest<>published_digest", "visibility", endpoint),
+            ("mobile_character_review_feed_state", "input_digest IS NOT published_input_digest", "characters", endpoint),
+            ("mobile_similarity_review_feed_state", "input_digest IS NOT published_input_digest", "similarity", endpoint),
+            ("cloud_metadata_publication_state", "generation<>published_generation", "metadata", normalized.as_str()),
+            ("caption_publication_state", "json_extract(state_json,'$.more')=1", "autoTags", normalized.as_str()),
+        ] {
+            let pending = db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE endpoint=?1 AND ({predicate}))"), [key], |r| r.get::<_, bool>(0))?;
+            if pending { kinds.push(super::lane_label(kind).to_owned()); }
+        }
+        drop(db);
+        // In-memory input changes cover lanes without generation columns. A
+        // clean startup/safety probe alone is not pending content.
+        for (slot, kind) in [(1,"characters"),(2,"visibility"),(3,"similarity"),(4,"catalogDuplicates"),(5,"releases"),(6,"bindings"),(7,"metadata"),(8,"upcoming"),(9,"avPick"),(10,"artists"),(11,"autoTags")] {
+            if active && matches!(slot, 5 | 6) { continue; }
+            if self.publication_inputs.observed_generation(slot, &normalized)
+                .is_some_and(|seen| seen != self.publication_inputs.generation(slot)) {
+                kinds.push(super::lane_label(kind).to_owned());
+            }
+        }
+        kinds.sort(); kinds.dedup();
+        Ok(kinds)
+    }
+
     pub(crate) fn publication_lanes_due(
         &self,
         endpoint: &str,
@@ -583,6 +620,16 @@ mod tests {
         assert!(due());
     }
 
+    #[test]
+    fn publication_activity_waits_for_dirty_content_without_listing_idle_timers() {
+        let f = idle();
+        assert!(f.library.publication_lanes_waiting(&f.endpoint).unwrap().is_empty());
+        f.library.connection().unwrap().execute("UPDATE mobile_publication_state SET generation=published_generation+1,first_dirty=?1,last_dirty=?1 WHERE kind='characters'", [f.now]).unwrap();
+        assert!(f.library.publication_lanes_waiting(&f.endpoint).unwrap().contains(&"캐릭터".to_owned()));
+        assert!(!f.library.publication_lanes_due(&f.endpoint, f.now, false, false).unwrap()[1]);
+        f.library.connection().unwrap().execute("UPDATE mobile_publication_state SET published_generation=generation WHERE kind='characters'", []).unwrap();
+        assert!(f.library.publication_lanes_waiting(&f.endpoint).unwrap().is_empty());
+    }
     #[test]
     fn idle_ticks_dispatch_zero_lanes_and_build_zero_snapshots() {
         let f = idle();

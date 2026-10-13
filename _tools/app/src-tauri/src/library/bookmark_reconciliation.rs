@@ -258,6 +258,7 @@ impl Library {
         authority: crate::cloud::client::MobileCatalogAuthority,
         skip_unchanged: bool,
     ) -> Result<BookmarkReconciliation, LibraryError> {
+        crate::activities::RequestJob::run("catalog-bookmarks-receive", "catalog_bookmarks", "카탈로그 북마크 동기화", || {
         let Some(server_library_id) = authority.library_id else {
             // Still PC-owned: nothing to receive, and no local state is invented.
             return Ok(BookmarkReconciliation {
@@ -381,6 +382,7 @@ impl Library {
             behind_by: server_cursor - local_cursor.unwrap_or(server_cursor),
             applied_changes: applied,
             adopted_baseline,
+        })
         })
     }
 

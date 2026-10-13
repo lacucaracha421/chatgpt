@@ -717,12 +717,14 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<AlbumOutboxFlush, LibraryError> {
+        crate::activities::RequestJob::run("server-albums-send", "server_exchange", "서버 변경 주고받기", || {
         self.ensure_send_to(client.base())?;
         client.ensure_send()?;
         // Every Album delivery entry point funnels through here, so the domain's single-flight
         // gate covers all of them. See [`Library::flush_outbox_single_flight`].
         self.flush_outbox_single_flight(&self.album_flush_lock, || {
             flush_outbox(self, client, token, &chrono::Utc::now().to_rfc3339())
+        })
         })
     }
 }

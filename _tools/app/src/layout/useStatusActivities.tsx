@@ -27,6 +27,7 @@ export function useStatusActivities(input: Inputs) {
   const [characterPaused, setCharacterPaused] = useState<boolean | null>(null);
   const [cloudPaused, setCloudPaused] = useState<boolean | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  const [videoControlError, setVideoControlError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(new Set<string>());
   const hiddenNative = useRef(new Set<string>());
   const character = input.characterAutomation;
@@ -48,6 +49,13 @@ export function useStatusActivities(input: Inputs) {
     } catch (error) { setCloudPaused(null); setCloudError(String(error)); }
   };
   const rows: ActivityItem[] = [];
+  const pauseVideo = async (row: typeof native[number]) => {
+    const scanId = row.key.replace(/^video-similarity:/, "");
+    setVideoControlError(null);
+    try {
+      await invoke(row.state === "paused" || row.state === "queued" ? "resume_video_similarity_scan" : "cancel_video_similarity_scan", { scanId });
+    } catch (error) { setVideoControlError(String(error)); }
+  };
   const kinds = new Set<string>();
   const representedNative = new Set<string>();
   const resultKinds = new Set(["publication_catalog", "publication_characters", "vault_import", "vault_export"]);
@@ -138,11 +146,13 @@ export function useStatusActivities(input: Inputs) {
   }
   if (cloudError) add({ id: "local-cloud-control-error", kind: "cloud_upload_control_problem", label: "클라우드 업로드 제어 문제", state: "failed", done: 0,
     error: cloudError, retry: () => void cloudPause(), dismiss: () => setCloudError(null) });
+  if (videoControlError) add({ id: "local-video-control-error", kind: "video_similarity_control_problem", label: "영상 유사 검사 제어 문제", state: "failed", done: 0,
+    error: videoControlError, dismiss: () => setVideoControlError(null) });
   // Native rows represented by result owners never return as duplicate results after dismissal.
   native.forEach(row => { if (kinds.has(row.kind) && !resultKinds.has(row.kind)) hiddenNative.current.add(row.id); });
   for (const row of native) {
     if (hiddenNative.current.has(row.id) || representedNative.has(row.id)) continue;
-    const saverDeferred = restricted && ["similarity", "character_reconsideration", "character_history", "reference_reinforcement", "character_claude"].includes(row.kind);
+    const saverDeferred = restricted && ["similarity", "character_reconsideration", "character_history", "reference_reinforcement", "character_claude", "character_augmentation", "character_shadow", "character_shadow_backfill"].includes(row.kind);
     rows.push({ ...row,
       label: row.kind === "character_fresh" && character.activeWork?.cause === "manual_scan" ? "수동 분석" : row.label,
       countText: row.kind.startsWith("transfer_") && row.total != null ? `${(row.done / 1048576).toFixed(1)} / ${(row.total / 1048576).toFixed(1)} MB`
@@ -152,7 +162,7 @@ export function useStatusActivities(input: Inputs) {
         ? [character.activeWork.seriesName, character.activeWork.targetName].filter(Boolean).join(" / ") || null
         : row.detail?.match(/^\d+개 (남음|처리 중)$/) ? null
           : row.kind.startsWith("publication_") && row.state === "done" ? null : row.kind === "catalog_refresh" ? row.detail?.replace(/ · \d+페이지$/, "") : row.detail,
-      pause: row.pauseGroup === "character" ? pauseCharacter : row.pauseGroup === "cloud" ? () => void cloudPause() : undefined,
+      pause: row.pauseGroup === "character" ? pauseCharacter : row.pauseGroup === "cloud" ? () => void cloudPause() : row.kind === "video_similarity" && row.pausable ? () => void pauseVideo(row) : undefined,
       state: row.state === "failed" || row.state === "done" ? row.state : row.pauseGroup === "character" && paused ? "paused" : saverDeferred ? "queued" : row.pauseGroup === "cloud" && cloudPaused !== null ? cloudPaused ? "paused" : "queued" : row.state,
       pausedReason: row.state === "done" || row.state === "failed" ? row.pausedReason : row.pauseGroup === "character" && paused ? "일시 정지됨" : saverDeferred ? row.pausedReason ?? "절약 모드" : row.pauseGroup === "cloud" && cloudPaused !== null ? cloudPaused ? "일시 정지됨" : null : row.pausedReason,
       dismiss: () => { dismiss(row.id); void dismissNativeActivity(row.id).catch(() => undefined); },

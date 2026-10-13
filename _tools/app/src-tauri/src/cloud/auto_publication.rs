@@ -7,6 +7,24 @@ pub(crate) use schedule::Inputs;
 // Separate lanes prevent slow artwork uploads from blocking character/settings changes.
 static RUNNING: [Worker; 12] = [const { Worker::new() }; 12];
 
+fn lane_label(kind: &str) -> &'static str {
+    match kind {
+        "collections" => "컬렉션",
+        "characters" => "캐릭터",
+        "visibility" => "카탈로그 표시",
+        "similarity" => "유사 검토",
+        "catalogDuplicates" => "카탈로그 중복",
+        "releases" => "신간",
+        "bindings" => "연결",
+        "metadata" => "폴더 정보",
+        "autoTags" => "자동 태그 · 설명",
+        "upcoming" => "발매 캘린더",
+        "avPick" => "AV 추천",
+        "artists" => "작가",
+        _ => "홈",
+    }
+}
+
 /// Lazily started, isolated single-flight workers sleep on their channels between jobs.
 pub(crate) struct Worker {
     sender: Mutex<Option<std::sync::mpsc::Sender<Box<dyn FnOnce() + Send>>>>,
@@ -136,11 +154,15 @@ impl Library {
         let config = self.cloud_sync_config()?;
         let endpoint = config.api_base_url.unwrap_or_default();
         if !config.enabled || endpoint.is_empty() {
+            crate::activities::publication_pending(Vec::new());
             return Ok(0);
         }
         {
             let c = self.connection()?;
             Self::update_publication_endpoint_on(&c, &endpoint)?;
+        }
+        if let Ok(pending) = self.publication_lanes_waiting(&endpoint) {
+            crate::activities::publication_pending(pending);
         }
         let due = self.publication_lanes_due(
             &endpoint,
@@ -186,6 +208,7 @@ impl Library {
                 slot,
                 Box::new(move || {
                     let endpoint = worker_endpoint;
+                    let activity = crate::activities::PublicationLane::start(lane_label(kind));
                     let result = run(&library, kind, &endpoint);
                     if result.is_ok()
                         && !library.sync_held(&endpoint)
@@ -197,6 +220,10 @@ impl Library {
                     {
                         library.publication_inputs.checked(slot, generation);
                     }
+                    if let Ok(pending) = library.publication_lanes_waiting(&endpoint) {
+                        crate::activities::publication_pending(pending);
+                    }
+                    activity.complete(&result);
                 }),
             )
             .map_err(|_| LibraryError::InvalidCloudResponse)?;
@@ -214,7 +241,10 @@ impl Library {
 
     fn run_mobile_publication_lane(&self, kind: &str, endpoint: &str) -> Result<(), LibraryError> {
         if matches!(kind, "bindings" | "releases")
-            && crate::library::collection_authority::collection_authority_active(&*self.connection()?)? {
+            && crate::library::collection_authority::collection_authority_active(
+                &*self.connection()?,
+            )?
+        {
             return Ok(());
         }
         match kind {
@@ -235,11 +265,10 @@ impl Library {
                         })
                 },
                 || {
-                    self.run_due_caption_publication(endpoint)
-                        .map_err(|error| {
-                            eprintln!("caption publication: {error}");
-                            error
-                        })
+                    self.run_due_caption_publication(endpoint).map_err(|error| {
+                        eprintln!("caption publication: {error}");
+                        error
+                    })
                 },
             ),
             "visibility" => self.publish_due_catalog_visibility(endpoint),
@@ -302,7 +331,9 @@ impl Library {
                 // Same for mobile personal edits (at most once a minute, durably throttled).
                 // An applied edit dirties the lane through the 0074 triggers; the publication
                 // itself receives again before it reads the snapshot.
-                if !crate::library::collection_authority::collection_authority_active(&*self.connection()?)? {
+                if !crate::library::collection_authority::collection_authority_active(
+                    &*self.connection()?,
+                )? {
                     self.run_due_collection_personal_edits(endpoint)?;
                 }
             }
@@ -330,7 +361,9 @@ impl Library {
             return Ok(());
         }
         receive()?;
-        if self.sync_held(endpoint) { return Ok(()); }
+        if self.sync_held(endpoint) {
+            return Ok(());
+        }
         let generation: Option<i64> = {
             use rusqlite::OptionalExtension;
             // Collections are small to publish (the list query is ~6 ms) and a new or edited
@@ -388,12 +421,16 @@ impl Library {
 mod tests {
     #[test]
     fn auto_publication_active_collection_replays_are_quiet_before_credentials_or_network() {
-        let temp=tempfile::tempdir().unwrap();
-        let library=crate::library::Library::open(temp.path()).unwrap();
-        let id=library.library_id().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let library = crate::library::Library::open(temp.path()).unwrap();
+        let id = library.library_id().unwrap();
         library.connection().unwrap().execute("INSERT INTO collection_authority_sync(singleton,library_id,epoch,contract_version,generation,updated_at) VALUES(1,?1,1,1,'fixture','t')",[id]).unwrap();
-        library.run_mobile_publication_lane("bindings","https://fixture.invalid").unwrap();
-        library.run_mobile_publication_lane("releases","https://fixture.invalid").unwrap();
+        library
+            .run_mobile_publication_lane("bindings", "https://fixture.invalid")
+            .unwrap();
+        library
+            .run_mobile_publication_lane("releases", "https://fixture.invalid")
+            .unwrap();
     }
     use crate::library::Library;
     #[test]
@@ -410,19 +447,29 @@ mod tests {
                 db.execute("UPDATE mobile_publication_state SET generation=published_generation+1,retry_after=unixepoch()+3600,first_dirty=unixepoch(),last_dirty=unixepoch()", []).unwrap();
             }
             // No cloud configuration or credentials: activation must stop the lane first.
-            library.publish_due_mobile_kind_with_receive("collections", endpoint, || {
-                panic!("active Collections must not receive legacy personal edits")
-            }).unwrap();
-            library.run_mobile_publication_lane("collections", endpoint).unwrap();
+            library
+                .publish_due_mobile_kind_with_receive("collections", endpoint, || {
+                    panic!("active Collections must not receive legacy personal edits")
+                })
+                .unwrap();
+            library
+                .run_mobile_publication_lane("collections", endpoint)
+                .unwrap();
             let db = library.connection().unwrap();
             let state: (bool, i64, i64, i64) = db.query_row("SELECT generation=published_generation,retry_after,first_dirty,last_dirty FROM mobile_publication_state WHERE kind='collections'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
             assert_eq!(state, (true, 0, 0, 0));
             let other_dirty: bool = db.query_row("SELECT generation<>published_generation AND retry_after>0 FROM mobile_publication_state WHERE kind='characters'", [], |r| r.get(0)).unwrap();
             assert!(other_dirty, "other publication lanes must stay untouched");
             drop(db);
-            assert!(matches!(library.push_cloud_collections(&|_| {}), Err(crate::library::error::LibraryError::CollectionAuthorityOperationUnavailable)));
+            assert!(matches!(
+                library.push_cloud_collections(&|_| {}),
+                Err(crate::library::error::LibraryError::CollectionAuthorityOperationUnavailable)
+            ));
             let (client, requests) = crate::cloud::client::CloudClient::home_test_client(vec![]);
-            assert!(matches!(library.push_cloud_collections_with(&client, endpoint, "fixture", None, &|_| {}), Err(crate::library::error::LibraryError::CollectionAuthorityOperationUnavailable)));
+            assert!(matches!(
+                library.push_cloud_collections_with(&client, endpoint, "fixture", None, &|_| {}),
+                Err(crate::library::error::LibraryError::CollectionAuthorityOperationUnavailable)
+            ));
             assert!(requests.lock().unwrap().is_empty());
         }
     }
@@ -433,15 +480,22 @@ mod tests {
         let library = Library::open(temp.path().join("library")).unwrap();
         library.use_machine_settings(temp.path().join("machine.json"));
         let endpoint = "http://127.0.0.1";
-        library.set_cloud_sync_config(crate::cloud::models::CloudSyncConfig {
-            enabled: true,
-            api_base_url: Some(endpoint.into()),
-        }).unwrap();
+        library
+            .set_cloud_sync_config(crate::cloud::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(endpoint.into()),
+            })
+            .unwrap();
         Library::update_publication_endpoint_on(&library.connection().unwrap(), endpoint).unwrap();
-        let error = library.publish_due_mobile_kind_with_receive("collections", endpoint, || {
-            Err(crate::library::error::LibraryError::InvalidCloudResponse)
-        }).unwrap_err();
-        assert!(matches!(error, crate::library::error::LibraryError::InvalidCloudResponse));
+        let error = library
+            .publish_due_mobile_kind_with_receive("collections", endpoint, || {
+                Err(crate::library::error::LibraryError::InvalidCloudResponse)
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::library::error::LibraryError::InvalidCloudResponse
+        ));
         let db = library.connection().unwrap();
         let dirty: bool = db.query_row("SELECT generation<>published_generation FROM mobile_publication_state WHERE kind='collections'", [], |r| r.get(0)).unwrap();
         assert!(dirty);

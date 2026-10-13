@@ -1330,6 +1330,7 @@ impl Library {
             if !due {
                 continue;
             }
+            let mut activity = crate::activities::Job::start(format!("release-calendar:{provider}"), "release_calendar_check", "발매 캘린더 · 위시리스트 확인", None);
             let fetched = if provider == "igdb" {
                 fetch_upcoming_games(transport, start, end)
             } else if provider == "tmdb" {
@@ -1337,6 +1338,7 @@ impl Library {
             } else {
                 fetch_upcoming_anime(transport, start, end)
             };
+            activity.complete(&fetched);
             let connection = self.connection()?;
             let attempted = now.to_rfc3339();
             match fetched {

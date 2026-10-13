@@ -671,7 +671,10 @@ pub async fn ensure_daily_backup(
     state: State<'_, AppState>,
 ) -> Result<Option<MetadataBackup>, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.ensure_daily_backup(chrono::Utc::now()))
+    tauri::async_runtime::spawn_blocking(move || crate::activities::Job::run(
+        "daily-backup", "maintenance", "자동 백업 · 휴지통 정리", None,
+        |_| library.ensure_daily_backup(chrono::Utc::now()),
+    ))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
@@ -1106,7 +1109,10 @@ pub async fn set_trash_policy(
 #[tauri::command]
 pub async fn purge_expired_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.purge_expired_trash(chrono::Utc::now()))
+    tauri::async_runtime::spawn_blocking(move || crate::activities::Job::run(
+        "trash-cleanup", "maintenance", "자동 백업 · 휴지통 정리", None,
+        |_| library.purge_expired_trash(chrono::Utc::now()),
+    ))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

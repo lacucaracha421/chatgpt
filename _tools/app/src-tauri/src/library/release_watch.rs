@@ -147,7 +147,11 @@ impl Library {
             skipped: 0,
             stop_reason: None,
         };
+        if due.is_empty() { return Ok(result); }
+        crate::activities::Job::run("release-check:kakao-legacy", "release_check", "신간 확인", None, |activity| {
+        let total = due.len() as u64;
         for (collection_id, _) in due {
+            activity.progress(result.checked as u64, Some(total), Some(format!("카카오 · {}개 확인 · {}개 남음", result.checked, total.saturating_sub((result.checked + result.skipped) as u64))));
             if crate::workload::is_restricted() {
                 break;
             }
@@ -200,7 +204,9 @@ impl Library {
                 }
             }
         }
+        activity.progress(result.checked as u64, Some(total), Some(format!("카카오 · {}개 확인 · {}개 남음", result.checked, total.saturating_sub((result.checked + result.skipped) as u64))));
         Ok(result)
+        })
     }
 
     pub fn get_release_watch_status(
