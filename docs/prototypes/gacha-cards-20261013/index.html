@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" data-desc="a">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -73,6 +73,7 @@ select.sel { height: 32px; padding: 0 8px; border: 1px solid var(--c-border); bo
 .imgbar { position: sticky; top: 0; z-index: 60; margin: -8px -16px 0; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
   background: color-mix(in srgb, var(--pg) 88%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--c-border); }
 @media (min-width: 720px) { .imgbar { margin: -8px -32px 0; padding: 10px 32px; } }
+@media (max-width: 719px) { .imgbar { position: static; } }
 .imgbar .hint { color: var(--c-faint); font-size: 12px; }
 @media (max-width: 600px), (pointer: coarse) { .imgbar .hint { display: none; } }
 .imgbar .state { color: var(--c-muted); font-size: 12px; margin-left: auto; }
@@ -249,7 +250,7 @@ ul.ideas li::marker { color: var(--c-faint); }
    CARD — sizes are in cqw (percent of card width), so a card scales as one object. Ratio 63:88.
    Layer order (bottom → top): background art · foil sheen · window shade · frame · glitter canvas
    · window rim · subject (may break the frame) · name · text box · footer · glare · edge bevel.
-   Window: top 15cqw, sides 6.6cqw, bottom 80cqw. Card height = 139.68cqw.
+   Window: top 15.4cqw, sides 7cqw, bottom 95.4cqw. Card height = 139.68cqw.
    ===================================================================================== */
 .card { --mx: 30%; --my: 22%; --o: .5; --ang: 35deg; --rx: 0deg; --ry: 0deg; --tint: #6a3aa8;
   position: relative; z-index: 0; container-type: inline-size; aspect-ratio: 63 / 88; perspective: 1100px; -webkit-user-select: none; user-select: none;
@@ -285,42 +286,47 @@ ul.ideas li::marker { color: var(--c-faint); }
 .back { transform: rotateY(180deg); }
 .face > * { position: absolute; }
 
-/* --- shared front parts --- */
-.front { --ink: #2a2622; --ink2: #5b554c; background: #15131c; color: var(--ink); }
+/* --- shared front parts ---
+   One printed geometry for every tier: 3.8cqw outer border, art window 15.4–95.4cqw (sides 7cqw),
+   description area under the window sized to its content, two-line print footer. */
+.card { --wt: 15.4cqw; --wx: 7cqw; --wh: 80cqw; --wbm: 44.28cqw; }
+.front { --ink: #2a2622; --ink2: #5b554c;
+  --d-bg: linear-gradient(180deg, #f8f3e6, #ece3cc); --d-line: linear-gradient(135deg, #5e4d33, #8f7a55 45%, #5e4d33); --d-linec: #6e5c3e; --d-ink: #261f15; --d-ink2: #5d5140; --d-tab: #f8f3e6;
+  --r-bg: linear-gradient(180deg, #fffaf0 0%, #efe6cf 45%, #d9cba8 100%);
+  --m-rim: linear-gradient(135deg, #6e5634, #e6d3a8 40%, #8a7048 70%, #d9c497); --m-face: radial-gradient(circle at 40% 32%, #fffdf6, #efe6cf 55%, #cfc09c);
+  background: #15131c; color: var(--ink); }
 .f-bg { inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--bgpos, 50% 50%); display: block; }
 .f-sheen { inset: 0; pointer-events: none; opacity: 0; -webkit-mask-image: var(--lum, none); mask-image: var(--lum, none); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
-.f-shade { top: 15cqw; left: 6.6cqw; right: 6.6cqw; height: 65cqw; pointer-events: none; box-shadow: inset 0 0 2.4cqw rgba(0, 0, 0, .45); }
-.f-frame { inset: 0; padding: 15cqw 6.6cqw 59.68cqw; border-radius: inherit; pointer-events: none;
+.f-shade { top: var(--wt); left: var(--wx); right: var(--wx); height: var(--wh); pointer-events: none; box-shadow: inset 0 0 2.4cqw rgba(0, 0, 0, .45); }
+.f-frame { inset: 0; padding: var(--wt) var(--wx) var(--wbm); border-radius: inherit; pointer-events: none; background-size: 100% 100%;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
 .f-frame::after { content: ""; position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .f-glit { inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; mix-blend-mode: plus-lighter; }
-.f-rim { top: 15cqw; left: 6.6cqw; right: 6.6cqw; height: 65cqw; padding: .55cqw; pointer-events: none; background: #3d372f;
+.f-rim { top: var(--wt); left: var(--wx); right: var(--wx); height: var(--wh); padding: .55cqw; pointer-events: none; background: #3d372f;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.f-subjwrap { inset: 0; pointer-events: none; clip-path: inset(15cqw 6.6cqw 59.68cqw 6.6cqw); }
+.f-subjwrap { inset: 0; pointer-events: none; clip-path: inset(var(--wt) var(--wx) var(--wbm) var(--wx)); }
 .f-subj { position: absolute; left: var(--sx, 0%); top: var(--sy, 0%); width: var(--sw, 100%); height: auto; max-width: none; display: block;
   -webkit-mask-image: var(--sfade, none); mask-image: var(--sfade, none); }
 .card[data-subj="0"] .f-subjwrap { display: none; }
-.f-name { top: 4.6cqw; left: 6.6cqw; right: 6cqw; height: 9cqw; display: flex; align-items: center; gap: 2cqw; }
-.f-title { flex: 1; min-width: 0; font-size: 5.5cqw; font-weight: 800; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; padding: .3cqw 0; }
-.f-type { flex: none; width: 7.6cqw; height: 7.6cqw; border-radius: 50%; display: grid; place-items: center;
+.f-name { top: 5cqw; left: 8cqw; right: 7.2cqw; height: 9.6cqw; display: flex; align-items: center; gap: 2cqw; }
+/* condensed bold card-name type */
+.f-title { flex: 0 1 auto; margin-right: auto; min-width: 0; font-size: 5.7cqw; font-weight: 800; letter-spacing: -.035em; white-space: nowrap; line-height: 1.25; padding: .3cqw 0;
+  transform: scaleX(.9); transform-origin: 0 50%; }
+.f-type { flex: none; width: 7.4cqw; height: 7.4cqw; border-radius: 50%; display: grid; place-items: center;
   background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .45cqw rgba(255, 255, 255, .55), 0 0 0 .8cqw rgba(0, 0, 0, .35), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); }
-.f-type svg { width: 4.6cqw; height: 4.6cqw; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 .2cqw .3cqw rgba(0, 0, 0, .35)); }
-.f-illus { top: 81cqw; left: 6.6cqw; right: 6.6cqw; height: 4cqw; font-size: 2.35cqw; line-height: 4cqw; text-align: right; color: var(--ink2); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.f-text { top: 86cqw; left: 6.6cqw; right: 6.6cqw; height: 39.5cqw; padding: 2.2cqw 3cqw 2cqw; display: flex; flex-direction: column; gap: 1.2cqw;
-  background: #f6f2e9; border: .4cqw solid #b9b09e; border-radius: .8cqw; color: var(--ink); }
-.f-typeline { font-size: 3cqw; font-weight: 700; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.f-flavor { flex: 1; margin: 0; font-size: 3.35cqw; line-height: 1.55; word-break: keep-all; }
-.f-stats { display: flex; align-items: center; gap: 3.4cqw; padding-top: 1.6cqw; border-top: .3cqw solid currentColor; border-top-color: color-mix(in srgb, currentColor 30%, transparent);
-  font-size: 2.8cqw; color: var(--ink2); font-variant-numeric: tabular-nums; }
-.f-stats b { color: var(--ink); font-weight: 700; margin-left: .8cqw; }
-.f-stats .fav { margin-left: auto; display: inline-flex; }
-.f-stats .fav svg { width: 3.4cqw; height: 3.4cqw; fill: #d8343c; }
-.f-foot { left: 7cqw; right: 7cqw; bottom: 4.3cqw; height: 4.6cqw; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; font-size: 2.4cqw; color: var(--ink2); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
-.f-no { display: inline-flex; align-items: center; gap: 1cqw; white-space: nowrap; }
-.f-no svg { width: 2.6cqw; height: 3cqw; }
+.f-type svg { width: 4.5cqw; height: 4.5cqw; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 .2cqw .3cqw rgba(0, 0, 0, .35)); }
+
+/* print footer: two tiny rows on the frame */
+.f-foot { left: 10.6cqw; right: 10.6cqw; bottom: 6.4cqw; display: flex; flex-direction: column; gap: .7cqw; font-size: 2.1cqw; line-height: 1.15; color: var(--ink2); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.fr { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 2cqw; }
+.fr > :last-child { justify-self: end; }
+.f-illus { font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-no { display: inline-flex; align-items: center; gap: .8cqw; white-space: nowrap; font-weight: 700; }
+.f-no svg { width: 2.4cqw; height: 2.8cqw; }
 .f-rar { display: inline-flex; align-items: center; gap: .6cqw; font-weight: 800; letter-spacing: .06em; color: var(--ink); }
-.f-rar svg { width: 2.8cqw; height: 2.8cqw; fill: currentColor; }
-.f-serial { justify-self: end; white-space: nowrap; font-weight: 700; }
+.f-rar svg { width: 2.6cqw; height: 2.6cqw; fill: currentColor; }
+.f-serial { white-space: nowrap; font-weight: 700; }
+.f-copy { white-space: nowrap; }
 .f-glare, .f-edge { inset: 0; pointer-events: none; border-radius: inherit; }
 .f-glare { mix-blend-mode: soft-light; opacity: calc(var(--o) * .75);
   background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .6) 0%, rgba(255, 255, 255, .2) 22%, transparent 50%); }
@@ -331,33 +337,89 @@ ul.ideas li::marker { color: var(--c-faint); }
   background-image: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, .95) 50%, transparent 62%), var(--metal);
   background-size: 260% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(115% - var(--mx) * 1.3) 0, 0 0; }
 .card .f-name.outlined { filter: drop-shadow(0 0 .2cqw #000) drop-shadow(0 0 .2cqw rgba(0, 0, 0, .95)) drop-shadow(0 0 .25cqw rgba(0, 0, 0, .8)) drop-shadow(0 .45cqw .45cqw rgba(0, 0, 0, .55)); }
+.card .f-name.stamped { filter: drop-shadow(0 .15cqw 0 rgba(255, 255, 255, .55)) drop-shadow(0 -.12cqw 0 rgba(0, 0, 0, .45)); }
 .card { --gold: linear-gradient(180deg, #fff8dc 0%, #f7d77e 28%, #a8711c 50%, #e7bd5c 68%, #fff0bb 100%);
   --silver: linear-gradient(180deg, #ffffff 0%, #e6ebf1 28%, #7f8a9c 50%, #d3d9e3 68%, #ffffff 100%);
+  --silverdk: linear-gradient(180deg, #8a939f 0%, #4b535e 30%, #1d2229 52%, #59626e 70%, #9aa3ae 100%);
   --prism: linear-gradient(180deg, #ffffff 0%, #ffe6f2 24%, #8f9bc4 50%, #d8fff0 70%, #fff7e0 100%); }
-/* parchment text box (overframe / full-art tiers) */
-.parch .f-text { background: linear-gradient(180deg, rgba(252, 242, 220, .80), rgba(240, 224, 190, .74)); border: .35cqw solid rgba(120, 82, 30, .85);
-  box-shadow: inset 0 0 0 .5cqw rgba(255, 246, 220, .35), inset 0 0 0 .8cqw rgba(168, 122, 48, .55), 0 .4cqw 1.2cqw rgba(0, 0, 0, .35); color: #2a1c0c; --ink: #2a1c0c; --ink2: #5a4128; }
-.parch .f-typeline { color: #2a1c0c; }
 
-/* N · 일반 — paper frame */
-.card[data-tier="n"] .f-frame { background: #e9e3d4 var(--tex-paper); box-shadow: inset 0 0 0 .4cqw rgba(0, 0, 0, .12); }
-.card[data-tier="n"] .f-shade { box-shadow: inset 0 0 1.4cqw rgba(0, 0, 0, .3); }
+/* ---------- description area (3 styles, chosen page-wide on <html data-desc>) ---------- */
+.f-desc { left: 7cqw; right: 7cqw; top: 97.4cqw; color: var(--d-ink); }
+.d-body { display: flex; flex-direction: column; gap: 1cqw; }
+.d-type { font-size: 2.75cqw; font-weight: 800; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d-flavor { margin: 0; font-size: 3.15cqw; line-height: 1.5; word-break: keep-all; }
+.d-stats { display: flex; align-items: center; gap: 3cqw; font-size: 2.55cqw; color: var(--d-ink2); font-variant-numeric: tabular-nums; }
+.d-stats i { font-style: normal; }
+.d-stats b { color: var(--d-ink); font-weight: 800; margin-left: .7cqw; }
+.d-stats .fav svg { width: 3.1cqw; height: 3.1cqw; fill: #d22f3c; display: block; }
+.d-orn { display: none; }
 
-/* R · 레어 — brushed silver frame, silver name */
-.card[data-tier="r"] .front { --ink2: #4c535c; }
-.card[data-tier="r"] .f-frame { background: var(--tex-brush), linear-gradient(135deg, #8e959d 0%, #eef1f4 22%, #a1a8b0 40%, #fbfcfd 55%, #868d95 74%, #e3e7ea 100%); }
+/* A · 장식 카르투슈 — notched-corner cartouche, double rule, type line set into its top edge as a tab */
+:root[data-desc="a"] .f-desc { padding: 3.6cqw 4.2cqw 2.2cqw; isolation: isolate; filter: drop-shadow(0 .35cqw .7cqw rgba(0, 0, 0, .3)); }
+:root[data-desc="a"] .f-desc::before, :root[data-desc="a"] .f-desc::after, :root[data-desc="a"] .d-orn, :root[data-desc="a"] .d-orn::after {
+  content: ""; position: absolute; inset: 0; z-index: -3; --c: 2.8cqw;
+  clip-path: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)); }
+:root[data-desc="a"] .f-desc::before { background: var(--d-line); }
+:root[data-desc="a"] .f-desc::after { inset: .4cqw; --c: 2.6cqw; z-index: -2; background: var(--d-bg); }
+:root[data-desc="a"] .d-orn { display: block; inset: 1.1cqw; --c: 2.2cqw; z-index: -1; background: var(--d-linec); opacity: .7; }
+:root[data-desc="a"] .d-orn::after { inset: .16cqw; --c: 2.1cqw; z-index: 0; background: var(--d-bg); }
+:root[data-desc="a"] .d-body { gap: 1.4cqw; }
+:root[data-desc="a"] .d-type { position: absolute; top: -2.1cqw; left: 50%; transform: translateX(-50%); max-width: 78%; padding: .7cqw 3.2cqw; font-size: 2.5cqw;
+  background: var(--d-line); color: var(--d-tab); clip-path: polygon(1.6cqw 0, calc(100% - 1.6cqw) 0, 100% 50%, calc(100% - 1.6cqw) 100%, 1.6cqw 100%, 0 50%); }
+:root[data-desc="a"] .d-flavor { text-align: center; padding: .4cqw 0 0; }
+:root[data-desc="a"] .d-stats { justify-content: center; padding-top: 1.4cqw; margin-top: 1.4cqw; border-top: .22cqw solid color-mix(in srgb, var(--d-linec) 55%, transparent); }
+
+/* B · 리본 + 메달 — no box: a forked ribbon carries the line, stats become medallions on the bottom border */
+:root[data-desc="b"] .f-desc { top: 96.8cqw; bottom: 15.4cqw; left: 4.4cqw; right: 4.4cqw; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; }
+:root[data-desc="b"] .d-body { position: relative; isolation: isolate; align-items: center; gap: .5cqw; padding: 1.5cqw 10.5cqw 1.9cqw; filter: drop-shadow(0 .4cqw .6cqw rgba(0, 0, 0, .35)); }
+:root[data-desc="b"] .d-body::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--r-bg);
+  clip-path: polygon(0 0, 100% 0, 94.5% 50%, 100% 100%, 0 100%, 5.5% 50%); box-shadow: inset 0 .35cqw 0 rgba(255, 255, 255, .45), inset 0 -.35cqw 0 rgba(0, 0, 0, .18); }
+:root[data-desc="b"] .d-body::after { content: ""; position: absolute; left: 6.5%; right: 6.5%; top: .7cqw; bottom: .7cqw; z-index: -1; border-top: .18cqw solid var(--d-linec); border-bottom: .18cqw solid var(--d-linec); opacity: .65; }
+:root[data-desc="b"] .d-type { font-size: 2.4cqw; color: var(--d-ink2); }
+:root[data-desc="b"] .d-flavor { font-size: 3.1cqw; font-weight: 600; }
+:root[data-desc="b"] .d-stats { gap: 2.6cqw; }
+:root[data-desc="b"] .d-stats .st { width: 11cqw; height: 11cqw; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .1cqw;
+  border: .65cqw solid transparent; background: var(--m-face) padding-box, var(--m-rim) border-box;
+  box-shadow: 0 .5cqw 1cqw rgba(0, 0, 0, .45), inset 0 .3cqw .4cqw rgba(255, 255, 255, .5), inset 0 -.4cqw .6cqw rgba(0, 0, 0, .18); font-size: 1.7cqw; line-height: 1.05; }
+:root[data-desc="b"] .d-stats .st b { margin: 0; font-size: 2.45cqw; }
+:root[data-desc="b"] .d-stats .st.fav { background: radial-gradient(circle at 38% 30%, #ffe1e4 0%, #ff5a6a 22%, #c41a33 52%, #5a0612 100%) padding-box, var(--m-rim) border-box; }
+:root[data-desc="b"] .d-stats .st.fav svg { width: 3.4cqw; height: 3.4cqw; fill: rgba(255, 255, 255, .85); }
+
+/* C · 아치 플레이트 — short plate whose arched top hugs the art; stats sit in its bottom rule */
+:root[data-desc="c"] .f-desc { top: 91.4cqw; padding: 6.4cqw 4.6cqw 0; text-align: center; isolation: isolate; filter: drop-shadow(0 .35cqw .7cqw rgba(0, 0, 0, .3)); }
+:root[data-desc="c"] .f-desc::before, :root[data-desc="c"] .f-desc::after { content: ""; position: absolute; inset: 0; z-index: -2; background: var(--d-line); border-radius: 50% 50% 1.4cqw 1.4cqw / 7cqw 7cqw 1.4cqw 1.4cqw; }
+:root[data-desc="c"] .f-desc::after { inset: .4cqw; z-index: -1; background: var(--d-bg); border-radius: 50% 50% 1.1cqw 1.1cqw / 6.6cqw 6.6cqw 1.1cqw 1.1cqw; }
+:root[data-desc="c"] .d-orn { display: block; left: 1.4cqw; right: 1.4cqw; top: 1.3cqw; height: 8cqw; border-top: .2cqw solid var(--d-linec); border-radius: 50% 50% 0 0 / 5.8cqw 5.8cqw 0 0; opacity: .75; }
+:root[data-desc="c"] .d-body { align-items: center; gap: 1cqw; }
+:root[data-desc="c"] .d-type { font-size: 2.5cqw; letter-spacing: .04em; }
+:root[data-desc="c"] .d-stats { margin-top: 1.4cqw; padding-bottom: 1.6cqw; gap: 2cqw; }
+:root[data-desc="c"] .d-stats::before, :root[data-desc="c"] .d-stats::after { content: ""; flex: 1; height: .22cqw; background: var(--d-linec); opacity: .7; }
+
+/* premium tiers: warm translucent parchment so the overframe figure shows through */
+.parch .front { --d-bg: linear-gradient(180deg, rgba(252, 242, 220, .82), rgba(240, 224, 190, .76)); --d-line: linear-gradient(135deg, #7a4c10, #e9c46e 30%, #9a6a1e 55%, #f3d58a 80%, #7a4c10);
+  --d-linec: #9a6e2a; --d-ink: #2a1c0c; --d-ink2: #5a4128; --d-tab: #fff6dc;
+  --r-bg: linear-gradient(180deg, rgba(255, 248, 228, .9) 0%, rgba(240, 222, 182, .86) 50%, rgba(214, 186, 132, .88) 100%);
+  --m-rim: linear-gradient(135deg, #7a4c10, #ffe9a6 35%, #a8711c 60%, #f3d58a 85%); --m-face: radial-gradient(circle at 40% 32%, #fffaf0, #f0e0bc 55%, #c9a86a); }
+
+/* N · 일반 — matte printed card stock, engraved ivory frame (canvas texture) */
+.card[data-tier="n"] .f-shade { box-shadow: inset 0 0 1.6cqw rgba(0, 0, 0, .35); }
+.card[data-tier="n"] .f-rim, .card[data-tier="r"] .f-rim, .card[data-tier="sr"] .f-rim { display: none; }
+
+/* R · 레어 — same card, pewter frame, silver foil stamp on the name and set mark, foil border line */
+.card[data-tier="r"] .front { --ink2: #444b55;
+  --d-bg: linear-gradient(180deg, #f7f8fa, #e4e8ec); --d-line: linear-gradient(135deg, #5f6772, #f3f5f7 40%, #7d8590 65%, #dfe3e7); --d-linec: #6c7480; --d-tab: #f7f8fa;
+  --r-bg: linear-gradient(180deg, #ffffff 0%, #e9ecf0 45%, #c6ccd3 100%); --m-rim: linear-gradient(135deg, #5f6772, #ffffff 40%, #8a929c 70%, #e6e9ed); --m-face: radial-gradient(circle at 40% 32%, #ffffff, #e9ecf0 55%, #b9c0c8); }
 .card[data-tier="r"] .f-frame::after { opacity: calc(var(--o) * .8); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .95), transparent 40%); }
-.card[data-tier="r"] .f-rim { padding: .8cqw; background: linear-gradient(135deg, #5b636c, #f6f8fa 35%, #7c848d 60%, #e9edf0); }
-.card[data-tier="r"] .f-text { background: #f2f3f5; border-color: #9aa1aa; }
+.card[data-tier="r"] .f-no svg { color: #8f98a3; filter: drop-shadow(0 .1cqw 0 rgba(255, 255, 255, .8)); }
 
-/* SR · 홀로 레어 — navy metal frame; thin-film holo only on the background, never on the subject */
-.card[data-tier="sr"] .front { --ink: #eef0ff; --ink2: #b3b9dc; }
-.card[data-tier="sr"] .f-frame { background: var(--tex-brush), linear-gradient(160deg, #3b4380 0%, #171c3e 35%, #2d3372 65%, #0f1230 100%); }
+/* SR · 홀로 레어 — brushed gunmetal frame with silver inlay; thin-film holo only on the background, never on the subject */
+.card[data-tier="sr"] .front { --ink: #eef0ff; --ink2: #b3b9dc;
+  --d-bg: linear-gradient(180deg, rgba(34, 40, 92, .94), rgba(16, 20, 50, .94)); --d-line: linear-gradient(135deg, #7d86a8, #f4f6ff 40%, #8890ad 65%, #dfe3f4); --d-linec: #aab3d6;
+  --d-ink: #eef0ff; --d-ink2: #b8bfe0; --d-tab: #14183a;
+  --r-bg: linear-gradient(180deg, #3a4486 0%, #252c62 50%, #151a40 100%); --m-rim: linear-gradient(135deg, #6d7690, #f4f6ff 40%, #8890ad 70%, #e6e9f6); --m-face: radial-gradient(circle at 40% 32%, #4a55a0, #262d64 55%, #121638); }
 .card[data-tier="sr"] .f-frame::after { opacity: calc(var(--o) * .7); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(220, 228, 255, .9), transparent 42%); }
-.card[data-tier="sr"] .f-rim { padding: .8cqw; background: linear-gradient(135deg, #6d7690, #f4f6ff 35%, #8890ad 60%, #e6e9f6); }
 .card[data-tier="sr"] .f-sheen { opacity: calc(.18 + var(--o) * .42); mix-blend-mode: color-dodge; filter: saturate(.75) brightness(.72);
   background: linear-gradient(var(--ang), #ffb3d0, #ffe6a8, #b3f5d8, #b0d4ff, #d6c2ff, #ffb3d0); background-size: 220% 220%; background-position: var(--mx) var(--my); }
-.card[data-tier="sr"] .f-text { background: rgba(14, 18, 46, .82); border-color: rgba(190, 200, 240, .45); }
 
 /* SSR · 오버프레임 — lacquer frame with gold bevel; the subject breaks the window and the frame */
 .card[data-tier="ssr"] .f-frame { background: var(--tex-brush), linear-gradient(165deg, color-mix(in srgb, var(--tint) 62%, #1a0c22) 0%, #150b1e 50%, color-mix(in srgb, var(--tint) 45%, #0a0610) 100%);
@@ -482,6 +544,8 @@ ul.ideas li::marker { color: var(--c-faint); }
         <div class="picks" role="radiogroup" aria-label="그림" id="picks"></div>
         <p class="slabel">등급</p>
         <div class="seg" role="radiogroup" aria-label="등급" id="tierSeg"></div>
+        <p class="slabel">설명창 스타일</p>
+        <div class="seg" role="radiogroup" aria-label="설명창 스타일" id="descSeg"></div>
         <div class="tier-head"><span class="code" id="fCode"></span><h3 id="fName"></h3><span class="o" id="fOdds"></span></div>
         <p class="note" id="fDesc"></p>
         <ol class="layers" id="fLayers"></ol>
@@ -560,6 +624,11 @@ ul.ideas li::marker { color: var(--c-faint); }
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = (s, r = document) => r.querySelector(s);
 const DPR = Math.min(2, window.devicePixelRatio || 1);
+// Description-area style applies page-wide (all cards, gacha, anatomy) and is remembered per viewer.
+const DESC = [['a', 'A 카르투슈'], ['b', 'B 리본·메달'], ['c', 'C 아치']];
+let descStyle = 'a';
+try { const v = localStorage.getItem('lk-gacha-desc'); if (/^[abc]$/.test(v || '')) descStyle = v; } catch (e) { /* storage blocked */ }
+document.documentElement.dataset.desc = descStyle;
 
 /* ------------------------------------------------------- procedural art
    Every scene is two layers at card size (600×840): a background and a transparent subject.
@@ -1008,8 +1077,8 @@ function backdrop(kind, tint) {
   const key = kind + tint; if (BD[key]) return BD[key];
   const cv = newCanvas(), c = cv.getContext('2d'), R = seeded(kind.length * 97 + parseInt(tint.slice(1), 16) % 1000);
   const rad = (stops, cx = 300, cy = 320, r = 640) => { const g = c.createRadialGradient(cx, cy, 10, cx, cy + 60, r); stops.forEach(([o, col]) => g.addColorStop(o, col)); return g; };
-  if (kind === 'paper') { c.fillStyle = rad([[0, '#fffaf0'], [.6, mixHex('#efe6d2', tint, .12)], [1, mixHex('#d8ccb2', tint, .2)]]); c.fillRect(0, 0, W, H); sunburst(c, R, 300, 320, 'rgba(0,0,0,0)', mixHex('#ffffff', tint, .15), 0, .12); }
-  else if (kind === 'silver') { sunburst(c, R, 300, 320, rad([[0, '#ffffff'], [.35, '#d5dbe3'], [1, '#6f7a88']]), '#ffffff', 0, .35); }
+  if (kind === 'paper') { c.fillStyle = rad([[0, '#fffaf0'], [.55, mixHex('#efe6d2', tint, .1)], [1, mixHex('#cdbf9f', tint, .22)]]); c.fillRect(0, 0, W, H); dabs(c, R, 120, ['#ffffff', mixHex('#e8dcc0', tint, .15)], 0, H, 40, 160, .12, 'source-over', 0, 6); }
+  else if (kind === 'silver') { sunburst(c, R, 300, 320, rad([[0, '#ffffff'], [.35, '#dde2e8'], [1, '#7a8492']]), '#ffffff', 0, .14); }
   else if (kind === 'holo') { sunburst(c, R, 300, 320, rad([[0, '#c9d2ff'], [.3, '#4a58a8'], [1, '#0c1030']]), '#c7d0ff', 0, .3); stars(c, R, 160, H, 4); }
   else if (kind === 'deep') { sunburst(c, R, 300, 320, rad([[0, mixHex(tint, '#ffffff', .75)], [.25, mixHex(tint, '#ffffff', .15)], [.6, mixHex(tint, '#000000', .45)], [1, mixHex(tint, '#000000', .8)]]), mixHex(tint, '#ffffff', .6), 0, .4); }
   else if (kind === 'gold') return BD[key] = ART.gold;
@@ -1018,6 +1087,75 @@ function backdrop(kind, tint) {
   return BD[key] = cv.toDataURL('image/jpeg', .9);
 }
 const BACKDROP_OF = { n: 'paper', r: 'silver', sr: 'holo', ssr: 'deep', ur: 'gold', lr: 'star' };
+/* ------------------------------------------------- printed frames (N · R · SR)
+   One card family: a 3.8cqw printed outer border, then an illustrated frame panel whose material changes by tier
+   (ivory card stock → pewter → brushed gunmetal), engraved double rules, corner ornaments, a notched name plate,
+   a bevelled art window and a footer rule. Drawn once per tier at 8 px per cqw. */
+const FT = {};
+function rrPath(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+function frameTex(k) {
+  if (FT[k]) return FT[k];
+  const FW = 800, FH = 1117, u = FW / 100, cv = newCanvas(FW, FH), c = cv.getContext('2d'), R = seeded(k.length * 131 + 17);
+  const M = {
+    n:  { border: '#1d1c22', base: ['#f1e9d3', '#e4d8bb', '#d8c9a7', '#e6dcc2'], mott: .07, brush: 0, slope: 0, grain: .1, ink: 'rgba(96,78,50,.92)', hi: 'rgba(255,252,240,.9)',
+          plate: ['#fbf5e3', '#e8dcbc'], plateLine: 'rgba(96,78,50,.9)', foil: null, win: ['rgba(255,252,240,.9)', 'rgba(70,56,34,.55)'] },
+    r:  { border: '#18191e', base: ['#eff2f5', '#d3d9df', '#b9c1ca', '#dde2e7'], mott: .05, brush: .07, slope: 0, grain: .07, ink: 'rgba(66,74,86,.92)', hi: 'rgba(255,255,255,.95)',
+          plate: ['#ffffff', '#cdd3da'], plateLine: 'rgba(66,74,86,.9)', foil: ['#6b737e', '#ffffff', '#8d959f', '#f1f3f5', '#6b737e'], win: ['rgba(255,255,255,.95)', 'rgba(40,46,56,.55)'] },
+    sr: { border: '#0c0d15', base: ['#3b4488', '#272e62', '#181c42', '#2a3268'], mott: .06, brush: .1, slope: .015, grain: .06, ink: 'rgba(206,214,246,.9)', hi: 'rgba(2,3,14,.75)',
+          plate: ['#3a4488', '#1b2048'], plateLine: 'rgba(206,214,246,.9)', foil: ['#6d7690', '#ffffff', '#8890ad', '#eef1ff', '#6d7690'], win: ['rgba(200,210,255,.55)', 'rgba(0,0,10,.7)'] },
+  }[k];
+  const B = 3.8 * u, IN = B + 1.6 * u;
+  c.fillStyle = M.border; c.fillRect(0, 0, FW, FH);
+  // material panel
+  c.save(); rrPath(c, B, B, FW - 2 * B, FH - 2 * B, 1.5 * u); c.clip();
+  const g = c.createLinearGradient(0, 0, FW * .7, FH); M.base.forEach((col, i) => g.addColorStop(i / (M.base.length - 1), col)); c.fillStyle = g; c.fillRect(0, 0, FW, FH);
+  for (let i = 0; i < 180; i++) { const x = R() * FW, y = R() * FH, r = 20 + R() * 130, a = M.mott * R(), gg = c.createRadialGradient(x, y, 0, x, y, r);
+    gg.addColorStop(0, R() < .5 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`); gg.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gg; c.fillRect(x - r, y - r, 2 * r, 2 * r); }
+  if (M.brush) for (let i = 0; i < 3200; i++) { const y = R() * FH, x = R() * FW - 100, l = 60 + R() * 320;
+    c.strokeStyle = R() < .5 ? `rgba(255,255,255,${(R() * M.brush).toFixed(3)})` : `rgba(0,0,0,${(R() * M.brush).toFixed(3)})`; c.lineWidth = .5 + R() * .9; c.beginPath(); c.moveTo(x, y); c.lineTo(x + l, y + l * M.slope); c.stroke(); }
+  const n = newCanvas(128, 128), nc = n.getContext('2d'), id = nc.createImageData(128, 128);
+  for (let i = 0; i < id.data.length; i += 4) { const v = R() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
+  nc.putImageData(id, 0, 0); c.globalAlpha = M.grain; c.globalCompositeOperation = 'overlay'; c.fillStyle = c.createPattern(n, 'repeat'); c.fillRect(0, 0, FW, FH);
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  const vg = c.createRadialGradient(FW / 2, FH / 2, FH * .35, FW / 2, FH / 2, FH * .75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.16)'); c.fillStyle = vg; c.fillRect(0, 0, FW, FH);
+  c.restore();
+  // engraved strokes: a highlight offset down-right, the ink line on top
+  const eng = (path, lw, fill) => {
+    c.save(); c.translate(.13 * u, .13 * u); path(); if (fill) { c.fillStyle = M.hi; c.fill(); } else { c.strokeStyle = M.hi; c.lineWidth = lw; c.stroke(); } c.restore();
+    c.save(); path(); if (fill) { c.fillStyle = M.ink; c.fill(); } else { c.strokeStyle = M.ink; c.lineWidth = lw; c.stroke(); } c.restore();
+  };
+  if (M.foil) { c.save(); rrPath(c, B + .35 * u, B + .35 * u, FW - 2 * B - .7 * u, FH - 2 * B - .7 * u, 1.3 * u); const fg = c.createLinearGradient(0, 0, FW, FH); M.foil.forEach((col, i) => fg.addColorStop(i / (M.foil.length - 1), col)); c.strokeStyle = fg; c.lineWidth = .45 * u; c.stroke(); c.restore(); }
+  eng(() => rrPath(c, B + 1 * u, B + 1 * u, FW - 2 * B - 2 * u, FH - 2 * B - 2 * u, 1 * u), .26 * u);
+  eng(() => rrPath(c, IN, IN, FW - 2 * IN, FH - 2 * IN, .6 * u), .12 * u);
+  // corner ornaments: diamond, quarter arc, end beads (Lakomics' own motif)
+  const corner = (x, y, sx, sy) => {
+    const tr = f => () => { c.translate(x, y); c.scale(sx, sy); f(); };
+    eng(tr(() => { c.beginPath(); c.arc(0, 0, 4.2 * u, 0, Math.PI / 2); }), .2 * u);
+    eng(tr(() => { c.beginPath(); c.arc(0, 0, 5.4 * u, .12, Math.PI / 2 - .12); }), .1 * u);
+    eng(tr(() => { c.beginPath(); c.moveTo(1.9 * u, .7 * u); c.lineTo(3.1 * u, 1.9 * u); c.lineTo(1.9 * u, 3.1 * u); c.lineTo(.7 * u, 1.9 * u); c.closePath(); }), 0, true);
+    eng(tr(() => { c.beginPath(); c.arc(4.2 * u, 0, .45 * u, 0, 7); c.moveTo(.45 * u, 4.2 * u); c.arc(0, 4.2 * u, .45 * u, 0, 7); }), 0, true);
+  };
+  c.save(); corner(IN, IN, 1, 1); c.restore(); c.save(); corner(FW - IN, IN, -1, 1); c.restore();
+  c.save(); corner(IN, FH - IN, 1, -1); c.restore(); c.save(); corner(FW - IN, FH - IN, -1, -1); c.restore();
+  // art window bevel: raised lip, light top-left, shadow bottom-right
+  const wx0 = 7 * u, wx1 = 93 * u, wy0 = 15.4 * u, wy1 = 95.4 * u, bw = 1.05 * u;
+  c.fillStyle = M.win[0]; P(c, [[wx0 - bw, wy0 - bw], [wx1 + bw, wy0 - bw], [wx1, wy0], [wx0, wy0], [wx0, wy1], [wx0 - bw, wy1 + bw]]); c.fill();
+  c.fillStyle = M.win[1]; P(c, [[wx1 + bw, wy0 - bw], [wx1 + bw, wy1 + bw], [wx0 - bw, wy1 + bw], [wx0, wy1], [wx1, wy1], [wx1, wy0]]); c.fill();
+  eng(() => { c.beginPath(); c.rect(wx0 - bw - .5 * u, wy0 - bw - .5 * u, wx1 - wx0 + 2 * bw + u, wy1 - wy0 + 2 * bw + u); }, .12 * u);
+  // notched name plate
+  const px0 = 6.6 * u, px1 = 93.4 * u, py0 = 4.7 * u, py1 = 14.3 * u, nt = 1.5 * u;
+  const plate = (inset) => () => P(c, [[px0 + nt + inset, py0 + inset], [px1 - nt - inset, py0 + inset], [px1 - inset, py0 + nt], [px1 - inset, py1 - nt], [px1 - nt - inset, py1 - inset], [px0 + nt + inset, py1 - inset], [px0 + inset, py1 - nt], [px0 + inset, py0 + nt]]);
+  c.save(); c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = .8 * u; c.shadowOffsetY = .3 * u; plate(0)(); const pg = c.createLinearGradient(0, py0, 0, py1); pg.addColorStop(0, M.plate[0]); pg.addColorStop(1, M.plate[1]); c.fillStyle = pg; c.fill(); c.restore();
+  c.save(); plate(0)(); c.strokeStyle = M.plateLine; c.lineWidth = .24 * u; c.stroke(); c.restore();
+  c.save(); plate(.6 * u)(); c.strokeStyle = M.plateLine; c.globalAlpha = .55; c.lineWidth = .1 * u; c.stroke(); c.restore();
+  c.save(); c.beginPath(); c.moveTo(px0 + nt, py0 + .25 * u); c.lineTo(px1 - nt, py0 + .25 * u); c.strokeStyle = M.hi; c.lineWidth = .16 * u; c.stroke(); c.restore();
+  // footer rule with a centre diamond
+  const fy = 125.6 * u;
+  eng(() => { c.beginPath(); c.moveTo(10 * u, fy); c.lineTo(47.6 * u, fy); c.moveTo(52.4 * u, fy); c.lineTo(90 * u, fy); }, .12 * u);
+  eng(() => P(c, [[50 * u, fy - 1 * u], [51.2 * u, fy], [50 * u, fy + 1 * u], [48.8 * u, fy]]), 0, true);
+  return FT[k] = cv.toDataURL('image/jpeg', .92);
+}
+
 
 /* ------------------------------------------------- luminance maps (no-cutout art)
    Foil and glitter follow the picture's own light; an optional ellipse keeps them off the face. */
@@ -1062,6 +1200,10 @@ const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;'
 let userBg = null, userFg = null; const madeURLs = [];
 const cards = new Set();
 
+const descHTML = a => { const at = ATTR[a.attr]; return `<span class="d-orn"></span><div class="d-body"><div class="d-type">[${at.name} / ${a.tags.join(' · ')}]</div><p class="d-flavor">${esc(a.flavor)}</p></div>`
+  + `<div class="d-stats"><span class="st"><i>감상</i><b>${fmt(a.views)}</b></span><span class="st"><i>앨범</i><b>${a.albums}</b></span>${a.fav ? `<span class="st fav" title="즐겨찾기">${HEART}</span>` : ''}</div>`; };
+const footHTML = a => `<div class="fr"><span class="f-illus">Illus. ${esc(a.credit)}</span><span class="f-rar"></span><span class="f-no"><svg viewBox="0 0 32 36"><use href="#mk"/></svg>LK01 · ${pad(a.id)}</span></div>`
+  + `<div class="fr"><span>수집 ${a.date}</span><span class="f-serial"></span><span class="f-copy">© Lakomics</span></div>`;
 function makeCard(a, tier, opts = {}) {
   const el = document.createElement('div'); el.className = 'card'; el._asset = a; el._serial = opts.serial; el._live = !!opts.live;
   const at = ATTR[a.attr];
@@ -1073,10 +1215,8 @@ function makeCard(a, tier, opts = {}) {
       <div class="f-rim"></div>
       <div class="f-subjwrap"><img class="f-subj" alt="" draggable="false" decoding="async"></div>
       <div class="f-name"><span class="f-title">${esc(a.title)}</span><span class="f-type" style="--c1:${at.c1};--c2:${at.c2}" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
-      <div class="f-illus">Illus. ${esc(a.credit)} · 수집 ${a.date}</div>
-      <div class="f-text"><div class="f-typeline">[${at.name} / ${a.tags.join(' · ')}]</div><p class="f-flavor">${esc(a.flavor)}</p>
-        <div class="f-stats"><span>감상<b>${fmt(a.views)}</b></span><span>앨범<b>${a.albums}</b></span>${a.fav ? `<span class="fav" title="즐겨찾기">${HEART}</span>` : ''}</div></div>
-      <div class="f-foot"><span class="f-no"><svg viewBox="0 0 32 36"><use href="#mk"/></svg>LK-${pad(a.id)}</span><span class="f-rar"></span><span class="f-serial"></span></div>
+      <div class="f-desc">${descHTML(a)}</div>
+      <div class="f-foot">${footHTML(a)}</div>
       <div class="f-glare"></div><div class="f-edge"></div>
     </div>
     <div class="face back">
@@ -1100,8 +1240,9 @@ function setTier(el, k) {
   const serial = el._serial ?? (k === 'lr' ? 'No. 1 / 1' : k === 'ur' ? 'No. 3 / 10' : '');
   $('.f-serial', el).textContent = (k === 'lr' || k === 'ur' || el.classList.contains('show-serial')) ? serial || 'No. 3 / 10' : '';
   const title = $('.f-title', el), name = $('.f-name', el);
-  const metal = { r: 'silver', sr: 'silver', ssr: 'gold', ur: 'silver', lr: 'prism' }[k];
-  title.classList.toggle('metal', !!metal); name.classList.toggle('outlined', PREMIUM.has(k) || k === 'r' || k === 'sr');
+  const metal = { r: 'silverdk', sr: 'silver', ssr: 'gold', ur: 'silver', lr: 'prism' }[k];
+  title.classList.toggle('metal', !!metal); name.classList.toggle('outlined', PREMIUM.has(k) || k === 'sr'); name.classList.toggle('stamped', k === 'n' || k === 'r');
+  const fr = $('.f-frame', el); if (k === 'n' || k === 'r' || k === 'sr') fr.style.backgroundImage = `url(${frameTex(k)})`; else fr.style.removeProperty('background-image');
   if (metal) title.style.setProperty('--metal', `var(--${metal})`);
   el.classList.toggle('parch', PREMIUM.has(k));
   refreshArt(el);
@@ -1129,7 +1270,7 @@ function refreshArt(el) {
   if (p.cut) { if (sj.getAttribute('src') !== p.cut) sj.src = p.cut; sj.style.setProperty('--sx', p.fit[0] + '%'); sj.style.setProperty('--sy', p.fit[1] + '%'); sj.style.setProperty('--sw', p.fit[2] + '%');
     sj.style.setProperty('--sfade', 'none');
     if (p.fade) { const setFade = () => { if (!sj.naturalWidth) return; const h = p.fit[2] * sj.naturalHeight / sj.naturalWidth, top = p.fit[1] * 1.3968;
-        const end = Math.min(1, (126 - top) / h), start = Math.max(0, end - 22 / h);
+        const end = Math.min(1, (124 - top) / h), start = Math.max(0, end - 22 / h);
         sj.style.setProperty('--sfade', `linear-gradient(180deg, #000 ${(start * 100).toFixed(1)}%, transparent ${(end * 100).toFixed(1)}%)`); };
       sj.complete ? setFade() : sj.addEventListener('load', setFade, { once: true }); } }
   el._lum = null; el.style.removeProperty('--lum');
@@ -1148,7 +1289,7 @@ const GLIT = {
   ur:  { d: .0085, win: 1,   frame: 1,  text: .04, cols: ['#ffffff', '#fff6d8', '#ffe08a', '#ffffff', '#fff0b8'], big: .1 },
   lr:  { d: .0075, win: 1,   frame: 1,  text: .04, cols: ['#ffffff', '#ffffff', '#e8f2ff', '#ffd6ec', '#fff2c8', '#d0ffec', '#e2d6ff'], big: .14 },
 };
-const WIN = [.066, 15 / 139.68, .934, 80 / 139.68], TXT = [.066, 86 / 139.68, .934, 125.5 / 139.68];
+const WIN = [.07, 15.4 / 139.68, .93, 95.4 / 139.68], TXT = [.07, 96 / 139.68, .93, 123 / 139.68];
 const inRect = (x, y, r) => x > r[0] && x < r[2] && y > r[1] && y < r[3];
 function hashStr(s) { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; }
 function regen(el) {
@@ -1267,6 +1408,13 @@ function sections() {
     if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
   });
   showTier(featTier);
+  const dseg = $('#descSeg');
+  DESC.forEach(([d, label]) => dseg.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-d="${d}" aria-checked="${d === descStyle}" tabindex="${d === descStyle ? 0 : -1}">${label}</button>`));
+  const setDesc = (d, focus) => { descStyle = d; document.documentElement.dataset.desc = d; try { localStorage.setItem('lk-gacha-desc', d); } catch (e) { /* ignore */ }
+    dseg.querySelectorAll('button').forEach(b => { const on = b.dataset.d === d; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); }); requestAnimationFrame(placePins); };
+  dseg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setDesc(b.dataset.d); });
+  dseg.addEventListener('keydown', e => { const i = DESC.findIndex(x => x[0] === descStyle), d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (d) { e.preventDefault(); setDesc(DESC[(i + d + 3) % 3][0], true); } });
   new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
   const tgDemo = $('#tgDemo'); if (RM) tgDemo.setAttribute('aria-pressed', 'false');
   tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
@@ -1291,9 +1439,7 @@ function sections() {
 }
 function rebuildFeat() { refreshArt(feat); $('.f-title', feat).textContent = featAsset.title; const at = ATTR[featAsset.attr];
   const ty = $('.f-type', feat); ty.style.setProperty('--c1', at.c1); ty.style.setProperty('--c2', at.c2); ty.innerHTML = `<svg viewBox="0 0 24 24">${at.icon}</svg>`;
-  $('.f-illus', feat).textContent = `Illus. ${featAsset.credit} · 수집 ${featAsset.date}`; $('.f-typeline', feat).textContent = `[${at.name} / ${featAsset.tags.join(' · ')}]`;
-  $('.f-flavor', feat).textContent = featAsset.flavor; $('.f-no', feat).lastChild.textContent = `LK-${pad(featAsset.id)}`;
-  const st = $('.f-stats', feat); st.innerHTML = `<span>감상<b>${fmt(featAsset.views)}</b></span><span>앨범<b>${featAsset.albums}</b></span>${featAsset.fav ? `<span class="fav">${HEART}</span>` : ''}`; }
+  $('.f-desc', feat).innerHTML = descHTML(featAsset); $('.f-foot', feat).innerHTML = footHTML(featAsset); setTier(feat, feat.dataset.tier); }
 function showTier(k, focus) {
   featTier = k; setTier(feat, k); const t = TIERS[TI[k]];
   $('#tierSeg').querySelectorAll('button').forEach(b => { const on = b.dataset.k === k; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); });
@@ -1318,25 +1464,25 @@ const FIELDS = [
   ['.f-type', '속성', '태그나 분류를 6가지 속성으로 묶어 아이콘과 색으로', ''],
   ['.f-subj', '튀어나오는 인물 층', '배경을 지운 투명 레이어. SSR부터 틀 밖으로', ''],
   ['.f-bg', '배경 박', '흰 배경 그림은 등급별 선버스트 박으로 바꿔 깜', ''],
-  ['.f-illus', '일러스트 줄', '작가 · 수집일', ''],
-  ['.f-typeline', '타입 줄', '속성 + 대표 태그 2–3개', ''],
-  ['.f-flavor', '한 줄 글', '직접 적거나 비워 둠', '', '아이디어'],
-  ['.f-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기 표시. 구경용 숫자', '', '아이디어'],
-  ['.f-no', '카드 번호', '에셋마다 고정 번호', ''],
+  ['.f-illus', '인쇄 정보', '작가 · 수집일 · © Lakomics (아래 두 줄)', ''],
+  ['.d-type', '타입 줄', '속성 + 대표 태그 2–3개', ''],
+  ['.d-flavor', '한 줄 글', '직접 적거나 비워 둠', '', '아이디어'],
+  ['.d-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기 표시. 구경용 숫자', '', '아이디어'],
+  ['.f-no', '세트·카드 번호', '세트 LK01 + 에셋마다 고정 번호', ''],
   ['.f-rar', '등급 마크', '뽑을 때 정해진 등급, 모양 개수로 구분', ''],
   ['.f-serial', '시리얼', 'UR·LR만. 이 그림으로 나온 몇 번째 카드인지', 'No. 3 / 10'],
 ];
 function placePins() {
   if (!anat) return; const cb = anat.getBoundingClientRect(), hb = anatHolder.getBoundingClientRect();
   if (!cb.width) return;
-  const L = cb.left - hb.left - 15, Rr = cb.right - hb.left + 15, side = ['L', 'R', 'C', 'C', 'R', 'L', 'L', 'L', 'L', 'B', 'R'];
+  const L = cb.left - hb.left - 15, Rr = cb.right - hb.left + 15, side = ['L', 'R', 'C', 'C', 'L', 'L', 'L', 'L', 'R', 'B', 'R2'];
   FIELDS.forEach((f, i) => {
     const t = $(f[0], anat); if (!t) return; const r = t.getBoundingClientRect(), pin = anatHolder.querySelector(`.pin[data-i="${i}"]`), sd = side[i];
-    let x = sd === 'L' ? L : sd === 'R' ? Rr : r.left - hb.left + r.width / 2, y = r.top - hb.top + r.height / 2;
+    let x = sd === 'L' ? L : sd === 'R' ? Rr : sd === 'R2' ? Rr + 26 : r.left - hb.left + r.width / 2, y = r.top - hb.top + r.height / 2;
     if (f[0] === '.f-subj') { x = cb.left - hb.left + cb.width * .9; y = cb.top - hb.top + cb.height * .19; }
     if (f[0] === '.f-bg') { x = cb.left - hb.left + cb.width * .14; y = cb.top - hb.top + cb.height * .3; }
     if (sd === 'B') y = cb.bottom - hb.top + 15;
-    pin.className = 'pin ' + sd; pin.style.left = x + 'px'; pin.style.top = y + 'px';
+    pin.className = 'pin ' + (sd === 'R2' ? 'R' : sd); pin.style.left = x + 'px'; pin.style.top = y + 'px';
   });
 }
 
