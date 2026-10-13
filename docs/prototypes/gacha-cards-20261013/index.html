@@ -336,7 +336,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 .card .f-title.metal { color: transparent; -webkit-background-clip: text; background-clip: text;
   background-image: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, .95) 50%, transparent 62%), var(--metal);
   background-size: 260% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(115% - var(--mx) * 1.3) 0, 0 0; }
-.card .f-name.outlined { filter: drop-shadow(0 0 .2cqw #000) drop-shadow(0 0 .2cqw rgba(0, 0, 0, .95)) drop-shadow(0 0 .25cqw rgba(0, 0, 0, .8)) drop-shadow(0 .45cqw .45cqw rgba(0, 0, 0, .55)); }
+.card .f-name.outlined .f-title { filter: drop-shadow(0 0 .2cqw #000) drop-shadow(0 0 .2cqw rgba(0, 0, 0, .95)) drop-shadow(0 0 .25cqw rgba(0, 0, 0, .8)) drop-shadow(0 .45cqw .45cqw rgba(0, 0, 0, .55)); }
 .card .f-name.stamped { filter: drop-shadow(0 .15cqw 0 rgba(255, 255, 255, .55)) drop-shadow(0 -.12cqw 0 rgba(0, 0, 0, .45)); }
 .card { --gold: linear-gradient(180deg, #fff8dc 0%, #f7d77e 28%, #a8711c 50%, #e7bd5c 68%, #fff0bb 100%);
   --silver: linear-gradient(180deg, #ffffff 0%, #e6ebf1 28%, #7f8a9c 50%, #d3d9e3 68%, #ffffff 100%);
@@ -421,40 +421,93 @@ ul.ideas li::marker { color: var(--c-faint); }
 .card[data-tier="sr"] .f-sheen { opacity: calc(.18 + var(--o) * .42); mix-blend-mode: color-dodge; filter: saturate(.75) brightness(.72);
   background: linear-gradient(var(--ang), #ffb3d0, #ffe6a8, #b3f5d8, #b0d4ff, #d6c2ff, #ffb3d0); background-size: 220% 220%; background-position: var(--mx) var(--my); }
 
-/* SSR · 오버프레임 — lacquer frame with gold bevel; the subject breaks the window and the frame */
-.card[data-tier="ssr"] .f-frame { background: var(--tex-brush), linear-gradient(165deg, color-mix(in srgb, var(--tint) 62%, #1a0c22) 0%, #150b1e 50%, color-mix(in srgb, var(--tint) 45%, #0a0610) 100%);
-  box-shadow: inset 0 0 0 .55cqw #c9a14a, inset 0 0 0 .9cqw rgba(30, 14, 4, .8), inset 0 0 0 1.2cqw rgba(233, 196, 110, .45); }
-.card[data-tier="ssr"] .f-frame::after { opacity: calc(var(--o) * .9); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 228, 170, .85), transparent 45%); }
-.card[data-tier="ssr"] .f-rim { padding: 1cqw; background: linear-gradient(135deg, #7a4c10 0%, #ffe9a6 20%, #b8862b 40%, #fff3c8 58%, #8a5a12 78%, #f0cf7c 100%); }
-.card[data-tier="ssr"] .f-sheen { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 240, 210, .75), transparent 46%); }
-.card[data-tier="ssr"] .f-subjwrap, .card[data-tier="ur"] .f-subjwrap, .card[data-tier="lr"] .f-subjwrap { clip-path: none; }
-.card[data-tier="ssr"] .f-subj, .card[data-tier="ur"] .f-subj, .card[data-tier="lr"] .f-subj { filter: drop-shadow(0 1cqw 1.2cqw rgba(0, 0, 0, .45)); }
-.card[data-tier="ssr"] .f-illus, .card[data-tier="ur"] .f-illus, .card[data-tier="lr"] .f-illus { color: rgba(255, 255, 255, .92); text-shadow: 0 0 .5cqw rgba(0, 0, 0, .9), 0 0 .2cqw #000; }
-.card[data-tier="ssr"] .f-foot, .card[data-tier="ur"] .f-foot, .card[data-tier="lr"] .f-foot { color: rgba(255, 248, 230, .92); text-shadow: 0 0 .4cqw rgba(0, 0, 0, .9); }
-.card[data-tier="ssr"] .f-rar, .card[data-tier="ur"] .f-rar, .card[data-tier="lr"] .f-rar { color: #fff; }
-.card[data-tier="ssr"] .f-edge { box-shadow: inset .4cqw .4cqw .6cqw rgba(255, 240, 200, .35), inset -.4cqw -.4cqw .7cqw rgba(0, 0, 0, .5); }
+/* =====================================================================================
+   SSR · UR · LR — box-less full art (modern illustration-rare layout, Lakomics' own vocabulary).
+   Same 3.8cqw outer border as N/R/SR, metal per tier; art full bleed; header with a portrait medallion,
+   condensed metallic name and a swoosh rule; text printed straight on the art in the lower third;
+   tone (light/dark ink) is chosen from the art behind the text block.
+   ===================================================================================== */
+.fa-medal, .fa-sub, .fa-swoosh, .fa-body, .fa-copy, .fa-value { display: none; }
+.fa .f-desc, .fa .f-foot, .fa .f-rim, .fa .f-shade { display: none; }
+.fa .f-frame { padding: 3.8cqw; }
+.fa .f-subjwrap { clip-path: none; }
+.fa .f-subj { filter: drop-shadow(0 1cqw 1.2cqw rgba(0, 0, 0, .45)); }
+.fa .f-edge { box-shadow: inset .35cqw .35cqw .5cqw rgba(255, 255, 255, .55), inset -.35cqw -.35cqw .6cqw rgba(0, 0, 0, .45), inset 0 0 0 3.8cqw transparent, inset 0 0 0 4.15cqw rgba(0, 0, 0, .28); }
+.card[data-tone="light"] { --fa-ink: #ffffff; --fa-ink2: rgba(255, 255, 255, .88); --fa-sh: rgba(0, 0, 0, .95); --fa-sh2: rgba(0, 0, 0, .6); --fa-rule: linear-gradient(90deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .95) 12%, rgba(205, 212, 222, .9) 60%, rgba(255, 255, 255, .2)); }
+.card[data-tone="dark"] { --fa-ink: #16110a; --fa-ink2: rgba(22, 17, 10, .86); --fa-sh: rgba(255, 252, 240, .95); --fa-sh2: rgba(255, 250, 235, .55); --fa-rule: linear-gradient(90deg, rgba(60, 44, 20, .15), rgba(60, 44, 20, .9) 12%, rgba(120, 90, 40, .85) 60%, rgba(60, 44, 20, .2)); }
+.fa { --fa-halo: 0 0 .2cqw var(--fa-sh), 0 0 .2cqw var(--fa-sh), 0 0 .55cqw var(--fa-sh2), 0 .25cqw .6cqw var(--fa-sh2); }
 
-/* UR · 골드 풀아트 — gold sunburst behind the subject, gold bevel band, silver name */
-.card[data-tier="ur"] .f-frame, .card[data-tier="lr"] .f-frame { padding: 2.6cqw; }
-.card[data-tier="ur"] .f-frame { background: linear-gradient(135deg, #7a4c10 0%, #ffe9a6 16%, #c88d2a 32%, #fff6d6 48%, #a8701c 64%, #ffe08a 82%, #6e4309 100%);
-  box-shadow: inset .5cqw .5cqw .6cqw rgba(255, 250, 225, .7), inset -.5cqw -.5cqw .7cqw rgba(60, 30, 0, .6); }
+/* header */
+.fa .fa-medal { display: block; left: 5.2cqw; top: 5cqw; width: 12.4cqw; height: 12.4cqw; border-radius: 50%; border: .9cqw solid transparent;
+  background: var(--medal-img, none) var(--medal-pos, 50% 35%) / var(--medal-size, 300%) no-repeat padding-box, radial-gradient(circle at 40% 35%, #f6f2ea, #b9b4aa) padding-box, var(--band) border-box;
+  box-shadow: 0 .4cqw 1cqw rgba(0, 0, 0, .45), inset 0 0 0 .25cqw rgba(0, 0, 0, .35); }
+.fa .f-name { left: 19.6cqw; right: 5.6cqw; top: 4.8cqw; height: 8.4cqw; gap: 1.2cqw; }
+.fa .f-title { font-size: 6.2cqw; }
+.fa .fa-value { display: inline-flex; align-items: baseline; gap: .5cqw; color: var(--fa-ink); text-shadow: var(--fa-halo); font-weight: 800; font-size: 6.6cqw; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.fa .fa-value i { font-style: normal; font-size: 2cqw; font-weight: 800; letter-spacing: .02em; }
+.fa .f-type { width: 7cqw; height: 7cqw; }
+.fa .fa-swoosh { display: block; left: 19cqw; right: 5.4cqw; top: 12.2cqw; height: 4.4cqw; overflow: visible; filter: drop-shadow(0 .15cqw .2cqw rgba(0, 0, 0, .5)); }
+.fa .fa-swoosh path { fill: none; stroke-width: 1.1; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.fa .fa-swoosh path.hl { stroke-width: .5; opacity: .9; }
+.card[data-tier="ssr"] .fa-swoosh path { stroke: url(#swSsr); } .card[data-tier="ur"] .fa-swoosh path { stroke: url(#swUr); } .card[data-tier="lr"] .fa-swoosh path { stroke: url(#swLr); }
+.fa .fa-sub { display: block; left: 20cqw; top: 12.6cqw; font-size: 2.2cqw; font-style: italic; font-weight: 700; color: var(--fa-ink); text-shadow: var(--fa-halo); white-space: nowrap; }
+
+/* body printed on the art */
+.fa .fa-body { display: flex; flex-direction: column; left: 6.6cqw; right: 6.6cqw; bottom: 5.6cqw; color: var(--fa-ink); text-shadow: var(--fa-halo); isolation: isolate; }
+.fa[data-scrim="1"] .fa-body::before { content: ""; position: absolute; inset: -9cqw -10cqw -4cqw; z-index: -1; pointer-events: none;
+  background: radial-gradient(60% 55% at 50% 58%, var(--scrim, rgba(0, 0, 0, .5)), transparent 100%); }
+.card[data-tone="dark"] { --scrim: rgba(255, 250, 238, .55); }
+.fa-type { display: flex; align-items: center; gap: 1.6cqw; font-size: 3.5cqw; font-weight: 800; letter-spacing: -.02em; }
+.fa-type .gem { flex: none; width: 4.6cqw; height: 4.6cqw; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .3cqw rgba(255, 255, 255, .7), 0 0 0 .5cqw rgba(0, 0, 0, .4); }
+.fa-type .gem svg { width: 2.9cqw; height: 2.9cqw; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.fa-type .fa-pt { margin-left: auto; font-size: 4.2cqw; font-weight: 800; font-variant-numeric: tabular-nums; }
+.fa-type .fa-pt small { font-size: 2cqw; margin-left: .4cqw; }
+.fa-flavor { margin: 1cqw 0 0; font-size: 3.05cqw; line-height: 1.42; font-weight: 500; word-break: keep-all; }
+.fa-stats { position: relative; display: flex; align-items: center; margin-top: 2.4cqw; padding: 1.1cqw 0; font-size: 2.2cqw; font-weight: 700; }
+.fa-stats::before, .fa-stats::after { content: ""; position: absolute; left: 0; right: 0; height: .5cqw; background: var(--fa-rule);
+  -webkit-mask: linear-gradient(#000 0 0) top / 100% .16cqw no-repeat, linear-gradient(#000 0 0) bottom / 100% .16cqw no-repeat; mask: linear-gradient(#000 0 0) top / 100% .16cqw no-repeat, linear-gradient(#000 0 0) bottom / 100% .16cqw no-repeat;
+  filter: drop-shadow(0 0 .15cqw var(--fa-sh2)); }
+.fa-stats::before { top: 0; } .fa-stats::after { bottom: 0; }
+.fa-stats > span { flex: 1; display: inline-flex; align-items: center; gap: 1cqw; padding: 0 1.6cqw; }
+.fa-stats > span + span { border-left: .14cqw solid color-mix(in srgb, var(--fa-ink) 55%, transparent); }
+.fa-stats i { font-style: normal; font-weight: 500; font-size: 1.9cqw; opacity: .9; }
+.fa-stats .mini { width: 2.8cqw; height: 2.8cqw; border-radius: 50%; display: inline-grid; place-items: center; background: radial-gradient(circle at 35% 30%, #fff, var(--c1) 40%, var(--c2)); box-shadow: 0 0 0 .2cqw rgba(0, 0, 0, .35); }
+.fa-stats .mini svg { width: 1.9cqw; height: 1.9cqw; fill: none; stroke: #fff; stroke-width: 2.6; }
+.fa-stats .heart svg { width: 2.8cqw; height: 2.8cqw; fill: #e5394a; filter: drop-shadow(0 0 .2cqw var(--fa-sh)); display: block; }
+.fa-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 3cqw; margin-top: 1.8cqw; }
+.fa-credit { font-size: 1.95cqw; line-height: 1.35; white-space: nowrap; }
+.fa-credit em { font-style: italic; font-weight: 700; }
+.fa-credit .set { display: inline-flex; align-items: center; gap: .8cqw; font-weight: 800; }
+.fa-credit .set .code { padding: 0 .7cqw; border-radius: .5cqw; font-size: 1.7cqw; line-height: 2.4cqw; color: var(--fa-sh); background: var(--fa-ink); text-shadow: none; }
+.fa-credit .f-rar { color: inherit; gap: .3cqw; }
+.fa-credit .f-rar svg { width: 2.3cqw; height: 2.3cqw; }
+.fa-credit .f-rar span { display: none; }
+.fa-credit .f-serial { margin-left: 1cqw; }
+.fa-note { margin: 0; max-width: 52%; text-align: right; font-size: 1.95cqw; line-height: 1.38; font-style: italic; word-break: keep-all; }
+.fa .fa-copy { display: block; left: 0; right: 0; bottom: .95cqw; text-align: center; font-size: 1.65cqw; font-weight: 600; letter-spacing: .04em; color: var(--copy-ink, #2b2f36); text-shadow: 0 .1cqw 0 rgba(255, 255, 255, .45); }
+
+/* SSR · 폴리시드 실버 */
+.card[data-tier="ssr"] { --band: linear-gradient(135deg, #8d949c 0%, #f4f6f8 18%, #a8afb7 34%, #ffffff 50%, #8f969e 66%, #e6e9ec 84%, #7d848c 100%); --swoosh-a: #ffffff; --swoosh-b: #8a929c; }
+.card[data-tier="ssr"] .f-frame { background: var(--band); }
+.card[data-tier="ssr"] .f-frame::after { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 42%); }
+.card[data-tier="ssr"] .f-sheen { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 245, 230, .7), transparent 46%); }
+/* UR · 골드 */
+.card[data-tier="ur"] { --band: linear-gradient(135deg, #7a4c10 0%, #ffe9a6 16%, #c88d2a 32%, #fff6d6 48%, #a8701c 64%, #ffe08a 82%, #6e4309 100%); --copy-ink: #3a2405; --swoosh-a: #fff3c8; --swoosh-b: #a8711c; }
+.card[data-tier="ur"] .f-frame { background: var(--band); }
 .card[data-tier="ur"] .f-frame::after { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); }
-.card[data-tier="ur"] .f-rim { padding: .6cqw; background: linear-gradient(135deg, #8a5a12, #fff3c8 30%, #b8862b 55%, #fff0b0 80%, #8a5a12); opacity: .9; }
-.card[data-tier="ur"] .f-shade, .card[data-tier="lr"] .f-shade { display: none; }
-.card[data-cut="0"][data-tier="ur"] .f-rim, .card[data-cut="0"][data-tier="lr"] .f-rim { display: none; }
 .card[data-tier="ur"] .f-sheen { opacity: calc(.25 + var(--o) * .75); mix-blend-mode: color-dodge;
   background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 236, 180, .85) 0%, rgba(255, 200, 110, .35) 28%, transparent 60%); }
 .card[data-tier="ur"][data-cut="0"] .f-sheen { background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 226, 150, .95) 0%, rgba(255, 190, 90, .55) 35%, rgba(200, 140, 40, .25) 70%); }
-
-/* LR · 별빛 한정 — starlight sunburst, pale prism band and letters, white/pastel glitter, serial */
-.card[data-tier="lr"] .f-frame { background: conic-gradient(from var(--ang), #f2d6e6, #f8eccc, #d4f2e6, #d2e2f8, #e2d8f8, #f2d6e6);
-  box-shadow: inset .5cqw .5cqw .6cqw rgba(255, 255, 255, .8), inset -.5cqw -.5cqw .7cqw rgba(40, 40, 80, .45); }
-.card[data-tier="lr"] .f-rim { padding: .6cqw; background: linear-gradient(135deg, #8d95b5, #ffffff 30%, #a7b0d0 55%, #f4f0ff 80%, #8d95b5); }
+.card[data-tier="ur"] .f-rar svg { fill: #f3c869; }
+/* LR · 별빛 */
+.card[data-tier="lr"] { --band: conic-gradient(from var(--ang), #f2d6e6, #f8eccc, #d4f2e6, #d2e2f8, #e2d8f8, #f2d6e6); --copy-ink: #2c2f4a; --swoosh-a: #ffffff; --swoosh-b: #b9b2e6; }
+.card[data-tier="lr"] .f-frame { background: var(--tex-brush), var(--band); }
+.card[data-tier="lr"] .f-frame::after { opacity: calc(var(--o) * .9); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); }
 .card[data-tier="lr"] .f-sheen { opacity: calc(.1 + var(--o) * .32); mix-blend-mode: color-dodge; filter: saturate(.7) brightness(.8);
   background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .7), transparent 45%), linear-gradient(var(--ang), #ffb8d6, #ffe9b0, #b8f7dc, #b6d8ff, #dcc6ff, #ffb8d6); background-size: 100% 100%, 220% 220%; background-position: 0 0, var(--mx) var(--my); }
-.card[data-tier="lr"] .f-serial { color: #fff; padding: .4cqw 1.2cqw; border-radius: .8cqw; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 .25cqw rgba(255, 255, 255, .55); }
+.card[data-tier="lr"] .f-serial { padding: 0 .9cqw; border-radius: .6cqw; box-shadow: inset 0 0 0 .2cqw currentColor; }
 .card[data-tier="lr"] .f-rar svg { fill: url(#prismFill); }
-.card[data-tier="ur"] .f-rar svg { fill: #f3c869; }
 
 /* Effects off (comparison toggle) */
 .plain .f-sheen, .plain .f-glit, .plain .f-glare, .plain .f-frame::after { display: none; }
@@ -493,6 +546,9 @@ ul.ideas li::marker { color: var(--c-faint); }
 <body>
 <svg class="defs" aria-hidden="true">
   <defs>
+    <linearGradient id="swSsr" x1="0" x2="1"><stop offset="0" stop-color="#8a929c"/><stop offset=".35" stop-color="#ffffff"/><stop offset=".7" stop-color="#9aa2ac"/><stop offset="1" stop-color="#f4f6f8"/></linearGradient>
+    <linearGradient id="swUr" x1="0" x2="1"><stop offset="0" stop-color="#a8711c"/><stop offset=".35" stop-color="#fff3c8"/><stop offset=".7" stop-color="#c88d2a"/><stop offset="1" stop-color="#ffe9a6"/></linearGradient>
+    <linearGradient id="swLr" x1="0" x2="1"><stop offset="0" stop-color="#ffc6dc"/><stop offset=".3" stop-color="#ffffff"/><stop offset=".55" stop-color="#c6f5e6"/><stop offset=".8" stop-color="#cfe0ff"/><stop offset="1" stop-color="#e6d6ff"/></linearGradient>
     <linearGradient id="prismFill" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#ff9cc0"/><stop offset=".3" stop-color="#ffe7a0"/><stop offset=".55" stop-color="#a8ffd6"/><stop offset=".8" stop-color="#a8d4ff"/><stop offset="1" stop-color="#d9b8ff"/>
     </linearGradient>
@@ -523,7 +579,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 
   <section aria-labelledby="s1">
     <h2 class="sec" id="s1">등급 사다리 <span class="num">6단계</span></h2>
-    <p class="note">같은 그림 한 장이 등급마다 어떻게 달라지는지입니다. N·R·SR은 그림 창 안에 머물고, <b>SSR부터 인물이 틀 밖으로</b> 나옵니다. UR·LR은 배경 전체가 금박·별빛 박입니다.</p>
+    <p class="note">같은 그림 한 장이 등급마다 어떻게 달라지는지입니다. N·R·SR은 인쇄된 틀과 그림 창, 카르투슈 설명창. <b>SSR부터는 설명창 없는 풀아트</b>로, 글자가 그림 위에 바로 인쇄되고 인물이 테두리 밖으로 나옵니다. 여섯 등급 모두 바깥 테두리 폭이 같습니다.</p>
     <div class="ladder" id="ladder"></div>
     <p class="slabel">카드 뒷면 · 모든 등급 공통</p>
     <div class="backrow">
@@ -544,8 +600,6 @@ ul.ideas li::marker { color: var(--c-faint); }
         <div class="picks" role="radiogroup" aria-label="그림" id="picks"></div>
         <p class="slabel">등급</p>
         <div class="seg" role="radiogroup" aria-label="등급" id="tierSeg"></div>
-        <p class="slabel">설명창 스타일</p>
-        <div class="seg" role="radiogroup" aria-label="설명창 스타일" id="descSeg"></div>
         <div class="tier-head"><span class="code" id="fCode"></span><h3 id="fName"></h3><span class="o" id="fOdds"></span></div>
         <p class="note" id="fDesc"></p>
         <ol class="layers" id="fLayers"></ol>
@@ -555,6 +609,8 @@ ul.ideas li::marker { color: var(--c-faint); }
           <button class="btn" type="button" id="tgFlip"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg>뒤집기</button>
         </div>
         <p class="note" style="font-size:13px">광택을 끄면 같은 카드의 맨 상태가 보여, 효과가 얼마나 더해졌는지 비교할 수 있습니다.</p>
+        <label class="demo-pick">N·R·SR 설명창 (보조 시안)
+          <select class="sel" id="descSel"><option value="a">카르투슈 (기본)</option><option value="b">리본 · 메달</option><option value="c">아치</option></select></label>
       </div>
     </div>
   </section>
@@ -594,6 +650,7 @@ ul.ideas li::marker { color: var(--c-faint); }
   <section aria-labelledby="s4">
     <h2 class="sec" id="s4">카드 해부도</h2>
     <p class="note">카드의 칸마다 에셋의 어떤 정보가 들어가는지입니다. 원본 파일과 정보는 그대로 두고, 카드는 그것을 읽어서 보여 주기만 합니다.</p>
+    <div class="seg" role="radiogroup" aria-label="카드 형태" id="anatSeg" style="max-width:380px"><button type="button" role="radio" data-l="fa" aria-checked="true">풀아트형 · SSR 이상</button><button type="button" role="radio" data-l="frame" aria-checked="false">테두리형 · N·R·SR</button></div>
     <div class="anat">
       <div class="anat-card" id="anatCard"></div>
       <ol class="fields" id="fields"></ol>
@@ -627,7 +684,7 @@ const DPR = Math.min(2, window.devicePixelRatio || 1);
 // Description-area style applies page-wide (all cards, gacha, anatomy) and is remembered per viewer.
 const DESC = [['a', 'A 카르투슈'], ['b', 'B 리본·메달'], ['c', 'C 아치']];
 let descStyle = 'a';
-try { const v = localStorage.getItem('lk-gacha-desc'); if (/^[abc]$/.test(v || '')) descStyle = v; } catch (e) { /* storage blocked */ }
+try { const v = localStorage.getItem('lk-gacha-desc-v2'); if (/^[abc]$/.test(v || '')) descStyle = v; } catch (e) { /* storage blocked */ }
 document.documentElement.dataset.desc = descStyle;
 
 /* ------------------------------------------------------- procedural art
@@ -1023,15 +1080,15 @@ const TIERS = [
   { k: 'sr',  code: 'SR',  name: '홀로 레어',   odds: 13,  glow: '#b46bff', sym: ['dia', 'dia'],
     desc: '그림 창의 배경에만 옅은 무지개 박막. 인물은 원래 색 그대로.',
     layers: [['남색 금속 프레임', ''], ['배경 홀로', '채도 낮은 박막, 인물 뒤에만'], ['은가루', '배경에 드문드문'], ['은박 이름', '']] },
-  { k: 'ssr', code: 'SSR', name: '오버프레임',  odds: 5,   glow: '#ffd25a', sym: ['star'],
-    desc: '인물이 그림 창과 틀을 넘어 이름줄·글상자 위까지 튀어나옵니다. 금박 베벨 틀, 반투명 양피지 글상자.',
-    layers: [['배경', '틀 색 선버스트'], ['칠기 틀 + 금박 베벨', '틀에 금가루'], ['인물 층', '창과 틀 밖으로'], ['금박 이름', '어두운 외곽선'], ['양피지 글상자', '인물이 비침']] },
+  { k: 'ssr', code: 'SSR', name: '실버 풀아트', odds: 5,   glow: '#ffd25a', sym: ['star'],
+    desc: '설명창 없이 그림이 카드 전체를 채우고, 글자는 그림 위에 바로 인쇄됩니다. 은박 테두리, 인물은 이름줄과 테두리 위로 튀어나옵니다.',
+    layers: [['은박 테두리', 'N·R·SR과 같은 폭'], ['배경 박', '틀 색 선버스트, 금가루는 테두리에'], ['인물 층', '테두리·이름 위로'], ['머리줄', '메달 · 은박 이름 · 곡선 띠 · 감상 수'], ['그림 위 글자', '밝기 따라 흰 글/검은 글 자동']] },
   { k: 'ur',  code: 'UR',  name: '골드 풀아트', odds: 1.8, glow: '#ffb21e', sym: ['star', 'star'],
-    desc: '금박 선버스트 위에 인물. 금가루는 배경과 틀에만 촘촘하고, 빛 방향에 따라 다른 알갱이가 반짝입니다.',
-    layers: [['금박 선버스트', '빛 받는 곳이 밝아짐'], ['금가루', '알갱이마다 면 방향이 다름'], ['안쪽 금테', '인물이 넘어감'], ['은박 이름', ''], ['양피지 글상자', '']] },
+    desc: '금박 테두리, 금박 선버스트 위에 인물. 금가루는 배경과 테두리에만 촘촘하고, 빛 방향에 따라 다른 알갱이가 반짝입니다. 글자는 그림 위에 바로.',
+    layers: [['금박 테두리', ''], ['금박 선버스트', '빛 받는 곳이 밝아짐'], ['금가루', '알갱이마다 면 방향이 다름'], ['은박 이름 + 금빛 곡선 띠', ''], ['그림 위 글자', '상자 없이']] },
   { k: 'lr',  code: 'LR',  name: '별빛 한정',   odds: .2,  glow: 'rainbow', sym: ['spark'],
-    desc: '그림마다 단 1장. 은빛 별빛 선버스트와 옅은 무지개 박막, 별 모양으로 반짝이는 가루, 시리얼 1 / 1.',
-    layers: [['별빛 선버스트', '옅은 박막색'], ['별가루', '큰 알갱이는 십자 빛'], ['무지갯빛 은테', ''], ['프리즘 이름', ''], ['시리얼', 'No. 1 / 1']] },
+    desc: '그림마다 단 1장. 무지갯빛 은 테두리, 별빛 선버스트와 옅은 박막, 별 모양으로 반짝이는 가루, 시리얼 1 / 1.',
+    layers: [['무지갯빛 은 테두리', '각도 따라 색이 돎'], ['별빛 선버스트', '옅은 박막색'], ['별가루', '큰 알갱이는 십자 빛'], ['프리즘 이름', ''], ['시리얼', 'No. 1 / 1']] },
 ];
 const TI = Object.fromEntries(TIERS.map((t, i) => [t.k, i]));
 const PREMIUM = new Set(['ssr', 'ur', 'lr']);
@@ -1045,13 +1102,13 @@ const ATTR = [
 ];
 // Real samples (scratch testing only; never committed). They load from ./samples/ next to the page and fall back silently.
 const SAMPLE_DEFS = [
-  { key: 's1', art: 'samples/art1.jpg', cut: 'samples/cut1.webp', fit: [-14, -1.2, 124], tint: '#b0246e', best: 'ur', id: 1013,
+  { key: 's1', art: 'samples/art1.jpg', cut: 'samples/cut1.webp', fit: [-14, -1.2, 124], tint: '#b0246e', best: 'ur', id: 1013, face: '64% 36%', faceSize: '250%',
     title: '사탕과 주먹', credit: '@loped00', date: '2026.10.13', attr: 2, tags: ['격투', '인물'], flavor: '사탕을 문 채로, 먼저 덤비라고 손짓했다.', views: 4210, albums: 3, fav: true },
-  { key: 's2', art: 'samples/art2.jpg', cut: 'samples/cut2.webp', fit: [-24, -1.6, 148], tint: '#a3203c', best: 'ssr', id: 1014,
+  { key: 's2', art: 'samples/art2.jpg', cut: 'samples/cut2.webp', fit: [-24, -1.6, 148], tint: '#a3203c', best: 'ssr', id: 1014, face: '45% 21%', faceSize: '420%',
     title: '방울창의 여우', credit: '작가 미상', date: '2026.10.13', attr: 4, tags: ['여우귀', '창'], flavor: '방울 소리가 들렸다면, 이미 늦었다.', views: 1877, albums: 2, fav: true },
-  { key: 's3', art: 'samples/art3.jpg', pos: '50% 40%', protect: [.57, .42, .2, .19], best: 'ur', id: 1015,
+  { key: 's3', art: 'samples/art3.jpg', pos: '50% 40%', protect: [.57, .42, .2, .19], best: 'ur', id: 1015, face: '60% 33%',
     title: '가면 아래의 노장', credit: '작가 미상', date: '2026.10.13', attr: 0, tags: ['초상', '유화풍'], flavor: '반쯤 깨진 가면 너머로 오래된 빛이 남아 있다.', views: 962, albums: 1, fav: false },
-  { key: 's4', art: 'samples/art4.jpg', pos: '68% 50%', protect: [.58, .33, .2, .13], best: 'lr', id: 1016,
+  { key: 's4', art: 'samples/art4.jpg', pos: '68% 50%', protect: [.58, .33, .2, .13], best: 'lr', id: 1016, face: '60% 32%',
     title: '나비가 깨운 관', credit: '@moudanji', date: '2026.10.13', attr: 1, tags: ['고딕', '나비'], flavor: '나비 한 마리가 날아든 밤, 관 뚜껑이 열렸다.', views: 3305, albums: 4, fav: true },
 ];
 const PROC_DEFS = [
@@ -1204,21 +1261,34 @@ const descHTML = a => { const at = ATTR[a.attr]; return `<span class="d-orn"></s
   + `<div class="d-stats"><span class="st"><i>감상</i><b>${fmt(a.views)}</b></span><span class="st"><i>앨범</i><b>${a.albums}</b></span>${a.fav ? `<span class="st fav" title="즐겨찾기">${HEART}</span>` : ''}</div>`; };
 const footHTML = a => `<div class="fr"><span class="f-illus">Illus. ${esc(a.credit)}</span><span class="f-rar"></span><span class="f-no"><svg viewBox="0 0 32 36"><use href="#mk"/></svg>LK01 · ${pad(a.id)}</span></div>`
   + `<div class="fr"><span>수집 ${a.date}</span><span class="f-serial"></span><span class="f-copy">© Lakomics</span></div>`;
-function makeCard(a, tier, opts = {}) {
-  const el = document.createElement('div'); el.className = 'card'; el._asset = a; el._serial = opts.serial; el._live = !!opts.live;
-  const at = ATTR[a.attr];
-  el.innerHTML = `<div class="card__flip"><div class="card__tilt">
-    <div class="face front">
-      <img class="f-bg" alt="" draggable="false" decoding="async">
+const SWOOSH = '<svg class="fa-swoosh" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><path d="M0 8.6 H58 C68 8.6 70 1.6 80 1.2 H100"/><path class="hl" d="M3 9.6 H57 C67 9.6 69.5 2.6 79.5 2.2 H97"/></svg>';
+function frontInner(a) {
+  const at = ATTR[a.attr], gem = `<span class="gem" style="--c1:${at.c1};--c2:${at.c2}"><svg viewBox="0 0 24 24">${at.icon}</svg></span>`;
+  return `<img class="f-bg" alt="" draggable="false" decoding="async">
       <div class="f-sheen"></div><div class="f-shade"></div><div class="f-frame"></div>
       <canvas class="f-glit"></canvas>
       <div class="f-rim"></div>
       <div class="f-subjwrap"><img class="f-subj" alt="" draggable="false" decoding="async"></div>
-      <div class="f-name"><span class="f-title">${esc(a.title)}</span><span class="f-type" style="--c1:${at.c1};--c2:${at.c2}" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
+      <div class="fa-medal"></div>
+      <div class="f-name"><span class="f-title">${esc(a.title)}</span><span class="fa-value"><i>감상</i>${fmt(a.views)}</span><span class="f-type" style="--c1:${at.c1};--c2:${at.c2}" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
+      ${SWOOSH}<div class="fa-sub">${at.name} 속성 · ${esc(a.tags[0])}</div>
       <div class="f-desc">${descHTML(a)}</div>
       <div class="f-foot">${footHTML(a)}</div>
-      <div class="f-glare"></div><div class="f-edge"></div>
-    </div>
+      <div class="fa-body">
+        <div class="fa-type">${gem}<span>${esc(a.tags.join(' · '))}</span><span class="fa-pt">${a.albums}<small>앨범</small></span></div>
+        <p class="fa-flavor">${esc(a.flavor)}</p>
+        <div class="fa-stats"><span><i>속성</i><span class="mini" style="--c1:${at.c1};--c2:${at.c2}"><svg viewBox="0 0 24 24">${at.icon}</svg></span>${at.name}</span><span><i>앨범</i>${a.albums}</span><span><i>즐겨찾기</i>${a.fav ? `<span class="heart">${HEART}</span>` : '–'}</span></div>
+        <div class="fa-foot"><div class="fa-credit"><em>Illus. ${esc(a.credit)}</em><br><span class="set"><span class="code">LK01</span>${pad(a.id)} <span class="f-rar"></span><span class="f-serial"></span></span></div>
+          <p class="fa-note">${a.date.slice(0, 4)}년 ${+a.date.slice(5, 7)}월 ${+a.date.slice(8, 10)}일에 모였다. 앨범 ${a.albums}곳에 함께 담겨 있다.</p></div>
+      </div>
+      <div class="fa-copy">© Lakomics · Illus. ${esc(a.credit)}</div>
+      <div class="f-glare"></div><div class="f-edge"></div>`;
+}
+function makeCard(a, tier, opts = {}) {
+  const el = document.createElement('div'); el.className = 'card'; el._asset = a; el._serial = opts.serial; el._live = !!opts.live;
+  el.dataset.tone = 'light';
+  el.innerHTML = `<div class="card__flip"><div class="card__tilt">
+    <div class="face front">${frontInner(a)}</div>
     <div class="face back">
       <div class="b-frame"></div><div class="b-corner tl"></div><div class="b-corner tr"></div><div class="b-corner bl"></div><div class="b-corner br"></div>
       <div class="b-word t">LAKOMICS</div><div class="b-sub t">ASSET CARD</div><div class="b-word b">LAKOMICS</div><div class="b-sub b">ASSET CARD</div>
@@ -1236,15 +1306,15 @@ function setTier(el, k) {
   const t = TIERS[TI[k]];
   el.dataset.tier = k; el.dataset.glow = t.glow === 'rainbow' ? 'rainbow' : '';
   el.style.setProperty('--glow', t.glow === 'rainbow' ? '#fff' : t.glow);
-  $('.f-rar', el).innerHTML = t.sym.map(s => SYM[s]).join('') + `<span>${t.code}</span>`;
+  el.querySelectorAll('.f-rar').forEach(r => { r.innerHTML = t.sym.map(s => SYM[s]).join('') + `<span>${t.code}</span>`; });
   const serial = el._serial ?? (k === 'lr' ? 'No. 1 / 1' : k === 'ur' ? 'No. 3 / 10' : '');
-  $('.f-serial', el).textContent = (k === 'lr' || k === 'ur' || el.classList.contains('show-serial')) ? serial || 'No. 3 / 10' : '';
+  el.querySelectorAll('.f-serial').forEach(f => { f.textContent = (k === 'lr' || k === 'ur' || el.classList.contains('show-serial')) ? serial || 'No. 3 / 10' : ''; f.hidden = !f.textContent; });
   const title = $('.f-title', el), name = $('.f-name', el);
-  const metal = { r: 'silverdk', sr: 'silver', ssr: 'gold', ur: 'silver', lr: 'prism' }[k];
+  const metal = { r: 'silverdk', sr: 'silver', ssr: 'silver', ur: 'silver', lr: 'prism' }[k];
   title.classList.toggle('metal', !!metal); name.classList.toggle('outlined', PREMIUM.has(k) || k === 'sr'); name.classList.toggle('stamped', k === 'n' || k === 'r');
   const fr = $('.f-frame', el); if (k === 'n' || k === 'r' || k === 'sr') fr.style.backgroundImage = `url(${frameTex(k)})`; else fr.style.removeProperty('background-image');
   if (metal) title.style.setProperty('--metal', `var(--${metal})`);
-  el.classList.toggle('parch', PREMIUM.has(k));
+  el.classList.toggle('parch', PREMIUM.has(k)); el.classList.toggle('fa', PREMIUM.has(k));
   refreshArt(el);
 }
 /* Which layers a card shows, from its asset, its tier and any user images. */
@@ -1270,13 +1340,41 @@ function refreshArt(el) {
   if (p.cut) { if (sj.getAttribute('src') !== p.cut) sj.src = p.cut; sj.style.setProperty('--sx', p.fit[0] + '%'); sj.style.setProperty('--sy', p.fit[1] + '%'); sj.style.setProperty('--sw', p.fit[2] + '%');
     sj.style.setProperty('--sfade', 'none');
     if (p.fade) { const setFade = () => { if (!sj.naturalWidth) return; const h = p.fit[2] * sj.naturalHeight / sj.naturalWidth, top = p.fit[1] * 1.3968;
-        const end = Math.min(1, (124 - top) / h), start = Math.max(0, end - 22 / h);
+        const end = Math.min(1, ((PREMIUM.has(el.dataset.tier) ? 136 : 124) - top) / h), start = Math.max(0, end - 22 / h);
         sj.style.setProperty('--sfade', `linear-gradient(180deg, #000 ${(start * 100).toFixed(1)}%, transparent ${(end * 100).toFixed(1)}%)`); };
       sj.complete ? setFade() : sj.addEventListener('load', setFade, { once: true }); } }
   el._lum = null; el.style.removeProperty('--lum');
   const token = el._artToken = {};
+  const a = el._asset, msrc = p.cut || p.bg;
+  el.style.setProperty('--medal-img', `url("${msrc}")`); el.style.setProperty('--medal-pos', a.face || (p.cut ? '50% 22%' : '50% 35%')); el.style.setProperty('--medal-size', p.cut ? (a.faceSize || '260%') : '320%');
+  if (PREMIUM.has(el.dataset.tier)) computeTone(el, p, token);
   if (p.lumNeeded) lumMap(p.bg, p.pos, p.protect).then(m => { if (el._artToken !== token) return; el._lum = m; if (m) el.style.setProperty('--lum', m.mask); regen(el); });
   regen(el);
+}
+
+/* Text tone for box-less full art: light or dark ink from the art behind the text block; a feathered
+   scrim only when the area is mid-grey or busy. If pixels can't be read, white ink with a dark outline. */
+const IMGC = new Map();
+const loadI = src => { if (!IMGC.has(src)) IMGC.set(src, new Promise(r => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = src; })); return IMGC.get(src); };
+async function computeTone(el, p, token) {
+  let tone = 'light', scrim = '0';
+  try {
+    const [bi, si] = await Promise.all([loadI(p.bg), p.cut ? loadI(p.cut) : null]);
+    if (!bi) throw 0;
+    const w = 63, h = 88, cv = newCanvas(w, h), c = cv.getContext('2d', { willReadFrequently: true });
+    const [px, py] = (p.pos || '50% 50%').split(' ').map(v => parseFloat(v) / 100), ia = bi.width / bi.height, ca = w / h;
+    let sx = 0, sy = 0, sw = bi.width, sh = bi.height;
+    if (ia > ca) { sw = bi.height * ca; sx = (bi.width - sw) * px; } else { sh = bi.width / ca; sy = (bi.height - sh) * py; }
+    c.drawImage(bi, sx, sy, sw, sh, 0, 0, w, h);
+    if (si) { const dw = p.fit[2] / 100 * w; c.drawImage(si, p.fit[0] / 100 * w, p.fit[1] / 100 * h, dw, dw * si.height / si.width); }
+    const d = c.getImageData(4, 56, 55, 28).data; let sum = 0, sq = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { const l = (.299 * d[i] + .587 * d[i + 1] + .114 * d[i + 2]) / 255; sum += l; sq += l * l; n++; }
+    const mean = sum / n, sd = Math.sqrt(Math.max(0, sq / n - mean * mean));
+    tone = mean > .58 ? 'dark' : 'light';
+    scrim = (mean > .4 && mean < .66) || sd > .27 ? '1' : '0';
+  } catch (e) { tone = 'light'; scrim = '0'; }
+  if (el._artToken !== token) return;
+  el.dataset.tone = tone; el.dataset.scrim = scrim;
 }
 
 /* ---------------------------------------------------------------- glitter
@@ -1299,7 +1397,8 @@ function regen(el) {
   const fl = [], scale = Math.max(.65, Math.min(1.15, cw / 380));
   for (let tries = 0; fl.length < n && tries < n * 10; tries++) {
     const x = R(), y = R(); let w;
-    if (inRect(x, y, TXT)) w = spec.text; else if (inRect(x, y, WIN)) w = spec.win; else w = spec.frame;
+    if (PREMIUM.has(el.dataset.tier)) { const band = x < .038 || x > .962 || y < .027 || y > .973; w = band ? spec.frame : y > .6 ? spec.text * 3 : spec.win; }
+    else if (inRect(x, y, TXT)) w = spec.text; else if (inRect(x, y, WIN)) w = spec.win; else w = spec.frame;
     if (!cut && el.dataset.tier !== 'sr') { if (lum) { const v = lum.wt[(y * lum.h | 0) * lum.w + (x * lum.w | 0)]; w *= inRect(x, y, WIN) || inRect(x, y, [.03, .03, .97, .97]) ? .04 + .96 * v : 1; } else w *= .35; }
     if (R() > w) continue;
     const phi = R() * Math.PI * 2, rr = R() ** .7 * .42;
@@ -1408,13 +1507,9 @@ function sections() {
     if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
   });
   showTier(featTier);
-  const dseg = $('#descSeg');
-  DESC.forEach(([d, label]) => dseg.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-d="${d}" aria-checked="${d === descStyle}" tabindex="${d === descStyle ? 0 : -1}">${label}</button>`));
-  const setDesc = (d, focus) => { descStyle = d; document.documentElement.dataset.desc = d; try { localStorage.setItem('lk-gacha-desc', d); } catch (e) { /* ignore */ }
-    dseg.querySelectorAll('button').forEach(b => { const on = b.dataset.d === d; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); }); requestAnimationFrame(placePins); };
-  dseg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setDesc(b.dataset.d); });
-  dseg.addEventListener('keydown', e => { const i = DESC.findIndex(x => x[0] === descStyle), d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-    if (d) { e.preventDefault(); setDesc(DESC[(i + d + 3) % 3][0], true); } });
+  const dsel = $('#descSel'); dsel.value = descStyle;
+  dsel.addEventListener('change', () => { descStyle = dsel.value; document.documentElement.dataset.desc = descStyle;
+    try { localStorage.setItem('lk-gacha-desc-v2', descStyle); } catch (e) { /* ignore */ } requestAnimationFrame(placePins); });
   new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
   const tgDemo = $('#tgDemo'); if (RM) tgDemo.setAttribute('aria-pressed', 'false');
   tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
@@ -1422,24 +1517,19 @@ function sections() {
   tgFx.addEventListener('click', () => { const on = tgFx.getAttribute('aria-pressed') !== 'true'; tgFx.setAttribute('aria-pressed', on); $('#featStage').classList.toggle('plain', !on); });
   $('#tgFlip').addEventListener('click', () => feat.classList.toggle('down'));
 
-  // 4 anatomy
-  const anatAsset = usingSamples ? byKey('s2') : byKey('p2');
-  anat = makeCard(anatAsset, 'ssr', { serial: 'No. 3 / 10' }); anat.classList.add('show-serial'); setTier(anat, 'ssr');
-  anatHolder = $('#anatCard'); anatHolder.appendChild(anat);
+  // 4 anatomy — both layouts, switchable
+  anatHolder = $('#anatCard');
+  const aseg = $('#anatSeg');
+  aseg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) renderAnat(b.dataset.l); });
+  renderAnat('fa');
   const fl = $('#fields');
-  FIELDS.forEach((f, i) => {
-    fl.insertAdjacentHTML('beforeend', `<li data-i="${i}" tabindex="0"><span class="k">${i + 1}</span><b>${f[1]}${f[4] ? `<span class="tag">${f[4]}</span>` : ''}</b><span>${f[2]}${f[3] ? `<i>${esc(f[3] === '@' ? anatAsset.title : f[3])}</i>` : ''}</span></li>`);
-    anatHolder.insertAdjacentHTML('beforeend', `<span class="pin" data-i="${i}">${i + 1}</span>`);
-  });
-  new ResizeObserver(placePins).observe(anatHolder);
   const hot = li => anatHolder.querySelectorAll('.pin').forEach(p => p.classList.toggle('hot', !!li && p.dataset.i === li.dataset.i));
   fl.addEventListener('pointerover', e => hot(e.target.closest('li'))); fl.addEventListener('pointerleave', () => hot(null)); fl.addEventListener('focusin', e => hot(e.target.closest('li')));
+  new ResizeObserver(placePins).observe(anatHolder);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(placePins);
   placePins(); startDemo();
 }
-function rebuildFeat() { refreshArt(feat); $('.f-title', feat).textContent = featAsset.title; const at = ATTR[featAsset.attr];
-  const ty = $('.f-type', feat); ty.style.setProperty('--c1', at.c1); ty.style.setProperty('--c2', at.c2); ty.innerHTML = `<svg viewBox="0 0 24 24">${at.icon}</svg>`;
-  $('.f-desc', feat).innerHTML = descHTML(featAsset); $('.f-foot', feat).innerHTML = footHTML(featAsset); setTier(feat, feat.dataset.tier); }
+function rebuildFeat() { const fr = $('.front', feat); fr.innerHTML = frontInner(featAsset); feat._cv = $('.f-glit', feat); feat._cw = 0; setTier(feat, feat.dataset.tier); ro.unobserve(feat); ro.observe(feat); }
 function showTier(k, focus) {
   featTier = k; setTier(feat, k); const t = TIERS[TI[k]];
   $('#tierSeg').querySelectorAll('button').forEach(b => { const on = b.dataset.k === k; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); });
@@ -1459,30 +1549,58 @@ function startDemo() { if (!feat || !demoOn || demoRAF || !featVisible) return; 
 function stopDemo() { if (demoRAF) cancelAnimationFrame(demoRAF), demoRAF = 0; feat && feat.classList.remove('demo'); }
 function scheduleDemo() { clearTimeout(demoTimer); if (!demoOn) return; demoTimer = setTimeout(() => { if (!feat.classList.contains('active')) startDemo(); }, 2600); }
 
-const FIELDS = [
-  ['.f-title', '카드 이름', '에셋 제목. 없으면 파일 이름에서 정리', '@'],
-  ['.f-type', '속성', '태그나 분류를 6가지 속성으로 묶어 아이콘과 색으로', ''],
-  ['.f-subj', '튀어나오는 인물 층', '배경을 지운 투명 레이어. SSR부터 틀 밖으로', ''],
-  ['.f-bg', '배경 박', '흰 배경 그림은 등급별 선버스트 박으로 바꿔 깜', ''],
-  ['.f-illus', '인쇄 정보', '작가 · 수집일 · © Lakomics (아래 두 줄)', ''],
-  ['.d-type', '타입 줄', '속성 + 대표 태그 2–3개', ''],
-  ['.d-flavor', '한 줄 글', '직접 적거나 비워 둠', '', '아이디어'],
-  ['.d-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기 표시. 구경용 숫자', '', '아이디어'],
-  ['.f-no', '세트·카드 번호', '세트 LK01 + 에셋마다 고정 번호', ''],
-  ['.f-rar', '등급 마크', '뽑을 때 정해진 등급, 모양 개수로 구분', ''],
-  ['.f-serial', '시리얼', 'UR·LR만. 이 그림으로 나온 몇 번째 카드인지', 'No. 3 / 10'],
+// [selector, name, what fills it, example, tag, pin side, optional fixed point (fraction of card)]
+const FIELDS_FRAME = [
+  ['.f-title', '카드 이름', '에셋 제목. 없으면 파일 이름에서 정리', '@', '', 'L'],
+  ['.f-type', '속성', '태그나 분류를 6가지 속성으로 묶어 아이콘과 색으로', '', '', 'R'],
+  ['.f-bg', '그림 창', '에셋 그림. 흰 배경 그림은 투명 레이어를 등급별 배경 위에', '', '', 'C', [.16, .3]],
+  ['.d-type', '타입 줄', '속성 + 대표 태그 2–3개, 카르투슈 윗변에 박힘', '', '', 'L'],
+  ['.d-flavor', '한 줄 글', '직접 적거나 비워 둠', '', '아이디어', 'L'],
+  ['.d-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기', '', '아이디어', 'L'],
+  ['.f-illus', '인쇄 정보', '작가 · 수집일 · © Lakomics (아래 두 줄)', '', '', 'L'],
+  ['.f-no', '세트·카드 번호', '세트 LK01 + 에셋마다 고정 번호', '', '', 'R'],
+  ['.f-rar', '등급 마크', '뽑을 때 정해진 등급, 모양 개수로 구분', '', '', 'B'],
 ];
+const FIELDS_FA = [
+  ['.fa-medal', '메달', '그림의 얼굴 부분을 둥글게 잘라 보여 줌', '', '', 'L'],
+  ['.f-title', '카드 이름', '은박 글자 + 아래 곡선 띠', '@', '', 'C', [.5, .035]],
+  ['.fa-sub', '작은 줄', '속성 · 대표 태그 하나', '', '', 'C', [.3, .125]],
+  ['.fa-value', '큰 숫자', '감상 횟수. 카드의 대표 숫자', '', '아이디어', 'R'],
+  ['.f-subj', '튀어나오는 인물 층', '배경을 지운 투명 레이어. 이름줄과 테두리 위로', '', '', 'C', [.86, .2]],
+  ['.f-bg', '배경 박', '흰 배경 그림은 등급별 선버스트 박. 어두운 그림은 그대로', '', '', 'C', [.14, .42]],
+  ['.fa-type', '타입 줄', '속성 보석 + 태그 + 앨범 수, 그림 위에 바로', '', '', 'L'],
+  ['.fa-flavor', '한 줄 글', '상자 없이 그림 위에. 밝기 따라 흰 글/검은 글', '', '아이디어', 'L'],
+  ['.fa-stats', '정보 줄', '이중 금속선 사이에 속성 | 앨범 | 즐겨찾기', '', '', 'R'],
+  ['.fa-credit', '인쇄 정보', '작가 · 세트 LK01 · 번호 · 등급 마크 · 시리얼', '', '', 'L'],
+  ['.fa-note', '수집 메모', '수집일과 앨범 수로 만든 짧은 문장', '', '', 'R'],
+  ['.fa-copy', '저작 줄', '© Lakomics · 작가, 아래 테두리 가운데', '', '', 'B'],
+];
+let FIELDS = FIELDS_FA, anatLayout = 'fa';
+function renderAnat(layout) {
+  anatLayout = layout; FIELDS = layout === 'fa' ? FIELDS_FA : FIELDS_FRAME;
+  $('#anatSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', b.dataset.l === layout));
+  if (anat) { cards.delete(anat); ro.unobserve(anat); anat.remove(); }
+  anatHolder.querySelectorAll('.pin').forEach(p => p.remove());
+  const usingSamples = ASSETS[0].key[0] === 's', anatAsset = usingSamples ? byKey('s2') : byKey('p2');
+  anat = makeCard(anatAsset, layout === 'fa' ? 'ssr' : 'r'); anatHolder.prepend(anat);
+  const fl = $('#fields'); fl.innerHTML = '';
+  FIELDS.forEach((f, i) => {
+    fl.insertAdjacentHTML('beforeend', `<li data-i="${i}" tabindex="0"><span class="k">${i + 1}</span><b>${f[1]}${f[4] ? `<span class="tag">${f[4]}</span>` : ''}</b><span>${f[2]}${f[3] ? `<i>${esc(f[3] === '@' ? anatAsset.title : f[3])}</i>` : ''}</span></li>`);
+    anatHolder.insertAdjacentHTML('beforeend', `<span class="pin" data-i="${i}">${i + 1}</span>`);
+  });
+  requestAnimationFrame(placePins);
+}
 function placePins() {
   if (!anat) return; const cb = anat.getBoundingClientRect(), hb = anatHolder.getBoundingClientRect();
   if (!cb.width) return;
-  const L = cb.left - hb.left - 15, Rr = cb.right - hb.left + 15, side = ['L', 'R', 'C', 'C', 'L', 'L', 'L', 'L', 'R', 'B', 'R2'];
+  const L = cb.left - hb.left - 15, Rr = cb.right - hb.left + 15;
   FIELDS.forEach((f, i) => {
-    const t = $(f[0], anat); if (!t) return; const r = t.getBoundingClientRect(), pin = anatHolder.querySelector(`.pin[data-i="${i}"]`), sd = side[i];
-    let x = sd === 'L' ? L : sd === 'R' ? Rr : sd === 'R2' ? Rr + 26 : r.left - hb.left + r.width / 2, y = r.top - hb.top + r.height / 2;
-    if (f[0] === '.f-subj') { x = cb.left - hb.left + cb.width * .9; y = cb.top - hb.top + cb.height * .19; }
-    if (f[0] === '.f-bg') { x = cb.left - hb.left + cb.width * .14; y = cb.top - hb.top + cb.height * .3; }
+    const t = $(f[0], anat), pin = anatHolder.querySelector(`.pin[data-i="${i}"]`); if (!t || !pin) return;
+    const r = t.getBoundingClientRect(), sd = f[5];
+    let x = sd === 'L' ? L : sd === 'R' ? Rr : r.left - hb.left + r.width / 2, y = r.top - hb.top + r.height / 2;
+    if (f[6]) { x = cb.left - hb.left + cb.width * f[6][0]; y = cb.top - hb.top + cb.height * f[6][1]; }
     if (sd === 'B') y = cb.bottom - hb.top + 15;
-    pin.className = 'pin ' + (sd === 'R2' ? 'R' : sd); pin.style.left = x + 'px'; pin.style.top = y + 'px';
+    pin.className = 'pin ' + sd; pin.style.left = x + 'px'; pin.style.top = y + 'px';
   });
 }
 
