@@ -7,9 +7,9 @@ globalThis.LakomicsPickerCss = String.raw`
 .lk{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--p-bg);border-left:1px solid var(--p-line);box-shadow:var(--p-shadow);color:var(--p-text);font:400 15px/20px var(--ui);-webkit-font-smoothing:antialiased;animation:lkIn 200ms var(--ease) both}
 .lk.leaving{animation:lkOut 140ms var(--ease) both}
 .tree-section{padding:8px 12px 4px;color:var(--p-muted);font-size:12px;font-weight:600}
-.lk .ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-.lk button{font:inherit;color:inherit;cursor:pointer}
-.lk button:focus-visible,.lk [tabindex]:focus-visible,.lk input:focus-visible{outline:2px solid var(--p-focus);outline-offset:-2px}
+.lk .ic,.prev .ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.lk button,.prev button{font:inherit;color:inherit;cursor:pointer}
+.lk button:focus-visible,.prev button:focus-visible,.lk [tabindex]:focus-visible,.lk input:focus-visible{outline:2px solid var(--p-focus);outline-offset:-2px}
 .lk-head{flex:none;display:flex;align-items:center;gap:8px;height:48px;padding:0 8px 0 16px}
 .lk-mark{flex:none;width:14px;height:16px;color:var(--p-accent)}
 .folder{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 12px;border:0;border-radius:4px;background:var(--p-field);text-align:left}
@@ -108,7 +108,10 @@ globalThis.LakomicsPickerCss = String.raw`
 .prev{position:absolute;z-index:25;top:48px;bottom:48px;right:376px;width:min(620px,calc(100vw - 360px - 48px));display:flex;flex-direction:column;border:1px solid var(--p-line);background-color:var(--p-raised);background-image:linear-gradient(var(--p-accent),var(--p-accent)),linear-gradient(var(--p-accent),var(--p-accent)),linear-gradient(var(--p-accent),var(--p-accent)),linear-gradient(var(--p-accent),var(--p-accent));background-repeat:no-repeat;background-size:8px 2px,2px 8px,8px 2px,2px 8px;background-position:left top,left top,right bottom,right bottom;box-shadow:0 1px 3px rgb(0 0 0/.18),0 12px 32px rgb(0 0 0/.24);color:var(--p-text);font:400 15px/20px var(--ui);animation:popIn 140ms var(--ease) both}
 .prev .ph{flex:none;display:flex;align-items:center;gap:8px;height:44px;padding:0 4px 0 12px;border-bottom:1px solid var(--p-line)}
 .prev .ph .pos{font-size:12px;color:var(--p-faint);font-variant-numeric:tabular-nums}
-.prev .ph .sp{flex:1}
+.prev .ph .sp{flex:1;min-width:0}
+.prev .ph>*:not(.sp){flex:none}
+.prev .ph .pclose{width:40px;height:40px;margin-left:auto}
+@media (max-width:1000px){.prev{right:368px;width:calc(100vw - 360px - 16px)}.prev .ph .selbtn .lbl{display:none}}
 .prev .stage{flex:1;min-height:0;position:relative;display:grid;place-items:center;background:color-mix(in srgb,var(--p-bg) 60%,#000 40%)}
 .prev .stage img{max-width:100%;max-height:100%;object-fit:contain;display:block}
 .prev .pnav{position:absolute;top:50%;transform:translateY(-50%);width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:2px;background:var(--p-scrim);color:#fff!important;padding:0}

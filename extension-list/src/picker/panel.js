@@ -440,9 +440,9 @@
       closePreview({ refocus: false });
       s.preview = index;
       const id = item.assetId, number = selection.numberOf(id);
-      const selBtn = h(doc, "button", { type: "button", class: "selbtn", onclick: () => { toggle(id); openPreview(s.preview); } }, number ? h(doc, "span", { class: "num" }, String(number)) : h(doc, "span", { class: "box" }), number ? "선택됨" : "선택");
+      const selBtn = h(doc, "button", { type: "button", class: "selbtn", onclick: () => { toggle(id); openPreview(s.preview); } }, number ? h(doc, "span", { class: "num" }, String(number)) : h(doc, "span", { class: "box" }), h(doc, "span", { class: "lbl" }, number ? "선택됨" : "선택"));
       ui.prev = h(doc, "div", { class: "prev", role: "dialog", "aria-label": "크게 보기" },
-        h(doc, "div", { class: "ph" }, h(doc, "span", { class: "pos" }, `${index + 1} / ${s.batch.length}`), h(doc, "span", { class: "sp" }), selBtn, h(doc, "button", { type: "button", class: "cbtn sq", "aria-label": "닫기", onclick: () => closePreview() }, icon(doc, "close"))),
+        h(doc, "div", { class: "ph" }, h(doc, "span", { class: "pos" }, `${index + 1} / ${s.batch.length}`), h(doc, "span", { class: "sp" }), selBtn, h(doc, "button", { type: "button", class: "cbtn sq pclose", "aria-label": "크게 보기 닫기", onclick: () => closePreview() }, icon(doc, "close"))),
         h(doc, "div", { class: "stage" }, thumbs.get(id) ? h(doc, "img", { src: thumbs.get(id), alt: "" }) : null,
           index > 0 ? h(doc, "button", { type: "button", class: "pnav l", "aria-label": "이전", onclick: () => openPreview(index - 1) }, icon(doc, "left")) : null,
           index < s.batch.length - 1 ? h(doc, "button", { type: "button", class: "pnav r", "aria-label": "다음", onclick: () => openPreview(index + 1) }, icon(doc, "right")) : null),
