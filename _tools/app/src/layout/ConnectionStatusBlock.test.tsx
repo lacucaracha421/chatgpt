@@ -1,7 +1,7 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import type { LibraryGateway } from "../library/types";
+import type { LibraryGateway, ReleaseCalendar } from "../library/types";
 import { EMPTY_EXCHANGE, type ExchangeSnapshot } from "../exchange/exchangeStore";
 import { ConnectionStatusBlock } from "./ConnectionStatusBlock";
 
@@ -12,6 +12,25 @@ vi.mock("../exchange/exchangeStore", async (original) => {
 });
 
 afterEach(() => { cleanup(); transfer.snapshot = null; });
+
+it("includes the calendar immediately and keeps the last result across reopening and a failed revalidation", async () => {
+  let resolve!: (value: ReleaseCalendar) => void;
+  const calendar = vi.fn().mockReturnValueOnce(new Promise<ReleaseCalendar>((done) => { resolve = done; }))
+    .mockRejectedValueOnce(new Error("offline"));
+  const gateway = { getOnlineCatalogStatus: vi.fn().mockResolvedValue(null), releaseCalendar: { calendar } } as unknown as LibraryGateway;
+  const props = { gateway, authorityHealth: null, onNavigate: vi.fn() };
+  const first = render(<ConnectionStatusBlock {...props} />);
+  const row = screen.getByRole("button", { name: "발매 캘린더 IGDB · TMDB" });
+  expect(row).toHaveAttribute("data-tone", "idle");
+  await act(async () => resolve({ sources: [{ provider: "igdb", fetchedAt: "2026-10-12T03:00:00Z", errorCode: "offline" }] } as ReleaseCalendar));
+  expect(screen.getByRole("button", { name: "발매 캘린더 가져올 수 없음" })).toBe(row);
+  const oldText = row.textContent;
+  first.unmount();
+  render(<ConnectionStatusBlock {...props} />);
+  expect(screen.getByRole("button", { name: "발매 캘린더 가져올 수 없음" }).textContent).toBe(oldText);
+  await act(async () => {});
+  expect(screen.getByRole("button", { name: "발매 캘린더 가져올 수 없음" })).toHaveAttribute("data-tone", "off");
+});
 
 it("lists server, catalog and 발매 캘린더 state and opens the screen that owns each", async () => {
   const gateway = {

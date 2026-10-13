@@ -1,6 +1,6 @@
 # Windows/PowerShell twin of cargo-test.sh for shells where Git Bash cannot start (the Codex
 # Windows sandbox): keep full Cargo output in a log while showing lock waits, failures and hung tests.
-# Usage: pwsh -File scripts/cargo-test.ps1 [-Timeout S] [-Jobs N] [-AllowConcurrent] [-DryRunPreflight]
+# Usage: powershell -File scripts/cargo-test.ps1 [-Timeout S] [-Jobs N] [-AllowConcurrent] [-DryRunPreflight]
 #        [--] <cargo test args...>   (several filters: -- -- <f1> <f2>)
 # No param block: PowerShell's binder rejects a bare `--`, so options are read from $args by hand.
 $ErrorActionPreference = 'Stop'

@@ -11,6 +11,7 @@ import { ArtistCollage } from "./ArtistCollage";
 import { ArtistHub } from "./ArtistHub";
 import { ArtistIndex } from "./ArtistIndex";
 import { UnknownStyleSuggestions, useArtistScopeChrome } from "./ArtistPage";
+import { invalidateArtists } from "./artistStore";
 import type { ArtistDetail, ArtistExcludedFolder, ArtistGateway, ArtistMergeSuggestion, ArtistOverview, ArtistStyleGroup, ArtistSummary, SourceFillPreview } from "./types";
 
 afterEach(() => { vi.useRealTimers(); cleanup(); });
@@ -128,7 +129,37 @@ function ArtistScopeIntro({ view, onNavigate }: { view: AssetView; onNavigate: (
   return <>{useArtistScopeChrome(view, { onNavigate, onPlay: vi.fn(), privacyMode: false })?.intro}</>;
 }
 
+it("reserves the artist statistics and origins before a slow detail read, retaining them on refresh", async () => {
+  const artists = artistGateway();
+  let resolve!: (value: ArtistDetail) => void;
+  artists.detail = vi.fn().mockReturnValue(new Promise<ArtistDetail>((done) => { resolve = done; }));
+  const { container } = render(<LibraryProvider gateway={libraryGateway(artists)}><ArtistScopeIntro view={{ kind: "creator", creatorKey: "artist:moon" }} onNavigate={vi.fn()} /></LibraryProvider>);
+  expect(container.querySelectorAll(".artist-stat")).toHaveLength(4);
+  expect(container.querySelector(".artist-origins")).toBeInTheDocument();
+  expect(container.querySelector(".artist-intro")).toHaveAttribute("aria-busy", "true");
+  await act(async () => resolve({ ...detail, onThisDay: null, longUnseen: null }));
+  expect(screen.getByText("486")).toBeInTheDocument();
+  expect(container.querySelectorAll(".artist-stat")).toHaveLength(4);
+  artists.detail = vi.fn().mockReturnValue(new Promise<ArtistDetail>(() => {}));
+  act(() => invalidateArtists());
+  expect(screen.getByText("486")).toBeInTheDocument();
+  expect(container.querySelector(".artist-intro")).not.toHaveAttribute("aria-busy", "true");
+});
+
 describe("ArtistIndex", () => {
+  it("shows sidebar rows without staggered entrance animations", async () => {
+    const animate = vi.fn();
+    const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      render(<LibraryProvider gateway={libraryGateway(artistGateway())}><ArtistIndex view={{ kind: "artists" }} onNavigate={vi.fn()} /></LibraryProvider>);
+      await screen.findByRole("button", { name: "Rin Kagura 12장" });
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      if (previous) Object.defineProperty(HTMLElement.prototype, "animate", previous);
+      else Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    }
+  });
   it("lists pins, tiers, 작가 미상 and 정리 with counts; the open pinned artist is the slab", async () => {
     const onNavigate = vi.fn();
     render(<LibraryProvider gateway={libraryGateway(artistGateway())}><ArtistIndex view={{ kind: "creator", creatorKey: "artist:moon" }} onNavigate={onNavigate} /></LibraryProvider>);
@@ -222,7 +253,7 @@ describe("style recommendation rows", () => {
 });
 
 describe("ArtistHub", () => {
-  it("enters together with the index list: both are held unseen, then start in the same task", async () => {
+  it("lets the hub grid enter while the sidebar index list appears quietly without an entrance", async () => {
     const played: { part: string; task: number }[] = [];
     let task = 0;
     const animate = vi.fn(function (this: HTMLElement) {
@@ -236,10 +267,10 @@ describe("ArtistHub", () => {
     vi.stubGlobal("CSS", { supports: () => false });
     try {
       render(<LibraryProvider gateway={libraryGateway(artistGateway())}><ArtistIndex view={{ kind: "artists" }} onNavigate={vi.fn()} />{chrome(<ArtistHub view={{ kind: "artists" }} onNavigate={vi.fn()} privacyMode={false} />)}</LibraryProvider>);
-      await waitFor(() => expect(played.map(entry => entry.part)).toEqual(expect.arrayContaining(["index", "grid"])));
-      const parts = played.filter(entry => entry.part !== "other");
-      expect(new Set(parts.map(entry => entry.task))).toEqual(new Set([0]));
-      const held = animate.mock.calls.filter((_call, index) => (animate.mock.contexts[index] as unknown as HTMLElement).matches(".artist-index__artist-row, .artist-card"));
+      await waitFor(() => expect(played.map(entry => entry.part)).toContain("grid"));
+      // User 2026-10-13: the sidebar artist list appears quietly, with no staggered entrance.
+      expect(played.some(entry => entry.part === "index")).toBe(false);
+      const held = animate.mock.calls.filter((_call, index) => (animate.mock.contexts[index] as unknown as HTMLElement).matches(".artist-card"));
       expect(held.length).toBeGreaterThan(0);
       expect(held.every(call => (call as unknown as Keyframe[][])[0][0].visibility === "hidden")).toBe(true);
     } finally {
@@ -322,9 +353,46 @@ describe("ArtistHub", () => {
     ]);
     renderHub({ kind: "artists" }, gateway);
     await screen.findByRole("article", { name: "윤슬 · 3년 전 오늘 저장" });
+    const cell = document.querySelector(".artist-hero-mosaic__cell");
+    const image = cell?.querySelector("img");
     await user.click(screen.getByRole("button", { name: "미라 · 이번 주 새로 저장" }));
     expect(await screen.findByRole("article", { name: "미라 · 이번 주 새로 저장" })).toBeInTheDocument();
     expect(gateway.today).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".artist-hero-mosaic__cell")).toBe(cell);
+    expect(cell?.querySelector("img")).toBe(image);
+    expect(image).toHaveAttribute("src", expect.stringContaining("t1"));
+  });
+
+  it("does not replay a first-image fade when a hero bitmap arrives late", async () => {
+    renderHub({ kind: "artists" });
+    const hero = await screen.findByRole("article", { name: "윤슬 · 3년 전 오늘 저장" });
+    const image = hero.querySelector<HTMLImageElement>(".artist-hero-mosaic__cell img")!;
+    const animate = vi.fn().mockReturnValue({ cancel: vi.fn() });
+    Object.defineProperties(image, {
+      animate: { configurable: true, value: animate },
+      decode: { configurable: true, value: undefined },
+    });
+    fireEvent.load(image);
+    expect(animate).not.toHaveBeenCalled();
+    expect(image.style.opacity).not.toBe("0");
+  });
+
+  it("keeps the selected hero while a new pick is pending", async () => {
+    const gateway = artistGateway();
+    const picks = [
+      { artist: artist("yun", "윤슬"), kind: "anniversary" as const, reason: "3년 전 오늘 저장", assetIds: ["t1"] },
+      { artist: artist("mira", "미라"), kind: "fresh" as const, reason: "이번 주 새로 저장", assetIds: ["m1"] },
+    ];
+    let resolve!: (value: typeof picks) => void;
+    gateway.today = vi.fn().mockResolvedValueOnce(picks).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderHub({ kind: "artists" }, gateway);
+    await screen.findByRole("article", { name: "윤슬 · 3년 전 오늘 저장" });
+    await userEvent.click(screen.getByRole("button", { name: "미라 · 이번 주 새로 저장" }));
+    const hero = screen.getByRole("article", { name: "미라 · 이번 주 새로 저장" });
+    await userEvent.click(screen.getByRole("button", { name: "다시 고르기" }));
+    expect(screen.getByRole("article", { name: "미라 · 이번 주 새로 저장" })).toBe(hero);
+    await act(async () => resolve(picks));
+    expect(screen.getByRole("article", { name: "미라 · 이번 주 새로 저장" })).toBe(hero);
   });
 
   it("다시 고르기 shows another hero even when the server returns the same picks", async () => {

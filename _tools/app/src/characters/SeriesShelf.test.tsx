@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { AssetStableImage } from "../privacy/AssetImage";
 import { SeriesShelf, SERIES_SHELF_CAP_MS } from "./SeriesShelf";
+import { FolderShelf } from "../assets/FolderShelf";
 
 const rect = { top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON() {} };
 let decodes: Map<string, (() => void)[]>;
@@ -130,4 +131,23 @@ it("has no shelf transition styles left", () => {
   const css = readFileSync("src/characters/SeriesBrowser.css", "utf8");
   expect(css).not.toContain("view-transition");
   expect(css).not.toContain("series-shelf-in");
+});
+
+it("keeps the wheel over the shelf from reaching the content pane, also with a strip at its end or with nothing to scroll", () => {
+  const view = render(<SeriesShelf scope="s" privacyKey="false" ready>
+    <FolderShelf label="캐릭터 2" cards={[<article key="a"><button>하나</button></article>, <article key="b"><button>둘</button></article>]} />
+  </SeriesShelf>);
+  const track = view.container.querySelector<HTMLElement>(".home-shelf__track")!;
+  const wheel = (target: Element, init: WheelEventInit) => { const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...init }); target.dispatchEvent(event); return event; };
+  // Nothing to scroll: the shelf still holds the wheel.
+  expect(wheel(track, { deltaY: 40 }).defaultPrevented).toBe(true);
+  expect(wheel(track, { deltaY: -40 }).defaultPrevented).toBe(true);
+  // A strip at its far end releases its own latch after a pause; the pane still does not move.
+  Object.defineProperties(track, { clientWidth: { configurable: true, value: 200 }, scrollWidth: { configurable: true, value: 800 } });
+  track.scrollLeft = 600;
+  expect(wheel(track, { deltaY: 40, timeStamp: 5000 } as WheelEventInit).defaultPrevented).toBe(true);
+  // Over the label row, outside the strip.
+  expect(wheel(view.container.querySelector(".folder-shelf__label")!, { deltaY: 40 }).defaultPrevented).toBe(true);
+  // A pinch-zoom wheel is not ours.
+  expect(wheel(track, { deltaY: 40, ctrlKey: true }).defaultPrevented).toBe(false);
 });

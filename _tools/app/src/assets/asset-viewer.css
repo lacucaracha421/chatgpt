@@ -214,6 +214,15 @@
   pointer-events: none;
 }
 
+/* The asset viewer shows each overlay only in its own pointer zone (shared/viewer/viewerZones.ts); the film strip
+   hides through data-filmstrip-visible. The manga reader keeps the single chrome-hidden switch above. */
+.asset-viewer[data-top-visible="false"] .asset-viewer__topbar,
+.asset-viewer[data-left-visible="false"] .asset-viewer__edge--left,
+.asset-viewer[data-right-visible="false"] .asset-viewer__edge--right {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .asset-viewer__topbar,
 .asset-viewer__edge,
 .asset-viewer__filmstrip {

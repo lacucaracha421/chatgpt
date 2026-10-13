@@ -24,7 +24,7 @@ const SITE_LABEL: Record<string, string> = { "x.com": "x", pixiv: "Pixiv", manua
 const STYLE_PAGE_SIZE = 5;
 const REPOSTER_EXPLANATION = "공식 이미지·스크린샷·스틸컷을 다시 올리는 계정입니다. 켜면 '닮은 작가' 추천 대상에서 빠지고, 작가 목록에서는 '정리' › '퍼온 계정'으로 모입니다. 이미 붙은 이미지는 그대로 둡니다.";
 
-export type ArtistScopeChrome = { title: string; accessory: ReactNode; intro: ReactNode; panel: ReactNode };
+export type ArtistScopeChrome = { title: string; accessory: ReactNode; intro: ReactNode; panel: ReactNode; /** False while the intro is the placeholder: the real one may add a 다시보기 section. */ ready: boolean };
 
 /**
  * Chrome for the gallery of one artist (`creator` views): header title and actions, the
@@ -52,6 +52,7 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
     return {
       title: "작가 미상",
       accessory: null,
+      ready: true,
       intro: <div className="artist-intro artist-intro--unknown">
         <div className="artist-others__filters" role="group" aria-label="작가 미상 거르기">
           {chip(UNKNOWN_NONE, "출처 없음", overview?.unknownNone)}
@@ -84,7 +85,17 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
   return {
     title: summary?.label ?? (error ? "작가" : "…"),
     accessory: null,
-    intro: detail ? <ArtistIntro detail={detail} privacyMode={privacyMode} actions={actions} /> : error ? <p role="alert" className="artist-error artist-intro">{commandErrorMessage(error, "작가를 불러오지 못했습니다.")}</p> : null,
+    ready: Boolean(detail || error),
+    intro: detail ? <ArtistIntro detail={detail} privacyMode={privacyMode} actions={actions} /> : <div className="artist-intro" aria-busy={!error}>
+      <div className="artist-head"><div className="artist-stats" aria-hidden="true">
+        {["저장", "처음 저장", "최근 저장", "출처"].map((label) => <div key={label} className="artist-stat"><span>{label}</span><strong>–</strong></div>)}
+      </div><div className="artist-head__actions" aria-hidden="true" style={{ visibility: "hidden" }}>
+        <Button size="icon" variant="ghost" aria-label="고정" disabled><PinIcon aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" aria-label="작가 편집" disabled><PencilIcon aria-hidden="true" /></Button>
+        <Button size="sm" variant="primary" disabled><PlayIcon aria-hidden="true" />연속 보기</Button>
+      </div></div>
+      <div className="artist-origins">{error ? <span role="alert" className="artist-error">{commandErrorMessage(error, "작가를 불러오지 못했습니다.")}</span> : <span aria-hidden="true">&nbsp;</span>}</div>
+    </div>,
     panel: detail && editOpen ? <ArtistEditPanel key={detail.summary.id} detail={detail} privacyMode={privacyMode} onClose={() => setEditOpen(false)} onNavigate={navigate} /> : null,
   };
 }

@@ -1,9 +1,8 @@
 import { Badge } from "../shared/ui/Badge";
 import { SectionLabel } from "../shared/ui/SectionLabel";
-import { AssetImage } from "../privacy/AssetImage";
+import { AssetStableImage } from "../privacy/AssetImage";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { useMemo, useRef, useState, type ReactNode } from "react";
-import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
+import { useMemo, useState, type ReactNode } from "react";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { createKoreanMatcher } from "../shared/koreanSearch";
@@ -50,12 +49,7 @@ export function ArtistIndex({ view, onNavigate }: { view: AssetView; onNavigate:
   const creator = view.kind === "creator" ? view.creatorKey : null;
   const section = view.kind === "artists" ? view.section ?? "main" : null;
   const styleSuggestionCount = overview?.styleSuggestionCount ?? 0;
-  // The list enters with the hub's thumbnails as one entrance (same start, timing and stagger cap),
-  // once its pinned and main rows are both known and their first thumbnails are decoded.
-  const nav = useRef<HTMLElement>(null);
-  useFirstAppearance(nav, artists.length + (overview?.pinned.length ?? 0), !!overview && !!mainPage.data, "artist-index", ".artist-index__artist-row", undefined, ARTIST_ENTRANCE);
-
-  return <nav ref={nav} className="artist-index" aria-label="작가 목록">
+  return <nav className="artist-index" aria-label="작가 목록">
     <TextInput
       className="artist-index__search-input"
       icon={MagnifyingGlassIcon}
@@ -95,7 +89,7 @@ function ArtistRow({ artist, current, onNavigate }: { artist: ArtistSummary; cur
   return <button type="button" className="workspace-index-link artist-index__link artist-index__artist-row"
     aria-current={current ? "page" : undefined} aria-label={`${artist.label} ${count(artist.assetCount)}장`}
     onClick={() => onNavigate({ kind: "creator", creatorKey: artist.id })}>
-    <span className="artist-index__thumb" aria-hidden="true">{privacyMode ? <span className="privacy-mask" aria-label="비공개 모드"/> : artist.coverAssetIds[0] && <AssetImage src={thumbnailUrl(artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}</span>
+    <span className="artist-index__thumb" aria-hidden="true">{privacyMode ? <span className="privacy-mask" aria-label="비공개 모드"/> : artist.coverAssetIds[0] && <AssetStableImage src={thumbnailUrl(artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" decodeFirst={false} respectReducedMotion draggable={false} />}</span>
     <span className="more-panel__label artist-name">{artist.label}</span>
     <span className="more-panel__count">{count(artist.assetCount)}</span>
   </button>;

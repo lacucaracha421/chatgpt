@@ -7,6 +7,17 @@ import { AssetViewer, VIEWER_CHROME_IDLE_MS } from "./AssetViewer";
 import { AssetInfoPanel } from "./AssetInfoPanel";
 import type { AssetImageText } from "../library/types";
 
+/** Gives the stage a 1200 x 800 box (jsdom measures none) so pointer positions map to the viewer's edge zones. */
+function measureStage() {
+  const stage = document.querySelector<HTMLElement>(".asset-viewer__stage")!;
+  vi.spyOn(stage, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+}
+const CENTRE = { clientX: 600, clientY: 400 };
+const NEAR_BOTTOM = { clientX: 600, clientY: 760 };
+const NEAR_TOP = { clientX: 600, clientY: 20 };
+const NEAR_LEFT = { clientX: 30, clientY: 400 };
+const NEAR_RIGHT = { clientX: 1170, clientY: 400 };
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -147,8 +158,8 @@ it('preserves strip geometry across images and videos and rides above the grown 
     expect(strip.style.bottom).toBe('');
     const stage = document.querySelector('.asset-viewer__media-surface');
     const media = document.querySelector('video')!;
-    vi.spyOn(viewer, 'getBoundingClientRect').mockReturnValue({bottom:800} as DOMRect);
-    fireEvent.pointerMove(viewer, {clientY:700});
+    measureStage();
+    fireEvent.pointerMove(viewer, NEAR_BOTTOM);
     expect(strip).toHaveClass('is-grown');
     expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
     fireEvent.play(media);
@@ -158,14 +169,14 @@ it('preserves strip geometry across images and videos and rides above the grown 
     fireEvent.pause(media);
     expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
     expect(document.querySelector('.video-player')).toHaveAttribute('data-controls-visible', 'true');
-    fireEvent.pointerMove(viewer, {clientY:100});
+    fireEvent.pointerMove(viewer, CENTRE);
     act(() => vi.advanceTimersByTime(220));
     expect(strip).not.toHaveClass('is-grown');
     expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('66px');
     expect(document.querySelector('.asset-viewer__media-surface')).toBe(stage);
     expect(document.querySelector('video')).toBe(media);
     view.rerender(<AssetViewer {...props} activeId="a"/>);
-    fireEvent.pointerMove(viewer, {clientY:700});
+    fireEvent.pointerMove(viewer, NEAR_BOTTOM);
     expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('124px');
     expect(strip).toHaveClass('is-grown');
   } finally { vi.useRealTimers(); }
@@ -369,54 +380,163 @@ it("keeps Left/Right as previous/next for a video hidden by privacy mode", () =>
   expect(onActiveIdChange).toHaveBeenCalledWith("a");
 });
 
-it("fades the title, arrows and actions after idle and restores them on pointer or key activity", () => {
+function zoneState(viewer: HTMLElement) {
+  return {
+    top: viewer.getAttribute("data-top-visible") === "true",
+    left: viewer.getAttribute("data-left-visible") === "true",
+    right: viewer.getAttribute("data-right-visible") === "true",
+    bottom: viewer.getAttribute("data-filmstrip-visible") === "true",
+  };
+}
+const NONE = { top: false, left: false, right: false, bottom: false };
+
+it("shows no overlay on open or while the pointer moves around the centre", () => {
   vi.useFakeTimers();
   try {
-    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")]} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
     const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
-    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
-
-    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS - 1));
-    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
-    act(() => vi.advanceTimersByTime(1));
-    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
-    expect(viewer).toHaveClass("asset-viewer--chrome-hidden");
-
-    fireEvent.pointerMove(viewer);
-    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
-    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
-    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
-
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "f" });
-    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+    measureStage();
+    expect(zoneState(viewer)).toEqual(NONE);
+    fireEvent.pointerMove(viewer, CENTRE);
+    fireEvent.pointerMove(viewer, { clientX: 500, clientY: 300 });
+    expect(zoneState(viewer)).toEqual(NONE);
   } finally {
     vi.useRealTimers();
   }
 });
 
-it("keeps the chrome visible while the pointer rests on the controls or Tab focus is inside them", () => {
+it("shows each overlay only when the pointer is in its own zone and hides it on leaving or after idle", () => {
   vi.useFakeTimers();
   try {
-    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")]} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
     const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
-    const controls = document.querySelector<HTMLElement>(".asset-viewer__topbar")!;
+    measureStage();
 
-    fireEvent.pointerEnter(controls);
+    fireEvent.pointerMove(viewer, NEAR_BOTTOM);
+    expect(zoneState(viewer)).toEqual({ ...NONE, bottom: true });
+    fireEvent.pointerMove(viewer, NEAR_TOP);
+    expect(zoneState(viewer)).toEqual({ ...NONE, top: true });
+    fireEvent.pointerMove(viewer, NEAR_LEFT);
+    expect(zoneState(viewer)).toEqual({ ...NONE, left: true });
+    fireEvent.pointerMove(viewer, NEAR_RIGHT);
+    expect(zoneState(viewer)).toEqual({ ...NONE, right: true });
+    fireEvent.pointerMove(viewer, { clientX: 20, clientY: 20 });
+    expect(zoneState(viewer)).toEqual({ ...NONE, top: true, left: true });
+
+    // Leaving the zone hides the overlay at once.
+    fireEvent.pointerMove(viewer, CENTRE);
+    expect(zoneState(viewer)).toEqual(NONE);
+
+    // Resting inside the zone hides it after the usual idle delay; moving again brings it back.
+    fireEvent.pointerMove(viewer, NEAR_TOP);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS - 1));
+    expect(zoneState(viewer).top).toBe(true);
+    act(() => vi.advanceTimersByTime(1));
+    expect(zoneState(viewer)).toEqual(NONE);
+    fireEvent.pointerMove(viewer, NEAR_TOP);
+    expect(zoneState(viewer).top).toBe(true);
+
+    // Leaving the viewer clears every zone.
+    fireEvent.pointerLeave(viewer);
+    expect(zoneState(viewer)).toEqual(NONE);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("ignores the pointer outside the stage, such as over the docked information panel", () => {
+  vi.useFakeTimers();
+  try {
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} renderInfo={() => <div>info</div>} />);
+    const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "i" });
+    measureStage();
+    expect(screen.queryByRole("button", { name: "이전 자산" })).not.toBeInTheDocument();
+    // The stage ends at x = 1200; the dock sits to the right of it.
+    fireEvent.pointerMove(viewer, { clientX: 1300, clientY: 20 });
+    expect(zoneState(viewer)).toEqual(NONE);
+    fireEvent.pointerMove(viewer, NEAR_TOP);
+    expect(zoneState(viewer).top).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps an overlay shown while the pointer rests on it, until the pointer leaves and the idle delay passes", () => {
+  vi.useFakeTimers();
+  try {
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")]} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+    const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
+    measureStage();
+    const bar = document.querySelector<HTMLElement>(".asset-viewer__topbar")!;
+    const left = screen.getByRole("button", { name: "이전 자산" });
+
+    fireEvent.pointerMove(viewer, NEAR_TOP);
+    fireEvent.pointerEnter(bar);
     act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
-    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
-    fireEvent.pointerLeave(controls);
+    expect(zoneState(viewer).top).toBe(true);
+    fireEvent.pointerLeave(bar);
     act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
-    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
+    expect(zoneState(viewer)).toEqual(NONE);
+
+    fireEvent.pointerMove(viewer, NEAR_LEFT);
+    fireEvent.pointerEnter(left);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+    expect(zoneState(viewer).left).toBe(true);
+    fireEvent.pointerLeave(left);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
+    expect(zoneState(viewer)).toEqual(NONE);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the overlay that holds Tab focus shown, and an open character panel keeps the top bar", () => {
+  vi.useFakeTimers();
+  try {
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} renderCharacterPicker={() => <div>picker</div>} />);
+    const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
+    measureStage();
 
     const close = screen.getByRole("button", { name: "감상 화면 닫기" });
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
     act(() => close.focus());
     act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
-    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+    expect(zoneState(viewer)).toEqual({ ...NONE, top: true });
 
-    fireEvent.pointerMove(viewer);
-    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
-    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
+    // Pointer activity drops the keyboard hold; the pointer is at the centre, so the bar goes.
+    fireEvent.pointerMove(viewer, CENTRE);
+    expect(zoneState(viewer)).toEqual(NONE);
+
+    // A character panel stays open with the pointer elsewhere.
+    fireEvent.pointerMove(viewer, NEAR_TOP);
+    fireEvent.click(screen.getByRole("button", { name: "캐릭터" }));
+    fireEvent.pointerMove(viewer, CENTRE);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+    expect(screen.getByText("picker")).toBeInTheDocument();
+    expect(zoneState(viewer).top).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "캐릭터" }));
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+    expect(zoneState(viewer)).toEqual(NONE);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps a paused video's strip, and hides it while playing even near the bottom (the player's own bar shows)", () => {
+  vi.useFakeTimers();
+  try {
+    render(<AssetViewer items={[videoAsset("v", "v.webm"), asset("b", "b.png")]} activeId="v" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+    const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
+    measureStage();
+    expect(viewer).toHaveAttribute("data-filmstrip-visible", "true");
+    fireEvent.pointerMove(viewer, CENTRE);
+    expect(viewer).toHaveAttribute("data-filmstrip-visible", "true");
+    fireEvent.play(document.querySelector("video")!);
+    fireEvent.pointerMove(viewer, NEAR_BOTTOM);
+    expect(viewer).toHaveAttribute("data-filmstrip-visible", "false");
+    fireEvent.pointerMove(document.querySelector(".video-player")!, NEAR_BOTTOM);
+    expect(document.querySelector(".video-player")).toHaveAttribute("data-controls-visible", "true");
   } finally {
     vi.useRealTimers();
   }
@@ -608,10 +728,10 @@ it('grows the strip near the bottom and shrinks after the pointer leaves', () =>
   try {
     render(<AssetViewer items={[asset('a','a.png'),asset('b','b.png')]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()}/>);
     const viewer=document.querySelector<HTMLElement>('.asset-viewer')!;
-    vi.spyOn(viewer,'getBoundingClientRect').mockReturnValue({bottom:800} as DOMRect);
-    fireEvent.pointerMove(viewer,{clientY:700});
+    measureStage();
+    fireEvent.pointerMove(viewer,NEAR_BOTTOM);
     expect(screen.getByRole('navigation',{name:'주변 자산'})).toHaveClass('is-grown');
-    fireEvent.pointerMove(viewer,{clientY:100});
+    fireEvent.pointerMove(viewer,CENTRE);
     act(()=>vi.advanceTimersByTime(220));
     expect(screen.getByRole('navigation',{name:'주변 자산'})).not.toHaveClass('is-grown');
   } finally {vi.useRealTimers();}

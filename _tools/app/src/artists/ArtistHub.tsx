@@ -1,7 +1,7 @@
 import { Badge } from "../shared/ui/Badge";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
-import { AssetImage } from "../privacy/AssetImage";
+import { AssetImage, AssetStableImage } from "../privacy/AssetImage";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { ARTIST_ENTRANCE } from "./ArtistIndex";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -285,8 +285,8 @@ function HeroMosaic({ assetIds, assetCount, privacyMode }: { assetIds: string[];
   const extra = ids.length > 0 ? Math.max(0, assetCount - ids.length) : 0;
   const count = cells.length;
   return <span className={`artist-hero-mosaic artist-hero-mosaic--n${count}`} aria-hidden="true">
-    {cells.map((assetId, index) => <span key={`${assetId ?? "empty"}-${index}`} className={`artist-hero-mosaic__cell${extra > 0 && index === cells.length - 1 ? " artist-hero-mosaic__cell--more" : ""}`}>
-      {assetId && !privacyMode && <AssetImage src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
+    {cells.map((assetId, index) => <span key={index} className={`artist-hero-mosaic__cell${extra > 0 && index === cells.length - 1 ? " artist-hero-mosaic__cell--more" : ""}`}>
+      {assetId && !privacyMode && <AssetStableImage src={thumbnailUrl(assetId)} alt="" loading="eager" decoding="async" decodeFirst={false} respectReducedMotion draggable={false} />}
       {extra > 0 && index === cells.length - 1 && <Badge variant="scrim">+{formatCount(extra)}</Badge>}
     </span>)}
   </span>;
@@ -304,13 +304,20 @@ function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; priva
   const { localDate, offsetMinutes } = localDateAndOffset();
   const fetched = useArtistRead((gateway) => gateway.today(localDate, offsetMinutes, seed, []), `today:${localDate}:${seed}`).data;
   // Keep the current picks on screen while 다시 고르기 loads the next ones.
-  const [lastRows, setLastRows] = useState<typeof fetched>(null);
-  useEffect(() => { if (fetched) setLastRows(fetched); }, [fetched]);
-  const rows = fetched ?? lastRows;
+  const [lastPick, setLastPick] = useState<{ rows: NonNullable<typeof fetched>; seed: number } | null>(null);
+  useEffect(() => {
+    if (fetched) {
+      if (lastPick && lastPick.seed !== seed) setHeroId(null);
+      setLastPick({ rows: fetched, seed });
+    }
+  }, [fetched, seed]);
+  const rows = fetched ?? lastPick?.rows;
+  const shownSeed = fetched ? seed : lastPick?.seed ?? seed;
   if (rows && rows.length === 0) return null;
   // A day often has one candidate per kind, so the server's re-pick can return the same rows;
   // 다시 고르기 also moves the hero along the rows so it always visibly changes.
-  const hero = rows?.find((row) => row.artist.id === heroId) ?? (rows?.length ? rows[seed % rows.length] : undefined);
+  const selectedId = fetched && lastPick && lastPick.seed !== seed ? null : heroId;
+  const hero = rows?.find((row) => row.artist.id === selectedId) ?? (rows?.length ? rows[shownSeed % rows.length] : undefined);
   if (!hero) return <section className="artist-today" aria-label="오늘">
     <div className="artist-section-head">
       <SectionLabel className="workspace-section-label" title={`오늘 · ${displayDate(localDate, new Date(`${localDate}T12:00:00`))}`} />
@@ -320,7 +327,7 @@ function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; priva
   return <section className="artist-today" aria-label="오늘">
     <div className="artist-section-head">
       <SectionLabel className="workspace-section-label" title={`오늘 · ${displayDate(localDate, new Date(`${localDate}T12:00:00`))}`} />
-      <Button size="sm" variant="ghost" onClick={() => { setHeroId(null); setSeed((value) => value + 1); }}><ArrowPathIcon aria-hidden="true" />다시 고르기</Button>
+      <Button size="sm" variant="ghost" onClick={() => setSeed((value) => value + 1)}><ArrowPathIcon aria-hidden="true" />다시 고르기</Button>
     </div>
     {hero && <article className="artist-today__hero" aria-label={`${hero.artist.label} · ${hero.reason}`}>
       <button type="button" className="artist-hero-mosaic-button" aria-label={`${hero.artist.label} 작가 페이지`} onClick={() => onNavigate({ kind: "creator", creatorKey: hero.artist.id })}>

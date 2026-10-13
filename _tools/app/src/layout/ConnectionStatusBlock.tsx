@@ -9,6 +9,9 @@ import { noteDateLabel } from "../notes/format";
 type Tone = "ok" | "busy" | "idle" | "off";
 export type ConnectionRow = { key: string; label: string; value: string; time?: string; tone: Tone; view: AssetView };
 
+// Reopening the status panel keeps its last calendar result while the read revalidates.
+const lastCalendars = new WeakMap<LibraryGateway, ReleaseCalendar>();
+
 /**
  * 연결 in the 상태 panel (moved from the Home index, 2026-09-28): server, tablet, cloud,
  * catalog and 발매 캘린더, one line each. Read when the panel opens.
@@ -18,14 +21,22 @@ export function useConnectionRows({ gateway, cloud, authorityHealth, active = tr
 }): ConnectionRow[] {
   const transfer = useExchangeSnapshot(exchangeStore);
   const [catalog, setCatalog] = useState<CatalogStatus | null>(null);
-  const [ownCalendar, setCalendar] = useState<ReleaseCalendar | null>(null);
+  const [ownCalendar, setCalendar] = useState<{ gateway: LibraryGateway; value: ReleaseCalendar } | null>(null);
   const readCalendar = sharedCalendar === undefined;
-  const calendar = readCalendar ? ownCalendar : sharedCalendar;
+  const calendar = sharedCalendar ?? (ownCalendar?.gateway === gateway ? ownCalendar.value : null) ?? lastCalendars.get(gateway);
+  useEffect(() => {
+    if (sharedCalendar) lastCalendars.set(gateway, sharedCalendar);
+  }, [gateway, sharedCalendar]);
   useEffect(() => {
     if (!active) return;
     let live = true;
     void Promise.resolve().then(() => gateway.getOnlineCatalogStatus()).then((value) => { if (live) setCatalog(value ?? null); }, () => undefined);
-    if (readCalendar) void gateway.releaseCalendar?.calendar().then((value) => { if (live) setCalendar(value ?? null); }, () => undefined);
+    if (readCalendar) void gateway.releaseCalendar?.calendar().then((value) => {
+      if (live && value) {
+        lastCalendars.set(gateway, value);
+        setCalendar({ gateway, value });
+      }
+    }, () => undefined);
     return () => { live = false; };
   }, [gateway, active, readCalendar]);
 
@@ -50,11 +61,11 @@ export function useConnectionRows({ gateway, cloud, authorityHealth, active = tr
     const time = catalog.lastSuccessAt ? noteDateLabel(catalog.lastSuccessAt, at) : undefined;
     rows.push({ key: "catalog", label: "카탈로그", value: catalog.lastError ? "갱신 실패" : "갱신 완료", time, tone: catalog.lastError ? "off" : "ok", view: { kind: "settings", section: "catalog" } });
   }
-  if (calendar) {
-    const fetched = calendar.sources.map((source) => source.fetchedAt).filter((value): value is string => Boolean(value)).sort().reverse()[0];
-    const failed = calendar.sources.some((source) => source.errorCode);
+  if (calendar || gateway.releaseCalendar || !readCalendar) {
+    const fetched = calendar?.sources.map((source) => source.fetchedAt).filter((value): value is string => Boolean(value)).sort().reverse()[0];
+    const failed = calendar?.sources.some((source) => source.errorCode);
     rows.push({ key: "calendar", label: "발매 캘린더", value: failed ? "가져올 수 없음" : "IGDB · TMDB",
-      time: fetched ? `${noteDateLabel(fetched, at)}${failed ? " 기준" : ""}` : undefined, tone: failed ? "off" : "ok", view: { kind: "settings", section: "connection" } });
+      time: fetched ? `${noteDateLabel(fetched, at)}${failed ? " 기준" : ""}` : undefined, tone: failed ? "off" : calendar ? "ok" : "idle", view: { kind: "settings", section: "connection" } });
   }
   return rows;
 }

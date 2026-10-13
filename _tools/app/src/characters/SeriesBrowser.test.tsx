@@ -151,7 +151,8 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   const rendered = render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
   const navigateToCharacter = (id?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId: id })}</LibraryProvider>);
   const navigateToGroup = (id: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { groupId: id })}</LibraryProvider>);
-  return {api,browse,confirmSource,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter,navigateToGroup};
+  const showTargets = (next: CharacterTarget[]) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targets: next })}</LibraryProvider>);
+  return {api,targets,showTargets,browse,confirmSource,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange,navigateToCharacter,navigateToGroup};
 }
 
 it.each(["group", "character"])("keeps the active kind chip when opening a %s and resets the empty gallery", async destination => {
@@ -232,34 +233,68 @@ it("keeps the character screen until the returning folder page and shelf thumbna
   expect(screen.getByRole("button", { name: "히나 열기" }).querySelector("img")).toBe(shelfImage);
 });
 
-it("publishes a ready segment and its count only inside the shared swap callback", async () => {
+it("swaps 미분류 and 전체 in one quiet step once the new page is ready", async () => {
   const mounted = await mount();
   await screen.findByRole("option", { name: "이미지 5.webp" });
   const scroller = document.querySelector<HTMLElement>('.asset-gallery__scroll')!;
   scroller.scrollTop = 80; fireEvent.scroll(scroller);
-  let commit!: () => void;
-  const swap = vi.spyOn(viewSwap, "swapSegment").mockImplementation((_owner, options) => { commit = options.commit; return null; });
-  vi.spyOn(viewportImages, "preloadImages").mockResolvedValue(undefined);
+  const swap = vi.spyOn(viewSwap, "swapSegment");
+  let ready: (() => void) | undefined;
+  vi.spyOn(viewportImages, "preloadImages").mockImplementation(() => new Promise<void>(resolve => { ready = resolve; }));
   mounted.browse.mockResolvedValue({ items: Array.from({ length: 113 }, (_, index) => ({ ...fixtureAssets[index % fixtureAssets.length], id: `all-${index}` })), nextCursor: null, totalCount: 113 });
   await userEvent.click(screen.getByRole("radio", { name: "전체" }));
-  await waitFor(() => expect(swap).toHaveBeenCalled());
+  await waitFor(() => expect(ready).toBeDefined());
+  // The old page and its count stay until the new first screen is ready.
   expect(scroller.scrollTop).toBe(80);
   expect(screen.getByRole("radio", { name: "미분류 13" })).toHaveAttribute('aria-checked', 'true');
-  expect(swap).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ target: scroller, still: document.querySelector('.folder-filter'), forward: true }));
-  act(() => commit());
+  await act(async () => { ready!(); ready = undefined; });
   expect(screen.getByRole("radio", { name: "전체 113" })).toHaveAttribute('aria-checked', 'true');
   expect(scroller.scrollTop).toBe(80);
   expect(document.querySelector('.asset-gallery__folder-snapshot')).toBeNull();
   mounted.browse.mockResolvedValue({ items: [fixtureAssets[5]], nextCursor: null, totalCount: 1 });
   await userEvent.click(screen.getByRole("radio", { name: "미분류" }));
-  await waitFor(() => expect(swap).toHaveBeenCalledTimes(2));
-  expect(scroller.scrollTop).toBe(80);
   expect(screen.getByRole("radio", { name: "전체 113" })).toHaveAttribute('aria-checked', 'true');
-  expect(swap).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ forward: false }));
-  act(() => commit());
+  await waitFor(() => expect(ready).toBeDefined());
+  await act(async () => { ready!(); ready = undefined; });
   expect(screen.getByRole("radio", { name: "미분류 1" })).toHaveAttribute('aria-checked', 'true');
   expect(scroller.scrollTop).toBe(0);
-  expect(document.querySelector('.asset-gallery__folder-snapshot')).toBeNull();
+  expect(swap).not.toHaveBeenCalled();
+});
+
+it("offers 다른 시리즈로 이동… for a character, lists nested series, and opens the character in its new series once the hub lists it", async () => {
+  const { targets, showTargets, navigate, changed, browse } = await mount("hina");
+  const hina = targets.find(target => target.id === "hina")!;
+  const invoke = vi.mocked(tauriCore.invoke).mockImplementation((async (command: string) => {
+    if (command === "character_series") return ["series", "machines"].map(classificationId => ({ classificationId, autoClassify: true, heroAssetId: null }));
+    if (command === "character_series_move_preview") return { targetId: "hina", destinationId: "machines", assetCount: 4, relocationCount: 4, sharedCount: 0, groupName: null, token: "t" };
+    if (command === "move_character_to_series") return { ...hina, seriesClassificationId: "machines" };
+    return undefined;
+  }) as typeof tauriCore.invoke);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "캐릭터 더보기" }));
+  await user.click(screen.getByRole("menuitem", { name: "다른 시리즈로 이동…" }));
+  const dialog = await screen.findByRole("dialog", { name: "히나 · 다른 시리즈로 이동" });
+  const select = within(dialog).getByRole("combobox", { name: "대상 시리즈" });
+  await waitFor(() => expect(select).toBeEnabled());
+  // The open series is excluded; the nested registered series is offered.
+  expect(within(select).getAllByRole("option").map(option => option.textContent)).toEqual(["시리즈 선택", "블루 아카이브 / 기체"]);
+  await user.selectOptions(select, "machines");
+  await user.click(await within(dialog).findByRole("button", { name: "이동" }));
+  await waitFor(() => expect(changed).toHaveBeenCalled());
+  expect(invoke).toHaveBeenCalledWith("move_character_to_series", { targetId: "hina", destinationId: "machines", token: "t" });
+  expect(screen.queryByRole("dialog", { name: "히나 · 다른 시리즈로 이동" })).toBeNull();
+  // Until the hub lists the character in the new series, this view stays as it is: no reload, no navigation.
+  const loads = browse.mock.calls.length;
+  expect(navigate).not.toHaveBeenCalled();
+  showTargets(targets.map(target => target.id === "hina" ? { ...target, seriesClassificationId: "machines" } : target));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: "classification", classificationId: "machines", characterId: "hina" }));
+  expect(browse.mock.calls.length).toBe(loads);
+});
+
+it("has no 캐릭터 더보기 menu (so no series move) on a 기타 bucket", async () => {
+  await mount("hina", false, [], undefined, false, { targetOverrides: { role: "extras" } });
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  expect(screen.queryByRole("button", { name: "캐릭터 더보기" })).toBeNull();
 });
 
 it("provides working display settings inside character folders", async () => {

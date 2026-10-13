@@ -22,6 +22,7 @@ import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion
 import { ImageTextMarkers, imageTextMarkerPositions } from "../shared/viewer/ImageTextMarkers";
 import { ImageTextContext } from "../shared/viewer/ImageTextContext";
 import { useDisplayedImage } from "../shared/viewer/useDisplayedImage";
+import { NO_VIEWER_ZONES, sameViewerZones, viewerZonesAt, viewerZonesShown, type ViewerZoneSet } from "../shared/viewer/viewerZones";
 import { useImageText } from "../shared/viewer/useImageText";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { artistHandle } from "../artists/format";
@@ -44,7 +45,7 @@ import { pcViewerClosed, pcViewerOpened } from "../shared/pcPerfLog";
 import { VIDEO_SEEK_STEP_SECONDS, VideoPlayer, type VideoPlayerHandle } from "../video/VideoPlayer";
 import { assetThumbnailUrl, assetUrl, vaultAssetUrl, vaultThumbnailUrl } from "./mediaUrl";
 
-/** Title, navigation arrows and actions fade out after this much pointer/keyboard idle time. */
+/** An overlay (top bar, arrows, film strip) fades out after this much pointer idle time inside its zone. */
 export const VIEWER_CHROME_IDLE_MS = 1_200;
 export const VIEWER_MAX_ZOOM = 8;
 const WHEEL_STEP_DELTA = 40;
@@ -163,9 +164,14 @@ export function AssetViewer({
   const chromeRef = useRef<HTMLDivElement>(null);
   const favoriteButtonRef = useRef<HTMLButtonElement>(null);
   const chromeTimerRef = useRef<number | null>(null);
-  const pointerOverChromeRef = useRef(false);
+  // Overlays show only while the pointer is in their own zone (`viewerZones.ts`), or while held: pointer on the
+  // overlay, keyboard focus in it, an open menu or character panel (top bar), an active strip drag.
+  const pointerZonesRef = useRef<ViewerZoneSet>(NO_VIEWER_ZONES);
+  const pointerOverRef = useRef({ top: false, left: false, right: false });
+  const characterOpenRef = useRef(false);
+  characterOpenRef.current = characterOpen;
   const keyboardFocusRef = useRef(false);
-  const [chromeVisible, setChromeVisible] = useState(true);
+  const [zones, setZones] = useState<ViewerZoneSet>(NO_VIEWER_ZONES);
   const viewerOpen = Boolean(asset);
   const total = totalCount != null && Number.isFinite(totalCount) && totalCount >= items.length ? totalCount : items.length;
   const showFilmstrip = Boolean(asset && items.length > 1);
@@ -205,17 +211,33 @@ export function AssetViewer({
   const openText = () => { setInfoOpen(true); setTextOpen(true); };
   const toggleText = () => { if (infoOpen && textOpen) setTextOpen(false); else openText(); };
 
-  const revealChrome = useCallback(() => {
-    setChromeVisible(true);
+  /** Recomputes which overlays are shown; returns whether an open menu or panel holds the top bar (nothing announces when that ends, so the idle clock re-checks). */
+  const refreshZones = useCallback(() => {
+    const root = chromeRef.current;
+    const focusIn = (selector: string) => keyboardFocusRef.current && Boolean(root?.querySelector(selector)?.contains(document.activeElement));
+    const menuOpen = characterOpenRef.current || Boolean(root?.querySelector('.asset-viewer__topbar .ui-menu__trigger[data-state="open"]'));
+    const next = viewerZonesShown(pointerZonesRef.current, {
+      top: pointerOverRef.current.top || menuOpen || focusIn(".asset-viewer__topbar"),
+      left: pointerOverRef.current.left || focusIn(".asset-viewer__edge--left"),
+      right: pointerOverRef.current.right || focusIn(".asset-viewer__edge--right"),
+      bottom: stripActive.current || focusIn(".asset-viewer__filmstrip"),
+    });
+    setZones((current) => sameViewerZones(current, next) ? current : next);
+    return menuOpen;
+  }, []);
+
+  /** Starts the idle clock: when it runs out the pointer no longer counts as being in a zone. */
+  const armIdle = useCallback(() => {
     if (chromeTimerRef.current !== null) window.clearTimeout(chromeTimerRef.current);
     chromeTimerRef.current = window.setTimeout(() => {
       chromeTimerRef.current = null;
-      // Stay visible while the pointer rests on a control or a Tab-focused control shows its focus ring.
-      if (pointerOverChromeRef.current || stripActive.current) return;
-      if (keyboardFocusRef.current && chromeRef.current?.contains(document.activeElement)) return;
-      setChromeVisible(false);
+      pointerZonesRef.current = NO_VIEWER_ZONES;
+      if (refreshZones()) armIdle();
     }, VIEWER_CHROME_IDLE_MS);
-  }, []);
+  }, [refreshZones]);
+
+  /** Keeps the overlays the pointer or keyboard is using alive for another idle period. */
+  const revealChrome = useCallback(() => { refreshZones(); armIdle(); }, [armIdle, refreshZones]);
 
   useEffect(() => () => clearTimeout(stripGrowTimer.current), []);
   useEffect(() => () => clearTimeout(textPanTimer.current), []);
@@ -235,12 +257,12 @@ export function AssetViewer({
       nearEndLengthRef.current = null;
       return;
     }
-    revealChrome();
     return () => {
       if (chromeTimerRef.current !== null) window.clearTimeout(chromeTimerRef.current);
       chromeTimerRef.current = null;
+      pointerZonesRef.current = NO_VIEWER_ZONES;
     };
-  }, [revealChrome, viewerOpen]);
+  }, [viewerOpen]);
 
   useEffect(() => {
     setTextSelection(null);
@@ -300,7 +322,7 @@ export function AssetViewer({
   const next = items[index + 1];
   const move = (target: AssetSummary | undefined) => { if (target) onActiveIdChange(target.id); };
   const seekable = asset.media.kind === "video" && !privacyMode;
-  const filmstripVisible = showFilmstrip && !videoPlaying && (chromeVisible || seekable);
+  const filmstripVisible = showFilmstrip && !videoPlaying && (zones.bottom || seekable);
   const artistLabel = getArtistLabel(asset, artist);
   const dateLabel = [displayDate(asset.collectedAt), displayTime(asset.collectedAt)].filter(Boolean).join(" ");
   const metaLabel = [folderPath, dateLabel].filter(Boolean).join(" · ");
@@ -308,10 +330,10 @@ export function AssetViewer({
     if (infoOpen) { setInfoOpen(false); return; }
     motion.close();
   };
-  const chromeHover = {
-    onPointerEnter: () => { pointerOverChromeRef.current = true; setChromeVisible(true); },
-    onPointerLeave: () => { pointerOverChromeRef.current = false; revealChrome(); },
-  };
+  const overlayHover = (zone: "top" | "left" | "right") => ({
+    onPointerEnter: () => { pointerOverRef.current[zone] = true; refreshZones(); },
+    onPointerLeave: () => { pointerOverRef.current[zone] = false; revealChrome(); },
+  });
   const albumItems = albums?.map((album) => ({ id: album.id, label: album.name, onSelect: () => onAddToAlbum?.(asset, album.id) })) ?? [];
   const folderItems = folders?.map((folder) => ({ id: folder.id, label: breadcrumbPath(folder, folders), onSelect: () => onMoveToFolder?.(asset, folder.id) })) ?? [];
   const closeCharacterPicker = () => setCharacterOpen(false);
@@ -395,17 +417,23 @@ export function AssetViewer({
   >
     <div
       ref={motion.bind}
-      className={`asset-viewer${chromeVisible ? "" : " asset-viewer--chrome-hidden"}${infoOpen ? " asset-viewer--docked" : ""}${videoPlaying ? " asset-viewer--playing" : ""}`}
-      data-chrome-visible={chromeVisible}
+      className={`asset-viewer${infoOpen ? " asset-viewer--docked" : ""}${videoPlaying ? " asset-viewer--playing" : ""}`}
+      data-top-visible={zones.top}
+      data-left-visible={zones.left}
+      data-right-visible={zones.right}
       data-filmstrip-visible={filmstripVisible}
       style={{"--viewer-controls-offset": `${filmstripControlsOffset(124, stripGrown, filmstripVisible)}px`} as CSSProperties}
       onPointerMove={(event) => {
+        const rect = stageRef.current?.getBoundingClientRect();
+        const at = rect ? viewerZonesAt(event.clientX, event.clientY, rect) : NO_VIEWER_ZONES;
+        pointerZonesRef.current = at;
         keyboardFocusRef.current = false; revealChrome();
         if (stripActive.current) return;
-        if (event.clientY > event.currentTarget.getBoundingClientRect().bottom - 210) { clearTimeout(stripGrowTimer.current); stripGrowTimer.current = undefined; setStripGrown(true); }
+        if (at.bottom) { clearTimeout(stripGrowTimer.current); stripGrowTimer.current = undefined; setStripGrown(true); }
         else if (!stripGrowTimer.current) stripGrowTimer.current = setTimeout(() => { stripGrowTimer.current = undefined; setStripGrown(false); }, 220);
       }}
       onPointerDown={() => { keyboardFocusRef.current = false; }}
+      onPointerLeave={() => { pointerZonesRef.current = NO_VIEWER_ZONES; refreshZones(); }}
     >
       <div data-viewer-backdrop className="asset-viewer__backdrop" />
       <div className={`asset-viewer__stage${showFilmstrip ? " asset-viewer__stage--filmstrip" : ""}${seekable ? " asset-viewer__stage--video" : ""}`} ref={attachStage}
@@ -425,7 +453,7 @@ export function AssetViewer({
         onPointerCancel={() => { panRef.current = null; }}
         data-zoomed={zoom.scale > 1 ? "true" : undefined}>
         <div ref={chromeRef} className="asset-viewer__chrome" onFocusCapture={revealChrome} onBlurCapture={revealChrome}>
-          <div className="asset-viewer__topbar" {...chromeHover}>
+          <div className="asset-viewer__topbar" {...overlayHover("top")}>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={motion.close}><ArrowLeftIcon aria-hidden="true" /></Button>
             <span className="asset-viewer__position"><b>{index + 1}</b> / {total.toLocaleString("ko-KR")}</span>
             <span className="asset-viewer__title">
@@ -448,8 +476,8 @@ export function AssetViewer({
             {renderInfo && <Button className={`asset-viewer__vbtn${infoOpen ? " asset-viewer__vbtn--on" : ""}`} size="icon" variant="ghost" aria-label="정보" aria-pressed={infoOpen} onClick={() => setInfoOpen((open) => !open)}><InformationCircleIcon aria-hidden="true" /></Button>}
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="감상 화면 닫기" aria-description="감상 화면 닫기" onClick={motion.close}><XMarkIcon aria-hidden="true" /></Button>
           </div>
-          {previous && <button className="asset-viewer__edge asset-viewer__edge--left" type="button" aria-label="이전 자산" onClick={() => move(previous)} {...chromeHover}><ChevronLeftIcon aria-hidden="true" /></button>}
-          {next && <button className="asset-viewer__edge asset-viewer__edge--right" type="button" aria-label="다음 자산" onClick={() => move(next)} {...chromeHover}><ChevronRightIcon aria-hidden="true" /></button>}
+          {previous && <button className="asset-viewer__edge asset-viewer__edge--left" type="button" aria-label="이전 자산" onClick={() => move(previous)} {...overlayHover("left")}><ChevronLeftIcon aria-hidden="true" /></button>}
+          {next && <button className="asset-viewer__edge asset-viewer__edge--right" type="button" aria-label="다음 자산" onClick={() => move(next)} {...overlayHover("right")}><ChevronRightIcon aria-hidden="true" /></button>}
           {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={124} grown={stripGrown} className="asset-viewer__filmstrip" onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; if (active) setStripGrown(true); revealChrome(); }} renderThumbnail={(_, i) => masked(items[i], requestedPrivacy) ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id, items[i].thumbnailRevision ?? undefined) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
         </div>
         <ViewerMediaContextMenu enabled={Boolean(onSetVideoThumbnail) && asset.media.kind === "video" && !privacyMode}

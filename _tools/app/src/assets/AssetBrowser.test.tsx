@@ -1876,3 +1876,22 @@ describe("plain-folder character picker", () => {
     expect(within(picker).getByRole("option", { name: /히나/ })).toBeInTheDocument();
   });
 });
+
+it("shows an artist page in one step: no gallery until the artist detail (with its 다시보기 section) has arrived", async () => {
+  const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+  let resolveDetail!: (value: unknown) => void;
+  const detail = { summary: { id: "artist:moon", label: "달그림자", displayName: null, keys: [], assetCount: 1, pinned: false, hidden: false, reposter: false, firstSavedAt: null, lastSavedAt: null },
+    members: [], assignments: [], sources: [], mergeSuggestions: [], onThisDay: { total: 3, assetIds: [], yearsAgo: 2, localDate: "2024-10-13" }, longUnseen: null };
+  gateway.artists = new Proxy({ detail: vi.fn(() => new Promise(resolve => { resolveDetail = resolve; })) }, {
+    get: (target, key) => key in target ? (target as Record<PropertyKey, unknown>)[key] : vi.fn().mockResolvedValue(null),
+  }) as unknown as LibraryGateway["artists"];
+  renderBrowser(gateway, { view: { kind: "creator", creatorKey: "artist:moon" } });
+  // The page itself is read first, yet the gallery waits: the intro would otherwise grow under it.
+  await waitFor(() => expect(gateway.listAssets).toHaveBeenCalled());
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.queryByRole("option", { name: "asset-0.png" })).toBeNull();
+  expect(screen.getByLabelText("자산을 불러오는 중")).toBeInTheDocument();
+  await act(async () => resolveDetail(detail));
+  expect(await screen.findByRole("option", { name: "asset-0.png" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "다시보기" })).toBeInTheDocument();
+});

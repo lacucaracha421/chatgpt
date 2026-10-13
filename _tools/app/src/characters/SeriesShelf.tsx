@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { waitForViewportImages } from "../shared/motion/viewportImages";
 
 export const SERIES_SHELF_CAP_MS = 300;
@@ -12,6 +12,7 @@ export function SeriesShelf({ scope, privacyKey, ready, hidden = false, children
   const [shown, setShown] = useState(scope);
   const retained = useRef({ scope, privacyKey, children });
   const next = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const deadline = useRef(0);
   const switching = shown !== scope && retained.current.privacyKey === privacyKey;
   if (!switching) retained.current = { scope, privacyKey, children };
@@ -31,7 +32,17 @@ export function SeriesShelf({ scope, privacyKey, ready, hidden = false, children
     return waitForViewportImages(next.current, () => setShown(scope), Math.max(0, deadline.current - performance.now()));
   }, [scope, switching, ready]);
 
-  return <div className="series-browser__overview series-shelf" style={hidden ? { display: 'none' } : undefined}>
+  // The wheel over the shelf belongs to the shelf: its own strip pans first (and consumes the event);
+  // whatever reaches here (the strip at an end, or nothing to scroll) must not move the content pane.
+  useEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const keepInShelf = (event: WheelEvent) => { if (!event.ctrlKey && !event.defaultPrevented) event.preventDefault(); };
+    node.addEventListener("wheel", keepInShelf, { passive: false });
+    return () => node.removeEventListener("wheel", keepInShelf);
+  }, []);
+
+  return <div ref={root} className="series-browser__overview series-shelf" style={hidden ? { display: 'none' } : undefined}>
     {switching && <div key={shown} inert>{retained.current.children}</div>}
     <div key={scope} ref={next} data-motion-view="series-shelf" aria-hidden={switching || undefined} inert={switching || undefined}
       style={switching ? { position: "absolute", top: 0, left: 0, width: "100%", opacity: 0, pointerEvents: "none" } : undefined}>

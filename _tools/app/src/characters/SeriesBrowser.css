@@ -1,7 +1,7 @@
 .series-browser { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 /* The plain-folder workspace grid (`.asset-browser__workspace`): gallery plus the docked 정보 column. */
 .series-browser__body { min-width: 0; }
-.series-browser__overview { padding: var(--space-5) 0 var(--space-4); }
+/* The series shelf adds no padding of its own: the gallery's inset and the shelf's own bottom margin give the same spacing as a plain folder's shelf. */
 .series-header-actions, .series-breadcrumb { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .series-header-actions { flex-shrink: 0; }
 .character-info-trigger { position: relative; }
@@ -174,6 +174,8 @@
 .series-candidate-review { font-variant-numeric: tabular-nums; }
 .folder-shelf__label.character-group-heading { margin-top: 0; border-top: 0; padding: 0; min-height: var(--line-ui); }
 .folder-shelf__label-row.character-group-heading { margin-top: 0; border-top: 0; }
+/* Header buttons (확인, 제안 숨기기) are taller than the label line; they overflow it centred instead of growing the row, so the shelf starts where a plain folder's does whether or not they show. */
+.folder-shelf__label.character-group-heading .ui-section-label__actions { height: var(--line-ui); }
 .character-group-card__mosaic { box-sizing: border-box; display: grid; width: 100%; aspect-ratio: 3 / 4; gap: 1px; overflow: hidden; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--color-border); }
 .character-group-card__mosaic[data-count="1"] { grid-template-columns: 1fr; }
 .character-group-card__mosaic[data-count="2"] { grid-template-columns: repeat(2, 1fr); }

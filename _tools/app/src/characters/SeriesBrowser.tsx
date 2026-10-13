@@ -10,7 +10,6 @@ import { characterDefinitionRevision, subscribeCharacterDefinitionRevision, NO_S
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { cloneElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactElement, type ReactNode } from "react";
-import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
 import { AreaRequested, READY_CAP_MS } from "../shared/motion/AreaSwitch";
 import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, FunnelIcon, PencilIcon, UserGroupIcon, UserIcon, UserMinusIcon } from "@heroicons/react/24/outline";
@@ -47,6 +46,7 @@ import { ExtrasCard, useExtrasPreviews, useExtrasSuggestions } from "./ExtrasCar
 import { ExtrasPromotionDialog, type ExtrasPromotionApi, type ExtrasPromotionOutcome } from "./ExtrasPromotionDialog";
 import { ExtrasPromotionDone } from "./ExtrasPromotionDone";
 import { SeriesUnregisterDialog } from "./SeriesUnregisterDialog";
+import { CharacterSeriesMove } from "./CharacterSeriesMove";
 import { characterExtrasApi } from "./extrasApi";
 import { extrasTagName } from "./extrasNames";
 import { FolderFilterControl } from "../assets/FolderShelf";
@@ -203,6 +203,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [promoting, setPromoting] = useState(false);
   const [promotionDone, setPromotionDone] = useState<ExtrasPromotionOutcome | null>(null);
   const [unregistering, setUnregistering] = useState(false);
+  // 다른 시리즈로 이동…: the character being moved, then (after the move) the moved target until the hub shows it in its new series.
+  const [movingTarget, setMovingTarget] = useState<CharacterTarget | null>(null);
+  const [movedTarget, setMovedTarget] = useState<CharacterTarget | null>(null);
   const [referenceSuggestionTarget, setReferenceSuggestionTarget] = useState<CharacterTarget | null>(null);
   const [seriesGalleryState, setSeriesGalleryState] = useState<{ seriesId: string; view: SeriesGalleryView }>(() => ({ seriesId: series.classificationId, view: "unclassified" }));
   const [legacyExcludedCount, setLegacyExcludedCount] = useState(0);
@@ -229,13 +232,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [preparedPage, setPreparedPage] = useState<{ scope: string; page: CharacterBrowsePage; token: number } | null>(null);
   const painted = useRef<ReactElement<{ inert?: boolean; 'aria-busy'?: boolean; children?: ReactNode }> | null>(null);
   const host = useRef<HTMLElement>(null);
-  const swapOwner = useRef({});
   const pickerPages = useRef(new Map<string, CharacterBrowsePage>());
   const returnGallery = useRef<{ scope: string; page: CharacterBrowsePage } | null>(null);
   useLayoutEffect(() => {
     setEditor(null); setPicking(null); setConverting(false); setViewer(null); setExternalAsset(null);
     setSelection(emptySelection()); setCharacterOpen(false); setConfirmOpen(false);
-    setPreselect(null); setPromotionTag(null); setPromoting(false); setPromotionDone(null); setUnregistering(false);
+    setPreselect(null); setPromotionTag(null); setPromoting(false); setPromotionDone(null); setUnregistering(false); setMovingTarget(null);
     setReferenceSuggestionTarget(null); setAll(false); setTrashUndo(null); setMessage(null); setEditorError(null); setCharacterNotice(null); setAssignArtistOpen(false);
     pickerPages.current.clear(); returnGallery.current = null;
   }, [series.classificationId]);
@@ -367,7 +369,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (loadedScope.current !== scope) {
       loadedScope.current = scope; setSelection(emptySelection()); setViewer(null);
     }
-    void load(); return () => { ++generation.current; cancelSegmentSwap(swapOwner.current); };
+    // A moved character's old series no longer lists it: keep the painted page until the new series opens.
+    if (!movedTarget) void load(); else { pending.current = false; setLoading(false); }
+    return () => { ++generation.current; };
   }, [scope, galleryRefreshVersion, reload, hubApi]);
   useEffect(() => {
     if (targetId || currentGroup || picking) return;
@@ -703,6 +707,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const characterMenuItems = characterTarget ? [
     ...faultItem,
     ...(characterTarget.ready && !characterTarget.manualOnly ? [{ id: "historical-refresh", label: "과거 미분류 이미지 갱신", disabled: busy, onSelect: () => void requestHistoricalRefresh(characterTarget) }] : []),
+    { id: "move-series", label: "다른 시리즈로 이동…", disabled: busy, onSelect: () => setMovingTarget(characterTarget) },
     { id: "convert-folder", label: "일반 폴더로 전환", disabled: busy, onSelect: () => { setEditor(null); setConverting(true); } },
     ...(!characterTarget.manualOnly ? [{ id: "automatic-recognition", label: "자동 인식 끄기", checked: !characterTarget.enabled, disabled: busy, onSelect: () => void toggleAutomaticRecognition(characterTarget) }] : []),
   ] : [];
@@ -760,15 +765,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       const commit = () => {
         setPage(preparedPage.page); setPageScope(scope); setPreparedPage(null);
       };
-      const segment = pageScope?.replace(/:series-(unclassified|all|excluded):/, ':series:') === scope.replace(/:series-(unclassified|all|excluded):/, ':series:');
-      if (segment) swapSegment(swapOwner.current, {
-        forward: seriesGalleryView === 'all', target: host.current?.querySelector<HTMLElement>('.asset-gallery__scroll'),
-        still: host.current?.querySelector<HTMLElement>('.folder-filter'), commit,
-      });
-      else commit();
+      // 미분류 <-> 전체 swaps like a folder move: the old page stays until this one is ready, then one step, no motion.
+      commit();
     });
     return () => { active = false; };
-  }, [preparedPage, scope, shelfLoading, privacyMode, pageScope, seriesGalleryView, folders, targets, suggestions.rows, suggestionsHidden, galleryLayout]);
+  }, [preparedPage, scope, shelfLoading, privacyMode, pageScope, folders, targets, suggestions.rows, suggestionsHidden, galleryLayout]);
   /**
    * What a switch waits for: the first screen only, gallery tiles first (those with a thumbnail),
    * then the strip cards in view. The rest loads lazily after the commit.
@@ -782,6 +783,15 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     }).slice(0, shelfCardsInView(host.current)).flat() : [];
     return [...new Set([...tiles, ...strip])];
   }
+  // After a move the character is opened in its new series, but only once the hub lists it there: this view
+  // keeps showing the character until then (the lookup is by id), so nothing blanks between the two screens.
+  useEffect(() => {
+    if (!movedTarget) return;
+    const open = () => { setMovedTarget(null); onNavigate({ kind: "classification", classificationId: movedTarget.seriesClassificationId, characterId: movedTarget.id }); };
+    if (targets.some(t => t.id === movedTarget.id && t.seriesClassificationId === movedTarget.seriesClassificationId)) { open(); return; }
+    const timer = window.setTimeout(open, 3000);
+    return () => window.clearTimeout(timer);
+  }, [movedTarget, targets]);
   const content = <section ref={host} className="series-browser" aria-label={focusedName ?? name} aria-busy={loading || shelfLoading || (!error && pageScope !== scope)} onKeyDown={event => {
     if (picking || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
@@ -852,6 +862,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               return <ContextMenu key={target.id} items={[
                 { id: "move-up", label: "위로 이동", disabled: busy || index === 0, onSelect: () => move(-1) },
                 { id: "move-down", label: "아래로 이동", disabled: busy || index === orderedMembers.length - 1, onSelect: () => move(1) },
+                { id: "move-series", label: "다른 시리즈로 이동…", disabled: busy, onSelect: () => setMovingTarget(target) },
               ]}><article className="series-character folder-shelf__card">
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
                 {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : characterCardImage(target) ? <StableImage draggable={false} loading="lazy" src={characterCardImage(target)!} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
@@ -946,6 +957,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         onChanged();
         if (preview?.destinationId) onNavigate({ kind: "classification", classificationId: preview.destinationId });
       }} />}
+    {movingTarget && <CharacterSeriesMove target={movingTarget} entries={classifications} onClose={() => setMovingTarget(null)}
+      onMoved={moved => { setMovingTarget(null); setMovedTarget(moved); onChanged(); }} />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
     {confirmOpen && <ConfirmList onClose={() => { setConfirmOpen(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} sources={confirmSource} decisions={confirmDecisionApi}
       scope={{ series: { id: series.classificationId, name } }} targets={[...targets, ...extras]} classifications={classifications} />}

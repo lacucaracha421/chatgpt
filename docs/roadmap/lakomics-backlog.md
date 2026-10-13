@@ -280,19 +280,19 @@ Status: `IDEA` — user 2026-10-08 selected as a promising **new top-level infor
 ## USER-FEEDBACK-20261013 — PC feedback batch of 2026-10-13
 
 Status: `TODO` — user feedback (PC unless stated; tablet follows where the same screen exists). Numbered as reported.
-1. **Release calendar late:** in the top-bar status button's 연결 list, only the release calendar row appears slightly late.
+1. **Release calendar late:** source fix 2026-10-13 (uncommitted): the row shows from the first render and keeps the last value while revalidating. in the top-bar status button's 연결 list, only the release calendar row appears slightly late.
 2. **작업 panel visibility:** many running jobs are not shown (trimmed earlier for simplicity); without adding notifications, the user wants to see what is running.
 3. **Todo section button:** restyle the "섹션 추가" button to fit the theme and move it next to the existing 복사 / 더보기 buttons.
 4. **Collections toolbar:** merge 정렬, 보기, 별점 etc. into one control (possibly the shared 보기 piece used in 에셋); fold 책등 받기 into it too. Design decision.
-5. **미분류 ↔ 전체:** switching in 에셋 swaps quietly with no animation.
-6. **Viewer overlays:** in the image/asset viewer, the film strip, top bar and side arrows appear only when the pointer moves near them (bottom, top, left/right edges); moving the mouse around the centre keeps only the asset on screen.
-7. **Artists:** the big artist header flashes when it appears; in artist detail the counts at the top arrive late and push the content down; the sidebar artist list should appear quietly with minimal motion.
-8. **Character shelf scroll:** wheel scrolling over the top character-folder shelf in 에셋 scrolls only the shelf, never the content pane; the pane scrolls from the asset area below.
+5. **미분류 ↔ 전체:** source fix 2026-10-13 (uncommitted): no segment fade/slide; one quiet swap once ready (DESIGN.md exception noted). switching in 에셋 swaps quietly with no animation.
+6. **Viewer overlays:** source fix 2026-10-13 (uncommitted): per-zone overlays (`src/shared/viewer/viewerZones.ts`); open question: the strip appears already grown (show zone = grow band). in the image/asset viewer, the film strip, top bar and side arrows appear only when the pointer moves near them (bottom, top, left/right edges); moving the mouse around the centre keeps only the asset on screen.
+7. **Artists:** source fix 2026-10-13 (uncommitted): hero mosaic no late fade/remount, detail intro reserves its space and the gallery waits for the detail (`ready`), sidebar list without entrance. the big artist header flashes when it appears; in artist detail the counts at the top arrive late and push the content down; the sidebar artist list should appear quietly with minimal motion.
+8. **Character shelf scroll:** source fix 2026-10-13 (uncommitted): the shelf consumes every wheel event it receives. wheel scrolling over the top character-folder shelf in 에셋 scrolls only the shelf, never the content pane; the pane scrolls from the asset area below.
 9. **Search convenience:** tag/folder results first — typing 레베카 + Enter jumps straight to the 레베카 tag or folder; natural-language search later in the order. Context-aware per tab (in Collections, Collection results first without natural-language search; the same idea in every tab). The user does not understand the difference between 화면 and 명령 results — rename, merge or explain.
 10. **Character info / reference editor:** the "필요한 인물만 검출" button always appears late; could reference recommendations reinforce references quietly on their own, and could person-detection confirmations be a quiet indicator instead of a prompt?
-11. **기타 folder header:** only 기타 differs from 게임/만화 in the top bar and the spacing around the folder title.
+11. **기타 folder header:** 2026-10-13 (uncommitted): the series shelf had its own 20/16 px padding — removed, and its header buttons no longer grow the label row; bar height and the left line were not reproduced (left line likely the sidebar tree guide) — recheck in the app. only 기타 differs from 게임/만화 in the top bar and the spacing around the folder title.
 12. **Reorder characters/groups:** change the order of the top character folders and groups.
-13. **Move a series folder:** the user wants to move the 레베카 folder from 만화 into the 사이버펑크 folder — user wants the app itself to allow this move (find why it is not possible today and fix it), not a one-off data move.
+13. **Move a series folder:** 2026-10-13 (uncommitted): the existing 다른 시리즈로 이동 dialog had lost its entry in `60d4e3a6`; it is back in the character ⋯ menu and the shelf card menu (레베카 is a character in 만화, 사이버펑크 a registered nested series). the user wants to move the 레베카 folder from 만화 into the 사이버펑크 folder — user wants the app itself to allow this move (find why it is not possible today and fix it), not a one-off data move.
 
 
 <a id="home-redesign-001"></a>

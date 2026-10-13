@@ -60,17 +60,29 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/src/characters/CharacterExtras.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/characters/CharacterManagement.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 1,
       "pillRadius": 0,
       "legacyToken": 7
     },
+    "_tools/app/src/characters/ConfirmList.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/characters/SeriesBrowser.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 2,
       "pillRadius": 0,
-      "legacyToken": 21
+      "legacyToken": 20
     },
     "_tools/app/src/characters/suggestions/CharacterSuggestions.css": {
       "offScaleSpacing": 5,
@@ -408,6 +420,12 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/src/shared/fold.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/shared/launch/launchSplash.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -432,6 +450,12 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/src/shared/motion/arrivalFade.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/shared/motion/viewSwap.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -451,6 +475,12 @@
       "legacyToken": 0
     },
     "_tools/app/src/shared/viewer/CenteredFilmstrip.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/shared/viewer/image-text.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,

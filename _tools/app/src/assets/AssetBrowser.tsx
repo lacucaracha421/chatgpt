@@ -1,7 +1,7 @@
 import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { libraryContextItems } from "./libraryContextItems";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FolderIcon, FunnelIcon } from "@heroicons/react/24/outline";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
@@ -107,6 +107,7 @@ function useStyleSuggestionAssetIds(enabled: boolean) {
   }, [enabled, gateway, revision]);
   return result;
 }
+
 
 
 export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], characterSeries = [], characterExtras = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel, onExitDescriptionSearch }: Props) {
@@ -693,6 +694,13 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
           if (!target || (batchPending && !selection.ids.has(target.id))) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }} ref={resultsRef} data-search-results="" className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
+  // One step, no shift: while the artist intro is still the placeholder, the screen already painted stays as it was
+  // (inert, same element, so nothing remounts); with nothing painted yet, the loading skeleton shows instead of
+  // a gallery whose intro would grow when the detail arrives.
+  const introPending = Boolean(gateway.artists) && artistScope !== null && !artistScope.ready;
+  const paintedResults = useRef<ReactNode>(null);
+  if (!introPending) paintedResults.current = assetResults;
+  const shownResults = introPending ? paintedResults.current ?? <>{folderHead}<Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /></> : assetResults;
   return <section ref={perfHostRef} className="asset-browser" aria-label="저장소" onKeyDown={event => {
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
@@ -708,7 +716,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     {currentFirstError && descriptionQuery === null && <Toast tone="error">{currentFirstError}</Toast>}
     <div className="asset-browser__workspace" data-info-open={inspectorOpen}>
       <div className="asset-browser__gallery">
-        {assetResults}
+        {shownResults}
         {artistScope?.panel}
         <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onFavorite={setSelectionFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}

@@ -36,7 +36,7 @@ npm run tauri -- dev
 The current desktop package and shared mobile frontend are under `_tools/app/`.
 From the repository root, use `bash scripts/check-project.sh` for the full check
 and `bash scripts/cargo-test.sh -- <filter>` for targeted Rust tests; on Windows,
-`pwsh -NoProfile -File scripts/cargo-test.ps1 -- <filter>` is the sandbox alternative.
+`powershell -NoProfile -File scripts/cargo-test.ps1 -- <filter>` is the sandbox alternative.
 
 Use a disposable library for development verification. Read [AGENTS.md](AGENTS.md)
 for repository workflow and production-library boundaries. Android uses its own
