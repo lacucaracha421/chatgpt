@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko" data-numfont="oswald">
+<html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,10 +9,16 @@
 <link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
 <link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
 <link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
-<!-- Card numerals (PW · COST · Count · Lv) only. The app would bundle the chosen OFL font locally. -->
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@800&family=Oswald:wght@700&display=swap">
 <style>
+@font-face { font-family: "Anton"; src: url("fonts/Anton-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+/* Four background treatments, switchable on this prototype via ?variant=. */
+.bg-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; max-width: 520px; }
+.bg-options button { display: flex; flex-direction: column; gap: 7px; padding: 6px; min-width: 0; border: 1px solid var(--c-border); border-radius: var(--r-ctl); color: var(--c-text); background: var(--c-control); font: 500 12px/1.4 var(--f-ui); cursor: pointer; }
+.bg-options button img { width: 100%; height: 56px; object-fit: cover; object-position: 10% 30%; border-radius: 2px; }
+.bg-options button[aria-pressed="true"] { border-color: var(--c-accent); background: var(--c-control-hover); }
+.bg-options button:disabled { opacity: .45; cursor: default; }
+.bg-state { color: var(--c-muted); font-size: 12px; margin: 0; }
+@media (max-width: 460px) { .bg-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* ---------- Registered pointer variables (so they can transition when the pointer leaves) ---------- */
 @property --mx { syntax: '<percentage>'; inherits: true; initial-value: 50%; }
 @property --my { syntax: '<percentage>'; inherits: true; initial-value: 50%; }
@@ -322,10 +328,8 @@ ul.ideas li::marker { color: var(--c-faint); }
 .f-cost { left: 5.4cqw; top: 5.6cqw; width: 13cqw; height: 13cqw; }
 .f-dup { left: 8.6cqw; top: 19.4cqw; width: 8.6cqw; height: 8.6cqw; }
 /* card numerals: one condensed display face, sized by its digit height (--cap) and trimmed to the cap so it centres optically */
-:root { --num-font: "Oswald", "Arial Narrow", "Roboto Condensed", Impact, sans-serif; --num-w: 700; --cap: .83; }
-:root[data-numfont="barlow"] { --num-font: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", Impact, sans-serif; --num-w: 800; --cap: .72; }
-:root[data-numfont="anton"] { --num-font: "Anton", Impact, "Arial Narrow", sans-serif; --num-w: 400; --cap: .88; }
-.num { display: block; font-family: var(--num-font); font-weight: var(--num-w); font-style: normal; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums;
+:root { --num-font: "Anton", Impact, "Arial Narrow", sans-serif; --num-w: 400; --cap: .88; }
+.face .num { display: block; font-family: var(--num-font); font-weight: var(--num-w); font-style: normal; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums;
   text-box: trim-both cap alphabetic; }
 .f-cost .num { font-size: calc(7.3cqw / var(--cap)); }
 .f-dup .num { font-size: calc(4.6cqw / var(--cap)); }
@@ -336,7 +340,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 .f-cost::before { content: "COST"; }
 .f-dup::before { content: "Count"; top: -1.35cqw; font-size: 1.6cqw; letter-spacing: .03em; }
 
-/* top-right: PW (resolution) — big leading digits, small trailing 000 with "PW" printed above them */
+/* top-right: LP (resolution) — big leading digits, small trailing 000 with "LP" printed above them */
 .f-power { right: 6cqw; top: 4.6cqw; display: flex; align-items: flex-end; gap: .5cqw; color: #fff; line-height: 1;
   text-shadow: 0 0 .25cqw #000, 0 0 .25cqw #000, 0 0 .6cqw rgba(0, 0, 0, .7), 0 .3cqw .7cqw rgba(0, 0, 0, .55); }
 .f-power b.num { font-size: calc(7.4cqw / var(--cap)); }
@@ -390,6 +394,7 @@ ul.ideas li::marker { color: var(--c-faint); }
   background-size: 260% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(115% - var(--mx) * 1.3) 0, 0 0;
   filter: drop-shadow(0 0 .15cqw rgba(0, 0, 0, .9)) drop-shadow(0 .2cqw .2cqw rgba(0, 0, 0, .45)); }
 .card { --gold: linear-gradient(180deg, #fff8dc 0%, #f7d77e 28%, #a8711c 50%, #e7bd5c 68%, #fff0bb 100%);
+  --silverdk: linear-gradient(180deg, #1a1f28 0%, #4b5563 28%, #202630 50%, #59616d 68%, #151b24 100%);
   --silver: linear-gradient(180deg, #ffffff 0%, #e6ebf1 28%, #7f8a9c 50%, #d3d9e3 68%, #ffffff 100%);
   --prism: linear-gradient(180deg, #ffffff 0%, #ffe6f2 24%, #8f9bc4 50%, #d8fff0 70%, #fff7e0 100%); }
 
@@ -445,6 +450,10 @@ ul.ideas li::marker { color: var(--c-faint); }
 
 /* Effects off (comparison toggle) */
 .plain .f-sheen, .plain .f-glit, .plain .f-glare, .plain .f-frame::after { display: none; }
+.card.original-art .f-sheen, .card.original-art .f-glit, .card.original-art .f-glare { display: none; }
+/* SSR and SEC omit the outer frame only when there is no cutout layer. */
+.card[data-tier="ur"][data-cut="0"] .f-frame, .card[data-tier="lr"][data-cut="0"] .f-frame { display: none; }
+.card[data-tier="ur"][data-cut="0"] .f-vc, .card[data-tier="lr"][data-cut="0"] .f-vc { color: #fff; text-shadow: 0 0 .25cqw #000, 0 0 .5cqw rgba(0, 0, 0, .8); }
 
 /* Card back */
 .back { background: radial-gradient(90% 70% at 50% 50%, #1f2645 0%, #0d1022 60%, #070914 100%); }
@@ -513,7 +522,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 
   <section aria-labelledby="s1">
     <h2 class="sec" id="s1">등급 사다리 <span class="num">6단계</span></h2>
-    <p class="note">같은 그림 한 장, 같은 뼈대(코스트 · 파워 · 효과 · 이름줄). 등급이 오르면 <b>재질만</b> 바뀝니다. N·R·SR은 카드 스톡 · 백랍 · 건메탈 인쇄, <b>SSR부터는</b> 그림이 테두리까지 차고 패널이 반투명·박으로 바뀌며 인물이 테두리 위를 덮습니다.</p>
+    <p class="note">같은 그림 한 장, 같은 뼈대(코스트 · 파워 · 효과 · 이름줄). 등급이 오르면 <b>재질만</b> 바뀝니다. N·U·S는 카드 스톡 · 백랍 · 건메탈 인쇄, <b>SR부터는</b> 그림이 테두리까지 차고 패널이 반투명·박으로 바뀌며 인물이 테두리 위를 덮습니다.</p>
     <div class="ladder" id="ladder"></div>
     <p class="slabel">카드 뒷면 · 모든 등급 공통</p>
     <div class="backrow">
@@ -534,13 +543,16 @@ ul.ideas li::marker { color: var(--c-faint); }
         <div class="picks" role="radiogroup" aria-label="그림" id="picks"></div>
         <p class="slabel">등급</p>
         <div class="seg" role="radiogroup" aria-label="등급" id="tierSeg"></div>
+        <p class="slabel">배경</p>
+        <div class="bg-options" role="group" aria-label="카드 배경" id="bgOptions"></div>
+        <p class="bg-state" id="bgState" aria-live="polite"></p>
         <div class="tier-head"><span class="code" id="fCode"></span><h3 id="fName"></h3><span class="o" id="fOdds"></span></div>
         <p class="note" id="fDesc"></p>
         <ol class="layers" id="fLayers"></ol>
         <div class="toggles">
           <button class="btn" type="button" id="tgFx" aria-pressed="true"><span class="dot"></span>광택 효과</button>
           <button class="btn" type="button" id="tgDemo" aria-pressed="true"><span class="dot"></span>자동 기울이기</button>
-          <label class="demo-pick">숫자 폰트 <select class="sel" id="numSel"><option value="oswald">Oswald (기본)</option><option value="barlow">Barlow Condensed</option><option value="anton">Anton</option></select></label>
+          <button class="btn" type="button" id="tgOriginal" aria-pressed="false">원본 풀아트</button>
           <button class="btn" type="button" id="tgFlip"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg>뒤집기</button>
         </div>
         <p class="note" style="font-size:13px">광택을 끄면 같은 카드의 맨 상태가 보여, 효과가 얼마나 더해졌는지 비교할 수 있습니다.</p>
@@ -550,7 +562,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 
   <section aria-labelledby="s3">
     <h2 class="sec" id="s3">뽑기</h2>
-    <p class="note">팩을 뜯는 순간 틈새 빛의 색으로 이번 팩의 최고 등급을 살짝 알려 줍니다. 흰색 → 파랑 → 보라 → 금색 → 무지개 순. 오버프레임 이상이 나오면 화면이 번쩍이고 빛줄기와 불꽃이 터집니다.</p>
+    <p class="note">팩을 뜯는 순간 틈새 빛의 색으로 이번 팩의 최고 등급을 살짝 알려 줍니다. 흰색 → 파랑 → 보라 → 금색 → 무지개 순.</p>
     <div class="gacha">
       <div class="stage" id="stage">
         <div class="st-rays"></div>
@@ -573,7 +585,7 @@ ul.ideas li::marker { color: var(--c-faint); }
         <button class="btn lg" type="button" id="skipBtn" hidden>건너뛰기</button>
         <span class="sp"></span>
         <label class="demo-pick">시연용 확정
-          <select class="sel" id="force"><option value="">무작위</option><option value="sr">SR</option><option value="ssr">SSR</option><option value="ur">UR</option><option value="lr">LR</option></select>
+          <select class="sel" id="force"><option value="">무작위</option><option value="sr">S</option><option value="ssr">SR</option><option value="ur">SSR</option><option value="lr">SEC</option></select>
         </label>
       </div>
       <p class="g-summary"><span id="gRes"></span><span class="g-odds" id="gOdds"></span></p>
@@ -583,7 +595,7 @@ ul.ideas li::marker { color: var(--c-faint); }
   <section aria-labelledby="s4">
     <h2 class="sec" id="s4">카드 해부도</h2>
     <p class="note">여섯 등급이 같은 뼈대를 쓰고 재질만 바뀝니다. 칸마다 에셋의 어떤 실제 정보에서 숫자가 나오는지 적었습니다. 원본 파일과 정보는 그대로 두고, 카드는 읽어서 보여 주기만 합니다.</p>
-    <div class="seg" role="radiogroup" aria-label="카드 형태" id="anatSeg" style="max-width:380px"><button type="button" role="radio" data-l="fa" aria-checked="true">박 재질 · SSR 이상</button><button type="button" role="radio" data-l="frame" aria-checked="false">인쇄 재질 · N·R·SR</button></div>
+    <div class="seg" role="radiogroup" aria-label="카드 형태" id="anatSeg" style="max-width:380px"><button type="button" role="radio" data-l="fa" aria-checked="true">박 재질 · SR 이상</button><button type="button" role="radio" data-l="frame" aria-checked="false">인쇄 재질 · N·U·S</button></div>
     <div class="anat">
       <div class="anat-card" id="anatCard"></div>
       <ol class="fields" id="fields"></ol>
@@ -597,9 +609,9 @@ ul.ideas li::marker { color: var(--c-faint); }
       <li><b>파워는 그림 품질</b> — 해상도가 큰 원본일수록 강한 카드. 앨범에 담을수록 +500씩, 같은 작가 3장을 모으면 +2,000.</li>
       <li><b>뽑기권</b> — 하루 무료 1장, 도감에 처음 등록되는 카드마다 +1. 수집하는 습관이 그대로 보상이 되도록.</li>
       <li><b>카드 도감</b> — 작가별·속성별 바인더. 못 뽑은 칸은 흐린 실루엣, 즐겨찾기한 카드는 테두리가 빛남.</li>
-      <li><b>튀어나올 부분</b> — 흰 배경 그림은 배경을 지운 투명 레이어를 한 번 만들어 두면 SSR 이상에서 테두리 위로 나옵니다.</li>
+      <li><b>튀어나올 부분</b> — 밝은 샘플 두 장은 isnet-anime으로 배경을 제거했습니다. 어두운 두 장은 원본 풀아트로 사용합니다.</li>
       <li><b>원본은 그대로</b> — 카드는 에셋을 가리키기만 하고 파일을 복사하거나 바꾸지 않음.</li>
-      <li><b>숫자 폰트</b> — PW · COST · Count · Lv 숫자에만 쓰는 폰트. 데스크톱 앱은 오프라인이라 고른 폰트(OFL 라이선스)를 앱에 직접 넣어 씁니다.</li>
+      <li><b>숫자 폰트</b> — 카드 숫자는 Anton, 설명문은 기존 글꼴을 사용합니다.</li>
     </ul>
   </section>
 </main>
@@ -610,16 +622,17 @@ ul.ideas li::marker { color: var(--c-faint); }
   <p class="zcap">끌어서 기울이기 · Esc로 닫기</p>
 </div>
 
+<script src="backgrounds.js"></script>
 <script>
 (() => {
 'use strict';
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = (s, r = document) => r.querySelector(s);
 const DPR = Math.min(2, window.devicePixelRatio || 1);
-// Numeral face for PW · COST · Count · Lv only (comparison option, remembered per viewer).
-let numFont = 'oswald';
-try { const v = localStorage.getItem('lk-gacha-numfont'); if (/^(oswald|barlow|anton)$/.test(v || '')) numFont = v; } catch (e) { /* storage blocked */ }
-document.documentElement.dataset.numfont = numFont;
+const BACKGROUNDS = window.CardBackgrounds;
+const variantParam = new URLSearchParams(location.search).get('variant');
+let backgroundVariant = BACKGROUNDS.variants.some(v => v.key === variantParam) ? variantParam : 'digital';
+let originalArt = false;
 
 /* ------------------------------------------------------- procedural art
    Every scene is two layers at card size (600×840): a background and a transparent subject.
@@ -1004,25 +1017,26 @@ function buildArt() {
 
 
 /* ------------------------------------------------------------------ data */
+// Material keys preserve the existing six stages; code is the displayed rarity.
 const TIERS = [
   { k: 'n',   code: 'N',   name: '일반',        odds: 55,  glow: '#e9edf3', sym: ['dot'],
     desc: '인쇄 카드 스톡. 그림은 이름줄 위까지, 효과 1줄. 여섯 등급이 모두 같은 뼈대를 씁니다.',
     layers: [['카드 스톡 테두리', '종이 결 + 음각선'], ['코스트 · 보유 · 파워', '모든 등급 같은 자리'], ['효과 1줄', '카르투슈 모양 패널'], ['이름줄', 'Lv · 이름 · 번호·등급']] },
-  { k: 'r',   code: 'R',   name: '레어',        odds: 25,  glow: '#5aa8ff', sym: ['dia'],
+  { k: 'r',   code: 'U',   name: '백랍 인쇄',    odds: 25,  glow: '#5aa8ff', sym: ['dia'],
     desc: '같은 뼈대에 백랍(은회색) 재질과 은박 줄, 은박 이름. 효과 2줄.',
     layers: [['백랍 테두리', '헤어라인 결 + 은박 줄'], ['은박 이름', '빛 따라 하이라이트'], ['효과 2줄', '']] },
-  { k: 'sr',  code: 'SR',  name: '홀로 레어',   odds: 13,  glow: '#b46bff', sym: ['dia', 'dia'],
+  { k: 'sr',  code: 'S',   name: '건메탈 인쇄',  odds: 13,  glow: '#b46bff', sym: ['dia', 'dia'],
     desc: '건메탈 재질과 은 상감. 그림 배경에만 옅은 홀로, 인물은 원래 색 그대로. 효과 2줄.',
     layers: [['건메탈 테두리', '은 상감'], ['배경 홀로', '인물 뒤에만'], ['은가루', '배경에 드문드문'], ['은박 이름', '']] },
-  { k: 'ssr', code: 'SSR', name: '실버 풀아트', odds: 5,   glow: '#ffd25a', sym: ['star'],
+  { k: 'ssr', code: 'SR',  name: '실버 풀아트', odds: 5,   glow: '#ffd25a', sym: ['star'],
     desc: '같은 뼈대가 은박으로 바뀝니다. 그림이 테두리까지 채우고 효과 패널은 반투명, 이름줄은 은박. 인물은 테두리 위를 완전히 덮습니다.',
-    layers: [['은박 테두리', 'N·R·SR과 같은 폭'], ['배경 박', '틀 색 선버스트, 금가루는 테두리에'], ['인물 층', '테두리 위로, 완전 불투명'], ['반투명 효과 패널', '2줄'], ['은박 이름줄', '']] },
-  { k: 'ur',  code: 'UR',  name: '골드 풀아트', odds: 1.8, glow: '#ffb21e', sym: ['star', 'star'],
-    desc: '금박 테두리와 금박 이름줄, 금박 선버스트 위에 인물. 금가루는 배경과 테두리에만. 효과 3줄.',
-    layers: [['금박 테두리 · 이름줄', ''], ['금박 선버스트', '빛 받는 곳이 밝아짐'], ['금가루', '알갱이마다 면 방향이 다름'], ['반투명 효과 패널', '3줄']] },
-  { k: 'lr',  code: 'LR',  name: '별빛 한정',   odds: .2,  glow: 'rainbow', sym: ['spark'],
-    desc: '그림마다 단 1장. 무지갯빛 은 테두리와 이름줄, 별빛 선버스트, 별가루. 시리얼 1 / 1, 효과 3줄.',
-    layers: [['무지갯빛 은 테두리 · 이름줄', '각도 따라 색이 돎'], ['별빛 선버스트', '옅은 박막색'], ['별가루', '큰 알갱이는 십자 빛'], ['시리얼', 'No. 1 / 1']] },
+    layers: [['은박 테두리', 'N·U·S와 같은 폭'], ['선택한 배경', '은박 반사와 가장자리 입자'], ['인물 층', '테두리 위로, 완전 불투명'], ['반투명 효과 패널', '2줄'], ['은박 이름줄', '']] },
+  { k: 'ur',  code: 'SSR', name: '골드 풀아트', odds: 1.8, glow: '#ffb21e', sym: ['star', 'star'],
+    desc: '금박 테두리와 이름줄, 선택한 배경 위에 인물. 금가루는 배경과 테두리에만. 효과 3줄.',
+    layers: [['금박 테두리 · 이름줄', ''], ['선택한 배경', '금박 반사'], ['금가루', '배경과 테두리에만'], ['반투명 효과 패널', '3줄']] },
+  { k: 'lr',  code: 'SEC', name: '별빛 한정',   odds: .2,  glow: 'rainbow', sym: ['spark'],
+    desc: '그림마다 단 1장. 무지갯빛 은 테두리와 이름줄, 선택한 배경에 홀로 반사와 별가루. 시리얼 1 / 1, 효과 3줄.',
+    layers: [['무지갯빛 은 테두리 · 이름줄', '각도 따라 색이 돎'], ['선택한 배경', '옅은 홀로 반사'], ['별가루', '큰 알갱이는 십자 빛'], ['시리얼', 'No. 1 / 1']] },
 ];
 const TI = Object.fromEntries(TIERS.map((t, i) => [t.k, i]));
 const PREMIUM = new Set(['ssr', 'ur', 'lr']);
@@ -1037,13 +1051,13 @@ const ATTR = [
 ];
 // Real samples (scratch testing only; never committed). They load from ./samples/ next to the page and fall back silently.
 const SAMPLE_DEFS = [
-  { key: 's1', art: 'samples/art1.jpg', cut: 'samples/cut1.webp', fit: [-14, -1.2, 124], tint: '#b0246e', best: 'ur', id: 1013, face: '64% 36%', faceSize: '250%',
+  { key: 's1', art: 'samples/art1.webp', cut: 'samples/cut1.webp', fit: [-14, -1.2, 124], tint: '#b0246e', best: 'ur', id: 1013, face: '64% 36%', faceSize: '250%',
     title: '사탕과 주먹', credit: '@loped00', date: '2026.10.13', attr: 2, tags: ['격투가', '경단머리', '사탕'], w: 3000, h: 3000, dup: 2, albums: 3, fav: true },
-  { key: 's2', art: 'samples/art2.jpg', cut: 'samples/cut2.webp', fit: [-24, -1.6, 148], tint: '#a3203c', best: 'ssr', id: 1014, face: '45% 21%', faceSize: '420%',
+  { key: 's2', art: 'samples/art2.webp', cut: 'samples/cut2.webp', fit: [-24, -1.6, 148], tint: '#a3203c', best: 'ssr', id: 1014, face: '45% 21%', faceSize: '420%',
     title: '방울창의 여우', credit: 'NoOne', date: '2026.10.13', attr: 2, tags: ['여우귀', '창', '방울'], w: 4008, h: 4096, dup: 1, albums: 2, fav: true },
-  { key: 's3', art: 'samples/art3.jpg', pos: '50% 40%', protect: [.57, .42, .2, .19], best: 'ur', id: 1015, face: '60% 33%',
+  { key: 's3', art: 'samples/art3.jpg', fullArt: true, pos: '50% 40%', protect: [.57, .42, .2, .19], best: 'ur', id: 1015, face: '60% 33%',
     title: '가면 아래의 노장', credit: 'NoOne', date: '2026.10.13', attr: 1, tags: ['가면', '은발', '유화풍'], w: 1181, h: 1507, dup: 3, albums: 1, fav: false },
-  { key: 's4', art: 'samples/art4.jpg', pos: '68% 50%', protect: [.58, .33, .2, .13], best: 'lr', id: 1016, face: '60% 32%',
+  { key: 's4', art: 'samples/art4.jpg', fullArt: true, pos: '68% 50%', protect: [.58, .33, .2, .13], best: 'lr', id: 1016, face: '60% 32%',
     title: '나비가 깨운 관', credit: '@moudanji', date: '2026.10.13', attr: 1, tags: ['고딕', '나비', '관'], w: 1024, h: 1024, dup: 1, albums: 4, fav: true },
 ];
 const PROC_DEFS = [
@@ -1178,12 +1192,12 @@ const cards = new Set();
 /* Card-game stats from real asset data:
    코스트 ← tier · 보유 / Lv ← duplicates · 파워 ← resolution · 속성 ← dominant colour · 특성 ← tags · effects ← artist, albums, favourite. */
 const powerOf = (w, h) => Math.max(500, Math.floor(w * h / 1e6 * 1000 / 500) * 500);
-const powerHTML = v => v >= 1000 ? `<b class="num">${Math.floor(v / 1000)}</b><span class="pw-tail"><i>PW</i><small class="num">${String(v % 1000).padStart(3, '0')}</small></span>` : `<b class="num">${v}</b><span class="pw-tail"><i>PW</i></span>`;
+const powerHTML = v => v >= 1000 ? `<b class="num">${Math.floor(v / 1000)}</b><span class="pw-tail"><i>LP</i><small class="num">${String(v % 1000).padStart(3, '0')}</small></span>` : `<b class="num">${v}</b><span class="pw-tail"><i>LP</i></span>`;
 function effectsFor(a, tier) {
   const out = [];
   if (a.albums) out.push(['앨범', `담긴 앨범 ${a.albums}곳 · 파워 <b>+${fmt(a.albums * 500)}</b>`]);
   if (a.credit !== 'NoOne') out.push(['작가 연계', '같은 작가 카드 3장을 모으면 파워 <b>+2,000</b>']);
-  if (a.fav) out.push(['즐겨찾기', '즐겨찾기 중이면 등급 테두리가 빛난다']);
+  if (a.fav) out.push(['즐겨찾기', '즐겨찾기 표시가 붙는다']);
   out.push(['첫 수집', '도감에 새로 등록되면 뽑기권 <b>+1</b>']);
   return out.slice(0, { n: 1, r: 2, sr: 2, ssr: 2, ur: 3, lr: 3 }[tier]);
 }
@@ -1266,19 +1280,22 @@ function detectAttr(src) {
 function artPlan(el) {
   const a = el._asset, k = el.dataset.tier;
   const bgOverride = el._ovBg || userBg;
+  const fullArt = originalArt || (bgOverride ? !userFg : !!a.fullArt);
+  if (fullArt) return { bg: bgOverride || a.art || a.scene, pos: a.pos || '50% 50%', cut: null, fit: [0, 0, 100], fade: false, protect: null, lumNeeded: false, fullArt: true };
   let cut = null, fit = [0, 0, 100], fade = false;
   if (el._ovBg) cut = userFg; else if (userFg) cut = userFg; else if (!userBg) { if (a.cut) { cut = a.cut; fit = a.fit; fade = true; } else if (a.subj) cut = a.subj; }
   if (cut === userFg && userFg) { fit = [0, 0, 100]; fade = false; }
   let bg, pos = '50% 50%', protect = null;
   if (bgOverride) { bg = bgOverride; }
-  else if (cut && a.scene && !['ur', 'lr'].includes(k)) bg = a.scene;
-  else if (cut) bg = backdrop(BACKDROP_OF[k], a.tint || '#6a3aa8');
+  else if (cut) bg = BACKGROUNDS.render(backgroundVariant, k, a.tint || '#6a3aa8');
   else { bg = a.art; pos = a.pos || '50% 50%'; protect = a.protect || null; }
   if (cut && bgOverride && !userFg) cut = null;
   return { bg, pos, cut, fit, fade, protect, lumNeeded: !cut };
 }
 function refreshArt(el) {
   const p = artPlan(el), bg = $('.f-bg', el), sj = $('.f-subj', el);
+  el.classList.toggle('original-art', !!p.fullArt);
+  el.classList.toggle('fa', PREMIUM.has(el.dataset.tier) || !!p.fullArt);
   if (bg.getAttribute('src') !== p.bg) bg.src = p.bg;
   el.style.setProperty('--bgpos', p.pos); el.style.setProperty('--tint', el._asset.tint || '#6a3aa8');
   el.dataset.subj = p.cut ? '1' : '0'; el.dataset.cut = p.cut ? '1' : '0';
@@ -1395,7 +1412,13 @@ async function boot() {
     const ok = await Promise.all([loadImg(d.art), d.cut ? loadImg(d.cut) : true]);
     if (ok.every(Boolean)) found.push(d);
   }
-  ASSETS = found.length ? found : PROC_DEFS.map(d => ({ ...d, scene: ART.bg[d.proc], subj: ART.subj[d.proc] }));
+  ASSETS = found.length ? found : await Promise.all(PROC_DEFS.map(async d => {
+    const scene = ART.bg[d.proc], subj = ART.subj[d.proc];
+    const [bg, fg] = await Promise.all([loadI(scene), loadI(subj)]);
+    const cv = newCanvas(), ctx = cv.getContext('2d');
+    ctx.drawImage(bg, 0, 0); ctx.drawImage(fg, 0, 0);
+    return { ...d, scene, subj, art: cv.toDataURL('image/jpeg', .92) };
+  }));
   sections();
 }
 
@@ -1423,7 +1446,7 @@ function sections() {
     const thumb = a.cut || a.art || a.subj;
     picks.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-key="${a.key}" aria-checked="false"><img alt="" src="${thumb}" style="${a.cut || a.subj ? 'object-fit:contain;background:#3a3550' : ''}">${esc(a.title)}</button>`);
   });
-  picks.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; featAsset = byKey(b.dataset.key); feat._asset = featAsset; rebuildFeat(); showTier(featAsset.best); });
+  picks.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; originalArt = false; userBg = userFg = null; cards.forEach(c => { c._ovBg = null; }); featAsset = byKey(b.dataset.key); feat._asset = featAsset; rebuildFeat(); showTier(featAsset.best); refreshAll(); });
   const seg = $('#tierSeg');
   TIERS.forEach(t => seg.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-k="${t.k}" aria-checked="false" tabindex="-1">${t.code}</button>`));
   seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTier(b.dataset.k); });
@@ -1432,8 +1455,16 @@ function sections() {
     if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
   });
   showTier(featTier);
-  const nsel = $('#numSel'); nsel.value = numFont;
-  nsel.addEventListener('change', () => { numFont = nsel.value; document.documentElement.dataset.numfont = numFont; try { localStorage.setItem('lk-gacha-numfont', numFont); } catch (e) { /* ignore */ } requestAnimationFrame(placePins); });
+  const bgOptions = $('#bgOptions');
+  BACKGROUNDS.variants.forEach(v => bgOptions.insertAdjacentHTML('beforeend', `<button type="button" data-variant="${v.key}" aria-pressed="false"><img alt="" src="${BACKGROUNDS.render(v.key, 'ur', featAsset.tint || '#6a3aa8')}"><span>${v.label}</span></button>`));
+  bgOptions.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    backgroundVariant = b.dataset.variant;
+    const url = new URL(location.href); url.searchParams.set('variant', backgroundVariant); history.replaceState(null, '', url);
+    refreshAll();
+  });
+  $('#tgOriginal').addEventListener('click', () => { originalArt = !originalArt; refreshAll(); });
+  updateBackgroundControls();
   new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
   const tgDemo = $('#tgDemo'); if (RM) tgDemo.setAttribute('aria-pressed', 'false');
   tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
@@ -1453,14 +1484,28 @@ function sections() {
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(placePins);
   placePins(); startDemo();
 }
-function rebuildFeat() { const fr = $('.front', feat); fr.innerHTML = frontInner(featAsset); feat._cv = $('.f-glit', feat); feat._cw = 0; setTier(feat, feat.dataset.tier); ro.unobserve(feat); ro.observe(feat); }
+function rebuildFeat() { const fr = $('.front', feat); fr.innerHTML = frontInner(featAsset); feat._dup = featAsset.dup || 1; feat._cv = $('.f-glit', feat); feat._cw = 0; setTier(feat, feat.dataset.tier); ro.unobserve(feat); ro.observe(feat); }
 function showTier(k, focus) {
   featTier = k; setTier(feat, k); const t = TIERS[TI[k]];
   $('#tierSeg').querySelectorAll('button').forEach(b => { const on = b.dataset.k === k; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); });
   $('#picks').querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', b.dataset.key === featAsset.key));
   const code = $('#fCode'); code.dataset.t = k; code.textContent = t.code; $('#fName').textContent = t.name; $('#fOdds').textContent = `뽑힐 확률 ${t.odds}%`;
-  $('#fDesc').textContent = t.desc;
-  $('#fLayers').innerHTML = t.layers.map((l, i) => `<li><span class="n">${i + 1}</span><b>${l[0]}</b><span>${l[1]}</span></li>`).join('');
+  updateBackgroundControls();
+}
+function updateBackgroundControls() {
+  if (!feat) return;
+  const p = artPlan(feat), locked = !!p.fullArt || !p.cut;
+  const t = TIERS[TI[featTier]], borderless = ['ur', 'lr'].includes(featTier) && !p.cut;
+  $('#fDesc').textContent = p.cut ? t.desc : borderless ? '원본 그림의 배경과 구도를 유지하고, 테두리 없이 카드 끝까지 채우는 풀아트입니다.' : '원본 그림의 배경과 구도를 유지하는 풀아트입니다.';
+  const layers = p.cut ? t.layers : [['원본 풀아트', '그림의 배경 유지'], ['등급 재질', borderless ? '이름줄' : '테두리와 이름줄']];
+  $('#fLayers').innerHTML = layers.map((l, i) => `<li><span class="n">${i + 1}</span><b>${l[0]}</b><span>${l[1]}</span></li>`).join('');
+  $('#bgOptions').querySelectorAll('button').forEach(b => {
+    b.disabled = locked; b.setAttribute('aria-pressed', b.dataset.variant === backgroundVariant ? 'true' : 'false');
+    b.querySelector('img').src = BACKGROUNDS.render(b.dataset.variant, featTier, featAsset.tint || '#6a3aa8');
+  });
+  const original = $('#tgOriginal'); original.disabled = !!featAsset.fullArt;
+  original.setAttribute('aria-pressed', p.fullArt ? 'true' : 'false');
+  $('#bgState').textContent = featAsset.fullArt && !userBg && !feat._ovBg ? '어두운 그림 · 원본 풀아트' : p.fullArt ? '원본 풀아트' : p.cut ? '인물 뒤에 배경 적용' : '투명 이미지를 추가하면 배경을 바꿀 수 있습니다';
 }
 function demoFrame(t) {
   demoRAF = 0; if (!demoOn || !featVisible || feat.classList.contains('active')) return;
@@ -1475,11 +1520,11 @@ function scheduleDemo() { clearTimeout(demoTimer); if (!demoOn) return; demoTime
 
 // [selector, name, ← which asset data fills it, example, tag, pin side, optional fixed point (fraction of card)] — same skeleton for every tier
 const FIELDS_ALL = [
-  ['.f-cost', 'COST (코스트)', '← 등급. N 1 · R 2 · SR 3 · SSR 4 · UR 5 · LR 6', '', '', 'L'],
+  ['.f-cost', 'COST (코스트)', '← 등급. N 1 · U 2 · S 3 · SR 4 · SSR 5 · SEC 6', '', '', 'L'],
   ['.f-dup', 'Count (보유 수)', '← 중복 수. 같은 카드를 뽑은 장수', '', '', 'L'],
-  ['.f-power', 'PW (파워)', '← 해상도. 메가픽셀 × 1,000, 500 단위 내림 (3000×3000 → 9,000)', '', '', 'R'],
+  ['.f-power', 'LP (파워)', '← 해상도. 메가픽셀 × 1,000, 500 단위 내림 (3000×3000 → 9,000)', '', '', 'R'],
   ['.f-type', '속성', '← 그림의 주된 색. 분홍·빨강 불꽃 · 파랑 물 · 초록 숲 · 금·노랑 빛 · 어두움 어둠 · 옅음 바람', '', '', 'R'],
-  ['.f-subj', '튀어나오는 인물 층', '← 배경을 지운 투명 레이어. SSR부터 테두리 위로, 완전 불투명', '', '', 'C', [.6, .07]],
+  ['.f-subj', '튀어나오는 인물 층', '← 배경을 지운 투명 레이어. SR부터 테두리 위로, 완전 불투명', '', '', 'C', [.6, .07]],
   ['.f-fx', '효과', '← 작가 · 앨범 · 즐겨찾기 · 첫 수집. 등급에 따라 1–3줄', '', '', 'L'],
   ['.nb-lv', '레벨', '← 중복 수. 1장이면 Lv.1, 1장 더할 때마다 +1, 최대 Lv.5', '', '', 'L'],
   ['.f-title', '카드 이름', '← 에셋 제목', '@', '', 'C', [.4, .925]],
@@ -1520,7 +1565,7 @@ function placePins() {
 /* ----------------------------------------------------------------- gacha */
 const stage = $('#stage'), pack = $('#pack'), stCards = $('#stCards'), stFlash = $('#stFlash'), stParticles = $('#stParticles'), stHint = $('#stHint');
 const btn1 = $('#pull1'), btn10 = $('#pull10'), skipBtn = $('#skipBtn'), force = $('#force');
-$('#gOdds').innerHTML = TIERS.map(t => `<b>${t.code}</b> ${t.odds}%`).join(' · ') + ' · 10연은 SR 이상 1장 보장';
+$('#gOdds').innerHTML = TIERS.map(t => `<b>${t.code}</b> ${t.odds}%`).join(' · ') + ` · 10연은 ${TIERS[TI.sr].code} 이상 1장 보장`;
 let busy = false, skip = false, waiters = [];
 const wait = ms => new Promise(res => { if (skip) return res(); const id = setTimeout(res, ms); waiters.push(() => { clearTimeout(id); res(); }); });
 function doSkip() { if (!busy || skip) return; skip = true; waiters.splice(0).forEach(f => f()); }
@@ -1583,7 +1628,6 @@ async function reveal(el, k, single) {
   }
   await wait(big ? (single ? 1100 : 900) : single ? 560 : ti >= TI.sr ? 380 : 220);
   if (skip) { el.classList.remove('charge'); el.classList.add('quick'); el.classList.remove('down'); el.classList.add('revealed'); return; }
-  if (big) { flash(k === 'lr' ? '#f4ecff' : k === 'ur' ? '#fff3d6' : '#ffffff'); el.classList.add('pop'); }
   el.classList.remove('down');
   if (big) setTimeout(() => burst(el, k), 120);
   await wait(big ? 1000 : single ? 420 : 170);
@@ -1611,7 +1655,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !zoom.hidd
 /* -------------------------------------------------------- user images */
 const fileIn = $('#file'), fileFg = $('#fileFg'), artState = $('#artState'), resetBtn = $('#resetArt'), imgbar = $('#imgbar'), fgNote = $('#fgNote');
 const isImg = f => f && /^image\//.test(f.type);
-function refreshAll() { cards.forEach(refreshArt); fgNote.hidden = !(userBg && !userFg); resetBtn.hidden = !(userBg || userFg || [...cards].some(c => c._ovBg)); }
+function refreshAll() { cards.forEach(refreshArt); fgNote.hidden = !(userBg && !userFg); resetBtn.hidden = !(userBg || userFg || [...cards].some(c => c._ovBg)); updateBackgroundControls(); }
 function setGlobal(file, fg) {
   if (!isImg(file)) { artState.textContent = '이미지 파일만 쓸 수 있어요'; return; }
   const url = URL.createObjectURL(file); madeURLs.push(url);
@@ -1652,3 +1696,4 @@ boot();
 </script>
 </body>
 </html>
+
