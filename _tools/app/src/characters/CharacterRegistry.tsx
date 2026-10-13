@@ -1,12 +1,13 @@
 import { AssetSvgImage } from "../privacy/AssetImage";
 import { AssetImage } from "../privacy/AssetImage";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { EyeSlashIcon, PhotoIcon, UserIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { EyeSlashIcon, PhotoIcon, PlusIcon, UserIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { ReferenceRegionChoices, ReferenceCheckSlot, AUTOMATIC_CHARACTER_REFERENCE_COUNT, currentReferenceCrop, isUsableReferenceRegion, referenceNeedsPerson, referenceRegionStatus, useReferenceRegionInspection, usableReferenceCount, type ReferenceRegionInspection, type ReferenceRequest, type ReferenceWorkflow } from "./ReferenceRegionChoices";
-import { draftReferenceRegions, type CharacterApi, type CharacterTarget, type ReferenceInspection, type ReferenceRegions } from "./api";
+import type { ReferenceReinforcementState } from "./useReferenceReinforcement";
+import { draftReferenceRegions, type CharacterApi, type ReinforcementGhost, type CharacterTarget, type ReferenceInspection, type ReferenceRegions } from "./api";
 
 export type CharacterEditorDraft = { name: string; description: string; thumbnail: string | null; references: string[]; referenceRegions: ReferenceRegions; enabled: boolean };
 
@@ -14,6 +15,11 @@ export const MAX_CHARACTER_REFERENCES = 25;
 export const activeCharacterReferences = (target: CharacterTarget | null) => target
   ? [...target.references, ...(target.learnedReferences ?? [])].filter(reference => reference.status === "ready" && reference.assetId)
   : [];
+/** A character starts from this many base references; below that (or manual-only) the first-setup dialog is still the way to fill it. */
+export const FIRST_SETUP_REFERENCE_COUNT = 5;
+export const needsFirstReferenceSetup = (target: CharacterTarget) =>
+  target.manualOnly || target.references.filter(reference => reference.status === "ready" && reference.assetId).length < FIRST_SETUP_REFERENCE_COUNT;
+
 /**
  * Draft overrides start from the saved regions of the current references and
  * carry only what the user chose here; nothing is inferred or persisted for them.
@@ -52,12 +58,15 @@ function ReferenceThumb({ assetId, region, privacyMode }: { assetId: string; reg
  * Character panel body. References and their crops come first; automation state is
  * one line; rarely used settings sit in one closed disclosure. Saving is the host's footer.
  */
-export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacyMode, busy, error, api, inspection, jumpRequest, automationStatus, management, onChange, onPick, onOpenReference, onRecommendReferences }: {
+export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacyMode, busy, error, api, inspection, jumpRequest, reinforcement, onUndoReinforcement, automationStatus, management, onChange, onPick, onOpenReference, onRecommendReferences }: {
   draft: CharacterEditorDraft; target: CharacterTarget | null; seriesId?: string; libraryKey?: string; privacyMode: boolean; busy: boolean; error: string | null;
   api?: Pick<CharacterApi, "inspectReferenceRegions"> & Partial<Pick<CharacterApi, "targets" | "decide">>;
   inspection?: ReferenceRegionInspection;
   /** The host asks for one reference's person chooser (e.g. a save blocked on it); `key` repeats the same request. */
   jumpRequest?: { assetId: string; key: number } | null;
+  /** What the PC added by itself (to undo) and the suggestions it left as ghost tiles. */
+  reinforcement?: ReferenceReinforcementState;
+  onUndoReinforcement?: () => void;
   /** S36 state for this character, appended to the automation line. */
   automationStatus?: string | null;
   /** Host-owned rare actions (history refresh, conversion, S36 exclusion, FAULT) shown under 관리. */
@@ -80,6 +89,8 @@ export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacy
   const [focusRequest, setFocusRequest] = useState<{ assetId: string; key: number } | null>(null);
   const [slotRequest, setSlotRequest] = useState<ReferenceRequest | null>(null);
   const [workflow, setWorkflow] = useState<ReferenceWorkflow>(null);
+  const [lit, setLit] = useState(false);
+  const [solidified, setSolidified] = useState<ReadonlySet<string>>(new Set());
   // A request that already existed when the panel opened again belongs to an earlier visit.
   const seenJump = useRef(jumpRequest?.key ?? 0);
   useEffect(() => {
@@ -98,6 +109,17 @@ export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacy
   // The line exists from the first paint with the raw count and only its number changes.
   const shortfall = automatic && usable < AUTOMATIC_CHARACTER_REFERENCE_COUNT
     ? `사용 가능 ${usable.toLocaleString()}장 · ${AUTOMATIC_CHARACTER_REFERENCE_COUNT}장 이상 권장` : null;
+  const run = reinforcement?.run?.assetIds.length ? reinforcement.run : null;
+  const added = new Set(run?.assetIds ?? []);
+  // A suggestion fills a free slot; none is offered beyond the limit or twice.
+  const ghosts: ReinforcementGhost[] = (reinforcement?.ghosts ?? [])
+    .filter(ghost => !draft.references.includes(ghost.assetId)).slice(0, Math.max(0, MAX_CHARACTER_REFERENCES - draft.references.length));
+  function addGhosts(chosen: ReinforcementGhost[]) {
+    if (!chosen.length) return;
+    onChange({ ...draft, references: [...draft.references, ...chosen.map(ghost => ghost.assetId)],
+      referenceRegions: { ...draft.referenceRegions, ...Object.fromEntries(chosen.flatMap(ghost => ghost.region ? [[ghost.assetId, ghost.region] as const] : [])) } });
+    setSolidified(old => new Set([...old, ...chosen.map(ghost => ghost.assetId)]));
+  }
   const nameField = <TextField label="캐릭터 이름" value={draft.name} onChange={e => onChange({ ...draft, name: e.target.value })} disabled={busy} />;
   return <section className="character-registry" aria-label="캐릭터 설정">
     {!target && nameField}
@@ -113,13 +135,13 @@ export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacy
         {onRecommendReferences && <Button size="sm" variant="ghost" disabled={busy} onClick={onRecommendReferences}>추천으로 보강</Button>}
       </div>
       {shortfall && <p className="character-registry__hint" role="status">{shortfall}</p>}
-      {draft.references.length > 0 ? <section className="character-reference-strip" aria-label="레퍼런스 목록">{draft.references.map((assetId, index) => {
+      {draft.references.length > 0 || ghosts.length > 0 ? <section className="character-reference-strip" aria-label="레퍼런스 목록">{draft.references.map((assetId, index) => {
         const region = regionOf(assetId);
         const croppable = Boolean(region && region.boxes.length > 0);
         const status = region ? referenceRegionStatus(region, draft.referenceRegions, changedRegions) : undefined;
         const needsPerson = Boolean(region && referenceNeedsPerson(region));
         const unusable = Boolean(region && !isUsableReferenceRegion(region) && !needsPerson);
-        return <div className={`character-reference-tile${unusable ? " character-reference-tile--unusable" : ""}`} key={assetId}>
+        return <div className={`character-reference-tile${unusable ? " character-reference-tile--unusable" : ""}${lit && added.has(assetId) ? " character-reference-tile--lit" : ""}${solidified.has(assetId) ? " character-reference-tile--solid" : ""}`} key={assetId}>
           {croppable
             ? <button type="button" className="character-reference-tile__open" disabled={busy} aria-label={`레퍼런스 ${index + 1} 크롭 확인`} aria-description={status}
               onClick={() => setFocusRequest(old => ({ assetId, key: (old?.key ?? 0) + 1 }))}><ReferenceThumb assetId={assetId} region={region} privacyMode={privacyMode} /></button>
@@ -130,7 +152,17 @@ export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacy
           <Button size="icon" variant="ghost" className="character-reference-tile__remove" disabled={busy} aria-label={`레퍼런스 ${index + 1} 제거`}
             onClick={() => onChange(updateCharacterReferences(draft, draft.references.filter(id => id !== assetId)))}><XMarkIcon aria-hidden="true" /></Button>
         </div>;
-      })}</section> : !shortfall && <p className="character-message">레퍼런스가 없습니다.</p>}
+      })}{ghosts.map((ghost, index) => <div className="character-reference-tile character-reference-tile--ghost" key={`ghost-${ghost.assetId}`}>
+        <button type="button" className="character-reference-tile__open" disabled={busy} aria-label={`추천 레퍼런스 ${index + 1} 추가`} onClick={() => addGhosts([ghost])}>
+          <AssetImage loading="lazy" src={thumbnailUrl(ghost.assetId)} className={privacyMode ? "character-private" : undefined} alt="" /></button>
+        <span className="character-reference-tile__mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true"><PlusIcon /></span>
+      </div>)}</section> : !shortfall && <p className="character-message">레퍼런스가 없습니다.</p>}
+      {run && <p className="character-reinforce-line" onMouseEnter={() => setLit(true)} onMouseLeave={() => setLit(false)} onFocus={() => setLit(true)} onBlur={() => setLit(false)}>
+        <span>{run.assetIds.length.toLocaleString()}장 보강됨</span><span aria-hidden="true">·</span>
+        <Button size="sm" variant="quiet" disabled={busy || !onUndoReinforcement} onClick={onUndoReinforcement}>되돌리기</Button></p>}
+      {ghosts.length > 1 && <p className="character-reinforce-line">
+        <span>추천 {ghosts.length.toLocaleString()}장</span><span aria-hidden="true">·</span>
+        <Button size="sm" variant="quiet" disabled={busy} onClick={() => addGhosts(ghosts)}>모두 추가</Button></p>}
       {inspectable && inspect && seriesId && <ReferenceRegionChoices assetIds={draft.references}
         draftRegions={draft.referenceRegions} savedRegions={characterDraft(target).referenceRegions} privacyMode={privacyMode} busy={busy} inspection={shared}
         decisionApi={api?.targets && api.decide ? { targets: api.targets, decide: api.decide } : undefined}

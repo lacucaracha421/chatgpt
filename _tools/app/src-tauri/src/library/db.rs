@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 132;
+pub(crate) const SCHEMA_VERSION: i64 = 133;
 
 #[cfg(test)]
 mod character_folder_perf_migration_tests {
@@ -69,7 +69,7 @@ mod character_claude_migration_tests {
             connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            132
+            super::SCHEMA_VERSION
         );
         let usage: (i64, i64, i64, i64) = connection.query_row(
                 "SELECT input_tokens,output_tokens,cache_write_tokens,cache_read_tokens FROM character_claude_opinions",
@@ -933,6 +933,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 131 {
             transaction.execute_batch(include_str!("../../migrations/0132_character_claude_cache_tokens.sql"))?;
+        }
+        if version < 133 {
+            transaction.execute_batch(include_str!("../../migrations/0133_character_reference_reinforcement.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

@@ -121,9 +121,19 @@ export type Decision = { origin?: "manual" | "automatic"; sequence: number; asse
 export type CharacterMoveTarget = { targetId: string; expectedFingerprint: string };
 export type CharacterAssignSuggestion = { targetId: string; matched: number; total: number };
 
+/** References the PC added on its own after the user put images into the character by hand; one run can be undone. */
+export type ReinforcementRun = { runId: string; assetIds: string[]; at: string };
+/** A suggested reference that was not added by itself; `region` is the person it would use when known. */
+export type ReinforcementGhost = { assetId: string; hash: string; persons: number | null; safe: boolean; region?: ReferenceRegion };
+export type ReferenceReinforcement = { pendingRun: ReinforcementRun | null; ghosts: ReinforcementGhost[] };
+
 export interface CharacterApi {
   /** Optional so tests and older hosts can skip inspection entirely. */
   inspectReferenceRegions?(seriesId: string, targetId: string | null, assetIds: string[], regions?: ReferenceRegions): Promise<ReferenceInspection[]>;
+  /** Optional like the inspection: tests and older hosts can skip the quiet reinforcement. */
+  referenceReinforcement?(targetId: string): Promise<ReferenceReinforcement>;
+  undoReferenceReinforcement?(targetId: string, runId: string): Promise<CharacterTarget>;
+  acknowledgeReferenceReinforcement?(targetId: string, runId: string): Promise<null>;
   targets(): Promise<CharacterTarget[]>;
   save(request: TargetDraft, strictSelection?: boolean): Promise<CharacterTarget>;
   saveSettings(request: CharacterSettingsDraft, strictSelection?: boolean): Promise<CharacterTarget>;
@@ -145,6 +155,9 @@ export interface CharacterApi {
 }
 export const characterApi: CharacterApi = {
   inspectReferenceRegions: (seriesId, targetId, assetIds, regions = {}) => invoke("inspect_character_reference_regions", { seriesId, targetId, assetIds, regions }),
+  referenceReinforcement: targetId => invoke("character_reference_reinforcement", { targetId }),
+  undoReferenceReinforcement: (targetId, runId) => invoke("undo_reference_reinforcement", { targetId, runId }),
+  acknowledgeReferenceReinforcement: (targetId, runId) => invoke("acknowledge_reference_reinforcement", { targetId, runId }),
   targets: () => invoke("list_character_targets"),
   save: (request, strictSelection = false) => invoke("save_character_target", { request, strictSelection }),
   saveSettings: (request, strictSelection = false) => invoke("save_character_settings", { request, strictSelection }),

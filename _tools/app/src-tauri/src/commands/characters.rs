@@ -1460,3 +1460,45 @@ pub async fn claude_status(
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
 }
+
+#[tauri::command]
+pub async fn character_reference_reinforcement(
+    target_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_reference_reinforcement::ReferenceReinforcement, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_reference_reinforcement(&target_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn undo_reference_reinforcement(
+    target_id: String,
+    run_id: String,
+    state: State<'_, AppState>,
+) -> Result<Target, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.undo_reference_reinforcement(&target_id, &run_id)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn acknowledge_reference_reinforcement(
+    target_id: String,
+    run_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.acknowledge_reference_reinforcement(&target_id, &run_id)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}

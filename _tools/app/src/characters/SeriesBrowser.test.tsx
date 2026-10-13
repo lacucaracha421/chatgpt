@@ -571,13 +571,13 @@ it("creates a group from the series overflow",async()=>{
   expect(await screen.findByRole("dialog",{name:"캐릭터 그룹 만들기"})).toBeVisible();
 });
 
-it("shows compact name-only tiles with a warning mark only when S36 found mistakes",async()=>{
+it("shows compact name-only tiles without a warning mark; a fallback to basic recognition is told in the description",async()=>{
   vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ scoringEnabled: true });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([{ targetId: "hina", reviewed: 30, wrong: 2, allowed: 1, examples: 60, status: "hold" }]);
   await mount();
   const hina=await screen.findByRole("button",{name:"히나 열기"});
-  await waitFor(()=>expect(hina.querySelector(".series-character__warning")).not.toBeNull());
-  expect(hina).toHaveAttribute("aria-description", expect.stringContaining("기본 인식 · 확인 판단 30 · 틀림 2"));
+  await waitFor(()=>expect(hina).toHaveAttribute("aria-description", expect.stringMatching(/^기본 인식으로 돌아감 · .*기본 인식 · 확인 판단 30 · 틀림 2/)));
+  expect(hina.querySelector(".series-character__warning")).toBeNull();
   expect(hina.querySelector("small")).toBeEmptyDOMElement();
   expect(hina.querySelector("small")).toHaveAttribute("aria-hidden", "true");
   expect(screen.queryByText(/기본 인식/)).not.toBeInTheDocument();
@@ -586,7 +586,7 @@ it("shows compact name-only tiles with a warning mark only when S36 found mistak
 
   cleanup();
   await mount("hina");
-  expect(await screen.findByText("기본 인식 · 확인 판단 30 · 틀림 2", { exact: false })).toHaveClass("series-character-status--warning");
+  expect(await screen.findByText("기본 인식 · 확인 판단 30 · 틀림 2", { exact: false })).not.toHaveClass("series-character-status--warning");
 });
 
 it("keeps character selection in place without a persistent refresh button",async()=>{
@@ -723,7 +723,9 @@ it("offers recovery when a legacy character is disabled", async () => {
 
 
 it("opens suggested reference reinforcement from character settings and refreshes after applying", async () => {
-  const { hubApi, changed } = await mount("hina");
+  // First setup only: a character with fewer than five base references still fills itself through the dialog.
+  const references = Array.from({ length: 3 }, (_, slot) => ({ slot, assetId: `image-${slot}`, assetHash: `hash-${slot}`, status: "ready" }));
+  const { hubApi, changed } = await mount("hina", false, [], undefined, false, { targetOverrides: { references } });
   const user = userEvent.setup();
   const toolbar = screen.getByRole("toolbar", { name: "시리즈 도구" });
   expect(within(toolbar).queryByRole("button", { name: "추천으로 보강" })).not.toBeInTheDocument();
@@ -1010,6 +1012,96 @@ it("still shows a real save failure as the one-line error", async () => {
   await waitFor(() => expect(inspect).toHaveBeenCalled());
   await user.click(within(panel).getByRole("button", { name: "저장" }));
   expect(await within(within(panel).getByRole("region", { name: "캐릭터 설정" })).findByRole("alert")).toHaveTextContent("서버가 응답하지 않습니다.");
+});
+
+it("keeps 추천으로 보강 out of the panel of a character that already has its base references", async () => {
+  await mount("hina");
+  await userEvent.setup().click(await screen.findByRole("button", { name: "캐릭터 편집" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  expect(within(panel).getByRole("button", { name: "레퍼런스 추가" })).toBeVisible();
+  expect(within(panel).queryByRole("button", { name: "추천으로 보강" })).not.toBeInTheDocument();
+});
+
+const pendingRun = { runId: "run-1", assetIds: ["image-3", "image-4"], at: "2026-10-13T00:00:00Z" };
+
+async function openReinforced(ghosts: unknown[] = []) {
+  const mounted = await mount("hina");
+  const reinforcement = vi.fn(async () => ({ pendingRun, ghosts }));
+  const acknowledge = vi.fn(async () => null);
+  const undo = vi.fn(async (_targetId: string, _runId: string) => ({ ...mounted.targets.find(t => t.id === "hina")!, revision: 2, fingerprint: "after-undo",
+    references: mounted.targets.find(t => t.id === "hina")!.references.slice(0, 3) }));
+  Object.assign(mounted.api, { referenceReinforcement: reinforcement, acknowledgeReferenceReinforcement: acknowledge, undoReferenceReinforcement: undo });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "캐릭터 편집" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  return { ...mounted, user, panel, reinforcement, acknowledge, undo };
+}
+
+it("shows the reinforcement line, undoes it without a blank frame, and does not acknowledge an undone run", async () => {
+  const { user, panel, undo, acknowledge, changed, reinforcement } = await openReinforced();
+  expect(await within(panel).findByText("2장 보강됨")).toBeVisible();
+  expect(reinforcement).toHaveBeenCalledWith("hina");
+  const strip = within(panel).getByRole("region", { name: "레퍼런스 목록" });
+  expect(strip.querySelectorAll(".character-reference-tile")).toHaveLength(5);
+  await user.click(within(panel).getByRole("button", { name: "되돌리기" }));
+  expect(undo).toHaveBeenCalledWith("hina", "run-1");
+  // The strip lost exactly the run's tiles and the line left, with the panel still open and clean.
+  await waitFor(() => expect(within(panel).queryByText(/보강됨/)).not.toBeInTheDocument());
+  expect(strip.querySelectorAll(".character-reference-tile")).toHaveLength(3);
+  expect(within(panel).queryByText("저장하지 않은 변경")).not.toBeInTheDocument();
+  expect(changed).toHaveBeenCalled();
+  await user.click(within(panel).getByRole("button", { name: "히나 · 캐릭터 정보 닫기" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "히나 · 캐릭터 정보" })).not.toBeInTheDocument());
+  expect(acknowledge).not.toHaveBeenCalled();
+});
+
+it("acknowledges a seen run once when the panel is closed, and not again when it is reopened", async () => {
+  const { user, panel, acknowledge } = await openReinforced();
+  await within(panel).findByText("2장 보강됨");
+  expect(acknowledge).not.toHaveBeenCalled();
+  await user.click(within(panel).getByRole("button", { name: "히나 · 캐릭터 정보 닫기" }));
+  await waitFor(() => expect(acknowledge).toHaveBeenCalledWith("hina", "run-1"));
+  await user.click(await screen.findByRole("button", { name: "캐릭터 편집" }));
+  const reopened = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await within(reopened).findByText("2장 보강됨");
+  await user.click(within(reopened).getByRole("button", { name: "히나 · 캐릭터 정보 닫기" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "히나 · 캐릭터 정보" })).not.toBeInTheDocument());
+  expect(acknowledge).toHaveBeenCalledTimes(1);
+});
+
+it("acknowledges a seen run when the panel is saved", async () => {
+  const { user, panel, acknowledge, api } = await openReinforced();
+  const save = vi.spyOn(api, "saveSettings");
+  await within(panel).findByText("2장 보강됨");
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(save).toHaveBeenCalled());
+  await waitFor(() => expect(acknowledge).toHaveBeenCalledWith("hina", "run-1"));
+  expect(acknowledge).toHaveBeenCalledTimes(1);
+});
+
+it("adds a suggested reference to the draft with its region and writes it only with the panel's own 저장", async () => {
+  const region = { contentHash: "hash-image-8", baselineFingerprint: "baseline", bounds: [5, 6, 70, 80] as [number, number, number, number] };
+  const { user, panel, api } = await openReinforced([{ assetId: "image-8", hash: "hash-image-8", persons: 1, safe: true, region }]);
+  const save = vi.spyOn(api, "saveSettings");
+  await user.click(await within(panel).findByRole("button", { name: "추천 레퍼런스 1 추가" }));
+  expect(within(panel).getByText("저장하지 않은 변경")).toBeVisible();
+  expect(save).not.toHaveBeenCalled();
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+    referenceIds: ["image-0", "image-1", "image-2", "image-3", "image-4", "image-8"],
+    referenceRegions: { "image-8": region },
+  }), true));
+});
+
+it("drops suggestions that were not added when the panel is closed without saving", async () => {
+  const { user, panel, api } = await openReinforced([{ assetId: "image-8", hash: "hash-image-8", persons: 1, safe: true }]);
+  const save = vi.spyOn(api, "saveSettings");
+  await user.click(await within(panel).findByRole("button", { name: "추천 레퍼런스 1 추가" }));
+  await user.click(within(panel).getByRole("button", { name: "히나 · 캐릭터 정보 닫기" }));
+  await user.click(await screen.findByRole("button", { name: "캐릭터 편집" }));
+  const reopened = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  expect(await within(reopened).findByRole("button", { name: "추천 레퍼런스 1 추가" })).toBeVisible();
+  expect(save).not.toHaveBeenCalled();
 });
 
 it("keeps asking only through the quiet button until the requirement is met", async () => {

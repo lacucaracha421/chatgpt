@@ -86,6 +86,7 @@ export function readinessLabel(r: S36Readiness): string {
   switch (r.status) {
     case "learning": return `학습 인식 · 확인 판단 ${r.reviewed}${auto} · 틀림 ${r.wrong} / 허용 ${r.allowed}`;
     case "hold": return `기본 인식 · 확인 판단 ${r.reviewed}${auto} · 틀림 ${r.wrong} / 허용 ${r.allowed}`;
-    default: return `학습 인식 준비 · 확인 판단 ${Math.min(r.reviewed, READY_REVIEWED)}/${READY_REVIEWED}${auto} · 맞음 예시 ${Math.min(r.examples, READY_EXAMPLES)}/${READY_EXAMPLES}`;
+    // Mistakes already made count against the switch, so a preparing character shows them too.
+    default: return `학습 인식 준비 · 확인 판단 ${Math.min(r.reviewed, READY_REVIEWED)}/${READY_REVIEWED}${auto} · 맞음 예시 ${Math.min(r.examples, READY_EXAMPLES)}/${READY_EXAMPLES}${r.wrong > 0 ? ` · 틀림 ${r.wrong} / 허용 ${r.allowed}` : ""}`;
   }
 }

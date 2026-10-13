@@ -37,11 +37,12 @@ import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { collectPages, faultAssets, faultSelectionItem, useFaultGame, type FaultScope } from "../games/FaultGame";
-import { CharacterRegistry, characterDraft, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
+import { CharacterRegistry, characterDraft, needsFirstReferenceSetup, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
 import { CharacterTaggerTags } from "./CharacterTaggerTags";
 import { blockedSaveReferences, personChoiceCount, useReferenceRegionInspection } from "./ReferenceRegionChoices";
 import { CountBadge } from "../shared/ui/Badge";
+import { useReferenceReinforcement } from "./useReferenceReinforcement";
 import { CharacterGroups } from "./CharacterGroups";
 import { ExtrasCard, useExtrasPreviews, useExtrasSuggestions } from "./ExtrasCard";
 import { ExtrasPromotionDialog, type ExtrasPromotionApi, type ExtrasPromotionOutcome } from "./ExtrasPromotionDialog";
@@ -143,13 +144,14 @@ export function prefetchSeriesOverview(seriesId: string, hubApi: Pick<CharacterH
     prefetchRead(hubApi, "seriesFolders", seriesId, () => hubApi.seriesFolders(seriesId), seriesId),
   ];
 }
-/** Status that used to sit under each character card; tiles now show only a warning mark when something is wrong. */
+/** Status that used to sit under each character card; it now lives only in the card's description (no mark on the tile, user 2026-10-13). */
 function characterStatus(target: CharacterTarget, readiness: S36Readiness | undefined): { detail: string[]; warning: boolean } {
   const references = activeCharacterReferences(target).length;
   const detail = !target.enabled ? ["자동 인식 꺼짐"] : references < 6 ? [`레퍼런스 ${references}장 · 자동 확정 보류`] : [];
   const numbers = target.enabled ? readiness : undefined;
   if (numbers) detail.push(readinessLabel(numbers));
-  return { detail, warning: Boolean(numbers && numbers.wrong > numbers.allowed) };
+  // Only a character that actually fell back to basic recognition says so; a character still preparing just shows its numbers.
+  return { detail, warning: Boolean(numbers && numbers.status === "hold" && numbers.wrong > numbers.allowed) };
 }
 
 export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId: requestedTargetId, groupId, targets, extras = [], groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, seriesRevisions = NO_SERIES_REVISIONS, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, confirmSource = confirmSources, confirmDecisions, extrasApi = characterExtrasApi, promotionApi, onReviewVideos, onMembershipChanged, groupEditRequest: requestedGroupEdit = null, onGroupEditRequestHandled }: Props) {
@@ -278,6 +280,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     : null;
   // A shared image without a chosen person makes the save refuse: say so before, and jump to it on 저장.
   const blockedReferences = editor ? blockedSaveReferences(referenceInspection.inspections, editor.draft.references) : [];
+  // The quiet reinforcement is read with the inspection while the info panel of an existing character is open.
+  const reinforcement = useReferenceReinforcement(editor?.target?.id ?? null, api);
   const [saveJump, setSaveJump] = useState<{ assetId: string; key: number } | null>(null);
   const extrasForSuggestions = currentExtras ? current : !targetId ? shelfExtras : undefined;
   const extrasSuggestions = useExtrasSuggestions(extrasForSuggestions?.id ?? null, refreshVersion + reload + analysisRevision, extrasApi);
@@ -539,6 +543,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     else if (picking.ids.length < MAX_CHARACTER_REFERENCES) setPicking({ ...picking, ids: [...picking.ids, id] });
     else setError("레퍼런스는 최대 25장입니다. 먼저 한 장을 해제해 주세요.");
   }
+  /** Take back what the PC added by itself: the returned target replaces the open one and its draft loses those references. */
+  async function undoReinforcement() {
+    const run = reinforcement.run, undo = api.undoReferenceReinforcement;
+    if (!editor?.target || !run || !undo || saving.current) return;
+    const openId = editor.target.id;
+    saving.current = true; setBusy(true); setEditorError(null);
+    try {
+      const updated = await undo(openId, run.runId);
+      reinforcement.dismissRun();
+      setEditor(old => old?.target?.id === openId
+        ? { target: updated, draft: updateCharacterReferences(old.draft, old.draft.references.filter(id => !run.assetIds.includes(id))) } : old);
+      onChanged();
+    } catch (e) { setEditorError(commandErrorMessage(e, "보강을 되돌리지 못했습니다.")); }
+    finally { saving.current = false; setBusy(false); }
+  }
   async function saveEditor() {
     if (!editor || saving.current) return;
     saving.current = true; setBusy(true); setEditorError(null);
@@ -598,7 +617,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       <Button size="sm" variant={editorDirty || !editor.target ? "primary" : "secondary"} disabled={busy || !editor.draft.name.trim()}
         onClick={() => blockedReferences.length > 0 ? setSaveJump(old => ({ assetId: blockedReferences[0]!.assetId, key: (old?.key ?? 0) + 1 })) : void saveEditor()}>{editor.target ? "저장" : "캐릭터 만들기"}</Button>
     </> : undefined}>
-    {editor && <CharacterRegistry draft={editor.draft} target={editor.target} seriesId={series.classificationId} libraryKey={library?.root ?? ""} privacyMode={privacyMode} busy={busy} error={editorError} api={api} inspection={referenceInspection} jumpRequest={saveJump}
+    {editor && <CharacterRegistry draft={editor.draft} target={editor.target} seriesId={series.classificationId} libraryKey={library?.root ?? ""} privacyMode={privacyMode} busy={busy} error={editorError} api={api} inspection={referenceInspection} jumpRequest={saveJump} reinforcement={editor.target ? reinforcement : undefined} onUndoReinforcement={() => void undoReinforcement()}
       automationStatus={editorS36}
       onOpenReference={assetId => void (async () => {
         try { const asset = await gateway.getAsset(assetId); setExternalAsset(asset); setViewer(assetId); }
@@ -607,7 +626,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       // A refusal belongs to the draft that was saved; editing the draft (a chosen person, a removed
       // reference) makes it stale, so it leaves rather than contradicting what is now on screen.
       onChange={draft => { setEditor({ ...editor, draft }); setEditorError(null); }} onPick={beginPick}
-      onRecommendReferences={editor.target ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined}
+      onRecommendReferences={editor.target && needsFirstReferenceSetup(editor.target) ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined}
       />}
     {editor?.target && <CharacterTaggerTags key={editor.target.id} targetId={editor.target.id} disabled={busy} />}
   </AnchoredPanel>;
@@ -864,7 +883,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               </article>;
             }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => {
               const status = characterStatus(target, readiness.get(target.id));
-              const description = [...(status.warning ? ["확인 필요"] : []), ...status.detail].join(" · ");
+              const description = [...(status.warning ? ["기본 인식으로 돌아감"] : []), ...status.detail].join(" · ");
               const index = orderedMembers.findIndex(member => member.id === target.id);
               const move = (direction: number) => void action(() => invoke("move_character_folder", {
                 seriesId: series.classificationId, targetId: target.id, groupId: currentGroup?.id ?? null, direction,
@@ -876,7 +895,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               ]}><article className="series-character folder-shelf__card">
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
                 {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : characterCardImage(target) ? <StableImage draggable={false} loading="lazy" src={characterCardImage(target)!} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
-                <strong><UserIcon className="folder-shelf__icon" aria-hidden="true" />{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
+                <strong><UserIcon className="folder-shelf__icon" aria-hidden="true" /><span className="series-character__name">{target.displayName}</span></strong>
                 <small className="folder-shelf__meta" aria-hidden={memberCounts[target.id] === undefined || undefined}>{memberCounts[target.id] === undefined ? null : `${memberCounts[target.id]!.toLocaleString("ko-KR")}장`}</small>
               </button>
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
@@ -886,7 +905,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {!current && suggestions.error && <p role="alert">{suggestions.error}<Button size="sm" onClick={suggestions.refresh}>다시 시도</Button></p>}
         {!current && suggestions.message && <Toast onDismiss={suggestions.dismissMessage}>{suggestions.message}</Toast>}
         {folderError && <p className="character-message" role="alert">{folderError}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
-        {!picking && currentStatus && currentStatus.detail.length > 0 && <p className={`series-character-status${currentStatus.warning ? " series-character-status--warning" : ""}`}>{currentStatus.detail.join(" · ")}</p>}
+        {!picking && currentStatus && currentStatus.detail.length > 0 && <p className="series-character-status">{currentStatus.detail.join(" · ")}</p>}
         {!picking && currentExtras && extrasSuggestions.length > 0 && <div className="character-extras-suggestions" role="group" aria-label="자동 태그가 읽은 이름">
           <span>자동 태그가 읽은 이름</span>
           {extrasSuggestions.map(suggestion => <Button key={suggestion.tag} size="sm" variant="ghost" disabled={busy} aria-description="이 이름으로 읽힌 이미지를 선택합니다" onClick={() => {

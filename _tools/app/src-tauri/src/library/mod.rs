@@ -71,6 +71,7 @@ pub mod character_groups;
 pub mod character_hub;
 pub mod character_incremental;
 pub mod character_reference_candidates;
+pub mod character_reference_reinforcement;
 mod character_reference_curation;
 pub mod character_reference_refresh;
 #[cfg(test)]

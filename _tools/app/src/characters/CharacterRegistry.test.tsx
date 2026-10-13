@@ -3,7 +3,8 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { CharacterRegistry, characterDraft } from "./CharacterRegistry";
-import type { CharacterApi, CharacterTarget, ReferenceInspection } from "./api";
+import type { CharacterApi, CharacterTarget, ReferenceInspection, ReinforcementGhost } from "./api";
+import type { ReferenceReinforcementState } from "./useReferenceReinforcement";
 
 afterEach(cleanup);
 
@@ -322,4 +323,93 @@ it("orders the 관리 fields portrait, name, description, then the host's mainte
   expect(before(portrait, name)).toBe(true);
   expect(before(name, description)).toBe(true);
   expect(before(description, maintenance)).toBe(true);
+});
+
+/** Hosts the draft the way the series screen does, so a click on a suggestion shows up in the strip. */
+function ReinforcedEditor({ target, reinforcement, onUndo = vi.fn(), onDraft }: {
+  target: CharacterTarget; reinforcement: ReferenceReinforcementState; onUndo?: () => void; onDraft?: (draft: ReturnType<typeof characterDraft>) => void;
+}) {
+  const [draft, setDraft] = useState(() => characterDraft(target));
+  onDraft?.(draft);
+  return <CharacterRegistry target={target} draft={draft} privacyMode={false} busy={false} error={null}
+    onChange={setDraft} onPick={vi.fn()} reinforcement={reinforcement} onUndoReinforcement={onUndo} />;
+}
+const reinforced = (extra: Partial<ReferenceReinforcementState> = {}): ReferenceReinforcementState =>
+  ({ run: null, ghosts: [], dismissRun: vi.fn(), ...extra });
+const ghost = (assetId: string, extra: Partial<ReinforcementGhost> = {}): ReinforcementGhost => ({ assetId, hash: `hash-${assetId}`, persons: 1, safe: true, ...extra });
+
+it("shows the reinforcement line only while a run is pending, and undoes it from the line", async () => {
+  const target = readyTarget(6);
+  const undo = vi.fn();
+  const run = { runId: "run-1", assetIds: ["ref-4", "ref-5"], at: "2026-10-13T00:00:00Z" };
+  const view = render(<ReinforcedEditor target={target} reinforcement={reinforced()} onUndo={undo} />);
+  expect(screen.queryByText(/보강됨/)).not.toBeInTheDocument();
+  view.rerender(<ReinforcedEditor target={target} reinforcement={reinforced({ run })} onUndo={undo} />);
+  expect(screen.getByText("2장 보강됨")).toBeVisible();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "되돌리기" }));
+  expect(undo).toHaveBeenCalledTimes(1);
+  // The run leaves with its line; the tiles carry no badge for it.
+  view.rerender(<ReinforcedEditor target={target} reinforcement={reinforced()} onUndo={undo} />);
+  expect(screen.queryByText(/보강됨/)).not.toBeInTheDocument();
+  expect(view.container.querySelector(".character-reference-tile__mark")).toBeNull();
+});
+
+it("outlines exactly the reinforced tiles while the line is hovered", async () => {
+  const target = readyTarget(6);
+  const run = { runId: "run-1", assetIds: ["ref-4", "ref-5"], at: "now" };
+  const view = render(<ReinforcedEditor target={target} reinforcement={reinforced({ run })} />);
+  const lit = () => [...view.container.querySelectorAll(".character-reference-tile--lit")].map(tile => tile.querySelector("button")!.getAttribute("aria-label"));
+  expect(lit()).toEqual([]);
+  expect(view.container.querySelector(".character-reference-tile__mark")).toBeNull();
+  const user = userEvent.setup();
+  await user.hover(screen.getByText("2장 보강됨"));
+  expect(lit()).toEqual(["레퍼런스 5 원본 보기", "레퍼런스 6 원본 보기"]);
+  await user.unhover(screen.getByText("2장 보강됨"));
+  expect(lit()).toEqual([]);
+});
+
+it("lists suggestions as dimmed plus tiles after the real ones and adds one with its region on click", async () => {
+  const target = readyTarget(3);
+  const region = { contentHash: "hash-new", baselineFingerprint: "baseline", bounds: [1, 2, 30, 40] as [number, number, number, number] };
+  let latest!: ReturnType<typeof characterDraft>;
+  const view = render(<ReinforcedEditor target={target} reinforcement={reinforced({ ghosts: [ghost("sug-1", { region })] })} onDraft={draft => { latest = draft; }} />);
+  const strip = screen.getByRole("region", { name: "레퍼런스 목록" });
+  const tiles = [...strip.querySelectorAll(".character-reference-tile")];
+  expect(tiles).toHaveLength(4);
+  const suggestion = tiles[3]!;
+  expect(suggestion).toHaveClass("character-reference-tile--ghost");
+  expect(suggestion.querySelector(".character-reference-tile__mark")).toHaveClass("ui-badge--scrim");
+  // A single suggestion needs no "모두 추가" line: the tile itself is the button.
+  expect(screen.queryByRole("button", { name: "모두 추가" })).not.toBeInTheDocument();
+  expect(latest.references).toEqual(["ref-0", "ref-1", "ref-2"]);
+  await userEvent.setup().click(screen.getByRole("button", { name: "추천 레퍼런스 1 추가" }));
+  expect(latest.references).toEqual(["ref-0", "ref-1", "ref-2", "sug-1"]);
+  expect(latest.referenceRegions["sug-1"]).toEqual(region);
+  // It is a normal tile now, and no ghost is left.
+  expect(view.container.querySelector(".character-reference-tile--ghost")).toBeNull();
+  expect(view.container.querySelectorAll(".character-reference-tile")).toHaveLength(4);
+});
+
+it("adds every suggestion from the line, keeps the person choice for ones without a region, and never repeats a reference", async () => {
+  const target = readyTarget(2);
+  let latest!: ReturnType<typeof characterDraft>;
+  render(<ReinforcedEditor target={target} onDraft={draft => { latest = draft; }}
+    reinforcement={reinforced({ ghosts: [ghost("sug-1"), ghost("sug-2", { persons: 2 }), ghost("ref-0"), ghost("sug-3", { persons: null })] })} />);
+  expect(screen.getByText("추천 3장")).toBeVisible();
+  await userEvent.setup().click(screen.getByRole("button", { name: "모두 추가" }));
+  expect(latest.references).toEqual(["ref-0", "ref-1", "sug-1", "sug-2", "sug-3"]);
+  expect(latest.referenceRegions).toEqual({});
+  expect(screen.queryByText(/추천 \d+장/)).not.toBeInTheDocument();
+});
+
+it("offers no more suggestions than the 25 reference limit leaves room for", () => {
+  const manyGhosts = [ghost("sug-1"), ghost("sug-2"), ghost("sug-3")];
+  const nearFull = readyTarget(24);
+  const view = render(<ReinforcedEditor target={nearFull} reinforcement={reinforced({ ghosts: manyGhosts })} />);
+  expect(view.container.querySelectorAll(".character-reference-tile--ghost")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "모두 추가" })).not.toBeInTheDocument();
+  view.unmount();
+  const full = render(<ReinforcedEditor target={readyTarget(25)} reinforcement={reinforced({ ghosts: manyGhosts })} />);
+  expect(full.container.querySelectorAll(".character-reference-tile--ghost")).toHaveLength(0);
 });

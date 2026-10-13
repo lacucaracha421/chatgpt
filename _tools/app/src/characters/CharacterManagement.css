@@ -75,10 +75,26 @@
 .character-registry__automation > span { flex: 1; min-width: 0; }
 .character-registry__management { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
 
+/* Quiet reinforcement: a hover on the "N장 보강됨" line outlines exactly the tiles it names (card outline, no badge at rest). */
+.character-reference-tile--lit .character-reference-tile__open { border-color: var(--color-accent); }
+.character-reinforce-line { display: flex; align-items: center; gap: var(--space-1); margin: 0; min-height: var(--control-height-compact); color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; animation: character-reference-fade-in 200ms var(--ease-standard) both; }
+.character-reinforce-line > .ui-button--quiet { font-size: var(--type-meta); color: var(--color-text); }
+/* Suggestions wait as dimmed tiles with a plus badge after the real ones; they fade in by opacity only, so nothing above moves. */
+.character-reference-tile--ghost { animation: character-reference-fade-in 200ms var(--ease-standard) both; }
+.character-reference-tile--ghost .character-reference-tile__open img { opacity: .42; }
+.character-reference-tile--ghost .character-reference-tile__open:hover:not(:disabled) img, .character-reference-tile--ghost .character-reference-tile__open:focus-visible img { opacity: .8; }
+.character-reference-tile--ghost .character-reference-tile__mark.ui-badge { left: auto; right: var(--space-1); }
+/* A suggestion that was just added turns solid in place. */
+.character-reference-tile--solid .character-reference-tile__open { animation: character-reference-solid-in 90ms var(--ease-standard) both; }
+@keyframes character-reference-solid-in { from { opacity: .42; } to { opacity: 1; } }
+
 /* The inline chooser eases in (fade and a 4 px rise) and closes at once. */
 @keyframes character-reference-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes character-reference-rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .character-reference-tile__mark.ui-badge, .character-reference-slot__content, .character-reference-regions { animation: none; }
+  .character-reference-tile__mark.ui-badge, .character-reference-slot__content, .character-reference-regions, .character-reinforce-line, .character-reference-tile--ghost, .character-reference-tile--solid .character-reference-tile__open { animation: none; }
   .character-reference-tile__open img, .character-reference-tile__open svg { transition: none; }
 }
+
+/* The panel keeps its scrollbar gutter: suggestion tiles arriving after open never narrow the strip and reflow the tiles. */
+.ui-anchored-panel__body:has(.character-registry) { scrollbar-gutter: stable; }

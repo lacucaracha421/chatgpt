@@ -46,6 +46,8 @@ pub(crate) fn is_queue_table(table: &str) -> bool {
             | "character_autotag_control"
             | "character_reference_refreshes"
             | "character_reference_refresh_items"
+            | "character_reference_reinforcement_queue"
+            | "character_reference_reinforcement_runs"
     )
 }
 
@@ -503,6 +505,20 @@ impl Library {
                 )?;
                 if worker_paused {
                     return Ok(false);
+                }
+                if !crate::workload::is_restricted() {
+                    match self.advance_character_reference_reinforcement() {
+                        Ok(true) => return Ok(true),
+                        Ok(false) => {}
+                        Err(error) => {
+                            // A stale/unavailable reinforcement source must not hold up
+                            // recognition or the rest of this owner's background work.
+                            self.character_incremental
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .error = Some(error.to_string());
+                        }
+                    }
                 }
                 let Some(job) = self.claim_character_autotag()? else {
                     if crate::workload::is_restricted() {

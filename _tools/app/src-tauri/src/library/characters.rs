@@ -1040,6 +1040,19 @@ impl Library {
     ) -> Result<Target> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        let result =
+            self.exclude_character_reference_in(&transaction, id, expected_revision, asset_id)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    pub(super) fn exclude_character_reference_in(
+        &self,
+        transaction: &Connection,
+        id: &str,
+        expected_revision: i64,
+        asset_id: &str,
+    ) -> Result<Target> {
         let target = self.read_character_target(&transaction, id)?;
         if target.is_extras() {
             return Err(Error::Invalid(EXTRAS_FIXED));
@@ -1068,9 +1081,7 @@ impl Library {
                 ));
             }
         }
-        let result = self.read_character_target(&transaction, id)?;
-        transaction.commit()?;
-        Ok(result)
+        self.read_character_target(transaction, id)
     }
 
     pub fn replace_character_references(
@@ -1703,6 +1714,13 @@ impl Library {
             )?;
             super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
             changed += 1;
+        }
+        if changed > 0 && request.decision == DecisionKind::Accepted && !target.is_extras() {
+            transaction.execute(
+                "INSERT INTO character_reference_reinforcement_queue(target_id) VALUES(?1)
+                 ON CONFLICT(target_id) DO UPDATE SET requested=requested+1,retry_at=0",
+                [&target.id],
+            )?;
         }
         Ok(changed)
     }

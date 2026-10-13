@@ -45,13 +45,14 @@ pub struct ConfirmReferenceBatch {
 }
 
 #[derive(Clone, Debug)]
-struct Candidate {
-    asset_id: String,
-    content_hash: String,
-    fingerprint: Option<[u8; 32]>,
-    quality: i64,
-    sequence: i64,
-    detected_people: Option<i64>,
+pub(super) struct Candidate {
+    pub(super) asset_id: String,
+    pub(super) content_hash: String,
+    pub(super) fingerprint: Option<[u8; 32]>,
+    pub(super) quality: i64,
+    pub(super) sequence: i64,
+    pub(super) detected_people: Option<i64>,
+    pub(super) boxes: Option<serde_json::Value>,
 }
 
 pub(super) fn reference_set_hash(target: &Target) -> Result<String> {
@@ -178,54 +179,7 @@ impl Library {
         limit: usize,
         pool: bool,
     ) -> Result<ReferenceCandidateSet> {
-        let target_id = target.id.as_str();
-        let series = target
-            .series_classification_id
-            .as_deref()
-            .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-        let mut statement = connection.prepare(&format!(
-            "WITH RECURSIVE scope(id) AS (
-                SELECT id FROM classification_entries WHERE id=?2
-                UNION ALL SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
-             )
-             SELECT r.asset_id,a.content_hash,a.perceptual_hash,COALESCE(a.perceptual_hash_quality,-1),d.sequence,
-               (SELECT json_array_length(json_extract(p.result_json,'$.evidence.queryBoxes'))
-                FROM character_autotag_evidence e
-                JOIN character_autotag_predictions p ON p.evidence_id=e.id
-                JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
-                WHERE e.asset_id=a.id AND e.content_hash=a.content_hash AND j.state<>'superseded'
-                  AND json_type(json_extract(p.result_json,'$.evidence.queryBoxes'))='array'
-                ORDER BY e.generation DESC,e.id DESC LIMIT 1)
-             FROM character_relations r
-             JOIN character_decisions d ON d.sequence=r.sequence AND d.origin='manual' AND NOT {disabled}
-             JOIN assets a ON a.id=r.asset_id AND a.status='normal' AND a.media_kind='image'
-             WHERE r.target_id=?1
-               AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
-               AND NOT EXISTS(SELECT 1 FROM character_relations other JOIN character_targets ot ON ot.id=other.target_id AND ot.role='character' WHERE other.asset_id=a.id AND other.target_id<>?1)
-               AND NOT EXISTS(SELECT 1 FROM character_references base WHERE base.target_id=?1 AND base.asset_id=a.id)
-               AND NOT EXISTS(SELECT 1 FROM character_learned_references learned WHERE learned.target_id=?1 AND learned.asset_id=a.id)
-               AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions excluded WHERE excluded.target_id=?1 AND excluded.asset_id=a.id)
-               AND NOT EXISTS(SELECT 1 FROM character_references base_hash WHERE base_hash.target_id=?1 AND base_hash.asset_hash=a.content_hash)
-               AND NOT EXISTS(SELECT 1 FROM character_learned_references learned_hash WHERE learned_hash.target_id=?1 AND learned_hash.asset_hash=a.content_hash)
-               AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
-               AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions excluded WHERE excluded.series_id=?2 AND excluded.asset_id=a.id)
-             ORDER BY d.sequence DESC,r.asset_id LIMIT 400",
-            disabled = super::characters::learning_disabled_sql("d")
-        ))?;
-        let eligible = statement
-            .query_map(params![target_id, series], |row| {
-                let bytes: Option<Vec<u8>> = row.get(2)?;
-                let fingerprint = bytes.and_then(|bytes| <[u8; 32]>::try_from(bytes).ok());
-                Ok(Candidate {
-                    asset_id: row.get(0)?,
-                    content_hash: row.get(1)?,
-                    fingerprint,
-                    quality: row.get(3)?,
-                    sequence: row.get(4)?,
-                    detected_people: row.get(5)?,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let eligible = self.reference_candidate_pool_in(connection, target)?;
         let remaining = limit.min(super::characters::MAX_REFERENCES.saturating_sub(
             target.references.len() + target.learned_references.len(),
         ));
@@ -259,12 +213,88 @@ impl Library {
         })
     }
 
+    /// Shared manual, exclusion and ownership gates for both suggestions and quiet reinforcement.
+    pub(super) fn reference_candidate_pool_in(
+        &self,
+        connection: &rusqlite::Connection,
+        target: &Target,
+    ) -> Result<Vec<Candidate>> {
+        let target_id = target.id.as_str();
+        let series = target
+            .series_classification_id
+            .as_deref()
+            .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
+        let mut statement = connection.prepare(&format!(
+            "WITH RECURSIVE scope(id) AS (
+                SELECT id FROM classification_entries WHERE id=?2
+                UNION ALL SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
+             )
+             SELECT r.asset_id,a.content_hash,a.perceptual_hash,COALESCE(a.perceptual_hash_quality,-1),d.sequence,
+               (SELECT json_extract(p.result_json,'$.evidence.queryBoxes')
+                FROM character_autotag_evidence e
+                JOIN character_autotag_predictions p ON p.evidence_id=e.id
+                JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
+                WHERE e.asset_id=a.id AND e.content_hash=a.content_hash AND j.state<>'superseded' AND j.content_hash=a.content_hash
+                  AND json_type(json_extract(p.result_json,'$.evidence.queryBoxes'))='array'
+                ORDER BY e.generation DESC,e.id DESC LIMIT 1)
+             FROM character_relations r
+             JOIN assets a ON a.id=r.asset_id AND a.status='normal' AND a.media_kind='image'
+             JOIN character_decisions d ON d.sequence=r.sequence AND d.origin='manual' AND d.decision='accepted' AND d.asset_hash=a.content_hash AND NOT {disabled}
+             WHERE r.target_id=?1
+               AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
+               AND NOT EXISTS(SELECT 1 FROM character_relations other JOIN character_targets ot ON ot.id=other.target_id AND ot.role='character' WHERE other.asset_id=a.id AND other.target_id<>?1)
+               AND NOT EXISTS(SELECT 1 FROM character_references base WHERE base.target_id=?1 AND base.asset_id=a.id)
+               AND NOT EXISTS(SELECT 1 FROM character_learned_references learned WHERE learned.target_id=?1 AND learned.asset_id=a.id)
+               AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions excluded WHERE excluded.target_id=?1 AND excluded.asset_id=a.id)
+               AND NOT EXISTS(SELECT 1 FROM character_references base_hash WHERE base_hash.target_id=?1 AND base_hash.asset_hash=a.content_hash)
+               AND NOT EXISTS(SELECT 1 FROM character_learned_references learned_hash WHERE learned_hash.target_id=?1 AND learned_hash.asset_hash=a.content_hash)
+               AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
+               AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions excluded WHERE excluded.series_id=?2 AND excluded.asset_id=a.id)
+             ORDER BY d.sequence DESC,r.asset_id LIMIT 400",
+            disabled = super::characters::learning_disabled_sql("d")
+        ))?;
+        let eligible = statement
+            .query_map(params![target_id, series], |row| {
+                let bytes: Option<Vec<u8>> = row.get(2)?;
+                let fingerprint = bytes.and_then(|bytes| <[u8; 32]>::try_from(bytes).ok());
+                let boxes: Option<String> = row.get(5)?;
+                let boxes = boxes.and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+                Ok(Candidate {
+                    asset_id: row.get(0)?,
+                    content_hash: row.get(1)?,
+                    fingerprint,
+                    quality: row.get(3)?,
+                    sequence: row.get(4)?,
+                    detected_people: boxes
+                        .as_ref()
+                        .and_then(|v| v.as_array())
+                        .map(|v| v.len() as i64),
+                    boxes,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(eligible)
+    }
+
     pub fn confirm_reference_batch(&self, request: ConfirmReferenceBatch) -> Result<Target> {
         self.confirm_reference_batch_with_regions(request, Default::default())
     }
 
     pub fn confirm_reference_batch_with_regions(
         &self,
+        request: ConfirmReferenceBatch,
+        regions: super::character_reference_regions::RegionBindings,
+    ) -> Result<Target> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let result = self.confirm_reference_batch_in(&transaction, request, regions)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    pub(super) fn confirm_reference_batch_in(
+        &self,
+        transaction: &rusqlite::Connection,
         request: ConfirmReferenceBatch,
         regions: super::character_reference_regions::RegionBindings,
     ) -> Result<Target> {
@@ -291,9 +321,7 @@ impl Library {
             _ => {}
         }
 
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let target = self.read_character_target(&transaction, &request.target_id)?;
+        let target = self.read_character_target(transaction, &request.target_id)?;
         if target.revision != request.expected_revision
             || reference_set_hash(&target)? != request.expected_reference_set_hash
         {
@@ -430,9 +458,7 @@ impl Library {
                 params![result.id, chrono::Utc::now().to_rfc3339()],
             )?;
         }
-        let result = self.read_character_target(&transaction, &result.id)?;
-        transaction.commit()?;
-        Ok(result)
+        self.read_character_target(transaction, &result.id)
     }
 }
 
